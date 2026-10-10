@@ -1,0 +1,54 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Phazite (Windows)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      // Resolving this input makes CMake Tools build the active preset first, and stops if the build fails.
+      "program": "${input:phaziteExe}",
+      "args": [],
+      "cwd": "${input:phaziteDir}",
+      "environment": [],
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Attach to Phazite (Windows)",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}"
+    },
+    {
+      // Crashes outside a debugger leave dumps in %LOCALAPPDATA%\CrashDumps (enabled by tools\setup-windows.cmd).
+      // Only windows-debug builds have symbols: reproduce Release crashes in windows-debug.
+      "name": "Open crash dump (Windows, Debug build)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows-debug/Phazite_artefacts/Debug/Phazite.exe",
+      "cwd": "${workspaceFolder}",
+      "dumpPath": "${input:dumpFile}"
+    },
+    {
+      "name": "Phazite (Linux / WSL, gdb)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${input:phaziteExe}",
+      "args": [],
+      "cwd": "${input:phaziteDir}",
+      "environment": [],
+      "stopAtEntry": false,
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        { "description": "Enable pretty-printing for gdb", "text": "-enable-pretty-printing", "ignoreFailures": true }
+      ]
+    }
+  ],
+  "inputs": [
+    { "id": "phaziteExe", "type": "command", "command": "cmake.launchTargetPath", "args": { "targetName": "Phazite" } },
+    { "id": "phaziteDir", "type": "command", "command": "cmake.getLaunchTargetDirectory", "args": { "targetName": "Phazite" } },
+    { "id": "dumpFile", "type": "promptString", "description": "Full path of the .dmp file (normally in %LOCALAPPDATA%\\CrashDumps)" }
+  ]
+}

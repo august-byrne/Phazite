@@ -1,0 +1,47 @@
+{
+  // ---- CMake Tools: the presets are the only source of truth; behave exactly like the terminal ----
+  "cmake.useCMakePresets": "always",
+  // Never load a Visual Studio developer environment. The default ("auto") would silently inject one for
+  // Ninja presets, hiding exactly the problems a plain PowerShell would hit.
+  "cmake.useVsDeveloperEnvironment": "never",
+  // CMAKE_EXPORT_COMPILE_COMMANDS comes from CMakePresets.json; don't let CMake Tools add its own -D.
+  "cmake.exportCompileCommandsFile": false,
+  // Configure only when asked (or when building), so VS Code never runs CMake in a build folder that
+  // Claude Code or a terminal is using at the same time. Builds re-run CMake by themselves when needed.
+  // After a build folder was created from a terminal, run "CMake: Configure" once in VS Code: CMake Tools
+  // only gets IntelliSense data and launch targets from folders it has configured itself.
+  "cmake.configureOnOpen": false,
+  "cmake.configureOnEdit": false,
+  "cmake.buildBeforeRun": true,          // F5 builds first (via ${command:cmake.launchTargetPath}) and stops if the build fails
+  "cmake.modifyLists.addNewSourceFiles": "no",
+  "cmake.modifyLists.removeDeletedSourceFiles": "no",
+  // Deliberately NOT set, because each would make VS Code differ from the terminal: cmake.environment,
+  // cmake.configureEnvironment, cmake.buildEnvironment, cmake.configureArgs, cmake.buildArgs,
+  // cmake.parallelJobs, cmake.cmakePath, terminal.integrated.env.windows.
+
+  // ---- C/C++ extension: IntelliSense from CMake Tools; never persist a vcvars environment ----
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.debugShortcut": false,
+  "C_Cpp.persistVsDeveloperEnvironment": false,
+  "C_Cpp.files.exclude": {
+    "**/.vscode": true,
+    "**/CMakeFiles": true,
+    "**/build/*/external": true,
+    "**/.claude/worktrees": true
+  },
+  "C_Cpp.formatting": "clangFormat",
+  "C_Cpp.clang_format_style": "file",
+  "C_Cpp.clang_format_fallbackStyle": "none",
+  "[cpp]": { "editor.formatOnSave": false },
+
+  // ---- Keep file watching and search off build output (but CMakeCache.txt must stay watched) ----
+  "files.watcherExclude": {
+    "build/**/CMakeFiles/**": true,
+    "build/*/external/**": true,
+    "build/*/*_artefacts/**": true,
+    ".claude/worktrees/**": true
+  },
+  "search.exclude": {
+    "build/**": true
+  }
+}

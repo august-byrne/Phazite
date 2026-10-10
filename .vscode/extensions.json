@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "ms-vscode.cpptools",          // C/C++: IntelliSense, the Windows debugger (cppvsdbg) and gdb support
+    "ms-vscode.cmake-tools",       // CMake presets, build, launch-target lookup, IntelliSense provider
+    "anthropic.claude-code",       // Claude Code
+    "ms-vscode-remote.remote-wsl"  // only needed once WSL is installed
+  ],
+  "unwantedRecommendations": [
+    "ms-vscode.cpptools-extension-pack",  // only adds themes and Copilot-only tools on top of the two above
+    "twxs.cmake"                          // outdated; CMake Tools already provides CMake language support
+  ]
+}

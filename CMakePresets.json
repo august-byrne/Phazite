@@ -1,0 +1,97 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Kitware/CMake/v4.4.4/Help/manual/presets/schema.json",
+  "version": 8,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "description": "Single-config Ninja, one build folder per preset, compile_commands.json for tools.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "CMAKE_EXPORT_COMPILE_COMMANDS": true }
+    },
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "inherits": "base",
+      "description": "MSVC from VS 2026 Build Tools, found by cmake/toolchains/windows-msvc.cmake: no Developer PowerShell needed. The environment copy reaches JUCE's nested juceaide configure. Never set CMAKE_C_FLAGS/CMAKE_CXX_FLAGS here.",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "toolchainFile": "${sourceDir}/cmake/toolchains/windows-msvc.cmake",
+      "environment": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/windows-msvc.cmake"
+      }
+    },
+    {
+      "name": "windows-debug",
+      "displayName": "Windows Debug (MSVC + Ninja)",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows Release (MSVC + Ninja)",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "linux-base",
+      "hidden": true,
+      "inherits": "base",
+      "description": "System GCC (Ubuntu 24.04: g++ 13).",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Linux Debug (GCC + Ninja)",
+      "inherits": "linux-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux Release (GCC + Ninja)",
+      "inherits": "linux-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "linux-asan",
+      "displayName": "Linux ASan + UBSan (GCC, Debug)",
+      "description": "AddressSanitizer + UndefinedBehaviorSanitizer. CMAKE_<LANG>_FLAGS reach both compile and link steps.",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer"
+      }
+    },
+    {
+      "name": "linux-tsan",
+      "displayName": "Linux TSan (GCC, RelWithDebInfo)",
+      "description": "ThreadSanitizer needs optimisation and JUCE forces -O0 in Debug, hence RelWithDebInfo. On Ubuntu 24.04/WSL2 run the app under 'setarch $(uname -m) -R' (GCC 13/14 TSan vs vm.mmap_rnd_bits=32). -Wno-tsan: GCC warns that TSan doesn't model the atomic_thread_fence calls in Tracktion's bundled seqlock.",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_FLAGS": "-fsanitize=thread -Wno-tsan",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -Wno-tsan"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-build-base",
+      "hidden": true,
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "linux-build-base",
+      "hidden": true,
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    { "name": "windows-debug",   "inherits": "windows-build-base", "configurePreset": "windows-debug" },
+    { "name": "windows-release", "inherits": "windows-build-base", "configurePreset": "windows-release" },
+    { "name": "linux-debug",     "inherits": "linux-build-base",   "configurePreset": "linux-debug" },
+    { "name": "linux-release",   "inherits": "linux-build-base",   "configurePreset": "linux-release" },
+    { "name": "linux-asan",      "inherits": "linux-build-base",   "configurePreset": "linux-asan" },
+    { "name": "linux-tsan",      "inherits": "linux-build-base",   "configurePreset": "linux-tsan" }
+  ]
+}
