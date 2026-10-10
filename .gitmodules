@@ -1,0 +1,7 @@
+[submodule "external/tracktion_engine"]
+	path = external/tracktion_engine
+	url = https://github.com/Tracktion/tracktion_engine.git
+	shallow = true
+[submodule "external/WindowsToolchain"]
+	path = external/WindowsToolchain
+	url = https://github.com/MarkSchofield/WindowsToolchain.git
