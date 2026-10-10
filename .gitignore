@@ -1,3 +1,29 @@
+# ---- Build output ----
+/build/
+/out/
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+
+# ---- Editors and IDEs (the shared VS Code files are kept) ----
+.vs/
+*.user
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+
+# ---- Claude Code personal files and worktrees ----
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+
+# ---- OS clutter ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- From GitHub's C++ template ----
 # Prerequisites
 *.d
 
