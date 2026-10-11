@@ -18,8 +18,10 @@
     Optional: LLVM.LLVM (-WithLlvm) and the Surge XT VST3 test plug-in (-WithTestPlugin).
     Also (admin): crash dumps for Phazite.exe in %LOCALAPPDATA%\CrashDumps (Windows Error Reporting).
     Without admin rights: for this user, git settings (long paths, HTTPS for JUCE) and the VS Code C/C++
-    and CMake Tools extensions; for this clone, core.hooksPath = .githooks, which turns on the commit and
-    push checks (GitHub noreply emails only, gitleaks secret scan).
+    and CMake Tools extensions (the C/C++ extension brings the clang-format that tools\format.sh uses,
+    unless LLVM is installed); for this clone, core.hooksPath = .githooks, which turns on the commit and
+    push checks (GitHub noreply emails, pinned dependencies, file sizes, whitespace, gitleaks secret
+    scan, clang-format).
 
     Exit codes (the last line printed, "Result: ...", says the same; Claude Code's shell tool shows
     3010 as 194): 0 = done; 3010 = done, but restart Windows and run it again; 1 = a step failed (see the
@@ -402,6 +404,20 @@ function Test-OnInheritedPath([string]$Dir) {
     return (@($script:InheritedPath -split ';' | Where-Object { $_.Trim().TrimEnd('\') -ieq $d }).Count -gt 0)
 }
 
+function Find-ClangFormat {
+    # The clang-format tools\format.sh and the pre-commit hook use: PATH, then LLVM, then the newest
+    # VS Code C/C++ extension (which bundles one).
+    $cmd = Get-Command clang-format.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
+    $llvm = Join-Path $env:ProgramW6432 'LLVM\bin\clang-format.exe'
+    if (Test-Path -LiteralPath $llvm) { return $llvm }
+    $extensions = Join-Path $env:USERPROFILE '.vscode\extensions'
+    return Get-ChildItem -LiteralPath $extensions -Directory -Filter 'ms-vscode.cpptools-*' -ErrorAction SilentlyContinue |
+        Sort-Object { try { [version]($_.Name -replace '^ms-vscode\.cpptools-', '' -replace '-.*$', '') } catch { [version]'0.0' } } -Descending |
+        ForEach-Object { Join-Path $_.FullName 'LLVM\bin\clang-format.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
+
 function Get-ToolLine([string]$Name) {
     $cmd = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $cmd) { $script:Missing = $true; return ('MISSING ({0})' -f $Name) }
@@ -426,6 +442,18 @@ function Write-Report {
     Write-Log ('secrets ' + (Get-ToolLine 'gitleaks.exe'))
     $clang = Join-Path $env:ProgramFiles 'LLVM\bin\clang.exe'
     if (Test-Path -LiteralPath $clang) { Write-Log ('clang   ' + (& $clang --version | Select-Object -First 1) + "  [$clang]") }
+    $clangFormat = Find-ClangFormat
+    if (-not $clangFormat) {
+        Write-Log "format  clang-format MISSING: install VS Code's C/C++ extension, or run this script with -WithLlvm" Red
+        $script:Missing = $true
+    }
+    else {
+        $version = "$(& $clangFormat --version | Select-Object -First 1)".Trim()
+        $major = 0
+        if ($version -match 'version ((\d+)\.[\d.]+)') { $version = 'clang-format ' + $Matches[1]; $major = [int]$Matches[2] }
+        if ($major -ge 22) { Write-Log ('format  {0}  [{1}]' -f $version, $clangFormat) }
+        else { Write-Log ('format  {0} is too old: .clang-format needs 22 or newer  [{1}]' -f $version, $clangFormat) Red; $script:Missing = $true }
+    }
 
     $vs = Get-BuildToolsInstance
     if ($null -eq $vs) { Write-Log 'VS      MISSING' Red; $script:Missing = $true }

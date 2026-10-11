@@ -1,0 +1,98 @@
+# Phazite's C++ formatting: JUCE's coding standards (https://juce.com/discover/stories/coding-standards)
+# written as clang-format options. JUCE ships no .clang-format of its own. This one starts from the
+# config shared on the JUCE forum, which Tracktion Engine also uses, and follows JUCE's own source where
+# the standards don't say. Needs clang-format 22 or newer (IndentPPDirectives: Leave); Phazite is
+# formatted with clang-format 23, the version VS Code's C/C++ extension bundles.
+---
+Language: Cpp
+BasedOnStyle: LLVM # defaults for anything not set below
+Standard: c++20
+
+# Layout. JUCE's standards set no line-length limit; 99.4% of JUCE's own lines fit in 140 columns.
+ColumnLimit: 140
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4 # public: and private: line up with the class
+IndentCaseLabels: true
+NamespaceIndentation: Inner # the outermost namespace isn't indented, nested ones are
+IndentPPDirectives: Leave # JUCE indents #if inside functions by hand ("   #if JUCE_WINDOWS")
+IndentWrappedFunctionNames: true
+MaxEmptyLinesToKeep: 1
+KeepEmptyLines:
+  AtStartOfBlock: false
+
+# Braces on their own lines (Allman), multi-line lambdas included. Short lambdas and short functions
+# inside a class stay on one line: button.onClick = [this] { play(); };
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: true
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+AllowShortLambdasOnASingleLine: All
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+BreakTemplateDeclarations: Yes # template <typename T> on its own line
+BreakInheritanceList: AfterComma # one base class per line, aligned after the class name
+
+# Spaces: foo (123) but foo(), if (! ready), Type* p, Type& r, template <typename T>, (int) x, { 1, 2 }
+SpaceBeforeParens: NonEmptyParentheses
+SpaceAfterLogicalNot: true
+SpaceAfterTemplateKeyword: true
+SpaceAfterCStyleCast: true
+SpaceBeforeCpp11BracedList: true
+Cpp11BracedListStyle: false
+PointerAlignment: Left
+DerivePointerAlignment: false
+
+# Wrapping. A wrapped expression's next line starts with the operator; arguments may share lines.
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+BinPackArguments: true
+BinPackParameters: BinPack
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: Never # the ": member (x)" list starts on the line after the constructor
+ConstructorInitializerIndentWidth: 4
+BreakStringLiterals: false
+
+# Comments and includes
+ReflowComments: Never # comments keep the line breaks they were written with
+AlignTrailingComments: true
+SpacesBeforeTrailingComments: 1
+FixNamespaceComments: true # } // namespace juce
+SortIncludes: CaseSensitive
+---
+Language: ObjC # macOS .mm files, later
+BasedOnStyle: LLVM
+ColumnLimit: 140
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+BreakBeforeBraces: Allman
+PointerAlignment: Left
+SpaceBeforeParens: NonEmptyParentheses
+SpaceAfterLogicalNot: true
+ObjCSpaceAfterProperty: true
+ObjCSpaceBeforeProtocolList: true

@@ -1,22 +1,31 @@
 #!/bin/sh
-# Phazite's pre-commit check: nothing confidential may reach the public repository.
+# Phazite's pre-commit checks, in this order:
 #  1. The commit's author and committer email must be a GitHub noreply address, because pushing a
-#     commit publishes its email for good. To publish a different address on purpose, for one commit:
-#     git -c phazite.allowPublicEmail=true commit ...
-#  2. gitleaks scans the staged changes for API keys, tokens, private keys and other secrets. It can't
+#     commit publishes its email for good.
+#  2. Pinned dependencies (external/*, .gitmodules) change only in a deliberate bump.
+#  3. No staged file is larger than 5 MiB.
+#  4. No trailing whitespace or leftover conflict markers in the staged changes.
+#  5. gitleaks finds no API keys, tokens, private keys or other secrets in the staged changes. It can't
 #     see inside binary files (UTF-16 text counts as binary) or commit messages.
+#  6. Staged C/C++ files follow .clang-format (checked by tools/format.sh).
+# To skip check 1, 2 or 3 on purpose for one commit, add -c phazite.allowPublicEmail=true,
+# -c phazite.allowSubmoduleBump=true or -c phazite.allowLargeFiles=true after "git".
 # Turned on per clone with "git config core.hooksPath .githooks" (tools\setup-windows.cmd does this on
 # Windows); git merge and git pull run it through pre-merge-commit. Commits made by rebase,
-# cherry-pick, revert and am skip it, as does "git commit --no-verify"; pre-push checks all of them
-# again before they leave this computer.
+# cherry-pick, revert and am skip it, as does "git commit --no-verify"; pre-push checks emails and
+# secrets again before they leave this computer.
 
 stop() {
     printf '\npre-commit: %s\n\n' "$*" >&2
     exit 1
 }
 
+allowed() {
+    [ "$(git config --type=bool "phazite.$1")" = true ]
+}
+
 # 1. Commit identity
-if [ "$(git config --type=bool phazite.allowPublicEmail)" != true ]; then
+if ! allowed allowPublicEmail; then
     for who in author:GIT_AUTHOR_IDENT committer:GIT_COMMITTER_IDENT; do
         email=$(git var "${who#*:}" | sed -n 's/.*<\(.*\)>.*/\1/p')
         who=${who%%:*}
@@ -36,7 +45,45 @@ To publish this address on purpose, for this commit only:
     done
 fi
 
-# 2. Secrets in the staged changes
+# What the staged changes are compared with: the current commit, or nothing for the first commit.
+if git rev-parse --verify --quiet HEAD >/dev/null; then
+    against=HEAD
+else
+    against=$(git hash-object -t tree /dev/null)
+fi
+
+# 2. Pinned dependencies
+if ! allowed allowSubmoduleBump; then
+    pins=$(git -c core.quotepath=off diff-index --cached --name-only "$against" -- external .gitmodules)
+    [ -z "$pins" ] || stop "this commit changes the pinned dependencies:
+$(printf '%s\n' "$pins" | sed 's/^/    /')
+If it's a deliberate dependency bump (see \"Submodules\" in CLAUDE.md), commit with:
+    git -c phazite.allowSubmoduleBump=true commit ...
+Otherwise unstage it and put the pinned versions back:
+    git restore --staged <path>
+    git submodule update --init --recursive --depth 1"
+fi
+
+# 3. Large files
+if ! allowed allowLargeFiles; then
+    big=$(git -c core.quotepath=off diff-index --cached --no-renames --diff-filter=AM "$against" -- |
+        awk -F '\t' '{ split($1, m, " "); if (m[2] != "160000") print m[4] " " $2 }' |
+        git cat-file --batch-check='%(objectsize) %(rest)' |
+        awk '{ size = $1; sub(/^[0-9]+ /, ""); if (size > 5242880) printf "    %s (%.1f MiB)\n", $0, size / 1048576 }')
+    [ -z "$big" ] || stop "these staged files are larger than 5 MiB:
+$big
+Keep large files such as audio, builds and dumps out of git: the history keeps every version for good.
+If one really belongs in the repository, commit it with:
+    git -c phazite.allowLargeFiles=true commit ..."
+fi
+
+# 4. Whitespace errors and leftover conflict markers
+whitespace=$(git -c color.ui=never -c core.quotepath=off diff-index --check --cached "$against" -- 2>&1) ||
+    stop "the staged changes have trailing whitespace or a leftover conflict marker:
+$whitespace
+Fix those lines, stage the files again and commit."
+
+# 5. Secrets in the staged changes
 gitleaks=$(command -v gitleaks)
 if [ -z "$gitleaks" ]; then
     case "$(uname -s)" in
@@ -73,5 +120,17 @@ $report" ;;
 Windows: run tools\\setup-windows.cmd. Linux: see \"No secrets in git\" in README.md."
        stop "gitleaks failed, so the staged changes were not checked for secrets:
 
+$report" ;;
+esac
+
+# 6. Formatting of the staged C/C++ files
+report=$(sh tools/format.sh --staged 2>&1)
+case $? in
+    0) ;;
+    1) stop "these staged C/C++ files don't follow .clang-format (JUCE style):
+$report
+Format them, stage them again and commit. In VS Code, saving a file formats it; from a shell:
+    sh tools/format.sh" ;;
+    *) stop "the staged C/C++ files couldn't be checked against .clang-format:
 $report" ;;
 esac

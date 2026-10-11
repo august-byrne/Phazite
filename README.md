@@ -160,6 +160,11 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). Ru
 | `pre-commit: this commit would publish the ... email address ...` | Set your GitHub noreply address as described in [Your email address](#contributing), then commit again. |
 | `pre-push: ... has commits or a tag with these email addresses ...` | Some commits you're pushing carry another address: fix them as the message says (`git commit --amend --reset-author`), then push again. |
 | `-CheckOnly` prints `hooks ... OFF` | The git hooks are off in this clone: run `git config core.hooksPath .githooks` there. |
+| `pre-commit: these staged C/C++ files don't follow .clang-format` | Save each file in VS Code (that formats it), or run `sh tools/format.sh` in Git Bash, then stage the files again and commit. |
+| `pre-commit: the staged C/C++ files couldn't be checked against .clang-format` | No clang-format 22 or newer was found: install VS Code's C/C++ extension, or run `tools\setup-windows.cmd -WithLlvm`. |
+| `pre-commit: this commit changes the pinned dependencies` | A submodule pointer moved by accident (for example through `git commit -a`): follow the message to unstage it. A deliberate bump is described in [CLAUDE.md](CLAUDE.md#submodules-and-third-party-code). |
+| `pre-commit: these staged files are larger than 5 MiB` | Unstage them (`git restore --staged <file>`); audio files, builds and dumps don't belong in git. |
+| `pre-commit: the staged changes have trailing whitespace or a leftover conflict marker` | Fix the lines it lists, stage the files again and commit. |
 | Anything else | The first line containing `error`, `fatal` or `FAILED` usually names the cause. If you're stuck, open an issue at https://github.com/august-byrne/Phazite/issues with that line and the command you ran. |
 
 ## Building on Linux and WSL2 (untested)
@@ -190,7 +195,7 @@ cmake --build --preset linux-debug
 build/linux-debug/Phazite_artefacts/Debug/Phazite
 ```
 
-The first `git config` line is the Linux version of the setup script's HTTPS rule for JUCE; run it once per machine (WSL keeps its own git settings). The `core.hooksPath` line turns on the git hooks in this clone; they need gitleaks 8.19 or newer, installed as described in [No secrets in git](#contributing). The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or newer (Ubuntu 24.04 has 3.28.3). The Linux build only finds Linux VST3 plug-ins (by default in `~/.vst3`, `/usr/local/lib/vst3` and `/usr/lib/vst3`, plus any folder listed in `VST3_PATH`).
+The first `git config` line is the Linux version of the setup script's HTTPS rule for JUCE; run it once per machine (WSL keeps its own git settings). The `core.hooksPath` line turns on the git hooks in this clone; they need gitleaks 8.19 or newer, installed as described in [No secrets in git](#contributing), and clang-format 22 or newer for C/C++ commits. Ubuntu 24.04's own clang-format is version 18, so install version 23 with pipx (`sudo apt install pipx`, `pipx install "clang-format==23.*"`, then `pipx ensurepath` and a new terminal) or as `clang-format-23` from LLVM's apt repository (apt.llvm.org); `tools/format.sh` finds either. The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or newer (Ubuntu 24.04 has 3.28.3). The Linux build only finds Linux VST3 plug-ins (by default in `~/.vst3`, `/usr/local/lib/vst3` and `/usr/lib/vst3`, plus any folder listed in `VST3_PATH`).
 
 | Preset | Build type | App |
 |---|---|---|
@@ -211,7 +216,7 @@ Under WSL2, the window should appear on the Windows desktop through WSLg (WSL's 
 
 ### VS Code
 
-1. Install VS Code from https://code.visualstudio.com if you don't have it. Open the repository folder (File > Open Folder) and trust it when VS Code asks, or through the Restricted Mode banner: the C/C++ and CMake Tools extensions stay disabled until you do. Install the recommended extensions when VS Code offers them: C/C++ and CMake Tools (the setup script installs both if VS Code was already there), Claude Code, and WSL once you use WSL.
+1. Install VS Code from https://code.visualstudio.com if you don't have it. Open the repository folder (File > Open Folder) and trust it when VS Code asks, or through the Restricted Mode banner: the C/C++ and CMake Tools extensions stay disabled until you do. Install the recommended extensions when VS Code offers them: C/C++ and CMake Tools (the setup script installs both if VS Code was already there), Claude Code, and WSL once you use WSL. Saving a C/C++ file formats it in the project's style (see [Coding guidelines](#coding-guidelines)).
 2. Pick a preset with **CMake: Select Configure Preset** from the Command Palette (Ctrl+Shift+P), for example `windows-debug`. VS Code then builds exactly like the terminal, without a Developer PowerShell.
 3. Run **CMake: Configure** once. VS Code doesn't configure when it opens the folder, and CMake Tools only gets IntelliSense data and launch targets from build folders it configured itself, so do this once even for a folder you built in a terminal.
 4. Choose a launch configuration in the Run and Debug view and press F5:
@@ -239,8 +244,9 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 | `CMakeLists.txt`, `CMakePresets.json`, `cmake/` | Build definition, presets, Windows toolchain wrapper and CMake helpers |
 | `external/tracktion_engine/` | Submodule: Tracktion Engine, with JUCE as its own submodule in `modules/juce` |
 | `external/WindowsToolchain/` | Submodule (MIT) that finds MSVC; used at build time on Windows only |
-| `tools/` | Machine setup: `setup-windows.cmd` runs [tools/setup-windows.ps1](tools/setup-windows.ps1) |
-| `.githooks/` | Git hooks, turned on per clone with `git config core.hooksPath .githooks`: email and gitleaks checks before every commit, merge and push |
+| `tools/` | Machine setup (`setup-windows.cmd` runs [tools/setup-windows.ps1](tools/setup-windows.ps1)) and [tools/format.sh](tools/format.sh), which formats the C/C++ files |
+| `.clang-format` | The C/C++ formatting rules (JUCE style) |
+| `.githooks/` | Git hooks, turned on per clone with `git config core.hooksPath .githooks`: checks before every commit, merge and push |
 | `.vscode/` | Shared VS Code settings, launch configurations and extension recommendations |
 | `CLAUDE.md`, `.claude/` | Instructions and settings for Claude Code |
 | `build/<preset>/` | Build output (ignored by git) |
@@ -262,7 +268,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 - C++20. Include module headers directly (`<juce_gui_basics/juce_gui_basics.h>`, `<tracktion_engine/tracktion_engine.h>`), not `JuceHeader.h`. Qualify `juce::` names, and use `namespace te = tracktion;`.
 - Create and destroy Tracktion objects (`te::Engine`, `te::Edit`) on the message thread, and destroy every `Edit` before the `Engine`.
 - Keep the build warning-free under JUCE's recommended warning flags (`/W4` on MSVC). Never silence a warning without saying why, as [CMakeLists.txt](CMakeLists.txt) does for `/wd4702` and the `linux-tsan` preset in [CMakePresets.json](CMakePresets.json) does for `-Wno-tsan`.
-- There is no `.clang-format` yet: match the surrounding code.
+- Formatting follows [.clang-format](.clang-format): JUCE's coding standards as a clang-format configuration (braces on their own lines, `foo (x)` but `foo()`, `if (! ready)`, `Type* p`, 4-space indents, lines up to 140 characters). VS Code formats a C/C++ file when you save it; `sh tools/format.sh` formats every file from a shell (Git Bash on Windows), and the pre-commit hook refuses unformatted files. To keep a hand-made layout, wrap that code in `// clang-format off` and `// clang-format on`.
 
 ### Real-time rules (audio thread)
 
@@ -278,12 +284,12 @@ Threads share data only through lock-free FIFOs and `std::atomic` values, and pa
 ### Working with Claude Code
 
 - [CLAUDE.md](CLAUDE.md) holds the project instructions that Claude Code loads automatically. Its sections on submodules, real-time rules and code conventions apply to human contributors too; the rest is written for Claude Code.
-- [.claude/settings.json](.claude/settings.json) is the shared Claude Code configuration: it pre-approves the configure and build commands, read-only git commands, `Get-Process` and `tools\setup-windows.cmd -CheckOnly`, and keeps Tracktion's own CLAUDE.md files (written for Tracktion's contributors) out of Claude's context.
+- [.claude/settings.json](.claude/settings.json) is the shared Claude Code configuration: it pre-approves the configure and build commands, read-only git commands, `Get-Process`, `tools\setup-windows.cmd -CheckOnly` and `sh tools/format.sh`, and keeps Tracktion's own CLAUDE.md files (written for Tracktion's contributors) out of Claude's context.
 - Put personal notes in `CLAUDE.local.md` and personal settings in `.claude/settings.local.json`; git ignores both.
 
 ## Contributing
 
-**Builds.** Before you send a change, build `windows-debug` (and `windows-release` for performance-related work) with zero warnings.
+**Builds.** Before you send a change, format it and build `windows-debug` (and `windows-release` for performance-related work) with zero warnings.
 
 **Licenses.** Only add code under licenses compatible with the AGPL-3.0: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license). Never enable Tracktion's proprietary options (Elastique, ReWire, REX).
 
@@ -291,11 +297,19 @@ Threads share data only through lock-free FIFOs and `std::atomic` values, and pa
 
 Before every commit, check `git status` and read `git diff --cached` in full; if git shows the diff in a pager, scroll with the arrow keys and press `q` to quit. A secret that reaches a commit stays in the history even after you delete the file, so if one slips through, revoke it and create a new one.
 
-**The git hooks.** Three hooks in [.githooks/](.githooks) apply the same two checks: every email must be a GitHub noreply address (see below), and [gitleaks](https://github.com/gitleaks/gitleaks) (MIT) must find nothing that looks like a secret; findings are shown redacted.
+**The git hooks.** Three hooks in [.githooks/](.githooks) check your work before it's committed or pushed. [gitleaks](https://github.com/gitleaks/gitleaks) (MIT) is the secret scanner; it shows what it finds redacted.
 
-- `pre-commit` runs before `git commit` (also `--amend`, and finishing a merge or cherry-pick after a conflict) and checks the author and committer email and the staged changes.
-- `pre-merge-commit` runs the same check for `git merge` and `git pull`.
-- `pre-push` runs before `git push` and checks every commit the remote doesn't have yet, including their commit messages and any tag you push. It catches what the other two can't see: commits made by `git cherry-pick`, `git revert`, `git rebase` or `git am`, and commits made with `--no-verify`.
+- `pre-commit` runs before `git commit` (also `--amend`, and finishing a merge or cherry-pick after a conflict). It checks, in this order, that:
+  1. the author and committer email is a GitHub noreply address (see below);
+  2. the pinned dependencies (`external/`, `.gitmodules`) don't change, except in a deliberate bump;
+  3. no staged file is larger than 5 MiB;
+  4. the staged changes have no trailing whitespace or leftover conflict markers;
+  5. gitleaks finds nothing that looks like a secret in them;
+  6. staged C/C++ files follow `.clang-format`.
+- `pre-merge-commit` runs the same checks for `git merge` and `git pull`.
+- `pre-push` runs before `git push` and checks the emails and secrets of every commit the remote doesn't have yet, including their commit messages and any tag you push. It catches what the other two can't see: commits made by `git cherry-pick`, `git revert`, `git rebase` or `git am`, and commits made with `--no-verify`.
+
+To make an exception on purpose, for one command, add `-c phazite.allowSubmoduleBump=true` (a dependency bump) or `-c phazite.allowLargeFiles=true` after `git`, for example `git -c phazite.allowLargeFiles=true commit`.
 
 On Windows, `tools\setup-windows.cmd` installs gitleaks and turns the hooks on in its clone. On Linux and WSL, install gitleaks 8.19 or newer from its GitHub releases (Ubuntu's own package, 8.16, lacks the `gitleaks git` command the hooks use), then turn the hooks on once in each clone:
 

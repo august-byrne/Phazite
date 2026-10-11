@@ -29,10 +29,14 @@
     "**/build/*/external": true,
     "**/.claude/worktrees": true
   },
+  // Formatting: the extension's bundled clang-format with the repository's .clang-format (JUCE style).
+  // Saving a C/C++ file formats it, which is what the pre-commit hook checks for. Files with no
+  // .clang-format in a folder above them are never formatted.
   "C_Cpp.formatting": "clangFormat",
   "C_Cpp.clang_format_style": "file",
   "C_Cpp.clang_format_fallbackStyle": "none",
-  "[cpp]": { "editor.formatOnSave": false },
+  "[cpp]": { "editor.formatOnSave": true, "editor.defaultFormatter": "ms-vscode.cpptools" },
+  "[c]": { "editor.formatOnSave": true, "editor.defaultFormatter": "ms-vscode.cpptools" },
 
   // ---- Keep file watching and search off build output (but CMakeCache.txt must stay watched) ----
   "files.watcherExclude": {

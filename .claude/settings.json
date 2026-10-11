@@ -15,7 +15,9 @@
       "PowerShell(tools\\setup-windows.cmd -CheckOnly)",
       "Bash(cmake --list-presets *)",
       "Bash(cmake --preset *)",
-      "Bash(cmake --build --preset *)"
+      "Bash(cmake --build --preset *)",
+      "Bash(sh tools/format.sh)",
+      "Bash(sh tools/format.sh *)"
     ]
   }
 }
