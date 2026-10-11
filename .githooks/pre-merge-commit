@@ -1,0 +1,3 @@
+#!/bin/sh
+# git merge (and git pull when it merges) runs this hook instead of pre-commit: run the same checks.
+exec sh "$(dirname -- "$0")/pre-commit"

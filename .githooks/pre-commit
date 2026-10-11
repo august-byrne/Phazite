@@ -1,0 +1,77 @@
+#!/bin/sh
+# Phazite's pre-commit check: nothing confidential may reach the public repository.
+#  1. The commit's author and committer email must be a GitHub noreply address, because pushing a
+#     commit publishes its email for good. To publish a different address on purpose, for one commit:
+#     git -c phazite.allowPublicEmail=true commit ...
+#  2. gitleaks scans the staged changes for API keys, tokens, private keys and other secrets. It can't
+#     see inside binary files (UTF-16 text counts as binary) or commit messages.
+# Turned on per clone with "git config core.hooksPath .githooks" (tools\setup-windows.cmd does this on
+# Windows); git merge and git pull run it through pre-merge-commit. Commits made by rebase,
+# cherry-pick, revert and am skip it, as does "git commit --no-verify"; pre-push checks all of them
+# again before they leave this computer.
+
+stop() {
+    printf '\npre-commit: %s\n\n' "$*" >&2
+    exit 1
+}
+
+# 1. Commit identity
+if [ "$(git config --type=bool phazite.allowPublicEmail)" != true ]; then
+    for who in author:GIT_AUTHOR_IDENT committer:GIT_COMMITTER_IDENT; do
+        email=$(git var "${who#*:}" | sed -n 's/.*<\(.*\)>.*/\1/p')
+        who=${who%%:*}
+        hint=
+        [ "$who" = author ] && hint="
+If you are amending or reusing someone else's commit, add --reset-author to make yourself its author."
+        case "$email" in
+            *@users.noreply.github.com) ;;
+            '') stop "git has no $who email for this commit. Use your GitHub noreply address (GitHub: Settings > Emails):
+    git config user.email \"<id>+<username>@users.noreply.github.com\"" ;;
+            *) stop "this commit would publish the $who email address \"$email\".
+Use your GitHub noreply address instead (GitHub: Settings > Emails):
+    git config user.email \"<id>+<username>@users.noreply.github.com\"$hint
+To publish this address on purpose, for this commit only:
+    git -c phazite.allowPublicEmail=true commit ..." ;;
+        esac
+    done
+fi
+
+# 2. Secrets in the staged changes
+gitleaks=$(command -v gitleaks)
+if [ -z "$gitleaks" ]; then
+    case "$(uname -s)" in
+        MINGW* | MSYS* | CYGWIN*)
+            # winget's links folders, for programs started before gitleaks was installed (old PATH)
+            for dir in "${ProgramW6432:-$PROGRAMFILES}/WinGet/Links" "$LOCALAPPDATA/Microsoft/WinGet/Links"; do
+                candidate="$(cygpath -u "$dir")/gitleaks.exe"
+                if [ -x "$candidate" ]; then
+                    gitleaks=$candidate
+                    break
+                fi
+            done ;;
+    esac
+fi
+[ -n "$gitleaks" ] || stop "gitleaks is not installed, so the staged changes can't be checked for secrets.
+Windows: run tools\\setup-windows.cmd. Linux: see \"No secrets in git\" in README.md."
+
+# gitleaks reads "git diff" and finds nothing in it when git colours it (color.ui = always), so colour
+# is turned off for it; appended to GIT_CONFIG_PARAMETERS, this beats every config file and "git -c".
+# gitleaks exits with 3 (--exit-code) when it finds something and with another code when it fails.
+# Its output comes after our message because VS Code shows only the first line of a failed commit.
+report=$(GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'color.ui=never' 'color.diff=never'" \
+    NO_COLOR=1 "$gitleaks" git --pre-commit --staged --redact --no-banner --no-color --verbose --exit-code 3 2>&1)
+case $? in
+    0) ;;
+    3) stop "gitleaks found a possible secret in the staged changes (redacted below).
+Take the secret out of the staged changes. If it was a real key or token, revoke it and create a new one.
+For a false positive you have checked, add the comment gitleaks:allow to that line, or, in a file that
+can't hold comments, add its Fingerprint line to .gitleaksignore.
+
+$report" ;;
+    *) # The "git" command arrived in gitleaks 8.19; Ubuntu's own package (8.16) doesn't report its version.
+       "$gitleaks" git --help >/dev/null 2>&1 || stop "gitleaks is too old: this check needs 8.19 or newer.
+Windows: run tools\\setup-windows.cmd. Linux: see \"No secrets in git\" in README.md."
+       stop "gitleaks failed, so the staged changes were not checked for secrets:
+
+$report" ;;
+esac

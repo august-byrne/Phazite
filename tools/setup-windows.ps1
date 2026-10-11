@@ -13,11 +13,13 @@
       Git.Git                            Git for Windows
       Kitware.CMake                      CMake (MSI, added to the system PATH)
       Ninja-build.Ninja                  Ninja (linked from C:\Program Files\WinGet\Links)
+      Gitleaks.Gitleaks                  gitleaks, run by the hooks in .githooks (also linked from WinGet\Links)
       Microsoft.VisualStudio.BuildTools  VS 2026 Build Tools: MSVC x64/x86 + Windows 11 SDK, no IDE
     Optional: LLVM.LLVM (-WithLlvm) and the Surge XT VST3 test plug-in (-WithTestPlugin).
     Also (admin): crash dumps for Phazite.exe in %LOCALAPPDATA%\CrashDumps (Windows Error Reporting).
-    Per user, without admin rights: git settings (long paths, HTTPS for JUCE) and the VS Code
-    C/C++ and CMake Tools extensions.
+    Without admin rights: for this user, git settings (long paths, HTTPS for JUCE) and the VS Code C/C++
+    and CMake Tools extensions; for this clone, core.hooksPath = .githooks, which turns on the commit and
+    push checks (GitHub noreply emails only, gitleaks secret scan).
 
     Exit codes (the last line printed, "Result: ...", says the same; Claude Code's shell tool shows
     3010 as 194): 0 = done; 3010 = done, but restart Windows and run it again; 1 = a step failed (see the
@@ -318,6 +320,7 @@ function Invoke-AdminSteps {
     Invoke-Step 'Git'            { Install-WingetPackage -Id 'Git.Git' -Extra @('--scope', 'machine') }
     Invoke-Step 'CMake'          { Install-WingetPackage -Id 'Kitware.CMake' -Extra @('--installer-type', 'wix') }  # the MSI, never the zip
     Invoke-Step 'Ninja'          { Install-WingetPackage -Id 'Ninja-build.Ninja' -Extra @('--scope', 'machine') }
+    Invoke-Step 'Gitleaks'       { Install-WingetPackage -Id 'Gitleaks.Gitleaks' -Extra @('--scope', 'machine') }
     Invoke-Step 'VS Build Tools' { Install-BuildTools }
     Invoke-Step 'crash dumps'    { Enable-CrashDumps }
     if ($WithLlvm)       { Invoke-Step 'LLVM'     { Install-WingetPackage -Id 'LLVM.LLVM' } }            # no --scope: its manifest has none
@@ -346,6 +349,35 @@ function Set-GitSettings {
     }
 }
 
+function Get-RepoRoot {
+    # The clone this script belongs to (the folder above tools\ holds .git and .githooks\pre-commit),
+    # or $null if the script was copied out of one or the source came without git (a ZIP download).
+    $root = Split-Path -Parent $PSScriptRoot
+    foreach ($item in @('.git', '.githooks\pre-commit')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $item))) { return $null }
+    }
+    return $root
+}
+
+function Enable-GitHooks {
+    # Per clone (stored in .git\config, not per user): git then runs the hooks in .githooks, which check
+    # commit emails and run gitleaks before every commit, merge and push.
+    $repo = Get-RepoRoot
+    if (-not $repo) { Write-Log '    not inside a git clone of Phazite; skipped the git hooks' Yellow; return }
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $git) { throw 'git was not found, so the git hooks could not be turned on.' }
+    if ((Invoke-Native $git.Source @('-C', $repo, 'rev-parse', '--is-inside-work-tree') -Quiet) -ne 0) {
+        throw ('git refuses to work in {0}. To see why (for example "detected dubious ownership"), run: git -C "{0}" status' -f $repo)
+    }
+    $ErrorActionPreference = 'Continue'   # PS 5.1: a line on stderr must not become a terminating error
+    $current = & $git.Source -C $repo config --get core.hooksPath 2>$null
+    if ($current -eq '.githooks') { Write-Log '==> git hooks: commit and push checks already on for this clone' Green; return }
+    if ($current) { Write-Log ('    core.hooksPath was "{0}": git stops running the hooks there in this clone' -f $current) Yellow }
+    Write-Log '==> git hooks: turning on the commit and push checks for this clone (core.hooksPath = .githooks)' Cyan
+    $rc = Invoke-Native $git.Source @('-C', $repo, 'config', '--local', 'core.hooksPath', '.githooks')
+    if ($rc -ne 0) { throw ('git config core.hooksPath failed (exit code {0})' -f $rc) }
+}
+
 function Install-VsCodeExtensions {
     if ($SkipVSCodeExtensions) { return }
     $code = Find-VsCodeCli
@@ -361,6 +393,7 @@ function Install-VsCodeExtensions {
 
 function Invoke-UserSteps {
     Invoke-Step 'git settings'       { Set-GitSettings }
+    Invoke-Step 'git hooks'          { Enable-GitHooks }
     Invoke-Step 'VS Code extensions' { Install-VsCodeExtensions }
 }
 
@@ -371,7 +404,7 @@ function Test-OnInheritedPath([string]$Dir) {
 
 function Get-ToolLine([string]$Name) {
     $cmd = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $cmd) { $script:Missing = $true; return 'MISSING' }
+    if ($null -eq $cmd) { $script:Missing = $true; return ('MISSING ({0})' -f $Name) }
     $ErrorActionPreference = 'Continue'
     $first = & $cmd.Source --version 2>&1 | Select-Object -First 1
     $note = ''
@@ -390,6 +423,7 @@ function Write-Report {
     Write-Log ('git     ' + (Get-ToolLine 'git.exe'))
     Write-Log ('cmake   ' + (Get-ToolLine 'cmake.exe'))
     Write-Log ('ninja   ' + (Get-ToolLine 'ninja.exe'))
+    Write-Log ('secrets ' + (Get-ToolLine 'gitleaks.exe'))
     $clang = Join-Path $env:ProgramFiles 'LLVM\bin\clang.exe'
     if (Test-Path -LiteralPath $clang) { Write-Log ('clang   ' + (& $clang --version | Select-Object -First 1) + "  [$clang]") }
 
@@ -423,6 +457,12 @@ function Write-Report {
         $jucePaths = & $git.Source config --global --get 'url.https://github.com/juce-framework/.insteadOf' 2>$null
         Write-Log ('gitcfg  core.longpaths={0}  JUCE over HTTPS={1}' -f $longPaths, [bool]$jucePaths)
         if ($longPaths -ne 'true' -or -not $jucePaths) { $script:Missing = $true }
+        $repo = Get-RepoRoot
+        if ($repo) {
+            $hooksPath = & $git.Source -C $repo config --get core.hooksPath 2>$null
+            if ($hooksPath -eq '.githooks') { Write-Log 'hooks   commit and push checks on (core.hooksPath=.githooks)' }
+            else { Write-Log 'hooks   commit and push checks OFF in this clone; turn them on with: git config core.hooksPath .githooks' Red; $script:Missing = $true }
+        }
     }
 
     $cli = Find-VsCodeCli

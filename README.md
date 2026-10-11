@@ -78,16 +78,17 @@ The setup script installs or updates every build tool and prepares your machine.
 tools\setup-windows.cmd
 ```
 
-- It installs or updates Git; CMake and Ninja, which generate and run the build; and Visual Studio 2026 Build Tools (the MSVC C++ compiler and the Windows 11 SDK, without the Visual Studio IDE). It uses winget, except for updates to the Build Tools, which go through the Visual Studio Installer.
+- It installs or updates Git; CMake and Ninja, which generate and run the build; gitleaks, the secret scanner the git hooks run; and Visual Studio 2026 Build Tools (the MSVC C++ compiler and the Windows 11 SDK, without the Visual Studio IDE). It uses winget, except for updates to the Build Tools, which go through the Visual Studio Installer.
 - It sets two global git options for your user account: `core.longpaths true`, which lets git handle paths over 260 characters, and a rule that fetches JUCE over HTTPS (see step 3).
+- It turns on this clone's git hooks (`git config core.hooksPath .githooks`), which stop a commit or push that would publish a secret or a private email address; see [Contributing](#contributing). The setting belongs to the clone, so in another clone of Phazite, run that `git config` command once.
 - It turns on crash dumps for `Phazite.exe` (full dumps; Windows keeps the last 3).
 - If VS Code is installed, it installs or updates the C/C++ and CMake Tools extensions (it never installs VS Code itself).
 
-It asks for administrator rights once (click Yes at the UAC prompt), then runs the installers in a second window that closes by itself. Don't close either window; wait until the first one prints its `Result:` line. A full run took under 6 minutes on the test PC, but can take up to an hour on a slower connection or PC. It is safe to run again: it installs what is missing and updates the rest. No versions are pinned; the build was verified with what it installed on 2026-10-10: Git 2.55.0, CMake 4.4.4, Ninja 1.13.2 and Visual Studio 2026 Build Tools 18.10.2 (MSVC toolset 14.51.36231, Windows SDK 10.0.26100.0).
+It asks for administrator rights once (click Yes at the UAC prompt), then runs the installers in a second window that closes by itself. Don't close either window; wait until the first one prints its `Result:` line. A full run took under 6 minutes on the test PC, but can take up to an hour on a slower connection or PC. It is safe to run again: it installs what is missing and updates the rest. No versions are pinned; the build was last verified on 2026-10-11 with what it installed: Git 2.55.0, CMake 4.4.4, Ninja 1.13.2, gitleaks 8.30.1 and Visual Studio 2026 Build Tools 18.10.3 (MSVC toolset 14.51.36231, Windows SDK 10.0.26100.0).
 
 | Switch | Effect |
 |---|---|
-| `-CheckOnly` | Only reports what is installed. Changes nothing and needs no administrator rights: safe at any time. |
+| `-CheckOnly` | Only reports what is installed and whether this clone's git hooks are on. Changes nothing and needs no administrator rights: safe at any time. |
 | `-SkipUpdates` | Installs what is missing, but leaves installed tools as they are. |
 | `-WithTestPlugin` | Also installs Surge XT, an open-source (GPL-3.0-or-later) VST3 synth, to test plug-in scanning. |
 | `-WithLlvm` | Also installs LLVM (clangd, clang-tidy, clang-format). |
@@ -155,6 +156,10 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). Ru
 | `fatal error C1081` (file name too long) | The repository path is too long: clone again into a short one such as `C:\src\Phazite`. |
 | `LNK1104` on `Phazite.exe` | Phazite, its `--PluginScan` child or a debug session is still running. Close it and build again. |
 | Errors after a Build Tools update (new MSVC) or a toolchain change | Run `cmake --preset <preset> --fresh` (the setup script prints this when MSVC changes). If it still fails, delete `build\<preset>` and configure again. |
+| `pre-commit:` or `pre-push: gitleaks is not installed` (or `... is too old`) | Run `tools\setup-windows.cmd` (it installs gitleaks), then try again. On Linux, see [No secrets in git](#contributing). |
+| `pre-commit: this commit would publish the ... email address ...` | Set your GitHub noreply address as described in [Your email address](#contributing), then commit again. |
+| `pre-push: ... has commits or a tag with these email addresses ...` | Some commits you're pushing carry another address: fix them as the message says (`git commit --amend --reset-author`), then push again. |
+| `-CheckOnly` prints `hooks ... OFF` | The git hooks are off in this clone: run `git config core.hooksPath .githooks` there. |
 | Anything else | The first line containing `error`, `fatal` or `FAILED` usually names the cause. If you're stuck, open an issue at https://github.com/august-byrne/Phazite/issues with that line and the command you ran. |
 
 ## Building on Linux and WSL2 (untested)
@@ -178,13 +183,14 @@ sudo apt install -y gdb libasound2-plugins   # optional: VS Code debugging, soun
 git config --global url.https://github.com/juce-framework/.insteadOf git@github.com:juce-framework/
 git clone https://github.com/august-byrne/Phazite.git ~/src/Phazite
 cd ~/src/Phazite
+git config core.hooksPath .githooks   # commit and push checks; need gitleaks 8.19+ (see "No secrets in git")
 git submodule update --init --recursive --depth 1
 cmake --preset linux-debug
 cmake --build --preset linux-debug
 build/linux-debug/Phazite_artefacts/Debug/Phazite
 ```
 
-The `git config` line is the Linux version of the setup script's HTTPS rule for JUCE; run it once per machine (WSL keeps its own git settings). The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or newer (Ubuntu 24.04 has 3.28.3). The Linux build only finds Linux VST3 plug-ins (by default in `~/.vst3`, `/usr/local/lib/vst3` and `/usr/lib/vst3`, plus any folder listed in `VST3_PATH`).
+The first `git config` line is the Linux version of the setup script's HTTPS rule for JUCE; run it once per machine (WSL keeps its own git settings). The `core.hooksPath` line turns on the git hooks in this clone; they need gitleaks 8.19 or newer, installed as described in [No secrets in git](#contributing). The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or newer (Ubuntu 24.04 has 3.28.3). The Linux build only finds Linux VST3 plug-ins (by default in `~/.vst3`, `/usr/local/lib/vst3` and `/usr/lib/vst3`, plus any folder listed in `VST3_PATH`).
 
 | Preset | Build type | App |
 |---|---|---|
@@ -234,6 +240,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 | `external/tracktion_engine/` | Submodule: Tracktion Engine, with JUCE as its own submodule in `modules/juce` |
 | `external/WindowsToolchain/` | Submodule (MIT) that finds MSVC; used at build time on Windows only |
 | `tools/` | Machine setup: `setup-windows.cmd` runs [tools/setup-windows.ps1](tools/setup-windows.ps1) |
+| `.githooks/` | Git hooks, turned on per clone with `git config core.hooksPath .githooks`: email and gitleaks checks before every commit, merge and push |
 | `.vscode/` | Shared VS Code settings, launch configurations and extension recommendations |
 | `CLAUDE.md`, `.claude/` | Instructions and settings for Claude Code |
 | `build/<preset>/` | Build output (ignored by git) |
@@ -282,9 +289,29 @@ Threads share data only through lock-free FIFOs and `std::atomic` values, and pa
 
 **No secrets in git.** Nothing confidential may reach the public repository: no API keys or access tokens, passwords, private keys, signing certificates, `.env` files, crash dumps, or personal data such as email addresses or local paths that contain your user name. Keep secrets in environment variables or in files git ignores (`.env`, `CMakeUserPresets.json`, `.claude/settings.local.json`), never in tracked files such as `.vscode/launch.json`, `CMakePresets.json` or `.claude/settings.json`. [.gitignore](.gitignore) ignores common secret files (`.env` files except `.env.example`, `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.p8`, SSH private keys, credential JSON files and `*.dmp` crash dumps), but it can't catch a key pasted into a tracked file.
 
-Before every commit, check `git status` and read `git diff --cached` in full; if git shows the diff in a pager, scroll with the arrow keys and press `q` to quit. A secret that reaches a commit stays in the history even after you delete the file, so if one slips through, revoke it and create a new one. A scanner such as [gitleaks](https://github.com/gitleaks/gitleaks) (MIT; `winget install --id Gitleaks.Gitleaks --exact`) can check staged changes too: `gitleaks git --pre-commit --redact --staged --verbose` exits with code 1 if it finds a leak (or hits an error). Gitleaks is feature-complete and now gets security fixes only.
+Before every commit, check `git status` and read `git diff --cached` in full; if git shows the diff in a pager, scroll with the arrow keys and press `q` to quit. A secret that reaches a commit stays in the history even after you delete the file, so if one slips through, revoke it and create a new one.
 
-**Your email address.** Every commit records git's `user.name` and `user.email`, and pushing to a public repository publishes them for good. Before your first commit, turn on **Keep my email addresses private** under GitHub's Settings > Emails and set the noreply address shown there: `git config --global user.email "<id>+<username>@users.noreply.github.com"` (and your name with `git config --global user.name "Your Name"`). A new address applies only to new commits, so before you push, check the addresses on your commits with `git log --format="%h %ae %ce"`.
+**The git hooks.** Three hooks in [.githooks/](.githooks) apply the same two checks: every email must be a GitHub noreply address (see below), and [gitleaks](https://github.com/gitleaks/gitleaks) (MIT) must find nothing that looks like a secret; findings are shown redacted.
+
+- `pre-commit` runs before `git commit` (also `--amend`, and finishing a merge or cherry-pick after a conflict) and checks the author and committer email and the staged changes.
+- `pre-merge-commit` runs the same check for `git merge` and `git pull`.
+- `pre-push` runs before `git push` and checks every commit the remote doesn't have yet, including their commit messages and any tag you push. It catches what the other two can't see: commits made by `git cherry-pick`, `git revert`, `git rebase` or `git am`, and commits made with `--no-verify`.
+
+On Windows, `tools\setup-windows.cmd` installs gitleaks and turns the hooks on in its clone. On Linux and WSL, install gitleaks 8.19 or newer from its GitHub releases (Ubuntu's own package, 8.16, lacks the `gitleaks git` command the hooks use), then turn the hooks on once in each clone:
+
+```bash
+cd /tmp
+curl -fsSLO https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+curl -fsSLO https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
+sha256sum --check --ignore-missing gitleaks_8.30.1_checksums.txt   # must print: OK
+sudo tar -xzf gitleaks_8.30.1_linux_x64.tar.gz -C /usr/local/bin gitleaks
+cd ~/src/Phazite
+git config core.hooksPath .githooks
+```
+
+The hooks don't replace reading the diff: gitleaks can't recognize personal data or every kind of key, and it can't see inside binary files (UTF-16 text counts as binary). If gitleaks flags something you've checked and it isn't a secret, add the comment `gitleaks:allow` to that line, or, in a file that can't hold comments, add the `Fingerprint` line it printed to `.gitleaksignore`. `--no-verify` skips a hook; keep it for false positives you've checked. Git runs the hooks from your working tree, so before you check out someone else's branch, look at its changes to `.githooks/`. Gitleaks is feature-complete and now gets security fixes only.
+
+**Your email address.** Every commit records git's `user.name` and `user.email`, and pushing to a public repository publishes them for good. Before your first commit, turn on **Keep my email addresses private** under GitHub's Settings > Emails and set the noreply address shown there: `git config --global user.email "<id>+<username>@users.noreply.github.com"` (and your name with `git config --global user.name "Your Name"`). A new address applies only to new commits, so before you push, check the addresses on your commits with `git log --format="%h %ae %ce"`. The hooks refuse any other address; to publish one on purpose, for a single command, add `-c phazite.allowPublicEmail=true` after `git` (for example `git -c phazite.allowPublicEmail=true commit`).
 
 ## License and third-party code
 

@@ -5,3 +5,5 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.sh  text eol=lf
+# Git hooks are shell scripts without an extension (git runs them with sh, on Windows too).
+.githooks/* text eol=lf

@@ -1,0 +1,63 @@
+#!/bin/sh
+# Phazite's pre-push check, the last stop before commits become public. It also covers what
+# pre-commit can't see: commits made by rebase, cherry-pick, revert, am or "commit --no-verify",
+# tags, and commit messages. Every commit not yet on the remote must use GitHub noreply addresses,
+# and gitleaks scans their changes and messages. "git push --no-verify" skips it.
+
+stop() {
+    printf '\npre-push: %s\n\n' "$*" >&2
+    exit 1
+}
+
+gitleaks=$(command -v gitleaks)
+if [ -z "$gitleaks" ]; then
+    case "$(uname -s)" in
+        MINGW* | MSYS* | CYGWIN*)
+            for dir in "${ProgramW6432:-$PROGRAMFILES}/WinGet/Links" "$LOCALAPPDATA/Microsoft/WinGet/Links"; do
+                candidate="$(cygpath -u "$dir")/gitleaks.exe"
+                if [ -x "$candidate" ]; then gitleaks=$candidate; break; fi
+            done ;;
+    esac
+fi
+[ -n "$gitleaks" ] || stop "gitleaks is not installed, so the commits can't be checked for secrets.
+Windows: run tools\\setup-windows.cmd. Linux: see \"No secrets in git\" in README.md."
+
+# Colour off for the "git log" gitleaks runs (see pre-commit).
+GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'color.ui=never' 'color.diff=never'"
+NO_COLOR=1
+export GIT_CONFIG_PARAMETERS NO_COLOR
+
+allow=$(git config --type=bool phazite.allowPublicEmail)
+while read -r local_ref local_oid remote_ref remote_oid; do
+    case $local_oid in *[!0]*) ;; *) continue ;; esac      # deleting a branch or tag
+    new="$local_oid --not --remotes=$1"                      # what the remote doesn't have yet
+    if [ "$allow" != true ]; then
+        emails=$( { git log --format='%ae%n%ce' $new
+                    [ "$(git cat-file -t "$local_oid")" = tag ] &&
+                        git cat-file tag "$local_oid" | sed -n 's/^tagger .*<\(.*\)>.*/\1/p'
+                  } </dev/null | grep -v '@users\.noreply\.github\.com$' | sed 's/^$/(empty)/' | sort -u)
+        [ -z "$emails" ] || stop "$local_ref has commits or a tag with these email addresses, which pushing would publish:
+$emails
+List them with: git log --format=\"%h %ae %ce %s\" $new
+Fix them (for example git rebase -i, then git commit --amend --reset-author on each), or publish
+them on purpose with: git -c phazite.allowPublicEmail=true push"
+    fi
+    report=$("$gitleaks" git --redact --no-banner --no-color --verbose --exit-code 3 --log-opts="$new" 2>&1 </dev/null)
+    rc=$?
+    if [ $rc -eq 0 ]; then
+        report=$(git log --format=%B $new </dev/null |
+            "$gitleaks" stdin --redact --no-banner --no-color --verbose --exit-code 3 2>&1)
+        rc=$?
+    fi
+    case $rc in
+        0) ;;
+        3) stop "gitleaks found a possible secret in the commits or commit messages of $local_ref (redacted below).
+Remove it from those commits (git rebase -i) before pushing. If it was a real key or token, revoke it.
+
+$report" ;;
+        *) stop "gitleaks failed, so the commits of $local_ref were not checked for secrets:
+
+$report" ;;
+    esac
+done
+exit 0

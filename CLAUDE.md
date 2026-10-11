@@ -16,9 +16,9 @@ Run every command from the repository root. The presets are the only entry point
 
 ## Tools (Windows)
 
-- `tools\setup-windows.cmd` installs or updates every tool. A full run needs the user at a UAC prompt and takes 15-60 minutes, so start it only when the user asks (as a background command) or ask them to run it. `tools\setup-windows.cmd -CheckOnly` is safe at any time: no admin rights, changes nothing.
-- Exit codes (your shell tool shows 3010 as 194; the script's last line, "Result: ...", always states it): 0 = done; 3010 = done, but Windows must restart (ask the user to reboot, then run it again); 1 = a step failed (read the FAILED lines and the log path it prints); 2 = it could not start. With `-CheckOnly`: 0 = all present, 1 = something missing or not on this shell's PATH, 3010 = Visual Studio is waiting for a reboot. Switches: `-CheckOnly`, `-SkipUpdates`, `-WithTestPlugin` (Surge XT), `-WithLlvm`.
-- If `cmake` or `git` is "not recognized", run `tools\setup-windows.cmd -CheckOnly`. If it finds the tools, the program that started Claude Code has an old PATH: ask the user to quit every VS Code window, start VS Code from the Start menu and close any terminals it restores (or to open a new terminal and start Claude there). If it reports MISSING, ask the user to run the setup. Don't edit PATH or search the disk for tools.
+- `tools\setup-windows.cmd` installs or updates every tool (including gitleaks) and turns on this clone's git hooks (`core.hooksPath = .githooks`). A full run needs the user at a UAC prompt and can take up to an hour (a few minutes when everything is current), so start it only when the user asks (as a background command) or ask them to run it. `tools\setup-windows.cmd -CheckOnly` is safe at any time: no admin rights, changes nothing.
+- Exit codes (your shell tool shows 3010 as 194; the script's last line, "Result: ...", always states it): 0 = done; 3010 = done, but Windows must restart (ask the user to reboot, then run it again); 1 = a step failed (read the FAILED lines and the log path it prints); 2 = it could not start. With `-CheckOnly`: 0 = all present, 1 = something missing (including this clone's git hooks) or not on this shell's PATH, 3010 = Visual Studio is waiting for a reboot. Switches: `-CheckOnly`, `-SkipUpdates`, `-WithTestPlugin` (Surge XT), `-WithLlvm`, `-SkipVSCodeExtensions`.
+- If `cmake` or `git` is "not recognized", run `tools\setup-windows.cmd -CheckOnly`. If it finds the tools, the program that started Claude Code has an old PATH: ask the user to quit every VS Code window, start VS Code from the Start menu and close any terminals it restores (or to open a new terminal and start Claude there). If it reports MISSING, ask the user to run the setup. Don't edit PATH or search the disk for tools. If it prints `hooks ... OFF`, the git hooks are off in this clone: tell the user, then run `git config core.hooksPath .githooks` (no admin rights or full setup needed).
 
 ## Running and debugging
 
@@ -35,6 +35,7 @@ Run every command from the repository root. The presets are the only entry point
 - `external/tracktion_engine` - git submodule: Tracktion Engine (`develop`, pinned commit), with JUCE as its own submodule at `modules/juce`. Never add JUCE separately.
 - `external/WindowsToolchain` - git submodule (MIT), used on Windows at build time only.
 - `tools/` - machine setup. `build/<preset>/` - build output (ignored by git).
+- `.githooks/` - git hooks, turned on per clone by `git config core.hooksPath .githooks` (the setup script does this). `pre-commit` blocks commits whose author or committer email isn't a GitHub noreply address and runs gitleaks over the staged changes; `pre-merge-commit` runs it for merges; `pre-push` checks every commit the remote doesn't have yet (emails, tags, gitleaks over changes and commit messages).
 
 ## Submodules and third-party code
 
@@ -67,6 +68,10 @@ The audio thread is the audio callback and everything it calls: plug-in and grap
 The repository will be public on GitHub, and a commit stays in its history even after a later commit deletes the file. The user's rule: nothing confidential may ever reach the remote. Before every commit:
 - Read `git diff --cached` in full and check that nothing confidential is staged: API keys and tokens (including AI providers'), passwords, private keys, signing certificates, `.env` files, crash dumps, and personal data such as email addresses or local paths containing user names. If anything looks sensitive, stop and ask the user.
 - Secrets never go in tracked files, including `.vscode/launch.json`, `CMakePresets.json` and `.claude/settings.json`. Keep them in environment variables or in files git ignores (`.env`, `CMakeUserPresets.json`, `.claude/settings.local.json`).
+- The git hooks (`.githooks/`) also stop a commit, merge or push whose email isn't a GitHub noreply address, or whose changes or messages gitleaks flags. They don't replace reading the diff. Never skip them with `--no-verify` (commit or push), never change `core.hooksPath`, and never use `-c phazite.allowPublicEmail=true` unless the user asks; if a hook stops something, show the user its message and ask how to proceed. For a false positive the user has checked, add `gitleaks:allow` to that line, or add the printed `Fingerprint` line to `.gitleaksignore` where comments aren't possible.
+- Stage a new or changed hook with `git add --chmod=+x .githooks/<name>`: Windows records no executable bit, and git on Linux and macOS silently skips a hook without it. `git ls-files -s .githooks` must show mode 100755.
+- In WSL/Linux the hooks need gitleaks 8.19 or newer from its GitHub releases (Ubuntu's own package is 8.16) and `git config core.hooksPath .githooks` once per clone.
+- Commit messages: write them to a file and use `git commit -F <file>`. Windows PowerShell 5.1 splits a `-m` argument at embedded double quotes.
 - Never add a remote or push unless the user asks.
 
 ## Before reporting work as done
