@@ -1,2 +1,304 @@
 # Phazite
 
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+
+Phazite is an open-source digital audio workstation (DAW) in early development, written in C++20 on [Tracktion Engine](https://github.com/Tracktion/tracktion_engine) and [JUCE](https://github.com/juce-framework/JUCE). What it aims for:
+
+- **Clean UI/UX:** an uncluttered interface and straightforward workflows.
+- **AI integrations:** planned, not designed yet.
+- **Lean and fast:** low CPU and memory use in both the audio engine and the UI.
+- **Open source:** licensed under the [AGPL-3.0](LICENSE).
+- **Plug-in hosting:** VST®3 plug-ins first, Audio Units on macOS later.
+- **Cross-platform:** Windows first; Linux and macOS planned.
+
+## Status
+
+- **Early development (pre-alpha):** there are no releases or downloads, and Phazite can't be used to make music yet. The only program is a small test app (a *smoke test*), which you build from source as described below.
+- **Smoke-test app:** one window with **Play**/**Stop** (a looping arpeggio on Tracktion's built-in 4OSC synth), **Audio Settings** (JUCE's audio device selector) and **Scan Plugins** (finds VST3 plug-ins in a separate process and lists them; Phazite can't use them yet). [5. Run Phazite](#5-run-phazite) describes what to expect.
+
+| Platform | Status |
+|---|---|
+| Windows 11 x64 | Builds (Debug and Release, zero warnings) with Visual Studio 2026 Build Tools. Running the app hasn't been verified yet, so this README describes what it is designed to do. |
+| Linux / WSL2 (Windows Subsystem for Linux), Ubuntu 24.04 | Presets exist, but have never been built or run: see [Building on Linux and WSL2](#building-on-linux-and-wsl2-untested). |
+| macOS | Planned, with Audio Units hosting. No presets yet. |
+
+## Building on Windows
+
+Open PowerShell (press Start, type `PowerShell` and press Enter; don't choose "Run as administrator", because the setup script asks for administrator rights itself) and type the commands one line at a time. In short, they install the build tools, fetch the *submodules* (other git repositories that Phazite pins at exact commits) and build with a CMake *preset* (a named set of build settings). The numbered steps below explain each one.
+
+```powershell
+# Windows 11 x64, about 10 GB free. Skip the winget line if git --version prints a version.
+winget install --id Git.Git --exact --source winget --scope machine
+# Close PowerShell and open a new window, so that it finds git:
+git clone https://github.com/august-byrne/Phazite.git C:\src\Phazite
+cd C:\src\Phazite
+tools\setup-windows.cmd                 # click Yes when Windows asks for administrator rights; up to an hour
+# If it asks you to restart your PC (or ends with exit code 3010), restart Windows, then cd C:\src\Phazite and run it again.
+# Open a new PowerShell window:
+cd C:\src\Phazite
+git submodule update --init --recursive --depth 1
+cmake --preset windows-debug
+cmake --build --preset windows-debug
+build\windows-debug\Phazite_artefacts\Debug\Phazite.exe   # not verified yet: see step 5
+```
+
+### Requirements
+
+| You need | Notes |
+|---|---|
+| Windows 11, 64-bit (x64) | The only tested system. Visual Studio 2026, which provides the compiler, doesn't support Windows 10. |
+| winget | The Windows Package Manager, part of Microsoft's App Installer, which comes with Windows 11. |
+| Administrator rights | For the installers. The setup script asks once, through one UAC (User Account Control) prompt. |
+| Internet access | The Visual Studio Build Tools alone are about a 2 GB download. |
+| About 10 GB of free disk space | About 7 GB was used on the test PC, most of it by the Build Tools and the Windows SDK; the two build folders take 1.5 GB. |
+| A short folder path, not cloud-synced | Such as `C:\src\Phazite` (see below), outside folders that OneDrive or a similar service syncs: the `windows-debug` build folder alone holds more than 1 GB of files. |
+
+**Why a short path?** Windows limits most paths to 260 characters, and the MSVC compiler and linker keep that limit even when long paths are turned on in Windows. The longest path a build creates inside the repository is 179 characters, so the repository folder's own path must stay under about 80 characters, or the build can fail with `fatal error C1081` (file name too long).
+
+### 1. Get Git and the source
+
+Git downloads Phazite and its dependencies. If `git --version` prints a version, skip the install. Otherwise install Git with winget (the setup script in step 2 installs it too, but you need it first; Windows may ask for administrator rights):
+
+```powershell
+winget install --id Git.Git --exact --source winget --scope machine
+```
+
+Then close PowerShell and open a new window, so that it finds `git`; `git --version` should now print a version. Cloning downloads the repository into a new folder (git creates any missing parent folders); run every later command from that folder, the repository root. Don't add `--recurse-submodules`: the submodules need a git setting from step 2.
+
+```powershell
+git clone https://github.com/august-byrne/Phazite.git C:\src\Phazite
+cd C:\src\Phazite
+```
+
+### 2. Run the setup script
+
+The setup script installs or updates every build tool and prepares your machine. Its `.cmd` wrapper runs [tools/setup-windows.ps1](tools/setup-windows.ps1) without changing PowerShell's execution policy; you can also double-click it in File Explorer.
+
+```powershell
+tools\setup-windows.cmd
+```
+
+- It installs or updates Git; CMake and Ninja, which generate and run the build; and Visual Studio 2026 Build Tools (the MSVC C++ compiler and the Windows 11 SDK, without the Visual Studio IDE). It uses winget, except for updates to the Build Tools, which go through the Visual Studio Installer.
+- It sets two global git options for your user account: `core.longpaths true`, which lets git handle paths over 260 characters, and a rule that fetches JUCE over HTTPS (see step 3).
+- It turns on crash dumps for `Phazite.exe` (full dumps; Windows keeps the last 3).
+- If VS Code is installed, it installs or updates the C/C++ and CMake Tools extensions (it never installs VS Code itself).
+
+It asks for administrator rights once (click Yes at the UAC prompt), then runs the installers in a second window that closes by itself. Don't close either window; wait until the first one prints its `Result:` line. A full run took under 6 minutes on the test PC, but can take up to an hour on a slower connection or PC. It is safe to run again: it installs what is missing and updates the rest. No versions are pinned; the build was verified with what it installed on 2026-10-10: Git 2.55.0, CMake 4.4.4, Ninja 1.13.2 and Visual Studio 2026 Build Tools 18.10.2 (MSVC toolset 14.51.36231, Windows SDK 10.0.26100.0).
+
+| Switch | Effect |
+|---|---|
+| `-CheckOnly` | Only reports what is installed. Changes nothing and needs no administrator rights: safe at any time. |
+| `-SkipUpdates` | Installs what is missing, but leaves installed tools as they are. |
+| `-WithTestPlugin` | Also installs Surge XT, an open-source (GPL-3.0-or-later) VST3 synth, to test plug-in scanning. |
+| `-WithLlvm` | Also installs LLVM (clangd, clang-tidy, clang-format). |
+| `-SkipVSCodeExtensions` | Doesn't install or update the VS Code extensions. |
+
+For example: `tools\setup-windows.cmd -WithTestPlugin`. The last line it prints states the result, such as `Result: exit code 0 (done)`:
+
+| Exit code | Normal run | With `-CheckOnly` |
+|---|---|---|
+| 0 | Done | Everything is present |
+| 3010 | Done, but restart Windows, then run it again | Visual Studio is waiting for a restart |
+| 1 | A step failed: read the `FAILED` lines and the log named after `Full log:` | Something is missing, or not yet on this window's PATH (see below) |
+| 2 | Could not start (no winget, administrator rights refused, ...) | Could not check (for example, from 32-bit PowerShell) |
+
+**When it finishes:** if the last line says `exit code 3010`, or the output asks you to restart your PC (that can happen even with exit code 0), restart Windows, then run the script again from `C:\src\Phazite`. Then **open a new PowerShell window** and run `cd C:\src\Phazite`: programs that were already running, including this window, keep the old PATH (the list of folders Windows searches for programs) and can't find the new tools. If VS Code is running, quit it (File > Exit), start it from the Start menu and close any terminals it restores. You're ready when `tools\setup-windows.cmd -CheckOnly` ends with `Result: exit code 0 (everything present)`.
+
+### 3. Fetch the submodules
+
+This downloads the dependencies at the exact commits Phazite pins: Tracktion Engine (with the JUCE commit it pins) and WindowsToolchain, about 0.2 GB on disk. `--depth 1` skips their history:
+
+```powershell
+git submodule update --init --recursive --depth 1
+```
+
+The first run prints `checked out` for each of the three submodules. Run the same command after every pull or branch switch. Step 2 must come first: Tracktion lists JUCE with an SSH address (`git@github.com:juce-framework/JUCE.git`), which only works with an SSH key registered on GitHub. Otherwise ssh asks whether to trust `github.com`, and git then fails with `Permission denied (publickey)` or `Host key verification failed`. The setup script's git rule fetches JUCE over HTTPS instead.
+
+### 4. Configure and build
+
+Configuring finds the compiler and prepares a build folder, `build\<preset>`; building compiles and links Phazite. The presets live in [CMakePresets.json](CMakePresets.json): `windows-debug` for development and debugging, `windows-release` for an optimized app (use it in both commands); `cmake --list-presets` lists them.
+
+```powershell
+cmake --preset windows-debug
+cmake --build --preset windows-debug
+```
+
+- Configure has worked when its last line is `-- Build files have been written to: .../build/windows-debug`, and the build when its last line ends with `Linking CXX executable Phazite_artefacts\Debug\Phazite.exe` (or is `ninja: no work to do.`). Otherwise the first `CMake Error` or `error` line names the cause: see [Troubleshooting](#troubleshooting).
+- No Developer PowerShell or vcvars needed: [cmake/toolchains/windows-msvc.cmake](cmake/toolchains/windows-msvc.cmake) finds MSVC by itself.
+- The first configure of a build folder also builds JUCE's `juceaide` helper, so it takes longer. On the test PC (8 cores, 32 GB RAM) the first Debug configure took 33 s and the Debug build 47 s; Release took about 2 minutes for both.
+- Windows PowerShell 5.1 has no `&&`. To build only if configure succeeded, run `cmake --preset windows-debug; if ($LASTEXITCODE -eq 0) { cmake --build --preset windows-debug }`.
+
+### 5. Run Phazite
+
+| Preset | App |
+|---|---|
+| `windows-debug` | `build\windows-debug\Phazite_artefacts\Debug\Phazite.exe` (about 50 MB, plus about 0.5 GB next to it: `Phazite.pdb` with the debug symbols and `Phazite.ilk` for incremental linking) |
+| `windows-release` | `build\windows-release\Phazite_artefacts\Release\Phazite.exe` (about 12 MB, no debug symbols) |
+
+Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). Running the app has not been verified yet; it is designed to work like this:
+
+1. A window titled "Phazite" opens with three buttons and a status line (the audio device, or "No audio device", then sample rate, block size and CPU use). Phazite opens your default audio device, for output only.
+2. Turn your volume down, then click **Play**. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. The button turns into **Stop**, which stops playback and rewinds.
+3. If you hear nothing, click **Audio Settings** and choose an output device; inputs are off by default and can be turned on there. Device settings and the plug-in list are saved in `%APPDATA%\Phazite\Settings.xml`.
+4. Click **Scan Plugins**. A "Plug-ins" window asks which folders to scan, with the standard VST3 folders filled in; click **Scan**. The scan runs in a child copy of Phazite (`Phazite.exe --PluginScan:...`), so a plug-in that crashes while being scanned shouldn't take Phazite down; if the child can't start, Phazite shows a warning and scans in its own process instead. Found plug-ins are listed, but Phazite can't add or play them yet. With no VST3 plug-ins installed the list stays empty; `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT, which should then appear.
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `fatal: not a git repository`, `tools\setup-windows.cmd` "is not recognized", or CMake `Could not read presets` | This window isn't in the repository folder (new windows start in your user folder): run `cd C:\src\Phazite` and try again. |
+| `winget` "is not recognized" | Install or update "App Installer" from the Microsoft Store, then open a new PowerShell window. |
+| `git`, `cmake` or `ninja` "is not recognized" | The window is older than the install. Open a new one; for VS Code, quit it completely (File > Exit) and start it from the Start menu. Then run `tools\setup-windows.cmd -CheckOnly`: if it reports `MISSING`, run the full setup again; if a new window still can't find the tools, sign out of Windows and back in. |
+| Configure finds no complete Visual Studio installation | Run `tools\setup-windows.cmd`, and restart Windows first if it said a restart is required. |
+| Configure says a folder under `external` is empty or missing | The submodules aren't checked out: run step 3 (after step 2 on a new machine). |
+| Fetching JUCE asks whether to trust `github.com`, or fails with `Permission denied (publickey)` or `Host key verification failed` | The HTTPS rule for JUCE is missing (answer `no` if asked). Run `tools\setup-windows.cmd`, then step 3 again. |
+| `fatal error C1081` (file name too long) | The repository path is too long: clone again into a short one such as `C:\src\Phazite`. |
+| `LNK1104` on `Phazite.exe` | Phazite, its `--PluginScan` child or a debug session is still running. Close it and build again. |
+| Errors after a Build Tools update (new MSVC) or a toolchain change | Run `cmake --preset <preset> --fresh` (the setup script prints this when MSVC changes). If it still fails, delete `build\<preset>` and configure again. |
+| Anything else | The first line containing `error`, `fatal` or `FAILED` usually names the cause. If you're stuck, open an issue at https://github.com/august-byrne/Phazite/issues with that line and the command you ran. |
+
+## Building on Linux and WSL2 (untested)
+
+> **Never built or run yet.** These steps are worked out from the presets, the dependencies' sources and Ubuntu 24.04's packages, not from a working build, and may need fixes.
+
+For WSL2, install Ubuntu 24.04 from a PowerShell opened with "Run as administrator", then restart Windows:
+
+```powershell
+wsl --install -d Ubuntu-24.04
+```
+
+After the restart, open Ubuntu with `wsl -d Ubuntu-24.04`; its first start asks you to create a Linux user name and password, which `sudo` asks for. Inside Ubuntu, keep the clone in the Linux file system (such as `~/src`), not under `/mnt/c`. Install the packages before the first configure: it builds JUCE's `juceaide` helper, which already needs pkg-config and the X11, FreeType and Fontconfig headers.
+
+```bash
+sudo apt update
+sudo apt install -y build-essential git cmake ninja-build pkg-config \
+    libasound2-dev libfreetype-dev libfontconfig-dev \
+    libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev
+sudo apt install -y gdb libasound2-plugins   # optional: VS Code debugging, sound under WSL2
+git config --global url.https://github.com/juce-framework/.insteadOf git@github.com:juce-framework/
+git clone https://github.com/august-byrne/Phazite.git ~/src/Phazite
+cd ~/src/Phazite
+git submodule update --init --recursive --depth 1
+cmake --preset linux-debug
+cmake --build --preset linux-debug
+build/linux-debug/Phazite_artefacts/Debug/Phazite
+```
+
+The `git config` line is the Linux version of the setup script's HTTPS rule for JUCE; run it once per machine (WSL keeps its own git settings). The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or newer (Ubuntu 24.04 has 3.28.3). The Linux build only finds Linux VST3 plug-ins (by default in `~/.vst3`, `/usr/local/lib/vst3` and `/usr/lib/vst3`, plus any folder listed in `VST3_PATH`).
+
+| Preset | Build type | App |
+|---|---|---|
+| `linux-debug` | Debug | `build/linux-debug/Phazite_artefacts/Debug/Phazite` |
+| `linux-release` | Release (optimized) | `build/linux-release/Phazite_artefacts/Release/Phazite` |
+| `linux-asan` | Debug with AddressSanitizer and UndefinedBehaviorSanitizer (memory errors, undefined behavior) | `build/linux-asan/Phazite_artefacts/Debug/Phazite` |
+| `linux-tsan` | RelWithDebInfo with ThreadSanitizer (data races) | `build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite` |
+
+Run the ThreadSanitizer build under `setarch -R`, which turns off address-space randomization for that one process. Ubuntu 24.04 and WSL2 kernels use 32 bits of randomization (`vm.mmap_rnd_bits=32`), which can stop the ThreadSanitizer in GCC 13 and 14 from starting:
+
+```bash
+setarch $(uname -m) -R build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite
+```
+
+Under WSL2, the window should appear on the Windows desktop through WSLg (WSL's built-in GUI support). JUCE has no PulseAudio backend, so for sound install `libasound2-plugins` and pick the ALSA device "Pulseaudio output" in **Audio Settings**. Expect no MIDI ports, and don't measure audio performance under WSL.
+
+## Developing
+
+### VS Code
+
+1. Install VS Code from https://code.visualstudio.com if you don't have it. Open the repository folder (File > Open Folder) and trust it when VS Code asks, or through the Restricted Mode banner: the C/C++ and CMake Tools extensions stay disabled until you do. Install the recommended extensions when VS Code offers them: C/C++ and CMake Tools (the setup script installs both if VS Code was already there), Claude Code, and WSL once you use WSL.
+2. Pick a preset with **CMake: Select Configure Preset** from the Command Palette (Ctrl+Shift+P), for example `windows-debug`. VS Code then builds exactly like the terminal, without a Developer PowerShell.
+3. Run **CMake: Configure** once. VS Code doesn't configure when it opens the folder, and CMake Tools only gets IntelliSense data and launch targets from build folders it configured itself, so do this once even for a folder you built in a terminal.
+4. Choose a launch configuration in the Run and Debug view and press F5:
+
+| Configuration | What it does |
+|---|---|
+| Phazite (Windows) | Builds the active preset (stops if the build fails), then starts Phazite under the debugger. |
+| Attach to Phazite (Windows) | Attaches the debugger to a running Phazite. |
+| Open crash dump (Windows, Debug build) | Asks for a `.dmp` file and opens it with the `windows-debug` build's symbols. |
+| Phazite (Linux / WSL, gdb) | Like the first, with gdb (untested). |
+
+Once the setup script has turned crash dumps on, a crash outside a debugger leaves `Phazite.exe.<pid>.dmp` in `%LOCALAPPDATA%\CrashDumps` (in PowerShell: `$env:LOCALAPPDATA\CrashDumps`). Only `windows-debug` builds have symbols, so reproduce Release crashes in a Debug build. A full dump holds Phazite's whole memory, so never attach one to a public issue; share the call stack instead.
+
+### Command line
+
+- Run every command from the repository root: the presets are the only entry point. `cmake --list-presets` lists the ones for your OS; configure with `cmake --preset <preset>`, then build with `cmake --build --preset <preset>`. Don't build one preset from VS Code and a terminal at the same time: two builds in one folder break each other.
+- After a Build Tools update or a toolchain change, reconfigure with `cmake --preset <preset> --fresh`; if that still fails, delete `build/<preset>` and configure again.
+- Put personal presets in `CMakeUserPresets.json`, which git ignores. Each build folder gets a `compile_commands.json` for clangd and similar tools, and configure limits parallel compiles to one per 2560 MiB of RAM, at most one per logical CPU (cache variable `PHAZITE_MIB_PER_COMPILE_JOB`).
+
+### Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/` | Phazite's own code (currently the smoke test: `Main.cpp`, `MainComponent.*`) |
+| `CMakeLists.txt`, `CMakePresets.json`, `cmake/` | Build definition, presets, Windows toolchain wrapper and CMake helpers |
+| `external/tracktion_engine/` | Submodule: Tracktion Engine, with JUCE as its own submodule in `modules/juce` |
+| `external/WindowsToolchain/` | Submodule (MIT) that finds MSVC; used at build time on Windows only |
+| `tools/` | Machine setup: `setup-windows.cmd` runs [tools/setup-windows.ps1](tools/setup-windows.ps1) |
+| `.vscode/` | Shared VS Code settings, launch configurations and extension recommendations |
+| `CLAUDE.md`, `.claude/` | Instructions and settings for Claude Code |
+| `build/<preset>/` | Build output (ignored by git) |
+
+### Dependencies and submodules
+
+| Submodule | Pinned at |
+|---|---|
+| `external/tracktion_engine` | `bb386171` on Tracktion's `develop` branch (2026-10-07; module version 3.5.0, not a tagged release) |
+| `external/tracktion_engine/modules/juce` | `37c894f8`, the commit Tracktion pins (2026-05-21; JUCE 8.0.13 plus 7 commits on `develop`, not a tagged release) |
+| `external/WindowsToolchain` | `1373361e` (v0.14.0 plus 11 commits) |
+
+- Never run `git submodule update --remote`: it would move JUCE away from the commit Tracktion pins.
+- Everything under `external/` is read-only: don't edit, reformat or "fix" it, and never add JUCE separately. Don't commit a moved submodule pointer (`git status` shows "(new commits)") unless it is a deliberate dependency bump.
+- To bump Tracktion Engine (and with it JUCE), follow [CLAUDE.md](CLAUDE.md#submodules-and-third-party-code): fetch the new commit by its full 40-character hash, review the changes and Tracktion's `BREAKING-CHANGES.md`, then reconfigure with `--fresh` and rebuild.
+
+### Coding guidelines
+
+- C++20. Include module headers directly (`<juce_gui_basics/juce_gui_basics.h>`, `<tracktion_engine/tracktion_engine.h>`), not `JuceHeader.h`. Qualify `juce::` names, and use `namespace te = tracktion;`.
+- Create and destroy Tracktion objects (`te::Engine`, `te::Edit`) on the message thread, and destroy every `Edit` before the `Engine`.
+- Keep the build warning-free under JUCE's recommended warning flags (`/W4` on MSVC). Never silence a warning without saying why, as [CMakeLists.txt](CMakeLists.txt) does for `/wd4702` and the `linux-tsan` preset in [CMakePresets.json](CMakePresets.json) does for `-Wno-tsan`.
+- There is no `.clang-format` yet: match the surrounding code.
+
+### Real-time rules (audio thread)
+
+The audio thread is the audio callback and everything it calls, such as plug-in, graph and Tracktion node processing. It must deliver every block of audio on time, so code there must not:
+
+- allocate or free memory (`new`/`delete`, growing containers, creating strings, allocating `std::function` captures): allocate up front when preparing;
+- take locks or wait for other threads (`std::mutex`, `juce::CriticalSection`, `MessageManagerLock`, ...);
+- post to the message thread (`triggerAsyncUpdate`, `sendChangeMessage`, `callAsync`): set an atomic flag and poll it from a `juce::Timer` instead;
+- do file or network I/O, log, throw exceptions or run unbounded loops.
+
+Threads share data only through lock-free FIFOs and `std::atomic` values, and parameters are read through `AutomatableParameter::getCurrentValue()`. Tracktion's 4OSC synth, used by the smoke test, breaks these rules: don't copy it or use it for performance measurements. The full list is in [CLAUDE.md](CLAUDE.md#real-time-rules-audio-thread).
+
+### Working with Claude Code
+
+- [CLAUDE.md](CLAUDE.md) holds the project instructions that Claude Code loads automatically. Its sections on submodules, real-time rules and code conventions apply to human contributors too; the rest is written for Claude Code.
+- [.claude/settings.json](.claude/settings.json) is the shared Claude Code configuration: it pre-approves the configure and build commands, read-only git commands, `Get-Process` and `tools\setup-windows.cmd -CheckOnly`, and keeps Tracktion's own CLAUDE.md files (written for Tracktion's contributors) out of Claude's context.
+- Put personal notes in `CLAUDE.local.md` and personal settings in `.claude/settings.local.json`; git ignores both.
+
+## Contributing
+
+**Builds.** Before you send a change, build `windows-debug` (and `windows-release` for performance-related work) with zero warnings.
+
+**Licenses.** Only add code under licenses compatible with the AGPL-3.0: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license). Never enable Tracktion's proprietary options (Elastique, ReWire, REX).
+
+**No secrets in git.** Nothing confidential may reach the public repository: no API keys or access tokens, passwords, private keys, signing certificates, `.env` files, crash dumps, or personal data such as email addresses or local paths that contain your user name. Keep secrets in environment variables or in files git ignores (`.env`, `CMakeUserPresets.json`, `.claude/settings.local.json`), never in tracked files such as `.vscode/launch.json`, `CMakePresets.json` or `.claude/settings.json`. [.gitignore](.gitignore) ignores common secret files (`.env` files except `.env.example`, `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.p8`, SSH private keys, credential JSON files and `*.dmp` crash dumps), but it can't catch a key pasted into a tracked file.
+
+Before every commit, check `git status` and read `git diff --cached` in full; if git shows the diff in a pager, scroll with the arrow keys and press `q` to quit. A secret that reaches a commit stays in the history even after you delete the file, so if one slips through, revoke it and create a new one. A scanner such as [gitleaks](https://github.com/gitleaks/gitleaks) (MIT; `winget install --id Gitleaks.Gitleaks --exact`) can check staged changes too: `gitleaks git --pre-commit --redact --staged --verbose` exits with code 1 if it finds a leak (or hits an error). Gitleaks is feature-complete and now gets security fixes only.
+
+**Your email address.** Every commit records git's `user.name` and `user.email`, and pushing to a public repository publishes them for good. Before your first commit, turn on **Keep my email addresses private** under GitHub's Settings > Emails and set the noreply address shown there: `git config --global user.email "<id>+<username>@users.noreply.github.com"` (and your name with `git config --global user.name "Your Name"`). A new address applies only to new commits, so before you push, check the addresses on your commits with `git log --format="%h %ae %ce"`.
+
+## License and third-party code
+
+Phazite is licensed under the GNU Affero General Public License, version 3 (AGPL-3.0): see [LICENSE](LICENSE).
+
+| Component | License | Role |
+|---|---|---|
+| [Tracktion Engine](https://github.com/Tracktion/tracktion_engine) | GPL-3.0-or-later, or commercial | Audio engine, compiled in |
+| [JUCE](https://github.com/juce-framework/JUCE) 8 (inside Tracktion Engine) | AGPL-3.0, or commercial | App, audio-device and plug-in-hosting framework, compiled in |
+| VST 3 SDK (bundled with JUCE) | MIT | VST3 plug-in scanning (hosting later), compiled in |
+| SoundTouch (bundled with Tracktion Engine) | LGPL-2.1-or-later | Time-stretching, compiled in |
+| libsamplerate (bundled with Tracktion Engine) | BSD-2-Clause | Sample-rate conversion, compiled in |
+| [WindowsToolchain](https://github.com/MarkSchofield/WindowsToolchain) | MIT | Finds MSVC at build time on Windows; nothing compiled in |
+
+Tracktion Engine and JUCE are also available under commercial licenses; Phazite uses their open-source licenses (section 13 of both the AGPL-3.0 and the GPL-3.0 allows combining code under the two licenses). Both bundle further open-source code, such as choc, farbot, magic_enum, crill, rpmalloc, zlib, libpng, libjpeg, FLAC, Ogg Vorbis, HarfBuzz and SheenBidi: see `external/tracktion_engine/LICENSE.md`, `external/tracktion_engine/modules/juce/LICENSE.md`, and the license files and source-file headers of the bundled code under `external/`.
+
+VST is a registered trademark of Steinberg Media Technologies GmbH.

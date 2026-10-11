@@ -38,7 +38,7 @@ Run every command from the repository root. The presets are the only entry point
 
 ## Submodules and third-party code
 
-- After cloning, pulling or switching branches, run `git submodule update --init --recursive`. In WSL/Linux, run this once beforehand, because Tracktion lists JUCE with an SSH URL: `git config --global url.https://github.com/juce-framework/.insteadOf git@github.com:juce-framework/`
+- After cloning, pulling or switching branches, run `git submodule update --init --recursive --depth 1` (`--depth 1` skips the dependencies' history, which for JUCE is large). In WSL/Linux, run this once beforehand, because Tracktion lists JUCE with an SSH URL: `git config --global url.https://github.com/juce-framework/.insteadOf git@github.com:juce-framework/`
 - Everything under `external/` is read-only: don't edit, reformat or "fix" it. Don't stage a changed `external/*` pointer unless the task is a deliberate dependency bump; before committing, check `git status` for "(new commits)".
 - Never run `git submodule update --remote`: it would move JUCE away from the commit Tracktion pins. The Tracktion submodule is a shallow clone, so to bump it use the full 40-character commit hash: `git -C external/tracktion_engine fetch --depth 1 origin <full-sha>`, `git -C external/tracktion_engine checkout --detach FETCH_HEAD`, `git add external/tracktion_engine`, `git submodule update --init --recursive --depth 1`. Review the changes on GitHub (compare old...new) and read Tracktion's BREAKING-CHANGES.md, then reconfigure with `--fresh` and rebuild.
 - `external/tracktion_engine` contains CLAUDE.md files and `.claude/commands` written for Tracktion's own contributors (branch names, commit prefixes, choc's code style). They don't apply to Phazite; ignore them.
@@ -61,6 +61,13 @@ The audio thread is the audio callback and everything it calls: plug-in and grap
 - C++20. Include module headers directly (`<juce_gui_basics/juce_gui_basics.h>`, `<tracktion_engine/tracktion_engine.h>`), not `JuceHeader.h`. Qualify `juce::`; use `namespace te = tracktion;`.
 - Create and destroy Tracktion objects (Engine, Edit) on the message thread, and destroy every `te::Edit` before the `te::Engine`.
 - Keep the build warning-free under JUCE's recommended warning flags (/W4 on MSVC). Don't silence a warning without saying why.
+
+## Committing
+
+The repository will be public on GitHub, and a commit stays in its history even after a later commit deletes the file. The user's rule: nothing confidential may ever reach the remote. Before every commit:
+- Read `git diff --cached` in full and check that nothing confidential is staged: API keys and tokens (including AI providers'), passwords, private keys, signing certificates, `.env` files, crash dumps, and personal data such as email addresses or local paths containing user names. If anything looks sensitive, stop and ask the user.
+- Secrets never go in tracked files, including `.vscode/launch.json`, `CMakePresets.json` and `.claude/settings.json`. Keep them in environment variables or in files git ignores (`.env`, `CMakeUserPresets.json`, `.claude/settings.local.json`).
+- Never add a remote or push unless the user asks.
 
 ## Before reporting work as done
 

@@ -18,6 +18,24 @@ CLAUDE.local.md
 .claude/settings.local.json
 .claude/worktrees/
 
+# ---- Secrets: API keys (e.g. for AI services), private keys, signing certificates ----
+# These never belong in git. Keep a variable-names-only template as .env.example.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.p8
+id_rsa*
+id_ed25519*
+secrets.json
+credentials*.json
+service-account*.json
+# Crash dumps hold the app's whole memory, including any key it has loaded.
+*.dmp
+
 # ---- OS clutter ----
 Thumbs.db
 Desktop.ini

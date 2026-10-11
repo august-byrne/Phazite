@@ -14,7 +14,7 @@ endif()
 
 set(_phazite_upstream "${CMAKE_CURRENT_LIST_DIR}/../../external/WindowsToolchain/Windows.MSVC.toolchain.cmake")
 if(NOT EXISTS "${_phazite_upstream}")
-    message(FATAL_ERROR "external/WindowsToolchain is missing. Run: git submodule update --init --recursive")
+    message(FATAL_ERROR "external/WindowsToolchain is missing. Run: git submodule update --init --recursive --depth 1")
 endif()
 
 set(_phazite_shared_vars CMAKE_VS_VERSION_RANGE VS_INSTALLATION_PATH VS_PLATFORM_TOOLSET_VERSION)

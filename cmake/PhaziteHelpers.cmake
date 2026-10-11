@@ -6,7 +6,7 @@ function(phazite_require_submodules)
         if(NOT EXISTS "${CMAKE_SOURCE_DIR}/${_dir}/CMakeLists.txt")
             message(FATAL_ERROR
                 "${_dir} is empty because the git submodules are not checked out. Run:\n"
-                "  git submodule update --init --recursive\n"
+                "  git submodule update --init --recursive --depth 1\n"
                 "On a new Windows machine run tools\\setup-windows.cmd first: it lets git fetch JUCE over HTTPS.")
         endif()
     endforeach()
