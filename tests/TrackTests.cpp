@@ -18,7 +18,7 @@ struct Tracks
 
         edit->getUndoManager().clearUndoHistory();
         selection.edit = edit.get();
-        phazite::addSelectionCommands (registry, selection);
+        phazite::addSelectionCommands (registry, selection, range);
         phazite::addTrackCommands (registry, selection);
     }
 
@@ -65,6 +65,7 @@ struct Tracks
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::RangeSelection range;
     phazite::CommandRegistry registry;
 };
 } // namespace

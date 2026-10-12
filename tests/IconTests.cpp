@@ -6,7 +6,8 @@ TEST_CASE ("Every icon reads as a drawing that can be recolored")
 {
     using phazite::ui::Icon;
 
-    for (const auto icon : { Icon::play, Icon::stop, Icon::keyboard, Icon::search, Icon::detach, Icon::plus, Icon::magnet })
+    for (const auto icon : { Icon::play, Icon::stop, Icon::keyboard, Icon::search, Icon::detach, Icon::plus, Icon::magnet, Icon::smartTool,
+                             Icon::draw, Icon::paint, Icon::slice, Icon::slip, Icon::mute, Icon::erase, Icon::select, Icon::zoom })
     {
         CAPTURE ((int) icon);
         const auto drawable = phazite::ui::createIcon (icon);

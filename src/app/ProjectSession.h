@@ -6,6 +6,7 @@
 #include "model/Commands.h"
 #include "model/EngineSetup.h"
 #include "model/Project.h"
+#include "model/Selection.h"
 
 namespace phazite
 {
@@ -18,8 +19,10 @@ public:
     Project* getProject() const noexcept { return project.get(); }
     te::Edit* getEdit() const noexcept { return project != nullptr ? &project->getEdit() : nullptr; }
 
-    // What is selected in the open project (tracks, for now). Live MIDI input follows the selected track.
+    // What is selected in the open project: tracks and clips (live MIDI input follows the selected track),
+    // and a time range across tracks.
     te::SelectionManager& getSelection() noexcept { return selection; }
+    RangeSelection& getRangeSelection() noexcept { return rangeSelection; }
 
     std::function<void()> onProjectClosing;  // the open project is about to close: let go of its Edit
     std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
@@ -48,6 +51,7 @@ private:
     UIBehaviour& uiBehaviour;
     RecentProjects recent;
     te::SelectionManager selection { engine };
+    RangeSelection rangeSelection;
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
     std::unique_ptr<juce::FileChooser> fileChooser;

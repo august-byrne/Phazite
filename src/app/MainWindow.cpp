@@ -70,7 +70,8 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     setUsingNativeTitleBar (true);
     setInterfaceScale ((float) engine.getPropertyStorage().getPropertiesFile().getDoubleValue (interfaceScaleSettingKey, 1.0));
 
-    auto content = std::make_unique<ui::AppShell> (engine, commands, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection());
+    auto content = std::make_unique<ui::AppShell> (
+        engine, commands, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection(), s.getRangeSelection());
     shell = content.get();
     setContentOwned (content.release(), false);
 

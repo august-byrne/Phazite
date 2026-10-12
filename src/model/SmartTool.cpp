@@ -3,6 +3,85 @@
 
 namespace phazite
 {
+juce::String getToolName (Tool tool)
+{
+    switch (tool)
+    {
+        case Tool::draw:
+            return "Draw";
+        case Tool::paint:
+            return "Paint";
+        case Tool::slice:
+            return "Slice";
+        case Tool::slip:
+            return "Slip";
+        case Tool::mute:
+            return "Mute";
+        case Tool::erase:
+            return "Delete";
+        case Tool::select:
+            return "Select";
+        case Tool::zoom:
+            return "Zoom";
+        case Tool::smart:
+        default:
+            return "Smart Tool";
+    }
+}
+
+juce::String getToolCommandID (Tool tool)
+{
+    switch (tool)
+    {
+        case Tool::draw:
+            return "tool.draw";
+        case Tool::paint:
+            return "tool.paint";
+        case Tool::slice:
+            return "tool.slice";
+        case Tool::slip:
+            return "tool.slip";
+        case Tool::mute:
+            return "tool.mute";
+        case Tool::erase:
+            return "tool.delete";
+        case Tool::select:
+            return "tool.select";
+        case Tool::zoom:
+            return "tool.zoom";
+        case Tool::smart:
+        default:
+            return "tool.smart";
+    }
+}
+
+juce::String describeTool (Tool tool)
+{
+    switch (tool)
+    {
+        case Tool::draw:
+            return "Click to place a copy of the last clip you used; on a track with an instrument and no clip used yet, a new MIDI clip.";
+        case Tool::paint:
+            return "Drag to place copies of the last clip you used, one after another.";
+        case Tool::slice:
+            return "Click a clip to split it there. Hold Alt to split off the grid.";
+        case Tool::slip:
+            return "Drag a clip to move what is inside it, leaving the clip where it is.";
+        case Tool::mute:
+            return "Click a clip to mute or unmute it; drag to do it to several.";
+        case Tool::erase:
+            return "Click a clip to delete it; drag over clips to delete them all.";
+        case Tool::select:
+            return "Drag to select the clips in a rectangle; with Ctrl, add them to the selection.";
+        case Tool::zoom:
+            return "Click to zoom in, Alt-click to zoom out, or drag across the time to zoom to.";
+        case Tool::smart:
+        default:
+            return "Where you drag a clip decides what happens: edges trim, top corners fade, the upper half selects time, "
+                   "the lower half moves.";
+    }
+}
+
 ClipZone getClipZone (juce::Rectangle<float> bounds, juce::Point<float> point, bool hasFades)
 {
     const auto x = point.x - bounds.getX(), y = point.y - bounds.getY();

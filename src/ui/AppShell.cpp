@@ -69,10 +69,10 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 
 //==============================================================================
 AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard, std::function<te::Edit*()> getEdit,
-                    te::SelectionManager& selection)
+                    te::SelectionManager& selection, RangeSelection& range)
     : commands (registry),
       topBar (engine, registry, computerKeyboard, getEdit),
-      playlist (registry, selection),
+      playlist (registry, selection, range),
       inspector (std::move (getEdit), selection)
 {
     setTitle ("Phazite");

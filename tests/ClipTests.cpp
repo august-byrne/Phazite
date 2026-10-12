@@ -21,7 +21,7 @@ struct ClipEdit
         tracks = te::getAudioTracks (*edit);
         edit->getUndoManager().clearUndoHistory();
         selection.edit = edit.get();
-        phazite::addSelectionCommands (registry, selection);
+        phazite::addSelectionCommands (registry, selection, range);
     }
 
     ~ClipEdit() { selection.deselectAll(); }
@@ -36,6 +36,7 @@ struct ClipEdit
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM: a beat is 0.5 s
     juce::Array<te::AudioTrack*> tracks;
     te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::RangeSelection range;
     phazite::CommandRegistry registry;
 };
 
@@ -211,4 +212,151 @@ TEST_CASE ("Select All selects every clip, or every track while tracks are selec
     REQUIRE (e.registry.invoke ("edit.selectAll"));
     CHECK (phazite::getSelectedClips (e.selection).isEmpty());
     CHECK (e.selection.getNumObjectsSelected() == 2);
+}
+
+namespace
+{
+// A track's clips as "start-end" in beats, in order, such as "0-2 4-8".
+juce::String describeClips (te::ClipTrack& track)
+{
+    juce::Array<te::Clip*> clips (track.getClips());
+    std::sort (clips.begin(), clips.end(), [] (te::Clip* a, te::Clip* b) { return a->getStartBeat() < b->getStartBeat(); });
+    juce::StringArray parts;
+
+    for (auto* clip : clips)
+        parts.add (juce::String (clip->getStartBeat().inBeats(), 2) + "-" + juce::String (clip->getEndBeat().inBeats(), 2));
+
+    return parts.joinIntoString (" ");
+}
+} // namespace
+
+TEST_CASE ("Split, mute and nudge act on the selected clips")
+{
+    ClipEdit e;
+    auto& clip = e.addClip (0, 0.0, 8.0);
+    e.selection.selectOnly (clip);
+    e.edit->getTransport().setPosition (e.edit->tempoSequence.toTime (beats (2.0)));
+
+    REQUIRE (e.registry.invoke ("edit.split")); // at the playhead
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-8.00"));
+
+    e.selection.selectOnly (clip);
+    REQUIRE (e.registry.invoke ("clip.mute"));
+    CHECK (clip.isMuted());
+    CHECK (e.registry.find ("clip.mute")->isTicked());
+    REQUIRE (e.registry.invoke ("clip.mute"));
+    CHECK_FALSE (clip.isMuted());
+
+    phazite::nudgeClips ({ &clip }, te::BeatDuration::fromBeats (-1.0)); // not before the start of the song
+    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (0.0));
+    phazite::nudgeClips ({ &clip }, te::BeatDuration::fromBeats (8.0));
+    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (8.0));
+}
+
+TEST_CASE ("Make Unique turns aliases back into separate clips")
+{
+    ClipEdit e;
+    auto& original = e.addClip (0, 0.0, 4.0);
+    const auto aliases = phazite::copyClips ({ &original }, true);
+    REQUIRE (aliases.size() == 1);
+
+    e.selection.selectOnly (aliases[0]);
+    REQUIRE (e.registry.invoke ("clip.makeUnique"));
+    CHECK_FALSE (aliases[0]->isLinked());
+    CHECK_FALSE (original.isLinked()); // left alone in its group, it is no one's alias either
+    CHECK_FALSE (e.registry.find ("clip.makeUnique")->isEnabled());
+}
+
+TEST_CASE ("Delete and Close Gap moves what comes after back")
+{
+    ClipEdit e;
+    e.addClip (0, 0.0, 4.0);
+    auto& middle = e.addClip (0, 4.0, 4.0);
+    e.addClip (0, 8.0, 4.0);
+
+    e.selection.selectOnly (middle);
+    REQUIRE (e.registry.invoke ("edit.deleteAndCloseGap"));
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-4.00 4.00-8.00"));
+}
+
+TEST_CASE ("A time range is deleted, split, inserted and removed")
+{
+    ClipEdit e;
+    e.addClip (0, 0.0, 8.0);
+    e.addClip (1, 0.0, 8.0);
+    e.range.set ({ beats (2.0), beats (4.0) }, { e.tracks[0] });
+    CHECK (phazite::describeSelection (e.selection, e.range, "Delete") == juce::String ("Delete Range"));
+
+    // Delete: on the range's track only, where the clip is split around the hole.
+    REQUIRE (e.registry.invoke ("edit.delete"));
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 4.00-8.00"));
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-8.00"));
+    phazite::undo (*e.edit);
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-8.00"));
+
+    // Split: at both edges.
+    REQUIRE (e.registry.invoke ("edit.split"));
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-4.00 4.00-8.00"));
+    phazite::undo (*e.edit);
+
+    // Insert Time: on every track, as long as the range.
+    REQUIRE (e.registry.invoke ("edit.insertTime"));
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-2.00 4.00-10.00"));
+    phazite::undo (*e.edit);
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-8.00"));
+
+    // Remove Time: from every track, closing the gap.
+    REQUIRE (e.registry.invoke ("edit.removeTime"));
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-6.00"));
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-2.00 2.00-6.00"));
+
+    // A range whose tracks are all gone is empty.
+    e.edit->deleteTrack (e.tracks[0]);
+    CHECK (e.range.isEmpty());
+}
+
+TEST_CASE ("Each tool has a name, a command and a hint")
+{
+    juce::StringArray ids;
+
+    for (const auto tool : phazite::allTools)
+    {
+        CHECK (phazite::getToolName (tool).isNotEmpty());
+        CHECK (phazite::describeTool (tool).isNotEmpty());
+        CHECK_FALSE (ids.contains (phazite::getToolCommandID (tool)));
+        ids.add (phazite::getToolCommandID (tool));
+    }
+}
+
+TEST_CASE ("A crossfade overlaps two touching audio clips, as far as their audio reaches")
+{
+    ClipEdit e;
+    SilentFile file; // a second long
+    const auto seconds = [] (double s) { return te::TimePosition::fromSeconds (s); };
+    auto first = e.tracks[0]->insertWaveClip ("A", file.temp.getFile(), { te::TimeRange (seconds (0.0), seconds (0.5)) }, false);
+    auto second = e.tracks[0]->insertWaveClip (
+        "B", file.temp.getFile(), { te::TimeRange (seconds (0.5), seconds (1.0)), te::TimeDuration::fromSeconds (0.25) }, false);
+    REQUIRE (first != nullptr);
+    REQUIRE (second != nullptr);
+
+    phazite::setCrossfade (*first, *second, seconds (0.5), te::TimeDuration::fromSeconds (0.2));
+    CHECK (first->getPosition().getEnd().inSeconds() == doctest::Approx (0.6));
+    CHECK (second->getPosition().getStart().inSeconds() == doctest::Approx (0.4));
+    CHECK (first->getFadeOut().inSeconds() == doctest::Approx (0.2));
+    CHECK (second->getFadeIn().inSeconds() == doctest::Approx (0.2));
+
+    // The second clip's audio starts a quarter of a second before it does, so no further.
+    phazite::setCrossfade (*first, *second, seconds (0.5), te::TimeDuration::fromSeconds (2.0));
+    CHECK (second->getPosition().getStart().inSeconds() == doctest::Approx (0.25));
+    CHECK (first->getPosition().getEnd().inSeconds() == doctest::Approx (0.75));
+
+    // A crossfade of nothing puts them back.
+    phazite::setCrossfade (*first, *second, seconds (0.5), te::TimeDuration());
+    CHECK (first->getPosition().getEnd().inSeconds() == doctest::Approx (0.5));
+    CHECK (second->getPosition().getStart().inSeconds() == doctest::Approx (0.5));
+    CHECK (second->getFadeIn().inSeconds() == doctest::Approx (0.0));
+
+    phazite::setFadeShape ({ first.get(), second.get() }, te::AudioFadeCurve::sCurve);
+    CHECK (first->getFadeOutType() == te::AudioFadeCurve::sCurve);
+    CHECK (second->getFadeInType() == te::AudioFadeCurve::sCurve);
 }

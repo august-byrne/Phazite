@@ -94,14 +94,23 @@ juce_add_binary_data(phazite_data
     SOURCES
         resources/keymaps/phazite.json
         resources/keymaps/fl_studio.json
-        # Lucide icons (ISC; search and square from Feather, MIT): resources/icons/lucide/LICENSE
+        # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
+        resources/icons/lucide/eraser.svg
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/magnet.svg
+        resources/icons/lucide/mouse-pointer-2.svg
+        resources/icons/lucide/move-horizontal.svg
+        resources/icons/lucide/paintbrush.svg
+        resources/icons/lucide/pencil.svg
         resources/icons/lucide/play.svg
         resources/icons/lucide/plus.svg
+        resources/icons/lucide/scissors.svg
         resources/icons/lucide/search.svg
-        resources/icons/lucide/square.svg)
+        resources/icons/lucide/square-dashed-mouse-pointer.svg
+        resources/icons/lucide/square.svg
+        resources/icons/lucide/volume-x.svg
+        resources/icons/lucide/zoom-in.svg)
 
 target_link_libraries(phazite_core PRIVATE phazite_data)
 

@@ -29,6 +29,37 @@ void trimClipEnd (te::Clip&, te::BeatPosition);
 // Sets an audio clip's fade-in or fade-out, at most as long as the clip.
 void setClipFade (te::AudioClipBase&, bool fadeIn, te::TimeDuration);
 
+// Crossfades two audio clips that met at boundary on a track: each reaches over it by half the length, as
+// far as its audio goes, and the first fades out as the second fades in. A length of 0 puts them back.
+void setCrossfade (te::AudioClipBase& first, te::AudioClipBase& second, te::TimePosition boundary, te::TimeDuration length);
+
+// Gives the audio clips among these fade-ins and fade-outs of a shape.
+void setFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
+
 // Adds an empty MIDI clip, named after its track, and selects it if a selection manager is given.
 te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, te::SelectionManager*);
+
+//==============================================================================
+// Splits each clip that the beat falls inside into two there. Returns the new right-hand parts.
+juce::Array<te::Clip*> splitClips (const juce::Array<te::Clip*>&, te::BeatPosition);
+
+// Turns aliases back into separate clips. A clip left alone in its link group is unlinked too.
+void makeClipsUnique (const juce::Array<te::Clip*>&);
+
+// Mutes the clips, or unmutes them if they all are muted already.
+void toggleClipsMuted (const juce::Array<te::Clip*>&);
+bool areAllClipsMuted (const juce::Array<te::Clip*>&);
+
+// Moves clips by an amount, all together, but none before the start of the song.
+void nudgeClips (const juce::Array<te::Clip*>&, te::BeatDuration);
+
+// Deletes clips. With closeGap, the clips after each one on its track move back by its length.
+void deleteClips (const juce::Array<te::Clip*>&, bool closeGap);
+
+// Deletes what lies in a time range on some tracks: clips inside it go, and clips across its edges are
+// trimmed or split. With closeGap, what comes after on those tracks moves back to fill the gap.
+void deleteTimeRange (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&, bool closeGap);
+
+// Inserts empty time at the start of a range, as long as the range, on every track.
+void insertTime (te::Edit&, te::BeatRange);
 } // namespace phazite

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist: the song's tracks and clips on a timeline, with a ruler, the grid, the playhead and a
-// header for each track (roadmap step 1.1). The Smart Tool edits the clips: where a drag starts on a clip
-// decides what it does (model/SmartTool.h). The single-key tools and folders come in the step's later parts.
+// header for each track (roadmap step 1.1). Its tools edit the clips (model/SmartTool.h): by default the
+// Smart Tool, where the spot a drag starts on a clip decides what it does. Folders come in the step's last part.
 #pragma once
 
 #include "ClipComponent.h"
 #include "Icons.h"
 #include "TrackHeader.h"
 #include "model/Commands.h"
+#include "model/Selection.h"
 #include "model/SmartTool.h"
 #include "model/Timeline.h"
 
@@ -24,13 +25,14 @@ class Playlist : public juce::Component,
                  private juce::Timer
 {
 public:
-    Playlist (CommandRegistry&, te::SelectionManager&);
+    Playlist (CommandRegistry&, te::SelectionManager&, RangeSelection&);
     ~Playlist() override;
 
     // The open project's Edit, or nullptr while none is open.
     void setEdit (te::Edit*);
 
-    // Adds the playlist's commands: renaming and coloring tracks, zooming, following playback and the grid.
+    // Adds the playlist's commands: renaming and coloring tracks, zooming, following playback, the grid,
+    // the tools, and nudging and quantizing clips.
     void addCommands (CommandRegistry&);
 
     // Puts the current shortcuts into the tooltips; call after the keymap changed.
@@ -54,15 +56,17 @@ private:
         juce::Colour colour;
     };
 
-    // A time range across some rows, as dragging the upper half of a clip or empty space selects it.
-    struct RangeSelection
+    // Where two audio clips on a track meet (they touch, or overlap in a crossfade): dragging near the
+    // bottom of the boundary between them draws a crossfade.
+    struct CrossfadeSpot
     {
-        te::BeatRange range;
-        int firstRow = 0, lastRow = 0;
+        te::SafeSelectable<te::Clip> first, second;
+        te::TimePosition boundary;
     };
 
     CommandRegistry& commands;
     te::SelectionManager& selection;
+    RangeSelection& range; // a time range across tracks
     te::SafeSelectable<te::Edit> edit;
     juce::ValueTree editState; // listened to for changes to the tracks and the tempo
 
@@ -74,6 +78,9 @@ private:
 
     IconButton addTrackButton { "Add track", Icon::plus }, snapButton { "Snap to grid", Icon::magnet };
     juce::TextButton gridButton;
+    juce::OwnedArray<IconButton> toolButtons; // one for each of allTools, in order
+    Tool tool = Tool::smart;
+    te::SafeSelectable<te::Clip> lastClip; // the clip the Draw and Paint tools place copies of
     std::unique_ptr<Ruler> ruler;
     juce::Component headerColumn, headerContent; // headerContent holds the headers and scrolls inside headerColumn
     std::unique_ptr<Lanes> lanes;
@@ -86,8 +93,8 @@ private:
     int contentHeight = 0;
     te::SafeSelectable<te::Track> selectionAnchor; // where Shift-click ranges start
     int dropRow = -1;                              // while a track is dragged: the row it would go before (rows.size() for the end)
-    std::optional<RangeSelection> rangeSelection;
-    std::unique_ptr<Gesture> gesture; // what the mouse is doing in the lanes, from mouse down to mouse up
+    std::unique_ptr<Gesture> gesture;              // what the mouse is doing in the lanes, from mouse down to mouse up
+    juce::Rectangle<int> rubberBand;               // the Select and Zoom tools' rectangle, in the lanes
 
     // The rows of tracks.
     void rebuild(); // after tracks were added, deleted, moved or changed
@@ -111,14 +118,22 @@ private:
     void clipClicked (te::Clip&, const juce::ModifierKeys&);
     void showClipMenu();
 
-    // The Smart Tool: the mouse in the lanes.
+    // The tools: the mouse in the lanes.
+    void setTool (Tool);
     void lanesMouseMove (const juce::MouseEvent&);
     void lanesMouseDown (const juce::MouseEvent&);
     void lanesMouseDrag (const juce::MouseEvent&);
     void lanesMouseUp (const juce::MouseEvent&);
     void lanesDoubleClick (const juce::MouseEvent&);
+    void smartToolDown (const juce::MouseEvent&);
     void beginDrag (const juce::MouseEvent&);
-    void setRangeSelection (std::optional<RangeSelection>);
+    std::optional<CrossfadeSpot> findCrossfadeAt (juce::Point<int>) const;
+    void selectRange (te::BeatPosition from, te::BeatPosition to, int fromRow, int toRow);
+    te::Clip* placeClip (int row, te::BeatPosition, bool snapStart); // a copy of lastClip, for Draw and Paint
+    void muteOrDeleteClipAt (juce::Point<int>, bool deleteIt);       // once per gesture for each clip
+    void selectClipsIn (juce::Rectangle<int>, bool addToSelection);
+    void nudge (int direction); // the selected clips, or the range, by a step of the grid
+    void quantizeSelectedClips();
 
     // Time and the grid.
     te::TimecodeSnapType getSnapType() const;
@@ -144,7 +159,7 @@ private:
     void trackDragEnded (TrackHeader&, const juce::MouseEvent&) override;
     void trackHeightChanged() override { layOutRows(); }
 
-    void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection changed
+    void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection or the range changed
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;

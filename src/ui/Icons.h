@@ -15,7 +15,17 @@ enum class Icon
     search,
     detach,
     plus,
-    magnet
+    magnet,
+    // The playlist's tools
+    smartTool,
+    draw,
+    paint,
+    slice,
+    slip,
+    mute,
+    erase,
+    select,
+    zoom
 };
 
 // The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read.

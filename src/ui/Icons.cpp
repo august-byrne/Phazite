@@ -28,6 +28,24 @@ namespace
                 return "plus.svg";
             case Icon::magnet:
                 return "magnet.svg";
+            case Icon::smartTool:
+                return "mouse-pointer-2.svg";
+            case Icon::draw:
+                return "pencil.svg";
+            case Icon::paint:
+                return "paintbrush.svg";
+            case Icon::slice:
+                return "scissors.svg";
+            case Icon::slip:
+                return "move-horizontal.svg";
+            case Icon::mute:
+                return "volume-x.svg";
+            case Icon::erase:
+                return "eraser.svg";
+            case Icon::select:
+                return "square-dashed-mouse-pointer.svg";
+            case Icon::zoom:
+                return "zoom-in.svg";
         }
 
         return "";

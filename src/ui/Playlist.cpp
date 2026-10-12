@@ -58,6 +58,28 @@ namespace
         }
     }
 
+    juce::MouseCursor::StandardCursorType getCursorFor (Tool tool)
+    {
+        switch (tool)
+        {
+            case Tool::draw:
+            case Tool::paint:
+            case Tool::select:
+            case Tool::zoom:
+                return juce::MouseCursor::CrosshairCursor;
+            case Tool::slice:
+                return juce::MouseCursor::IBeamCursor;
+            case Tool::slip:
+                return juce::MouseCursor::LeftRightResizeCursor;
+            case Tool::mute:
+            case Tool::erase:
+                return juce::MouseCursor::PointingHandCursor;
+            case Tool::smart:
+            default:
+                return juce::MouseCursor::NormalCursor;
+        }
+    }
+
     bool isTempoState (const juce::ValueTree& state)
     {
         return state.hasType (te::IDs::TEMPO) || state.hasType (te::IDs::TIMESIG);
@@ -132,12 +154,12 @@ struct Playlist::Ruler : public juce::Component
         const auto& tempo = shownEdit->tempoSequence;
         const auto& timeline = playlist.view;
         const auto clip = g.getClipBounds();
-        const te::BeatRange range (timeline.xToBeat (clip.getX() - 1), timeline.xToBeat (clip.getRight() + 1));
+        const te::BeatRange visible (timeline.xToBeat (clip.getX() - 1), timeline.xToBeat (clip.getRight() + 1));
 
         // Ticks: tall for bars, shorter for beats, shortest between them.
-        const auto tickType = getAdaptiveSnapType (tempo, range.getStart(), timeline.pixelsPerBeat, false, minLineSpacing);
+        const auto tickType = getAdaptiveSnapType (tempo, visible.getStart(), timeline.pixelsPerBeat, false, minLineSpacing);
 
-        forEachGridLine (tempo, tickType, false, range,
+        forEachGridLine (tempo, tickType, false, visible,
                          [&] (te::BeatPosition beat, GridLineType type)
                          {
                              const auto isBar = type == GridLineType::bar;
@@ -147,7 +169,7 @@ struct Playlist::Ruler : public juce::Component
                          });
 
         // Bar numbers, as far apart as they need to be to read: every bar, or every 2nd, 4th, ...
-        const auto barWidth = timeline.pixelsPerBeat * tempo.getTimeSigAt (range.getStart()).numerator.get();
+        const auto barWidth = timeline.pixelsPerBeat * tempo.getTimeSigAt (visible.getStart()).numerator.get();
         auto every = 1;
 
         while (every * barWidth < 32.0 && every < (1 << 20))
@@ -230,16 +252,16 @@ struct Playlist::Lanes : public juce::Component
         const auto& tempo = shownEdit->tempoSequence;
         const auto& timeline = playlist.view;
         const auto triplets = playlist.grid.triplets;
-        const te::BeatRange range (timeline.xToBeat (clip.getX() - 1), timeline.xToBeat (clip.getRight() + 1));
+        const te::BeatRange visible (timeline.xToBeat (clip.getX() - 1), timeline.xToBeat (clip.getRight() + 1));
         auto type = playlist.getSnapType();
 
-        if (getGridStepInBeats (type, tempo, range.getStart(), triplets) * timeline.pixelsPerBeat < minLineSpacing)
-            type = getAdaptiveSnapType (tempo, range.getStart(), timeline.pixelsPerBeat, triplets, minLineSpacing);
+        if (getGridStepInBeats (type, tempo, visible.getStart(), triplets) * timeline.pixelsPerBeat < minLineSpacing)
+            type = getAdaptiveSnapType (tempo, visible.getStart(), timeline.pixelsPerBeat, triplets, minLineSpacing);
 
         const auto barColour = p.border.interpolatedWith (p.textMuted, 0.3f);
         const auto subdivisionColour = p.border.withMultipliedAlpha (0.5f);
 
-        forEachGridLine (tempo, type, triplets, range,
+        forEachGridLine (tempo, type, triplets, visible,
                          [&] (te::BeatPosition beat, GridLineType lineType)
                          {
                              g.setColour (lineType == GridLineType::bar ? barColour
@@ -255,29 +277,50 @@ struct Playlist::Lanes : public juce::Component
                 g.fillRect (clip.getX(), bottom, clip.getWidth(), 1);
     }
 
-    // The time range selected across tracks, over the clips.
+    // Over the clips: the time range selected across tracks, and the Select or Zoom tool's rectangle.
     void paintOverChildren (juce::Graphics& g) override
     {
-        const auto& selected = playlist.rangeSelection;
-
-        if (! selected.has_value() || ! juce::isPositiveAndBelow (selected->lastRow, (int) playlist.rows.size()))
-            return;
-
-        const auto& first = playlist.rows[(size_t) selected->firstRow];
-        const auto& last = playlist.rows[(size_t) selected->lastRow];
-        const auto left = juce::roundToInt (playlist.view.beatToX (selected->range.getStart()));
-        const auto right = juce::roundToInt (playlist.view.beatToX (selected->range.getEnd()));
-        const juce::Rectangle<int> area (left, first.top - playlist.scrollY, std::max (1, right - left),
-                                         last.top + last.height - first.top);
-
         const auto& p = getPalette (*this);
-        g.setColour (p.accent.withAlpha (0.25f));
-        g.fillRect (area);
-        g.setColour (p.accent);
-        g.drawRect (area, 1);
+
+        if (! playlist.range.isEmpty())
+        {
+            auto firstRow = (int) playlist.rows.size(), lastRow = -1;
+
+            for (auto* track : playlist.range.getTracks())
+            {
+                if (const auto row = playlist.getRowOf (track); row >= 0)
+                {
+                    firstRow = std::min (firstRow, row);
+                    lastRow = std::max (lastRow, row);
+                }
+            }
+
+            if (lastRow >= 0)
+            {
+                const auto& first = playlist.rows[(size_t) firstRow];
+                const auto& last = playlist.rows[(size_t) lastRow];
+                const auto left = juce::roundToInt (playlist.view.beatToX (playlist.range.getRange().getStart()));
+                const auto right = juce::roundToInt (playlist.view.beatToX (playlist.range.getRange().getEnd()));
+                const juce::Rectangle<int> area (left, first.top - playlist.scrollY, std::max (1, right - left),
+                                                 last.top + last.height - first.top);
+
+                g.setColour (p.accent.withAlpha (0.25f));
+                g.fillRect (area);
+                g.setColour (p.accent);
+                g.drawRect (area, 1);
+            }
+        }
+
+        if (! playlist.rubberBand.isEmpty())
+        {
+            g.setColour (p.accent.withAlpha (0.15f));
+            g.fillRect (playlist.rubberBand);
+            g.setColour (p.accent);
+            g.drawRect (playlist.rubberBand, 1);
+        }
     }
 
-    // The Smart Tool's work is the playlist's.
+    // The tools' work is the playlist's.
     void mouseMove (const juce::MouseEvent& e) override { playlist.lanesMouseMove (e); }
     void mouseDown (const juce::MouseEvent& e) override { playlist.lanesMouseDown (e); }
     void mouseDrag (const juce::MouseEvent& e) override { playlist.lanesMouseDrag (e); }
@@ -299,7 +342,14 @@ struct Playlist::Gesture
         trimEnd,
         fadeIn,
         fadeOut,
-        selectRange
+        selectRange,
+        crossfade,
+        slip,   // the Slip tool
+        paint,  // the Paint tool
+        mute,   // the Mute tool, over clips
+        erase,  // the Delete tool (or right-click, in FL Studio's keymap), over clips
+        select, // the Select tool's rectangle
+        zoom    // the Zoom tool's range
     };
 
     // A clip being moved, and where it started.
@@ -320,6 +370,13 @@ struct Playlist::Gesture
     std::vector<MovingClip> moving;
     te::BeatPosition anchorStart; // where the clip under the mouse (or its copy) started; it is the one that snaps
     int rowOffset = 0;            // how many rows the moving clips have moved
+
+    std::optional<CrossfadeSpot> crossfade;                         // where the mouse went down to draw a crossfade
+    juce::Point<int> startPosition;                                 // in the lanes
+    te::TimeDuration startOffset;                                   // Slip: the clip's offset when the drag began
+    te::BeatPosition nextPaintStart;                                // Paint: where the next copy goes
+    std::vector<te::SafeSelectable<te::Clip>> done;                 // Mute and Delete: the clips already done
+    std::vector<te::SafeSelectable<te::Selectable>> selectedBefore; // Select with Ctrl: what was selected already
 };
 
 //==============================================================================
@@ -342,9 +399,10 @@ struct Playlist::Playhead : public juce::Component
 };
 
 //==============================================================================
-Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionManager)
+Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionManager, RangeSelection& rangeSelection)
     : commands (registry),
       selection (selectionManager),
+      range (rangeSelection),
       ruler (std::make_unique<Ruler> (*this)),
       lanes (std::make_unique<Lanes> (*this)),
       playhead (std::make_unique<Playhead>())
@@ -366,6 +424,20 @@ Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionMa
         scrollBar->setAutoHide (false);
     }
 
+    // The tools, one button each; the commands set them, so the keys and the buttons agree.
+    const Icon toolIcons[] = { Icon::smartTool, Icon::draw,  Icon::paint,  Icon::slice, Icon::slip,
+                               Icon::mute,      Icon::erase, Icon::select, Icon::zoom };
+
+    for (size_t i = 0; i < std::size (allTools); ++i)
+    {
+        const auto toolToUse = allTools[i];
+        auto* button = toolButtons.add (new IconButton (getToolName (toolToUse) + (toolToUse == Tool::smart ? "" : " tool"), toolIcons[i]));
+        button->setRadioGroupId (1);
+        button->setClickingTogglesState (true);
+        button->onClick = [this, toolToUse] { commands.invoke (getToolCommandID (toolToUse)); };
+        addAndMakeVisible (button);
+    }
+
     for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &snapButton, &gridButton, ruler.get(), &headerColumn,
                                                              lanes.get(), &verticalScrollBar, &horizontalScrollBar, playhead.get() })
         addAndMakeVisible (c);
@@ -374,11 +446,14 @@ Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionMa
         c->setEnabled (false); // until a project is open
 
     selection.addChangeListener (this);
+    range.addChangeListener (this);
     updateGridControls();
+    setTool (Tool::smart);
 }
 
 Playlist::~Playlist()
 {
+    range.removeChangeListener (this);
     selection.removeChangeListener (this);
     editState.removeListener (this);
     headers.clear();        // before headerContent, which holds them
@@ -400,8 +475,9 @@ void Playlist::setEdit (te::Edit* newEdit)
     scrollY = 0;
     dropRow = -1;
     selectionAnchor = nullptr;
-    rangeSelection.reset();
+    lastClip = nullptr;
     gesture = nullptr;
+    rubberBand = {};
     grid = newEdit != nullptr ? GridSettings::load (findPhaziteState (*newEdit)) : GridSettings();
     headers.clear();
     clipComponents.clear();
@@ -453,10 +529,6 @@ void Playlist::rebuild()
 
     for (int i = 0; i < tracks.size(); ++i)
         rows.push_back ({ tracks[i], 0, 0, getTrackColour (*tracks[i], i) });
-
-    // A range across rows that are gone no longer means anything.
-    if (rangeSelection.has_value() && rangeSelection->lastRow >= (int) rows.size())
-        rangeSelection.reset();
 
     rebuildClips();
     layOutRows();
@@ -665,7 +737,7 @@ void Playlist::clipChanged (const juce::ValueTree& clipState)
 
 void Playlist::clipClicked (te::Clip& clip, const juce::ModifierKeys& mods)
 {
-    setRangeSelection (std::nullopt);
+    range.clear();
 
     // Ctrl or Shift adds the clip to the selection, or takes it out.
     if (! (mods.isCommandDown() || mods.isShiftDown()))
@@ -679,47 +751,368 @@ void Playlist::clipClicked (te::Clip& clip, const juce::ModifierKeys& mods)
 void Playlist::showClipMenu()
 {
     juce::PopupMenu menu;
-    addCommandItems (menu, commands, { "edit.duplicate", "edit.delete" });
+    addCommandItems (menu, commands, { "edit.split", "edit.duplicate", "clip.duplicateAsAlias", "clip.makeUnique" });
+    menu.addSeparator();
+    addCommandItems (menu, commands, { "clip.mute", "clip.quantize" });
+
+    juce::PopupMenu fadeShapes;
+    addCommandItems (fadeShapes, commands, { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" });
+    menu.addSubMenu ("Fade Shape", fadeShapes);
+
+    menu.addSeparator();
+    addCommandItems (menu, commands, { "edit.delete", "edit.deleteAndCloseGap" });
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 
-void Playlist::setRangeSelection (std::optional<RangeSelection> newRange)
+void Playlist::selectRange (te::BeatPosition from, te::BeatPosition to, int fromRow, int toRow)
 {
-    if (! newRange.has_value() && ! rangeSelection.has_value())
+    juce::Array<te::Track*> tracks;
+
+    for (auto row = std::min (fromRow, toRow); row <= std::max (fromRow, toRow); ++row)
+        if (juce::isPositiveAndBelow (row, (int) rows.size()))
+            if (auto* track = rows[(size_t) row].track.get())
+                tracks.add (track);
+
+    range.set (te::BeatRange (std::min (from, to), std::max (from, to)), tracks);
+}
+
+std::optional<Playlist::CrossfadeSpot> Playlist::findCrossfadeAt (juce::Point<int> position) const
+{
+    auto* e = edit.get();
+    const auto row = getRowAt (position.y);
+
+    if (e == nullptr || row < 0)
+        return {};
+
+    // Only the lower third of a row, so the upper part still trims.
+    const auto& r = rows[(size_t) row];
+    auto* track = dynamic_cast<te::ClipTrack*> (r.track.get());
+
+    if (track == nullptr || position.y + scrollY < r.top + r.height * 2 / 3)
+        return {};
+
+    const auto xOf = [this, e] (te::TimePosition time) { return view.beatToX (e->tempoSequence.toBeats (time)); };
+
+    for (auto* a : track->getClips())
+    {
+        for (auto* b : track->getClips())
+        {
+            auto* first = dynamic_cast<te::AudioClipBase*> (a);
+            auto* second = dynamic_cast<te::AudioClipBase*> (b);
+
+            if (first == nullptr || second == nullptr || first == second)
+                continue;
+
+            // The second starts after the first, where it ends or inside it (a crossfade already), and ends later.
+            const auto one = first->getEditTimeRange(), two = second->getEditTimeRange();
+
+            if (two.getStart() <= one.getStart() || two.getEnd() <= one.getEnd() || xOf (two.getStart()) > xOf (one.getEnd()) + 1.0)
+                continue;
+
+            const auto boundary = te::TimePosition::fromSeconds ((one.getEnd().inSeconds() + two.getStart().inSeconds()) / 2.0);
+
+            if (std::abs (xOf (boundary) - position.x) <= 6.0)
+                return CrossfadeSpot { first, second, boundary };
+        }
+    }
+
+    return {};
+}
+
+te::Clip* Playlist::placeClip (int row, te::BeatPosition beat, bool snapStart)
+{
+    auto* ed = edit.get();
+    auto* track =
+        juce::isPositiveAndBelow (row, (int) rows.size()) ? dynamic_cast<te::ClipTrack*> (rows[(size_t) row].track.get()) : nullptr;
+
+    if (ed == nullptr || track == nullptr)
+        return nullptr;
+
+    // From the grid line at or before the beat.
+    const auto& tempo = ed->tempoSequence;
+    const auto start = snapStart ? tempo.toBeats (getSnapType().roundTimeDown (tempo.toTime (beat), tempo, grid.triplets)) : beat;
+
+    // A copy of the last clip used: of a MIDI clip, an alias, as FL Studio places the same pattern again.
+    if (auto* source = lastClip.get(); source != nullptr && te::containsClip (*ed, source))
+    {
+        const auto copies = copyClips ({ source }, dynamic_cast<te::MidiClip*> (source) != nullptr);
+
+        if (copies.isEmpty())
+            return nullptr;
+
+        moveClip (*copies.getFirst(), start, *track);
+        return copies.getFirst();
+    }
+
+    // No clip used yet: an empty MIDI clip, a bar long, on a track with an instrument.
+    if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (track); audioTrack != nullptr && hasInstrument (*audioTrack))
+        return insertMidiClip (*track, { start, start + te::BeatDuration::fromBeats (tempo.getTimeSigAt (start).numerator.get()) },
+                               nullptr);
+
+    return nullptr;
+}
+
+void Playlist::muteOrDeleteClipAt (juce::Point<int> position, bool deleteIt)
+{
+    auto* component = getClipComponentAt (position);
+    auto* clip = component != nullptr ? component->getClip() : nullptr;
+
+    if (clip == nullptr || gesture == nullptr)
         return;
 
-    rangeSelection = newRange;
-    lanes->repaint();
+    // Each clip once per drag, however long the mouse stays on it.
+    for (const auto& done : gesture->done)
+        if (done.get() == clip)
+            return;
+
+    gesture->done.emplace_back (clip);
+
+    if (deleteIt)
+        clip->removeFromParent();
+    else
+        toggleClipsMuted ({ clip });
+}
+
+void Playlist::selectClipsIn (juce::Rectangle<int> area, bool addToSelection)
+{
+    juce::Array<te::Selectable*> items;
+
+    if (addToSelection && gesture != nullptr)
+        for (const auto& before : gesture->selectedBefore)
+            if (auto* item = before.get())
+                items.add (item);
+
+    for (auto* component : clipComponents)
+        if (auto* clip = component->getClip(); clip != nullptr && component->getBounds().intersects (area))
+            items.addIfNotAlreadyThere (clip);
+
+    range.clear();
+    selection.deselectAll();
+
+    for (auto* item : items)
+        selection.addToSelection (item);
+}
+
+void Playlist::nudge (int direction)
+{
+    auto* ed = edit.get();
+
+    if (ed == nullptr)
+        return;
+
+    // A step of the grid as it is now, so what is seen is what moves.
+    const auto step =
+        te::BeatDuration::fromBeats (direction * getGridStepInBeats (getSnapType(), ed->tempoSequence, view.start, grid.triplets));
+
+    if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
+    {
+        nudgeClips (clips, step);
+        return;
+    }
+
+    if (! range.isEmpty())
+    {
+        const auto r = range.getRange();
+        const auto start = te::BeatPosition::fromBeats (std::max (0.0, (r.getStart() + step).inBeats()));
+        range.set ({ start, start + r.getLength() }, range.getTracks());
+    }
+}
+
+void Playlist::quantizeSelectedClips()
+{
+    auto* ed = edit.get();
+
+    if (ed == nullptr)
+        return;
+
+    for (auto* clip : getSelectedClips (selection))
+        if (auto* track = clip->getClipTrack())
+            moveClip (*clip, snapToGrid (clip->getStartBeat(), getSnapType(), ed->tempoSequence, grid.triplets), *track);
 }
 
 //==============================================================================
+void Playlist::setTool (Tool newTool)
+{
+    tool = newTool;
+    gesture = nullptr;
+    rubberBand = {};
+
+    for (size_t i = 0; i < std::size (allTools); ++i)
+        toolButtons[(int) i]->setToggleState (allTools[i] == tool, juce::dontSendNotification);
+
+    lanes->setMouseCursor (getCursorFor (tool));
+    lanes->setDescription (tool == Tool::smart ? emptySpaceHint : describeTool (tool));
+    lanes->repaint();
+}
+
 void Playlist::lanesMouseMove (const juce::MouseEvent& e)
 {
-    // The hint bar and the pointer say what a drag would do here.
-    if (auto* component = getClipComponentAt (e.getPosition()))
+    // The hint bar and the pointer say what the mouse does here. With the Smart Tool, and with Draw over a
+    // clip, that depends on where on the clip it is.
+    if (tool == Tool::smart && findCrossfadeAt (e.getPosition()).has_value())
+    {
+        lanes->setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        lanes->setDescription ("Drag to crossfade the two clips: each plays over the other while one fades out and the other in.");
+        return;
+    }
+
+    auto* component = getClipComponentAt (e.getPosition());
+
+    if (component != nullptr && (tool == Tool::smart || tool == Tool::draw))
     {
         const auto zone =
             getClipZone (component->getBounds().toFloat(), e.position, dynamic_cast<te::AudioClipBase*> (component->getClip()) != nullptr);
         lanes->setMouseCursor (getCursorFor (zone));
         lanes->setDescription (describeClipZone (zone));
+        return;
     }
-    else
-    {
-        lanes->setMouseCursor (juce::MouseCursor::NormalCursor);
-        lanes->setDescription (emptySpaceHint);
-    }
+
+    lanes->setMouseCursor (getCursorFor (tool));
+    lanes->setDescription (tool == Tool::smart ? emptySpaceHint : describeTool (tool));
 }
 
 void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 {
     gesture = nullptr;
+    auto* ed = edit.get();
 
-    if (edit.get() == nullptr)
+    if (ed == nullptr)
         return;
 
     gesture = std::make_unique<Gesture>();
+    gesture->startPosition = e.getPosition();
     gesture->startBeat = view.xToBeat (e.position.x);
     gesture->startRow = getRowAt (e.y);
+
+    auto* component = getClipComponentAt (e.getPosition());
+    auto* clip = component != nullptr ? component->getClip() : nullptr;
+    auto& undo = ed->getUndoManager();
+
+    if (e.mods.isPopupMenu())
+    {
+        // In FL Studio's keymap, right-click deletes, as in FL Studio: this clip and those the mouse moves on to.
+        if (commands.getKeymap().rightClickDeletes)
+        {
+            undo.beginNewTransaction ("Delete Clips");
+            gesture->kind = Gesture::Kind::erase;
+            muteOrDeleteClipAt (e.getPosition(), true);
+        }
+        else
+        {
+            smartToolDown (e); // the menus
+        }
+
+        return;
+    }
+
+    switch (tool)
+    {
+        case Tool::draw:
+        case Tool::paint:
+        {
+            // Draw drags clips as the Smart Tool does; Paint selects them.
+            if (clip != nullptr)
+            {
+                if (tool == Tool::draw)
+                {
+                    smartToolDown (e);
+                }
+                else
+                {
+                    clipClicked (*clip, e.mods);
+                    gesture = nullptr;
+                }
+
+                return;
+            }
+
+            range.clear();
+            undo.beginNewTransaction (tool == Tool::draw ? "Place Clip" : "Paint Clips");
+            auto* placed = placeClip (gesture->startRow, gesture->startBeat, grid.snap && ! e.mods.isAltDown());
+
+            if (placed == nullptr)
+            {
+                gesture = nullptr;
+                return;
+            }
+
+            selection.selectOnly (placed);
+
+            if (tool == Tool::draw)
+            {
+                // A drag that follows moves the new clip.
+                gesture->kind = Gesture::Kind::move;
+                gesture->clip = placed;
+                gesture->anchorStart = placed->getStartBeat();
+                gesture->moving.push_back ({ placed, placed->getStartBeat(), gesture->startRow });
+            }
+            else
+            {
+                gesture->kind = Gesture::Kind::paint;
+                gesture->nextPaintStart = placed->getEndBeat();
+            }
+
+            return;
+        }
+
+        case Tool::slice:
+            if (clip != nullptr)
+            {
+                undo.beginNewTransaction ("Split Clip");
+                splitClips ({ clip }, snap (gesture->startBeat, e.mods));
+            }
+
+            gesture = nullptr;
+            return;
+
+        case Tool::slip:
+            if (clip == nullptr)
+            {
+                gesture = nullptr;
+                return;
+            }
+
+            clipClicked (*clip, {});
+            undo.beginNewTransaction ("Slip Clip");
+            gesture->kind = Gesture::Kind::slip;
+            gesture->clip = clip;
+            gesture->startOffset = clip->getPosition().getOffset();
+            return;
+
+        case Tool::mute:
+        case Tool::erase:
+            undo.beginNewTransaction (tool == Tool::mute ? "Mute Clips" : "Delete Clips");
+            gesture->kind = tool == Tool::mute ? Gesture::Kind::mute : Gesture::Kind::erase;
+            muteOrDeleteClipAt (e.getPosition(), tool == Tool::erase);
+            return;
+
+        case Tool::select:
+            // A click selects (when the mouse goes up); a drag draws a rectangle.
+            gesture->clip = clip;
+            gesture->clickOnMouseUp = true;
+            return;
+
+        case Tool::zoom:
+            return; // a click or a drag, decided later
+
+        case Tool::smart:
+        default:
+            smartToolDown (e);
+            return;
+    }
+}
+
+void Playlist::smartToolDown (const juce::MouseEvent& e)
+{
+    // Where two audio clips meet: a drag draws a crossfade.
+    if (! e.mods.isPopupMenu())
+    {
+        if (auto spot = findCrossfadeAt (e.getPosition()))
+        {
+            gesture->crossfade = spot;
+            return;
+        }
+    }
 
     // On a clip: where it is clicked decides what a drag does.
     if (auto* component = getClipComponentAt (e.getPosition()))
@@ -750,7 +1143,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     }
 
     // On empty space: the track is selected, and a drag selects a time range.
-    setRangeSelection (std::nullopt);
+    range.clear();
 
     if (gesture->startRow < 0)
     {
@@ -857,17 +1250,73 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
         case Gesture::Kind::selectRange:
         {
             // From where the drag started to the pointer, across the rows between them.
-            const auto from = snap (gesture->startBeat, e.mods), to = snap (beat, e.mods);
             const auto lastRow = (int) rows.size() - 1;
-            const auto startRow = gesture->startRow >= 0 ? gesture->startRow : lastRow;
+            const auto from = snap (gesture->startBeat, e.mods), to = snap (beat, e.mods);
             const auto row = getRowAt (e.y) >= 0 ? getRowAt (e.y) : (e.y < 0 ? 0 : lastRow);
 
             if (lastRow >= 0 && from != to)
-                setRangeSelection (RangeSelection { te::BeatRange (std::min (from, to), std::max (from, to)), std::min (startRow, row),
-                                                    std::max (startRow, row) });
+                selectRange (from, to, gesture->startRow >= 0 ? gesture->startRow : lastRow, row);
 
             break;
         }
+
+        case Gesture::Kind::crossfade:
+        {
+            // As long as twice the distance from the boundary to the mouse: the boundary stays in the middle.
+            const auto& spot = *gesture->crossfade;
+            auto* first = dynamic_cast<te::AudioClipBase*> (spot.first.get());
+            auto* second = dynamic_cast<te::AudioClipBase*> (spot.second.get());
+
+            if (first != nullptr && second != nullptr)
+            {
+                const auto distance = ed->tempoSequence.toTime (beat) - spot.boundary;
+                setCrossfade (*first, *second, spot.boundary, te::TimeDuration::fromSeconds (2.0 * std::abs (distance.inSeconds())));
+            }
+
+            break;
+        }
+
+        case Gesture::Kind::slip:
+            if (clip != nullptr)
+            {
+                // What is inside follows the mouse; the clip stays where it is.
+                const auto& tempo = ed->tempoSequence;
+                clip->setOffset (gesture->startOffset
+                                 - (tempo.toTime (snap (beat, e.mods)) - tempo.toTime (snap (gesture->startBeat, e.mods))));
+            }
+
+            break;
+
+        case Gesture::Kind::paint:
+            // Another copy each time the mouse passes the end of the last one.
+            while (beat >= gesture->nextPaintStart)
+            {
+                auto* placed = placeClip (gesture->startRow, gesture->nextPaintStart, false);
+
+                if (placed == nullptr)
+                    break;
+
+                selection.addToSelection (placed);
+                gesture->nextPaintStart = placed->getEndBeat();
+            }
+
+            break;
+
+        case Gesture::Kind::mute:
+        case Gesture::Kind::erase:
+            muteOrDeleteClipAt (e.getPosition(), gesture->kind == Gesture::Kind::erase);
+            break;
+
+        case Gesture::Kind::select:
+            rubberBand = juce::Rectangle<int> (gesture->startPosition, e.getPosition());
+            selectClipsIn (rubberBand, e.mods.isCommandDown());
+            lanes->repaint();
+            break;
+
+        case Gesture::Kind::zoom:
+            rubberBand = juce::Rectangle<int> (gesture->startPosition, e.getPosition()).withY (0).withHeight (lanes->getHeight());
+            lanes->repaint();
+            break;
 
         case Gesture::Kind::pending:
         default:
@@ -881,10 +1330,34 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
     auto* clip = gesture->clip.get();
     gesture->clickOnMouseUp = false;
 
+    if (tool == Tool::select)
+    {
+        gesture->kind = Gesture::Kind::select;
+
+        if (e.mods.isCommandDown())
+            for (auto* item : selection.getSelectedObjects())
+                gesture->selectedBefore.emplace_back (item);
+
+        return;
+    }
+
+    if (tool == Tool::zoom)
+    {
+        gesture->kind = Gesture::Kind::zoom;
+        return;
+    }
+
+    if (gesture->crossfade.has_value())
+    {
+        gesture->kind = Gesture::Kind::crossfade;
+        ed->getUndoManager().beginNewTransaction ("Crossfade");
+        return;
+    }
+
     if (clip == nullptr || ! gesture->zone.has_value() || *gesture->zone == ClipZone::selectRange)
     {
         // The range is the selection now. (Nothing else stays selected, so Delete can't take a whole track
-        // when a range was meant; the commands that act on ranges come in roadmap step 1.1's next part.)
+        // when a range was meant.)
         gesture->kind = Gesture::Kind::selectRange;
         selection.deselectAll();
         return;
@@ -959,11 +1432,41 @@ void Playlist::lanesMouseUp (const juce::MouseEvent& e)
     if (gesture == nullptr)
         return;
 
-    // A click that waited: now that it wasn't a drag, it selects.
-    if (auto* clip = gesture->clip.get(); clip != nullptr && gesture->kind == Gesture::Kind::pending && gesture->clickOnMouseUp)
-        clipClicked (*clip, e.mods);
+    if (gesture->kind == Gesture::Kind::pending)
+    {
+        // A click, not a drag.
+        if (tool == Tool::zoom)
+        {
+            zoomAround (e.position.x, e.mods.isAltDown() ? 0.5 : 2.0);
+        }
+        else if (auto* clip = gesture->clip.get(); clip != nullptr && gesture->clickOnMouseUp)
+        {
+            clipClicked (*clip, e.mods);
+        }
+        else if (tool == Tool::select && ! e.mods.isCommandDown())
+        {
+            range.clear();
+            selection.deselectAll();
+        }
+    }
+    else if (gesture->kind == Gesture::Kind::zoom && rubberBand.getWidth() > dragThreshold)
+    {
+        // Zoom to the dragged time.
+        const auto from = view.xToBeat (rubberBand.getX()), to = view.xToBeat (rubberBand.getRight());
+        view.pixelsPerBeat =
+            juce::jlimit (TimelineView::minPixelsPerBeat, TimelineView::maxPixelsPerBeat, lanes->getWidth() / (to - from).inBeats());
+        setViewStart (from);
+        updateGridControls();
+    }
 
     gesture = nullptr;
+
+    if (! rubberBand.isEmpty())
+    {
+        rubberBand = {};
+        lanes->repaint();
+    }
+
     lanesMouseMove (e);
 }
 
@@ -972,7 +1475,7 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
     auto* ed = edit.get();
     const auto row = getRowAt (e.y);
 
-    if (ed == nullptr || row < 0 || getClipComponentAt (e.getPosition()) != nullptr)
+    if (ed == nullptr || tool != Tool::smart || row < 0 || getClipComponentAt (e.getPosition()) != nullptr)
         return;
 
     // On a track with an instrument: an empty MIDI clip, a bar long, from the grid line before the click.
@@ -1448,6 +1951,82 @@ void Playlist::addCommands (CommandRegistry& registry)
                     .isEnabled = hasEdit,
                     .isTicked = [this] { return grid.triplets; } });
 
+    // The tools, with FL Studio's letters in the keymaps (Esc for the Smart Tool).
+    for (const auto toolToAdd : allTools)
+    {
+        juce::StringArray synonyms { "tool", "pointer", "mode" };
+
+        switch (toolToAdd)
+        {
+            case Tool::draw:
+                synonyms.addArray ({ "pencil", "place", "stamp" });
+                break;
+            case Tool::paint:
+                synonyms.addArray ({ "brush", "repeat", "fill" });
+                break;
+            case Tool::slice:
+                synonyms.addArray ({ "cut", "knife", "split", "scissors" });
+                break;
+            case Tool::slip:
+                synonyms.addArray ({ "slide", "content", "offset" });
+                break;
+            case Tool::mute:
+                synonyms.addArray ({ "silence", "deactivate" });
+                break;
+            case Tool::erase:
+                synonyms.addArray ({ "eraser", "remove", "delete" });
+                break;
+            case Tool::select:
+                synonyms.addArray ({ "marquee", "box", "rectangle", "lasso" });
+                break;
+            case Tool::zoom:
+                synonyms.addArray ({ "magnify", "magnifier" });
+                break;
+            case Tool::smart:
+            default:
+                synonyms.addArray ({ "arrow", "default", "normal" });
+                break;
+        }
+
+        registry.add ({ .id = getToolCommandID (toolToAdd),
+                        .name = toolToAdd == Tool::smart ? getToolName (toolToAdd) : getToolName (toolToAdd) + " Tool",
+                        .category = "Tool",
+                        .description = describeTool (toolToAdd),
+                        .synonyms = synonyms,
+                        .perform = [this, toolToAdd] { setTool (toolToAdd); },
+                        .isTicked = [this, toolToAdd] { return tool == toolToAdd; } });
+    }
+
+    const auto canNudge = [this] { return ! range.isEmpty() || ! getSelectedClips (selection).isEmpty(); };
+    const auto getUndoTarget = [this] { return edit.get(); };
+
+    registry.add ({ .id = "clip.nudgeLeft",
+                    .name = "Nudge Left",
+                    .category = "Clip",
+                    .description = "Moves the selected clips, or the selected time range, a step of the grid earlier.",
+                    .synonyms = { "move left", "earlier", "shift" },
+                    .perform = [this] { nudge (-1); },
+                    .isEnabled = canNudge,
+                    .undoTarget = getUndoTarget });
+
+    registry.add ({ .id = "clip.nudgeRight",
+                    .name = "Nudge Right",
+                    .category = "Clip",
+                    .description = "Moves the selected clips, or the selected time range, a step of the grid later.",
+                    .synonyms = { "move right", "later", "shift" },
+                    .perform = [this] { nudge (1); },
+                    .isEnabled = canNudge,
+                    .undoTarget = getUndoTarget });
+
+    registry.add ({ .id = "clip.quantize",
+                    .name = "Quantize Clip Starts",
+                    .category = "Clip",
+                    .description = "Moves the start of each selected clip to the nearest line of the grid.",
+                    .synonyms = { "snap", "align", "grid" },
+                    .perform = [this] { quantizeSelectedClips(); },
+                    .isEnabled = [this] { return ! getSelectedClips (selection).isEmpty(); },
+                    .undoTarget = getUndoTarget });
+
     refreshShortcutTexts();
 }
 
@@ -1457,6 +2036,10 @@ void Playlist::refreshShortcutTexts()
     snapButton.setTooltip (
         withShortcut (commands, "Snap to grid: what you move or place lines up with the grid. Hold Alt to place freely", "grid.snap"));
     gridButton.setTooltip ("The grid's size. An adaptive grid gets finer as you zoom in");
+
+    for (size_t i = 0; i < std::size (allTools); ++i)
+        toolButtons[(int) i]->setTooltip (
+            withShortcut (commands, toolButtons[(int) i]->getTitle() + ": " + describeTool (allTools[i]), getToolCommandID (allTools[i])));
 }
 
 //==============================================================================
@@ -1488,6 +2071,10 @@ void Playlist::resized()
     snapButton.setBounds (toolbar.removeFromLeft (controlHeight + Space::s));
     toolbar.removeFromLeft (Space::xs);
     gridButton.setBounds (toolbar.removeFromLeft (180));
+    toolbar.removeFromLeft (Space::l);
+
+    for (auto* button : toolButtons)
+        button->setBounds (toolbar.removeFromLeft (controlHeight + Space::s));
 
     horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (headerWidth).withTrimmedRight (scrollBarSize));
     auto rulerArea = area.removeFromTop (rulerHeight);
@@ -1538,11 +2125,21 @@ void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
 }
 
 //==============================================================================
-void Playlist::changeListenerCallback (juce::ChangeBroadcaster*)
+void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source == &range)
+    {
+        lanes->repaint();
+        return;
+    }
+
     updateHeaders();
     updateClips();
     lanes->repaint();
+
+    // The clip selected last is the one the Draw and Paint tools place.
+    if (auto* clip = selection.getFirstItemOfType<te::Clip>())
+        lastClip = clip;
 
     if (auto* track = selection.getFirstItemOfType<te::Track>())
         scrollToShow (getRowOf (track));

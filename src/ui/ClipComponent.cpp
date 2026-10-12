@@ -139,27 +139,45 @@ void ClipComponent::paintFades (juce::Graphics& g, te::AudioClipBase& audio, juc
     if (length <= 0.0)
         return;
 
-    // What a fade takes away is shaded, above a line from silence to full volume.
+    // What a fade takes away is shaded, above its curve from silence to full volume.
     const auto width = (float) area.getWidth(), height = (float) area.getHeight();
     const auto fadeIn = (float) (audio.getFadeIn().inSeconds() / length) * width;
     const auto fadeOut = (float) (audio.getFadeOut().inSeconds() / length) * width;
-    juce::Path shade;
+
+    // The curve, from x0 (silence) to x1 (full volume), and the part of the clip above it.
+    const auto drawFade = [&g, height] (float x0, float x1, te::AudioFadeCurve::Type type)
+    {
+        juce::Path curve;
+        constexpr int steps = 16;
+
+        for (int i = 0; i <= steps; ++i)
+        {
+            const auto alpha = (float) i / (float) steps;
+            const auto point =
+                juce::Point<float> (x0 + (x1 - x0) * alpha, height * (1.0f - te::AudioFadeCurve::alphaToGainForType (type, alpha)));
+
+            if (i == 0)
+                curve.startNewSubPath (point);
+            else
+                curve.lineTo (point);
+        }
+
+        auto shade = curve;
+        shade.lineTo (x1, 0.0f);
+        shade.lineTo (x0, 0.0f);
+        shade.closeSubPath();
+
+        g.setColour (juce::Colours::black.withAlpha (0.3f));
+        g.fillPath (shade);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.strokePath (curve, juce::PathStrokeType (1.5f));
+    };
 
     if (fadeIn > 0.0f)
-        shade.addTriangle (0.0f, 0.0f, fadeIn, 0.0f, 0.0f, height);
+        drawFade (0.0f, fadeIn, audio.getFadeInType());
 
     if (fadeOut > 0.0f)
-        shade.addTriangle (width, 0.0f, width - fadeOut, 0.0f, width, height);
-
-    g.setColour (juce::Colours::black.withAlpha (0.3f));
-    g.fillPath (shade);
-    g.setColour (juce::Colours::black.withAlpha (0.6f));
-
-    if (fadeIn > 0.0f)
-        g.drawLine (0.0f, height, fadeIn, 0.0f, 1.5f);
-
-    if (fadeOut > 0.0f)
-        g.drawLine (width - fadeOut, 0.0f, width, height, 1.5f);
+        drawFade (width, width - fadeOut, audio.getFadeOutType());
 }
 
 void ClipComponent::paintNotes (juce::Graphics& g, te::MidiClip& midi, juce::Rectangle<int> area, juce::Colour ink)

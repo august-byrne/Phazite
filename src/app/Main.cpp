@@ -50,7 +50,7 @@ public:
         mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel);
 
         addEditCommands (*commands, uiBehaviour);
-        addSelectionCommands (*commands, session->getSelection());
+        addSelectionCommands (*commands, session->getSelection(), session->getRangeSelection());
         addTrackCommands (*commands, session->getSelection());
         session->addCommands (*commands);
         mainWindow->addCommands();

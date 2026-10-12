@@ -14,7 +14,7 @@ namespace phazite::ui
 class AppShell : public juce::Component
 {
 public:
-    AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&);
+    AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&, RangeSelection&);
     ~AppShell() override;
 
     // The open project's Edit, or nullptr while none is open (call this before it closes, too).

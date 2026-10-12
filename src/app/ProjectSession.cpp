@@ -289,6 +289,7 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject)
     uiBehaviour.setFocusedEdit (nullptr);
     selection.deselectAll();
     selection.edit = nullptr;
+    rangeSelection.clear();
 
     if (project != nullptr && onProjectClosing != nullptr)
         onProjectClosing();

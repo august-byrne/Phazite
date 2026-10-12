@@ -24,6 +24,7 @@ std::optional<Keymap> Keymap::fromJSON (const juce::String& text)
     Keymap keymap;
     keymap.name = json["name"].toString();
     keymap.description = json["description"].toString();
+    keymap.rightClickDeletes = json["rightClickDeletes"];
 
     if (keymap.name.isEmpty())
         return {};
