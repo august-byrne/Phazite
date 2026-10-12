@@ -31,6 +31,7 @@ Run every command from the repository root. The presets are the only entry point
 ## Repository layout
 
 - `src/` - Phazite's own code (currently the smoke-test app: `Main.cpp`, `MainComponent.*`).
+- `docs/design.md` - the product design: what Phazite should be and why, with the owner's decisions and the open questions. `docs/roadmap.md` - the step-by-step build plan with "Done when" checks; update its status table after each step. Read both before starting feature work, and update `design.md` when a decision changes.
 - `CMakeLists.txt`, `CMakePresets.json`, `cmake/` - build definition, presets, Windows toolchain wrapper and CMake helpers.
 - `external/tracktion_engine` - git submodule: Tracktion Engine (`develop`, pinned commit), with JUCE as its own submodule at `modules/juce`. Never add JUCE separately.
 - `external/WindowsToolchain` - git submodule (MIT), used on Windows at build time only.
@@ -45,7 +46,7 @@ Run every command from the repository root. The presets are the only entry point
 - Everything under `external/` is read-only: don't edit, reformat or "fix" it. Don't stage a changed `external/*` pointer unless the task is a deliberate dependency bump; before committing, check `git status` for "(new commits)".
 - Never run `git submodule update --remote`: it would move JUCE away from the commit Tracktion pins. The Tracktion submodule is a shallow clone, so to bump it use the full 40-character commit hash: `git -C external/tracktion_engine fetch --depth 1 origin <full-sha>`, `git -C external/tracktion_engine checkout --detach FETCH_HEAD`, `git add external/tracktion_engine`, `git submodule update --init --recursive --depth 1`. Review the changes on GitHub (compare old...new) and read Tracktion's BREAKING-CHANGES.md, then reconfigure with `--fresh` and rebuild. The pre-commit hook refuses pin changes, so commit a bump with `git -c phazite.allowSubmoduleBump=true commit -F <file>`.
 - `external/tracktion_engine` contains CLAUDE.md files and `.claude/commands` written for Tracktion's own contributors (branch names, commit prefixes, choc's code style). They don't apply to Phazite; ignore them.
-- Phazite is AGPL-3.0-or-later. Only add code under compatible licences (GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, Zlib; not the 4-clause BSD licence). Never enable proprietary options such as Tracktion's Elastique, ReWire or REX support.
+- Phazite is AGPL-3.0-or-later. Only add code under compatible licences (GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, Zlib; not the 4-clause BSD licence). Fonts may also use the SIL Open Font License 1.1 (the UI font is Inter). Ship them as separate files next to the app, not compiled into it, together with their OFL text and copyright notice. Never enable proprietary options such as Tracktion's Elastique, ReWire or REX support.
 - Windows builds set `JUCE_ASIO=1`, which compiles in the ASIO SDK headers bundled with JUCE (`juce_audio_devices/native/asio/`) under Steinberg's GPLv3 option. Documentation that names ASIO writes "ASIO®" at the first mention and carries "ASIO is a registered trademark of Steinberg Media Technologies GmbH." (README.md does).
 
 ## Real-time rules (audio thread)
