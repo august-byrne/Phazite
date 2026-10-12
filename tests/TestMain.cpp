@@ -53,9 +53,12 @@ int main (int argc, char** argv)
     int result = 0;
 
     {
-        auto engine = phazite::createEngine ({ .applicationName = "PhaziteTests",
-                                               .behaviour = { .openAudioDevice = false, .scanPluginsOutOfProcess = false },
-                                               .propertyStorage = std::make_unique<TestPropertyStorage> (settingsFolder) });
+        // Audio is processed on one thread only, the one that calls the hosted device: the real-time
+        // audit attributes everything that happens during processing to that thread.
+        auto engine =
+            phazite::createEngine ({ .applicationName = "PhaziteTests",
+                                     .behaviour = { .openAudioDevice = false, .scanPluginsOutOfProcess = false, .numAudioThreads = 1 },
+                                     .propertyStorage = std::make_unique<TestPropertyStorage> (settingsFolder) });
         testEngine = engine.get();
 
         doctest::Context context (argc, argv);

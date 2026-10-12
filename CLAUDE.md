@@ -62,6 +62,7 @@ The audio thread is the audio callback and everything it calls: plug-in and grap
 - Threads communicate through lock-free queues (single-producer/single-consumer FIFOs such as `juce::AbstractFifo` or `choc::fifo::SingleReaderSingleWriterFIFO`) and lock-free `std::atomic` values (add `static_assert (std::atomic<T>::is_always_lock_free)` for anything wider than a pointer), not shared mutable state.
 - Read parameters through their atomic value (`AutomatableParameter::getCurrentValue()`), never through `juce::ValueTree`, `juce::CachedValue` or other message-thread objects.
 - Tracktion's built-in 4OSC synth locks and allocates on the audio thread. It is fine for the smoke test, but not a pattern to copy or a basis for performance measurements.
+- Tracktion's own code breaks some of these rules; `docs/realtime-audit.md` lists what is known and what Phazite does about each. After changes that touch playback, run the audit (`phazite_tests.exe --test-suite=realtime-audit` from the `windows-debug` build): it counts allocations on the audio thread and shows where they come from. Its guarded scenarios fail if steady playback allocates.
 
 ## Code conventions
 

@@ -156,7 +156,10 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestMain.cpp
         tests/TestHelpers.h
         tests/AppInfoTests.cpp
-        tests/EngineSetupTests.cpp)
+        tests/AudioThreadMonitor.cpp
+        tests/AudioThreadMonitor.h
+        tests/EngineSetupTests.cpp
+        tests/RealtimeAuditTests.cpp)
 
     phazite_use_core(phazite_tests)
 

@@ -31,12 +31,14 @@ public:
     {
         bool openAudioDevice = true;         // false in tests, which don't need one
         bool scanPluginsOutOfProcess = true; // needs the "--PluginScan" check at app startup
+        int numAudioThreads = 0;             // threads that process audio; 0 = one per CPU core
     };
 
     explicit EngineBehaviour (Options);
 
     bool autoInitialiseDeviceManager() override;
     bool canScanPluginsOutOfProcess() override;
+    int getNumberOfCPUsToUseForAudio() override;
     bool shouldOpenAudioInputByDefault() override;
     te::EditLimits getEditLimits() override;
     juce::File getDefaultFolderForAudioRecordings (te::Edit&) override;

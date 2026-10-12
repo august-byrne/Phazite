@@ -51,6 +51,12 @@ bool EngineBehaviour::canScanPluginsOutOfProcess()
     return options.scanPluginsOutOfProcess && ! PHAZITE_TSAN;
 }
 
+// Tracktion processes audio on the audio callback's thread plus (this number - 1) worker threads.
+int EngineBehaviour::getNumberOfCPUsToUseForAudio()
+{
+    return options.numAudioThreads > 0 ? options.numAudioThreads : te::EngineBehaviour::getNumberOfCPUsToUseForAudio();
+}
+
 // Don't open the microphone until the user asks for an input.
 bool EngineBehaviour::shouldOpenAudioInputByDefault()
 {
