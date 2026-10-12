@@ -76,6 +76,8 @@ void LookAndFeel::setTheme (ThemeName newTheme)
     setColour (juce::ComboBox::outlineColourId, p.border);
     setColour (juce::ComboBox::arrowColourId, p.textMuted);
     setColour (juce::ComboBox::focusedOutlineColourId, p.accent);
+    setColour (juce::BubbleComponent::backgroundColourId, p.surfaceRaised); // a slider's value while dragging
+    setColour (juce::BubbleComponent::outlineColourId, p.border);
     setColour (juce::KeyMappingEditorComponent::backgroundColourId, p.surface);
     setColour (juce::KeyMappingEditorComponent::textColourId, p.text);
     setColour (juce::TreeView::backgroundColourId, p.surface);
@@ -103,6 +105,110 @@ juce::Typeface::Ptr LookAndFeel::getTypefaceForFont (const juce::Font& font)
     }
 
     return juce::LookAndFeel_V4::getTypefaceForFont (font);
+}
+
+//==============================================================================
+void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float startAngle,
+                                    float endAngle, juce::Slider& slider)
+{
+    const auto& p = palette;
+    const auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat().reduced (2.0f);
+    const auto radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) / 2.0f;
+    const auto centre = bounds.getCentre();
+    const auto lineWidth = juce::jmax (2.0f, radius * 0.16f);
+    const auto arcRadius = radius - lineWidth;
+    const auto angle = startAngle + sliderPos * (endAngle - startAngle);
+
+    const auto strokeArc = [&] (float from, float to, juce::Colour colour)
+    {
+        juce::Path arc;
+        arc.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f, from, to, true);
+        g.setColour (colour);
+        g.strokePath (arc, juce::PathStrokeType (lineWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    };
+
+    strokeArc (startAngle, endAngle, p.border);
+
+    // The value's arc starts at the bottom of the range, or in the middle of ranges such as pan.
+    if (slider.isEnabled())
+    {
+        const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+        const auto origin = bipolar ? startAngle + (float) slider.valueToProportionOfLength (0.0) * (endAngle - startAngle) : startAngle;
+        strokeArc (juce::jmin (origin, angle), juce::jmax (origin, angle), p.accent);
+    }
+
+    g.setColour (slider.isEnabled() ? p.text : p.textMuted);
+    g.drawLine (juce::Line<float> (centre.getPointOnCircumference (arcRadius * 0.3f, angle),
+                                   centre.getPointOnCircumference (arcRadius * 0.85f, angle)),
+                lineWidth);
+
+    if (slider.hasKeyboardFocus (false))
+    {
+        g.setColour (p.accent);
+        g.drawEllipse (bounds.withSizeKeepingCentre (radius * 2.0f, radius * 2.0f).reduced (0.75f), 1.5f);
+    }
+}
+
+void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float minSliderPos,
+                                    float maxSliderPos, juce::Slider::SliderStyle style, juce::Slider& slider)
+{
+    if (style != juce::Slider::LinearVertical && style != juce::Slider::LinearHorizontal)
+    {
+        juce::LookAndFeel_V4::drawLinearSlider (g, x, y, width, height, sliderPos, minSliderPos, maxSliderPos, style, slider);
+        return;
+    }
+
+    const auto& p = palette;
+    const bool vertical = style == juce::Slider::LinearVertical;
+    const auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat();
+    constexpr float trackThickness = 4.0f, thumbLength = 10.0f, thumbWidth = 22.0f;
+
+    const auto track = vertical ? bounds.withSizeKeepingCentre (trackThickness, bounds.getHeight())
+                                : bounds.withSizeKeepingCentre (bounds.getWidth(), trackThickness);
+    g.setColour (p.border);
+    g.fillRoundedRectangle (track, trackThickness / 2.0f);
+
+    // Filled from the bottom (or left) to the value.
+    g.setColour (slider.isEnabled() ? p.accent : p.textMuted);
+    g.fillRoundedRectangle (vertical ? track.withTop (sliderPos) : track.withRight (sliderPos), trackThickness / 2.0f);
+
+    // The thumb, outlined in the accent when it has the keyboard focus.
+    const auto thumb = vertical ? juce::Rectangle<float> (juce::jmin (bounds.getWidth(), thumbWidth), thumbLength)
+                                      .withCentre ({ bounds.getCentreX(), sliderPos })
+                                : juce::Rectangle<float> (thumbLength, juce::jmin (bounds.getHeight(), thumbWidth))
+                                      .withCentre ({ sliderPos, bounds.getCentreY() });
+    const bool focused = slider.hasKeyboardFocus (false);
+
+    g.setColour (p.surfaceRaised);
+    g.fillRoundedRectangle (thumb, 2.0f);
+    g.setColour (focused ? p.accent : p.textMuted);
+    g.drawRoundedRectangle (thumb.reduced (0.5f), 2.0f, focused ? 2.0f : 1.0f);
+}
+
+int LookAndFeel::getSliderThumbRadius (juce::Slider& slider)
+{
+    if (slider.getSliderStyle() == juce::Slider::LinearVertical || slider.getSliderStyle() == juce::Slider::LinearHorizontal)
+        return 6; // half the thumb, so it stays inside the fader at both ends
+
+    return juce::LookAndFeel_V4::getSliderThumbRadius (slider);
+}
+
+void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour, bool isHighlighted,
+                                        bool isDown)
+{
+    const auto bounds = button.getLocalBounds().toFloat().reduced (0.5f);
+    auto colour = backgroundColour.withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f);
+
+    if (isDown || isHighlighted)
+        colour = colour.contrasting (isDown ? 0.15f : 0.06f);
+
+    g.setColour (colour);
+    g.fillRoundedRectangle (bounds, cornerRadius);
+
+    // The keyboard focus shows as a thick outline in the text color, which stands out on every background.
+    const bool focused = button.hasKeyboardFocus (false);
+    g.setColour (focused ? palette.text : palette.border);
+    g.drawRoundedRectangle (focused ? bounds.reduced (1.0f) : bounds, cornerRadius, focused ? 2.0f : 1.0f);
 }
 
 const Palette& getPalette (const juce::Component& component)

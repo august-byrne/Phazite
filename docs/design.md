@@ -703,6 +703,8 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - **Edit loading:** `EditLoader` builds projects on a background thread. That breaks the `CLAUDE.md` rule that Tracktion objects are created on the message thread, so Phazite loads them with `phazite::loadEdit()` (step 0.2).
 - **MIDI device scan:** `DeviceManager::initialise()` asks for a MIDI scan in 5 ms, then restarts the same timer with the 4-second hot-plug check, so MIDI inputs would appear 4 seconds after startup. `phazite::createEngine()` asks for the scan again (step 0.7).
 - **State written while playing:** Tracktion writes the playhead position into the project, and adds input-device entries when it prepares playback. `phazite::Project` doesn't count those as unsaved changes (step 0.7).
+- **Undoing a parameter change:** undo puts back a parameter's stored value (a track's volume, say) but not the value the engine plays with. `phazite::undo()` and `redo()` set every parameter that isn't automated to its stored value afterwards. Tracktion only stores a value once it first changes, and undoing that first change removes it again, so Phazite's controls store the value, without an undo step, before changing it; otherwise the fix would cost the redo history (step 0.6). Worth reporting upstream.
+- **Mute and solo** aren't part of the undo history.
 - **Aliases:** changes to linked clips are mirrored without undo, so Phazite's alias commands must edit every linked clip inside one undo step.
 - **Folder buses:** a submix folder has no output of its own; it uses its first child track's output. The bus routing UI has to account for this.
 - **Plug-in parameters:** hosted plug-in parameters are identified by index ([section 19](#19-plug-in-hosting-and-stability)).

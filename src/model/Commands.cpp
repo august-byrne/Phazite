@@ -344,6 +344,32 @@ int getMatchScore (const juce::String& query, const juce::String& text)
 }
 
 //==============================================================================
+namespace
+{
+    // AutomatableParameter::valueTreePropertyChanged() updates a parameter's CachedValue when undo
+    // changes it, but not its currentValue, which the audio thread reads. Automated parameters
+    // follow their curves instead, so they are left alone.
+    void playStoredParameterValues (te::Edit& edit)
+    {
+        for (auto* parameter : edit.getAllAutomatableParams (true))
+            if (parameter->getCurve().getNumPoints() == 0)
+                parameter->updateFromAttachedValue();
+    }
+} // namespace
+
+void undo (te::Edit& edit)
+{
+    edit.undo();
+    playStoredParameterValues (edit);
+}
+
+void redo (te::Edit& edit)
+{
+    edit.redo();
+    playStoredParameterValues (edit);
+}
+
+//==============================================================================
 void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
 {
     const auto focusedEdit = [&ui] { return ui.getLastFocusedEdit(); };
@@ -357,7 +383,7 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                         [focusedEdit]
                     {
                         if (auto* edit = focusedEdit())
-                            edit->undo();
+                            undo (*edit);
                     },
                     .isEnabled =
                         [focusedEdit]
@@ -375,7 +401,7 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                         [focusedEdit]
                     {
                         if (auto* edit = focusedEdit())
-                            edit->redo();
+                            redo (*edit);
                     },
                     .isEnabled =
                         [focusedEdit]
@@ -395,9 +421,9 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                         if (auto* edit = focusedEdit())
                         {
                             if (edit->getUndoManager().canRedo())
-                                edit->redo();
+                                redo (*edit);
                             else
-                                edit->undo();
+                                undo (*edit);
                         }
                     },
                     .isEnabled =

@@ -46,6 +46,8 @@ private:
     void showPluginList();
     void setTheme (ui::ThemeName);
     void setHoverHelp (bool);
+    void setInterfaceScale (float);
+    void stepInterfaceScale (int direction); // to the next larger (1) or smaller (-1) size
     void setKeymap (const juce::String& name);
     void updateTitle();
 

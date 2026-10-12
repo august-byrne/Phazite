@@ -2,6 +2,7 @@
 // The main window's content: top bar, browser, playlist, inspector, editor dock and hint bar.
 #pragma once
 
+#include "ChannelStrip.h"
 #include "HintBar.h"
 #include "Panels.h"
 #include "TopBar.h"
@@ -40,8 +41,7 @@ private:
     Panel browser { "Browser",
                     "Instruments, effects, plug-ins, samples and projects, by folder or by search. Coming in roadmap step 1.5." };
     Panel playlist { "Playlist", "Tracks, clips and song sections. Coming in roadmap step 1.1." };
-    Panel inspector { "Inspector",
-                      "The selected track's or clip's settings, devices and sends. Coming with the mixer, in roadmap step 1.4." };
+    Inspector inspector;
     EditorDock editorDock;
     HintBar hintBar;
 

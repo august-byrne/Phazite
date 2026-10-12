@@ -13,6 +13,9 @@
     "view.pianoRoll": [ "F7" ],
     "view.toggleBrowser": [ "F8" ],
     "view.mixer": [ "F9" ],
-    "options.settings": [ "command + ," ]
+    "options.settings": [ "command + ," ],
+    "view.interfaceLarger": [ "command + =", "command + numpad +" ],
+    "view.interfaceSmaller": [ "command + -", "command + numpad -" ],
+    "view.interfaceNormal": [ "command + 0", "command + numpad 0" ]
   }
 }

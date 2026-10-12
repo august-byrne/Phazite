@@ -170,3 +170,28 @@ TEST_CASE ("Keymaps load, switch, and keep the user's own changes")
     CHECK (playKeys.contains (describe ("spacebar")));
     CHECK (playKeys.contains (describe ("F2")));
 }
+
+TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap")
+{
+    for (const auto& keymap : phazite::Keymap::getBuiltIn())
+    {
+        CAPTURE (keymap.name.toStdString());
+        juce::Array<juce::KeyPress> used;
+
+        for (const auto& entry : keymap.keys)
+        {
+            for (const auto& description : entry.second)
+            {
+                CAPTURE (description.toStdString());
+                const auto key = juce::KeyPress::createFromDescription (description);
+                CHECK (key.isValid());
+                CHECK_FALSE (used.contains (key));
+                used.add (key);
+            }
+        }
+    }
+
+    // Number-pad keys are read as such, not as the character they type.
+    CHECK (juce::KeyPress::createFromDescription ("command + numpad +")
+           == juce::KeyPress (juce::KeyPress::numberPadAdd, juce::ModifierKeys::commandModifier, 0));
+}

@@ -4,6 +4,8 @@
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
+#include <array>
+
 namespace phazite
 {
 namespace
@@ -11,6 +13,10 @@ namespace
     constexpr const char* themeSettingKey = "phaziteTheme";
     constexpr const char* hoverHelpSettingKey = "phaziteHoverHelp";
     constexpr const char* computerKeyboardSettingKey = "phaziteComputerKeyboard";
+    constexpr const char* interfaceScaleSettingKey = "phaziteInterfaceScale";
+
+    // Interface sizes, on top of the operating system's display scaling.
+    constexpr std::array<float, 8> interfaceScales { 0.75f, 0.9f, 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f };
     constexpr const char* keymapSettingKey = "phaziteKeymap"; // also read by CommandRegistry::loadKeySettings
     constexpr int quitItemID = 1;
     constexpr int firstRecentItemID = 100;
@@ -63,6 +69,7 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
       computerKeyboard ([&e] (const juce::MidiMessage& m) { playIntoAllMidiInputs (e, m); })
 {
     setUsingNativeTitleBar (true);
+    setInterfaceScale ((float) engine.getPropertyStorage().getPropertiesFile().getDoubleValue (interfaceScaleSettingKey, 1.0));
 
     auto content = std::make_unique<ui::AppShell> (engine, commands, computerKeyboard, [&s] { return s.getEdit(); });
     shell = content.get();
@@ -222,6 +229,29 @@ void MainWindow::addCommands()
                         .isTicked = [this, theme] { return lookAndFeel.getTheme() == theme; } });
     }
 
+    commands.add ({ .id = "view.interfaceLarger",
+                    .name = "Larger Interface",
+                    .category = "View",
+                    .description = "Makes everything in Phazite's windows bigger, up to twice the normal size.",
+                    .synonyms = { "zoom in", "scale", "bigger", "text size", "accessibility" },
+                    .perform = [this] { stepInterfaceScale (1); },
+                    .isEnabled = [] { return juce::Desktop::getInstance().getGlobalScaleFactor() < interfaceScales.back() - 0.01f; } });
+
+    commands.add ({ .id = "view.interfaceSmaller",
+                    .name = "Smaller Interface",
+                    .category = "View",
+                    .description = "Makes everything in Phazite's windows smaller, down to three quarters of the normal size.",
+                    .synonyms = { "zoom out", "scale", "text size" },
+                    .perform = [this] { stepInterfaceScale (-1); },
+                    .isEnabled = [] { return juce::Desktop::getInstance().getGlobalScaleFactor() > interfaceScales.front() + 0.01f; } });
+
+    commands.add ({ .id = "view.interfaceNormal",
+                    .name = "Normal Interface Size",
+                    .category = "View",
+                    .description = "Shows Phazite at its normal size again.",
+                    .synonyms = { "zoom", "reset", "100%", "scale" },
+                    .perform = [this] { setInterfaceScale (1.0f); } });
+
     commands.add ({ .id = "view.hoverHelp",
                     .name = "Hover Help",
                     .category = "View",
@@ -330,6 +360,34 @@ void MainWindow::setHoverHelp (bool on)
     menuItemsChanged();
 }
 
+void MainWindow::setInterfaceScale (float scale)
+{
+    scale = juce::jlimit (interfaceScales.front(), interfaceScales.back(), scale);
+    juce::Desktop::getInstance().setGlobalScaleFactor (scale);
+
+    auto& settings = engine.getPropertyStorage().getPropertiesFile();
+    settings.setValue (interfaceScaleSettingKey, scale);
+    settings.saveIfNeeded();
+}
+
+void MainWindow::stepInterfaceScale (int direction)
+{
+    const auto current = juce::Desktop::getInstance().getGlobalScaleFactor();
+
+    if (direction > 0)
+    {
+        for (const auto scale : interfaceScales)
+            if (scale > current + 0.01f)
+                return setInterfaceScale (scale);
+    }
+    else
+    {
+        for (auto it = interfaceScales.rbegin(); it != interfaceScales.rend(); ++it)
+            if (*it < current - 0.01f)
+                return setInterfaceScale (*it);
+    }
+}
+
 void MainWindow::setKeymap (const juce::String& name)
 {
     auto& settings = engine.getPropertyStorage().getPropertiesFile();
@@ -411,6 +469,11 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSeparator();
 
             for (const auto* id : { "view.layoutBeat", "view.layoutMix", "view.layoutFull" })
+                add (menu, id);
+
+            menu.addSeparator();
+
+            for (const auto* id : { "view.interfaceLarger", "view.interfaceSmaller", "view.interfaceNormal" })
                 add (menu, id);
 
             menu.addSeparator();

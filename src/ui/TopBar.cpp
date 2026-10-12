@@ -30,9 +30,18 @@ TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyb
     keyLabel.setTooltip ("The project's key");
     cpuLabel.setTooltip ("How much of the time available for each audio block the engine uses");
 
-    addAndMakeVisible (playButton);
-    addAndMakeVisible (keyboardButton);
-    addAndMakeVisible (searchButton);
+    showAsDecibels (masterVolume);
+    masterVolume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
+
+    // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
+    for (auto* button : { &playButton, &keyboardButton, &searchButton })
+    {
+        button->setMouseClickGrabsKeyboardFocus (false);
+        addAndMakeVisible (button);
+    }
+
+    addAndMakeVisible (masterMeter);
+    addAndMakeVisible (masterVolume);
 
     timerCallback();
     startTimerHz (4);
@@ -89,12 +98,22 @@ void TopBar::resized()
 
     playButton.setBounds (area.removeFromLeft (80));
     area.removeFromLeft (Space::m);
-    tempoLabel.setBounds (area.removeFromLeft (90));
-    keyLabel.setBounds (area.removeFromLeft (110));
-    cpuLabel.setBounds (area.removeFromLeft (80));
-    searchButton.setBounds (area.removeFromRight (220));
+
+    searchButton.setBounds (area.removeFromRight (170));
     area.removeFromRight (Space::s);
     keyboardButton.setBounds (area.removeFromRight (96));
+    area.removeFromRight (Space::m);
+    masterVolume.setBounds (area.removeFromRight (120));
+    area.removeFromRight (Space::xs);
+    masterMeter.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 12));
+    area.removeFromRight (Space::m);
+
+    // The readouts get what is left. In a narrow window the last ones give way first.
+    for (const auto& [label, width] : { std::pair { &tempoLabel, 90 }, std::pair { &keyLabel, 110 }, std::pair { &cpuLabel, 80 } })
+    {
+        label->setVisible (area.getWidth() >= width);
+        label->setBounds (area.removeFromLeft (juce::jmin (width, area.getWidth())));
+    }
 }
 
 void TopBar::timerCallback()
@@ -124,5 +143,14 @@ void TopBar::timerCallback()
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",
                       juce::dontSendNotification);
     updateKeyboardButton();
+
+    // The master volume and meter follow the open project and its playback.
+    const auto masterVolumePlugin = edit != nullptr ? edit->getMasterVolumePlugin() : nullptr;
+    masterVolumeAttachment.setParameter (masterVolumePlugin.get(),
+                                         masterVolumePlugin != nullptr ? masterVolumePlugin->volParam->paramID : juce::String());
+    masterVolumeAttachment.update();
+
+    auto* context = edit != nullptr ? edit->getCurrentPlaybackContext() : nullptr;
+    masterMeter.setSource (context != nullptr ? &context->masterLevels : nullptr);
 }
 } // namespace phazite::ui

@@ -72,7 +72,9 @@ target_sources(phazite_core PRIVATE
     src/model/Project.cpp
     src/model/Project.h
     src/model/StarterProject.cpp
-    src/model/StarterProject.h)
+    src/model/StarterProject.h
+    src/model/ValueText.cpp
+    src/model/ValueText.h)
 
 # Small data files compiled into the program (PhaziteData.h, namespace PhaziteData). Fonts don't go
 # here: CLAUDE.md requires them as separate files next to the app.
@@ -162,8 +164,12 @@ target_sources(Phazite PRIVATE
     src/app/ProjectSession.h
     src/ui/AppShell.cpp
     src/ui/AppShell.h
+    src/ui/ChannelStrip.cpp
+    src/ui/ChannelStrip.h
     src/ui/CommandPalette.cpp
     src/ui/CommandPalette.h
+    src/ui/Controls.cpp
+    src/ui/Controls.h
     src/ui/DesignTokens.h
     src/ui/HintBar.cpp
     src/ui/HintBar.h
@@ -205,11 +211,16 @@ if(PHAZITE_BUILD_TESTS)
         tests/AudioThreadMonitor.h
         tests/CommandTests.cpp
         tests/ComputerKeyboardTests.cpp
+        tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
         tests/EngineSetupTests.cpp
         tests/LiveInputTests.cpp
         tests/ProjectTests.cpp
-        tests/RealtimeAuditTests.cpp)
+        tests/RealtimeAuditTests.cpp
+        tests/ValueTextTests.cpp
+        # The UI files the tests use: the base controls, which link to the engine's parameters.
+        src/ui/Controls.cpp
+        src/ui/LookAndFeel.cpp)
 
     phazite_use_core(phazite_tests)
 

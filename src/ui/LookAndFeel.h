@@ -25,6 +25,15 @@ public:
 
     juce::Typeface::Ptr getTypefaceForFont (const juce::Font&) override;
 
+    // Knobs, faders and buttons in the design tokens' colors, with a visible keyboard focus.
+    void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos, float startAngle, float endAngle,
+                           juce::Slider&) override;
+    void drawLinearSlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos, float minSliderPos, float maxSliderPos,
+                           juce::Slider::SliderStyle, juce::Slider&) override;
+    int getSliderThumbRadius (juce::Slider&) override;
+    void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour, bool isHighlighted,
+                               bool isDown) override;
+
 private:
     ThemeName theme = ThemeName::dark;
     Palette palette;

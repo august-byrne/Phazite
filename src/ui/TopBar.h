@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include "Controls.h"
 #include "model/Commands.h"
 #include "model/ComputerKeyboard.h"
 
@@ -9,7 +10,8 @@
 
 namespace phazite::ui
 {
-// The bar along the top: transport, tempo, key, CPU, the computer keyboard and the command search.
+// The bar along the top: transport, tempo, key, CPU, the master level and volume, the computer
+// keyboard and the command search.
 class TopBar : public juce::Component,
                private juce::Timer
 {
@@ -32,6 +34,9 @@ private:
 
     juce::TextButton playButton { "Play" }, keyboardButton, searchButton;
     juce::Label tempoLabel, keyLabel, cpuLabel;
+    LevelMeter masterMeter { "Master level" };
+    Fader masterVolume { Fader::Direction::horizontal, "Master volume", te::decibelsToVolumeFaderPosition (0.0f) };
+    ParameterAttachment masterVolumeAttachment { masterVolume, "Change Master Volume" };
     int shownKeyboardState = -1; // what the keyboard button shows, to update it only on changes
 
     void timerCallback() override; // updates the readouts a few times a second; only changes repaint

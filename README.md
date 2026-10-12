@@ -141,7 +141,7 @@ ctest --preset windows-debug
 
 Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). This is what you should see:
 
-1. The main window opens with a menu bar; a top bar with **Play**, the tempo, key and CPU use, **Keys** and **Search commands**; the Browser, Playlist and Inspector panels; the editor dock with Piano roll, Audio, Automation and Mixer tabs; and a hint bar along the bottom. The panels are placeholders that name the roadmap step that builds them. Phazite opens your default audio device, for output only.
+1. The main window opens with a menu bar; a top bar with **Play**, the tempo, key and CPU use, the master level and volume, **Keys** and **Search commands**; the Browser, Playlist and Inspector panels; the editor dock with Piano roll, Audio, Automation and Mixer tabs; and a hint bar along the bottom. Most panels are placeholders that name the roadmap step that builds them; the Inspector shows the synth track's channel. Phazite opens your default audio device, for output only.
 2. The first start makes a project called "My First Song" in `Documents\Phazite\Projects` (each project is a folder) and opens it. Later starts open the project you used last.
 3. Turn your volume down, then press Space or click **Play**. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. Space or **Stop** stops it.
 4. Play the synth yourself, with or without the arpeggio running:
@@ -153,6 +153,8 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). Th
    - **Options > Theme** switches between dark, light and high contrast; **Options > Keymap** switches to FL Studio's shortcuts (there, Ctrl+Z undoes or redoes, and Alt+F8 shows or hides the browser).
    - The hint bar says what the control under the pointer does. **View > Hover Help** turns the tooltips on or off.
    - **Options > Settings** (Ctrl+,) has three tabs: Audio, MIDI and Shortcuts, where any command's keys can be changed.
+   - The Inspector's channel has the synth track's level meter, volume fader, pan knob, and mute and solo. Drag a fader or knob (with Shift held for fine steps), double-click it to reset it, or Tab to it and use the arrow keys. Ctrl+Z undoes volume and pan changes (mute and solo, as in many DAWs, stay out of the undo history). Windows Narrator (Ctrl+Windows+Enter) reads each control's name and value.
+   - Ctrl+= and Ctrl+- make the whole interface larger or smaller (75 % to 200 %), and Ctrl+0 returns to the normal size.
 6. **File > Save** (Ctrl+S) saves the project and moves the previous version into the project's `Backups` folder, which keeps the newest 10. Phazite also saves a copy every 2 minutes: if it doesn't close properly, the next start asks whether to restore that copy. Closing the window, **New Project** and **Open Project** ask first whether to save unsaved changes; the title bar shows a `*` while there are any.
 7. If you hear nothing, choose **Options > Audio Settings** and pick an output device; audio inputs are off by default and can be turned on there. Audio and MIDI settings, the plug-in list, the theme, the keymap and your own shortcuts are saved in `%APPDATA%\Phazite\Settings.xml`.
    - With an audio interface, set **Audio device type** to **ASIO**® and pick its driver: ASIO is the low-latency driver standard on Windows. The **Control Panel** button opens the driver's own settings.

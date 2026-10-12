@@ -98,7 +98,7 @@ Done before this plan (progress since then is under [Status](#status)):
   - text renders in Inter on Windows and Linux, with tabular digits in readouts;
   - Windows Narrator reads the base controls;
   - CPU is near zero when idle.
-- *Status:* the shell is in (`src/ui/`): the window with its menus, panels that resize and collapse, the Beat, Mix and Full layouts, the design tokens with three themes (`src/ui/DesignTokens.h`, contrast checked by tests), Inter with tabular digits, the hint bar, hover help and the command palette. Still to do: detaching panels to another monitor, the icon set, a UI scale setting, and the base controls.
+- *Status:* the shell is in (`src/ui/`): the window with its menus, panels that resize and collapse, the Beat, Mix and Full layouts, the design tokens with three themes (`src/ui/DesignTokens.h`, contrast checked by tests), Inter with tabular digits, the hint bar, hover help and the command palette. The base controls are in too (`src/ui/Controls.h`): knob, fader and level meter, buttons with a visible keyboard focus, and links to Tracktion parameters with named undo steps. They show in the top bar (master level and volume) and in the inspector, which shows the synth track's channel (volume, pan, mute, solo, level). The interface size goes from 75 % to 200 % (View menu, Ctrl+= and Ctrl+-). Still to do: detaching panels to another monitor and the icon set. Still to try by hand: Windows Narrator reading the controls, and idle CPU.
 
 **0.7 Audio, MIDI and the computer keyboard (S)**
 - A settings page: audio device (including ASIO), buffer size and MIDI inputs.
@@ -347,7 +347,7 @@ Roughly in order of value:
 
 | Phase | Status |
 |---|---|
-| 0. Foundations | In progress: 0.1 to 0.5 and 0.7 done ([real-time audit](realtime-audit.md)); 0.6's shell done, its base controls, icons, UI scale and detachable panels to do |
+| 0. Foundations | In progress: 0.1 to 0.5 and 0.7 done ([real-time audit](realtime-audit.md)); 0.6's shell, base controls and interface size done, its icons and detachable panels to do |
 | 1. Make a beat | Not started |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
