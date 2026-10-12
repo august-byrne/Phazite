@@ -9,6 +9,9 @@
     "project.open": [ "command + O" ],
     "project.save": [ "command + S" ],
     "project.saveAs": [ "command + shift + S" ],
-    "view.commandPalette": [ "command + K" ]
+    "view.commandPalette": [ "command + K" ],
+    "view.pianoRoll": [ "F7" ],
+    "view.toggleBrowser": [ "F8" ],
+    "view.mixer": [ "F9" ]
   }
 }

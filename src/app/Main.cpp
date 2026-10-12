@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite smoke test: application entry point.
+// Phazite: application entry point.
 // Written against tracktion_engine develop @bb386171 (module 3.5.0) and the JUCE it pins (37c894f8).
 
-#include "MainComponent.h"
+#include "MainWindow.h"
+#include "ProjectSession.h"
+#include "model/Commands.h"
 #include "model/EngineSetup.h"
+#include "ui/LookAndFeel.h"
 
-//==============================================================================
-class PhaziteApplication final : public juce::JUCEApplication
+namespace phazite
+{
+class Application final : public juce::JUCEApplication
 {
 public:
-    PhaziteApplication() = default;
+    Application() = default;
 
     const juce::String getApplicationName() override { return JUCE_APPLICATION_NAME_STRING; }
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
@@ -33,47 +37,75 @@ public:
 
         // The Engine opens the default audio device and loads the saved plug-in list (settings live in
         // %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in a child copy of this exe (see above).
-        engine = phazite::createEngine ({});
+        engine = createEngine ({});
 
-        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
+        lookAndFeel = std::make_unique<ui::LookAndFeel>();
+        juce::LookAndFeel::setDefaultLookAndFeel (lookAndFeel.get()); // dialogs and menus use it too
+
+        auto& uiBehaviour = getUIBehaviour (*engine);
+        commands = std::make_unique<CommandRegistry>();
+        session = std::make_unique<ProjectSession> (*engine, uiBehaviour);
+        mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel);
+
+        addEditCommands (*commands, uiBehaviour);
+        session->addCommands (*commands);
+        mainWindow->addCommands();
+
+        // The keymap the user chose, with their own changes to it.
+        commands->loadKeySettings (engine->getPropertyStorage().getPropertiesFile());
+        mainWindow->getShell().refreshShortcutTexts();
+
+        session->openAtStartup();
     }
 
     void shutdown() override
     {
-        mainWindow = nullptr; // the window owns MainComponent, which owns the Edit: destroy it first
-        engine = nullptr;     // then the Engine
+        if (engine != nullptr && commands != nullptr)
+            commands->saveKeySettings (engine->getPropertyStorage().getPropertiesFile());
+
+        // Reverse order of creation: the window uses the session and the commands, the session holds
+        // the Edit, and every Edit must go before the Engine.
+        mainWindow = nullptr;
+        session = nullptr;
+        commands = nullptr;
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        lookAndFeel = nullptr;
+        engine = nullptr;
     }
 
-    void systemRequestedQuit() override { quit(); }
-
-private:
-    //==============================================================================
-    class MainWindow final : public juce::DocumentWindow
+    void systemRequestedQuit() override
     {
-    public:
-        MainWindow (const juce::String& name, te::Engine& e)
-            : DocumentWindow (name,
-                              juce::Desktop::getInstance().getDefaultLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId),
-                              juce::DocumentWindow::allButtons)
+        // Let the user finish an open dialog first (such as "Save changes?").
+        if (auto* modal = juce::Component::getCurrentlyModalComponent())
         {
-            setUsingNativeTitleBar (true);
-            setContentOwned (new MainComponent (e), true);
-            setResizable (true, false);
-            centreWithSize (getWidth(), getHeight());
-            setVisible (true);
+            modal->toFront (true);
+            return;
         }
 
-        void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
+        if (session == nullptr)
+        {
+            quit();
+            return;
+        }
 
-    private:
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
-    };
+        session->closeThen (
+            [] (bool closed)
+            {
+                if (closed)
+                    quit();
+            });
+    }
 
-    // Declaration order matters: members are destroyed in reverse order, so the window (and the Edit
-    // inside it) always goes before the Engine, even if shutdown() is never called.
+private:
+    // Declaration order matters: members are destroyed in reverse order, so even if shutdown() is
+    // never called, the window goes first and the Engine last.
     std::unique_ptr<te::Engine> engine;
+    std::unique_ptr<ui::LookAndFeel> lookAndFeel;
+    std::unique_ptr<CommandRegistry> commands;
+    std::unique_ptr<ProjectSession> session;
     std::unique_ptr<MainWindow> mainWindow;
 };
+} // namespace phazite
 
 //==============================================================================
-START_JUCE_APPLICATION (PhaziteApplication)
+START_JUCE_APPLICATION (phazite::Application)

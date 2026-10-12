@@ -69,12 +69,14 @@ private:
 };
 
 //==============================================================================
+// Every member has a default, so designated initializers can leave any of them out (GCC's
+// -Wmissing-field-initializers warns about left-out members without one).
 struct EngineOptions
 {
     juce::String applicationName { appName }; // names the settings folder
-    EngineBehaviour::Options behaviour;
-    std::unique_ptr<PropertyStorage> propertyStorage; // nullptr = PropertyStorage (applicationName)
-    std::unique_ptr<UIBehaviour> uiBehaviour;         // nullptr = UIBehaviour; the app passes its own
+    EngineBehaviour::Options behaviour {};
+    std::unique_ptr<PropertyStorage> propertyStorage {}; // nullptr = PropertyStorage (applicationName)
+    std::unique_ptr<UIBehaviour> uiBehaviour {};         // nullptr = UIBehaviour; the app passes its own
 };
 
 // Creates the Engine with Phazite's hooks. Call on the message thread.

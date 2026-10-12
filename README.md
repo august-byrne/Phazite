@@ -6,7 +6,7 @@
 Phazite is an open-source digital audio workstation (DAW) in early development, written in C++20 on [Tracktion Engine](https://github.com/Tracktion/tracktion_engine) and [JUCE](https://github.com/juce-framework/JUCE). What it aims for:
 
 - **Clean UI/UX:** an uncluttered interface and straightforward workflows.
-- **AI integrations:** planned, not designed yet.
+- **AI integrations:** chord-progression suggestions and drum-sound generation that work from the project you're in, plus song and chord-progression outlines for newcomers (see [the design](docs/design.md)).
 - **Lean and fast:** low CPU and memory use in both the audio engine and the UI.
 - **Open source:** licensed under the [AGPL-3.0-or-later](LICENSE).
 - **Plug-in hosting:** VST®3 plug-ins first, Audio Units on macOS later.
@@ -14,8 +14,8 @@ Phazite is an open-source digital audio workstation (DAW) in early development, 
 
 ## Status
 
-- **Early development (pre-alpha):** there are no releases or downloads, and Phazite can't be used to make music yet. The only program is a small test app (a *smoke test*), which you build from source as described below.
-- **Smoke-test app:** one window with **Play**/**Stop** (a looping arpeggio on Tracktion's built-in 4OSC synth), **Audio Settings** (JUCE's audio device selector) and **Scan Plugins** (finds VST3 plug-ins in a separate process and lists them; Phazite can't use them yet). [5. Run Phazite](#5-run-phazite) describes what to expect.
+- **Early development (pre-alpha):** there are no releases or downloads, and Phazite can't be used to make music yet. You build it from source as described below; [the roadmap](docs/roadmap.md) says what comes next.
+- **What's there:** the main window with its panels (most are placeholders that name the roadmap step that fills them), menus, a command search (Ctrl+K), switchable keymaps (Phazite's and FL Studio's), dark, light and high-contrast themes, and projects that save, keep backups and autosave. A new project plays a looping arpeggio on Tracktion's built-in 4OSC synth. Plug-in scanning finds VST3 plug-ins, but Phazite can't use them yet. [5. Run Phazite](#5-run-phazite) describes what to expect.
 
 | Platform | Status |
 |---|---|
@@ -141,12 +141,19 @@ ctest --preset windows-debug
 
 Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). This is what you should see:
 
-1. A window titled "Phazite" opens with three buttons and a status line (the audio device, or "No audio device", then sample rate, block size and CPU use). Phazite opens your default audio device, for output only.
-2. Turn your volume down, then click **Play**. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. The button turns into **Stop**, which stops playback and rewinds.
-3. If you hear nothing, click **Audio Settings** and choose an output device; inputs are off by default and can be turned on there. Device settings and the plug-in list are saved in `%APPDATA%\Phazite\Settings.xml`.
+1. The main window opens with a menu bar; a top bar with **Play**, the tempo, key and CPU use, and **Search commands**; the Browser, Playlist and Inspector panels; the editor dock with Piano roll, Audio, Automation and Mixer tabs; and a hint bar along the bottom. The panels are placeholders that name the roadmap step that builds them. Phazite opens your default audio device, for output only.
+2. The first start makes a project called "My First Song" in `Documents\Phazite\Projects` (each project is a folder) and opens it. Later starts open the project you used last.
+3. Turn your volume down, then press Space or click **Play**. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. Space or **Stop** stops it.
+4. Try the window:
+   - Ctrl+K or **Search commands** finds any command by typing part of its name; the arrow keys and Enter run one.
+   - F7 shows or hides the piano roll, F9 the mixer and F8 the browser. **View** also switches between the Beat, Mix and Full layouts, and the dividers between panels can be dragged.
+   - **Options > Theme** switches between dark, light and high contrast; **Options > Keymap** switches to FL Studio's shortcuts (there, Ctrl+Z undoes or redoes, and Alt+F8 shows or hides the browser).
+   - The hint bar says what the control under the pointer does. **View > Hover Help** turns the tooltips on or off.
+5. **File > Save** (Ctrl+S) saves the project and moves the previous version into the project's `Backups` folder, which keeps the newest 10. Phazite also saves a copy every 2 minutes: if it doesn't close properly, the next start asks whether to restore that copy. Closing the window, **New Project** and **Open Project** ask first whether to save unsaved changes; the title bar shows a `*` while there are any.
+6. If you hear nothing, choose **Options > Audio Settings** and pick an output device; inputs are off by default and can be turned on there. Device settings, the plug-in list, the theme and the keymap are saved in `%APPDATA%\Phazite\Settings.xml`.
    - With an audio interface, set **Audio device type** to **ASIO**® and pick its driver: ASIO is the low-latency driver standard on Windows. The **Control Panel** button opens the driver's own settings.
    - Without an ASIO driver, you can still try this with [FlexASIO](https://github.com/dechamps/FlexASIO) (MIT), a free ASIO driver that plays through Windows' normal audio.
-4. Click **Scan Plugins**. A "Plug-ins" window asks which folders to scan, with the standard VST3 folders filled in; click **Scan**. The scan runs in a child copy of Phazite (`Phazite.exe --PluginScan:...`), so a plug-in that crashes while being scanned shouldn't take Phazite down; if the child can't start, Phazite shows a warning and scans in its own process instead. Found plug-ins are listed, but Phazite can't add or play them yet. With no VST3 plug-ins installed the list stays empty; `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT, which should then appear.
+7. Choose **Options > Scan for Plug-ins**. A "Plug-ins" window asks which folders to scan, with the standard VST3 folders filled in; click **Scan**. The scan runs in a child copy of Phazite (`Phazite.exe --PluginScan:...`), so a plug-in that crashes while being scanned shouldn't take Phazite down; if the child can't start, Phazite shows a warning and scans in its own process instead. Found plug-ins are listed, but Phazite can't add or play them yet. With no VST3 plug-ins installed the list stays empty; `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT, which should then appear.
 
 ### Troubleshooting
 
@@ -246,8 +253,10 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 
 | Path | Contents |
 |---|---|
-| `src/app/` | The app: startup and windows (currently the smoke test: `Main.cpp`, `MainComponent.*`) |
+| `src/app/` | The app: startup, the main window with its menus and dialogs, and the open project |
+| `src/ui/` | Components and the look: the window's panels, top bar, hint bar, command palette, themes and design tokens |
 | `src/model/` | Code without a UI, compiled with Tracktion Engine and JUCE into the `phazite_core` library that the app and the tests share |
+| `resources/` | Keymaps (compiled into the app) and the Inter font (copied next to the app, into `fonts/`) |
 | `tests/` | Unit tests (`phazite_tests`, doctest); `ctest --preset <preset>` runs them |
 | `docs/` | [The design](docs/design.md) and [the roadmap](docs/roadmap.md) |
 | `CMakeLists.txt`, `CMakePresets.json`, `cmake/` | Build definition, presets, Windows toolchain wrapper and CMake helpers |
@@ -354,6 +363,7 @@ Phazite is licensed under the GNU Affero General Public License, version 3 or (a
 | ASIO SDK 2.3.4 headers (bundled with JUCE) | GPL-3.0-only (Steinberg's GPLv3 option) | ASIO driver support on Windows, compiled in |
 | [WindowsToolchain](https://github.com/MarkSchofield/WindowsToolchain) | MIT | Finds MSVC at build time on Windows; nothing compiled in |
 | [doctest](https://github.com/doctest/doctest) (bundled with Tracktion Engine) | MIT | Unit-test framework; compiled into the tests only, not the app |
+| [Inter](https://github.com/rsms/inter) 4.1 (in `resources/fonts/Inter`) | SIL Open Font License 1.1 | The UI font; shipped as separate files with its licence text (`OFL.txt`), not compiled in |
 
 Tracktion Engine and JUCE are also available under commercial licenses; Phazite uses their open-source licenses (section 13 of both the AGPL-3.0 and the GPL-3.0 allows combining code under the two licenses). Both bundle further open-source code, such as choc, farbot, magic_enum, crill, rpmalloc, zlib, libpng, libjpeg, FLAC, Ogg Vorbis, HarfBuzz and SheenBidi: see `external/tracktion_engine/LICENSE.md`, `external/tracktion_engine/modules/juce/LICENSE.md`, and the license files and source-file headers of the bundled code under `external/`.
 

@@ -66,7 +66,9 @@ target_sources(phazite_core PRIVATE
     src/model/EngineSetup.cpp
     src/model/EngineSetup.h
     src/model/Project.cpp
-    src/model/Project.h)
+    src/model/Project.h
+    src/model/StarterProject.cpp
+    src/model/StarterProject.h)
 
 # Small data files compiled into the program (PhaziteData.h, namespace PhaziteData). Fonts don't go
 # here: CLAUDE.md requires them as separate files next to the app.
@@ -150,14 +152,36 @@ juce_add_gui_app(Phazite
 
 target_sources(Phazite PRIVATE
     src/app/Main.cpp
-    src/app/MainComponent.cpp
-    src/app/MainComponent.h)
+    src/app/MainWindow.cpp
+    src/app/MainWindow.h
+    src/app/ProjectSession.cpp
+    src/app/ProjectSession.h
+    src/ui/AppShell.cpp
+    src/ui/AppShell.h
+    src/ui/CommandPalette.cpp
+    src/ui/CommandPalette.h
+    src/ui/DesignTokens.h
+    src/ui/HintBar.cpp
+    src/ui/HintBar.h
+    src/ui/LookAndFeel.cpp
+    src/ui/LookAndFeel.h
+    src/ui/Panels.cpp
+    src/ui/Panels.h
+    src/ui/TopBar.cpp
+    src/ui/TopBar.h)
 
 target_compile_definitions(Phazite PRIVATE
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Phazite,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Phazite,JUCE_VERSION>")
 
 phazite_use_core(Phazite)
+
+# The UI font, Inter (SIL Open Font License 1.1), goes next to the app as separate files with its licence
+# text (fonts/Inter), as CLAUDE.md asks of fonts. ui::LookAndFeel loads it from there.
+add_custom_command(TARGET Phazite POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts" "$<TARGET_FILE_DIR:Phazite>/fonts"
+    VERBATIM)
 
 # --- Tests: doctest (MIT), bundled with Tracktion Engine. Run them with `ctest --preset <preset>`. ---
 option(PHAZITE_BUILD_TESTS "Build Phazite's unit tests (phazite_tests)" ON)
@@ -174,6 +198,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
         tests/CommandTests.cpp
+        tests/DesignTokenTests.cpp
         tests/EngineSetupTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp)

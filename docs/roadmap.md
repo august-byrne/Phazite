@@ -19,7 +19,7 @@
 
 ## Where we are
 
-Done:
+Done before this plan (progress since then is under [Status](#status)):
 - **Tooling:** CMake presets, the MSVC toolchain wrapper and the Windows setup script.
 - **Dependencies:** Tracktion Engine and JUCE as pinned submodules.
 - **Smoke-test app:** play/stop, audio settings, out-of-process plug-in scanning, ASIO® on Windows.
@@ -73,7 +73,7 @@ Done:
 - *Done when:*
   - after the app is killed mid-session, restarting it offers the autosaved state;
   - tests cover save/load round trips.
-- *Status:* the model is done (`src/model/Project.h`, with tests). The app offers the restore once it has project menus (step 0.6).
+- *Status:* done (`src/model/Project.h` with tests, and the app's `src/app/ProjectSession.h`): new, open, open recent and save; an autosave every 2 minutes; the restore question at startup. Still to try by hand: end Phazite in Task Manager mid-session, then start it again.
 
 **0.5 Commands, keymaps and undo (M)**
 - A command registry with names, descriptions, search synonyms and categories.
@@ -81,7 +81,7 @@ Done:
 - Keymap files (Phazite default and FL Studio), and key rebinding.
 - The command palette (Ctrl+K), and macros made of chained commands.
 - *Done when:* every action in the app so far is a command, can be found in the palette, and shows by name in the undo history.
-- *Status:* the registry, keymaps (Phazite and FL Studio, in `resources/keymaps/`), named undo, macros and the palette's search are done (`src/model/Commands.h`, with tests). The palette's window and the app's own commands come with step 0.6.
+- *Status:* done: the registry, keymaps (Phazite and FL Studio, in `resources/keymaps/`), named undo, macros and the palette's search (`src/model/Commands.h`, with tests); the palette (Ctrl+K), menus and shortcuts run the app's commands, and **Options > Keyboard Shortcuts** changes keys (kept per keymap). There is no undo history panel yet, so step names only show inside Tracktion's undo manager.
 
 **0.6 UI shell and design system (L)**
 - **The main window:** docking panels that resize, collapse and detach to another monitor. Layouts: Beat, Mix and Full.
@@ -97,6 +97,7 @@ Done:
   - text renders in Inter on Windows and Linux, with tabular digits in readouts;
   - Windows Narrator reads the base controls;
   - CPU is near zero when idle.
+- *Status:* the shell is in (`src/ui/`): the window with its menus, panels that resize and collapse, the Beat, Mix and Full layouts, the design tokens with three themes (`src/ui/DesignTokens.h`, contrast checked by tests), Inter with tabular digits, the hint bar, hover help and the command palette. Still to do: detaching panels to another monitor, the icon set, a UI scale setting, and the base controls.
 
 **0.7 Audio, MIDI and the computer keyboard (S)**
 - A settings page: audio device (including ASIO), buffer size and MIDI inputs.
@@ -344,7 +345,7 @@ Roughly in order of value:
 
 | Phase | Status |
 |---|---|
-| 0. Foundations | In progress: 0.1, 0.2 and 0.3 done ([real-time audit](realtime-audit.md)); 0.4's and 0.5's model done |
+| 0. Foundations | In progress: 0.1 to 0.5 done ([real-time audit](realtime-audit.md)); 0.6's shell done, its base controls, icons, UI scale and detachable panels to do; 0.7 not started |
 | 1. Make a beat | Not started |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |

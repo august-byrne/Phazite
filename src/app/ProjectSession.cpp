@@ -1,0 +1,257 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#include "ProjectSession.h"
+#include "model/StarterProject.h"
+
+namespace phazite
+{
+ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui)
+    : engine (e),
+      uiBehaviour (ui),
+      recent (e)
+{
+}
+
+ProjectSession::~ProjectSession()
+{
+    setProject (nullptr); // closes the project on the message thread, before the Engine goes
+}
+
+void ProjectSession::openAtStartup()
+{
+    if (const auto projects = recent.getProjects(); ! projects.isEmpty())
+        openWithRestoreQuestion (projects.getFirst());
+    else
+        createFirstProject();
+}
+
+void ProjectSession::createFirstProject()
+{
+    auto folder = getDefaultProjectsFolder();
+    folder.createDirectory();
+
+    juce::String name ("My First Song");
+
+    for (int n = 2; folder.getChildFile (name).exists(); ++n)
+        name = "My First Song " + juce::String (n);
+
+    juce::String error;
+    auto created = Project::create (engine, folder, name, error);
+
+    if (created == nullptr)
+    {
+        showError ("Phazite couldn't create a project", error);
+        return;
+    }
+
+    addStarterContent (created->getEdit());
+
+    if (const auto result = created->save(); result.failed())
+        showError ("Phazite couldn't save the project", result.getErrorMessage());
+
+    setProject (std::move (created));
+}
+
+void ProjectSession::newProject()
+{
+    closeThen (
+        [this] (bool closed)
+        {
+            if (! closed)
+                return;
+
+            const auto folder = getDefaultProjectsFolder();
+            auto* window = new juce::AlertWindow ("New project",
+                                                  "Name the project. Phazite makes a folder for it in " + folder.getFullPathName() + ".",
+                                                  juce::MessageBoxIconType::NoIcon, dialogParent);
+            window->addTextEditor ("name", "Untitled");
+            window->addButton ("Create", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+            window->enterModalState (true,
+                                     juce::ModalCallbackFunction::create (
+                                         [this, window, folder] (int result)
+                                         {
+                                             if (result != 1)
+                                                 return;
+
+                                             folder.createDirectory();
+                                             juce::String error;
+
+                                             if (auto created =
+                                                     Project::create (engine, folder, window->getTextEditorContents ("name"), error))
+                                                 setProject (std::move (created));
+                                             else
+                                                 showError ("Phazite couldn't create the project", error);
+                                         }),
+                                     true);
+        });
+}
+
+void ProjectSession::openProject()
+{
+    fileChooser =
+        std::make_unique<juce::FileChooser> ("Open a project", getDefaultProjectsFolder(), juce::String ("*") + Project::fileExtension);
+
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& chooser)
+                              {
+                                  if (const auto file = chooser.getResult(); file.existsAsFile())
+                                      openProject (file);
+                              });
+}
+
+void ProjectSession::openProject (const juce::File& file)
+{
+    closeThen (
+        [this, file] (bool closed)
+        {
+            if (closed)
+                openWithRestoreQuestion (file);
+        });
+}
+
+void ProjectSession::saveProject()
+{
+    if (project == nullptr)
+        return;
+
+    if (const auto result = project->save(); result.failed())
+        showError ("Phazite couldn't save the project", result.getErrorMessage());
+
+    if (onProjectChanged != nullptr)
+        onProjectChanged();
+}
+
+void ProjectSession::closeThen (std::function<void (bool)> callback)
+{
+    if (project == nullptr || ! project->hasUnsavedChanges())
+    {
+        callback (true);
+        return;
+    }
+
+    const auto options = juce::MessageBoxOptions()
+                             .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                             .withTitle ("Save changes?")
+                             .withMessage ("Save the changes to \"" + project->getFile().getFileNameWithoutExtension() + "\" first?")
+                             .withButton ("Save")
+                             .withButton ("Don't save")
+                             .withButton ("Cancel")
+                             .withAssociatedComponent (dialogParent);
+
+    // With three buttons, JUCE reports the first as 1, the second as 2 and the third as 0.
+    juce::AlertWindow::showAsync (options,
+                                  [this, callback] (int result)
+                                  {
+                                      if (result == 1)
+                                      {
+                                          if (project != nullptr)
+                                          {
+                                              if (const auto saved = project->save(); saved.failed())
+                                              {
+                                                  showError ("Phazite couldn't save the project", saved.getErrorMessage());
+                                                  callback (false);
+                                                  return;
+                                              }
+                                          }
+
+                                          callback (true);
+                                      }
+                                      else
+                                      {
+                                          callback (result == 2); // "Don't save" closes; "Cancel" doesn't
+                                      }
+                                  });
+}
+
+void ProjectSession::openWithRestoreQuestion (const juce::File& file)
+{
+    if (! Project::hasNewerAutosave (file))
+    {
+        open (file, false);
+        return;
+    }
+
+    const auto options = juce::MessageBoxOptions()
+                             .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                             .withTitle ("Restore unsaved changes?")
+                             .withMessage ("Phazite didn't close properly the last time \"" + file.getFileNameWithoutExtension()
+                                           + "\" was open, but it had saved your changes automatically. Restore them?")
+                             .withButton ("Restore")
+                             .withButton ("Open the last saved version")
+                             .withAssociatedComponent (dialogParent);
+
+    juce::AlertWindow::showAsync (options, [this, file] (int result) { open (file, result == 1); });
+}
+
+void ProjectSession::open (const juce::File& file, bool restoreAutosave)
+{
+    juce::String error;
+
+    if (auto opened = Project::open (engine, file, restoreAutosave, error))
+    {
+        setProject (std::move (opened));
+        return;
+    }
+
+    recent.remove (file);
+    showError ("Phazite couldn't open the project", error);
+
+    if (project == nullptr)
+        createFirstProject();
+}
+
+void ProjectSession::setProject (std::unique_ptr<Project> newProject)
+{
+    autosaveTimer = nullptr;
+    uiBehaviour.setFocusedEdit (nullptr);
+
+    project = std::move (newProject); // the previous project closes here, deleting its autosave
+
+    if (project != nullptr)
+    {
+        uiBehaviour.setFocusedEdit (&project->getEdit());
+        autosaveTimer = std::make_unique<AutosaveTimer> (*project);
+        recent.add (project->getFile());
+    }
+
+    if (onProjectChanged != nullptr)
+        onProjectChanged();
+}
+
+void ProjectSession::showError (const juce::String& title, const juce::String& message)
+{
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                      .withTitle (title)
+                                      .withMessage (message)
+                                      .withButton ("OK")
+                                      .withAssociatedComponent (dialogParent),
+                                  static_cast<juce::ModalComponentManager::Callback*> (nullptr));
+}
+
+void ProjectSession::addCommands (CommandRegistry& registry)
+{
+    registry.add ({ .id = "project.new",
+                    .name = "New Project",
+                    .category = "Project",
+                    .description = "Makes a new project in its own folder.",
+                    .synonyms = { "create", "song" },
+                    .perform = [this] { newProject(); } });
+
+    registry.add ({ .id = "project.open",
+                    .name = "Open Project",
+                    .category = "Project",
+                    .description = "Opens a saved project.",
+                    .synonyms = { "load", "song" },
+                    .perform = [this] { openProject(); } });
+
+    registry.add ({ .id = "project.save",
+                    .name = "Save Project",
+                    .category = "Project",
+                    .description = "Saves the project. The previous version goes into its Backups folder.",
+                    .synonyms = { "store", "write" },
+                    .perform = [this] { saveProject(); },
+                    .isEnabled = [this] { return project != nullptr; } });
+}
+} // namespace phazite

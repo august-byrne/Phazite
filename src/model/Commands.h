@@ -15,18 +15,21 @@ namespace te = tracktion;
 class UIBehaviour;
 
 //==============================================================================
+// Written with designated initializers that leave out what a command doesn't need. Every member has
+// a default ({}), because GCC's -Wmissing-field-initializers warns about left-out members without one.
 struct Command
 {
-    juce::String id;            // stable, e.g. "transport.playStop": keymaps and macros refer to it
-    juce::String name;          // shown in menus, the palette and as the undo step's name
-    juce::String category;      // "Transport", "Edit", "Project", "View", ...
-    juce::String description;   // one sentence, for hover help and the hint bar
-    juce::StringArray synonyms; // other words the palette's search should match
-    std::function<void()> perform;
-    std::function<bool()> isEnabled; // optional: when false the command is greyed out and doesn't run
+    juce::String id {};            // stable, e.g. "transport.playStop": keymaps and macros refer to it
+    juce::String name {};          // shown in menus, the palette and as the undo step's name
+    juce::String category {};      // "Transport", "Edit", "Project", "View", ...
+    juce::String description {};   // one sentence, for hover help and the hint bar
+    juce::StringArray synonyms {}; // other words the palette's search should match
+    std::function<void()> perform {};
+    std::function<bool()> isEnabled {}; // optional: when false the command is greyed out and doesn't run
     // Optional: the Edit this command changes. Running the command then starts a new undo step
     // named after it, so the whole command undoes in one go.
-    std::function<te::Edit*()> undoTarget;
+    std::function<te::Edit*()> undoTarget {};
+    std::function<bool()> isTicked {}; // optional: for on/off settings, shown with a tick in menus
 };
 
 //==============================================================================

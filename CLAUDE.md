@@ -30,7 +30,9 @@ Run every command from the repository root. The presets are the only entry point
 
 ## Repository layout
 
-- `src/app/` - the app: startup and windows (currently the smoke test, `Main.cpp` and `MainComponent.*`), in the `Phazite` target.
+- `src/app/` - the app: startup (`Main.cpp`), the main window with its menus and dialogs (`MainWindow.*`) and the open project (`ProjectSession.*`), in the `Phazite` target.
+- `src/ui/` - components and the look, in the `Phazite` target: the window's panels, top bar, hint bar and command palette, `ui::LookAndFeel`, and the design tokens (`DesignTokens.h`: colours, text sizes, spacing). Take colours and sizes from the tokens (`ui::getPalette (component)`), not literals.
+- `resources/` - keymaps (compiled in as `PhaziteData`) and fonts (Inter, copied next to the app into `fonts/` after each build).
 - `src/model/` - code without UI, in the `phazite_core` static library. That library also compiles Tracktion Engine and JUCE, once, for the app and the tests: only `phazite_core` links the JUCE/Tracktion module targets, and every executable uses `phazite_use_core()` in `CMakeLists.txt`. JUCE and Tracktion options (compile definitions) go on `phazite_core`, never on an executable.
 - `tests/` - unit tests in the `phazite_tests` target, written with doctest (MIT, bundled with Tracktion; include `TestHelpers.h`). Add every new test file to `target_sources(phazite_tests ...)`.
 - `docs/design.md` - the product design: what Phazite should be and why, with the owner's decisions and the open questions. `docs/roadmap.md` - the step-by-step build plan with "Done when" checks; update its status table after each step. Read both before starting feature work, and update `design.md` when a decision changes.

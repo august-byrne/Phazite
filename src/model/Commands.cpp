@@ -277,6 +277,7 @@ void CommandRegistry::getCommandInfo (juce::CommandID commandID, juce::Applicati
 
     info.setInfo (command->name, command->description, command->category, 0);
     info.setActive (command->isEnabled == nullptr || command->isEnabled());
+    info.setTicked (command->isTicked != nullptr && command->isTicked());
 
     if (const auto keys = keymap.keys.find (command->id); keys != keymap.keys.end())
         for (const auto& description : keys->second)

@@ -7,3 +7,6 @@
 *.sh  text eol=lf
 # Git hooks are shell scripts without an extension (git runs them with sh, on Windows too).
 .githooks/* text eol=lf
+
+# Fonts and other binary data: never convert line endings.
+*.ttf binary
