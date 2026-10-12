@@ -1,13 +1,13 @@
 # Phazite
 
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
 Phazite is an open-source digital audio workstation (DAW) in early development, written in C++20 on [Tracktion Engine](https://github.com/Tracktion/tracktion_engine) and [JUCE](https://github.com/juce-framework/JUCE). What it aims for:
 
 - **Clean UI/UX:** an uncluttered interface and straightforward workflows.
 - **AI integrations:** planned, not designed yet.
 - **Lean and fast:** low CPU and memory use in both the audio engine and the UI.
-- **Open source:** licensed under the [AGPL-3.0](LICENSE).
+- **Open source:** licensed under the [AGPL-3.0-or-later](LICENSE).
 - **Plug-in hosting:** VST®3 plug-ins first, Audio Units on macOS later.
 - **Cross-platform:** Windows first; Linux and macOS planned.
 
@@ -18,7 +18,7 @@ Phazite is an open-source digital audio workstation (DAW) in early development, 
 
 | Platform | Status |
 |---|---|
-| Windows 11 x64 | Builds (Debug and Release, zero warnings) with Visual Studio 2026 Build Tools. Running the app hasn't been verified yet, so this README describes what it is designed to do. |
+| Windows 11 x64 | Builds (Debug and Release, zero warnings) with Visual Studio 2026 Build Tools, and runs. |
 | Linux / WSL2 (Windows Subsystem for Linux), Ubuntu 24.04 | Presets exist, but have never been built or run: see [Building on Linux and WSL2](#building-on-linux-and-wsl2-untested). |
 | macOS | Planned, with Audio Units hosting. No presets yet. |
 
@@ -39,7 +39,7 @@ cd C:\src\Phazite
 git submodule update --init --recursive --depth 1
 cmake --preset windows-debug
 cmake --build --preset windows-debug
-build\windows-debug\Phazite_artefacts\Debug\Phazite.exe   # not verified yet: see step 5
+build\windows-debug\Phazite_artefacts\Debug\Phazite.exe   # step 5 says what to expect
 ```
 
 ### Requirements
@@ -136,7 +136,7 @@ cmake --build --preset windows-debug
 | `windows-debug` | `build\windows-debug\Phazite_artefacts\Debug\Phazite.exe` (about 50 MB, plus about 0.5 GB next to it: `Phazite.pdb` with the debug symbols and `Phazite.ilk` for incremental linking) |
 | `windows-release` | `build\windows-release\Phazite_artefacts\Release\Phazite.exe` (about 12 MB, no debug symbols) |
 
-Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). Running the app has not been verified yet; it is designed to work like this:
+Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). This is what you should see:
 
 1. A window titled "Phazite" opens with three buttons and a status line (the audio device, or "No audio device", then sample rate, block size and CPU use). Phazite opens your default audio device, for output only.
 2. Turn your volume down, then click **Play**. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. The button turns into **Stop**, which stops playback and rewinds.
@@ -265,6 +265,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 
 ### Coding guidelines
 
+- Start every C/C++ file with `// SPDX-License-Identifier: AGPL-3.0-or-later`.
 - C++20. Include module headers directly (`<juce_gui_basics/juce_gui_basics.h>`, `<tracktion_engine/tracktion_engine.h>`), not `JuceHeader.h`. Qualify `juce::` names, and use `namespace te = tracktion;`.
 - Create and destroy Tracktion objects (`te::Engine`, `te::Edit`) on the message thread, and destroy every `Edit` before the `Engine`.
 - Keep the build warning-free under JUCE's recommended warning flags (`/W4` on MSVC). Never silence a warning without saying why, as [CMakeLists.txt](CMakeLists.txt) does for `/wd4702` and the `linux-tsan` preset in [CMakePresets.json](CMakePresets.json) does for `-Wno-tsan`.
@@ -329,7 +330,7 @@ The hooks don't replace reading the diff: gitleaks can't recognize personal data
 
 ## License and third-party code
 
-Phazite is licensed under the GNU Affero General Public License, version 3 (AGPL-3.0): see [LICENSE](LICENSE).
+Phazite is licensed under the GNU Affero General Public License, version 3 or (at your option) any later version (AGPL-3.0-or-later): see [LICENSE](LICENSE). Each source file says so in its first line: `// SPDX-License-Identifier: AGPL-3.0-or-later`.
 
 | Component | License | Role |
 |---|---|---|

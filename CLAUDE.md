@@ -1,6 +1,6 @@
 # Phazite
 
-Open-source DAW (AGPL-3.0) in C++20 on Tracktion Engine + JUCE. It hosts VST3 plug-ins (AU on macOS later). Performance and low resource use matter in both the audio engine and the UI.
+Open-source DAW (AGPL-3.0-or-later) in C++20 on Tracktion Engine + JUCE. It hosts VST3 plug-ins (AU on macOS later). Performance and low resource use matter in both the audio engine and the UI.
 
 ## Build
 
@@ -44,7 +44,7 @@ Run every command from the repository root. The presets are the only entry point
 - Everything under `external/` is read-only: don't edit, reformat or "fix" it. Don't stage a changed `external/*` pointer unless the task is a deliberate dependency bump; before committing, check `git status` for "(new commits)".
 - Never run `git submodule update --remote`: it would move JUCE away from the commit Tracktion pins. The Tracktion submodule is a shallow clone, so to bump it use the full 40-character commit hash: `git -C external/tracktion_engine fetch --depth 1 origin <full-sha>`, `git -C external/tracktion_engine checkout --detach FETCH_HEAD`, `git add external/tracktion_engine`, `git submodule update --init --recursive --depth 1`. Review the changes on GitHub (compare old...new) and read Tracktion's BREAKING-CHANGES.md, then reconfigure with `--fresh` and rebuild. The pre-commit hook refuses pin changes, so commit a bump with `git -c phazite.allowSubmoduleBump=true commit -F <file>`.
 - `external/tracktion_engine` contains CLAUDE.md files and `.claude/commands` written for Tracktion's own contributors (branch names, commit prefixes, choc's code style). They don't apply to Phazite; ignore them.
-- Phazite is AGPL-3.0. Only add code under compatible licences (GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, Zlib; not the 4-clause BSD licence). Never enable proprietary options such as Tracktion's Elastique, ReWire or REX support.
+- Phazite is AGPL-3.0-or-later. Only add code under compatible licences (GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, Zlib; not the 4-clause BSD licence). Never enable proprietary options such as Tracktion's Elastique, ReWire or REX support.
 
 ## Real-time rules (audio thread)
 
@@ -60,6 +60,7 @@ The audio thread is the audio callback and everything it calls: plug-in and grap
 
 ## Code conventions
 
+- Every C/C++ file starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`.
 - C++20. Include module headers directly (`<juce_gui_basics/juce_gui_basics.h>`, `<tracktion_engine/tracktion_engine.h>`), not `JuceHeader.h`. Qualify `juce::`; use `namespace te = tracktion;`.
 - Create and destroy Tracktion objects (Engine, Edit) on the message thread, and destroy every `te::Edit` before the `te::Engine`.
 - Keep the build warning-free under JUCE's recommended warning flags (/W4 on MSVC). Don't silence a warning without saying why.

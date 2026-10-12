@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite smoke test: application entry point.
 // Written against tracktion_engine develop @bb386171 (module 3.5.0) and the JUCE it pins (37c894f8).
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MainComponent.h"
 
 using namespace tracktion::literals; // 0_tp (time position), 16_bp (beat position), ...
