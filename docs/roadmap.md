@@ -73,6 +73,7 @@ Done:
 - *Done when:*
   - after the app is killed mid-session, restarting it offers the autosaved state;
   - tests cover save/load round trips.
+- *Status:* the model is done (`src/model/Project.h`, with tests). The app offers the restore once it has project menus (step 0.6).
 
 **0.5 Commands, keymaps and undo (M)**
 - A command registry with names, descriptions, search synonyms and categories.
@@ -342,7 +343,7 @@ Roughly in order of value:
 
 | Phase | Status |
 |---|---|
-| 0. Foundations | In progress: 0.1, 0.2 and 0.3 done ([real-time audit](realtime-audit.md)) |
+| 0. Foundations | In progress: 0.1, 0.2 and 0.3 done ([real-time audit](realtime-audit.md)); 0.4's model done |
 | 1. Make a beat | Not started |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
