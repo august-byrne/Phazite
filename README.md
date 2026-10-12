@@ -20,7 +20,7 @@ Phazite is an open-source digital audio workstation (DAW) in early development, 
 | Platform | Status |
 |---|---|
 | Windows 11 x64 | Builds (Debug and Release, zero warnings) with Visual Studio 2026 Build Tools, and runs. |
-| Linux / WSL2 (Windows Subsystem for Linux), Ubuntu 24.04 | Presets exist, but have never been built or run: see [Building on Linux and WSL2](#building-on-linux-and-wsl2-untested). |
+| Linux / WSL2 (Windows Subsystem for Linux), Ubuntu 24.04 | All four presets build in CI; running the app hasn't been tried yet. See [Building on Linux and WSL2](#building-on-linux-and-wsl2). |
 | macOS | Planned, with Audio Units hosting. No presets yet. |
 
 ## Building on Windows
@@ -170,9 +170,9 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). Th
 | `pre-commit: the staged changes have trailing whitespace or a leftover conflict marker` | Fix the lines it lists, stage the files again and commit. |
 | Anything else | The first line containing `error`, `fatal` or `FAILED` usually names the cause. If you're stuck, open an issue at https://github.com/august-byrne/Phazite/issues with that line and the command you ran. |
 
-## Building on Linux and WSL2 (untested)
+## Building on Linux and WSL2
 
-> **Never built or run yet.** These steps are worked out from the presets, the dependencies' sources and Ubuntu 24.04's packages, not from a working build, and may need fixes.
+> **Partly tested.** CI builds all four Linux presets on Ubuntu 24.04 with the packages below, but nobody has run the app on Linux or set up WSL2 with these steps yet, so they may need fixes.
 
 For WSL2, install Ubuntu 24.04 from a PowerShell opened with "Run as administrator", then restart Windows:
 
@@ -296,7 +296,7 @@ Threads share data only through lock-free FIFOs and `std::atomic` values, and pa
 
 **Builds.** Before you send a change, format it and build `windows-debug` (and `windows-release` for performance-related work) with zero warnings.
 
-**Continuous integration.** Every push and pull request runs [.github/workflows/ci.yml](.github/workflows/ci.yml) on GitHub's machines. It scans the whole history for secrets with gitleaks, checks formatting with clang-format 23.1.3 and checks whitespace. It also builds both Windows presets with Visual Studio 2026 (warnings count as errors) and all four Linux presets on Ubuntu 24.04. The results are on the repository's Actions tab.
+**Continuous integration.** Every push and pull request runs [.github/workflows/ci.yml](.github/workflows/ci.yml) on GitHub's machines. It scans the whole history for secrets with gitleaks, checks formatting with clang-format 23.1.3 and checks whitespace. It also builds both Windows presets with Visual Studio 2026 and all four Linux presets on Ubuntu 24.04, with warnings counting as errors. The results are on the repository's Actions tab, and compiler messages appear there as annotations.
 
 **Licenses.** Only add code under licenses compatible with the AGPL-3.0: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license). Never enable Tracktion's proprietary options (Elastique, ReWire, REX).
 

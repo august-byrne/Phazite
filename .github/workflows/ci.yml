@@ -1,6 +1,8 @@
 # Phazite's continuous integration: on every push and pull request, check the repository (secrets,
-# formatting, whitespace) and build every preset on Windows and Linux. Actions are pinned to full
-# commit hashes, so a moved tag can't change what runs.
+# formatting, whitespace) and build every preset on Windows and Linux with warnings as errors. The
+# problem matchers in .github/problem-matchers turn compiler messages into annotations on the run.
+# Builds keep going after a failure (ninja -k 0) to report every problem at once. Actions are pinned
+# to full commit hashes, so a moved tag can't change what runs.
 name: CI
 
 on:
@@ -55,7 +57,9 @@ jobs:
         run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_LINK_WARNING_AS_ERROR=ON
 
       - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: |
+          echo "::add-matcher::.github/problem-matchers/msvc.json"
+          cmake --build --preset ${{ matrix.preset }} -- -k 0
 
   linux:
     name: Linux (${{ matrix.preset }})
@@ -76,7 +80,9 @@ jobs:
               libfontconfig-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
 
       - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          cmake --build --preset ${{ matrix.preset }} -- -k 0
