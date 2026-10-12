@@ -141,15 +141,16 @@ ctest --preset windows-debug
 
 Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). This is what you should see:
 
-1. The main window opens with a menu bar; a top bar with **Play**, the tempo, key and CPU use, the master level and volume, **Keys** and **Search commands**; the Browser, Playlist and Inspector panels; the editor dock with Piano roll, Audio, Automation and Mixer tabs; and a hint bar along the bottom. Most panels are placeholders that name the roadmap step that builds them; the Inspector shows the synth track's channel. Phazite opens your default audio device, for output only.
+1. The main window opens with a menu bar; a top bar with the play button, the tempo, key and CPU use, the master level and volume, the computer-keyboard button and **Search commands**; the Browser, Playlist and Inspector panels; the editor dock with Piano roll, Audio, Automation and Mixer tabs; and a hint bar along the bottom. Most panels are placeholders that name the roadmap step that builds them; the Inspector shows the synth track's channel. Phazite opens your default audio device, for output only.
 2. The first start makes a project called "My First Song" in `Documents\Phazite\Projects` (each project is a folder) and opens it. Later starts open the project you used last.
-3. Turn your volume down, then press Space or click **Play**. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. Space or **Stop** stops it.
+3. Turn your volume down, then press Space or click the play button (▶) at the top left. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. Space or the same button (now ■) stops it.
 4. Play the synth yourself, with or without the arpeggio running:
-   - **Computer keyboard:** A S D F G H J K L ; play the white keys from middle C, and W E T Y U O P the black keys. Z and X move down or up an octave, C and V lower or raise the velocity. The **Keys** button in the top bar shows the octave and turns this on or off (in the FL Studio keymap, Ctrl+T does too). Shortcuts with Ctrl still work, and typing into a text field doesn't play notes.
+   - **Computer keyboard:** A S D F G H J K L ; play the white keys from middle C, and W E T Y U O P the black keys. Z and X move down or up an octave, C and V lower or raise the velocity. The keyboard button in the top bar shows the octave (C4 to start with) and turns this on or off (in the FL Studio keymap, Ctrl+T does too). Shortcuts with Ctrl still work, and typing into a text field doesn't play notes.
    - **MIDI keyboard:** plug it in and play; Phazite finds it within a few seconds. **Options > MIDI Settings** lists your MIDI inputs, each with an on/off switch.
 5. Try the window:
    - Ctrl+K or **Search commands** finds any command by typing part of its name; the arrow keys and Enter run one.
    - F7 shows or hides the piano roll, F9 the mixer and F8 the browser. **View** also switches between the Beat, Mix and Full layouts, and the dividers between panels can be dragged.
+   - The small window button in the top right corner of the Browser, the Inspector and the editor dock moves that panel to a window of its own, on your second monitor if you have one. Close that window to put the panel back.
    - **Options > Theme** switches between dark, light and high contrast; **Options > Keymap** switches to FL Studio's shortcuts (there, Ctrl+Z undoes or redoes, and Alt+F8 shows or hides the browser).
    - The hint bar says what the control under the pointer does. **View > Hover Help** turns the tooltips on or off.
    - **Options > Settings** (Ctrl+,) has three tabs: Audio, MIDI and Shortcuts, where any command's keys can be changed.
@@ -262,7 +263,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 | `src/app/` | The app: startup, the main window with its menus and dialogs, and the open project |
 | `src/ui/` | Components and the look: the window's panels, top bar, hint bar, command palette, themes and design tokens |
 | `src/model/` | Code without a UI, compiled with Tracktion Engine and JUCE into the `phazite_core` library that the app and the tests share |
-| `resources/` | Keymaps (compiled into the app) and the Inter font (copied next to the app, into `fonts/`) |
+| `resources/` | Keymaps and icons (compiled into the app), and the Inter font (copied next to the app, into `fonts/`) |
 | `tests/` | Unit tests (`phazite_tests`, doctest); `ctest --preset <preset>` runs them |
 | `docs/` | [The design](docs/design.md) and [the roadmap](docs/roadmap.md) |
 | `CMakeLists.txt`, `CMakePresets.json`, `cmake/` | Build definition, presets, Windows toolchain wrapper and CMake helpers |
@@ -370,6 +371,7 @@ Phazite is licensed under the GNU Affero General Public License, version 3 or (a
 | [WindowsToolchain](https://github.com/MarkSchofield/WindowsToolchain) | MIT | Finds MSVC at build time on Windows; nothing compiled in |
 | [doctest](https://github.com/doctest/doctest) (bundled with Tracktion Engine) | MIT | Unit-test framework; compiled into the tests only, not the app |
 | [Inter](https://github.com/rsms/inter) 4.1 (in `resources/fonts/Inter`) | SIL Open Font License 1.1 | The UI font; shipped as separate files with its licence text (`OFL.txt`), not compiled in |
+| [Lucide](https://lucide.dev) 1.55.0 icons (in `resources/icons/lucide`) | ISC; the icons from Feather (search, square): MIT | The icons Phazite uses, compiled in; the licence ships next to the app (`licenses/Lucide.txt`) |
 
 Tracktion Engine and JUCE are also available under commercial licenses; Phazite uses their open-source licenses (section 13 of both the AGPL-3.0 and the GPL-3.0 allows combining code under the two licenses). Both bundle further open-source code, such as choc, farbot, magic_enum, crill, rpmalloc, zlib, libpng, libjpeg, FLAC, Ogg Vorbis, HarfBuzz and SheenBidi: see `external/tracktion_engine/LICENSE.md`, `external/tracktion_engine/modules/juce/LICENSE.md`, and the license files and source-file headers of the bundled code under `external/`.
 

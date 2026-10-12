@@ -341,7 +341,16 @@ void MainWindow::setTheme (ui::ThemeName theme)
 {
     lookAndFeel.setTheme (theme);
     setBackgroundColour (lookAndFeel.getPalette().background);
+
+    // This window (even before it is on the screen), and every other one: panels in their own
+    // windows, dialogs and tooltips.
     sendLookAndFeelChange();
+    auto& desktop = juce::Desktop::getInstance();
+
+    for (int i = 0; i < desktop.getNumComponents(); ++i)
+        if (auto* window = desktop.getComponent (i); window != nullptr && window != this)
+            window->sendLookAndFeelChange();
+
     repaint();
 
     auto& settings = engine.getPropertyStorage().getPropertiesFile();
@@ -464,6 +473,11 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSeparator();
 
             for (const auto* id : { "view.toggleBrowser", "view.toggleInspector", "view.toggleEditor", "view.pianoRoll", "view.mixer" })
+                add (menu, id);
+
+            menu.addSeparator();
+
+            for (const auto* id : { "view.detachBrowser", "view.detachInspector", "view.detachEditor" })
                 add (menu, id);
 
             menu.addSeparator();

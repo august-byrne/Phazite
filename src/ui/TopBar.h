@@ -2,6 +2,7 @@
 #pragma once
 
 #include "Controls.h"
+#include "Icons.h"
 #include "model/Commands.h"
 #include "model/ComputerKeyboard.h"
 
@@ -32,7 +33,8 @@ private:
     ComputerKeyboard& computerKeyboard;
     std::function<te::Edit*()> getEdit;
 
-    juce::TextButton playButton { "Play" }, keyboardButton, searchButton;
+    IconButton playButton { "Play", Icon::play }, keyboardButton { "Computer keyboard", Icon::keyboard },
+        searchButton { "Search commands", Icon::search };
     juce::Label tempoLabel, keyLabel, cpuLabel;
     LevelMeter masterMeter { "Master level" };
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", te::decibelsToVolumeFaderPosition (0.0f) };

@@ -69,7 +69,7 @@ void TopBar::updateKeyboardButton()
     const auto from = juce::MidiMessage::getMidiNoteName (lowestNote, true, true, 4); // C4 is middle C
 
     keyboardButton.setToggleState (on, juce::dontSendNotification);
-    keyboardButton.setButtonText (on ? "Keys " + from : juce::String ("Keys off"));
+    keyboardButton.setButtonText (on ? from : juce::String ("Off"));
     setTooltipWithShortcut (keyboardButton,
                             on ? "The computer keyboard plays notes: A S D F G H J K L ; from " + from
                                      + ", and W E T Y U O P the black keys. Z and X change the octave, C and V the velocity (now "
@@ -96,12 +96,12 @@ void TopBar::resized()
 {
     auto area = getLocalBounds().reduced (Space::s, (getHeight() - controlHeight) / 2);
 
-    playButton.setBounds (area.removeFromLeft (80));
+    playButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::m);
 
-    searchButton.setBounds (area.removeFromRight (170));
+    searchButton.setBounds (area.removeFromRight (180));
     area.removeFromRight (Space::s);
-    keyboardButton.setBounds (area.removeFromRight (96));
+    keyboardButton.setBounds (area.removeFromRight (76));
     area.removeFromRight (Space::m);
     masterVolume.setBounds (area.removeFromRight (120));
     area.removeFromRight (Space::xs);
@@ -121,8 +121,12 @@ void TopBar::timerCallback()
     auto* edit = getEdit();
     const bool playing = edit != nullptr && edit->getTransport().isPlaying();
 
-    if (const auto text = juce::String (playing ? "Stop" : "Play"); playButton.getButtonText() != text)
-        playButton.setButtonText (text);
+    // The play button shows what clicking it does, and screen readers say so.
+    if (const auto title = juce::String (playing ? "Stop" : "Play"); playButton.getTitle() != title)
+    {
+        playButton.setTitle (title);
+        playButton.setIcon (playing ? Icon::stop : Icon::play);
+    }
 
     playButton.setEnabled (edit != nullptr);
 

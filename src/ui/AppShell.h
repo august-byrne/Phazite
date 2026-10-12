@@ -4,6 +4,7 @@
 
 #include "ChannelStrip.h"
 #include "HintBar.h"
+#include "Icons.h"
 #include "Panels.h"
 #include "TopBar.h"
 
@@ -13,6 +14,19 @@ class AppShell : public juce::Component
 {
 public:
     AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit);
+    ~AppShell() override;
+
+    // The panels that can move to a window of their own, for example on a second monitor. Closing
+    // that window puts the panel back.
+    enum class DetachablePanel
+    {
+        browser,
+        inspector,
+        editor
+    };
+
+    void setDetached (DetachablePanel, bool);
+    bool isDetached (DetachablePanel) const;
 
     // Layouts arrange the panels; they don't hide features.
     enum class Layout
@@ -66,7 +80,21 @@ private:
     juce::StretchableLayoutResizerBar editorDivider { &rows, 1, false };
     Centre centre;
 
+    // Each docked panel has a button in its top right corner that moves it to its own window.
+    IconButton browserDetachButton { "Move the browser to its own window", Icon::detach },
+        inspectorDetachButton { "Move the inspector to its own window", Icon::detach },
+        editorDetachButton { "Move the editor to its own window", Icon::detach };
+
+    struct PanelWindow;
+    std::unique_ptr<PanelWindow> browserWindow, inspectorWindow, editorWindow; // null while docked
+
     void updateLayout();
     void showEditor (EditorDock::Tab);
+    void placeDetachButtons();
+
+    juce::Component& getPanel (DetachablePanel);
+    IconButton& getDetachButton (DetachablePanel);
+    std::unique_ptr<PanelWindow>& getWindow (DetachablePanel);
+    const std::unique_ptr<PanelWindow>& getWindow (DetachablePanel) const;
 };
 } // namespace phazite::ui

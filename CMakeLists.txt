@@ -83,7 +83,13 @@ juce_add_binary_data(phazite_data
     NAMESPACE PhaziteData
     SOURCES
         resources/keymaps/phazite.json
-        resources/keymaps/fl_studio.json)
+        resources/keymaps/fl_studio.json
+        # Lucide icons (ISC; search and square from Feather, MIT): resources/icons/lucide/LICENSE
+        resources/icons/lucide/app-window.svg
+        resources/icons/lucide/keyboard-music.svg
+        resources/icons/lucide/play.svg
+        resources/icons/lucide/search.svg
+        resources/icons/lucide/square.svg)
 
 target_link_libraries(phazite_core PRIVATE phazite_data)
 
@@ -173,6 +179,8 @@ target_sources(Phazite PRIVATE
     src/ui/DesignTokens.h
     src/ui/HintBar.cpp
     src/ui/HintBar.h
+    src/ui/Icons.cpp
+    src/ui/Icons.h
     src/ui/LookAndFeel.cpp
     src/ui/LookAndFeel.h
     src/ui/Panels.cpp
@@ -195,6 +203,12 @@ add_custom_command(TARGET Phazite POST_BUILD
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts" "$<TARGET_FILE_DIR:Phazite>/fonts"
     VERBATIM)
 
+# The icons are compiled in, so their licence, which asks to go with every copy, goes next to the app.
+add_custom_command(TARGET Phazite POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/lucide/LICENSE" "$<TARGET_FILE_DIR:Phazite>/licenses/Lucide.txt"
+    VERBATIM)
+
 # --- Tests: doctest (MIT), bundled with Tracktion Engine. Run them with `ctest --preset <preset>`. ---
 option(PHAZITE_BUILD_TESTS "Build Phazite's unit tests (phazite_tests)" ON)
 
@@ -214,12 +228,14 @@ if(PHAZITE_BUILD_TESTS)
         tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
         tests/EngineSetupTests.cpp
+        tests/IconTests.cpp
         tests/LiveInputTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp
         tests/ValueTextTests.cpp
-        # The UI files the tests use: the base controls, which link to the engine's parameters.
+        # The UI files the tests use: the base controls, which link to the engine's parameters, and the icons.
         src/ui/Controls.cpp
+        src/ui/Icons.cpp
         src/ui/LookAndFeel.cpp)
 
     phazite_use_core(phazite_tests)

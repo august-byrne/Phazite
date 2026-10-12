@@ -139,7 +139,7 @@ Phazite's look should be as clean and consistent as its workflow. Its design lan
   - a dark theme first, then light and high-contrast themes;
   - a track-color palette that stays distinguishable for color-blind users.
 - **Spacing and sizing:** a 4-pixel grid, standard control heights and consistent padding.
-- **Icons:** one consistent open icon set under the MIT or ISC licence, chosen in step 0.6, plus custom icons drawn to match.
+- **Icons (decided in step 0.6): [Lucide](https://lucide.dev)** ([B42](#appendix-b-sources)), line icons under the ISC licence (those taken from Feather: MIT), drawn in the theme's colors, plus custom icons drawn to match. Phazite copies in only the icons it uses (`resources/icons/lucide/`).
 - **Motion:** short, purposeful animation (around 100–150 ms). None in places that redraw constantly, and the system's reduced-motion setting is respected.
 
 ## 5. Building blocks
@@ -738,6 +738,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 | 2026-10-12 | Typography: bundle Inter (SIL OFL 1.1) as separate files, as part of a design language with color, spacing, icon and motion tokens |
 | 2026-10-12 | Engine problems: simple workarounds first; fork Tracktion Engine if workarounds get awkward or upstream issues block us |
 | 2026-10-12 | Step 0.7 defaults: the computer keyboard plays notes, laid out as in Ableton Live and Logic Pro; live MIDI plays the first track with an instrument until tracks can be selected |
+| 2026-10-12 | Icons: Lucide (ISC), step 0.6 |
 
 ## Appendix A. Research summary
 
@@ -817,3 +818,4 @@ In October 2026, research agents reviewed about 20 DAWs, and the Tracktion Engin
 - **B39** GNU project, licence list (SIL OFL entry): <https://www.gnu.org/licenses/license-list.html#SILOFL>
 - **B40** Ableton Live 12 manual, MIDI and Key Remote Control (playing MIDI with the computer keyboard): <https://www.ableton.com/en/manual/midi-and-key-remote-control/>
 - **B41** FL Studio manual, keyboard and mouse shortcuts (Ctrl+T typing keyboard to piano, F10 MIDI settings): <https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/basics_shortcuts.htm>
+- **B42** Lucide icons and licence (ISC; MIT for the icons from Feather): <https://github.com/lucide-icons/lucide/blob/main/LICENSE>
