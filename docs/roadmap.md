@@ -122,7 +122,8 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Done when:* a beat can be laid out from one-shots and MIDI clips with just the keyboard and the Smart Tool.
 - *Status:* in progress, in four parts.
   - **Part 1, done:** the timeline (`src/model/Timeline.h`: positions in beats, zoom, and a grid that adapts to the zoom or has a fixed size, with snap and triplets) and the tracks (`src/model/Tracks.h`: add, delete, duplicate, move, select, mute, solo, colors from the color-blind-safe palette, heights). The playlist (`src/ui/Playlist.h`) has the ruler, the playhead, scrolling, zoom and track headers that rename, recolor, resize and move tracks; live MIDI and the inspector follow the selected track.
-  - **Next:** clips with waveforms and note previews, and the Smart Tool (part 2); the single-key tools and editing commands (part 3); folders, pinning, focus mode and files dropped from Explorer (part 4).
+  - **Part 2, done:** clips (`src/ui/ClipComponent.h`): audio clips with waveforms and fades, MIDI clips with their notes, and aliases marked with a `*`. The Smart Tool (`src/model/SmartTool.h`, `src/model/Clips.h`): trim at the edges, fades at the top corners, a time range from the upper half or empty space, and moving, copying (Ctrl) or aliasing (Ctrl+Shift) from the lower half, across tracks, snapped unless Alt is held, each drag one named undo step. Delete, duplicate and select all work on clips (`src/model/Selection.h`), and double-clicking a track with an instrument adds a MIDI clip.
+  - **Next:** the single-key tools and editing commands, including those for time ranges and crossfades (part 3); folders, pinning, focus mode and files dropped from Explorer (part 4).
 
 **1.2 Sections and song outlines (M)**
 - The sections strip. Move, duplicate (also as aliases), delete and resize a section across all tracks.
@@ -351,7 +352,7 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: step 1.1, part 1 of 4 (timeline, grid and tracks) |
+| 1. Make a beat | In progress: step 1.1, parts 1 and 2 of 4 (timeline, grid, tracks, clips and the Smart Tool) |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |

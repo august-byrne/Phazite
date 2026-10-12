@@ -30,6 +30,9 @@ juce::Array<te::Track*> getPlaylistTracks (const te::Edit&);
 // The selected tracks, top to bottom.
 juce::Array<te::Track*> getSelectedTracks (const te::SelectionManager&);
 
+// The same, without the tracks in a selected folder: those go wherever their folder goes.
+juce::Array<te::Track*> getSelectedOutermostTracks (const te::SelectionManager&);
+
 // The place right after a track, in the same folder. (Tracktion's TrackInsertPoint (track, false)
 // means the start of the list for the first top-level track.)
 te::TrackInsertPoint getInsertPointAfter (te::Track&);
@@ -50,7 +53,8 @@ void setTrackHeight (te::Track&, int height); // kept between the minimum and th
 // color, and selects it alone. Returns nullptr if the Edit already has as many tracks as it can hold.
 te::AudioTrack* insertTrack (te::Edit&, te::Track* after, te::SelectionManager*);
 
-// The track commands that need no window: add, delete, duplicate, select, move, mute, solo and height.
-// They act on the tracks selected in the selection manager's Edit. The playlist adds rename and color.
+// The track commands that need no window: add, select the track above or below, move, mute, solo and
+// height. They act on the tracks selected in the selection manager's Edit. Delete and duplicate are
+// selection commands (Selection.h); the playlist adds rename and color.
 void addTrackCommands (CommandRegistry&, te::SelectionManager&);
 } // namespace phazite

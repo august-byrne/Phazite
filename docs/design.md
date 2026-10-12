@@ -743,6 +743,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 | 2026-10-12 | Icons: Lucide (ISC), step 0.6 |
 | 2026-10-12 | Single-key shortcuts and the computer keyboard: Ableton Live's way, Shift and a letter for the shortcut while the keyboard plays notes |
 | 2026-10-12 | Step 1.1 defaults: the playlist's time axis is in beats, as in FL Studio and Ableton Live, so tempo changes don't move the grid; the grid adapts to the zoom unless a fixed size is picked; live MIDI follows the selected track (like FL Studio's selected channel); Delete deletes the selection and selects the next track, as in Ableton Live; track heights are saved in the project but aren't undo steps |
+| 2026-10-12 | Smart Tool defaults until the milestone 1 usability test settles them: Ctrl+drag copies a clip and Ctrl+Shift+drag makes an alias, in both keymaps (FL Studio's Shift+drag clone isn't mapped yet); Alt places freely; clips show their track's color unless given their own; Duplicate puts copies of clips right after them, as FL Studio's Ctrl+B does |
 
 ## Appendix A. Research summary
 

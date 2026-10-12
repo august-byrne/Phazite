@@ -26,9 +26,20 @@ bool hasInstrument (const te::AudioTrack& track)
     return false;
 }
 
+te::AudioTrack* getSelectedAudioTrack (const te::SelectionManager& selection)
+{
+    if (auto* track = selection.getFirstItemOfType<te::AudioTrack>())
+        return track;
+
+    if (auto* clip = selection.getFirstItemOfType<te::Clip>())
+        return dynamic_cast<te::AudioTrack*> (clip->getTrack());
+
+    return nullptr;
+}
+
 void followSelectedTrack (const te::SelectionManager& selection)
 {
-    if (auto* track = selection.getFirstItemOfType<te::AudioTrack>(); track != nullptr && hasInstrument (*track))
+    if (auto* track = getSelectedAudioTrack (selection); track != nullptr && hasInstrument (*track))
         setLiveMidiTrack (*track);
     else if (auto* edit = selection.getEdit())
         routeLiveMidiInput (*edit); // in case the track it played was deleted

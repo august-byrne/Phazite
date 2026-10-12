@@ -6,6 +6,7 @@
 #include "ProjectSession.h"
 #include "model/Commands.h"
 #include "model/EngineSetup.h"
+#include "model/Selection.h"
 #include "model/Tracks.h"
 #include "ui/LookAndFeel.h"
 
@@ -49,6 +50,7 @@ public:
         mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel);
 
         addEditCommands (*commands, uiBehaviour);
+        addSelectionCommands (*commands, session->getSelection());
         addTrackCommands (*commands, session->getSelection());
         session->addCommands (*commands);
         mainWindow->addCommands();

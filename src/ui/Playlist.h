@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist: the song's tracks on a timeline, with a ruler, the grid, the playhead and a header for
-// each track (roadmap step 1.1). Clips, the tools and folders come in the step's later parts.
+// The playlist: the song's tracks and clips on a timeline, with a ruler, the grid, the playhead and a
+// header for each track (roadmap step 1.1). The Smart Tool edits the clips: where a drag starts on a clip
+// decides what it does (model/SmartTool.h). The single-key tools and folders come in the step's later parts.
 #pragma once
 
+#include "ClipComponent.h"
 #include "Icons.h"
 #include "TrackHeader.h"
 #include "model/Commands.h"
+#include "model/SmartTool.h"
 #include "model/Timeline.h"
+
+#include <optional>
 
 namespace phazite::ui
 {
@@ -40,12 +45,20 @@ private:
     struct Ruler;
     struct Lanes;
     struct Playhead;
+    struct Gesture;
 
     struct Row
     {
         te::SafeSelectable<te::Track> track;
         int top = 0, height = 0; // in the track area, before scrolling
         juce::Colour colour;
+    };
+
+    // A time range across some rows, as dragging the upper half of a clip or empty space selects it.
+    struct RangeSelection
+    {
+        te::BeatRange range;
+        int firstRow = 0, lastRow = 0;
     };
 
     CommandRegistry& commands;
@@ -69,9 +82,12 @@ private:
 
     std::vector<Row> rows;
     juce::OwnedArray<TrackHeader> headers; // headers[i] shows rows[i]
+    juce::OwnedArray<ClipComponent> clipComponents;
     int contentHeight = 0;
     te::SafeSelectable<te::Track> selectionAnchor; // where Shift-click ranges start
     int dropRow = -1;                              // while a track is dragged: the row it would go before (rows.size() for the end)
+    std::optional<RangeSelection> rangeSelection;
+    std::unique_ptr<Gesture> gesture; // what the mouse is doing in the lanes, from mouse down to mouse up
 
     // The rows of tracks.
     void rebuild(); // after tracks were added, deleted, moved or changed
@@ -83,6 +99,26 @@ private:
     void setScrollY (int);
     void scrollToShow (int row);
     void updateScrollBars();
+
+    // The clips.
+    void rebuildClips();
+    void layOutClips();
+    void updateClips();                                   // their colors and whether they are selected
+    juce::Rectangle<int> getClipBounds (te::Clip&) const; // in the lanes
+    ClipComponent* getClipComponentAt (juce::Point<int>) const;
+    ClipComponent* getClipComponentFor (const juce::ValueTree& clipState) const;
+    void clipChanged (const juce::ValueTree& clipState);
+    void clipClicked (te::Clip&, const juce::ModifierKeys&);
+    void showClipMenu();
+
+    // The Smart Tool: the mouse in the lanes.
+    void lanesMouseMove (const juce::MouseEvent&);
+    void lanesMouseDown (const juce::MouseEvent&);
+    void lanesMouseDrag (const juce::MouseEvent&);
+    void lanesMouseUp (const juce::MouseEvent&);
+    void lanesDoubleClick (const juce::MouseEvent&);
+    void beginDrag (const juce::MouseEvent&);
+    void setRangeSelection (std::optional<RangeSelection>);
 
     // Time and the grid.
     te::TimecodeSnapType getSnapType() const;

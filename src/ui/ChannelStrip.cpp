@@ -143,7 +143,7 @@ void Inspector::showTrack()
 
     if (auto* edit = getEdit())
     {
-        track = selection.getFirstItemOfType<te::AudioTrack>();
+        track = getSelectedAudioTrack (selection);
 
         if (track == nullptr)
             track = getLiveMidiTrack (*edit);

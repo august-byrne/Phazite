@@ -27,7 +27,10 @@ void routeLiveMidiInput (te::Edit&);
 // True if the track has an instrument (a synth or sampler plug-in) that live MIDI input can play.
 bool hasInstrument (const te::AudioTrack&);
 
-// Live MIDI input follows the selection, as FL Studio's selected channel does: if the first selected
-// track has an instrument, it plays that track. Call it when the selection changes.
+// The track the selection is about: the first selected audio track, or else the first selected clip's.
+te::AudioTrack* getSelectedAudioTrack (const te::SelectionManager&);
+
+// Live MIDI input follows the selection, as FL Studio's selected channel does: if the selected track (see
+// getSelectedAudioTrack()) has an instrument, it plays that track. Call it when the selection changes.
 void followSelectedTrack (const te::SelectionManager&);
 } // namespace phazite

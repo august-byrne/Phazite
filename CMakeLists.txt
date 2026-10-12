@@ -61,6 +61,8 @@ add_library(phazite_core STATIC)
 target_sources(phazite_core PRIVATE
     src/model/AppInfo.cpp
     src/model/AppInfo.h
+    src/model/Clips.cpp
+    src/model/Clips.h
     src/model/Commands.cpp
     src/model/Commands.h
     src/model/ComputerKeyboard.cpp
@@ -71,6 +73,10 @@ target_sources(phazite_core PRIVATE
     src/model/LiveInput.h
     src/model/Project.cpp
     src/model/Project.h
+    src/model/Selection.cpp
+    src/model/Selection.h
+    src/model/SmartTool.cpp
+    src/model/SmartTool.h
     src/model/StarterProject.cpp
     src/model/StarterProject.h
     src/model/Timeline.cpp
@@ -178,6 +184,8 @@ target_sources(Phazite PRIVATE
     src/ui/AppShell.h
     src/ui/ChannelStrip.cpp
     src/ui/ChannelStrip.h
+    src/ui/ClipComponent.cpp
+    src/ui/ClipComponent.h
     src/ui/CommandPalette.cpp
     src/ui/CommandPalette.h
     src/ui/Controls.cpp
@@ -233,6 +241,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppInfoTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/ClipTests.cpp
         tests/CommandTests.cpp
         tests/ComputerKeyboardTests.cpp
         tests/ControlsTests.cpp

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
 #include "model/Commands.h"
+#include "model/Selection.h"
 #include "model/Tracks.h"
 
 namespace
@@ -17,6 +18,7 @@ struct Tracks
 
         edit->getUndoManager().clearUndoHistory();
         selection.edit = edit.get();
+        phazite::addSelectionCommands (registry, selection);
         phazite::addTrackCommands (registry, selection);
     }
 

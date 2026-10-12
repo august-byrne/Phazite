@@ -27,37 +27,6 @@ namespace
         return nullptr;
     }
 
-    // The selected tracks, without those in a selected folder: they go wherever their folder goes.
-    juce::Array<te::Track*> getSelectedOutermostTracks (const te::SelectionManager& selection)
-    {
-        juce::Array<te::Track*> tracks;
-
-        for (auto* track : getSelectedTracks (selection))
-        {
-            auto inSelectedFolder = false;
-
-            for (auto* folder = track->getParentFolderTrack(); folder != nullptr && ! inSelectedFolder;
-                 folder = folder->getParentFolderTrack())
-                inSelectedFolder = selection.isSelected (folder);
-
-            if (! inSelectedFolder)
-                tracks.add (track);
-        }
-
-        return tracks;
-    }
-
-    // "Delete Track", "Delete 3 Tracks", or just "Delete" with no track selected.
-    juce::String nameForSelection (const te::SelectionManager& selection, const juce::String& verb)
-    {
-        const auto count = getSelectedTracks (selection).size();
-
-        if (count == 0)
-            return verb;
-
-        return verb + (count == 1 ? juce::String (" Track") : " " + juce::String (count) + " Tracks");
-    }
-
     void selectNeighbour (te::SelectionManager& selection, int direction)
     {
         auto* edit = selection.getEdit();
@@ -200,6 +169,24 @@ juce::Array<te::Track*> getSelectedTracks (const te::SelectionManager& selection
     return selected;
 }
 
+juce::Array<te::Track*> getSelectedOutermostTracks (const te::SelectionManager& selection)
+{
+    juce::Array<te::Track*> tracks;
+
+    for (auto* track : getSelectedTracks (selection))
+    {
+        auto inSelectedFolder = false;
+
+        for (auto* folder = track->getParentFolderTrack(); folder != nullptr && ! inSelectedFolder; folder = folder->getParentFolderTrack())
+            inSelectedFolder = selection.isSelected (folder);
+
+        if (! inSelectedFolder)
+            tracks.add (track);
+    }
+
+    return tracks;
+}
+
 te::TrackInsertPoint getInsertPointAfter (te::Track& track)
 {
     return { track.getParentTrack(), &track };
@@ -267,88 +254,6 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     },
                     .isEnabled = hasEdit,
                     .undoTarget = getEdit });
-
-    registry.add ({ .id = "edit.delete",
-                    .name = "Delete",
-                    .category = "Edit",
-                    .description = "Deletes the selection, such as the selected tracks.",
-                    .synonyms = { "remove", "erase" },
-                    .perform =
-                        [&selection]
-                    {
-                        auto* edit = selection.getEdit();
-                        const auto tracks = getSelectedOutermostTracks (selection);
-
-                        if (edit == nullptr || tracks.isEmpty())
-                            return;
-
-                        const auto row = getPlaylistTracks (*edit).indexOf (tracks.getFirst());
-
-                        for (auto* track : tracks)
-                            edit->deleteTrack (track);
-
-                        // The track that takes the first one's place is selected, as in Ableton Live, so
-                        // the keyboard can carry on from there.
-                        if (const auto remaining = getPlaylistTracks (*edit); ! remaining.isEmpty())
-                            selection.selectOnly (remaining[juce::jmin (row, remaining.size() - 1)]);
-                    },
-                    .isEnabled = hasSelectedTracks,
-                    .undoTarget = getEdit,
-                    .currentName = [&selection] { return nameForSelection (selection, "Delete"); } });
-
-    registry.add ({ .id = "edit.duplicate",
-                    .name = "Duplicate",
-                    .category = "Edit",
-                    .description = "Duplicates the selection, such as the selected tracks: each copy goes right after its original.",
-                    .synonyms = { "copy", "clone", "repeat" },
-                    .perform =
-                        [&selection]
-                    {
-                        auto* edit = selection.getEdit();
-
-                        if (edit == nullptr)
-                            return;
-
-                        juce::Array<te::Track*> copies;
-
-                        for (auto* track : getSelectedOutermostTracks (selection))
-                            if (auto copy = edit->copyTrack (track, getInsertPointAfter (*track)))
-                                copies.add (copy.get());
-
-                        selection.deselectAll();
-
-                        for (auto* copy : copies)
-                            selection.addToSelection (copy);
-                    },
-                    .isEnabled = hasSelectedTracks,
-                    .undoTarget = getEdit,
-                    .currentName = [&selection] { return nameForSelection (selection, "Duplicate"); } });
-
-    registry.add ({ .id = "edit.selectAll",
-                    .name = "Select All",
-                    .category = "Edit",
-                    .description = "Selects every track.",
-                    .synonyms = { "everything" },
-                    .perform =
-                        [&selection]
-                    {
-                        if (auto* edit = selection.getEdit())
-                        {
-                            selection.deselectAll();
-
-                            for (auto* track : getPlaylistTracks (*edit))
-                                selection.addToSelection (track);
-                        }
-                    },
-                    .isEnabled = hasEdit });
-
-    registry.add ({ .id = "edit.deselectAll",
-                    .name = "Deselect All",
-                    .category = "Edit",
-                    .description = "Clears the selection.",
-                    .synonyms = { "select none", "clear selection" },
-                    .perform = [&selection] { selection.deselectAll(); },
-                    .isEnabled = [&selection] { return selection.getNumObjectsSelected() > 0; } });
 
     registry.add ({ .id = "track.selectPrevious",
                     .name = "Select Track Above",
