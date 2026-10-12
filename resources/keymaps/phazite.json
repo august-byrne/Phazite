@@ -1,0 +1,14 @@
+{
+  "name": "Phazite",
+  "description": "Shortcuts that most music apps and the operating system share. \"command\" is Ctrl on Windows and Linux, Cmd on macOS.",
+  "keys": {
+    "transport.playStop": [ "spacebar" ],
+    "edit.undo": [ "command + Z" ],
+    "edit.redo": [ "command + shift + Z", "command + Y" ],
+    "project.new": [ "command + N" ],
+    "project.open": [ "command + O" ],
+    "project.save": [ "command + S" ],
+    "project.saveAs": [ "command + shift + S" ],
+    "view.commandPalette": [ "command + K" ]
+  }
+}

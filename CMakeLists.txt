@@ -61,10 +61,23 @@ add_library(phazite_core STATIC)
 target_sources(phazite_core PRIVATE
     src/model/AppInfo.cpp
     src/model/AppInfo.h
+    src/model/Commands.cpp
+    src/model/Commands.h
     src/model/EngineSetup.cpp
     src/model/EngineSetup.h
     src/model/Project.cpp
     src/model/Project.h)
+
+# Small data files compiled into the program (PhaziteData.h, namespace PhaziteData). Fonts don't go
+# here: CLAUDE.md requires them as separate files next to the app.
+juce_add_binary_data(phazite_data
+    HEADER_NAME PhaziteData.h
+    NAMESPACE PhaziteData
+    SOURCES
+        resources/keymaps/phazite.json
+        resources/keymaps/fl_studio.json)
+
+target_link_libraries(phazite_core PRIVATE phazite_data)
 
 target_include_directories(phazite_core PUBLIC src)
 target_compile_features(phazite_core PUBLIC cxx_std_20)
@@ -160,6 +173,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppInfoTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/CommandTests.cpp
         tests/EngineSetupTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp)

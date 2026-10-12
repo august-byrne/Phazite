@@ -81,6 +81,7 @@ Done:
 - Keymap files (Phazite default and FL Studio), and key rebinding.
 - The command palette (Ctrl+K), and macros made of chained commands.
 - *Done when:* every action in the app so far is a command, can be found in the palette, and shows by name in the undo history.
+- *Status:* the registry, keymaps (Phazite and FL Studio, in `resources/keymaps/`), named undo, macros and the palette's search are done (`src/model/Commands.h`, with tests). The palette's window and the app's own commands come with step 0.6.
 
 **0.6 UI shell and design system (L)**
 - **The main window:** docking panels that resize, collapse and detach to another monitor. Layouts: Beat, Mix and Full.
@@ -343,7 +344,7 @@ Roughly in order of value:
 
 | Phase | Status |
 |---|---|
-| 0. Foundations | In progress: 0.1, 0.2 and 0.3 done ([real-time audit](realtime-audit.md)); 0.4's model done |
+| 0. Foundations | In progress: 0.1, 0.2 and 0.3 done ([real-time audit](realtime-audit.md)); 0.4's and 0.5's model done |
 | 1. Make a beat | Not started |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |

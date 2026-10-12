@@ -1,0 +1,13 @@
+{
+  "name": "FL Studio",
+  "description": "FL Studio's shortcuts, from its manual, for the commands Phazite has so far. Ctrl+Z undoes or redoes the last change; Ctrl+Alt+Z undoes step by step.",
+  "keys": {
+    "transport.playStop": [ "spacebar" ],
+    "edit.undoOrRedo": [ "command + Z" ],
+    "edit.undo": [ "command + alt + Z" ],
+    "project.open": [ "command + O" ],
+    "project.save": [ "command + S" ],
+    "project.saveAs": [ "command + shift + S" ],
+    "view.commandPalette": [ "command + K" ]
+  }
+}
