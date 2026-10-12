@@ -7,7 +7,27 @@ namespace phazite
 {
 namespace
 {
-    const juce::Identifier heightProperty { "phaziteHeight" };
+    const juce::Identifier heightProperty { "phaziteHeight" }, collapsedProperty { "phaziteCollapsed" }, pinnedProperty { "phazitePinned" };
+
+    // The palette's next color after the track a new one goes below (the last track if that is nullptr),
+    // so that neighbours differ.
+    juce::Colour getNextColour (te::Edit& edit, te::Track* after)
+    {
+        const auto tracks = getPlaylistTracks (edit);
+        const auto& colours = getTrackColours();
+        size_t next = 0;
+
+        if (auto* above = after != nullptr ? after : tracks.getLast())
+        {
+            const auto aboveColour = getTrackColour (*above, tracks.indexOf (above));
+
+            for (size_t i = 0; i < colours.size(); ++i)
+                if (colours[i].colour == aboveColour)
+                    next = (i + 1) % colours.size();
+        }
+
+        return colours[next].colour;
+    }
 
     bool isPlaylistTrack (const te::Track& track)
     {
@@ -203,35 +223,118 @@ void setTrackHeight (te::Track& track, int height)
     track.state.setProperty (heightProperty, juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, height), nullptr);
 }
 
+bool isCollapsed (const te::Track& track)
+{
+    return track.state.getProperty (collapsedProperty, false);
+}
+
+void setCollapsed (te::Track& track, bool collapsed)
+{
+    track.state.setProperty (collapsedProperty, collapsed, nullptr);
+}
+
+bool isPinned (const te::Track& track)
+{
+    return track.state.getProperty (pinnedProperty, false);
+}
+
+void setPinned (te::Track& track, bool pinned)
+{
+    track.state.setProperty (pinnedProperty, pinned, nullptr);
+}
+
+bool isHiddenInCollapsedFolder (const te::Track& track)
+{
+    for (auto* folder = track.getParentFolderTrack(); folder != nullptr; folder = folder->getParentFolderTrack())
+        if (isCollapsed (*folder))
+            return true;
+
+    return false;
+}
+
 //==============================================================================
 te::AudioTrack* insertTrack (te::Edit& edit, te::Track* after, te::SelectionManager* selection)
 {
-    const auto tracks = getPlaylistTracks (edit);
+    const auto colour = getNextColour (edit, after);
     auto track =
         edit.insertNewAudioTrack (after != nullptr ? getInsertPointAfter (*after) : te::TrackInsertPoint::getEndOfTracks (edit), nullptr);
 
     if (track == nullptr)
         return nullptr;
 
-    // The palette's next color after the track above, so neighbours differ.
-    const auto& colours = getTrackColours();
-    size_t next = 0;
-
-    if (auto* above = after != nullptr ? after : tracks.getLast())
-    {
-        const auto aboveColour = getTrackColour (*above, tracks.indexOf (above));
-
-        for (size_t i = 0; i < colours.size(); ++i)
-            if (colours[i].colour == aboveColour)
-                next = (i + 1) % colours.size();
-    }
-
-    track->setColour (colours[next].colour);
+    track->setColour (colour);
 
     if (selection != nullptr)
         selection->selectOnly (track.get());
 
     return track.get();
+}
+
+te::FolderTrack* insertFolder (te::Edit& edit, te::Track* after, te::SelectionManager* selection)
+{
+    const auto colour = getNextColour (edit, after);
+    auto folder = edit.insertNewFolderTrack (after != nullptr ? getInsertPointAfter (*after) : te::TrackInsertPoint::getEndOfTracks (edit),
+                                             nullptr, false);
+
+    if (folder == nullptr)
+        return nullptr;
+
+    folder->setName ("Folder");
+    folder->setColour (colour);
+
+    if (selection != nullptr)
+        selection->selectOnly (folder.get());
+
+    return folder.get();
+}
+
+te::FolderTrack* groupIntoFolder (const juce::Array<te::Track*>& tracks, te::SelectionManager* selection)
+{
+    if (tracks.isEmpty())
+        return nullptr;
+
+    // Where the first track is, in its own folder if it has one; in its color.
+    auto& first = *tracks.getFirst();
+    const auto colour = getTrackColour (first, getPlaylistTracks (first.edit).indexOf (&first));
+    auto folder = first.edit.insertNewFolderTrack (te::TrackInsertPoint (first, true), nullptr, false);
+
+    if (folder == nullptr)
+        return nullptr;
+
+    folder->setName ("Folder");
+    folder->setColour (colour);
+
+    for (auto* track : tracks)
+        moveTrackIntoFolder (*track, *folder);
+
+    if (selection != nullptr)
+        selection->selectOnly (folder.get());
+
+    return folder.get();
+}
+
+void moveTrackIntoFolder (te::Track& track, te::FolderTrack& folder)
+{
+    // A folder can't go into itself, or into a folder inside it.
+    if (&track == &folder || folder.isAChildOf (track))
+        return;
+
+    const auto children = folder.getAllSubTracks (false);
+    track.edit.moveTrack (&track, children.isEmpty() ? te::TrackInsertPoint (&folder, nullptr) : getInsertPointAfter (*children.getLast()));
+}
+
+void ungroupFolder (te::FolderTrack& folder)
+{
+    auto& edit = folder.edit;
+    te::Track* previous = &folder;
+
+    for (auto* child : folder.getAllSubTracks (false))
+    {
+        edit.moveTrack (child, getInsertPointAfter (*previous));
+        previous = child;
+    }
+
+    edit.deleteTrack (&folder);
 }
 
 //==============================================================================
@@ -254,6 +357,105 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     },
                     .isEnabled = hasEdit,
                     .undoTarget = getEdit });
+
+    // Folders.
+    const auto getSelectedFolders = [&selection]
+    {
+        juce::Array<te::FolderTrack*> folders;
+
+        for (auto* track : getSelectedTracks (selection))
+            if (auto* folder = dynamic_cast<te::FolderTrack*> (track))
+                folders.add (folder);
+
+        return folders;
+    };
+
+    const auto hasSelectedFolders = [getSelectedFolders] { return ! getSelectedFolders().isEmpty(); };
+
+    registry.add ({ .id = "track.addFolder",
+                    .name = "Add Folder",
+                    .category = "Track",
+                    .description = "Adds an empty folder below the selected track, or at the bottom.",
+                    .synonyms = { "new folder", "group", "bus" },
+                    .perform =
+                        [&selection]
+                    {
+                        if (auto* edit = selection.getEdit())
+                            insertFolder (*edit, getSelectedTracks (selection).getLast(), &selection);
+                    },
+                    .isEnabled = hasEdit,
+                    .undoTarget = getEdit });
+
+    registry.add ({ .id = "track.groupIntoFolder",
+                    .name = "Group into Folder",
+                    .category = "Track",
+                    .description = "Puts the selected tracks into a new folder. A folder becomes a bus when it holds an effect.",
+                    .synonyms = { "group", "folder", "bus", "submix" },
+                    .perform = [&selection] { groupIntoFolder (getSelectedOutermostTracks (selection), &selection); },
+                    .isEnabled = hasSelectedTracks,
+                    .undoTarget = getEdit });
+
+    registry.add ({ .id = "track.ungroup",
+                    .name = "Ungroup Folder",
+                    .category = "Track",
+                    .description = "Takes the tracks out of the selected folders, and deletes the folders.",
+                    .synonyms = { "remove folder", "ungroup", "unfolder" },
+                    .perform =
+                        [getSelectedFolders]
+                    {
+                        for (auto* folder : getSelectedFolders())
+                            ungroupFolder (*folder);
+                    },
+                    .isEnabled = hasSelectedFolders,
+                    .undoTarget = getEdit });
+
+    // Collapsing and pinning change the view, so they aren't undo steps.
+    registry.add ({ .id = "track.collapse",
+                    .name = "Collapse Folder",
+                    .category = "Track",
+                    .description = "Hides the tracks in the selected folders, or shows them again.",
+                    .synonyms = { "fold", "unfold", "expand", "hide" },
+                    .perform =
+                        [getSelectedFolders]
+                    {
+                        const auto folders = getSelectedFolders();
+                        const auto collapse =
+                            ! std::all_of (folders.begin(), folders.end(), [] (te::FolderTrack* f) { return isCollapsed (*f); });
+
+                        for (auto* folder : folders)
+                            setCollapsed (*folder, collapse);
+                    },
+                    .isEnabled = hasSelectedFolders,
+                    .isTicked =
+                        [getSelectedFolders]
+                    {
+                        const auto folders = getSelectedFolders();
+                        return ! folders.isEmpty()
+                               && std::all_of (folders.begin(), folders.end(), [] (te::FolderTrack* f) { return isCollapsed (*f); });
+                    } });
+
+    registry.add ({ .id = "track.pin",
+                    .name = "Pin Track",
+                    .category = "Track",
+                    .description = "Keeps the selected tracks in view at the top of the playlist while the others scroll.",
+                    .synonyms = { "stick", "keep visible", "unpin" },
+                    .perform =
+                        [&selection]
+                    {
+                        const auto tracks = getSelectedTracks (selection);
+                        const auto pin = ! std::all_of (tracks.begin(), tracks.end(), [] (te::Track* t) { return isPinned (*t); });
+
+                        for (auto* track : tracks)
+                            setPinned (*track, pin);
+                    },
+                    .isEnabled = hasSelectedTracks,
+                    .isTicked =
+                        [&selection]
+                    {
+                        const auto tracks = getSelectedTracks (selection);
+                        return ! tracks.isEmpty()
+                               && std::all_of (tracks.begin(), tracks.end(), [] (te::Track* t) { return isPinned (*t); });
+                    } });
 
     registry.add ({ .id = "track.selectPrevious",
                     .name = "Select Track Above",

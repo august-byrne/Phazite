@@ -30,13 +30,15 @@ public:
 
     te::Track* getTrack() const { return track.get(); }
 
-    // Shows the track as it is now: its name, color, mute and solo, and whether it is selected.
-    void update (juce::Colour, bool isSelected);
+    // Shows the track as it is now: its name, color, mute and solo, whether it is selected, and how deep
+    // in folders it is (its name is indented as far). A folder has a triangle that collapses it.
+    void update (juce::Colour, bool isSelected, int depth);
 
     void startRenaming(); // shows the name in a text field
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void lookAndFeelChanged() override { updateCollapseButton(); } // the theme's colors
     void mouseMove (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -56,8 +58,12 @@ private:
     te::SafeSelectable<te::Track> track;
     juce::Label nameLabel;
     juce::TextButton muteButton { "M" }, soloButton { "S" };
+    juce::ShapeButton collapseButton { "Collapse folder", juce::Colours::grey, juce::Colours::lightgrey, juce::Colours::white };
     juce::Colour colour;
-    bool selected = false;
+    bool selected = false, isFolder = false, collapsed = false;
+    int depth = 0;
+
+    void updateCollapseButton();
 
     Drag drag = Drag::none;
     bool selectOnMouseUp = false; // a click on a selected track selects it alone, unless it starts a drag

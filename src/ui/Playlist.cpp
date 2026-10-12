@@ -2,6 +2,7 @@
 #include "Playlist.h"
 #include "LookAndFeel.h"
 #include "model/Clips.h"
+#include "model/Import.h"
 #include "model/LiveInput.h"
 #include "model/Project.h"
 #include "model/Tracks.h"
@@ -14,8 +15,9 @@ namespace
     constexpr int rulerHeight = 28;
     constexpr int headerWidth = 200;
     constexpr int scrollBarSize = 12;
-    constexpr int playheadWidth = 11; // the marker in the ruler is this wide; the line runs down its middle
-    constexpr int dragThreshold = 4;  // pixels the mouse moves before a click becomes a drag
+    constexpr int playheadWidth = 11;    // the marker in the ruler is this wide; the line runs down its middle
+    constexpr int dragThreshold = 4;     // pixels the mouse moves before a click becomes a drag
+    constexpr int focusedOutHeight = 20; // in focus mode, the tracks out of focus are this tall
 
     constexpr double wheelNotch = 60.0 / 256.0; // one notch of a mouse wheel, as JUCE reports it on Windows
     constexpr double zoomPerNotch = 1.25;
@@ -56,6 +58,17 @@ namespace
             default:
                 return juce::MouseCursor::DraggingHandCursor;
         }
+    }
+
+    // Whether a dropped file can go on a track. Audio and notes don't share a track in v1 (docs/design.md,
+    // section 5): an instrument would silence the audio.
+    bool suitsTrack (te::AudioTrack& track, FileKind kind)
+    {
+        for (auto* clip : track.getClips())
+            if ((dynamic_cast<te::MidiClip*> (clip) != nullptr) != (kind == FileKind::midi))
+                return false;
+
+        return kind == FileKind::midi || ! hasInstrument (track);
     }
 
     juce::MouseCursor::StandardCursorType getCursorFor (Tool tool)
@@ -234,17 +247,25 @@ struct Playlist::Lanes : public juce::Component
         if (shownEdit == nullptr)
             return;
 
+        // Folders are tinted in their color, and selected tracks in the accent color.
         for (const auto& row : playlist.rows)
         {
-            const auto top = row.top - playlist.scrollY;
+            auto* track = row.track.get();
+            const auto area = getRowArea (row).getIntersection (clip);
 
-            if (top >= clip.getBottom())
-                break;
+            if (track == nullptr || area.isEmpty())
+                continue;
 
-            if (auto* track = row.track.get(); track != nullptr && top + row.height > clip.getY() && playlist.selection.isSelected (track))
+            if (track->isFolderTrack())
+            {
+                g.setColour (row.colour.withAlpha (0.12f));
+                g.fillRect (area);
+            }
+
+            if (playlist.selection.isSelected (track))
             {
                 g.setColour (p.accent.withAlpha (0.08f));
-                g.fillRect (clip.getX(), top, clip.getWidth(), row.height);
+                g.fillRect (area);
             }
         }
 
@@ -269,12 +290,25 @@ struct Playlist::Lanes : public juce::Component
                              g.fillRect (juce::roundToInt (timeline.beatToX (beat)), clip.getY(), 1, clip.getHeight());
                          });
 
-        // A line under each track.
+        // A line under each track, and a stronger one under the pinned band.
         g.setColour (p.border);
 
         for (const auto& row : playlist.rows)
-            if (const auto bottom = row.top + row.height - 1 - playlist.scrollY; bottom >= clip.getY() && bottom < clip.getBottom())
-                g.fillRect (clip.getX(), bottom, clip.getWidth(), 1);
+            g.fillRect (getRowArea (row).removeFromBottom (1).getIntersection (clip));
+
+        if (playlist.pinnedHeight > 0)
+        {
+            g.setColour (p.textMuted);
+            g.fillRect (clip.getX(), playlist.pinnedHeight - 2, clip.getWidth(), 2);
+        }
+    }
+
+    // Where a row is in the lanes, cut to the part that shows: scrolling rows don't show in the pinned band.
+    juce::Rectangle<int> getRowArea (const Row& row) const
+    {
+        const juce::Rectangle<int> rowArea (0, playlist.getRowTop (row), getWidth(), row.height);
+        const auto band = getLocalBounds().withHeight (playlist.pinnedHeight);
+        return rowArea.getIntersection (row.pinned ? band : getLocalBounds().withTrimmedTop (playlist.pinnedHeight));
     }
 
     // Over the clips: the time range selected across tracks, and the Select or Zoom tool's rectangle.
@@ -282,33 +316,35 @@ struct Playlist::Lanes : public juce::Component
     {
         const auto& p = getPalette (*this);
 
+        // The range, on each of its tracks' rows.
         if (! playlist.range.isEmpty())
         {
-            auto firstRow = (int) playlist.rows.size(), lastRow = -1;
+            const auto left = juce::roundToInt (playlist.view.beatToX (playlist.range.getRange().getStart()));
+            const auto right = juce::roundToInt (playlist.view.beatToX (playlist.range.getRange().getEnd()));
 
             for (auto* track : playlist.range.getTracks())
             {
                 if (const auto row = playlist.getRowOf (track); row >= 0)
                 {
-                    firstRow = std::min (firstRow, row);
-                    lastRow = std::max (lastRow, row);
+                    const auto area = getRowArea (playlist.rows[(size_t) row]).withX (left).withWidth (std::max (1, right - left));
+                    g.setColour (p.accent.withAlpha (0.25f));
+                    g.fillRect (area);
+                    g.setColour (p.accent);
+                    g.fillRect (area.withWidth (1));
+                    g.fillRect (area.withTrimmedLeft (area.getWidth() - 1));
                 }
             }
+        }
 
-            if (lastRow >= 0)
-            {
-                const auto& first = playlist.rows[(size_t) firstRow];
-                const auto& last = playlist.rows[(size_t) lastRow];
-                const auto left = juce::roundToInt (playlist.view.beatToX (playlist.range.getRange().getStart()));
-                const auto right = juce::roundToInt (playlist.view.beatToX (playlist.range.getRange().getEnd()));
-                const juce::Rectangle<int> area (left, first.top - playlist.scrollY, std::max (1, right - left),
-                                                 last.top + last.height - first.top);
-
-                g.setColour (p.accent.withAlpha (0.25f));
-                g.fillRect (area);
-                g.setColour (p.accent);
-                g.drawRect (area, 1);
-            }
+        // Where dragged files would go: a line at that time, on that track or below the tracks.
+        if (playlist.fileDropBeat.has_value())
+        {
+            const auto x = juce::roundToInt (playlist.view.beatToX (*playlist.fileDropBeat));
+            const auto area = juce::isPositiveAndBelow (playlist.fileDropRow, (int) playlist.rows.size())
+                                  ? getRowArea (playlist.rows[(size_t) playlist.fileDropRow])
+                                  : getLocalBounds();
+            g.setColour (p.accent);
+            g.fillRect (x - 1, area.getY(), 3, area.getHeight());
         }
 
         if (! playlist.rubberBand.isEmpty())
@@ -416,7 +452,17 @@ Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionMa
     gridButton.onClick = [this] { showGridMenu(); };
 
     headerColumn.setTitle ("Track headers");
-    headerColumn.addAndMakeVisible (headerContent);
+    headerColumn.addAndMakeVisible (scrollingHeaders);
+    headerColumn.addAndMakeVisible (pinnedHeaders);
+    scrollingHeaders.addAndMakeVisible (headerContent);
+    pinnedHeaders.setTitle ("Pinned tracks");
+
+    // The clips' layers let the mouse through to the lanes, which handle it.
+    for (auto* layer : { &scrollingClips, &pinnedClips })
+    {
+        layer->setInterceptsMouseClicks (false, false);
+        lanes->addAndMakeVisible (layer);
+    }
 
     for (auto* scrollBar : { &verticalScrollBar, &horizontalScrollBar })
     {
@@ -478,6 +524,7 @@ void Playlist::setEdit (te::Edit* newEdit)
     lastClip = nullptr;
     gesture = nullptr;
     rubberBand = {};
+    fileDropBeat.reset();
     grid = newEdit != nullptr ? GridSettings::load (findPhaziteState (*newEdit)) : GridSettings();
     headers.clear();
     clipComponents.clear();
@@ -503,11 +550,18 @@ void Playlist::rebuild()
     auto* e = edit.get();
     const auto tracks = e != nullptr ? getPlaylistTracks (*e) : juce::Array<te::Track*>();
 
-    // The headers of tracks that are still there are kept, in the tracks' new order.
+    // The headers of tracks that are still shown are kept, in the tracks' new order. Tracks in
+    // collapsed folders aren't shown.
     juce::OwnedArray<TrackHeader> newHeaders;
+    rows.clear();
 
-    for (auto* track : tracks)
+    for (int i = 0; i < tracks.size(); ++i)
     {
+        auto* track = tracks[i];
+
+        if (isHiddenInCollapsedFolder (*track))
+            continue;
+
         auto* header = getHeaderFor (track);
 
         if (header != nullptr)
@@ -521,14 +575,10 @@ void Playlist::rebuild()
         }
 
         newHeaders.add (header);
+        rows.push_back ({ track, 0, 0, getTrackColour (*track, i), track->getTrackDepth(), isPinned (*track) });
     }
 
-    headers.swapWith (newHeaders); // newHeaders now holds the deleted tracks' headers, and deletes them
-
-    rows.clear();
-
-    for (int i = 0; i < tracks.size(); ++i)
-        rows.push_back ({ tracks[i], 0, 0, getTrackColour (*tracks[i], i) });
+    headers.swapWith (newHeaders); // newHeaders now holds the hidden or deleted tracks' headers, and deletes them
 
     rebuildClips();
     layOutRows();
@@ -539,38 +589,83 @@ void Playlist::rebuild()
 
 void Playlist::layOutRows()
 {
-    auto top = 0;
+    // Pinned rows go in the band at the top; the rest follow each other below it.
+    auto pinnedTop = 0, scrollingTop = 0;
 
     for (size_t i = 0; i < rows.size(); ++i)
     {
         auto& row = rows[i];
+        auto& top = row.pinned ? pinnedTop : scrollingTop;
         row.top = top;
 
         if (auto* track = row.track.get())
-            row.height = getTrackHeight (*track);
+            row.height = isInFocus (*track) ? getTrackHeight (*track) : focusedOutHeight;
 
-        headers[(int) i]->setBounds (0, top, headerWidth, row.height);
+        auto* header = headers[(int) i];
+        auto& parent = row.pinned ? pinnedHeaders : headerContent;
+
+        if (header->getParentComponent() != &parent)
+            parent.addAndMakeVisible (header);
+
+        header->setBounds (0, top, headerWidth, row.height);
         top += row.height;
     }
 
-    contentHeight = top;
+    pinnedHeight = std::min (pinnedTop, lanes->getHeight() / 2); // the band leaves room for the rest
+    contentHeight = scrollingTop;
+
+    pinnedHeaders.setBounds (0, 0, headerWidth, pinnedHeight);
+    scrollingHeaders.setBounds (0, pinnedHeight, headerWidth, std::max (0, headerColumn.getHeight() - pinnedHeight));
     headerContent.setSize (headerWidth, std::max (contentHeight, 1));
-    setScrollY (scrollY); // keeps it in range, and moves the headers with it
+    pinnedClips.setBounds (0, 0, lanes->getWidth(), pinnedHeight);
+    scrollingClips.setBounds (0, pinnedHeight, lanes->getWidth(), std::max (0, lanes->getHeight() - pinnedHeight));
+
+    setScrollY (scrollY); // keeps it in range, and moves the headers and clips with it
 }
 
 void Playlist::updateHeaders()
 {
     for (int i = 0; i < headers.size(); ++i)
         if (auto* track = rows[(size_t) i].track.get())
-            headers[i]->update (rows[(size_t) i].colour, selection.isSelected (track));
+            headers[i]->update (rows[(size_t) i].colour, selection.isSelected (track), rows[(size_t) i].depth);
+}
+
+int Playlist::getRowTop (const Row& row) const
+{
+    return row.pinned ? row.top : pinnedHeight + row.top - scrollY;
+}
+
+bool Playlist::isInFocus (te::Track& track) const
+{
+    if (! focusMode)
+        return true;
+
+    // The selected tracks, the tracks of the selected clips, and the folders they are in. With nothing
+    // selected, everything.
+    const auto tracks = getSelectedTracks (selection);
+    const auto clips = getSelectedClips (selection);
+
+    if (tracks.isEmpty() && clips.isEmpty())
+        return true;
+
+    for (auto* selected : tracks)
+        if (selected == &track || selected->isAChildOf (track))
+            return true;
+
+    for (auto* clip : clips)
+        if (auto* clipTrack = clip->getTrack(); clipTrack == &track || (clipTrack != nullptr && clipTrack->isAChildOf (track)))
+            return true;
+
+    return false;
 }
 
 int Playlist::getRowAt (int y) const
 {
-    const auto contentY = y + scrollY;
+    // In the pinned band, only pinned rows; below it, only the others.
+    const auto inBand = y < pinnedHeight;
 
     for (size_t i = 0; i < rows.size(); ++i)
-        if (contentY >= rows[i].top && contentY < rows[i].top + rows[i].height)
+        if (const auto top = getRowTop (rows[i]); rows[i].pinned == inBand && y >= top && y < top + rows[i].height)
             return (int) i;
 
     return -1;
@@ -597,7 +692,7 @@ TrackHeader* Playlist::getHeaderFor (const te::Track* track) const
 void Playlist::setScrollY (int newScrollY)
 {
     // There is room for one more track under the last, to scroll to.
-    const auto maxScroll = std::max (0, contentHeight + TrackHeight::standard - lanes->getHeight());
+    const auto maxScroll = std::max (0, contentHeight + TrackHeight::standard - (lanes->getHeight() - pinnedHeight));
     scrollY = juce::jlimit (0, maxScroll, newScrollY);
     headerContent.setTopLeftPosition (0, -scrollY);
     layOutClips();
@@ -607,15 +702,16 @@ void Playlist::setScrollY (int newScrollY)
 
 void Playlist::scrollToShow (int row)
 {
-    if (! juce::isPositiveAndBelow (row, (int) rows.size()))
-        return;
+    if (! juce::isPositiveAndBelow (row, (int) rows.size()) || rows[(size_t) row].pinned)
+        return; // pinned rows are always in view
 
     const auto& r = rows[(size_t) row];
+    const auto visibleHeight = lanes->getHeight() - pinnedHeight;
 
     if (r.top < scrollY)
         setScrollY (r.top);
-    else if (r.top + r.height > scrollY + lanes->getHeight())
-        setScrollY (r.top + r.height - lanes->getHeight());
+    else if (r.top + r.height > scrollY + visibleHeight)
+        setScrollY (r.top + r.height - visibleHeight);
 }
 
 void Playlist::updateScrollBars()
@@ -628,7 +724,7 @@ void Playlist::updateScrollBars()
     horizontalScrollBar.setCurrentRange (view.start.inBeats(), visibleBeats, juce::dontSendNotification);
     horizontalScrollBar.setSingleStepSize (scrollPerNotch / view.pixelsPerBeat);
 
-    const auto visibleHeight = std::max (1, lanes->getHeight());
+    const auto visibleHeight = std::max (1, lanes->getHeight() - pinnedHeight);
     verticalScrollBar.setRangeLimits (0.0, std::max (contentHeight + TrackHeight::standard, visibleHeight), juce::dontSendNotification);
     verticalScrollBar.setCurrentRange (scrollY, visibleHeight, juce::dontSendNotification);
     verticalScrollBar.setSingleStepSize (scrollPerNotch);
@@ -658,7 +754,7 @@ void Playlist::rebuildClips()
             else
             {
                 component = new ClipComponent (*clip);
-                lanes->addAndMakeVisible (component);
+                scrollingClips.addAndMakeVisible (component); // positionClip() moves it to the right layer
             }
 
             kept.add (component);
@@ -671,8 +767,26 @@ void Playlist::rebuildClips()
 void Playlist::layOutClips()
 {
     for (auto* component : clipComponents)
-        if (auto* clip = component->getClip())
-            component->setBounds (getClipBounds (*clip));
+        positionClip (*component);
+}
+
+void Playlist::positionClip (ClipComponent& component)
+{
+    auto* clip = component.getClip();
+    const auto row = clip != nullptr ? getRowOf (clip->getTrack()) : -1;
+    component.setVisible (row >= 0);
+
+    if (row < 0)
+        return;
+
+    // A pinned track's clips are in the pinned layer, the others in the scrolling one, which keeps them
+    // out of the pinned band.
+    auto& layer = rows[(size_t) row].pinned ? pinnedClips : scrollingClips;
+
+    if (component.getParentComponent() != &layer)
+        layer.addAndMakeVisible (component);
+
+    component.setBounds (getClipBounds (*clip) - layer.getPosition());
 }
 
 void Playlist::updateClips()
@@ -698,16 +812,24 @@ juce::Rectangle<int> Playlist::getClipBounds (te::Clip& clip) const
     const auto& r = rows[(size_t) row];
     const auto left = juce::roundToInt (view.beatToX (clip.getStartBeat()));
     const auto right = juce::roundToInt (view.beatToX (clip.getEndBeat()));
-    return { left, r.top - scrollY + 1, std::max (2, right - left), std::max (1, r.height - 3) };
+    return { left, getRowTop (r) + 1, std::max (2, right - left), std::max (1, r.height - 3) };
 }
 
 ClipComponent* Playlist::getClipComponentAt (juce::Point<int> position) const
 {
-    // The last one added is drawn on top, so it is the one that is clicked.
+    // In the pinned band, only the pinned tracks' clips. The last one added is drawn on top, so it is
+    // the one that is clicked.
+    const auto inBand = position.y < pinnedHeight;
+
     for (auto i = clipComponents.size(); --i >= 0;)
-        if (auto* component = clipComponents.getUnchecked (i);
-            component->getClip() != nullptr && component->getBounds().contains (position))
+    {
+        auto* component = clipComponents.getUnchecked (i);
+        auto* clip = component->getClip();
+        const auto row = clip != nullptr ? getRowOf (clip->getTrack()) : -1;
+
+        if (row >= 0 && rows[(size_t) row].pinned == inBand && getClipBounds (*clip).contains (position))
             return component;
+    }
 
     return nullptr;
 }
@@ -727,7 +849,7 @@ void Playlist::clipChanged (const juce::ValueTree& clipState)
     {
         if (auto* clip = component->getClip())
         {
-            component->setBounds (getClipBounds (*clip));
+            positionClip (*component);
             const auto row = getRowOf (clip->getTrack());
             component->update (getClipColour (*clip, row >= 0 ? rows[(size_t) row].colour : juce::Colours::grey),
                                selection.isSelected (clip));
@@ -788,7 +910,7 @@ std::optional<Playlist::CrossfadeSpot> Playlist::findCrossfadeAt (juce::Point<in
     const auto& r = rows[(size_t) row];
     auto* track = dynamic_cast<te::ClipTrack*> (r.track.get());
 
-    if (track == nullptr || position.y + scrollY < r.top + r.height * 2 / 3)
+    if (track == nullptr || position.y < getRowTop (r) + r.height * 2 / 3)
         return {};
 
     const auto xOf = [this, e] (te::TimePosition time) { return view.beatToX (e->tempoSequence.toBeats (time)); };
@@ -883,7 +1005,7 @@ void Playlist::selectClipsIn (juce::Rectangle<int> area, bool addToSelection)
                 items.add (item);
 
     for (auto* component : clipComponents)
-        if (auto* clip = component->getClip(); clip != nullptr && component->getBounds().intersects (area))
+        if (auto* clip = component->getClip(); clip != nullptr && getClipBounds (*clip).intersects (area))
             items.addIfNotAlreadyThere (clip);
 
     range.clear();
@@ -931,6 +1053,108 @@ void Playlist::quantizeSelectedClips()
 }
 
 //==============================================================================
+void Playlist::importFiles (const juce::StringArray& paths, juce::Point<int> position)
+{
+    auto* e = edit.get();
+
+    if (e == nullptr)
+        return;
+
+    // From the grid line at or before the drop, unless Alt is held.
+    const auto& tempo = e->tempoSequence;
+    auto start = te::BeatPosition::fromBeats (std::max (0.0, view.xToBeat (position.x).inBeats()));
+
+    if (grid.snap && ! juce::ModifierKeys::currentModifiers.isAltDown())
+        start = tempo.toBeats (getSnapType().roundTimeDown (tempo.toTime (start), tempo, grid.triplets));
+
+    // The first file can go on the track it was dropped on; the others get new tracks below it.
+    const auto row = getRowAt (position.y);
+    auto* target = row >= 0 ? rows[(size_t) row].track.get() : nullptr;
+    auto* after = target != nullptr ? target : getPlaylistTracks (*e).getLast();
+    juce::Array<te::Clip*> added;
+
+    e->getUndoManager().beginNewTransaction (paths.size() > 1 ? "Add Files" : "Add File");
+
+    for (const auto& path : paths)
+    {
+        const juce::File file (path);
+        const auto kind = getFileKind (e->engine, file);
+
+        if (kind == FileKind::other)
+            continue;
+
+        // A new track is named after the file, and colored by what its name says it is.
+        auto* track = dynamic_cast<te::AudioTrack*> (target);
+
+        if (track == nullptr || ! suitsTrack (*track, kind))
+        {
+            track = insertTrack (*e, after, nullptr);
+
+            if (track == nullptr)
+                break;
+
+            track->setName (file.getFileNameWithoutExtension());
+
+            if (const auto colour = getColourForName (file.getFileNameWithoutExtension()))
+                track->setColour (*colour);
+        }
+
+        if (auto* clip = importFile (*track, file, start))
+            added.add (clip);
+
+        after = track;
+        target = nullptr;
+    }
+
+    range.clear();
+    selection.deselectAll();
+
+    for (auto* clip : added)
+        selection.addToSelection (clip);
+
+    if (! added.isEmpty())
+        lastClip = added.getFirst(); // what Draw and Paint place next
+}
+
+bool Playlist::isInterestedInFileDrag (const juce::StringArray& paths)
+{
+    auto* e = edit.get();
+
+    if (e == nullptr)
+        return false;
+
+    return std::any_of (paths.begin(), paths.end(),
+                        [e] (const juce::String& path) { return getFileKind (e->engine, juce::File (path)) != FileKind::other; });
+}
+
+void Playlist::fileDragMove (const juce::StringArray&, int x, int y)
+{
+    // Where importFiles() would put them: at the grid line at or before the pointer.
+    const auto position = lanes->getLocalPoint (this, juce::Point<int> (x, y));
+    auto beat = te::BeatPosition::fromBeats (std::max (0.0, view.xToBeat (position.x).inBeats()));
+
+    if (auto* e = edit.get(); e != nullptr && grid.snap && ! juce::ModifierKeys::currentModifiers.isAltDown())
+        beat = e->tempoSequence.toBeats (getSnapType().roundTimeDown (e->tempoSequence.toTime (beat), e->tempoSequence, grid.triplets));
+
+    fileDropRow = getRowAt (position.y);
+    fileDropBeat = beat;
+    lanes->repaint();
+}
+
+void Playlist::fileDragExit (const juce::StringArray&)
+{
+    fileDropBeat.reset();
+    lanes->repaint();
+}
+
+void Playlist::filesDropped (const juce::StringArray& paths, int x, int y)
+{
+    fileDropBeat.reset();
+    lanes->repaint();
+    importFiles (paths, lanes->getLocalPoint (this, juce::Point<int> (x, y)));
+}
+
+//==============================================================================
 void Playlist::setTool (Tool newTool)
 {
     tool = newTool;
@@ -960,8 +1184,8 @@ void Playlist::lanesMouseMove (const juce::MouseEvent& e)
 
     if (component != nullptr && (tool == Tool::smart || tool == Tool::draw))
     {
-        const auto zone =
-            getClipZone (component->getBounds().toFloat(), e.position, dynamic_cast<te::AudioClipBase*> (component->getClip()) != nullptr);
+        const auto zone = getClipZone (getClipBounds (*component->getClip()).toFloat(), e.position,
+                                       dynamic_cast<te::AudioClipBase*> (component->getClip()) != nullptr);
         lanes->setMouseCursor (getCursorFor (zone));
         lanes->setDescription (describeClipZone (zone));
         return;
@@ -1119,7 +1343,7 @@ void Playlist::smartToolDown (const juce::MouseEvent& e)
     {
         auto& clip = *component->getClip();
         gesture->clip = &clip;
-        gesture->zone = getClipZone (component->getBounds().toFloat(), e.position, dynamic_cast<te::AudioClipBase*> (&clip) != nullptr);
+        gesture->zone = getClipZone (getClipBounds (clip).toFloat(), e.position, dynamic_cast<te::AudioClipBase*> (&clip) != nullptr);
 
         if (e.mods.isPopupMenu())
         {
@@ -1701,13 +1925,15 @@ void Playlist::showTrackMenu (te::Track&)
     juce::PopupMenu menu;
     addCommandItems (menu, commands, { "edit.rename", "track.color" });
     menu.addSeparator();
-    addCommandItems (menu, commands, { "track.mute", "track.solo" });
+    addCommandItems (menu, commands, { "track.mute", "track.solo", "track.pin" });
     menu.addSeparator();
     addCommandItems (menu, commands, { "track.moveUp", "track.moveDown" });
     menu.addSeparator();
+    addCommandItems (menu, commands, { "track.groupIntoFolder", "track.ungroup", "track.collapse" });
+    menu.addSeparator();
     addCommandItems (menu, commands, { "edit.duplicate", "edit.delete" });
     menu.addSeparator();
-    addCommandItems (menu, commands, { "track.add" });
+    addCommandItems (menu, commands, { "track.add", "track.addFolder" });
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 
@@ -1744,13 +1970,12 @@ void Playlist::trackDragged (TrackHeader&, const juce::MouseEvent& e)
     else if (y > lanes->getHeight())
         setScrollY (scrollY + (y - lanes->getHeight()) / 4);
 
-    // The track would go to the nearest boundary between rows.
-    const auto contentY = y + scrollY;
-    const auto boundary = [this] (size_t i) { return i < rows.size() ? rows[i].top : contentHeight; };
+    // The track would go to the nearest boundary between rows, as they are on screen.
+    const auto boundary = [this] (size_t i) { return i < rows.size() ? getRowTop (rows[i]) : pinnedHeight + contentHeight - scrollY; };
     size_t nearest = 0;
 
     for (size_t i = 1; i <= rows.size(); ++i)
-        if (std::abs (contentY - boundary (i)) < std::abs (contentY - boundary (nearest)))
+        if (std::abs (y - boundary (i)) < std::abs (y - boundary (nearest)))
             nearest = i;
 
     dropRow = (int) nearest;
@@ -1863,6 +2088,20 @@ void Playlist::addCommands (CommandRegistry& registry)
                     .synonyms = { "find playhead", "scroll to playhead", "where am i" },
                     .perform = [this] { centreOnPlayhead(); },
                     .isEnabled = hasEdit });
+
+    registry.add ({ .id = "view.focusMode",
+                    .name = "Focus Mode",
+                    .category = "View",
+                    .description = "Makes every track small but the selected ones, and the folders they are in.",
+                    .synonyms = { "solo view", "collapse others", "zoom tracks", "concentrate" },
+                    .perform =
+                        [this]
+                    {
+                        focusMode = ! focusMode;
+                        layOutRows();
+                    },
+                    .isEnabled = hasEdit,
+                    .isTicked = [this] { return focusMode; } });
 
     registry.add ({ .id = "view.followPlayback",
                     .name = "Follow Playback",
@@ -2057,9 +2296,9 @@ void Playlist::paintOverChildren (juce::Graphics& g)
         return;
 
     // A line where the dragged track would go.
-    const auto contentY = dropRow < (int) rows.size() ? rows[(size_t) dropRow].top : contentHeight;
+    const auto y = dropRow < (int) rows.size() ? getRowTop (rows[(size_t) dropRow]) : pinnedHeight + contentHeight - scrollY;
     g.setColour (getPalette (*this).accent);
-    g.fillRect (headerColumn.getX(), lanes->getY() + contentY - scrollY - 1, lanes->getRight() - headerColumn.getX(), 3);
+    g.fillRect (headerColumn.getX(), lanes->getY() + y - 1, lanes->getRight() - headerColumn.getX(), 3);
 }
 
 void Playlist::resized()
@@ -2136,6 +2375,9 @@ void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
     updateHeaders();
     updateClips();
     lanes->repaint();
+
+    if (focusMode)
+        layOutRows(); // what is in focus changed
 
     // The clip selected last is the one the Draw and Paint tools place.
     if (auto* clip = selection.getFirstItemOfType<te::Clip>())

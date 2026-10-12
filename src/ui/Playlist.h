@@ -17,6 +17,7 @@
 namespace phazite::ui
 {
 class Playlist : public juce::Component,
+                 public juce::FileDragAndDropTarget,
                  private TrackHeader::Owner,
                  private juce::ChangeListener,
                  private juce::ValueTree::Listener,
@@ -49,11 +50,14 @@ private:
     struct Playhead;
     struct Gesture;
 
+    // A track shown in the playlist. Pinned tracks stay in a band at the top; the rest scroll under it.
     struct Row
     {
         te::SafeSelectable<te::Track> track;
-        int top = 0, height = 0; // in the track area, before scrolling
+        int top = 0, height = 0; // in the pinned band, or among the scrolling rows before scrolling
         juce::Colour colour;
+        int depth = 0; // how deep in folders
+        bool pinned = false;
     };
 
     // Where two audio clips on a track meet (they touch, or overlap in a crossfade): dragging near the
@@ -82,15 +86,23 @@ private:
     Tool tool = Tool::smart;
     te::SafeSelectable<te::Clip> lastClip; // the clip the Draw and Paint tools place copies of
     std::unique_ptr<Ruler> ruler;
-    juce::Component headerColumn, headerContent; // headerContent holds the headers and scrolls inside headerColumn
+
+    // The header column holds the pinned headers in a band at the top, and below it the scrolling
+    // headers, inside headerContent; the lanes hold the clips in two layers the same way.
+    juce::Component headerColumn, pinnedHeaders, scrollingHeaders, headerContent;
     std::unique_ptr<Lanes> lanes;
+    juce::Component pinnedClips, scrollingClips;
     std::unique_ptr<Playhead> playhead;
     juce::ScrollBar verticalScrollBar { true }, horizontalScrollBar { false };
 
     std::vector<Row> rows;
     juce::OwnedArray<TrackHeader> headers; // headers[i] shows rows[i]
     juce::OwnedArray<ClipComponent> clipComponents;
-    int contentHeight = 0;
+    int contentHeight = 0; // of the scrolling rows
+    int pinnedHeight = 0;  // of the pinned band
+    bool focusMode = false;
+    std::optional<te::BeatPosition> fileDropBeat; // where files dragged over the playlist would go
+    int fileDropRow = -1;
     te::SafeSelectable<te::Track> selectionAnchor; // where Shift-click ranges start
     int dropRow = -1;                              // while a track is dragged: the row it would go before (rows.size() for the end)
     std::unique_ptr<Gesture> gesture;              // what the mouse is doing in the lanes, from mouse down to mouse up
@@ -102,6 +114,8 @@ private:
     void updateHeaders();
     int getRowAt (int y) const; // y in the lanes; -1 below the last row
     int getRowOf (const te::Track*) const;
+    int getRowTop (const Row&) const;  // where a row is in the lanes now
+    bool isInFocus (te::Track&) const; // in focus mode, the rest are made small
     TrackHeader* getHeaderFor (const te::Track*) const;
     void setScrollY (int);
     void scrollToShow (int row);
@@ -110,6 +124,7 @@ private:
     // The clips.
     void rebuildClips();
     void layOutClips();
+    void positionClip (ClipComponent&);                   // in its layer, by its row's place
     void updateClips();                                   // their colors and whether they are selected
     juce::Rectangle<int> getClipBounds (te::Clip&) const; // in the lanes
     ClipComponent* getClipComponentAt (juce::Point<int>) const;
@@ -134,6 +149,13 @@ private:
     void selectClipsIn (juce::Rectangle<int>, bool addToSelection);
     void nudge (int direction); // the selected clips, or the range, by a step of the grid
     void quantizeSelectedClips();
+
+    // Audio and MIDI files dropped from Explorer: onto a track that suits them, or onto new tracks.
+    void importFiles (const juce::StringArray& paths, juce::Point<int> position);
+    bool isInterestedInFileDrag (const juce::StringArray&) override;
+    void fileDragMove (const juce::StringArray&, int x, int y) override;
+    void fileDragExit (const juce::StringArray&) override;
+    void filesDropped (const juce::StringArray&, int x, int y) override;
 
     // Time and the grid.
     te::TimecodeSnapType getSnapType() const;

@@ -120,11 +120,11 @@ Done before this plan (progress since then is under [Status](#status)):
   - split, duplicate, alias and make unique, delete and ripple delete, nudge, fades and crossfades.
 - **Placing content:** drag and drop from the browser, with automatic naming and coloring.
 - *Done when:* a beat can be laid out from one-shots and MIDI clips with just the keyboard and the Smart Tool.
-- *Status:* in progress, in four parts.
+- *Status:* done, in four parts, pending a check by hand of the "done when" above.
   - **Part 1, done:** the timeline (`src/model/Timeline.h`: positions in beats, zoom, and a grid that adapts to the zoom or has a fixed size, with snap and triplets) and the tracks (`src/model/Tracks.h`: add, delete, duplicate, move, select, mute, solo, colors from the color-blind-safe palette, heights). The playlist (`src/ui/Playlist.h`) has the ruler, the playhead, scrolling, zoom and track headers that rename, recolor, resize and move tracks; live MIDI and the inspector follow the selected track.
   - **Part 2, done:** clips (`src/ui/ClipComponent.h`): audio clips with waveforms and fades, MIDI clips with their notes, and aliases marked with a `*`. The Smart Tool (`src/model/SmartTool.h`, `src/model/Clips.h`): trim at the edges, fades at the top corners, a time range from the upper half or empty space, and moving, copying (Ctrl) or aliasing (Ctrl+Shift) from the lower half, across tracks, snapped unless Alt is held, each drag one named undo step. Delete, duplicate and select all work on clips (`src/model/Selection.h`), and double-clicking a track with an instrument adds a MIDI clip.
   - **Part 3, done:** the single-key tools (Draw, Paint, Slice, Slip, Mute, Delete, Select and Zoom, on FL Studio's letters, with toolbar buttons), and editing commands (`src/model/Selection.h`): split, duplicate as alias, make unique, mute, nudge, quantize clip starts, delete and close the gap, insert and remove time, crossfades from the Smart Tool and fade shapes. A time range is a selection of its own (`phazite::RangeSelection`) that Delete, Split and the time commands act on.
-  - **Next:** folders, pinning, focus mode and files dropped from Explorer (part 4).
+  - **Part 4, done:** folders that group tracks (grouped, ungrouped, collapsed; plain until they hold an effect, then buses), pinned tracks in a band that doesn't scroll, focus mode, and audio and MIDI files dropped from Explorer (`src/model/Import.h`): copied into the project's `Audio` folder, on new tracks named after them and colored by their names.
 
 **1.2 Sections and song outlines (M)**
 - The sections strip. Move, duplicate (also as aliases), delete and resize a section across all tracks.
@@ -353,7 +353,7 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: step 1.1, parts 1 to 3 of 4 (timeline, grid, tracks, clips, the Smart Tool, the other tools and the editing commands) |
+| 1. Make a beat | In progress: step 1.1 done (the playlist), pending a check by hand; next, step 1.2 |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |

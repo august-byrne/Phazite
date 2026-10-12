@@ -69,6 +69,8 @@ target_sources(phazite_core PRIVATE
     src/model/ComputerKeyboard.h
     src/model/EngineSetup.cpp
     src/model/EngineSetup.h
+    src/model/Import.cpp
+    src/model/Import.h
     src/model/LiveInput.cpp
     src/model/LiveInput.h
     src/model/Project.cpp
@@ -257,6 +259,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DesignTokenTests.cpp
         tests/EngineSetupTests.cpp
         tests/IconTests.cpp
+        tests/ImportTests.cpp
         tests/LiveInputTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp

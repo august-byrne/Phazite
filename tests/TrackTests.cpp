@@ -255,3 +255,63 @@ TEST_CASE ("Track heights stay within limits, and change for the selection or al
     CHECK (phazite::getTrackHeight (b) == phazite::TrackHeight::standard);
     CHECK (phazite::getTrackHeight (a) == phazite::TrackHeight::minimum);
 }
+
+TEST_CASE ("Tracks group into a folder, which collapses, takes more tracks and ungroups")
+{
+    Tracks tracks (3);
+
+    // An empty folder goes at the bottom when nothing is selected.
+    REQUIRE (tracks.registry.invoke ("track.addFolder"));
+    CHECK (tracks.getOrder() == juce::String ("A B C Folder"));
+    phazite::undo (*tracks.edit);
+    CHECK (tracks.getOrder() == juce::String ("A B C"));
+
+    tracks.select ({ "A", "B" });
+    REQUIRE (tracks.registry.invoke ("track.groupIntoFolder"));
+    CHECK (tracks.getUndoName() == juce::String ("Group into Folder"));
+    CHECK (tracks.getOrder() == juce::String ("Folder A B C"));
+    CHECK (tracks.getSelectedNames() == juce::String ("Folder"));
+
+    auto* folder = dynamic_cast<te::FolderTrack*> (tracks["Folder"]);
+    REQUIRE (folder != nullptr);
+    CHECK (tracks["A"]->getParentFolderTrack() == folder);
+    CHECK (tracks["B"]->getParentFolderTrack() == folder);
+    CHECK (tracks["C"]->getParentFolderTrack() == nullptr);
+
+    // Collapsing hides its tracks, and isn't an undo step.
+    REQUIRE (tracks.registry.invoke ("track.collapse"));
+    CHECK (phazite::isCollapsed (*folder));
+    CHECK (phazite::isHiddenInCollapsedFolder (*tracks["A"]));
+    CHECK_FALSE (phazite::isHiddenInCollapsedFolder (*tracks["C"]));
+    CHECK (tracks.getUndoName() == juce::String ("Group into Folder"));
+    REQUIRE (tracks.registry.invoke ("track.collapse"));
+    CHECK_FALSE (phazite::isCollapsed (*folder));
+
+    // Another track goes in after its last track.
+    phazite::moveTrackIntoFolder (*tracks["C"], *folder);
+    CHECK (tracks.getOrder() == juce::String ("Folder A B C"));
+    CHECK (tracks["C"]->getParentFolderTrack() == folder);
+
+    // Ungrouping takes the tracks out to where the folder was.
+    tracks.select ({ "Folder" });
+    REQUIRE (tracks.registry.invoke ("track.ungroup"));
+    CHECK (tracks.getOrder() == juce::String ("A B C"));
+    CHECK (tracks["A"]->getParentFolderTrack() == nullptr);
+
+    phazite::undo (*tracks.edit);
+    CHECK (tracks.getOrder() == juce::String ("Folder A B C"));
+}
+
+TEST_CASE ("Pinning a track is kept in the project, but isn't an undo step")
+{
+    Tracks tracks (2);
+    tracks.select ({ "B" });
+
+    REQUIRE (tracks.registry.invoke ("track.pin"));
+    CHECK (phazite::isPinned (*tracks["B"]));
+    CHECK (tracks.registry.find ("track.pin")->isTicked());
+    CHECK_FALSE (tracks.edit->getUndoManager().canUndo());
+
+    REQUIRE (tracks.registry.invoke ("track.pin"));
+    CHECK_FALSE (phazite::isPinned (*tracks["B"]));
+}

@@ -10,7 +10,9 @@ namespace
     constexpr int colourStripWidth = 8;
     constexpr int resizeEdgeHeight = 5; // the bottom edge, which resizes the track when dragged
     constexpr int buttonSize = 24;
-    constexpr int dragThreshold = 4; // pixels the mouse moves before a click becomes a drag
+    constexpr int dragThreshold = 4;   // pixels the mouse moves before a click becomes a drag
+    constexpr int indentPerLevel = 12; // a track in a folder is indented this much more than the folder
+    constexpr int collapseButtonSize = 16;
 } // namespace
 
 TrackHeader::TrackHeader (Owner& o, te::Track& t)
@@ -55,11 +57,23 @@ TrackHeader::TrackHeader (Owner& o, te::Track& t)
             t->setSolo (soloButton.getToggleState());
     };
 
+    // A folder's triangle shows or hides its tracks.
+    isFolder = t.isFolderTrack();
+    collapseButton.onClick = [this]
+    {
+        if (auto* folder = track.get())
+            setCollapsed (*folder, ! isCollapsed (*folder));
+    };
+
     for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &muteButton, &soloButton })
         addAndMakeVisible (c);
+
+    addChildComponent (collapseButton);
+    collapseButton.setVisible (isFolder);
+    updateCollapseButton();
 }
 
-void TrackHeader::update (juce::Colour newColour, bool isSelected)
+void TrackHeader::update (juce::Colour newColour, bool isSelected, int newDepth)
 {
     auto* t = track.get();
 
@@ -67,7 +81,7 @@ void TrackHeader::update (juce::Colour newColour, bool isSelected)
         return;
 
     const auto name = t->getName();
-    setTitle (name); // what screen readers call the header
+    setTitle (isFolder ? name + " (folder)" : name); // what screen readers call the header
 
     if (! nameLabel.isBeingEdited())
         nameLabel.setText (name, juce::dontSendNotification);
@@ -75,12 +89,36 @@ void TrackHeader::update (juce::Colour newColour, bool isSelected)
     muteButton.setToggleState (t->isMuted (false), juce::dontSendNotification);
     soloButton.setToggleState (t->isSolo (false), juce::dontSendNotification);
 
-    if (colour != newColour || selected != isSelected)
+    if (isFolder && collapsed != isCollapsed (*t))
+    {
+        collapsed = ! collapsed;
+        updateCollapseButton();
+    }
+
+    if (colour != newColour || selected != isSelected || depth != newDepth)
     {
         colour = newColour;
         selected = isSelected;
+        depth = newDepth;
+        resized();
         repaint();
     }
+}
+
+void TrackHeader::updateCollapseButton()
+{
+    // A triangle pointing right when the folder is collapsed, down when it is open.
+    juce::Path triangle;
+    triangle.addTriangle (0.0f, 0.0f, 1.0f, 0.5f, 0.0f, 1.0f);
+
+    if (! collapsed)
+        triangle.applyTransform (juce::AffineTransform::rotation (juce::MathConstants<float>::halfPi, 0.5f, 0.5f));
+
+    const auto& p = getPalette (*this);
+    collapseButton.setColours (p.textMuted, p.text, p.text);
+    collapseButton.setShape (triangle, false, true, false);
+    collapseButton.setTitle (collapsed ? "Expand folder" : "Collapse folder");
+    collapseButton.setTooltip (collapsed ? "Shows the folder's tracks" : "Hides the folder's tracks");
 }
 
 void TrackHeader::startRenaming()
@@ -122,13 +160,29 @@ void TrackHeader::paint (juce::Graphics& g)
 
 void TrackHeader::resized()
 {
-    auto area = getLocalBounds().withTrimmedLeft (colourStripWidth + Space::xs).withTrimmedRight (Space::xs).withTrimmedBottom (1);
+    auto area = getLocalBounds()
+                    .withTrimmedLeft (colourStripWidth + Space::xs + depth * indentPerLevel)
+                    .withTrimmedRight (Space::xs)
+                    .withTrimmedBottom (1);
     auto top = area.removeFromTop (juce::jmin (area.getHeight(), controlHeight + Space::xs));
 
-    soloButton.setBounds (top.removeFromRight (buttonSize).withSizeKeepingCentre (buttonSize, buttonSize));
-    top.removeFromRight (Space::xs / 2);
-    muteButton.setBounds (top.removeFromRight (buttonSize).withSizeKeepingCentre (buttonSize, buttonSize));
-    top.removeFromRight (Space::xs);
+    // A short header (in focus mode, say) has room only for the name.
+    const auto roomForButtons = top.getHeight() >= buttonSize;
+    muteButton.setVisible (roomForButtons);
+    soloButton.setVisible (roomForButtons);
+
+    if (roomForButtons)
+    {
+        soloButton.setBounds (top.removeFromRight (buttonSize).withSizeKeepingCentre (buttonSize, buttonSize));
+        top.removeFromRight (Space::xs / 2);
+        muteButton.setBounds (top.removeFromRight (buttonSize).withSizeKeepingCentre (buttonSize, buttonSize));
+        top.removeFromRight (Space::xs);
+    }
+
+    if (isFolder)
+        collapseButton.setBounds (
+            top.removeFromLeft (collapseButtonSize).withSizeKeepingCentre (collapseButtonSize / 2, collapseButtonSize / 2));
+
     nameLabel.setBounds (top);
 }
 

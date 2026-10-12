@@ -496,10 +496,16 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
         case 2:
             add (menu, "track.add");
+            add (menu, "track.addFolder");
             add (menu, "track.color");
             menu.addSeparator();
 
-            for (const auto* id : { "track.mute", "track.solo" })
+            for (const auto* id : { "track.mute", "track.solo", "track.pin" })
+                add (menu, id);
+
+            menu.addSeparator();
+
+            for (const auto* id : { "track.groupIntoFolder", "track.ungroup", "track.collapse" })
                 add (menu, id);
 
             menu.addSeparator();
@@ -528,7 +534,8 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
             menu.addSeparator();
 
-            for (const auto* id : { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback" })
+            for (const auto* id :
+                 { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback", "view.focusMode" })
                 add (menu, id);
 
             juce::PopupMenu gridMenu;

@@ -53,6 +53,32 @@ void setTrackHeight (te::Track&, int height); // kept between the minimum and th
 // color, and selects it alone. Returns nullptr if the Edit already has as many tracks as it can hold.
 te::AudioTrack* insertTrack (te::Edit&, te::Track* after, te::SelectionManager*);
 
+//==============================================================================
+// Folders group tracks. A folder starts out plain (its volume control scales its tracks', as a VCA does)
+// and becomes a bus when it holds an effect (docs/design.md, section 5).
+
+// Inserts an empty folder after a track (at the end if that is nullptr), and selects it alone.
+te::FolderTrack* insertFolder (te::Edit&, te::Track* after, te::SelectionManager*);
+
+// Puts tracks into a new folder where the first of them was, in the order given, and selects the folder.
+te::FolderTrack* groupIntoFolder (const juce::Array<te::Track*>&, te::SelectionManager*);
+
+// Moves a track into a folder, after its last track.
+void moveTrackIntoFolder (te::Track&, te::FolderTrack&);
+
+// Takes a folder's tracks out, to where the folder was, and deletes the folder.
+void ungroupFolder (te::FolderTrack&);
+
+// A collapsed folder hides its tracks in the playlist; a pinned track stays in view while the others
+// scroll. Projects keep both, without undo steps, as they keep track heights.
+bool isCollapsed (const te::Track&);
+void setCollapsed (te::Track&, bool);
+bool isPinned (const te::Track&);
+void setPinned (te::Track&, bool);
+
+// True if the track is inside a collapsed folder, so the playlist doesn't show it.
+bool isHiddenInCollapsedFolder (const te::Track&);
+
 // The track commands that need no window: add, select the track above or below, move, mute, solo and
 // height. They act on the tracks selected in the selection manager's Edit. Delete and duplicate are
 // selection commands (Selection.h); the playlist adds rename and color.
