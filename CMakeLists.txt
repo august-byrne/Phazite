@@ -81,6 +81,9 @@ if(WIN32)
     # JUCE's headers define these anyway; defining them here as well keeps any code that includes
     # <windows.h> before JUCE consistent.
     target_compile_definitions(Phazite PRIVATE UNICODE _UNICODE)
+    # ASIO drivers, the low-latency standard for audio interfaces on Windows. JUCE bundles Steinberg's
+    # ASIO SDK 2.3.4 headers, which Phazite uses under the SDK's GPLv3 option (AGPL-compatible).
+    target_compile_definitions(Phazite PRIVATE JUCE_ASIO=1)
 endif()
 
 target_link_libraries(Phazite PRIVATE

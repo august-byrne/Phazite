@@ -141,6 +141,8 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). Th
 1. A window titled "Phazite" opens with three buttons and a status line (the audio device, or "No audio device", then sample rate, block size and CPU use). Phazite opens your default audio device, for output only.
 2. Turn your volume down, then click **Play**. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. The button turns into **Stop**, which stops playback and rewinds.
 3. If you hear nothing, click **Audio Settings** and choose an output device; inputs are off by default and can be turned on there. Device settings and the plug-in list are saved in `%APPDATA%\Phazite\Settings.xml`.
+   - With an audio interface, set **Audio device type** to **ASIO**® and pick its driver: ASIO is the low-latency driver standard on Windows. The **Control Panel** button opens the driver's own settings.
+   - Without an ASIO driver, you can still try this with [FlexASIO](https://github.com/dechamps/FlexASIO) (MIT), a free ASIO driver that plays through Windows' normal audio.
 4. Click **Scan Plugins**. A "Plug-ins" window asks which folders to scan, with the standard VST3 folders filled in; click **Scan**. The scan runs in a child copy of Phazite (`Phazite.exe --PluginScan:...`), so a plug-in that crashes while being scanned shouldn't take Phazite down; if the child can't start, Phazite shows a warning and scans in its own process instead. Found plug-ins are listed, but Phazite can't add or play them yet. With no VST3 plug-ins installed the list stays empty; `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT, which should then appear.
 
 ### Troubleshooting
@@ -339,8 +341,9 @@ Phazite is licensed under the GNU Affero General Public License, version 3 or (a
 | VST 3 SDK (bundled with JUCE) | MIT | VST3 plug-in scanning (hosting later), compiled in |
 | SoundTouch (bundled with Tracktion Engine) | LGPL-2.1-or-later | Time-stretching, compiled in |
 | libsamplerate (bundled with Tracktion Engine) | BSD-2-Clause | Sample-rate conversion, compiled in |
+| ASIO SDK 2.3.4 headers (bundled with JUCE) | GPL-3.0-only (Steinberg's GPLv3 option) | ASIO driver support on Windows, compiled in |
 | [WindowsToolchain](https://github.com/MarkSchofield/WindowsToolchain) | MIT | Finds MSVC at build time on Windows; nothing compiled in |
 
 Tracktion Engine and JUCE are also available under commercial licenses; Phazite uses their open-source licenses (section 13 of both the AGPL-3.0 and the GPL-3.0 allows combining code under the two licenses). Both bundle further open-source code, such as choc, farbot, magic_enum, crill, rpmalloc, zlib, libpng, libjpeg, FLAC, Ogg Vorbis, HarfBuzz and SheenBidi: see `external/tracktion_engine/LICENSE.md`, `external/tracktion_engine/modules/juce/LICENSE.md`, and the license files and source-file headers of the bundled code under `external/`.
 
-VST is a registered trademark of Steinberg Media Technologies GmbH.
+VST is a registered trademark of Steinberg Media Technologies GmbH. ASIO is a registered trademark of Steinberg Media Technologies GmbH.
