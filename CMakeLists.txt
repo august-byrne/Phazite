@@ -60,7 +60,9 @@ add_library(phazite_core STATIC)
 
 target_sources(phazite_core PRIVATE
     src/model/AppInfo.cpp
-    src/model/AppInfo.h)
+    src/model/AppInfo.h
+    src/model/EngineSetup.cpp
+    src/model/EngineSetup.h)
 
 target_include_directories(phazite_core PUBLIC src)
 target_compile_features(phazite_core PUBLIC cxx_std_20)
@@ -153,7 +155,8 @@ if(PHAZITE_BUILD_TESTS)
     target_sources(phazite_tests PRIVATE
         tests/TestMain.cpp
         tests/TestHelpers.h
-        tests/AppInfoTests.cpp)
+        tests/AppInfoTests.cpp
+        tests/EngineSetupTests.cpp)
 
     phazite_use_core(phazite_tests)
 

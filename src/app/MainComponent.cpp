@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MainComponent.h"
+#include "model/EngineSetup.h"
 
 using namespace tracktion::literals; // 0_tp (time position), 16_bp (beat position), ...
 
@@ -24,6 +25,9 @@ MainComponent::MainComponent (te::Engine& e)
     : engine (e)
 {
     createEdit();
+
+    // Tracktion sends MIDI controller mappings and app commands to the focused Edit.
+    phazite::getUIBehaviour (engine).setFocusedEdit (edit.get());
 
     playStopButton.onClick = [this] { togglePlay(); };
     audioSettingsButton.onClick = [this] { showAudioSettings(); };
@@ -57,6 +61,7 @@ MainComponent::~MainComponent()
     if (edit != nullptr)
         edit->getTransport().removeChangeListener (this);
 
+    phazite::getUIBehaviour (engine).setFocusedEdit (nullptr);
     edit = nullptr; // on the message thread, before the Engine
 }
 

@@ -342,7 +342,7 @@ Roughly in order of value:
 
 | Phase | Status |
 |---|---|
-| 0. Foundations | In progress: 0.1 done |
+| 0. Foundations | In progress: 0.1 and 0.2 done |
 | 1. Make a beat | Not started |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |

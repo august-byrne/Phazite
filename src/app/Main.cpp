@@ -3,43 +3,7 @@
 // Written against tracktion_engine develop @bb386171 (module 3.5.0) and the JUCE it pins (37c894f8).
 
 #include "MainComponent.h"
-
-// ThreadSanitizer builds (linux-tsan preset): GCC defines __SANITIZE_THREAD__, Clang has a feature check.
-#if defined(__SANITIZE_THREAD__)
- #define PHAZITE_TSAN 1
-#elif defined(__has_feature)
- #if __has_feature(thread_sanitizer)
-  #define PHAZITE_TSAN 1
- #endif
-#endif
-#ifndef PHAZITE_TSAN
- #define PHAZITE_TSAN 0
-#endif
-
-namespace
-{
-class PhaziteEngineBehaviour final : public te::EngineBehaviour
-{
-public:
-    // Scan plug-ins in a child copy of this exe, so a crashing plug-in can't take Phazite down.
-    // Needs the startChildProcessPluginScan() check at the top of initialise(). If it ever misbehaves,
-    // return false here: scanning then runs in-process on PluginListComponent's worker thread.
-    // Off under ThreadSanitizer: Tracktion's scan coordinator shares some state between threads
-    // without locks, which would bury real reports.
-    bool canScanPluginsOutOfProcess() override
-    {
-       #if PHAZITE_TSAN
-        return false;
-       #else
-        return true;
-       #endif
-    }
-
-    // Playback-only smoke test: don't open the microphone by default
-    // (inputs can still be enabled in the Audio Settings dialog).
-    bool shouldOpenAudioInputByDefault() override { return false; }
-};
-} // namespace
+#include "model/EngineSetup.h"
 
 //==============================================================================
 class PhaziteApplication final : public juce::JUCEApplication
@@ -67,9 +31,9 @@ public:
             return;
         }
 
-        // The Engine opens the default audio device and loads the saved plug-in list
-        // (settings live in %APPDATA%\Phazite\Settings.xml). nullptr = default UIBehaviour.
-        engine = std::make_unique<te::Engine> (getApplicationName(), nullptr, std::make_unique<PhaziteEngineBehaviour>());
+        // The Engine opens the default audio device and loads the saved plug-in list (settings live in
+        // %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in a child copy of this exe (see above).
+        engine = phazite::createEngine ({});
 
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
     }

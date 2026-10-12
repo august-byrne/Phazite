@@ -68,6 +68,7 @@ The audio thread is the audio callback and everything it calls: plug-in and grap
 - Every C/C++ file starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`.
 - C++20. Include module headers directly (`<juce_gui_basics/juce_gui_basics.h>`, `<tracktion_engine/tracktion_engine.h>`), not `JuceHeader.h`. Qualify `juce::`; use `namespace te = tracktion;`.
 - Create and destroy Tracktion objects (Engine, Edit) on the message thread, and destroy every `te::Edit` before the `te::Engine`.
+- Create the Engine only with `phazite::createEngine()` (`src/model/EngineSetup.h`), never `te::Engine` directly: Tracktion's default settings storage writes the user's full name into every saved project. Load saved Edits with `phazite::loadEdit()` (on the message thread), not Tracktion's `EditLoader`.
 - Keep the build warning-free under JUCE's recommended warning flags (/W4 on MSVC). Don't silence a warning without saying why.
 - Formatting comes from `.clang-format` (JUCE style). After editing C/C++ files, run `sh tools/format.sh` with the Bash tool (on Windows it uses the clang-format 23 bundled with VS Code's C/C++ extension), and check with `sh tools/format.sh --check`. Don't hand-align code or trailing comments that the formatter will undo; use `// clang-format off` / `// clang-format on` only where a hand layout carries meaning (such as a table).
 
