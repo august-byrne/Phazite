@@ -73,7 +73,7 @@ void TopBar::updateKeyboardButton()
     setTooltipWithShortcut (keyboardButton,
                             on ? "The computer keyboard plays notes: A S D F G H J K L ; from " + from
                                      + ", and W E T Y U O P the black keys. Z and X change the octave, C and V the velocity (now "
-                                     + juce::String (velocity) + "). Click to turn it off"
+                                     + juce::String (velocity) + "). Hold Shift for single-key shortcuts. Click to turn it off"
                                : juce::String ("Click to play notes with the computer keyboard"),
                             "input.computerKeyboard");
 }

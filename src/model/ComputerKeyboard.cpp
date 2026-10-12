@@ -39,6 +39,8 @@ void ComputerKeyboard::releaseAll()
         }
     }
 
+    // Keys still down when the window comes back count as newly pressed.
+    noteKeysDown.fill (false);
     controlKeysDown.fill (false);
 }
 
@@ -47,16 +49,19 @@ bool ComputerKeyboard::update (const std::function<bool (int)>& isKeyDown, juce:
     if (! enabled)
         return false;
 
-    // With Ctrl, Alt or Cmd held the keys are shortcuts: held notes can still end, but none start.
-    const bool canStart = ! isShortcut (modifiers);
+    // A key that goes down with Shift, Ctrl, Alt or Cmd held is part of a shortcut: it plays nothing,
+    // not even once the modifier is let go before the key. Held notes still end.
+    const bool shortcut = isShortcut (modifiers);
     bool used = false;
 
     for (size_t i = 0; i < heldNotes.size(); ++i)
     {
         const bool down = isKeyDown (noteKeys[i]);
+        const bool pressed = down && ! noteKeysDown[i];
+        noteKeysDown[i] = down;
         auto& held = heldNotes[i];
 
-        if (down && held < 0 && canStart && lowestNote + (int) i <= 127)
+        if (pressed && ! shortcut && held < 0 && lowestNote + (int) i <= 127)
         {
             held = lowestNote + (int) i;
             sendMessage (juce::MidiMessage::noteOn (midiChannel, held, (juce::uint8) velocity));
@@ -74,9 +79,11 @@ bool ComputerKeyboard::update (const std::function<bool (int)>& isKeyDown, juce:
     // Z, X, C and V act once per press, not again while held down.
     for (size_t i = 0; i < controlKeys.size(); ++i)
     {
-        const bool down = canStart && isKeyDown (controlKeys[i]);
+        const bool down = isKeyDown (controlKeys[i]);
+        const bool pressed = down && ! controlKeysDown[i];
+        controlKeysDown[i] = down;
 
-        if (down && ! controlKeysDown[i])
+        if (pressed && ! shortcut)
         {
             switch (controlKeys[i])
             {
@@ -99,8 +106,6 @@ bool ComputerKeyboard::update (const std::function<bool (int)>& isKeyDown, juce:
             changed();
             used = true;
         }
-
-        controlKeysDown[i] = down;
     }
 
     return used;
@@ -126,7 +131,7 @@ bool ComputerKeyboard::keyStateChanged (bool, juce::Component*)
 
 bool ComputerKeyboard::isShortcut (juce::ModifierKeys modifiers)
 {
-    return modifiers.isCommandDown() || modifiers.isCtrlDown() || modifiers.isAltDown();
+    return modifiers.isShiftDown() || modifiers.isCommandDown() || modifiers.isCtrlDown() || modifiers.isAltDown();
 }
 
 void ComputerKeyboard::changed()

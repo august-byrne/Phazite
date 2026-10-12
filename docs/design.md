@@ -371,9 +371,9 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 - **Any command can be rebound.** Ctrl+Alt+click on a menu item assigns a shortcut directly, as Logic's Control-click does.
 - **The computer keyboard plays notes**, on by default so a new project makes sound right away (step 0.7):
   - the layout of Ableton Live and Logic Pro: the middle row of letters plays the white keys from middle C, the row above the black keys, Z and X change the octave and C and V the velocity in steps of 20 ([B40](#appendix-b-sources));
-  - it takes only keys pressed without Ctrl, Alt or Cmd, and never keys typed into a text field;
+  - it takes only keys pressed without Shift, Ctrl, Alt or Cmd, and never keys typed into a text field;
   - a top-bar button and the Options menu turn it off. In the FL Studio keymap Ctrl+T does too, and F10 opens the MIDI settings, as in FL Studio ([B41](#appendix-b-sources)). FL's manual doesn't document which keys play which notes, so that keymap uses the same layout;
-  - single-key tools need the same letters: see [open question 9](#24-open-questions).
+  - **single-key shortcuts (decided, open question 9):** as in Ableton Live 12 ([B40](#appendix-b-sources)), while the computer keyboard plays notes, Shift and a letter run that letter's shortcut (FL Studio's tools, for example), unless Shift and that letter have a shortcut of their own. With the computer keyboard off, the letters alone run them. So a keymap shouldn't give Shift and a letter a different command than the letter alone.
 - **How "most intuitive" gets settled:**
   - watch three to five people, both FL Studio users and complete beginners, do the same tasks with a prototype: place a kick on every beat, trim, fade, duplicate a section, write a chord;
   - count hesitations and errors, and adjust the defaults from that.
@@ -720,7 +720,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 6. **Airwindows:** ship its 186 MIT-licensed effects as extra devices? They also lock on the audio thread today.
 7. **Plug-in sandboxing:** first update after v1 (proposed), or before v1?
 8. **Ableton Live keymap:** in v1, or soon after?
-9. **Single-key tools and the computer keyboard:** both want plain letters (FL Studio's tools use P, B, D, T, S, C and E). FL Studio turns single-key shortcuts off while its typing keyboard plays notes ([B41](#appendix-b-sources)); Ableton Live 12 keeps playing notes and runs single-key shortcuts with Shift held ([B40](#appendix-b-sources)). Proposed: Ableton's way, with notes on by default. Needed before step 1.1.
+9. ~~Single-key tools and the computer keyboard~~ **Decided:** Ableton Live's way. The computer keyboard plays notes by default, and Shift and a letter run that letter's single-key shortcut ([section 12](#12-commands-keys-and-help)).
 
 ## 25. Decision log
 
@@ -739,6 +739,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 | 2026-10-12 | Engine problems: simple workarounds first; fork Tracktion Engine if workarounds get awkward or upstream issues block us |
 | 2026-10-12 | Step 0.7 defaults: the computer keyboard plays notes, laid out as in Ableton Live and Logic Pro; live MIDI plays the first track with an instrument until tracks can be selected |
 | 2026-10-12 | Icons: Lucide (ISC), step 0.6 |
+| 2026-10-12 | Single-key shortcuts and the computer keyboard: Ableton Live's way, Shift and a letter for the shortcut while the keyboard plays notes |
 
 ## Appendix A. Research summary
 

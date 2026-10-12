@@ -29,6 +29,7 @@ public:
 
     void closeButtonPressed() override;
     void activeWindowStatusChanged() override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     te::Engine& engine;

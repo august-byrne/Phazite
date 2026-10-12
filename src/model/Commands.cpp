@@ -171,6 +171,24 @@ bool CommandRegistry::invoke (const juce::String& id)
     return true;
 }
 
+bool CommandRegistry::invokeWithoutShift (const juce::KeyPress& key)
+{
+    const auto modifiers = key.getModifiers();
+
+    if (! modifiers.isShiftDown() || modifiers.isCommandDown() || modifiers.isCtrlDown() || modifiers.isAltDown())
+        return false;
+
+    const auto& mappings = *commandManager.getKeyMappings();
+
+    if (mappings.findCommandForKeyPress (key) != 0)
+        return false; // Shift and the key have a command of their own
+
+    if (const auto* command = find (mappings.findCommandForKeyPress (juce::KeyPress (key.getKeyCode()))))
+        return invoke (command->id);
+
+    return false;
+}
+
 void CommandRegistry::runWithoutUndoStep (const Command& command)
 {
     if (command.isEnabled == nullptr || command.isEnabled())

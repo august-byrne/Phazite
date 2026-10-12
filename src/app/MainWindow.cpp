@@ -146,6 +146,16 @@ void MainWindow::activeWindowStatusChanged()
         computerKeyboard.releaseAll();
 }
 
+bool MainWindow::keyPressed (const juce::KeyPress& key)
+{
+    // While the computer keyboard plays notes, Shift and a letter run that letter's single-key
+    // shortcut, as in Ableton Live. The key listeners have tried Shift's own shortcuts by now.
+    if (computerKeyboard.isEnabled() && commands.invokeWithoutShift (key))
+        return true;
+
+    return juce::DocumentWindow::keyPressed (key);
+}
+
 void MainWindow::addCommands()
 {
     shell->addCommands (commands);
@@ -175,7 +185,7 @@ void MainWindow::addCommands()
                     .name = "Play Notes with the Computer Keyboard",
                     .category = "Input",
                     .description = "A S D F G H J K L ; play the white keys, W E T Y U O P the black keys; Z and X change "
-                                   "the octave, C and V the velocity.",
+                                   "the octave, C and V the velocity. Hold Shift for single-key shortcuts.",
                     .synonyms = { "typing keyboard", "qwerty", "musical typing", "piano", "midi" },
                     .perform = [this] { computerKeyboard.setEnabled (! computerKeyboard.isEnabled()); },
                     .isTicked = [this] { return computerKeyboard.isEnabled(); } });

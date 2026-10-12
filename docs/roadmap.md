@@ -37,7 +37,7 @@ Done before this plan (progress since then is under [Status](#status)):
 | 6. Airwindows effects | Step 2.8 |
 | 7. Sandboxing before or after v1 | Phase 3 |
 | 8. Ableton Live keymap in v1 | Step 3.7 |
-| 9. Single-key tools and the computer keyboard | Step 1.1 |
+| 9. Single-key tools and the computer keyboard | **Decided:** Ableton's way, Shift and a letter for the shortcut while the keyboard plays notes |
 
 ## Phase 0: Foundations
 

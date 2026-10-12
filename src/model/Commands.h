@@ -67,6 +67,11 @@ public:
     // Runs a command if it exists and is enabled.
     bool invoke (const juce::String& id);
 
+    // While the computer keyboard plays notes, single-key shortcuts are typed with Shift held, as in
+    // Ableton Live: for Shift and a key, this runs the command of the key alone, unless Shift and the
+    // key have a command of their own. Returns true if it ran a command.
+    bool invokeWithoutShift (const juce::KeyPress&);
+
     // The command palette's search: matches on the name, category and synonyms, best first.
     juce::Array<const Command*> search (const juce::String& query, int maxResults = 20) const;
 

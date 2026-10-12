@@ -124,6 +124,29 @@ TEST_CASE ("Keys pressed with Ctrl, Alt or Cmd are left to shortcuts")
     CHECK_FALSE (k.keyboard.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey), nullptr)); // play/stop
 }
 
+TEST_CASE ("With Shift held, letters are shortcuts, not notes, even once Shift is let go")
+{
+    Keyboard k;
+    k.modifiers = juce::ModifierKeys (juce::ModifierKeys::shiftModifier);
+
+    CHECK_FALSE (k.press ('s')); // Shift+S is S's shortcut
+    CHECK_FALSE (k.press ('z')); // and Shift+Z isn't an octave down
+    CHECK_FALSE (k.keyboard.keyPressed (juce::KeyPress ('s', juce::ModifierKeys::shiftModifier, 0), nullptr));
+
+    // Letting go of Shift before the keys doesn't turn them into a note or an octave change.
+    k.modifiers = {};
+    CHECK_FALSE (k.update());
+    k.release ('s');
+    k.release ('z');
+    CHECK (k.sent.empty());
+    CHECK (k.keyboard.getLowestNote() == 60);
+
+    // Pressed again on their own, they play and move as usual.
+    CHECK (k.press ('s'));
+    REQUIRE (k.sent.size() == 1);
+    CHECK (isNoteOn (k.sent[0], 62, 100));
+}
+
 TEST_CASE ("Turning the computer keyboard off ends its notes and frees its keys")
 {
     Keyboard k;

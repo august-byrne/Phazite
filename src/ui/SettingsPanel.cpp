@@ -30,7 +30,7 @@ MidiSettings::MidiSettings (te::Engine& e, ComputerKeyboard& keyboard, std::func
     noInputsLabel.setText ("No MIDI devices found. Connect a MIDI keyboard: it shows up here within a few seconds.",
                            juce::dontSendNotification);
     keyboardHelp.setText ("A S D F G H J K L ; play the white keys from middle C, and W E T Y U O P the black keys. "
-                          "Z and X change the octave, C and V the velocity.",
+                          "Z and X change the octave, C and V the velocity. Hold Shift for single-key shortcuts.",
                           juce::dontSendNotification);
 
     for (auto* label : { &noInputsLabel, &keyboardHelp, &routingLabel })

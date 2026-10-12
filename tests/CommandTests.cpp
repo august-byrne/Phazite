@@ -171,6 +171,38 @@ TEST_CASE ("Keymaps load, switch, and keep the user's own changes")
     CHECK (playKeys.contains (describe ("F2")));
 }
 
+TEST_CASE ("Shift and a letter run that letter's shortcut, unless they have their own")
+{
+    int tool = 0, shifted = 0;
+
+    phazite::Keymap keymap;
+    keymap.name = "Test";
+    keymap.keys["test.tool"] = { "B" };
+    keymap.keys["test.n"] = { "N" };
+    keymap.keys["test.shiftN"] = { "shift + N" };
+
+    phazite::CommandRegistry registry;
+    registry.setKeymap (keymap);
+    registry.add (makeCommand ("test.tool", "Tool", [&tool] { ++tool; }));
+    registry.add (makeCommand ("test.n", "N"));
+    registry.add (makeCommand ("test.shiftN", "Shift N", [&shifted] { ++shifted; }));
+
+    const auto shift = juce::ModifierKeys (juce::ModifierKeys::shiftModifier);
+    CHECK (registry.invokeWithoutShift (juce::KeyPress ('B', shift, 0)));
+    CHECK (tool == 1);
+
+    // Shift+N has its own command, which the shortcuts run as usual; this leaves it alone.
+    CHECK_FALSE (registry.invokeWithoutShift (juce::KeyPress ('N', shift, 0)));
+    CHECK (shifted == 0);
+
+    // Only Shift: not with Ctrl too, and not without it.
+    CHECK_FALSE (
+        registry.invokeWithoutShift (juce::KeyPress ('B', juce::ModifierKeys::shiftModifier | juce::ModifierKeys::ctrlModifier, 0)));
+    CHECK_FALSE (registry.invokeWithoutShift (juce::KeyPress ('B')));
+    CHECK_FALSE (registry.invokeWithoutShift (juce::KeyPress ('Q', shift, 0))); // no shortcut at all
+    CHECK (tool == 1);
+}
+
 TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap")
 {
     for (const auto& keymap : phazite::Keymap::getBuiltIn())
