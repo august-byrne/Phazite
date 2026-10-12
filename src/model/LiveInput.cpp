@@ -15,16 +15,24 @@ namespace
 
         return nullptr;
     }
-
-    bool hasInstrument (te::AudioTrack& track)
-    {
-        for (auto* plugin : track.pluginList)
-            if (plugin->isSynth())
-                return true;
-
-        return false;
-    }
 } // namespace
+
+bool hasInstrument (const te::AudioTrack& track)
+{
+    for (auto* plugin : track.pluginList)
+        if (plugin->isSynth())
+            return true;
+
+    return false;
+}
+
+void followSelectedTrack (const te::SelectionManager& selection)
+{
+    if (auto* track = selection.getFirstItemOfType<te::AudioTrack>(); track != nullptr && hasInstrument (*track))
+        setLiveMidiTrack (*track);
+    else if (auto* edit = selection.getEdit())
+        routeLiveMidiInput (*edit); // in case the track it played was deleted
+}
 
 std::shared_ptr<te::MidiInputDevice> getAllMidiInputs (te::Engine& engine)
 {

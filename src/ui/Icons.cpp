@@ -24,6 +24,10 @@ namespace
                 return "search.svg";
             case Icon::detach:
                 return "app-window.svg";
+            case Icon::plus:
+                return "plus.svg";
+            case Icon::magnet:
+                return "magnet.svg";
         }
 
         return "";

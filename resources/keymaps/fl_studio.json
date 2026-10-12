@@ -3,8 +3,16 @@
   "description": "FL Studio's shortcuts, from its manual, for the commands Phazite has so far. Ctrl+Z undoes or redoes the last change; Ctrl+Alt+Z undoes step by step. Ctrl+T turns the computer keyboard's notes on or off, and F10 opens the MIDI settings.",
   "keys": {
     "transport.playStop": [ "spacebar" ],
+    "transport.goToStart": [ "home" ],
     "edit.undoOrRedo": [ "command + Z" ],
     "edit.undo": [ "command + alt + Z" ],
+    "edit.delete": [ "delete" ],
+    "edit.duplicate": [ "command + B" ],
+    "edit.rename": [ "F2" ],
+    "edit.selectAll": [ "command + A" ],
+    "edit.deselectAll": [ "command + D" ],
+    "track.selectPrevious": [ "command + cursor up" ],
+    "track.selectNext": [ "command + cursor down" ],
     "project.open": [ "command + O" ],
     "project.save": [ "command + S" ],
     "project.saveAs": [ "command + shift + S" ],
@@ -12,6 +20,11 @@
     "view.pianoRoll": [ "F7" ],
     "view.toggleBrowser": [ "alt + F8" ],
     "view.mixer": [ "F9" ],
+    "view.zoomIn": [ "page up" ],
+    "view.zoomOut": [ "page down" ],
+    "view.zoomToFit": [ "shift + 4" ],
+    "view.centreOnPlayhead": [ "shift + 0" ],
+    "grid.snap": [ "backspace" ],
     "options.midiSettings": [ "F10" ],
     "input.computerKeyboard": [ "command + T" ]
   }

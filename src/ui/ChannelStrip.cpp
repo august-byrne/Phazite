@@ -121,22 +121,32 @@ void ChannelStrip::resized()
 }
 
 //==============================================================================
-Inspector::Inspector (std::function<te::Edit*()> editGetter)
-    : getEdit (std::move (editGetter))
+Inspector::Inspector (std::function<te::Edit*()> editGetter, te::SelectionManager& selectionManager)
+    : getEdit (std::move (editGetter)),
+      selection (selectionManager)
 {
     setTitle ("Inspector");
-    setDescription ("The settings of the track you're working on.");
+    setDescription ("The settings of the selected track.");
     addAndMakeVisible (strip);
+    selection.addChangeListener (this);
     startTimerHz (2);
 }
 
-void Inspector::timerCallback()
+Inspector::~Inspector()
+{
+    selection.removeChangeListener (this);
+}
+
+void Inspector::showTrack()
 {
     te::AudioTrack* track = nullptr;
 
     if (auto* edit = getEdit())
     {
-        track = getLiveMidiTrack (*edit);
+        track = selection.getFirstItemOfType<te::AudioTrack>();
+
+        if (track == nullptr)
+            track = getLiveMidiTrack (*edit);
 
         if (track == nullptr)
             if (const auto tracks = te::getAudioTracks (*edit); ! tracks.isEmpty())

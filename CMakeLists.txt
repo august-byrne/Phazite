@@ -73,6 +73,10 @@ target_sources(phazite_core PRIVATE
     src/model/Project.h
     src/model/StarterProject.cpp
     src/model/StarterProject.h
+    src/model/Timeline.cpp
+    src/model/Timeline.h
+    src/model/Tracks.cpp
+    src/model/Tracks.h
     src/model/ValueText.cpp
     src/model/ValueText.h)
 
@@ -87,7 +91,9 @@ juce_add_binary_data(phazite_data
         # Lucide icons (ISC; search and square from Feather, MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
         resources/icons/lucide/keyboard-music.svg
+        resources/icons/lucide/magnet.svg
         resources/icons/lucide/play.svg
+        resources/icons/lucide/plus.svg
         resources/icons/lucide/search.svg
         resources/icons/lucide/square.svg)
 
@@ -185,10 +191,14 @@ target_sources(Phazite PRIVATE
     src/ui/LookAndFeel.h
     src/ui/Panels.cpp
     src/ui/Panels.h
+    src/ui/Playlist.cpp
+    src/ui/Playlist.h
     src/ui/SettingsPanel.cpp
     src/ui/SettingsPanel.h
     src/ui/TopBar.cpp
-    src/ui/TopBar.h)
+    src/ui/TopBar.h
+    src/ui/TrackHeader.cpp
+    src/ui/TrackHeader.h)
 
 target_compile_definitions(Phazite PRIVATE
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Phazite,JUCE_PRODUCT_NAME>"
@@ -232,6 +242,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/LiveInputTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp
+        tests/TimelineTests.cpp
+        tests/TrackTests.cpp
         tests/ValueTextTests.cpp
         # The UI files the tests use: the base controls, which link to the engine's parameters, and the icons.
         src/ui/Controls.cpp

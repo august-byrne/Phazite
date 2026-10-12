@@ -90,6 +90,13 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Project)
 };
 
+// An Edit's Phazite state (Project::getPhaziteState()), for code that has the Edit but not the Project.
+juce::ValueTree getPhaziteState (te::Edit&);
+
+// The same, but without adding it if the Edit has none yet (adding it would count as an unsaved
+// change): then the result is invalid, and reading a property from it gives the default.
+juce::ValueTree findPhaziteState (const te::Edit&);
+
 //==============================================================================
 // Autosaves a project every few minutes while it has unsaved changes.
 class AutosaveTimer : private juce::Timer

@@ -11,19 +11,27 @@ ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui)
       recent (e)
 {
     engine.getDeviceManager().addChangeListener (this);
+    selection.addChangeListener (this);
+    uiBehaviour.setSelectionManager (&selection);
 }
 
 ProjectSession::~ProjectSession()
 {
+    uiBehaviour.setSelectionManager (nullptr);
+    selection.removeChangeListener (this);
     engine.getDeviceManager().removeChangeListener (this);
     setProject (nullptr); // closes the project on the message thread, before the Engine goes
 }
 
-void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster*)
+void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
-    // MIDI inputs show up a moment after startup, and when a MIDI keyboard is plugged in.
-    if (project != nullptr)
-        routeLiveMidiInput (project->getEdit());
+    if (project == nullptr)
+        return;
+
+    if (source == &selection)
+        followSelectedTrack (selection);
+    else
+        routeLiveMidiInput (project->getEdit()); // MIDI inputs show up a moment after startup, and when plugged in
 }
 
 void ProjectSession::openAtStartup()
@@ -279,11 +287,17 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject)
 {
     autosaveTimer = nullptr;
     uiBehaviour.setFocusedEdit (nullptr);
+    selection.deselectAll();
+    selection.edit = nullptr;
+
+    if (project != nullptr && onProjectClosing != nullptr)
+        onProjectClosing();
 
     project = std::move (newProject); // the previous project closes here, deleting its autosave
 
     if (project != nullptr)
     {
+        selection.edit = &project->getEdit();
         uiBehaviour.setFocusedEdit (&project->getEdit());
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
         recent.add (project->getFile());

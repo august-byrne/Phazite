@@ -124,7 +124,7 @@ private:
 int getMatchScore (const juce::String& query, const juce::String& text);
 
 // The commands that act on the focused Edit (UIBehaviour::getLastFocusedEdit): undo, redo,
-// FL Studio's undo-or-redo, and play/stop.
+// FL Studio's undo-or-redo, play/stop, and going to the start or end.
 void addEditCommands (CommandRegistry&, UIBehaviour&);
 
 // Undo and redo for an Edit. Use these, not Edit::undo() and redo(): Tracktion's undo puts back a

@@ -6,6 +6,7 @@
 #include "ProjectSession.h"
 #include "model/Commands.h"
 #include "model/EngineSetup.h"
+#include "model/Tracks.h"
 #include "ui/LookAndFeel.h"
 
 namespace phazite
@@ -48,6 +49,7 @@ public:
         mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel);
 
         addEditCommands (*commands, uiBehaviour);
+        addTrackCommands (*commands, session->getSelection());
         session->addCommands (*commands);
         mainWindow->addCommands();
 

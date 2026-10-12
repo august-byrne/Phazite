@@ -156,7 +156,17 @@ Project::~Project()
 
 juce::ValueTree Project::getPhaziteState()
 {
-    return edit->state.getOrCreateChildWithName (phaziteStateType, nullptr);
+    return phazite::getPhaziteState (*edit);
+}
+
+juce::ValueTree getPhaziteState (te::Edit& edit)
+{
+    return edit.state.getOrCreateChildWithName (phaziteStateType, nullptr);
+}
+
+juce::ValueTree findPhaziteState (const te::Edit& edit)
+{
+    return edit.state.getChildWithName (phaziteStateType);
 }
 
 bool Project::hasUnsavedChanges() const

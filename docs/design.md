@@ -706,6 +706,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - **Project IDs:** `te::loadEditFromFile` replaces the ID saved in a project with the one it is given, but the Edit names its temporary folder (freeze files, comp renders) after that ID. `phazite::Project` reads the saved ID first, so a project keeps it, and gives a Save As copy a new one (step 0.5).
 - **Undoing a parameter change:** undo puts back a parameter's stored value (a track's volume, say) but not the value the engine plays with. `phazite::undo()` and `redo()` set every parameter that isn't automated to its stored value afterwards. Tracktion only stores a value once it first changes, and undoing that first change removes it again, so Phazite's controls store the value, without an undo step, before changing it; otherwise the fix would cost the redo history (step 0.6). Worth reporting upstream.
 - **Mute and solo** aren't part of the undo history.
+- **Track insert points:** `TrackInsertPoint (track, false)` means "after this track", except for the first top-level track, where it means the start of the list. `phazite::getInsertPointAfter()` names the track explicitly (step 1.1).
 - **Aliases:** changes to linked clips are mirrored without undo, so Phazite's alias commands must edit every linked clip inside one undo step.
 - **Folder buses:** a submix folder has no output of its own; it uses its first child track's output. The bus routing UI has to account for this.
 - **Plug-in parameters:** hosted plug-in parameters are identified by index ([section 19](#19-plug-in-hosting-and-stability)).
@@ -741,6 +742,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 | 2026-10-12 | Step 0.7 defaults: the computer keyboard plays notes, laid out as in Ableton Live and Logic Pro; live MIDI plays the first track with an instrument until tracks can be selected |
 | 2026-10-12 | Icons: Lucide (ISC), step 0.6 |
 | 2026-10-12 | Single-key shortcuts and the computer keyboard: Ableton Live's way, Shift and a letter for the shortcut while the keyboard plays notes |
+| 2026-10-12 | Step 1.1 defaults: the playlist's time axis is in beats, as in FL Studio and Ableton Live, so tempo changes don't move the grid; the grid adapts to the zoom unless a fixed size is picked; live MIDI follows the selected track (like FL Studio's selected channel); Delete deletes the selection and selects the next track, as in Ableton Live; track heights are saved in the project but aren't undo steps |
 
 ## Appendix A. Research summary
 

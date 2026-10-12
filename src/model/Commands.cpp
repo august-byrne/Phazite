@@ -165,7 +165,7 @@ bool CommandRegistry::invoke (const juce::String& id)
 
     if (command->undoTarget != nullptr)
         if (auto* edit = command->undoTarget())
-            edit->getUndoManager().beginNewTransaction (command->name);
+            edit->getUndoManager().beginNewTransaction (getCurrentName (*command)); // e.g. "Delete 2 Tracks"
 
     command->perform();
     return true;
@@ -503,6 +503,32 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                             else
                                 transport.play (false);
                         }
+                    },
+                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; } });
+
+    registry.add ({ .id = "transport.goToStart",
+                    .name = "Go to Start",
+                    .category = "Transport",
+                    .description = "Moves the playhead to the start of the song.",
+                    .synonyms = { "home", "beginning", "rewind", "return" },
+                    .perform =
+                        [focusedEdit]
+                    {
+                        if (auto* edit = focusedEdit())
+                            edit->getTransport().setPosition (te::TimePosition());
+                    },
+                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; } });
+
+    registry.add ({ .id = "transport.goToEnd",
+                    .name = "Go to End",
+                    .category = "Transport",
+                    .description = "Moves the playhead to the end of the song, where its last clip ends.",
+                    .synonyms = { "end", "last", "fast forward" },
+                    .perform =
+                        [focusedEdit]
+                    {
+                        if (auto* edit = focusedEdit())
+                            edit->getTransport().setPosition (te::toPosition (edit->getLength()));
                     },
                     .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; } });
 }

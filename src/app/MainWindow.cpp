@@ -70,7 +70,7 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     setUsingNativeTitleBar (true);
     setInterfaceScale ((float) engine.getPropertyStorage().getPropertiesFile().getDoubleValue (interfaceScaleSettingKey, 1.0));
 
-    auto content = std::make_unique<ui::AppShell> (engine, commands, computerKeyboard, [&s] { return s.getEdit(); });
+    auto content = std::make_unique<ui::AppShell> (engine, commands, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection());
     shell = content.get();
     setContentOwned (content.release(), false);
 
@@ -101,8 +101,10 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     commands.getCommandManager().getKeyMappings()->addChangeListener (this);
 
     session.dialogParent = this;
+    session.onProjectClosing = [this] { shell->setEdit (nullptr); };
     session.onProjectChanged = [this]
     {
+        shell->setEdit (session.getEdit());
         updateTitle();
         menuItemsChanged(); // the recent projects
     };
@@ -115,8 +117,10 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
 MainWindow::~MainWindow()
 {
     stopTimer();
+    session.onProjectClosing = nullptr;
     session.onProjectChanged = nullptr;
     session.dialogParent = nullptr;
+    shell->setEdit (nullptr);
 
     // Close the dialogs: they point into the Engine and the commands, which are destroyed after
     // this window.
@@ -439,7 +443,7 @@ void MainWindow::updateTitle()
 //==============================================================================
 juce::StringArray MainWindow::getMenuBarNames()
 {
-    return { "File", "Edit", "Transport", "View", "Options" };
+    return { "File", "Edit", "Track", "Transport", "View", "Options" };
 }
 
 juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
@@ -479,19 +483,61 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             add (menu, "edit.undo");
             add (menu, "edit.redo");
             add (menu, "edit.undoOrRedo");
+            menu.addSeparator();
+
+            for (const auto* id : { "edit.delete", "edit.duplicate", "edit.rename" })
+                add (menu, id);
+
+            menu.addSeparator();
+            add (menu, "edit.selectAll");
+            add (menu, "edit.deselectAll");
             break;
 
         case 2:
-            add (menu, "transport.playStop");
+            add (menu, "track.add");
+            add (menu, "track.color");
+            menu.addSeparator();
+
+            for (const auto* id : { "track.mute", "track.solo" })
+                add (menu, id);
+
+            menu.addSeparator();
+
+            for (const auto* id : { "track.moveUp", "track.moveDown", "track.selectPrevious", "track.selectNext" })
+                add (menu, id);
+
+            menu.addSeparator();
+            add (menu, "track.taller");
+            add (menu, "track.shorter");
             break;
 
         case 3:
+            for (const auto* id : { "transport.playStop", "transport.goToStart", "transport.goToEnd" })
+                add (menu, id);
+
+            break;
+
+        case 4:
+        {
             add (menu, "view.commandPalette");
             menu.addSeparator();
 
             for (const auto* id : { "view.toggleBrowser", "view.toggleInspector", "view.toggleEditor", "view.pianoRoll", "view.mixer" })
                 add (menu, id);
 
+            menu.addSeparator();
+
+            for (const auto* id : { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback" })
+                add (menu, id);
+
+            juce::PopupMenu gridMenu;
+            add (gridMenu, "grid.snap");
+            gridMenu.addSeparator();
+
+            for (const auto* id : { "grid.adaptive", "grid.finer", "grid.coarser", "grid.triplets" })
+                add (gridMenu, id);
+
+            menu.addSubMenu ("Grid", gridMenu);
             menu.addSeparator();
 
             for (const auto* id : { "view.detachBrowser", "view.detachInspector", "view.detachEditor" })
@@ -510,8 +556,9 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSeparator();
             add (menu, "view.hoverHelp");
             break;
+        }
 
-        case 4:
+        case 5:
         {
             add (menu, "options.settings");
             add (menu, "options.audioSettings");

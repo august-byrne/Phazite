@@ -36,21 +36,26 @@ private:
 };
 
 //==============================================================================
-// The panel on the right. Until tracks can be selected (roadmap step 1.1), it shows the channel of
-// the track that live MIDI plays, or else the first track.
+// The panel on the right. It shows the channel of the selected track; with none selected, that of the
+// track live MIDI plays, or else the first track.
 class Inspector : public juce::Component,
+                  private juce::ChangeListener,
                   private juce::Timer
 {
 public:
-    explicit Inspector (std::function<te::Edit*()> getEdit);
+    Inspector (std::function<te::Edit*()> getEdit, te::SelectionManager&);
+    ~Inspector() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
     std::function<te::Edit*()> getEdit;
+    te::SelectionManager& selection;
     ChannelStrip strip;
 
-    void timerCallback() override; // follows the track
+    void showTrack();
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { showTrack(); } // the selection changed
+    void timerCallback() override { showTrack(); }                                   // or live MIDI moved
 };
 } // namespace phazite::ui

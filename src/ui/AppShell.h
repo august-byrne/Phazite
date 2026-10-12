@@ -6,6 +6,7 @@
 #include "HintBar.h"
 #include "Icons.h"
 #include "Panels.h"
+#include "Playlist.h"
 #include "TopBar.h"
 
 namespace phazite::ui
@@ -13,8 +14,11 @@ namespace phazite::ui
 class AppShell : public juce::Component
 {
 public:
-    AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit);
+    AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&);
     ~AppShell() override;
+
+    // The open project's Edit, or nullptr while none is open (call this before it closes, too).
+    void setEdit (te::Edit*);
 
     // The panels that can move to a window of their own, for example on a second monitor. Closing
     // that window puts the panel back.
@@ -54,7 +58,7 @@ private:
     TopBar topBar;
     Panel browser { "Browser",
                     "Instruments, effects, plug-ins, samples and projects, by folder or by search. Coming in roadmap step 1.5." };
-    Panel playlist { "Playlist", "Tracks, clips and song sections. Coming in roadmap step 1.1." };
+    Playlist playlist;
     Inspector inspector;
     EditorDock editorDock;
     HintBar hintBar;

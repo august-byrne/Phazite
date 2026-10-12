@@ -68,10 +68,12 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 };
 
 //==============================================================================
-AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard, std::function<te::Edit*()> getEdit)
+AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard, std::function<te::Edit*()> getEdit,
+                    te::SelectionManager& selection)
     : commands (registry),
       topBar (engine, registry, computerKeyboard, getEdit),
-      inspector (std::move (getEdit))
+      playlist (registry, selection),
+      inspector (std::move (getEdit), selection)
 {
     setTitle ("Phazite");
 
@@ -100,6 +102,11 @@ AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeybo
 }
 
 AppShell::~AppShell() = default; // here, where PanelWindow is complete
+
+void AppShell::setEdit (te::Edit* edit)
+{
+    playlist.setEdit (edit);
+}
 
 void AppShell::setLayout (Layout layout)
 {
@@ -393,12 +400,14 @@ void AppShell::addCommands (CommandRegistry& registry)
                         .isTicked = [this, which] { return isDetached (which); } });
     }
 
+    playlist.addCommands (registry);
     refreshShortcutTexts();
 }
 
 void AppShell::refreshShortcutTexts()
 {
     topBar.refreshTooltips();
+    playlist.refreshShortcutTexts();
 
     const auto paletteKeys = commands.getShortcutDescriptions ("view.commandPalette");
     hintBar.setDefaultHint (paletteKeys.isEmpty() ? juce::String ("Search for any command with \"Search commands\" at the top right.")

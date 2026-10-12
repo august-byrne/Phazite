@@ -33,13 +33,3 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
         CHECK (getContrastRatio (p.danger, p.surface) >= 3.0);
     }
 }
-
-TEST_CASE ("Track colours are distinct")
-{
-    const auto colours = getTrackColours();
-    CHECK (colours.size() >= 8);
-
-    for (int i = 0; i < colours.size(); ++i)
-        for (int j = i + 1; j < colours.size(); ++j)
-            CHECK (colours[i] != colours[j]);
-}

@@ -18,7 +18,11 @@ public:
     Project* getProject() const noexcept { return project.get(); }
     te::Edit* getEdit() const noexcept { return project != nullptr ? &project->getEdit() : nullptr; }
 
-    std::function<void()> onProjectChanged;  // e.g. to update the window title
+    // What is selected in the open project (tracks, for now). Live MIDI input follows the selected track.
+    te::SelectionManager& getSelection() noexcept { return selection; }
+
+    std::function<void()> onProjectClosing;  // the open project is about to close: let go of its Edit
+    std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
     juce::Component* dialogParent = nullptr; // dialogs appear over this
 
     // Opens the most recent project (offering to restore its autosave), or makes a first project.
@@ -43,6 +47,7 @@ private:
     te::Engine& engine;
     UIBehaviour& uiBehaviour;
     RecentProjects recent;
+    te::SelectionManager selection { engine };
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -53,7 +58,8 @@ private:
     void createFirstProject();
     void showError (const juce::String& title, const juce::String& message);
 
-    // The audio or MIDI devices changed: send live MIDI to the project again (see routeLiveMidiInput()).
+    // The selection changed, so live MIDI follows it; or the audio or MIDI devices changed, so live
+    // MIDI goes to the project again (see routeLiveMidiInput()).
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 };
 } // namespace phazite

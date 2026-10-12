@@ -87,3 +87,31 @@ TEST_CASE ("Playing and routing live MIDI don't count as unsaved changes")
 
     folder.deleteRecursively();
 }
+
+TEST_CASE ("Live MIDI follows the selected track, if it has an instrument")
+{
+    REQUIRE (findAllMidiInputs() != nullptr);
+
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    edit->ensureNumberOfAudioTracks (3);
+    const auto tracks = te::getAudioTracks (*edit);
+    addInstrument (*tracks[0]);
+    addInstrument (*tracks[2]);
+    phazite::routeLiveMidiInput (*edit);
+    REQUIRE (phazite::getLiveMidiTrack (*edit) == tracks[0]);
+
+    te::SelectionManager selection (phazite::test::getEngine());
+    selection.edit = edit.get();
+
+    selection.selectOnly (tracks[2]);
+    phazite::followSelectedTrack (selection);
+    CHECK (phazite::getLiveMidiTrack (*edit) == tracks[2]);
+
+    // A track without an instrument can't play it, so live MIDI stays where it was.
+    CHECK_FALSE (phazite::hasInstrument (*tracks[1]));
+    selection.selectOnly (tracks[1]);
+    phazite::followSelectedTrack (selection);
+    CHECK (phazite::getLiveMidiTrack (*edit) == tracks[2]);
+
+    selection.deselectAll();
+}

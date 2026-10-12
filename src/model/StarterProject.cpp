@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "StarterProject.h"
 #include "AppInfo.h"
+#include "Tracks.h"
 
 using namespace tracktion::literals; // 0_tp (time position), 16_bp (beat position), ...
 
@@ -30,6 +31,7 @@ void addStarterContent (te::Edit& edit)
         return;
 
     track->setName ("Synth");
+    track->setColour (getTrackColours()[0].colour);
 
     // Tracktion's 4OSC, before the track's volume and meter. (It locks and allocates on the audio
     // thread, see docs/realtime-audit.md; Phazite's own synth replaces it in roadmap step 1.6.)

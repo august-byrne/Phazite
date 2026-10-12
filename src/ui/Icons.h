@@ -13,7 +13,9 @@ enum class Icon
     stop,
     keyboard,
     search,
-    detach
+    detach,
+    plus,
+    magnet
 };
 
 // The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read.

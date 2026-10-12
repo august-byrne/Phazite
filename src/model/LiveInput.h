@@ -23,4 +23,11 @@ bool setLiveMidiTrack (te::AudioTrack&);
 // Also keeps the Edit's playback graph running, so that input is heard while the transport is
 // stopped. Call it when a project opens and whenever the MIDI devices change.
 void routeLiveMidiInput (te::Edit&);
+
+// True if the track has an instrument (a synth or sampler plug-in) that live MIDI input can play.
+bool hasInstrument (const te::AudioTrack&);
+
+// Live MIDI input follows the selection, as FL Studio's selected channel does: if the first selected
+// track has an instrument, it plays that track. Call it when the selection changes.
+void followSelectedTrack (const te::SelectionManager&);
 } // namespace phazite

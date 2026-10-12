@@ -120,6 +120,9 @@ Done before this plan (progress since then is under [Status](#status)):
   - split, duplicate, alias and make unique, delete and ripple delete, nudge, fades and crossfades.
 - **Placing content:** drag and drop from the browser, with automatic naming and coloring.
 - *Done when:* a beat can be laid out from one-shots and MIDI clips with just the keyboard and the Smart Tool.
+- *Status:* in progress, in four parts.
+  - **Part 1, done:** the timeline (`src/model/Timeline.h`: positions in beats, zoom, and a grid that adapts to the zoom or has a fixed size, with snap and triplets) and the tracks (`src/model/Tracks.h`: add, delete, duplicate, move, select, mute, solo, colors from the color-blind-safe palette, heights). The playlist (`src/ui/Playlist.h`) has the ruler, the playhead, scrolling, zoom and track headers that rename, recolor, resize and move tracks; live MIDI and the inspector follow the selected track.
+  - **Next:** clips with waveforms and note previews, and the Smart Tool (part 2); the single-key tools and editing commands (part 3); folders, pinning, focus mode and files dropped from Explorer (part 4).
 
 **1.2 Sections and song outlines (M)**
 - The sections strip. Move, duplicate (also as aliases), delete and resize a section across all tracks.
@@ -348,7 +351,7 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | Not started |
+| 1. Make a beat | In progress: step 1.1, part 1 of 4 (timeline, grid and tracks) |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |

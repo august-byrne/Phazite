@@ -71,13 +71,7 @@ namespace Space
 inline constexpr int controlHeight = 28;
 inline constexpr float cornerRadius = 4.0f;
 
-// Track colours that colour-blind users can tell apart: Okabe and Ito's palette (2008), with grey
-// instead of black so it shows on dark backgrounds.
-inline juce::Array<juce::Colour> getTrackColours()
-{
-    return { juce::Colour (0xffe69f00), juce::Colour (0xff56b4e9), juce::Colour (0xff009e73), juce::Colour (0xfff0e442),
-             juce::Colour (0xff0072b2), juce::Colour (0xffd55e00), juce::Colour (0xffcc79a7), juce::Colour (0xff999999) };
-}
+// Track colors are saved in projects, so their palette is in the model: phazite::getTrackColours().
 
 // WCAG 2.2's contrast ratio between two colours, from 1 (none) to 21 (black on white). Text needs at
 // least 4.5, and the parts of a control that identify it at least 3.
