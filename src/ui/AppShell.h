@@ -11,7 +11,7 @@ namespace phazite::ui
 class AppShell : public juce::Component
 {
 public:
-    AppShell (te::Engine&, CommandRegistry&, std::function<te::Edit*()> getEdit);
+    AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit);
 
     // Layouts arrange the panels; they don't hide features.
     enum class Layout

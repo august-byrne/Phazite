@@ -369,6 +369,11 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 
   It adds FL Studio's single-key tools, which reviewers praise.
 - **Any command can be rebound.** Ctrl+Alt+click on a menu item assigns a shortcut directly, as Logic's Control-click does.
+- **The computer keyboard plays notes**, on by default so a new project makes sound right away (step 0.7):
+  - the layout of Ableton Live and Logic Pro: the middle row of letters plays the white keys from middle C, the row above the black keys, Z and X change the octave and C and V the velocity in steps of 20 ([B40](#appendix-b-sources));
+  - it takes only keys pressed without Ctrl, Alt or Cmd, and never keys typed into a text field;
+  - a top-bar button and the Options menu turn it off. In the FL Studio keymap Ctrl+T does too, and F10 opens the MIDI settings, as in FL Studio ([B41](#appendix-b-sources)). FL's manual doesn't document which keys play which notes, so that keymap uses the same layout;
+  - single-key tools need the same letters: see [open question 9](#24-open-questions).
 - **How "most intuitive" gets settled:**
   - watch three to five people, both FL Studio users and complete beginners, do the same tasks with a prototype: place a kick on every beat, trim, fade, duplicate a section, write a chord;
   - count hesitations and errors, and adjust the defaults from that.
@@ -556,6 +561,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 ## 17. Recording and Capture
 
 **v1:**
+- **Live MIDI:** every MIDI keyboard, and the computer keyboard, plays one track, without arming it. For now that is the project's first track with an instrument; once tracks can be selected (step 1.1), it is the selected track.
 - **MIDI recording** from controllers and the computer keyboard, with overdub or replace, and optional input quantize.
 - **Capture:** Phazite keeps recent MIDI input (Tracktion keeps 30 seconds by default), and one key turns it into a clip. This is Live's Capture MIDI and Logic's Flashback Capture ([B30](#appendix-b-sources)). If the project is empty, Capture also detects the tempo.
 - **Audio recording:** record-arm, input monitoring, count-in, punch-in over the loop range, and basic takes.
@@ -692,9 +698,11 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - A scan timeout. After v1: plug-in sandboxing and CLAP.
 
 **Watch-outs, from reading the engine source:**
-- **Personal data:** saved projects contain the operating system user's full name (see [section 22](#22-privacy-licences-and-trademarks)).
-- **UI hooks:** Phazite passes no `UIBehaviour` yet. MIDI learn, app commands, plug-in windows and freeze need one.
-- **Edit loading:** `EditLoader` builds projects on a background thread. That breaks the `CLAUDE.md` rule that Tracktion objects are created on the message thread.
+- **Personal data:** saved projects contain the operating system user's full name (see [section 22](#22-privacy-licences-and-trademarks)). Handled in step 0.2: `phazite::PropertyStorage` gives no user name.
+- **UI hooks:** MIDI learn, app commands, plug-in windows and freeze need a `UIBehaviour`. Step 0.2 added `phazite::UIBehaviour`.
+- **Edit loading:** `EditLoader` builds projects on a background thread. That breaks the `CLAUDE.md` rule that Tracktion objects are created on the message thread, so Phazite loads them with `phazite::loadEdit()` (step 0.2).
+- **MIDI device scan:** `DeviceManager::initialise()` asks for a MIDI scan in 5 ms, then restarts the same timer with the 4-second hot-plug check, so MIDI inputs would appear 4 seconds after startup. `phazite::createEngine()` asks for the scan again (step 0.7).
+- **State written while playing:** Tracktion writes the playhead position into the project, and adds input-device entries when it prepares playback. `phazite::Project` doesn't count those as unsaved changes (step 0.7).
 - **Aliases:** changes to linked clips are mirrored without undo, so Phazite's alias commands must edit every linked clip inside one undo step.
 - **Folder buses:** a submix folder has no output of its own; it uses its first child track's output. The bus routing UI has to account for this.
 - **Plug-in parameters:** hosted plug-in parameters are identified by index ([section 19](#19-plug-in-hosting-and-stability)).
@@ -710,6 +718,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 6. **Airwindows:** ship its 186 MIT-licensed effects as extra devices? They also lock on the audio thread today.
 7. **Plug-in sandboxing:** first update after v1 (proposed), or before v1?
 8. **Ableton Live keymap:** in v1, or soon after?
+9. **Single-key tools and the computer keyboard:** both want plain letters (FL Studio's tools use P, B, D, T, S, C and E). FL Studio turns single-key shortcuts off while its typing keyboard plays notes ([B41](#appendix-b-sources)); Ableton Live 12 keeps playing notes and runs single-key shortcuts with Shift held ([B40](#appendix-b-sources)). Proposed: Ableton's way, with notes on by default. Needed before step 1.1.
 
 ## 25. Decision log
 
@@ -726,6 +735,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 | 2026-10-12 | First outline styles: pop, rock, electronic, and hip-hop/trap |
 | 2026-10-12 | Typography: bundle Inter (SIL OFL 1.1) as separate files, as part of a design language with color, spacing, icon and motion tokens |
 | 2026-10-12 | Engine problems: simple workarounds first; fork Tracktion Engine if workarounds get awkward or upstream issues block us |
+| 2026-10-12 | Step 0.7 defaults: the computer keyboard plays notes, laid out as in Ableton Live and Logic Pro; live MIDI plays the first track with an instrument until tracks can be selected |
 
 ## Appendix A. Research summary
 
@@ -803,3 +813,5 @@ In October 2026, research agents reviewed about 20 DAWs, and the Tracktion Engin
 - **B37** REAPER changelog, 7.70 ("use Inter as default font on all platforms"): <https://www.reaper.fm/whatsnew.txt>
 - **B38** SIL Open Font License FAQ (bundling with other software): <https://openfontlicense.org/ofl-faq/>
 - **B39** GNU project, licence list (SIL OFL entry): <https://www.gnu.org/licenses/license-list.html#SILOFL>
+- **B40** Ableton Live 12 manual, MIDI and Key Remote Control (playing MIDI with the computer keyboard): <https://www.ableton.com/en/manual/midi-and-key-remote-control/>
+- **B41** FL Studio manual, keyboard and mouse shortcuts (Ctrl+T typing keyboard to piano, F10 MIDI settings): <https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/basics_shortcuts.htm>

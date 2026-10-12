@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MainWindow.h"
+#include "model/LiveInput.h"
 
-#include <juce_audio_utils/juce_audio_utils.h> // AudioDeviceSelectorComponent, PluginListComponent
+#include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
 namespace phazite
 {
@@ -9,6 +10,7 @@ namespace
 {
     constexpr const char* themeSettingKey = "phaziteTheme";
     constexpr const char* hoverHelpSettingKey = "phaziteHoverHelp";
+    constexpr const char* computerKeyboardSettingKey = "phaziteComputerKeyboard";
     constexpr const char* keymapSettingKey = "phaziteKeymap"; // also read by CommandRegistry::loadKeySettings
     constexpr int quitItemID = 1;
     constexpr int firstRecentItemID = 100;
@@ -37,6 +39,19 @@ namespace
 
         return ui::ThemeName::dark;
     }
+
+    // The computer keyboard plays into Tracktion's "All MIDI Ins", as a MIDI keyboard would, so its
+    // notes go to the track that live MIDI plays.
+    void playIntoAllMidiInputs (te::Engine& engine, const juce::MidiMessage& m)
+    {
+        if (const auto device = getAllMidiInputs (engine))
+        {
+            if (m.isNoteOn())
+                device->keyboardState.noteOn (m.getChannel(), m.getNoteNumber(), m.getFloatVelocity());
+            else if (m.isNoteOff())
+                device->keyboardState.noteOff (m.getChannel(), m.getNoteNumber(), m.getFloatVelocity());
+        }
+    }
 } // namespace
 
 MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui::LookAndFeel& lf)
@@ -44,11 +59,12 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
       engine (e),
       commands (r),
       session (s),
-      lookAndFeel (lf)
+      lookAndFeel (lf),
+      computerKeyboard ([&e] (const juce::MidiMessage& m) { playIntoAllMidiInputs (e, m); })
 {
     setUsingNativeTitleBar (true);
 
-    auto content = std::make_unique<ui::AppShell> (engine, commands, [&s] { return s.getEdit(); });
+    auto content = std::make_unique<ui::AppShell> (engine, commands, computerKeyboard, [&s] { return s.getEdit(); });
     shell = content.get();
     setContentOwned (content.release(), false);
 
@@ -60,9 +76,22 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     setTheme (themeFromString (settings.getValue (themeSettingKey, "dark")));
     setHoverHelp (settings.getBoolValue (hoverHelpSettingKey, true));
 
+    computerKeyboard.setEnabled (settings.getBoolValue (computerKeyboardSettingKey, true));
+    computerKeyboard.onChange = [this]
+    {
+        auto& props = engine.getPropertyStorage().getPropertiesFile();
+        props.setValue (computerKeyboardSettingKey, computerKeyboard.isEnabled());
+        props.saveIfNeeded();
+        menuItemsChanged();
+    };
+
     setMenuBar (this);
     setApplicationCommandManagerToWatch (&commands.getCommandManager());
-    addKeyListener (commands.getCommandManager().getKeyMappings()); // shortcuts work anywhere in the window
+
+    // Shortcuts work anywhere in the window. Key listeners added later are asked first, so the computer
+    // keyboard gets its letters before shortcuts do; it leaves alone keys pressed with Ctrl, Alt or Cmd.
+    addKeyListener (commands.getCommandManager().getKeyMappings());
+    addKeyListener (&computerKeyboard);
     commands.getCommandManager().getKeyMappings()->addChangeListener (this);
 
     session.dialogParent = this;
@@ -85,12 +114,13 @@ MainWindow::~MainWindow()
 
     // Close the dialogs: they point into the Engine and the commands, which are destroyed after
     // this window.
-    delete audioSettingsWindow.getComponent();
+    delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
-    delete shortcutsWindow.getComponent();
 
     commands.getCommandManager().getKeyMappings()->removeChangeListener (this);
+    removeKeyListener (&computerKeyboard);
     removeKeyListener (commands.getCommandManager().getKeyMappings());
+    computerKeyboard.onChange = nullptr;
     setMenuBar (nullptr);
     clearContentComponent();
 }
@@ -100,16 +130,48 @@ void MainWindow::closeButtonPressed()
     juce::JUCEApplication::getInstance()->systemRequestedQuit(); // asks to save unsaved changes first
 }
 
+void MainWindow::activeWindowStatusChanged()
+{
+    juce::DocumentWindow::activeWindowStatusChanged();
+
+    // Keys released in another window would never reach this one: end the notes now.
+    if (! isActiveWindow())
+        computerKeyboard.releaseAll();
+}
+
 void MainWindow::addCommands()
 {
     shell->addCommands (commands);
 
+    commands.add ({ .id = "options.settings",
+                    .name = "Settings",
+                    .category = "Options",
+                    .description = "The audio device, MIDI inputs and keyboard shortcuts.",
+                    .synonyms = { "preferences", "options", "setup" },
+                    .perform = [this] { showSettings (std::nullopt); } });
+
     commands.add ({ .id = "options.audioSettings",
                     .name = "Audio Settings",
                     .category = "Options",
-                    .description = "Chooses the audio device, sample rate and buffer size.",
-                    .synonyms = { "device", "asio", "latency", "buffer", "sound card", "interface" },
-                    .perform = [this] { showAudioSettings(); } });
+                    .description = "Chooses the audio device (ASIO on Windows, for an audio interface), sample rate and buffer size.",
+                    .synonyms = { "device", "asio", "latency", "buffer", "sound card", "interface", "output" },
+                    .perform = [this] { showSettings (ui::SettingsPanel::audio); } });
+
+    commands.add ({ .id = "options.midiSettings",
+                    .name = "MIDI Settings",
+                    .category = "Options",
+                    .description = "Turns MIDI inputs and the computer keyboard on or off.",
+                    .synonyms = { "midi keyboard", "controller", "inputs", "devices" },
+                    .perform = [this] { showSettings (ui::SettingsPanel::midi); } });
+
+    commands.add ({ .id = "input.computerKeyboard",
+                    .name = "Play Notes with the Computer Keyboard",
+                    .category = "Input",
+                    .description = "A S D F G H J K L ; play the white keys, W E T Y U O P the black keys; Z and X change "
+                                   "the octave, C and V the velocity.",
+                    .synonyms = { "typing keyboard", "qwerty", "musical typing", "piano", "midi" },
+                    .perform = [this] { computerKeyboard.setEnabled (! computerKeyboard.isEnabled()); },
+                    .isTicked = [this] { return computerKeyboard.isEnabled(); } });
 
     commands.add (
         { .id = "options.scanPlugins",
@@ -124,7 +186,7 @@ void MainWindow::addCommands()
                     .category = "Options",
                     .description = "Changes the keys of any command. Each keymap keeps its own changes.",
                     .synonyms = { "keys", "hotkeys", "keymap", "bindings", "rebind" },
-                    .perform = [this] { showKeyboardShortcuts(); } });
+                    .perform = [this] { showSettings (ui::SettingsPanel::shortcuts); } });
 
     for (const auto& keymap : Keymap::getBuiltIn())
     {
@@ -170,27 +232,33 @@ void MainWindow::addCommands()
 }
 
 //==============================================================================
-void MainWindow::showAudioSettings()
+void MainWindow::showSettings (std::optional<ui::SettingsPanel::Tab> tab)
 {
-    if (audioSettingsWindow != nullptr)
+    if (settingsWindow != nullptr)
     {
-        audioSettingsWindow->toFront (true);
+        if (tab.has_value() && settingsPanel != nullptr)
+            settingsPanel->showTab (*tab);
+
+        settingsWindow->toFront (true);
         return;
     }
 
-    // 0-512 inputs and 1-512 outputs, no MIDI options yet (roadmap step 0.7), channels in stereo
-    // pairs, advanced options behind a button. The Engine saves changes in its settings.
-    auto& deviceManager = engine.getDeviceManager().deviceManager;
+    auto* panel = new ui::SettingsPanel (
+        engine, commands, computerKeyboard, [this] { return session.getEdit(); }, [this] (const juce::String& name) { setKeymap (name); });
+    panel->setSize (640, 600);
+    panel->showTab (tab.value_or (ui::SettingsPanel::audio));
+    settingsPanel = panel;
 
     juce::DialogWindow::LaunchOptions o;
-    o.dialogTitle = "Audio Settings";
+    o.dialogTitle = "Settings";
     o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
-    o.content.setOwned (new juce::AudioDeviceSelectorComponent (deviceManager, 0, 512, 1, 512, false, false, true, true));
-    o.content->setSize (420, 560);
-    o.componentToCentreAround = this;
+    o.escapeKeyTriggersCloseButton = true;
     o.useNativeTitleBar = true;
+    o.resizable = true;
+    o.componentToCentreAround = this;
+    o.content.setOwned (panel);
 
-    audioSettingsWindow = o.launchAsync();
+    settingsWindow = o.launchAsync();
 }
 
 void MainWindow::showPluginList()
@@ -229,31 +297,6 @@ void MainWindow::showPluginList()
     for (auto* format : pm.pluginFormatManager.getFormats())
         if (format->getName() == "VST3")
             list->scanFor (*format);
-}
-
-void MainWindow::showKeyboardShortcuts()
-{
-    if (shortcutsWindow != nullptr)
-    {
-        shortcutsWindow->toFront (true);
-        return;
-    }
-
-    // JUCE's editor for the command manager's keys, grouped by category. Its "reset to defaults"
-    // button goes back to the current keymap's keys, which is what the commands register as defaults.
-    auto* editor = new juce::KeyMappingEditorComponent (*commands.getCommandManager().getKeyMappings(), true);
-    editor->setSize (520, 640);
-
-    juce::DialogWindow::LaunchOptions o;
-    o.dialogTitle = "Keyboard Shortcuts";
-    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.componentToCentreAround = this;
-    o.content.setOwned (editor);
-
-    shortcutsWindow = o.launchAsync();
 }
 
 void MainWindow::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -376,9 +419,13 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
         case 4:
         {
+            add (menu, "options.settings");
             add (menu, "options.audioSettings");
-            add (menu, "options.scanPlugins");
+            add (menu, "options.midiSettings");
             add (menu, "options.keyboardShortcuts");
+            add (menu, "options.scanPlugins");
+            menu.addSeparator();
+            add (menu, "input.computerKeyboard");
             menu.addSeparator();
 
             juce::PopupMenu keymaps, themes;

@@ -9,11 +9,11 @@
 
 namespace phazite
 {
-class ProjectSession
+class ProjectSession : private juce::ChangeListener
 {
 public:
     ProjectSession (te::Engine&, UIBehaviour&);
-    ~ProjectSession();
+    ~ProjectSession() override;
 
     Project* getProject() const noexcept { return project.get(); }
     te::Edit* getEdit() const noexcept { return project != nullptr ? &project->getEdit() : nullptr; }
@@ -50,5 +50,8 @@ private:
     void open (const juce::File&, bool restoreAutosave);
     void createFirstProject();
     void showError (const juce::String& title, const juce::String& message);
+
+    // The audio or MIDI devices changed: send live MIDI to the project again (see routeLiveMidiInput()).
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
 };
 } // namespace phazite

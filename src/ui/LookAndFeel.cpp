@@ -68,6 +68,14 @@ void LookAndFeel::setTheme (ThemeName newTheme)
     setColour (juce::AlertWindow::textColourId, p.text);
     setColour (juce::AlertWindow::outlineColourId, p.border);
     setColour (juce::ScrollBar::thumbColourId, p.textMuted.withAlpha (0.5f));
+    setColour (juce::ToggleButton::textColourId, p.text);
+    setColour (juce::ToggleButton::tickColourId, p.accent);
+    setColour (juce::ToggleButton::tickDisabledColourId, p.textMuted); // also the box's outline
+    setColour (juce::ComboBox::backgroundColourId, p.surfaceRaised);
+    setColour (juce::ComboBox::textColourId, p.text);
+    setColour (juce::ComboBox::outlineColourId, p.border);
+    setColour (juce::ComboBox::arrowColourId, p.textMuted);
+    setColour (juce::ComboBox::focusedOutlineColourId, p.accent);
     setColour (juce::KeyMappingEditorComponent::backgroundColourId, p.surface);
     setColour (juce::KeyMappingEditorComponent::textColourId, p.text);
     setColour (juce::TreeView::backgroundColourId, p.surface);

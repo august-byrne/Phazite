@@ -230,13 +230,25 @@ void Project::backUpProjectFile()
         versions.getReference (i).deleteFile();
 }
 
-void Project::markChanged()
+void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (! isWriting)
+    if (! isWriting && ! isPlaybackState (tree, property))
     {
         changedSinceSave = true;
         changedSinceAutosave = true;
     }
+}
+
+bool Project::isPlaybackState (const juce::ValueTree& tree, const juce::Identifier& property)
+{
+    if (tree.hasType (te::IDs::TRANSPORT) && property == te::IDs::position)
+        return true;
+
+    for (auto t = tree; t.isValid(); t = t.getParent())
+        if (t.hasType (te::IDs::INPUTDEVICES))
+            return true;
+
+    return false;
 }
 
 //==============================================================================

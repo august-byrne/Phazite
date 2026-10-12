@@ -4,14 +4,16 @@
 
 namespace phazite::ui
 {
-TopBar::TopBar (te::Engine& e, CommandRegistry& registry, std::function<te::Edit*()> editGetter)
+TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyboard, std::function<te::Edit*()> editGetter)
     : engine (e),
       commands (registry),
+      computerKeyboard (keyboard),
       getEdit (std::move (editGetter))
 {
     setTitle ("Transport");
 
     playButton.onClick = [this] { commands.invoke ("transport.playStop"); };
+    keyboardButton.onClick = [this] { commands.invoke ("input.computerKeyboard"); };
 
     searchButton.setButtonText ("Search commands");
     searchButton.onClick = [this] { commands.invoke ("view.commandPalette"); };
@@ -29,6 +31,7 @@ TopBar::TopBar (te::Engine& e, CommandRegistry& registry, std::function<te::Edit
     cpuLabel.setTooltip ("How much of the time available for each audio block the engine uses");
 
     addAndMakeVisible (playButton);
+    addAndMakeVisible (keyboardButton);
     addAndMakeVisible (searchButton);
 
     timerCallback();
@@ -39,6 +42,31 @@ void TopBar::refreshTooltips()
 {
     setTooltipWithShortcut (playButton, "Play or stop", "transport.playStop");
     setTooltipWithShortcut (searchButton, "Find and run any command by typing part of its name", "view.commandPalette");
+
+    shownKeyboardState = -1; // its tooltip names a shortcut too
+    updateKeyboardButton();
+}
+
+void TopBar::updateKeyboardButton()
+{
+    const bool on = computerKeyboard.isEnabled();
+    const auto lowestNote = computerKeyboard.getLowestNote(), velocity = computerKeyboard.getVelocity();
+    const auto state = (on ? 1 : 0) + 2 * lowestNote + 256 * velocity; // lowestNote < 128
+
+    if (state == shownKeyboardState)
+        return;
+
+    shownKeyboardState = state;
+    const auto from = juce::MidiMessage::getMidiNoteName (lowestNote, true, true, 4); // C4 is middle C
+
+    keyboardButton.setToggleState (on, juce::dontSendNotification);
+    keyboardButton.setButtonText (on ? "Keys " + from : juce::String ("Keys off"));
+    setTooltipWithShortcut (keyboardButton,
+                            on ? "The computer keyboard plays notes: A S D F G H J K L ; from " + from
+                                     + ", and W E T Y U O P the black keys. Z and X change the octave, C and V the velocity (now "
+                                     + juce::String (velocity) + "). Click to turn it off"
+                               : juce::String ("Click to play notes with the computer keyboard"),
+                            "input.computerKeyboard");
 }
 
 void TopBar::setTooltipWithShortcut (juce::SettableTooltipClient& client, const juce::String& text, const juce::String& commandID)
@@ -65,6 +93,8 @@ void TopBar::resized()
     keyLabel.setBounds (area.removeFromLeft (110));
     cpuLabel.setBounds (area.removeFromLeft (80));
     searchButton.setBounds (area.removeFromRight (220));
+    area.removeFromRight (Space::s);
+    keyboardButton.setBounds (area.removeFromRight (96));
 }
 
 void TopBar::timerCallback()
@@ -93,5 +123,6 @@ void TopBar::timerCallback()
     keyLabel.setText (key, juce::dontSendNotification);
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",
                       juce::dontSendNotification);
+    updateKeyboardButton();
 }
 } // namespace phazite::ui

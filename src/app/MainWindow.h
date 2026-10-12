@@ -2,12 +2,17 @@
 #pragma once
 
 #include "ProjectSession.h"
+#include "model/ComputerKeyboard.h"
 #include "ui/AppShell.h"
 #include "ui/LookAndFeel.h"
+#include "ui/SettingsPanel.h"
+
+#include <optional>
 
 namespace phazite
 {
-// Phazite's one window: the menu bar and the AppShell. It also owns the settings dialogs.
+// Phazite's one window: the menu bar and the AppShell. It also owns the dialogs, and the computer
+// keyboard, which plays notes while this window has the keyboard focus.
 class MainWindow : public juce::DocumentWindow,
                    private juce::MenuBarModel,
                    private juce::ChangeListener,
@@ -19,24 +24,26 @@ public:
 
     ui::AppShell& getShell() noexcept { return *shell; }
 
-    // The window's commands ("options." and the shell's "view." commands).
+    // The window's commands ("options.", "input." and the shell's "view." commands).
     void addCommands();
 
     void closeButtonPressed() override;
+    void activeWindowStatusChanged() override;
 
 private:
     te::Engine& engine;
     CommandRegistry& commands;
     ProjectSession& session;
     ui::LookAndFeel& lookAndFeel;
+    ComputerKeyboard computerKeyboard;
     ui::AppShell* shell = nullptr; // owned by the window as its content
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow; // hover help; null when it is turned off
-    juce::Component::SafePointer<juce::DialogWindow> audioSettingsWindow, pluginListWindow, shortcutsWindow;
+    juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow;
+    juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
 
-    void showAudioSettings();
+    void showSettings (std::optional<ui::SettingsPanel::Tab>); // no tab: Audio, or the open window's tab
     void showPluginList();
-    void showKeyboardShortcuts();
     void setTheme (ui::ThemeName);
     void setHoverHelp (bool);
     void setKeymap (const juce::String& name);

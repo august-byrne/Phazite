@@ -42,6 +42,22 @@ te::Engine& phazite::test::getEngine()
     return *testEngine;
 }
 
+bool phazite::test::runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds)
+{
+    const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMilliseconds;
+
+    while (! condition())
+    {
+        if (juce::Time::getMillisecondCounter() > end)
+            return false;
+
+        juce::Thread::sleep (5);
+        juce::Timer::callPendingTimersSynchronously();
+    }
+
+    return true;
+}
+
 int main (int argc, char** argv)
 {
     // Tracktion's Engine and Edits expect JUCE's message manager, as in the app. The tests run on this

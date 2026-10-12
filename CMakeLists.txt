@@ -63,8 +63,12 @@ target_sources(phazite_core PRIVATE
     src/model/AppInfo.h
     src/model/Commands.cpp
     src/model/Commands.h
+    src/model/ComputerKeyboard.cpp
+    src/model/ComputerKeyboard.h
     src/model/EngineSetup.cpp
     src/model/EngineSetup.h
+    src/model/LiveInput.cpp
+    src/model/LiveInput.h
     src/model/Project.cpp
     src/model/Project.h
     src/model/StarterProject.cpp
@@ -167,6 +171,8 @@ target_sources(Phazite PRIVATE
     src/ui/LookAndFeel.h
     src/ui/Panels.cpp
     src/ui/Panels.h
+    src/ui/SettingsPanel.cpp
+    src/ui/SettingsPanel.h
     src/ui/TopBar.cpp
     src/ui/TopBar.h)
 
@@ -198,8 +204,10 @@ if(PHAZITE_BUILD_TESTS)
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
         tests/CommandTests.cpp
+        tests/ComputerKeyboardTests.cpp
         tests/DesignTokenTests.cpp
         tests/EngineSetupTests.cpp
+        tests/LiveInputTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp)
 

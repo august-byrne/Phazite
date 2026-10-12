@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectSession.h"
+#include "model/LiveInput.h"
 #include "model/StarterProject.h"
 
 namespace phazite
@@ -9,11 +10,20 @@ ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui)
       uiBehaviour (ui),
       recent (e)
 {
+    engine.getDeviceManager().addChangeListener (this);
 }
 
 ProjectSession::~ProjectSession()
 {
+    engine.getDeviceManager().removeChangeListener (this);
     setProject (nullptr); // closes the project on the message thread, before the Engine goes
+}
+
+void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    // MIDI inputs show up a moment after startup, and when a MIDI keyboard is plugged in.
+    if (project != nullptr)
+        routeLiveMidiInput (project->getEdit());
 }
 
 void ProjectSession::openAtStartup()
@@ -213,6 +223,7 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject)
         uiBehaviour.setFocusedEdit (&project->getEdit());
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
         recent.add (project->getFile());
+        routeLiveMidiInput (project->getEdit()); // MIDI keyboards and the computer keyboard play it
     }
 
     if (onProjectChanged != nullptr)

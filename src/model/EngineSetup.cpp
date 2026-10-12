@@ -125,8 +125,17 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
 
     auto storage = o.propertyStorage != nullptr ? std::move (o.propertyStorage) : std::make_unique<PropertyStorage> (o.applicationName);
     auto ui = o.uiBehaviour != nullptr ? std::move (o.uiBehaviour) : std::make_unique<UIBehaviour>();
+    const bool openDevices = o.behaviour.openAudioDevice;
 
-    return std::make_unique<te::Engine> (std::move (storage), std::move (ui), std::make_unique<EngineBehaviour> (o.behaviour));
+    auto engine = std::make_unique<te::Engine> (std::move (storage), std::move (ui), std::make_unique<EngineBehaviour> (o.behaviour));
+
+    // Tracktion's DeviceManager::initialise() asks for a MIDI device scan in 5 ms, but then restarts the
+    // same timer with the 4-second hot-plug check, so MIDI inputs (and the computer keyboard, which
+    // plays into "All MIDI Ins") would only work 4 seconds after startup. Ask again, once it is done.
+    if (openDevices)
+        engine->getDeviceManager().rescanMidiDeviceList();
+
+    return engine;
 }
 
 UIBehaviour& getUIBehaviour (te::Engine& engine)

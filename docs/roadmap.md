@@ -37,6 +37,7 @@ Done before this plan (progress since then is under [Status](#status)):
 | 6. Airwindows effects | Step 2.8 |
 | 7. Sandboxing before or after v1 | Phase 3 |
 | 8. Ableton Live keymap in v1 | Step 3.7 |
+| 9. Single-key tools and the computer keyboard | Step 1.1 |
 
 ## Phase 0: Foundations
 
@@ -103,6 +104,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - A settings page: audio device (including ASIO), buffer size and MIDI inputs.
 - Computer-keyboard MIDI input.
 - *Done when:* a MIDI keyboard and the computer keyboard both play the starter synth.
+- *Status:* done: **Options > Settings** with Audio (device type including ASIO, device, sample rate and buffer size), MIDI (each MIDI input with an on/off switch, and the computer keyboard) and Shortcuts tabs; the computer keyboard (`src/model/ComputerKeyboard.h`) and live MIDI routing (`src/model/LiveInput.h`), with tests. Still to try by hand: a MIDI keyboard and the computer keyboard playing the starter synth.
 
 ## Phase 1: Make a beat (milestone 1)
 
@@ -345,7 +347,7 @@ Roughly in order of value:
 
 | Phase | Status |
 |---|---|
-| 0. Foundations | In progress: 0.1 to 0.5 done ([real-time audit](realtime-audit.md)); 0.6's shell done, its base controls, icons, UI scale and detachable panels to do; 0.7 not started |
+| 0. Foundations | In progress: 0.1 to 0.5 and 0.7 done ([real-time audit](realtime-audit.md)); 0.6's shell done, its base controls, icons, UI scale and detachable panels to do |
 | 1. Make a beat | Not started |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |

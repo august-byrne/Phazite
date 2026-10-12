@@ -12,6 +12,7 @@
     "view.commandPalette": [ "command + K" ],
     "view.pianoRoll": [ "F7" ],
     "view.toggleBrowser": [ "F8" ],
-    "view.mixer": [ "F9" ]
+    "view.mixer": [ "F9" ],
+    "options.settings": [ "command + ," ]
   }
 }

@@ -18,9 +18,9 @@ namespace
     }
 } // namespace
 
-AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, std::function<te::Edit*()> getEdit)
+AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard, std::function<te::Edit*()> getEdit)
     : commands (registry),
-      topBar (engine, registry, std::move (getEdit))
+      topBar (engine, registry, computerKeyboard, std::move (getEdit))
 {
     setTitle ("Phazite");
 

@@ -15,7 +15,7 @@ Phazite is an open-source digital audio workstation (DAW) in early development, 
 ## Status
 
 - **Early development (pre-alpha):** there are no releases or downloads, and Phazite can't be used to make music yet. You build it from source as described below; [the roadmap](docs/roadmap.md) says what comes next.
-- **What's there:** the main window with its panels (most are placeholders that name the roadmap step that fills them), menus, a command search (Ctrl+K), switchable keymaps (Phazite's and FL Studio's), dark, light and high-contrast themes, and projects that save, keep backups and autosave. A new project plays a looping arpeggio on Tracktion's built-in 4OSC synth. Plug-in scanning finds VST3 plug-ins, but Phazite can't use them yet. [5. Run Phazite](#5-run-phazite) describes what to expect.
+- **What's there:** the main window with its panels (most are placeholders that name the roadmap step that fills them), menus, a command search (Ctrl+K), switchable keymaps (Phazite's and FL Studio's), dark, light and high-contrast themes, and projects that save, keep backups and autosave. A new project plays a looping arpeggio on Tracktion's built-in 4OSC synth, and a MIDI keyboard or the computer keyboard plays that synth live. A Settings window holds the audio device (including ASIO®), MIDI inputs and keyboard shortcuts. Plug-in scanning finds VST3 plug-ins, but Phazite can't use them yet. [5. Run Phazite](#5-run-phazite) describes what to expect.
 
 | Platform | Status |
 |---|---|
@@ -141,19 +141,23 @@ ctest --preset windows-debug
 
 Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). This is what you should see:
 
-1. The main window opens with a menu bar; a top bar with **Play**, the tempo, key and CPU use, and **Search commands**; the Browser, Playlist and Inspector panels; the editor dock with Piano roll, Audio, Automation and Mixer tabs; and a hint bar along the bottom. The panels are placeholders that name the roadmap step that builds them. Phazite opens your default audio device, for output only.
+1. The main window opens with a menu bar; a top bar with **Play**, the tempo, key and CPU use, **Keys** and **Search commands**; the Browser, Playlist and Inspector panels; the editor dock with Piano roll, Audio, Automation and Mixer tabs; and a hint bar along the bottom. The panels are placeholders that name the roadmap step that builds them. Phazite opens your default audio device, for output only.
 2. The first start makes a project called "My First Song" in `Documents\Phazite\Projects` (each project is a folder) and opens it. Later starts open the project you used last.
 3. Turn your volume down, then press Space or click **Play**. You should hear a saw-wave synth through a low-pass filter, arpeggiating C, A minor, F and G, one chord per bar at 120 BPM, looping every 8 seconds. Space or **Stop** stops it.
-4. Try the window:
+4. Play the synth yourself, with or without the arpeggio running:
+   - **Computer keyboard:** A S D F G H J K L ; play the white keys from middle C, and W E T Y U O P the black keys. Z and X move down or up an octave, C and V lower or raise the velocity. The **Keys** button in the top bar shows the octave and turns this on or off (in the FL Studio keymap, Ctrl+T does too). Shortcuts with Ctrl still work, and typing into a text field doesn't play notes.
+   - **MIDI keyboard:** plug it in and play; Phazite finds it within a few seconds. **Options > MIDI Settings** lists your MIDI inputs, each with an on/off switch.
+5. Try the window:
    - Ctrl+K or **Search commands** finds any command by typing part of its name; the arrow keys and Enter run one.
    - F7 shows or hides the piano roll, F9 the mixer and F8 the browser. **View** also switches between the Beat, Mix and Full layouts, and the dividers between panels can be dragged.
    - **Options > Theme** switches between dark, light and high contrast; **Options > Keymap** switches to FL Studio's shortcuts (there, Ctrl+Z undoes or redoes, and Alt+F8 shows or hides the browser).
    - The hint bar says what the control under the pointer does. **View > Hover Help** turns the tooltips on or off.
-5. **File > Save** (Ctrl+S) saves the project and moves the previous version into the project's `Backups` folder, which keeps the newest 10. Phazite also saves a copy every 2 minutes: if it doesn't close properly, the next start asks whether to restore that copy. Closing the window, **New Project** and **Open Project** ask first whether to save unsaved changes; the title bar shows a `*` while there are any.
-6. If you hear nothing, choose **Options > Audio Settings** and pick an output device; inputs are off by default and can be turned on there. Device settings, the plug-in list, the theme and the keymap are saved in `%APPDATA%\Phazite\Settings.xml`.
+   - **Options > Settings** (Ctrl+,) has three tabs: Audio, MIDI and Shortcuts, where any command's keys can be changed.
+6. **File > Save** (Ctrl+S) saves the project and moves the previous version into the project's `Backups` folder, which keeps the newest 10. Phazite also saves a copy every 2 minutes: if it doesn't close properly, the next start asks whether to restore that copy. Closing the window, **New Project** and **Open Project** ask first whether to save unsaved changes; the title bar shows a `*` while there are any.
+7. If you hear nothing, choose **Options > Audio Settings** and pick an output device; audio inputs are off by default and can be turned on there. Audio and MIDI settings, the plug-in list, the theme, the keymap and your own shortcuts are saved in `%APPDATA%\Phazite\Settings.xml`.
    - With an audio interface, set **Audio device type** to **ASIO**® and pick its driver: ASIO is the low-latency driver standard on Windows. The **Control Panel** button opens the driver's own settings.
    - Without an ASIO driver, you can still try this with [FlexASIO](https://github.com/dechamps/FlexASIO) (MIT), a free ASIO driver that plays through Windows' normal audio.
-7. Choose **Options > Scan for Plug-ins**. A "Plug-ins" window asks which folders to scan, with the standard VST3 folders filled in; click **Scan**. The scan runs in a child copy of Phazite (`Phazite.exe --PluginScan:...`), so a plug-in that crashes while being scanned shouldn't take Phazite down; if the child can't start, Phazite shows a warning and scans in its own process instead. Found plug-ins are listed, but Phazite can't add or play them yet. With no VST3 plug-ins installed the list stays empty; `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT, which should then appear.
+8. Choose **Options > Scan for Plug-ins**. A "Plug-ins" window asks which folders to scan, with the standard VST3 folders filled in; click **Scan**. The scan runs in a child copy of Phazite (`Phazite.exe --PluginScan:...`), so a plug-in that crashes while being scanned shouldn't take Phazite down; if the child can't start, Phazite shows a warning and scans in its own process instead. Found plug-ins are listed, but Phazite can't add or play them yet. With no VST3 plug-ins installed the list stays empty; `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT, which should then appear.
 
 ### Troubleshooting
 

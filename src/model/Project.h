@@ -69,12 +69,17 @@ private:
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
 
     void backUpProjectFile();
-    void markChanged();
+    void markChanged (const juce::ValueTree&, const juce::Identifier& property = {});
 
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { markChanged(); }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { markChanged(); }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { markChanged(); }
-    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { markChanged(); }
+    // Tracktion writes these while it plays, without anyone changing the song, so they don't count
+    // as changes: the playhead position, and the Edit's input-device states (the inputs it knows,
+    // and which track live input goes to).
+    static bool isPlaybackState (const juce::ValueTree&, const juce::Identifier& property);
+
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override { markChanged (parent); }
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&, int) override { markChanged (parent); }
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { markChanged (parent); }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Project)
 };
