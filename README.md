@@ -123,9 +123,11 @@ Configuring finds the compiler and prepares a build folder, `build\<preset>`; bu
 ```powershell
 cmake --preset windows-debug
 cmake --build --preset windows-debug
+ctest --preset windows-debug
 ```
 
-- Configure has worked when its last line is `-- Build files have been written to: .../build/windows-debug`, and the build when its last line ends with `Linking CXX executable Phazite_artefacts\Debug\Phazite.exe` (or is `ninja: no work to do.`). Otherwise the first `CMake Error` or `error` line names the cause: see [Troubleshooting](#troubleshooting).
+- Configure has worked when its last line is `-- Build files have been written to: .../build/windows-debug`, and the build when its last line is a `Linking CXX executable` line (or `ninja: no work to do.`). Otherwise the first `CMake Error` or `error` line names the cause: see [Troubleshooting](#troubleshooting).
+- `ctest` runs Phazite's unit tests (`phazite_tests`, written with [doctest](https://github.com/doctest/doctest)), which the build compiles alongside the app. They have passed when it prints `100% tests passed`. For doctest's own options, such as running only some tests, run `build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --help`.
 - No Developer PowerShell or vcvars needed: [cmake/toolchains/windows-msvc.cmake](cmake/toolchains/windows-msvc.cmake) finds MSVC by itself.
 - The first configure of a build folder also builds JUCE's `juceaide` helper, so it takes longer. On the test PC (8 cores, 32 GB RAM) the first Debug configure took 33 s and the Debug build 47 s; Release took about 2 minutes for both.
 - Windows PowerShell 5.1 has no `&&`. To build only if configure succeeded, run `cmake --preset windows-debug; if ($LASTEXITCODE -eq 0) { cmake --build --preset windows-debug }`.
@@ -195,6 +197,7 @@ git config core.hooksPath .githooks   # commit and push checks; need gitleaks 8.
 git submodule update --init --recursive --depth 1
 cmake --preset linux-debug
 cmake --build --preset linux-debug
+ctest --preset linux-debug                    # the unit tests
 build/linux-debug/Phazite_artefacts/Debug/Phazite
 ```
 
@@ -243,7 +246,10 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 
 | Path | Contents |
 |---|---|
-| `src/` | Phazite's own code (currently the smoke test: `Main.cpp`, `MainComponent.*`) |
+| `src/app/` | The app: startup and windows (currently the smoke test: `Main.cpp`, `MainComponent.*`) |
+| `src/model/` | Code without a UI, compiled with Tracktion Engine and JUCE into the `phazite_core` library that the app and the tests share |
+| `tests/` | Unit tests (`phazite_tests`, doctest); `ctest --preset <preset>` runs them |
+| `docs/` | [The design](docs/design.md) and [the roadmap](docs/roadmap.md) |
 | `CMakeLists.txt`, `CMakePresets.json`, `cmake/` | Build definition, presets, Windows toolchain wrapper and CMake helpers |
 | `external/tracktion_engine/` | Submodule: Tracktion Engine, with JUCE as its own submodule in `modules/juce` |
 | `external/WindowsToolchain/` | Submodule (MIT) that finds MSVC; used at build time on Windows only |
@@ -347,6 +353,7 @@ Phazite is licensed under the GNU Affero General Public License, version 3 or (a
 | libsamplerate (bundled with Tracktion Engine) | BSD-2-Clause | Sample-rate conversion, compiled in |
 | ASIO SDK 2.3.4 headers (bundled with JUCE) | GPL-3.0-only (Steinberg's GPLv3 option) | ASIO driver support on Windows, compiled in |
 | [WindowsToolchain](https://github.com/MarkSchofield/WindowsToolchain) | MIT | Finds MSVC at build time on Windows; nothing compiled in |
+| [doctest](https://github.com/doctest/doctest) (bundled with Tracktion Engine) | MIT | Unit-test framework; compiled into the tests only, not the app |
 
 Tracktion Engine and JUCE are also available under commercial licenses; Phazite uses their open-source licenses (section 13 of both the AGPL-3.0 and the GPL-3.0 allows combining code under the two licenses). Both bundle further open-source code, such as choc, farbot, magic_enum, crill, rpmalloc, zlib, libpng, libjpeg, FLAC, Ogg Vorbis, HarfBuzz and SheenBidi: see `external/tracktion_engine/LICENSE.md`, `external/tracktion_engine/modules/juce/LICENSE.md`, and the license files and source-file headers of the bundled code under `external/`.
 

@@ -48,7 +48,7 @@ Done:
   - `devices/`: built-in DSP;
   - `gen/`: the sound generator and chord engine.
 - A static library target, `phazite_core`, holds everything testable without a window. The app links it.
-- A test runner on JUCE's `UnitTest` framework, run by CTest locally and in CI. On Linux it runs headless.
+- A test runner using doctest (MIT, bundled with Tracktion Engine), run by CTest locally and in CI. On Linux it runs headless.
 - *Done when:* CI runs the tests on Windows and Linux.
 
 **0.2 Engine hooks (S)**
@@ -342,7 +342,7 @@ Roughly in order of value:
 
 | Phase | Status |
 |---|---|
-| 0. Foundations | Not started |
+| 0. Foundations | In progress: 0.1 done |
 | 1. Make a beat | Not started |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |

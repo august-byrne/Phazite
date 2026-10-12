@@ -7,7 +7,7 @@ Open-source DAW (AGPL-3.0-or-later) in C++20 on Tracktion Engine + JUCE. It host
 Run every command from the repository root. The presets are the only entry point, and the same two commands work on every OS.
 
 - `cmake --list-presets` shows the presets for this machine: `windows-debug`, `windows-release` on Windows; `linux-debug`, `linux-release`, `linux-asan`, `linux-tsan` on Linux/WSL.
-- Configure: `cmake --preset <preset>`. Build: `cmake --build --preset <preset>`.
+- Configure: `cmake --preset <preset>`. Build: `cmake --build --preset <preset>`. Test: `ctest --preset <preset>`, after a build of the same preset (it runs `phazite_tests`; all passed when it prints `100% tests passed` and exits 0). To run some tests only, call the test executable directly, for example `build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-case="*save*"`.
 - Run configure and build as separate commands, each with run_in_background and without redirections or pipes (no `>`, `*>`, `2>&1`, `Tee-Object`): the complete output lands in the task's output file. When a command finishes, check its exit code and search that file case-insensitively for `error` and `warning` (this also catches "CMake Warning"), plus `D9` and `LNK4`. The first configure of a build folder also builds JUCE's `juceaide` helper (1-2 minutes); a full build takes several minutes.
 - On Windows the shell is Windows PowerShell 5.1: there is no `&&`/`||`, and `;` does not stop after a failure. Use separate commands, or `A; if ($LASTEXITCODE -eq 0) { B }`. In WSL/Linux the shell is Bash.
 - Never run vcvars/VsDevCmd, open a Developer PowerShell, or call `cl`, `link`, `msbuild` or `ninja` directly. MSVC is found by `cmake/toolchains/windows-msvc.cmake`, which wraps `external/WindowsToolchain`.
@@ -30,7 +30,9 @@ Run every command from the repository root. The presets are the only entry point
 
 ## Repository layout
 
-- `src/` - Phazite's own code (currently the smoke-test app: `Main.cpp`, `MainComponent.*`).
+- `src/app/` - the app: startup and windows (currently the smoke test, `Main.cpp` and `MainComponent.*`), in the `Phazite` target.
+- `src/model/` - code without UI, in the `phazite_core` static library. That library also compiles Tracktion Engine and JUCE, once, for the app and the tests: only `phazite_core` links the JUCE/Tracktion module targets, and every executable uses `phazite_use_core()` in `CMakeLists.txt`. JUCE and Tracktion options (compile definitions) go on `phazite_core`, never on an executable.
+- `tests/` - unit tests in the `phazite_tests` target, written with doctest (MIT, bundled with Tracktion; include `TestHelpers.h`). Add every new test file to `target_sources(phazite_tests ...)`.
 - `docs/design.md` - the product design: what Phazite should be and why, with the owner's decisions and the open questions. `docs/roadmap.md` - the step-by-step build plan with "Done when" checks; update its status table after each step. Read both before starting feature work, and update `design.md` when a decision changes.
 - `CMakeLists.txt`, `CMakePresets.json`, `cmake/` - build definition, presets, Windows toolchain wrapper and CMake helpers.
 - `external/tracktion_engine` - git submodule: Tracktion Engine (`develop`, pinned commit), with JUCE as its own submodule at `modules/juce`. Never add JUCE separately.
@@ -83,6 +85,6 @@ The repository will be public on GitHub, and a commit stays in its history even 
 
 ## Before reporting work as done
 
-- Build `windows-debug` (and `windows-release` for performance-related work) and report the commands, their exit codes and any warnings.
+- Build `windows-debug` (and `windows-release` for performance-related work), run `ctest --preset windows-debug`, and report the commands, their exit codes and any warnings or failing tests.
 - After a push, check the CI run for that commit (https://github.com/august-byrne/Phazite/actions). The repository is public, so the GitHub REST API (`/repos/august-byrne/Phazite/actions/runs`) answers without signing in.
 - For audio or UI changes, tell the user what to click and listen for, because the GUI can't be checked from the shell.

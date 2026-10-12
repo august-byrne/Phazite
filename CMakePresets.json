@@ -93,5 +93,32 @@
     { "name": "linux-release",   "inherits": "linux-build-base",   "configurePreset": "linux-release" },
     { "name": "linux-asan",      "inherits": "linux-build-base",   "configurePreset": "linux-asan" },
     { "name": "linux-tsan",      "inherits": "linux-build-base",   "configurePreset": "linux-tsan" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "description": "Runs phazite_tests (doctest) after a build of the same preset; prints a failing test's output.",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "windows-test-base",
+      "hidden": true,
+      "inherits": "test-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "linux-test-base",
+      "hidden": true,
+      "inherits": "test-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    { "name": "windows-debug",   "inherits": "windows-test-base", "configurePreset": "windows-debug" },
+    { "name": "windows-release", "inherits": "windows-test-base", "configurePreset": "windows-release" },
+    { "name": "linux-debug",     "inherits": "linux-test-base",   "configurePreset": "linux-debug" },
+    { "name": "linux-release",   "inherits": "linux-test-base",   "configurePreset": "linux-release" },
+    { "name": "linux-asan",      "inherits": "linux-test-base",   "configurePreset": "linux-asan" },
+    { "name": "linux-tsan",      "inherits": "linux-test-base",   "configurePreset": "linux-tsan" }
   ]
 }
