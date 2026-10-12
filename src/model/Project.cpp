@@ -8,6 +8,17 @@ namespace
     const juce::Identifier phaziteStateType { "PHAZITE" };
     constexpr const char* recentProjectsKey = "phaziteRecentProjects";
 
+    // The ID saved in a project file. The Edit names its temporary folder (freeze files, comp renders)
+    // after it, so a project keeps its ID from one session to the next. te::loadEditFromFile replaces
+    // the saved ID with the one it is given, so this reads it first.
+    te::ProjectItemID readSavedID (const juce::File& file)
+    {
+        if (const auto root = juce::XmlDocument (file).getDocumentElement (true)) // the outer element only
+            return te::ProjectItemID (root->getStringAttribute (te::IDs::projectID));
+
+        return {};
+    }
+
     // Creates an Edit from a saved state, with projectFile as the file it saves to.
     std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& projectFile)
     {
@@ -95,7 +106,8 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
     const bool useAutosave = restoreAutosave && autosaveFile.existsAsFile();
 
     // Loads on this, the message thread: Tracktion's EditLoader would use a background thread.
-    const auto state = te::loadEditFromFile (engine, useAutosave ? autosaveFile : projectFile, te::ProjectItemID {});
+    const auto sourceFile = useAutosave ? autosaveFile : projectFile;
+    const auto state = te::loadEditFromFile (engine, sourceFile, readSavedID (sourceFile));
     auto edit = createEditFromState (engine, state, projectFile);
 
     if (edit == nullptr)
@@ -201,6 +213,70 @@ juce::Result Project::autosave()
 
     changedSinceAutosave = false;
     return juce::Result::ok();
+}
+
+juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::String& name, juce::String& error)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    const auto safeName = juce::File::createLegalFileName (name.trim());
+
+    if (safeName.isEmpty())
+    {
+        error = "The project needs a name.";
+        return {};
+    }
+
+    const auto folder = parentFolder.getChildFile (safeName);
+
+    if (folder.exists())
+    {
+        error = "There is already a folder called \"" + safeName + "\" in " + parentFolder.getFullPathName() + ".";
+        return {};
+    }
+
+    if (const auto result = folder.createDirectory(); result.failed())
+    {
+        error = "Phazite couldn't create the project folder: " + result.getErrorMessage();
+        return {};
+    }
+
+    // From here on, a failure removes the half-made copy (the folder is new), so the name can be
+    // tried again.
+    const auto fail = [&folder, &error] (const juce::String& message)
+    {
+        folder.deleteRecursively();
+        error = message;
+        return juce::File();
+    };
+
+    // The files the project uses come along; its earlier versions (Backups) don't.
+    for (const auto* subfolderName : { "Audio", "Generated", "Renders" })
+    {
+        const auto source = getFolder().getChildFile (subfolderName);
+        const auto target = folder.getChildFile (subfolderName);
+        const bool copied = source.isDirectory() ? source.copyDirectoryTo (target) : target.createDirectory().wasOk();
+
+        if (! copied)
+            return fail ("Phazite couldn't copy the project's " + juce::String (subfolderName) + " folder.");
+    }
+
+    folder.getChildFile ("Backups").createDirectory();
+    const auto newFile = folder.getChildFile (safeName + fileExtension);
+
+    {
+        const juce::ScopedValueSetter<bool> writing (isWriting, true);
+        edit->flushState(); // the plug-ins' current states, as a save writes them
+
+        // The copy is a project of its own, so it gets an ID of its own.
+        auto state = edit->state.createCopy();
+        state.setProperty (te::IDs::projectID, te::ProjectItemID::createNewID (te::ProjectID {}).toString(), nullptr);
+
+        if (const auto xml = state.createXml(); xml == nullptr || ! xml->writeTo (newFile))
+            return fail ("Phazite couldn't write the project file " + newFile.getFullPathName() + ".");
+    }
+
+    return newFile;
 }
 
 void Project::backUpProjectFile()

@@ -30,7 +30,12 @@ struct Command
     // named after it, so the whole command undoes in one go.
     std::function<te::Edit*()> undoTarget {};
     std::function<bool()> isTicked {}; // optional: for on/off settings, shown with a tick in menus
+    // Optional: the name as it is now, which menus and the palette show, such as "Undo Change Volume".
+    std::function<juce::String()> currentName {};
 };
+
+// The command's name as menus and the palette show it now (its currentName, if it has one).
+juce::String getCurrentName (const Command&);
 
 //==============================================================================
 // A set of shortcuts: command id -> key descriptions in JUCE's format ("command + Z", "spacebar",

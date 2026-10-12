@@ -140,9 +140,10 @@ void CommandPalette::paintListBoxItem (int row, juce::Graphics& g, int width, in
 
     g.setColour (enabled ? textColour : textColour.withAlpha (0.5f));
     g.setFont (juce::FontOptions (TextSize::body));
+    const auto name = getCurrentName (*command); // e.g. "Undo Change Volume"
     const auto nameWidth =
-        juce::jmin (area.getWidth(), juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), command->name)) + Space::m);
-    g.drawText (command->name, area.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
+        juce::jmin (area.getWidth(), juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), name)) + Space::m);
+    g.drawText (name, area.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
 
     g.setColour (mutedColour);
     g.setFont (juce::FontOptions (TextSize::small));
@@ -162,6 +163,6 @@ juce::String CommandPalette::getNameForRow (int row)
 
     const auto* command = results[row];
     const auto shortcuts = registry.getShortcutDescriptions (command->id);
-    return command->name + (shortcuts.isEmpty() ? juce::String() : ", " + shortcuts[0]);
+    return getCurrentName (*command) + (shortcuts.isEmpty() ? juce::String() : ", " + shortcuts[0]);
 }
 } // namespace phazite::ui

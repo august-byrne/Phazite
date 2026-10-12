@@ -82,7 +82,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - Keymap files (Phazite default and FL Studio), and key rebinding.
 - The command palette (Ctrl+K), and macros made of chained commands.
 - *Done when:* every action in the app so far is a command, can be found in the palette, and shows by name in the undo history.
-- *Status:* done: the registry, keymaps (Phazite and FL Studio, in `resources/keymaps/`), named undo, macros and the palette's search (`src/model/Commands.h`, with tests); the palette (Ctrl+K), menus and shortcuts run the app's commands, and **Options > Keyboard Shortcuts** changes keys (kept per keymap). There is no undo history panel yet, so step names only show inside Tracktion's undo manager.
+- *Status:* done: the registry, keymaps (Phazite and FL Studio, in `resources/keymaps/`), named undo, macros and the palette's search (`src/model/Commands.h`, with tests); the palette (Ctrl+K), menus and shortcuts run the app's commands, including Quit, Open Recent and Save As, and **Options > Keyboard Shortcuts** changes keys (kept per keymap). Undo and Redo show the step they apply to by name ("Undo Change Volume") in the Edit menu and the palette; an undo history panel can come later.
 
 **0.6 UI shell and design system (L)**
 - **The main window:** docking panels that resize, collapse and detach to another monitor. Layouts: Beat, Mix and Full.

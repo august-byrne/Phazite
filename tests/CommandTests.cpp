@@ -124,6 +124,27 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
         ui.setFocusedEdit (nullptr);
         CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without a focused Edit
     }
+
+    SUBCASE ("Undo and redo show the name of the step, in the menus too")
+    {
+        auto& ui = phazite::getUIBehaviour (phazite::test::getEngine());
+        ui.setFocusedEdit (edit.get());
+        phazite::addEditCommands (registry, ui);
+
+        const auto nameOf = [&registry] (const char* id) { return phazite::getCurrentName (*registry.find (id)); };
+        CHECK (nameOf ("edit.undo") == juce::String ("Undo Set to One"));
+
+        juce::ApplicationCommandInfo info (registry.getCommandID ("edit.undo"));
+        registry.getCommandInfo (info.commandID, info);
+        CHECK (info.shortName == juce::String ("Undo Set to One"));
+
+        REQUIRE (registry.invoke ("edit.undo"));
+        CHECK (nameOf ("edit.redo") == juce::String ("Redo Set to One"));
+        CHECK (nameOf ("edit.undoOrRedo") == juce::String ("Redo Set to One"));
+
+        ui.setFocusedEdit (nullptr);
+        CHECK (nameOf ("edit.undo") == juce::String ("Undo"));
+    }
 }
 
 TEST_CASE ("Keymaps load, switch, and keep the user's own changes")

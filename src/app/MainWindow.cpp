@@ -18,7 +18,6 @@ namespace
     // Interface sizes, on top of the operating system's display scaling.
     constexpr std::array<float, 8> interfaceScales { 0.75f, 0.9f, 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f };
     constexpr const char* keymapSettingKey = "phaziteKeymap"; // also read by CommandRegistry::loadKeySettings
-    constexpr int quitItemID = 1;
     constexpr int firstRecentItemID = 100;
 
     juce::String toString (ui::ThemeName theme)
@@ -159,6 +158,13 @@ bool MainWindow::keyPressed (const juce::KeyPress& key)
 void MainWindow::addCommands()
 {
     shell->addCommands (commands);
+
+    commands.add ({ .id = "app.quit",
+                    .name = "Quit Phazite",
+                    .category = "App",
+                    .description = "Closes Phazite. It asks first if the project has unsaved changes.",
+                    .synonyms = { "exit", "close", "leave" },
+                    .perform = [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); } });
 
     commands.add ({ .id = "options.settings",
                     .name = "Settings",
@@ -463,8 +469,9 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSubMenu ("Open Recent", recentMenu, ! recent.isEmpty());
             menu.addSeparator();
             add (menu, "project.save");
+            add (menu, "project.saveAs");
             menu.addSeparator();
-            menu.addItem (quitItemID, "Quit");
+            add (menu, "app.quit");
             break;
         }
 
@@ -539,12 +546,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
 void MainWindow::menuItemSelected (int menuItemID, int)
 {
-    if (menuItemID == quitItemID)
-    {
-        juce::JUCEApplication::getInstance()->systemRequestedQuit();
-        return;
-    }
-
+    // The Open Recent submenu's items (the palette has "Open Recent Project" for them).
     if (const auto recent = session.getRecentProjects(); juce::isPositiveAndBelow (menuItemID - firstRecentItemID, recent.size()))
         session.openProject (recent[menuItemID - firstRecentItemID]);
 }

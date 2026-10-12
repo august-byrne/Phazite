@@ -61,6 +61,12 @@ public:
     // Writes the autosave if anything changed since the last save or autosave.
     juce::Result autosave();
 
+    // Saves the project as it is now, unsaved changes included, as a new project <parentFolder>/<name>
+    // with copies of its Audio, Generated and Renders folders and an ID of its own. This project and
+    // its file stay as they are. Returns the new project file, or sets error and returns an empty
+    // File (if that folder exists, for example).
+    juce::File saveCopyAs (const juce::File& parentFolder, const juce::String& name, juce::String& error);
+
 private:
     Project (std::unique_ptr<te::Edit>, const juce::File&);
 

@@ -293,7 +293,7 @@ void CommandRegistry::getCommandInfo (juce::CommandID commandID, juce::Applicati
     if (command == nullptr)
         return;
 
-    info.setInfo (command->name, command->description, command->category, 0);
+    info.setInfo (getCurrentName (*command), command->description, command->category, 0);
     info.setActive (command->isEnabled == nullptr || command->isEnabled());
     info.setTicked (command->isTicked != nullptr && command->isTicked());
 
@@ -309,6 +309,16 @@ bool CommandRegistry::perform (const InvocationInfo& invocation)
         return invoke (command->id);
 
     return false;
+}
+
+//==============================================================================
+juce::String getCurrentName (const Command& command)
+{
+    if (command.currentName != nullptr)
+        if (const auto name = command.currentName(); name.isNotEmpty())
+            return name;
+
+    return command.name;
 }
 
 //==============================================================================
@@ -392,6 +402,23 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
 {
     const auto focusedEdit = [&ui] { return ui.getLastFocusedEdit(); };
 
+    // "Undo Change Volume": the name of the step, when it has one.
+    const auto nameWithStep = [focusedEdit] (bool isUndo)
+    {
+        const juce::String verb (isUndo ? "Undo" : "Redo");
+
+        if (auto* edit = focusedEdit())
+        {
+            auto& undoManager = edit->getUndoManager();
+            const auto step = isUndo ? undoManager.getUndoDescription() : undoManager.getRedoDescription();
+
+            if ((isUndo ? undoManager.canUndo() : undoManager.canRedo()) && step.isNotEmpty())
+                return verb + " " + step;
+        }
+
+        return verb;
+    };
+
     registry.add ({ .id = "edit.undo",
                     .name = "Undo",
                     .category = "Edit",
@@ -408,7 +435,8 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                     {
                         auto* edit = focusedEdit();
                         return edit != nullptr && edit->getUndoManager().canUndo();
-                    } });
+                    },
+                    .currentName = [nameWithStep] { return nameWithStep (true); } });
 
     registry.add ({ .id = "edit.redo",
                     .name = "Redo",
@@ -426,7 +454,8 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                     {
                         auto* edit = focusedEdit();
                         return edit != nullptr && edit->getUndoManager().canRedo();
-                    } });
+                    },
+                    .currentName = [nameWithStep] { return nameWithStep (false); } });
 
     registry.add ({ .id = "edit.undoOrRedo",
                     .name = "Undo or Redo",
@@ -449,6 +478,12 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                     {
                         auto* edit = focusedEdit();
                         return edit != nullptr && (edit->getUndoManager().canUndo() || edit->getUndoManager().canRedo());
+                    },
+                    .currentName =
+                        [focusedEdit, nameWithStep]
+                    {
+                        auto* edit = focusedEdit();
+                        return nameWithStep (! (edit != nullptr && edit->getUndoManager().canRedo()));
                     } });
 
     registry.add ({ .id = "transport.playStop",

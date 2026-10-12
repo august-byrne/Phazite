@@ -120,6 +120,70 @@ void ProjectSession::openProject (const juce::File& file)
         });
 }
 
+void ProjectSession::chooseRecentProject()
+{
+    const auto projects = recent.getProjects();
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Open a recent project");
+
+    for (int i = 0; i < projects.size(); ++i)
+        menu.addItem (i + 1, projects[i].getFileNameWithoutExtension());
+
+    if (projects.isEmpty())
+        menu.addItem (-1, "No recent projects yet", false);
+
+    // Near the top left of the main window: the command can come from the keyboard, with the
+    // pointer anywhere.
+    auto options = juce::PopupMenu::Options();
+
+    if (dialogParent != nullptr)
+        options = options.withTargetScreenArea (dialogParent->getScreenBounds().withSize (1, 1).translated (80, 60));
+
+    menu.showMenuAsync (options,
+                        [this, projects] (int chosen)
+                        {
+                            if (juce::isPositiveAndNotGreaterThan (chosen, projects.size()))
+                                openProject (projects[chosen - 1]);
+                        });
+}
+
+void ProjectSession::saveProjectAs()
+{
+    if (project == nullptr)
+        return;
+
+    const auto parentFolder = project->getFolder().getParentDirectory();
+    auto* window = new juce::AlertWindow ("Save project as",
+                                          "Name the copy. Phazite saves it in a folder of its own in " + parentFolder.getFullPathName()
+                                              + " and continues in it. This project keeps its last saved version.",
+                                          juce::MessageBoxIconType::NoIcon, dialogParent);
+    window->addTextEditor ("name", project->getFile().getFileNameWithoutExtension() + " copy");
+    window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    window->enterModalState (true,
+                             juce::ModalCallbackFunction::create (
+                                 [this, window, parentFolder] (int result)
+                                 {
+                                     if (result != 1 || project == nullptr)
+                                         return;
+
+                                     juce::String error;
+                                     const auto newFile = project->saveCopyAs (parentFolder, window->getTextEditorContents ("name"), error);
+
+                                     if (newFile == juce::File())
+                                     {
+                                         showError ("Phazite couldn't save the project", error);
+                                         return;
+                                     }
+
+                                     // Continue in the copy; the unsaved changes went into it.
+                                     setProject (nullptr);
+                                     open (newFile, false);
+                                 }),
+                             true);
+}
+
 void ProjectSession::saveProject()
 {
     if (project == nullptr)
@@ -256,6 +320,23 @@ void ProjectSession::addCommands (CommandRegistry& registry)
                     .description = "Opens a saved project.",
                     .synonyms = { "load", "song" },
                     .perform = [this] { openProject(); } });
+
+    registry.add ({ .id = "project.openRecent",
+                    .name = "Open Recent Project",
+                    .category = "Project",
+                    .description = "Opens one of the projects you worked on last.",
+                    .synonyms = { "recent", "last", "history", "load" },
+                    .perform = [this] { chooseRecentProject(); } });
+
+    registry.add ({ .id = "project.saveAs",
+                    .name = "Save Project As",
+                    .category = "Project",
+                    .description =
+                        "Saves the project under a new name, in a folder of its own, and continues in it. The original keeps its last "
+                        "saved version.",
+                    .synonyms = { "copy", "duplicate", "rename", "version" },
+                    .perform = [this] { saveProjectAs(); },
+                    .isEnabled = [this] { return project != nullptr; } });
 
     registry.add ({ .id = "project.save",
                     .name = "Save Project",

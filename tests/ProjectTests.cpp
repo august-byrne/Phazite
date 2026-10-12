@@ -74,11 +74,13 @@ TEST_CASE ("A project saves and reopens with Phazite's own data")
     CHECK_FALSE (project->hasUnsavedChanges());
 
     const auto file = project->getFile();
+    const auto id = project->getEdit().getProjectItemRef();
     project = nullptr;
 
     auto reopened = openProject (file);
     CHECK (te::getAudioTracks (reopened->getEdit()).size() == 3);
     CHECK (reopened->getPhaziteState()["outline"].toString() == juce::String ("Electronic"));
+    CHECK (reopened->getEdit().getProjectItemRef() == id); // so its temporary folder stays the same
 }
 
 TEST_CASE ("Saving keeps the newest backups")
@@ -142,6 +144,37 @@ TEST_CASE ("Autosave writes nothing when nothing changed")
 
     REQUIRE (project->autosave().wasOk());
     CHECK_FALSE (phazite::Project::getAutosaveFile (project->getFile()).exists());
+}
+
+TEST_CASE ("Save As makes a copy with the unsaved changes, and leaves the original file alone")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Original");
+    REQUIRE (project->getAudioFolder().getChildFile ("kick.wav").replaceWithText ("audio, as far as this test cares"));
+    project->getPhaziteState().setProperty ("outline", "Pop", nullptr); // not saved yet
+
+    juce::String error;
+    const auto copyFile = project->saveCopyAs (temp.folder, "Copy", error);
+    INFO (error.toStdString());
+    REQUIRE (copyFile.existsAsFile());
+    CHECK (copyFile == temp.folder.getChildFile ("Copy").getChildFile ("Copy.phazite"));
+    CHECK (copyFile.getSiblingFile ("Audio").getChildFile ("kick.wav").existsAsFile());
+    CHECK (copyFile.getSiblingFile ("Backups").isDirectory());
+
+    // The copy has the change. The original's file doesn't, and the project still has it unsaved.
+    CHECK (project->hasUnsavedChanges());
+    const auto copy = openProject (copyFile);
+    CHECK (copy->getPhaziteState()["outline"].toString() == juce::String ("Pop"));
+    CHECK (openProject (project->getFile())->getPhaziteState()["outline"].toString().isEmpty());
+
+    // The copy is a project of its own, with an ID of its own.
+    CHECK (copy->getEdit().getProjectItemRef().isProjectItemID());
+    CHECK (copy->getEdit().getProjectItemRef() != project->getEdit().getProjectItemRef());
+
+    // A name that is taken is refused.
+    error.clear();
+    CHECK (project->saveCopyAs (temp.folder, "Copy", error) == juce::File());
+    CHECK (error.isNotEmpty());
 }
 
 TEST_CASE ("Recent projects list the newest first and skip missing ones")

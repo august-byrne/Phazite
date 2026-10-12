@@ -27,7 +27,9 @@ public:
     void newProject();
     void openProject();
     void openProject (const juce::File&);
+    void chooseRecentProject(); // a menu of the recent projects
     void saveProject();
+    void saveProjectAs(); // a copy under a new name, which then stays open
 
     // Asks whether to save unsaved changes first. Calls back with false if the user cancelled.
     void closeThen (std::function<void (bool closed)>);
