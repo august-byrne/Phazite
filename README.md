@@ -1,6 +1,7 @@
 # Phazite
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
+[![CI](https://github.com/august-byrne/Phazite/actions/workflows/ci.yml/badge.svg)](https://github.com/august-byrne/Phazite/actions/workflows/ci.yml)
 
 Phazite is an open-source digital audio workstation (DAW) in early development, written in C++20 on [Tracktion Engine](https://github.com/Tracktion/tracktion_engine) and [JUCE](https://github.com/juce-framework/JUCE). What it aims for:
 
@@ -249,6 +250,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 | `tools/` | Machine setup (`setup-windows.cmd` runs [tools/setup-windows.ps1](tools/setup-windows.ps1)) and [tools/format.sh](tools/format.sh), which formats the C/C++ files |
 | `.clang-format` | The C/C++ formatting rules (JUCE style) |
 | `.githooks/` | Git hooks, turned on per clone with `git config core.hooksPath .githooks`: checks before every commit, merge and push |
+| `.github/workflows/` | Continuous integration: GitHub Actions checks and builds every push and pull request |
 | `.vscode/` | Shared VS Code settings, launch configurations and extension recommendations |
 | `CLAUDE.md`, `.claude/` | Instructions and settings for Claude Code |
 | `build/<preset>/` | Build output (ignored by git) |
@@ -293,6 +295,8 @@ Threads share data only through lock-free FIFOs and `std::atomic` values, and pa
 ## Contributing
 
 **Builds.** Before you send a change, format it and build `windows-debug` (and `windows-release` for performance-related work) with zero warnings.
+
+**Continuous integration.** Every push and pull request runs [.github/workflows/ci.yml](.github/workflows/ci.yml) on GitHub's machines. It scans the whole history for secrets with gitleaks, checks formatting with clang-format 23.1.3 and checks whitespace. It also builds both Windows presets with Visual Studio 2026 (warnings count as errors) and all four Linux presets on Ubuntu 24.04. The results are on the repository's Actions tab.
 
 **Licenses.** Only add code under licenses compatible with the AGPL-3.0: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license). Never enable Tracktion's proprietary options (Elastique, ReWire, REX).
 

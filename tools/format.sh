@@ -5,9 +5,9 @@
 #   sh tools/format.sh --staged  the same, for the staged versions (.githooks/pre-commit runs this)
 #   sh tools/format.sh --which   print the clang-format it uses
 # Exit codes: 0 = done or all formatted, 1 = files need formatting, 2 = clang-format missing or too old.
-# It takes clang-format-23, clang-format or clang-format-22 from PATH, then (on Windows) LLVM's install
-# folder, then VS Code's C/C++ extension, which bundles one. .clang-format needs version 22 or newer;
-# Phazite uses 23.
+# It uses $CLANG_FORMAT if set, else clang-format-23, clang-format or clang-format-22 from PATH, then
+# (on Windows) LLVM's install folder, then VS Code's C/C++ extension, which bundles one. .clang-format
+# needs version 22 or newer; Phazite uses 23.
 # On Windows, run it with Git's sh, for example from Git Bash or Claude Code's Bash tool.
 
 cd "$(git rev-parse --show-toplevel)" || exit 2
@@ -31,6 +31,11 @@ if [ "$mode" = --staged ] && [ -z "$(cxx_files diff --cached --name-only --diff-
 fi
 
 find_clang_format() {
+    # CLANG_FORMAT names a specific binary (CI uses this for its pinned clang-format 23).
+    if [ -n "${CLANG_FORMAT:-}" ]; then
+        printf '%s\n' "$CLANG_FORMAT"
+        return 0
+    fi
     # LLVM's apt packages install versioned names next to Ubuntu's older plain clang-format.
     for name in clang-format-23 clang-format clang-format-22; do
         if command -v "$name" >/dev/null 2>&1; then

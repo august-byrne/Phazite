@@ -36,6 +36,7 @@ Run every command from the repository root. The presets are the only entry point
 - `external/WindowsToolchain` - git submodule (MIT), used on Windows at build time only.
 - `tools/` - machine setup, and `format.sh` (clang-format for the C/C++ files). `build/<preset>/` - build output (ignored by git).
 - `.clang-format` - C/C++ formatting rules: JUCE's coding standards, for clang-format 22 or newer (23 is used).
+- `.github/workflows/ci.yml` - GitHub Actions: gitleaks over the whole history, clang-format 23.1.3, whitespace; builds both Windows presets (VS 2026 on `windows-2025-vs2026`, warnings as errors) and all four Linux presets (Ubuntu 24.04). Actions are pinned to full commit hashes; keep them pinned when updating.
 - `.githooks/` - git hooks, turned on per clone by `git config core.hooksPath .githooks` (the setup script does this). `pre-commit` checks the author and committer email (GitHub noreply only), dependency pins, files over 5 MiB, whitespace errors and conflict markers, secrets (gitleaks) and formatting (`tools/format.sh --staged`); `pre-merge-commit` runs it for merges; `pre-push` checks every commit the remote doesn't have yet (emails, tags, gitleaks over changes and commit messages).
 
 ## Submodules and third-party code
@@ -82,4 +83,5 @@ The repository will be public on GitHub, and a commit stays in its history even 
 ## Before reporting work as done
 
 - Build `windows-debug` (and `windows-release` for performance-related work) and report the commands, their exit codes and any warnings.
+- After a push, check the CI run for that commit (https://github.com/august-byrne/Phazite/actions). The repository is public, so the GitHub REST API (`/repos/august-byrne/Phazite/actions/runs`) answers without signing in.
 - For audio or UI changes, tell the user what to click and listen for, because the GUI can't be checked from the shell.
