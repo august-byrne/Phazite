@@ -15,9 +15,9 @@ namespace
     constexpr int collapseButtonSize = 16;
 } // namespace
 
-TrackHeader::TrackHeader (Owner& o, te::Track& t)
+TrackHeader::TrackHeader (Owner& o, te::Track& trackToShow)
     : owner (o),
-      track (t)
+      track (trackToShow)
 {
     setDescription ("Click to select the track, Ctrl+click to add it to the selection, Shift+click to select up to it. "
                     "Double-click the name to rename it, drag the track to move it, drag its bottom edge to resize it, "
@@ -58,7 +58,7 @@ TrackHeader::TrackHeader (Owner& o, te::Track& t)
     };
 
     // A folder's triangle shows or hides its tracks.
-    isFolder = t.isFolderTrack();
+    isFolder = trackToShow.isFolderTrack();
     collapseButton.onClick = [this]
     {
         if (auto* folder = track.get())

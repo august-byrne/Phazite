@@ -2356,10 +2356,10 @@ void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
     const auto sideways = e.mods.isShiftDown() ? wheel.deltaY : wheel.deltaX;
     const auto upDown = e.mods.isShiftDown() ? 0.0f : wheel.deltaY;
 
-    if (sideways != 0.0f)
+    if (! juce::exactlyEqual (sideways, 0.0f))
         setViewStart (view.xToBeat (-notches (sideways) * scrollPerNotch));
 
-    if (upDown != 0.0f)
+    if (! juce::exactlyEqual (upDown, 0.0f))
         setScrollY (scrollY - juce::roundToInt (notches (upDown) * scrollPerNotch));
 }
 
