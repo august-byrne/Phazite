@@ -48,8 +48,11 @@ public:
     CommandRegistry& getCommands() const noexcept { return commands; }
 
     //==============================================================================
-    // The time line.
+    // The time line. Positions are song beats, but the ruler and the grid count from the time origin: the
+    // playlist's is the start of the song, and the piano roll's the start of its clip, so that bar 1 is where
+    // the clip starts, as in FL Studio and Live. The view doesn't scroll back past it.
     const TimelineView& getView() const noexcept { return view; }
+    te::BeatPosition getTimeOrigin() const noexcept { return timeOrigin; }
     void setViewStart (te::BeatPosition);
     void zoomAround (double x, double factor); // x from the left of the time line
     void zoom (double factor);                 // around the playhead if it is in view, otherwise the middle
@@ -62,6 +65,21 @@ public:
     // While playing, turn the page when the playhead reaches the right edge.
     bool isFollowingPlayback() const noexcept { return followPlayback; }
     void setFollowingPlayback (bool shouldFollow) noexcept { followPlayback = shouldFollow; }
+
+    // Scrolling while something is dragged past an edge. Call autoScroll() on each mouse drag, with the
+    // pointer's position and the area it scrolls (in the same coordinates): near or past an edge, the view
+    // scrolls that way, faster the further out the pointer is. Sideways that is the time line; up and down,
+    // scrollVerticallyBy(). Returns true if anything scrolled. A drag that may scroll calls
+    // juce::Component::beginDragAutoRepeat() when it starts, so drags keep coming while the mouse is still.
+    enum class ScrollDirections
+    {
+        sideways,
+        upAndDown,
+        both
+    };
+
+    bool autoScroll (juce::Point<int> position, juce::Rectangle<int> area, ScrollDirections = ScrollDirections::both);
+    static constexpr int autoRepeatInterval = 16; // milliseconds, for beginDragAutoRepeat()
 
     //==============================================================================
     // The grid.
@@ -78,6 +96,12 @@ public:
     Tool getTool() const noexcept { return tool; }
     virtual bool canUseTool (Tool) const { return true; }
     void setTool (Tool);
+
+    // The tool commands. Tool keys spring back, as in Bitwig and Live: tapping a tool's key switches to the
+    // tool, but holding the key while using the mouse keeps the tool only until the key is let go (or, if a
+    // drag is still going on then, until it ends). Buttons and the palette switch for good.
+    void pressTool (Tool);
+    void releaseTool(); // the key that pressed it was let go
 
     //==============================================================================
     // What the commands for the selection do in this editor.
@@ -97,7 +121,9 @@ public:
     // Called when the mouse goes down anywhere in the editor, before its buttons run their commands, so that
     // they act on this editor. (JUCE reports focus changes later.)
     std::function<void()> onUsed;
-    void mouseDown (const juce::MouseEvent&) override;
+
+    // A right-click on the ruler, at a place in the song: the playlist offers the song's sections there.
+    virtual void showRulerMenu (te::BeatPosition) {}
 
 protected:
     // Fills the editor's background, with the toolbar's border and, while active, the accent line.
@@ -105,6 +131,9 @@ protected:
 
     // Call from the derived class's setEdit(): resets the view and loads the grid the project keeps.
     void setTimelineEdit (te::Edit*);
+
+    // Moves the time origin; the view stays where it is in the song, unless that is before the new origin.
+    void setTimeOrigin (te::BeatPosition);
 
     // Where beats are drawn, in this component's coordinates: x starts from beat view.start at the left.
     virtual juce::Rectangle<int> getTimelineArea() const = 0;
@@ -116,6 +145,8 @@ protected:
     virtual void gridChanged() {}
     // The vertical scroll bar was dragged; it is the derived class's to set up and use.
     virtual void verticalScrollBarMoved (double /*newRangeStart*/) {}
+    // Scrolls the content up (negative) or down by some pixels, for autoScroll(); returns true if it moved.
+    virtual bool scrollVerticallyBy (int /*pixels*/) { return false; }
     // What a tool does here, for its button's tooltip.
     virtual juce::String describeToolHere (Tool toolToDescribe) const { return describeTool (toolToDescribe); }
 
@@ -140,16 +171,24 @@ protected:
 
 private:
     struct Playhead;
+    struct UseListener;
 
     CommandRegistry& commands;
     const juce::Identifier gridStateType;
     te::SafeSelectable<te::Edit> edit;
     TimelineView view;
+    te::BeatPosition timeOrigin;
     GridSettings grid;
     Tool tool = Tool::smart;
+    std::optional<Tool> toolBeforeKey; // while a tool's key is down: the tool to spring back to
+    bool usedWhileKeyDown = false;     // and whether the mouse was pressed meanwhile
+    std::optional<Tool> toolAfterDrag; // the key was let go during a drag: the tool to go back to when it ends
+    bool mouseIsDown = false;
     bool followPlayback = true, wasPlaying = false, active = false;
-    double contentEnd = 0.0; // in beats, as the scroll bar knows it
+    double contentEnd = 0.0;         // in beats, as the scroll bar knows it
+    double lastAutoScrollTime = 0.0; // milliseconds (juce::Time::getMillisecondCounterHiRes())
     std::unique_ptr<Playhead> playhead;
+    std::unique_ptr<UseListener> useListener;
 
     juce::ValueTree getGridState (bool createIfMissing) const;
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;

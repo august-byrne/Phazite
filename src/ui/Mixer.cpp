@@ -27,11 +27,15 @@ Mixer::Mixer (te::Engine& e, CommandRegistry& registry, te::SelectionManager& se
 
     viewport.setViewedComponent (&stripHolder, false);
     viewport.setScrollBarsShown (false, true);
+    verticalView.setViewedComponent (&content, false);
+    verticalView.setScrollBarsShown (true, false);
+    content.addAndMakeVisible (viewport);
+    content.addAndMakeVisible (master);
     addReturnButton.onClick = [this] { commands.invoke ("track.addReturn"); };
     addReturnButton.setEnabled (false);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &viewport, &master, &addReturnButton })
-        addAndMakeVisible (c);
+    addAndMakeVisible (verticalView);
+    addAndMakeVisible (addReturnButton);
 
     selection.addChangeListener (this);
 }
@@ -107,14 +111,13 @@ void Mixer::paint (juce::Graphics& g)
 {
     const auto& p = getPalette (*this);
     g.fillAll (p.background);
-    g.setColour (p.border);
-    g.fillRect (master.getX() - 1, 0, 1, getHeight());
 
     if (strips.isEmpty() && edit.get() != nullptr)
     {
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::body));
-        g.drawText ("No tracks yet: add one with Track > Add Track.", viewport.getBounds(), juce::Justification::centred);
+        g.drawText ("No tracks yet: add one with Add > Track.", verticalView.getBounds().withTrimmedRight (MasterStrip::width),
+                    juce::Justification::centred);
     }
 }
 
@@ -124,11 +127,18 @@ void Mixer::resized()
     auto toolbar = area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs);
     addReturnButton.setBounds (toolbar.removeFromLeft (96));
 
-    master.setBounds (area.removeFromRight (MasterStrip::width));
-    viewport.setBounds (area);
+    // At least as tall as the strips need to be; a shorter mixer scrolls up and down.
+    verticalView.setBounds (area);
+    const auto minimum = std::max (ChannelStrip::getMinimumHeight() + viewport.getScrollBarThickness(), MasterStrip::getMinimumHeight());
+    const auto scrolls = area.getHeight() < minimum;
+    content.setSize (area.getWidth() - (scrolls ? verticalView.getScrollBarThickness() : 0), std::max (area.getHeight(), minimum));
+
+    auto inside = content.getLocalBounds();
+    master.setBounds (inside.removeFromRight (MasterStrip::width));
+    viewport.setBounds (inside);
 
     // The strips fill the height, leaving room for the scroll bar along the bottom.
-    const auto height = std::max (200, area.getHeight() - viewport.getScrollBarThickness());
+    const auto height = inside.getHeight() - viewport.getScrollBarThickness();
     stripHolder.setSize (std::max (1, strips.size() * ChannelStrip::width), height);
 
     for (int i = 0; i < strips.size(); ++i)

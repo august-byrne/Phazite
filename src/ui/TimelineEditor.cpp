@@ -15,6 +15,25 @@ namespace
     constexpr double zoomStep = 1.5;        // for the zoom commands
     constexpr double minLineSpacing = 6.0;  // grid lines closer than this many pixels aren't drawn
 
+    constexpr int autoScrollMargin = 16;             // pixels inside an edge where a drag starts to scroll
+    constexpr double autoScrollSpeedPerPixel = 15.0; // pixels per second for each pixel nearer the edge, or past it
+    constexpr double maxAutoScrollSpeed = 3000.0;    // pixels per second
+
+    // How fast a drag at some position along an area scrolls it: toward the edge it is near or past, in pixels
+    // per second (negative toward the start), or 0.
+    double getAutoScrollSpeed (int position, int size)
+    {
+        const auto margin = std::min (autoScrollMargin, size / 4); // a small area keeps most of its room for dragging
+
+        if (const auto pastStart = margin - position; pastStart > 0)
+            return -std::min (maxAutoScrollSpeed, pastStart * autoScrollSpeedPerPixel);
+
+        if (const auto pastEnd = position - (size - margin); pastEnd > 0)
+            return std::min (maxAutoScrollSpeed, pastEnd * autoScrollSpeedPerPixel);
+
+        return 0.0;
+    }
+
     juce::StringArray getToolSynonyms (Tool tool)
     {
         juce::StringArray synonyms { "tool", "pointer", "mode" };
@@ -105,7 +124,11 @@ void TimelineRuler::paint (juce::Graphics& g)
     const auto& tempo = edit->tempoSequence;
     const auto& view = editor.getView();
     const auto clip = g.getClipBounds();
-    const te::BeatRange visible (view.xToBeat (clip.getX() - 1), view.xToBeat (clip.getRight() + 1));
+
+    // Bars count from the time origin: the beats here are from there.
+    const auto origin = te::toDuration (editor.getTimeOrigin());
+    const te::BeatRange visible (view.xToBeat (clip.getX() - 1) - origin, view.xToBeat (clip.getRight() + 1) - origin);
+    const auto xOf = [&view, origin] (te::BeatPosition beat) { return view.beatToX (beat + origin); };
 
     // Ticks: tall for bars, shorter for beats, shortest between them.
     const auto tickType = getAdaptiveSnapType (tempo, visible.getStart(), view.pixelsPerBeat, false, minLineSpacing);
@@ -116,7 +139,7 @@ void TimelineRuler::paint (juce::Graphics& g)
                          const auto isBar = type == GridLineType::bar;
                          const auto tick = isBar ? getHeight() / 2 : (type == GridLineType::beat ? getHeight() / 4 : getHeight() / 8);
                          g.setColour (isBar ? p.textMuted : p.textMuted.withAlpha (0.4f));
-                         g.fillRect (juce::roundToInt (view.beatToX (beat)), getHeight() - 1 - tick, 1, tick);
+                         g.fillRect (juce::roundToInt (xOf (beat)), getHeight() - 1 - tick, 1, tick);
                      });
 
     // Bar numbers, as far apart as they need to be to read: every bar, or every 2nd, 4th, ...
@@ -127,7 +150,7 @@ void TimelineRuler::paint (juce::Graphics& g)
         every *= 2;
 
     // From a little before the area being drawn, so a number its edge cuts is drawn whole.
-    auto bar = std::max (0, tempo.toBarsAndBeats (tempo.toTime (view.xToBeat (clip.getX() - 48))).bars);
+    auto bar = std::max (0, tempo.toBarsAndBeats (tempo.toTime (view.xToBeat (clip.getX() - 48) - origin)).bars);
     bar -= bar % every;
 
     g.setColour (p.textMuted);
@@ -135,7 +158,7 @@ void TimelineRuler::paint (juce::Graphics& g)
 
     for (;; bar += every)
     {
-        const auto x = (float) view.beatToX (tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 }));
+        const auto x = (float) xOf (tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 }));
 
         if (x > (float) clip.getRight())
             break;
@@ -147,11 +170,22 @@ void TimelineRuler::paint (juce::Graphics& g)
 
 void TimelineRuler::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+    {
+        editor.showRulerMenu (editor.getView().xToBeat (e.position.x));
+        return;
+    }
+
+    beginDragAutoRepeat (TimelineEditor::autoRepeatInterval);
     movePlayhead (e);
 }
 
 void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+        return;
+
+    editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
     movePlayhead (e);
 }
 
@@ -188,11 +222,45 @@ struct TimelineEditor::Playhead : public juce::Component
     }
 };
 
+// Hears every mouse press and release in the editor and its children, for onUsed and the tools that spring
+// back. A listener of its own: the editor listening to itself would also get every other mouse event twice,
+// the mouse wheel's included.
+struct TimelineEditor::UseListener : public juce::MouseListener
+{
+    explicit UseListener (TimelineEditor& e)
+        : editor (e)
+    {
+    }
+
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        editor.mouseIsDown = true;
+        editor.usedWhileKeyDown = editor.toolBeforeKey.has_value();
+
+        if (editor.onUsed != nullptr)
+            editor.onUsed();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        editor.mouseIsDown = false;
+
+        if (const auto back = editor.toolAfterDrag)
+        {
+            editor.toolAfterDrag.reset();
+            editor.setTool (*back);
+        }
+    }
+
+    TimelineEditor& editor;
+};
+
 //==============================================================================
 TimelineEditor::TimelineEditor (CommandRegistry& registry, const juce::Identifier& stateType)
     : commands (registry),
       gridStateType (stateType),
-      playhead (std::make_unique<Playhead>())
+      playhead (std::make_unique<Playhead>()),
+      useListener (std::make_unique<UseListener> (*this))
 {
     snapButton.onClick = [this] { commands.invoke ("grid.snap"); };
     gridButton.setTitle ("Grid");
@@ -205,6 +273,7 @@ TimelineEditor::TimelineEditor (CommandRegistry& registry, const juce::Identifie
             new IconButton (getToolName (toolToShow) + (toolToShow == Tool::smart ? "" : " tool"), getToolIcon (toolToShow)));
         button->setRadioGroupId (1);
         button->setClickingTogglesState (true);
+        button->setToggleState (toolToShow == tool, juce::dontSendNotification);
         button->onClick = [this, toolToShow] { commands.invoke (getToolCommandID (toolToShow)); };
         addChildComponent (button);
     }
@@ -222,26 +291,21 @@ TimelineEditor::TimelineEditor (CommandRegistry& registry, const juce::Identifie
     snapButton.setEnabled (false); // until a project is open
     gridButton.setEnabled (false);
     updateGridControls();
-    addMouseListener (this, true); // mouseDown() hears about clicks on the children too
+    addMouseListener (useListener.get(), true);
 }
 
 TimelineEditor::~TimelineEditor()
 {
-    removeMouseListener (this);
+    removeMouseListener (useListener.get());
     horizontalScrollBar.removeListener (this);
     verticalScrollBar.removeListener (this);
-}
-
-void TimelineEditor::mouseDown (const juce::MouseEvent&)
-{
-    if (onUsed != nullptr)
-        onUsed();
 }
 
 void TimelineEditor::setTimelineEdit (te::Edit* newEdit)
 {
     edit = newEdit;
     view = {};
+    timeOrigin = {};
     grid = newEdit != nullptr ? GridSettings::load (getGridState (false)) : GridSettings();
     snapButton.setEnabled (newEdit != nullptr);
     gridButton.setEnabled (newEdit != nullptr);
@@ -274,11 +338,18 @@ juce::ValueTree TimelineEditor::getGridState (bool createIfMissing) const
 //==============================================================================
 void TimelineEditor::setViewStart (te::BeatPosition start)
 {
-    view.start = te::BeatPosition::fromBeats (std::max (0.0, start.inBeats()));
+    view.start = std::max (timeOrigin, start);
     ruler.repaint();
     timelineChanged();
     updatePlayhead();
     updateScrollBar();
+}
+
+void TimelineEditor::setTimeOrigin (te::BeatPosition newOrigin)
+{
+    timeOrigin = std::max (te::BeatPosition(), newOrigin);
+    updateGridControls(); // the grid's size can depend on where bars start
+    setViewStart (view.start);
 }
 
 void TimelineEditor::zoomAround (double x, double factor)
@@ -366,11 +437,11 @@ void TimelineEditor::updatePlayhead()
 
 void TimelineEditor::updateScrollBar()
 {
-    // The content plus some room after it.
+    // From the time origin, the content plus some room after it.
     const auto visibleBeats = std::max (1, getTimelineArea().getWidth()) / view.pixelsPerBeat;
     contentEnd = getContentRange().getEnd().inBeats();
-    const auto total = std::max ({ contentEnd + 64.0, view.start.inBeats() + visibleBeats, 256.0 });
-    horizontalScrollBar.setRangeLimits (0.0, total, juce::dontSendNotification);
+    const auto total = std::max ({ contentEnd + 64.0, view.start.inBeats() + visibleBeats, timeOrigin.inBeats() + 256.0 });
+    horizontalScrollBar.setRangeLimits (timeOrigin.inBeats(), total, juce::dontSendNotification);
     horizontalScrollBar.setCurrentRange (view.start.inBeats(), visibleBeats, juce::dontSendNotification);
     horizontalScrollBar.setSingleStepSize (scrollPerNotch / view.pixelsPerBeat);
 }
@@ -388,6 +459,35 @@ void TimelineEditor::zoomByWheel (float x, float wheelDelta)
 void TimelineEditor::scrollByWheel (float wheelDelta)
 {
     setViewStart (view.xToBeat (-getWheelNotches (wheelDelta) * scrollPerNotch));
+}
+
+bool TimelineEditor::autoScroll (juce::Point<int> position, juce::Rectangle<int> area, ScrollDirections directions)
+{
+    // By the time since the last drag, so the speed doesn't depend on how often the mouse reports. The first
+    // drag after a pause counts as a short one.
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto seconds = juce::jlimit (1.0 / 60.0, 1.0 / 20.0, (now - lastAutoScrollTime) / 1000.0);
+    lastAutoScrollTime = now;
+
+    auto scrolled = false;
+
+    if (directions != ScrollDirections::upAndDown)
+    {
+        if (const auto speed = getAutoScrollSpeed (position.x - area.getX(), area.getWidth()); ! juce::exactlyEqual (speed, 0.0))
+        {
+            const auto before = view.start.inBeats();
+            setViewStart (view.xToBeat (speed * seconds));
+            scrolled = ! juce::exactlyEqual (view.start.inBeats(), before);
+        }
+    }
+
+    if (directions != ScrollDirections::sideways)
+        if (const auto speed = getAutoScrollSpeed (position.y - area.getY(), area.getHeight()); ! juce::exactlyEqual (speed, 0.0))
+            scrolled = scrollVerticallyBy (speed < 0.0 ? std::min (-1, juce::roundToInt (speed * seconds))
+                                                       : std::max (1, juce::roundToInt (speed * seconds)))
+                       || scrolled;
+
+    return scrolled;
 }
 
 //==============================================================================
@@ -414,7 +514,9 @@ te::BeatPosition TimelineEditor::snap (te::BeatPosition beat, juce::ModifierKeys
     if (e == nullptr || ! grid.snap || mods.isAltDown())
         return beat;
 
-    return snapToGrid (beat, getSnapType(), e->tempoSequence, grid.triplets);
+    // The grid counts from the time origin, as the ruler does.
+    const auto origin = te::toDuration (timeOrigin);
+    return snapToGrid (std::max (te::BeatPosition(), beat - origin), getSnapType(), e->tempoSequence, grid.triplets) + origin;
 }
 
 te::BeatPosition TimelineEditor::snapDown (te::BeatPosition beat, juce::ModifierKeys mods) const
@@ -425,7 +527,9 @@ te::BeatPosition TimelineEditor::snapDown (te::BeatPosition beat, juce::Modifier
         return beat;
 
     const auto& tempo = e->tempoSequence;
-    return tempo.toBeats (getSnapType().roundTimeDown (tempo.toTime (beat), tempo, grid.triplets));
+    const auto origin = te::toDuration (timeOrigin);
+    const auto relative = std::max (te::BeatPosition(), beat - origin);
+    return tempo.toBeats (getSnapType().roundTimeDown (tempo.toTime (relative), tempo, grid.triplets)) + origin;
 }
 
 void TimelineEditor::setGrid (const GridSettings& newGrid)
@@ -490,12 +594,38 @@ void TimelineEditor::setTool (Tool newTool)
     if (! canUseTool (newTool))
         newTool = Tool::smart;
 
+    // A held key repeats its command: choosing the tool in use again must not end what the mouse is doing.
+    if (newTool == tool)
+        return;
+
     tool = newTool;
 
     for (size_t i = 0; i < std::size (allTools); ++i)
         toolButtons[(int) i]->setToggleState (allTools[i] == tool, juce::dontSendNotification);
 
     toolChanged();
+}
+
+void TimelineEditor::pressTool (Tool newTool)
+{
+    toolBeforeKey = tool;
+    usedWhileKeyDown = false;
+    toolAfterDrag.reset();
+    setTool (newTool);
+}
+
+void TimelineEditor::releaseTool()
+{
+    const auto back = std::exchange (toolBeforeKey, std::nullopt);
+
+    // A tap keeps the tool; a hold while the mouse was used springs back.
+    if (! back.has_value() || ! usedWhileKeyDown)
+        return;
+
+    if (mouseIsDown)
+        toolAfterDrag = back;
+    else
+        setTool (*back);
 }
 
 juce::Rectangle<int> TimelineEditor::layOutToolbarControls (juce::Rectangle<int> toolbar)
@@ -604,7 +734,10 @@ void paintGridLines (juce::Graphics& g, const TimelineEditor& editor, juce::Rect
     const auto& tempo = edit->tempoSequence;
     const auto& view = editor.getView();
     const auto triplets = editor.getGrid().triplets;
-    const te::BeatRange visible (view.xToBeat (area.getX() - 1), view.xToBeat (area.getRight() + 1));
+
+    // The grid counts from the time origin: the beats here are from there.
+    const auto origin = te::toDuration (editor.getTimeOrigin());
+    const te::BeatRange visible (view.xToBeat (area.getX() - 1) - origin, view.xToBeat (area.getRight() + 1) - origin);
     auto type = editor.getSnapType();
 
     if (getGridStepInBeats (type, tempo, visible.getStart(), triplets) * view.pixelsPerBeat < minLineSpacing)
@@ -618,7 +751,7 @@ void paintGridLines (juce::Graphics& g, const TimelineEditor& editor, juce::Rect
                      {
                          g.setColour (lineType == GridLineType::bar ? barColour
                                                                     : (lineType == GridLineType::beat ? p.border : subdivisionColour));
-                         g.fillRect (juce::roundToInt (view.beatToX (beat)), area.getY(), 1, area.getHeight());
+                         g.fillRect (juce::roundToInt (view.beatToX (beat + origin)), area.getY(), 1, area.getHeight());
                      });
 }
 
@@ -667,7 +800,8 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .description = "Shows less of the song, in more detail.",
                     .synonyms = { "magnify", "closer", "horizontal zoom" },
                     .perform = withEditor ([] (TimelineEditor& editor) { editor.zoom (zoomStep); }),
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasEdit,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "view.zoomOut",
                     .name = "Zoom Out",
@@ -675,7 +809,8 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .description = "Shows more of the song, in less detail.",
                     .synonyms = { "further", "horizontal zoom" },
                     .perform = withEditor ([] (TimelineEditor& editor) { editor.zoom (1.0 / zoomStep); }),
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasEdit,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "view.zoomToFit",
                     .name = "Zoom to Fit",
@@ -737,7 +872,8 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .description = "Makes the grid's steps smaller.",
                     .synonyms = { "narrow grid", "smaller grid", "more lines" },
                     .perform = changeGrid ([] (GridSettings& grid) { grid.makeFiner(); }),
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasEdit,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "grid.coarser",
                     .name = "Coarser Grid",
@@ -745,7 +881,8 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .description = "Makes the grid's steps larger.",
                     .synonyms = { "widen grid", "larger grid", "fewer lines" },
                     .perform = changeGrid ([] (GridSettings& grid) { grid.makeCoarser(); }),
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasEdit,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "grid.triplets",
                     .name = "Triplet Grid",
@@ -756,7 +893,8 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .isEnabled = hasEdit,
                     .isTicked = ticked ([] (const TimelineEditor& editor) { return editor.getGrid().triplets; }) });
 
-    // The tools, with FL Studio's letters in the keymaps (Esc for the Smart Tool).
+    // The tools, with FL Studio's letters in the keymaps (Esc for the Smart Tool), and in Phazite's also the
+    // digits 1 to 9 in the toolbar's order, which never play notes. Their keys spring back (pressTool()).
     for (const auto toolToAdd : allTools)
     {
         registry.add ({ .id = getToolCommandID (toolToAdd),
@@ -764,14 +902,15 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                         .category = "Tool",
                         .description = describeTool (toolToAdd),
                         .synonyms = getToolSynonyms (toolToAdd),
-                        .perform = withEditor ([toolToAdd] (TimelineEditor& editor) { editor.setTool (toolToAdd); }),
+                        .perform = withEditor ([toolToAdd] (TimelineEditor& editor) { editor.pressTool (toolToAdd); }),
                         .isEnabled =
                             [getActiveEditor, toolToAdd]
                         {
                             auto* editor = getActiveEditor();
                             return editor != nullptr && editor->canUseTool (toolToAdd);
                         },
-                        .isTicked = ticked ([toolToAdd] (const TimelineEditor& editor) { return editor.getTool() == toolToAdd; }) });
+                        .isTicked = ticked ([toolToAdd] (const TimelineEditor& editor) { return editor.getTool() == toolToAdd; }),
+                        .keyReleased = withEditor ([] (TimelineEditor& editor) { editor.releaseTool(); }) });
     }
 
     // Nudging and quantizing act on what is selected in the editor: clips or a time range in the playlist,
@@ -791,7 +930,8 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .synonyms = { "move left", "earlier", "shift" },
                     .perform = withEditor ([] (TimelineEditor& editor) { editor.nudgeSelection (-1); }),
                     .isEnabled = canNudge,
-                    .undoTarget = getUndoTarget });
+                    .undoTarget = getUndoTarget,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "edit.nudgeRight",
                     .name = "Nudge Right",
@@ -800,7 +940,8 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .synonyms = { "move right", "later", "shift" },
                     .perform = withEditor ([] (TimelineEditor& editor) { editor.nudgeSelection (1); }),
                     .isEnabled = canNudge,
-                    .undoTarget = getUndoTarget });
+                    .undoTarget = getUndoTarget,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "edit.quantize",
                     .name = "Quantize",

@@ -9,7 +9,8 @@
 
 namespace phazite::ui
 {
-// The text with the command's first shortcut after it, such as "Play or stop (Space)".
+// The text with the command's shortcuts after it (the first two), such as "Play or stop (Space)" or
+// "Paint tool: ... (B or 3)".
 juce::String withShortcut (const CommandRegistry&, const juce::String& text, const juce::String& commandID);
 
 // Adds commands to a menu, by id, with their shortcuts; ids that aren't registered are left out.

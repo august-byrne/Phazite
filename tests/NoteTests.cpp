@@ -4,6 +4,7 @@
 #include "model/Commands.h"
 #include "model/Notes.h"
 #include "model/Selection.h"
+#include "model/Tracks.h"
 
 namespace
 {
@@ -203,6 +204,34 @@ TEST_CASE ("Keys: shading, snapping and transposing in the key")
     // A new Edit is in C major.
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     CHECK (phazite::describeKey (phazite::getKeyAt (*edit, beats (0.0))) == juce::String ("C major"));
+}
+
+TEST_CASE ("A track has no key until one is chosen, and new tracks get the key chosen last")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto* track = te::getAudioTracks (*edit).getFirst();
+    REQUIRE (track != nullptr);
+    CHECK_FALSE (phazite::getTrackKey (*track).has_value());
+
+    edit->getUndoManager().beginNewTransaction();
+    phazite::setTrackKey (*track, phazite::Key { 9, te::Scale::minor });
+    const auto key = phazite::getTrackKey (*track);
+    REQUIRE (key.has_value());
+    CHECK (phazite::describeKey (*key) == juce::String ("A minor"));
+
+    // A new track gets it.
+    auto* added = phazite::insertTrack (*edit, track, nullptr);
+    REQUIRE (added != nullptr);
+    REQUIRE (phazite::getTrackKey (*added).has_value());
+    CHECK (phazite::getTrackKey (*added)->root == 9);
+    CHECK (phazite::getTrackKey (*added)->scale == te::Scale::minor);
+
+    // Turning it off is an undo step.
+    edit->getUndoManager().beginNewTransaction();
+    phazite::setTrackKey (*track, std::nullopt);
+    CHECK_FALSE (phazite::getTrackKey (*track).has_value());
+    edit->getUndoManager().undo();
+    CHECK (phazite::getTrackKey (*track).has_value());
 }
 
 TEST_CASE ("Chord stamps and drum rows")

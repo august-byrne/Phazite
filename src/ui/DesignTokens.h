@@ -73,6 +73,26 @@ inline constexpr float cornerRadius = 4.0f;
 
 // Track colors are saved in projects, so their palette is in the model: phazite::getTrackColours().
 
+// How strongly a track's color tints what belongs to the track, so that its color runs through its row: the
+// alpha of the color over the playlist's background, or how far a header's surface is mixed with it.
+namespace TrackTint
+{
+    inline constexpr float row = 0.07f;
+    inline constexpr float folderRow = 0.12f;
+    inline constexpr float selectedRow = 0.16f;
+    inline constexpr float header = 0.16f;
+    inline constexpr float selectedHeader = 0.34f;
+} // namespace TrackTint
+
+// How the song's sections show behind the playlist's tracks, as ghosts: a faint wash of each section's color
+// (stronger while it is selected) and a line in it where the section starts (alphas).
+namespace SectionTint
+{
+    inline constexpr float wash = 0.04f;
+    inline constexpr float selectedWash = 0.1f;
+    inline constexpr float edge = 0.6f;
+} // namespace SectionTint
+
 // WCAG 2.2's contrast ratio between two colours, from 1 (none) to 21 (black on white). Text needs at
 // least 4.5, and the parts of a control that identify it at least 3.
 inline double getContrastRatio (juce::Colour a, juce::Colour b)

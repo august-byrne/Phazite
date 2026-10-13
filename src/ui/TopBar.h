@@ -11,8 +11,8 @@
 
 namespace phazite::ui
 {
-// The bar along the top: transport, tempo, key, CPU, the master level and volume, the computer
-// keyboard and the command search.
+// The bar along the top: play, tempo, CPU, the master level and volume, the computer keyboard and the
+// command search. (A key is a track's, so the piano roll shows it.)
 class TopBar : public juce::Component,
                private juce::Timer
 {
@@ -35,7 +35,7 @@ private:
 
     IconButton playButton { "Play", Icon::play }, keyboardButton { "Computer keyboard", Icon::keyboard },
         searchButton { "Search commands", Icon::search };
-    juce::Label tempoLabel, keyLabel, cpuLabel;
+    juce::Label tempoLabel, cpuLabel;
     LevelMeter masterMeter { "Master level" };
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", te::decibelsToVolumeFaderPosition (0.0f) };
     ParameterAttachment masterVolumeAttachment { masterVolume, "Change Master Volume" };

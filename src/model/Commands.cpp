@@ -202,9 +202,56 @@ const Command* CommandRegistry::findCommandForKey (const juce::KeyPress& key) co
 bool CommandRegistry::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
     if (const auto* command = findCommandForKey (key))
-        return invoke (command->id);
+        return runForKey (*command, key);
 
     return false;
+}
+
+bool CommandRegistry::runForKey (const Command& command, const juce::KeyPress& key)
+{
+    // A held key repeats. Only commands that take a step run again; for the others the repeat is used up.
+    const auto held = std::find_if (heldKeys.begin(), heldKeys.end(),
+                                    [&key, &command] (const auto& entry) { return entry.first == key && entry.second == command.id; });
+
+    if (held != heldKeys.end())
+        return command.repeatsWhileHeld ? invoke (command.id) : true;
+
+    heldKeys.emplace_back (key, command.id);
+    return invoke (command.id);
+}
+
+bool CommandRegistry::keyStateChanged (bool, juce::Component*)
+{
+    releaseHeldKeys ([] (const juce::KeyPress& key) { return ! juce::KeyPress::isKeyCurrentlyDown (key.getKeyCode()); });
+    return false; // the other key listeners hear about it too
+}
+
+void CommandRegistry::releaseHeldKeys()
+{
+    releaseHeldKeys ([] (const juce::KeyPress&) { return true; });
+}
+
+void CommandRegistry::releaseHeldKeys (const std::function<bool (const juce::KeyPress&)>& isReleased)
+{
+    // The commands hear about it after the list is up to date, in case they press keys of their own.
+    juce::StringArray released;
+
+    for (auto it = heldKeys.begin(); it != heldKeys.end();)
+    {
+        if (isReleased (it->first))
+        {
+            released.add (it->second);
+            it = heldKeys.erase (it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    for (const auto& id : released)
+        if (const auto* command = find (id); command != nullptr && command->keyReleased != nullptr)
+            command->keyReleased();
 }
 
 bool CommandRegistry::invokeWithoutShift (const juce::KeyPress& key)
@@ -218,7 +265,7 @@ bool CommandRegistry::invokeWithoutShift (const juce::KeyPress& key)
         return false; // Shift and the key have a command of their own
 
     if (const auto* command = findCommandForKey (juce::KeyPress (key.getKeyCode())))
-        return invoke (command->id);
+        return runForKey (*command, key);
 
     return false;
 }
@@ -515,7 +562,8 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                         auto* edit = focusedEdit();
                         return edit != nullptr && edit->getUndoManager().canUndo();
                     },
-                    .currentName = [nameWithStep] { return nameWithStep (true); } });
+                    .currentName = [nameWithStep] { return nameWithStep (true); },
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "edit.redo",
                     .name = "Redo",
@@ -534,7 +582,8 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                         auto* edit = focusedEdit();
                         return edit != nullptr && edit->getUndoManager().canRedo();
                     },
-                    .currentName = [nameWithStep] { return nameWithStep (false); } });
+                    .currentName = [nameWithStep] { return nameWithStep (false); },
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "edit.undoOrRedo",
                     .name = "Undo or Redo",

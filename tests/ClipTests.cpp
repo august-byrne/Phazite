@@ -72,8 +72,11 @@ TEST_CASE ("The Smart Tool picks what a drag does from where it starts on a clip
     CHECK (zoneAt (200.0f, 60.0f) == ClipZone::selectRange);      // the upper half
     CHECK (zoneAt (200.0f, 100.0f) == ClipZone::move);            // the lower half
 
-    // A narrow clip keeps most of its width for moving.
+    // A narrow clip keeps most of its width for moving, and a short one (on a short track) moves from anywhere
+    // but its edges.
     CHECK (phazite::getClipZone ({ 0.0f, 0.0f, 12.0f, 40.0f }, { 6.0f, 30.0f }, true) == ClipZone::move);
+    CHECK (phazite::getClipZone ({ 0.0f, 0.0f, 200.0f, 29.0f }, { 100.0f, 5.0f }, false) == ClipZone::move);
+    CHECK (phazite::getClipZone ({ 0.0f, 0.0f, 200.0f, 29.0f }, { 4.0f, 20.0f }, false) == ClipZone::trimStart);
 
     for (const auto zone :
          { ClipZone::trimStart, ClipZone::trimEnd, ClipZone::fadeIn, ClipZone::fadeOut, ClipZone::selectRange, ClipZone::move })

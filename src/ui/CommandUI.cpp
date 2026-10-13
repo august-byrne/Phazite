@@ -6,8 +6,9 @@ namespace phazite::ui
 {
 juce::String withShortcut (const CommandRegistry& commands, const juce::String& text, const juce::String& commandID)
 {
+    // Up to two keys, such as a tool's letter and its digit.
     const auto keys = commands.getShortcutDescriptions (commandID);
-    return keys.isEmpty() ? text : text + " (" + keys[0] + ")";
+    return keys.isEmpty() ? text : text + " (" + keys.joinIntoString (" or ", 0, 2) + ")";
 }
 
 void addCommandItem (juce::PopupMenu& menu, CommandRegistry& commands, const juce::String& id)
@@ -44,7 +45,7 @@ void showColourMenu (juce::Component& target, juce::Colour current, std::functio
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target),
                         [safeTarget = juce::Component::SafePointer<juce::Component> (&target), callback = std::move (onChosen)] (int result)
                         {
-                            if (safeTarget != nullptr && juce::isPositiveAndNotGreaterThan (result, (int) getTrackColours().size()))
+                            if (safeTarget != nullptr && result > 0 && result <= (int) getTrackColours().size()) // 0: dismissed
                                 callback (getTrackColours()[(size_t) result - 1].colour);
                         });
 }

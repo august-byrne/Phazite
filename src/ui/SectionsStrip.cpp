@@ -9,13 +9,12 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr int energyBandHeight = 16; // the energy curve, above the blocks
-    constexpr int edgeWidth = 6;         // dragging this close to a section's right edge resizes it
+    constexpr int edgeWidth = 6; // dragging this close to a section's right edge resizes it
     constexpr int dragThreshold = 4;
     constexpr float corner = 3.0f;
     constexpr int barsPerNewSection = 8;
 
-    const juce::String emptyHint ("Double-click to add a section, or right-click to lay out the song from an outline.");
+    const juce::String emptyHint ("The song's sections. Double-click to add one here, or right-click to lay out the song from an outline.");
     const juce::String edgeHint ("Drag to make the section longer or shorter; what comes after it moves along. "
                                  "Hold Shift to resize the section alone, and Alt to place its end freely.");
     const juce::String moveHint ("Drag to move it with everything in it; Ctrl+drag copies it, and Ctrl+Shift+drag copies it as aliases. "
@@ -75,7 +74,7 @@ juce::Rectangle<int> SectionsStrip::getBlockArea (const te::Clip& section) const
     const auto& view = editor.getView();
     const auto left = juce::roundToInt (view.beatToX (section.getStartBeat()));
     const auto right = juce::roundToInt (view.beatToX (section.getEndBeat()));
-    return { left, energyBandHeight, std::max (2, right - left), std::max (1, getHeight() - energyBandHeight - 2) };
+    return { left, 0, std::max (2, right - left), getHeight() };
 }
 
 te::ArrangerClip* SectionsStrip::getSectionAt (juce::Point<int> position) const
@@ -114,10 +113,9 @@ te::BeatPosition SectionsStrip::findNearestBoundary (const te::ArrangerClip& sec
 //==============================================================================
 void SectionsStrip::paint (juce::Graphics& g)
 {
+    // Part of the time bar, as the ruler under it is.
     const auto& p = getPalette (*this);
-    g.fillAll (p.surface);
-    g.setColour (p.border);
-    g.fillRect (0, getHeight() - 1, getWidth(), 1);
+    g.fillAll (p.surfaceRaised);
 
     auto* e = edit.get();
 
@@ -127,18 +125,13 @@ void SectionsStrip::paint (juce::Graphics& g)
     const auto sections = getSections (*e);
 
     if (sections.isEmpty())
-    {
-        g.setColour (p.textMuted);
-        g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText (emptyHint, getLocalBounds().withTrimmedTop (energyBandHeight).reduced (Space::s, 0), juce::Justification::centredLeft,
-                    true);
-        return;
-    }
+        return; // the hint bar says what to do here
 
     paintEnergyCurve (g, sections);
 
     const auto clip = g.getClipBounds();
 
+    // Each section a light block in its color, solid where it starts, with its name.
     for (auto* section : sections)
     {
         const auto block = getBlockArea (*section);
@@ -148,49 +141,51 @@ void SectionsStrip::paint (juce::Graphics& g)
 
         const auto selected = selection.isSelected (section);
         const auto colour = getSectionColour (*section);
-        const auto fill = selected ? colour.brighter (0.3f) : colour;
-        const auto body = block.toFloat().reduced (0.5f);
+        const auto body = block.toFloat().reduced (0.5f, 1.5f);
 
-        g.setColour (fill);
+        g.setColour (colour.withAlpha (selected ? 0.6f : 0.3f));
         g.fillRoundedRectangle (body, corner);
-        g.setColour (selected ? p.text : colour.darker (0.5f));
-        g.drawRoundedRectangle (body, corner, selected ? 2.0f : 1.0f);
+        g.setColour (colour);
+        g.fillRect (body.withWidth (2.0f));
+
+        if (selected)
+        {
+            g.setColour (p.text);
+            g.drawRoundedRectangle (body, corner, 1.0f);
+        }
 
         if (! (nameLabel.isVisible() && renaming.get() == section))
         {
-            g.setColour (getInkFor (fill));
+            g.setColour (p.text);
             g.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
-            g.drawText (section->getName(), block.reduced (Space::xs, 0), juce::Justification::centredLeft, true);
+            g.drawText (section->getName(), block.withTrimmedLeft (Space::xs + 2).withTrimmedRight (Space::xs),
+                        juce::Justification::centredLeft, true);
         }
     }
 
     // While dragging: where the section would go, or where its end would be.
-    if (drag.has_value() && drag->target.has_value())
+    if (const auto target = getDragTarget())
     {
-        const auto x = juce::roundToInt (editor.getView().beatToX (*drag->target));
-        g.setColour (p.accent);
+        const auto x = juce::roundToInt (editor.getView().beatToX (*target));
 
-        if (drag->kind == Drag::Kind::resize)
+        if (auto* section = drag->section.get(); section != nullptr && drag->kind == Drag::Kind::resize)
         {
-            if (auto* section = drag->section.get())
-            {
-                const auto end = getBlockArea (*section).getRight();
-                g.setColour (p.accent.withAlpha (0.25f));
-                g.fillRect (std::min (x, end), energyBandHeight, std::abs (x - end), getHeight() - energyBandHeight);
-            }
-
-            g.setColour (p.accent);
+            const auto end = getBlockArea (*section).getRight();
+            g.setColour (p.accent.withAlpha (0.25f));
+            g.fillRect (std::min (x, end), 0, std::abs (x - end), getHeight());
         }
 
+        g.setColour (p.accent);
         g.fillRect (x - 1, 0, 3, getHeight());
     }
 }
 
 void SectionsStrip::paintEnergyCurve (juce::Graphics& g, const juce::Array<te::ArrangerClip*>& sections)
 {
-    // A smooth line through each section's energy at its middle, held flat to the outer ends.
+    // A smooth line through each section's energy at its middle, held flat to the outer ends: faint, behind
+    // the names.
     const auto& p = getPalette (*this);
-    const auto top = 2.0f, bottom = (float) energyBandHeight - 2.0f;
+    const auto top = 2.0f, bottom = (float) getHeight() - 2.0f;
     const auto yFor = [=] (const te::Clip& section) { return bottom - (bottom - top) * getSectionEnergy (section); };
 
     juce::Path line;
@@ -214,10 +209,10 @@ void SectionsStrip::paintEnergyCurve (juce::Graphics& g, const juce::Array<te::A
     area.lineTo (first.getX(), bottom + 2.0f);
     area.closeSubPath();
 
-    g.setColour (p.accent.withAlpha (0.15f));
+    g.setColour (p.accent.withAlpha (0.08f));
     g.fillPath (area);
-    g.setColour (p.accent.withAlpha (0.8f));
-    g.strokePath (line, juce::PathStrokeType (1.5f));
+    g.setColour (p.accent.withAlpha (0.4f));
+    g.strokePath (line, juce::PathStrokeType (1.0f));
 }
 
 //==============================================================================
@@ -253,7 +248,7 @@ void SectionsStrip::mouseDown (const juce::MouseEvent& e)
         if (section != nullptr && ! selection.isSelected (section))
             selection.selectOnly (section);
 
-        showMenu (section);
+        showMenu (section, editor.getView().xToBeat (e.position.x));
         return;
     }
 
@@ -273,6 +268,7 @@ void SectionsStrip::mouseDown (const juce::MouseEvent& e)
         selection.selectOnly (section);
 
     drag = Drag { Drag::Kind::pending, section, isOnRightEdge (*section, e.getPosition()), {} };
+    beginDragAutoRepeat (TimelineEditor::autoRepeatInterval); // the time line goes on scrolling while the mouse rests past an edge
 }
 
 void SectionsStrip::mouseDrag (const juce::MouseEvent& e)
@@ -293,13 +289,16 @@ void SectionsStrip::mouseDrag (const juce::MouseEvent& e)
     if (section == nullptr)
         return;
 
+    // Past an edge, the time line scrolls along.
+    editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
+
     if (drag->kind == Drag::Kind::resize)
         drag->target = std::max (section->getStartBeat() + te::BeatDuration::fromBeats (1.0),
                                  editor.snap (editor.getView().xToBeat (e.position.x), e.mods));
     else
         drag->target = findNearestBoundary (*section, e.position.x);
 
-    repaint();
+    dragChanged();
 }
 
 void SectionsStrip::mouseUp (const juce::MouseEvent& e)
@@ -309,7 +308,7 @@ void SectionsStrip::mouseUp (const juce::MouseEvent& e)
 
     const auto finished = *drag;
     drag.reset();
-    repaint();
+    dragChanged();
 
     auto* section = finished.section.get();
     auto* ed = edit.get();
@@ -439,9 +438,10 @@ void SectionsStrip::renamed()
     repaint();
 }
 
-void SectionsStrip::showMenu (te::ArrangerClip* section)
+void SectionsStrip::showMenu (te::ArrangerClip* section, te::BeatPosition where)
 {
     auto& registry = editor.getCommands();
+    const juce::Component::SafePointer<SectionsStrip> safeThis (this);
     juce::PopupMenu menu;
 
     if (section != nullptr)
@@ -449,17 +449,17 @@ void SectionsStrip::showMenu (te::ArrangerClip* section)
         const te::SafeSelectable<te::ArrangerClip> target (section);
 
         menu.addItem ("Rename",
-                      [this, target]
+                      [safeThis, target]
                       {
-                          if (auto* s = target.get())
-                              startRenaming (*s);
+                          if (auto* s = target.get(); s != nullptr && safeThis != nullptr)
+                              safeThis->startRenaming (*s);
                       });
 
         menu.addItem ("Color...",
-                      [this, target]
+                      [safeThis, target]
                       {
-                          if (auto* s = target.get())
-                              showColourMenu (*this, getSectionColour (*s),
+                          if (auto* s = target.get(); s != nullptr && safeThis != nullptr)
+                              showColourMenu (*safeThis, getSectionColour (*s),
                                               [target] (juce::Colour colour)
                                               {
                                                   if (auto* chosen = target.get())
@@ -475,15 +475,37 @@ void SectionsStrip::showMenu (te::ArrangerClip* section)
         menu.addSeparator();
     }
 
-    addCommandItems (menu, registry, { "section.add" });
+    menu.addItem ("Add Section Here",
+                  [safeThis, where]
+                  {
+                      if (safeThis != nullptr)
+                          safeThis->addSectionAt (where);
+                  });
 
+    // Each outline lays out the whole song; it replaces the sections there are.
     juce::PopupMenu outlines;
 
     for (const auto& outline : getBuiltInOutlines())
         addCommandItem (outlines, registry, "section.outline." + outline.id);
 
-    menu.addSubMenu ("Apply Song Outline", outlines);
+    menu.addSubMenu ("Song Outline", outlines);
     menu.showMenuAsync (juce::PopupMenu::Options());
+}
+
+std::optional<te::BeatPosition> SectionsStrip::getDragTarget() const
+{
+    if (drag.has_value() && drag->kind != Drag::Kind::pending)
+        return drag->target;
+
+    return std::nullopt;
+}
+
+void SectionsStrip::dragChanged()
+{
+    repaint();
+
+    if (onDragChanged != nullptr)
+        onDragChanged();
 }
 
 //==============================================================================

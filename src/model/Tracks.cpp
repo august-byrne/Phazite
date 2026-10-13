@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Tracks.h"
+#include "Notes.h"
 
 #include <algorithm>
 
@@ -263,6 +264,7 @@ te::AudioTrack* insertTrack (te::Edit& edit, te::Track* after, te::SelectionMana
         return nullptr;
 
     track->setColour (colour);
+    applyLastKey (*track); // the key chosen last in the song
 
     if (selection != nullptr)
         selection->selectOnly (track.get());
@@ -463,7 +465,8 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .description = "Selects the track above the selected one.",
                     .synonyms = { "previous track", "up" },
                     .perform = [&selection] { selectNeighbour (selection, -1); },
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasEdit,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "track.selectNext",
                     .name = "Select Track Below",
@@ -471,7 +474,8 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .description = "Selects the track below the selected one.",
                     .synonyms = { "next track", "down" },
                     .perform = [&selection] { selectNeighbour (selection, 1); },
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasEdit,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "track.moveUp",
                     .name = "Move Track Up",
@@ -480,7 +484,8 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "reorder", "raise" },
                     .perform = [&selection] { moveSelectedTracks (selection, -1); },
                     .isEnabled = hasSelectedTracks,
-                    .undoTarget = getEdit });
+                    .undoTarget = getEdit,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "track.moveDown",
                     .name = "Move Track Down",
@@ -489,7 +494,8 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "reorder", "lower" },
                     .perform = [&selection] { moveSelectedTracks (selection, 1); },
                     .isEnabled = hasSelectedTracks,
-                    .undoTarget = getEdit });
+                    .undoTarget = getEdit,
+                    .repeatsWhileHeld = true });
 
     // Tracktion keeps mute and solo out of the undo history, as many DAWs do.
     registry.add ({ .id = "track.mute",
@@ -516,7 +522,8 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .description = "Makes the selected tracks taller, or all tracks if none is selected.",
                     .synonyms = { "height", "bigger", "vertical zoom", "expand" },
                     .perform = [&selection] { resizeTracks (selection, TrackHeight::step); },
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasEdit,
+                    .repeatsWhileHeld = true });
 
     registry.add ({ .id = "track.shorter",
                     .name = "Shorter Tracks",
@@ -524,6 +531,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .description = "Makes the selected tracks shorter, or all tracks if none is selected.",
                     .synonyms = { "height", "smaller", "vertical zoom", "compact" },
                     .perform = [&selection] { resizeTracks (selection, -TrackHeight::step); },
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasEdit,
+                    .repeatsWhileHeld = true });
 }
 } // namespace phazite

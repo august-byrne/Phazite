@@ -51,6 +51,9 @@ class ChannelStrip : public juce::Component,
 public:
     static constexpr int width = 120;
 
+    // How tall the strip must be for its parts not to overlap; the mixer scrolls when it is shorter.
+    static int getMinimumHeight();
+
     ChannelStrip (te::Engine&, CommandRegistry&, te::SelectionManager&);
     ~ChannelStrip() override;
 
@@ -104,6 +107,7 @@ class MasterStrip : public juce::Component,
 {
 public:
     static constexpr int width = 156;
+    static int getMinimumHeight(); // as ChannelStrip's
 
     MasterStrip (te::Engine&, CommandRegistry&);
 
@@ -143,6 +147,7 @@ private:
     std::function<te::Edit*()> getEdit;
     te::SelectionManager& selection;
     ChannelStrip strip;
+    juce::Viewport stripView; // scrolls the strip up and down when the panel is shorter than it needs
 
     void showTrack();
     void changeListenerCallback (juce::ChangeBroadcaster*) override { showTrack(); } // the selection changed

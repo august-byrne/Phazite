@@ -146,9 +146,13 @@ void MainWindow::activeWindowStatusChanged()
 {
     juce::DocumentWindow::activeWindowStatusChanged();
 
-    // Keys released in another window would never reach this one: end the notes now.
+    // Keys released in another window would never reach this one: end the notes now, and let the tools that
+    // spring back do so.
     if (! isActiveWindow())
+    {
         computerKeyboard.releaseAll();
+        commands.releaseHeldKeys();
+    }
 }
 
 bool MainWindow::keyPressed (const juce::KeyPress& key)
@@ -445,7 +449,9 @@ void MainWindow::updateTitle()
 //==============================================================================
 juce::StringArray MainWindow::getMenuBarNames()
 {
-    return { "File", "Edit", "Track", "Song", "Transport", "View", "Options" };
+    // As in FL Studio, Live and Bitwig: no Track, Song or Transport menu. Their commands are in Add, Edit and
+    // View, as well as on the top bar, the keys, the right-click menus and the command palette.
+    return { "File", "Edit", "Add", "View", "Options", "Help" };
 }
 
 juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
@@ -453,18 +459,23 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
     juce::PopupMenu menu;
     auto& commandManager = commands.getCommandManager();
 
-    const auto add = [this, &commandManager] (juce::PopupMenu& m, const juce::String& id)
+    const auto addOne = [this, &commandManager] (juce::PopupMenu& m, const juce::String& id)
     {
         if (const auto commandID = commands.getCommandID (id); commandID != 0)
             m.addCommandItem (&commandManager, commandID);
     };
 
+    const auto add = [addOne] (juce::PopupMenu& m, std::initializer_list<const char*> ids)
+    {
+        for (const auto* id : ids)
+            addOne (m, id);
+    };
+
     switch (menuIndex)
     {
-        case 0:
+        case 0: // File
         {
-            add (menu, "project.new");
-            add (menu, "project.open");
+            add (menu, { "project.new", "project.open" });
 
             juce::PopupMenu recentMenu;
             const auto recent = session.getRecentProjects();
@@ -474,147 +485,90 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
             menu.addSubMenu ("Open Recent", recentMenu, ! recent.isEmpty());
             menu.addSeparator();
-            add (menu, "project.save");
-            add (menu, "project.saveAs");
+            add (menu, { "project.save", "project.saveAs" });
             menu.addSeparator();
-            add (menu, "app.quit");
+            add (menu, { "app.quit" });
             break;
         }
 
-        case 1:
+        case 1: // Edit
         {
-            add (menu, "edit.undo");
-            add (menu, "edit.redo");
-            add (menu, "edit.undoOrRedo");
+            add (menu, { "edit.undo", "edit.redo", "edit.undoOrRedo" });
             menu.addSeparator();
-
-            for (const auto* id : { "edit.delete", "edit.duplicate", "edit.duplicateAsAlias", "edit.rename" })
-                add (menu, id);
-
+            add (menu, { "edit.delete", "edit.duplicate", "edit.duplicateAsAlias", "edit.rename" });
             menu.addSeparator();
-            add (menu, "edit.quantize");
+            add (menu, { "edit.selectAll", "edit.deselectAll" });
+            menu.addSeparator();
+            add (menu, { "edit.quantize" });
 
             // The piano roll's edits, which act on the selected notes.
             juce::PopupMenu notes;
-
-            for (const auto* id : { "note.transposeUp", "note.transposeDown", "note.octaveUp", "note.octaveDown" })
-                add (notes, id);
-
+            add (notes, { "note.transposeUp", "note.transposeDown", "note.octaveUp", "note.octaveDown" });
             notes.addSeparator();
-
-            for (const auto* id : { "note.lengthen", "note.shorten", "note.legato", "note.chop" })
-                add (notes, id);
-
+            add (notes, { "note.lengthen", "note.shorten", "note.legato", "note.chop" });
             notes.addSeparator();
-
-            for (const auto* id : { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings" })
-                add (notes, id);
-
+            add (notes, { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings" });
             menu.addSubMenu ("Notes", notes);
+
+            // The selected tracks' edits, which their right-click menu has too.
+            juce::PopupMenu tracks;
+            add (tracks, { "track.color", "track.mute", "track.solo" });
+            tracks.addSeparator();
+            add (tracks, { "track.groupIntoFolder", "track.ungroup" });
+            tracks.addSeparator();
+            add (tracks, { "track.moveUp", "track.moveDown", "track.selectPrevious", "track.selectNext" });
+            menu.addSubMenu ("Tracks", tracks);
+
             menu.addSeparator();
-            add (menu, "edit.selectAll");
-            add (menu, "edit.deselectAll");
+            add (menu, { "edit.insertTime", "edit.removeTime" });
             break;
         }
 
-        case 2:
-            add (menu, "track.add");
-            add (menu, "track.addFolder");
-            add (menu, "track.addReturn");
-            add (menu, "track.color");
-            menu.addSeparator();
-
-            for (const auto* id : { "track.mute", "track.solo", "track.pin" })
-                add (menu, id);
-
-            menu.addSeparator();
-
-            for (const auto* id : { "track.groupIntoFolder", "track.ungroup", "track.collapse" })
-                add (menu, id);
-
-            menu.addSeparator();
-
-            for (const auto* id : { "track.moveUp", "track.moveDown", "track.selectPrevious", "track.selectNext" })
-                add (menu, id);
-
-            menu.addSeparator();
-            add (menu, "track.taller");
-            add (menu, "track.shorter");
-            break;
-
-        case 3:
+        case 2: // Add
         {
-            add (menu, "section.add");
+            add (menu, { "track.add", "track.addFolder", "track.addReturn" });
+            menu.addSeparator();
+            add (menu, { "section.add" });
 
             juce::PopupMenu outlines;
 
             for (const auto& outline : getBuiltInOutlines())
-                add (outlines, "section.outline." + outline.id);
+                addOne (outlines, "section.outline." + outline.id);
 
-            menu.addSubMenu ("Apply Song Outline", outlines);
-            menu.addSeparator();
-            add (menu, "edit.insertTime");
-            add (menu, "edit.removeTime");
+            menu.addSubMenu ("Song Outline", outlines);
             break;
         }
 
-        case 4:
-            for (const auto* id : { "transport.playStop", "transport.goToStart", "transport.goToEnd" })
-                add (menu, id);
-
-            break;
-
-        case 5:
+        case 3: // View
         {
-            add (menu, "view.commandPalette");
+            add (menu, { "view.toggleBrowser", "view.toggleInspector", "view.toggleEditor", "view.pianoRoll", "view.mixer" });
             menu.addSeparator();
-
-            for (const auto* id : { "view.toggleBrowser", "view.toggleInspector", "view.toggleEditor", "view.pianoRoll", "view.mixer" })
-                add (menu, id);
-
-            menu.addSeparator();
-
-            for (const auto* id :
-                 { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback", "view.focusMode" })
-                add (menu, id);
+            add (menu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback" });
+            add (menu, { "transport.goToStart", "transport.goToEnd" });
 
             juce::PopupMenu gridMenu;
-            add (gridMenu, "grid.snap");
+            add (gridMenu, { "grid.snap" });
             gridMenu.addSeparator();
-
-            for (const auto* id : { "grid.adaptive", "grid.finer", "grid.coarser", "grid.triplets" })
-                add (gridMenu, id);
-
+            add (gridMenu, { "grid.adaptive", "grid.finer", "grid.coarser", "grid.triplets" });
             menu.addSubMenu ("Grid", gridMenu);
-            menu.addSeparator();
-
-            for (const auto* id : { "view.detachBrowser", "view.detachInspector", "view.detachEditor" })
-                add (menu, id);
 
             menu.addSeparator();
-
-            for (const auto* id : { "view.layoutBeat", "view.layoutMix", "view.layoutFull" })
-                add (menu, id);
-
+            add (menu, { "view.focusMode", "track.pin", "track.collapse", "track.taller", "track.shorter" });
             menu.addSeparator();
-
-            for (const auto* id : { "view.interfaceLarger", "view.interfaceSmaller", "view.interfaceNormal" })
-                add (menu, id);
-
+            add (menu, { "view.detachBrowser", "view.detachInspector", "view.detachEditor" });
             menu.addSeparator();
-            add (menu, "view.hoverHelp");
+            add (menu, { "view.layoutBeat", "view.layoutMix", "view.layoutFull" });
+            menu.addSeparator();
+            add (menu, { "view.interfaceLarger", "view.interfaceSmaller", "view.interfaceNormal" });
             break;
         }
 
-        case 6:
+        case 4: // Options
         {
-            add (menu, "options.settings");
-            add (menu, "options.audioSettings");
-            add (menu, "options.midiSettings");
-            add (menu, "options.keyboardShortcuts");
-            add (menu, "options.scanPlugins");
+            add (menu, { "options.settings", "options.audioSettings", "options.midiSettings", "options.keyboardShortcuts",
+                         "options.scanPlugins" });
             menu.addSeparator();
-            add (menu, "input.computerKeyboard");
+            add (menu, { "input.computerKeyboard" });
             menu.addSeparator();
 
             juce::PopupMenu keymaps, themes;
@@ -622,15 +576,19 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             for (const auto* command : commands.getAll())
             {
                 if (command->id.startsWith ("options.keymap."))
-                    add (keymaps, command->id);
+                    addOne (keymaps, command->id);
                 else if (command->id.startsWith ("options.theme."))
-                    add (themes, command->id);
+                    addOne (themes, command->id);
             }
 
             menu.addSubMenu ("Keymap", keymaps);
             menu.addSubMenu ("Theme", themes);
             break;
         }
+
+        case 5: // Help: where to find things
+            add (menu, { "view.commandPalette", "options.keyboardShortcuts", "view.hoverHelp" });
+            break;
 
         default:
             break;

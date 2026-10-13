@@ -77,10 +77,10 @@ struct Song
 };
 } // namespace
 
-TEST_CASE ("The built-in outlines are the design's four, with its section lengths")
+TEST_CASE ("The built-in outlines are the design's four and four more, with their section lengths")
 {
     const auto& outlines = phazite::getBuiltInOutlines();
-    REQUIRE (outlines.size() == 4);
+    REQUIRE (outlines.size() == 8);
 
     const auto barsOf = [] (const phazite::Outline& outline)
     {
@@ -100,11 +100,22 @@ TEST_CASE ("The built-in outlines are the design's four, with its section length
     CHECK (barsOf (outlines[2]) == juce::String ("16 8 16 16 8 16 16"));
     CHECK (outlines[3].id == juce::String ("hipHop"));
     CHECK (barsOf (outlines[3]) == juce::String ("4 8 16 8 16 8 4"));
+    CHECK (outlines[4].id == juce::String ("lofi"));
+    CHECK (outlines[5].id == juce::String ("rnb"));
+    CHECK (outlines[6].id == juce::String ("drumAndBass"));
+    CHECK (outlines[7].id == juce::String ("techno"));
 
     for (const auto& outline : outlines)
     {
         CAPTURE (outline.id.toStdString());
-        CHECK (outline.description.isNotEmpty());
+
+        // The description ends with how long the song is, which the sections add up to.
+        auto total = 0;
+
+        for (const auto& section : outline.sections)
+            total += section.bars;
+
+        CHECK (outline.description.endsWith (" " + juce::String (total) + " bars."));
 
         for (const auto& section : outline.sections)
         {

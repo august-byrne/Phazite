@@ -20,7 +20,7 @@ TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyb
     searchButton.onClick = [this] { commands.invoke ("view.commandPalette"); };
     refreshTooltips();
 
-    for (auto* label : { &tempoLabel, &keyLabel, &cpuLabel })
+    for (auto* label : { &tempoLabel, &cpuLabel })
     {
         label->setFont (LookAndFeel::getNumberFont (TextSize::body));
         label->setJustificationType (juce::Justification::centred);
@@ -28,7 +28,6 @@ TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyb
     }
 
     tempoLabel.setTooltip ("Tempo, in beats per minute");
-    keyLabel.setTooltip ("The project's key");
     cpuLabel.setTooltip ("How much of the time available for each audio block the engine uses");
 
     showAsDecibels (masterVolume);
@@ -106,7 +105,7 @@ void TopBar::resized()
     area.removeFromRight (Space::m);
 
     // The readouts get what is left. In a narrow window the last ones give way first.
-    for (const auto& [label, width] : { std::pair { &tempoLabel, 90 }, std::pair { &keyLabel, 110 }, std::pair { &cpuLabel, 80 } })
+    for (const auto& [label, width] : { std::pair { &tempoLabel, 90 }, std::pair { &cpuLabel, 80 } })
     {
         label->setVisible (area.getWidth() >= width);
         label->setBounds (area.removeFromLeft (juce::jmin (width, area.getWidth())));
@@ -127,20 +126,15 @@ void TopBar::timerCallback()
 
     playButton.setEnabled (edit != nullptr);
 
-    juce::String tempo, key;
+    juce::String tempo;
 
     if (edit != nullptr)
     {
         const auto position = edit->getTransport().getPosition();
         tempo = juce::String (edit->tempoSequence.getBpmAt (position), 1) + " BPM";
-
-        const auto& pitch = edit->pitchSequence.getPitchAt (position);
-        key = juce::MidiMessage::getMidiNoteName (pitch.getPitch(), true, false, 0) + " "
-              + te::Scale::getNameForType (pitch.getScale()).toLowerCase();
     }
 
     tempoLabel.setText (tempo, juce::dontSendNotification);
-    keyLabel.setText (key, juce::dontSendNotification);
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",
                       juce::dontSendNotification);
     updateKeyboardButton();

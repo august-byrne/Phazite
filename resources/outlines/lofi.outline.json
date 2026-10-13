@@ -1,0 +1,15 @@
+{
+  "id": "lofi",
+  "name": "Lo-fi beat",
+  "order": 5,
+  "description": "A lo-fi or chill beat: a loop that changes a little every eight bars, with a short break. 48 bars.",
+  "sections": [
+    { "name": "Intro", "role": "intro", "bars": 4, "energy": 0.25, "tip": "The chords alone, filtered or with some vinyl noise, before the drums come in." },
+    { "name": "Loop A", "role": "verse", "bars": 8, "energy": 0.5, "tip": "Drums, bass and chords: the main loop. Keep it simple and warm." },
+    { "name": "Loop B", "role": "chorus", "bars": 8, "energy": 0.6, "tip": "The same loop with something added: a melody, a sample chop or a second line." },
+    { "name": "Loop A", "role": "verse", "bars": 8, "energy": 0.5, "tip": "Back to the main loop, with small changes so it doesn't sound copied." },
+    { "name": "Break", "role": "breakdown", "bars": 4, "energy": 0.3, "tip": "Take the drums out, or filter everything, for a moment." },
+    { "name": "Loop B", "role": "chorus", "bars": 8, "energy": 0.65, "tip": "The fullest version of the loop." },
+    { "name": "Outro", "role": "outro", "bars": 8, "energy": 0.25, "tip": "Take parts out one by one, or let the chords ring out." }
+  ]
+}

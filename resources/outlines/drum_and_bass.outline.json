@@ -1,0 +1,15 @@
+{
+  "id": "drumAndBass",
+  "name": "Drum and bass",
+  "order": 7,
+  "description": "A drum and bass track for DJs: a long intro, two drops around a breakdown, and a long outro. 160 bars.",
+  "sections": [
+    { "name": "Intro", "role": "intro", "bars": 32, "energy": 0.35, "tip": "Drums and atmosphere, simple enough for a DJ to mix in. Tease the bass." },
+    { "name": "Build-up", "role": "buildUp", "bars": 8, "energy": 0.65, "tip": "Risers, snare rolls and a filter opening up." },
+    { "name": "Drop", "role": "drop", "bars": 32, "energy": 1.0, "tip": "The full breakbeat and the main bass." },
+    { "name": "Breakdown", "role": "breakdown", "bars": 24, "energy": 0.35, "tip": "Pads, a vocal or a melody, with the drums out or quiet." },
+    { "name": "Build-up", "role": "buildUp", "bars": 8, "energy": 0.7, "tip": "Build again, bigger than the first time." },
+    { "name": "Drop", "role": "drop", "bars": 32, "energy": 1.0, "tip": "The second drop: change the bass or the drums so it isn't a copy of the first." },
+    { "name": "Outro", "role": "outro", "bars": 24, "energy": 0.35, "tip": "Back to the drums and a few parts, for a DJ to mix out." }
+  ]
+}

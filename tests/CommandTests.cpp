@@ -266,6 +266,51 @@ TEST_CASE ("When commands share a key, the enabled one with the highest priority
     CHECK_FALSE (registry.keyPressed (juce::KeyPress (juce::KeyPress::downKey), nullptr)); // no command at all
 }
 
+TEST_CASE ("A held key runs its command once, unless the command takes a step")
+{
+    // Holding Space used to start and stop playing over and over as the key repeated.
+    int toggles = 0, steps = 0, releases = 0;
+
+    phazite::Keymap keymap;
+    keymap.name = "Test";
+    keymap.keys["test.toggle"] = { "spacebar" };
+    keymap.keys["test.step"] = { "cursor right" };
+
+    phazite::CommandRegistry registry;
+    registry.setKeymap (keymap);
+
+    auto toggle = makeCommand ("test.toggle", "Toggle", [&toggles] { ++toggles; });
+    toggle.keyReleased = [&releases] { ++releases; };
+    registry.add (std::move (toggle));
+
+    auto step = makeCommand ("test.step", "Step", [&steps] { ++steps; });
+    step.repeatsWhileHeld = true;
+    registry.add (std::move (step));
+
+    // A held key repeats: the same key again before it is let go. The repeat is used up either way.
+    const juce::KeyPress space (juce::KeyPress::spaceKey), right (juce::KeyPress::rightKey);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        CHECK (registry.keyPressed (space, nullptr));
+        CHECK (registry.keyPressed (right, nullptr));
+    }
+
+    CHECK (toggles == 1);
+    CHECK (steps == 3);
+    CHECK (releases == 0);
+
+    // Let go (no key is really down while the tests run), and pressed again.
+    CHECK_FALSE (registry.keyStateChanged (false, nullptr));
+    CHECK (releases == 1);
+    CHECK (registry.keyPressed (space, nullptr));
+    CHECK (toggles == 2);
+
+    // A window that loses the keyboard lets go of its keys too.
+    registry.releaseHeldKeys();
+    CHECK (releases == 2);
+}
+
 TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap, or once more by a note command")
 {
     // A note command can share a key with a command of another kind: it takes the key while notes are

@@ -36,6 +36,12 @@ struct Command
     // selected notes use notePriority, so the arrow keys move notes while notes are selected and select
     // tracks otherwise.
     int keyPriority {};
+    // Optional: whether holding the command's key runs it again each time the key repeats, for commands
+    // that take a step (nudging, zooming, moving through tracks, undo). Others run once per press, so that
+    // holding Space doesn't start and stop playing over and over.
+    bool repeatsWhileHeld {};
+    // Optional: called when the key that ran the command is let go. The tools use it to spring back.
+    std::function<void()> keyReleased {};
 
     static constexpr int notePriority = 1;
 };
@@ -85,8 +91,14 @@ public:
     const Command* findCommandForKey (const juce::KeyPress&) const;
 
     // Runs the key's command (findCommandForKey()). Windows add the registry as a key listener, so the
-    // shortcuts work in them.
+    // shortcuts work in them. While the key is held, its repeats run the command again only if it
+    // repeatsWhileHeld; keyStateChanged() sees the key let go.
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
+    bool keyStateChanged (bool isKeyDown, juce::Component*) override;
+
+    // Forgets the held keys, as if they were let go: when the window loses the keyboard, their release goes
+    // elsewhere.
+    void releaseHeldKeys();
 
     // While the computer keyboard plays notes, single-key shortcuts are typed with Shift held, as in
     // Ableton Live: for Shift and a key, this runs the command of the key alone, unless Shift and the
@@ -127,8 +139,12 @@ private:
     std::vector<std::unique_ptr<Command>> commands; // commands[i] has CommandID firstCommandID + i
     std::map<juce::String, size_t> indexByID;
     Keymap keymap;
+    // The keys that ran commands, while they are down, with those commands' ids.
+    std::vector<std::pair<juce::KeyPress, juce::String>> heldKeys;
 
     const Command* find (juce::CommandID) const;
+    bool runForKey (const Command&, const juce::KeyPress&);
+    void releaseHeldKeys (const std::function<bool (const juce::KeyPress&)>& isReleased);
     void runWithoutUndoStep (const Command&);
     static bool isEnabled (const Command&);
 

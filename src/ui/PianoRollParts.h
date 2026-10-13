@@ -63,6 +63,7 @@ struct PianoRoll::NoteGrid : public juce::Component
     void paintRows (juce::Graphics&, juce::Rectangle<int> area);
     void paintNotes (juce::Graphics&);
     void beginDrag (const juce::MouseEvent&);
+    juce::Point<int> getGestureStart() const; // where the mouse went down, in the grid as it is now
     void dragNotes (const juce::MouseEvent&);
     void addNoteAt (const juce::MouseEvent&); // or a chord, with a chord stamp chosen
     void eraseOrMuteAt (juce::Point<float>, bool erase);

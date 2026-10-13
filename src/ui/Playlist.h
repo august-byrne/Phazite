@@ -51,6 +51,7 @@ public:
 private:
     struct Lanes;
     struct Gesture;
+    struct AddTrackRow;
 
     // A track shown in the playlist. Pinned tracks stay in a band at the top; the rest scroll under it.
     struct Row
@@ -75,15 +76,16 @@ private:
     juce::ValueTree editState; // listened to for changes to the tracks and the tempo
     int scrollY = 0;
 
-    SectionsStrip sectionsStrip { *this, selection, range }; // under the ruler
-    juce::TextButton outlineButton { "Song outline" };       // beside it, over the track headers
+    SectionsStrip sectionsStrip { *this, selection, range }; // in the time bar, above the ruler
 
-    IconButton addTrackButton { "Add track", Icon::plus };
-    te::SafeSelectable<te::Clip> lastClip; // the clip the Draw and Paint tools place copies of
+    IconButton addTrackButton { "Add track", Icon::plus }; // over the track headers, left of the time bar
+    te::SafeSelectable<te::Clip> lastClip;                 // the clip the Draw and Paint tools place copies of
 
     // The header column holds the pinned headers in a band at the top, and below it the scrolling
-    // headers, inside headerContent; the lanes hold the clips in two layers the same way.
+    // headers, inside headerContent, with a row after them that adds a track; the lanes hold the clips in two
+    // layers the same way.
     juce::Component headerColumn, pinnedHeaders, scrollingHeaders, headerContent;
+    std::unique_ptr<AddTrackRow> addTrackRow;
     std::unique_ptr<Lanes> lanes;
     juce::Component pinnedClips, scrollingClips;
 
@@ -133,6 +135,7 @@ private:
     void lanesDoubleClick (const juce::MouseEvent&);
     void smartToolDown (const juce::MouseEvent&);
     void beginDrag (const juce::MouseEvent&);
+    juce::Point<int> getGestureStart() const; // where the mouse went down, in the lanes as they are now
     std::optional<CrossfadeSpot> findCrossfadeAt (juce::Point<int>) const;
     void selectRange (te::BeatPosition from, te::BeatPosition to, int fromRow, int toRow);
     te::Clip* placeClip (int row, te::BeatPosition, bool snapStart); // a copy of lastClip, for Draw and Paint
@@ -148,7 +151,11 @@ private:
     te::BeatPosition getFileDropBeat (int x) const; // at the grid line at or before x, unless Alt is held
 
     void setColourOfSelectedTracks (juce::Colour);
-    void showOutlineMenu();
+    void showRulerMenu (te::BeatPosition) override; // the sections there, and the song outlines
+
+    // After the last track: a track or a folder (and it shows), and the menu of what can be added there.
+    void addTrackAtEnd (bool folder);
+    void showAddTrackMenu();
 
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;
@@ -157,6 +164,7 @@ private:
     void toolChanged() override;
     void gridChanged() override;
     void verticalScrollBarMoved (double newRangeStart) override;
+    bool scrollVerticallyBy (int pixels) override;
 
     // TrackHeader::Owner
     void trackClicked (te::Track&, const juce::ModifierKeys&) override;

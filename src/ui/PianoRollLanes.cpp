@@ -12,11 +12,6 @@ namespace phazite::ui
 namespace
 {
     constexpr int velocityHitDistance = 4; // pixels from a note's start that the velocity lane counts as on it
-
-    te::AudioTrack* getDrumTrack (const juce::Array<te::MidiClip*>& clips)
-    {
-        return clips.isEmpty() ? nullptr : dynamic_cast<te::AudioTrack*> (clips.getFirst()->getTrack());
-    }
 } // namespace
 
 //==============================================================================
@@ -105,7 +100,7 @@ void PianoRoll::Keys::mouseDown (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu())
     {
         // Drum mode: hide this drum's row, or show them all again.
-        if (auto* track = getDrumTrack (roll.getClips()); track != nullptr && roll.drumMode)
+        if (auto* track = roll.getTrack(); track != nullptr && roll.drumMode)
         {
             juce::PopupMenu menu;
             const te::SafeSelectable<te::AudioTrack> safeTrack (track);
@@ -175,7 +170,7 @@ void PianoRoll::Keys::mouseUp (const juce::MouseEvent&)
 {
     roll.stopAudition();
 
-    if (auto* track = getDrumTrack (roll.getClips()); track != nullptr && roll.drumMode && draggedRow >= 0 && dropRow >= 0)
+    if (auto* track = roll.getTrack(); track != nullptr && roll.drumMode && draggedRow >= 0 && dropRow >= 0)
     {
         const auto note = roll.drumRows[(size_t) draggedRow].note;
         moveDrumRow (*track, roll.drumRows, note, dropRow > draggedRow ? dropRow - 1 : dropRow);
@@ -361,8 +356,15 @@ void PianoRoll::TransformBar::show (const Transform& shown)
             info.setText ({}, juce::dontSendNotification);
             setUp (first, shown.transposeInKey ? "Steps" : "Semitones", -24.0, 24.0, 1.0, shown.transposeSteps,
                    [] (double steps) { return (steps > 0.0 ? "+" : "") + juce::String (juce::roundToInt (steps)); });
-            option.setButtonText ("In key (" + describeKey (roll.getKey()) + ")");
-            option.setToggleState (shown.transposeInKey, juce::dontSendNotification);
+            // In steps of the track's key, if it has one.
+            {
+                const auto key = roll.getKey();
+                option.setButtonText (key.has_value() ? "In key (" + describeKey (*key) + ")"
+                                                      : juce::String ("In key (the track has none)"));
+                option.setEnabled (key.has_value());
+                option.setToggleState (shown.transposeInKey && key.has_value(), juce::dontSendNotification);
+            }
+
             option.setVisible (true);
             break;
     }

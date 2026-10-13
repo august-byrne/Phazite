@@ -85,9 +85,9 @@ Why this audience:
 
 ```
 +-----------------------------------------------------------------------+
-| Play  Rec   140 BPM   F minor   CPU 12%    Ctrl+K: search any command |
+| Play  Rec   140 BPM   4/4   CPU 12%        Ctrl+K: search any command |
 +----------+--------------------------------------------+---------------+
-| Browser  | Sections [ Intro   ][ Build  ][ Drop    ]  | Inspector     |
+| Browser  | + Track  Intro    Build    Drop    (bars)  | Inspector     |
 |  (F8)    | v Drums  (folder = bus)                    | (selection)   |
 | folders  |     Kick    [] [] [] [] [] [] [] []        | devices       |
 | tags     |     Snare      []    []    []    []        | sends         |
@@ -102,9 +102,9 @@ Why this audience:
 +-----------------------------------------------------------------------+
 ```
 
-- **Top bar:** transport, tempo, key, time signature, CPU and disk meters, and the command search (Ctrl+K).
+- **Top bar:** play and record, tempo, time signature, CPU and disk meters, the master level, the computer keyboard and the command search (Ctrl+K). A key is a track's, so the piano roll shows it, not the top bar (2026-10-13).
 - **Browser (left):** instruments, effects, plug-ins, presets, samples, generated sounds and projects ([section 11](#11-the-browser)).
-- **Playlist (center):** the sections strip, then global lanes (chords, tempo, markers), then the tracks ([section 6](#6-the-playlist)).
+- **Playlist (center):** the time bar (the song's sections over the bar numbers, with the button that adds a track beside it), then global lanes (chords, tempo, markers), then the tracks, with the sections drawn faintly behind them ([section 6](#6-the-playlist)).
 - **Inspector (right):** the properties of whatever is selected: a track's devices and sends, a clip's gain and fades, a device's macros and modulators.
 - **Editor dock (bottom):** tabs for the piano roll, audio editor, automation editor and mixer. It follows the selection, so selecting a MIDI clip shows it in the piano roll.
 - **Hint bar (bottom edge):** what clicking, dragging and the modifier keys do under the pointer.
@@ -176,14 +176,14 @@ Phazite's look should be as clean and consistent as its workflow. Its design lan
 | Where on a clip | Dragging does |
 |---|---|
 | Left or right edge | Trims the clip |
-| Top-left or top-right corner | Draws a fade-in or fade-out |
-| Upper half | Selects a time range |
+| Top-left or top-right corner of an audio clip | Draws a fade-in or fade-out |
+| Upper half | Selects a time range (a clip on a short track has no upper half: all of it moves) |
 | Lower half | Moves the clip; with a modifier key it copies or makes an alias (the keymap sets which key) |
 | Bottom of the boundary between two touching clips | Draws a crossfade |
 
 **On empty space:**
 - dragging selects a time range across tracks, like REAPER's razor edits;
-- double-clicking creates an empty MIDI clip on an instrument track;
+- double-clicking creates an empty MIDI clip on an instrument track, and under the last track adds a track;
 - with the FL Studio keymap, a single click places the last-used clip, as FL's draw tool does.
 
 The final mapping will be settled in the usability tests ([section 12](#12-commands-keys-and-help)).
@@ -203,6 +203,10 @@ The final mapping will be settled in the usability tests ([section 12](#12-comma
 
 Esc returns to the Smart Tool. The current tool and its key show on the toolbar and in the hint bar.
 
+- **Digits too (2026-10-13):** in Phazite's keymap, 1 to 9 also pick the tools, in the toolbar's order. They never play notes, so they work while the computer keyboard does.
+- **Tool keys spring back (2026-10-13),** as in Bitwig and Ableton Live: a tap of a tool's key switches to the tool, but holding the key while using the mouse keeps the tool only until the key is let go (or until a drag still going on then ends).
+- **A held key repeats only the commands that take a step** (nudging, zooming, moving through tracks, undo). Choosing the tool in use again changes nothing, so holding a tool's key never ends a drag.
+
 **Right-click** opens a context menu by default. With the FL Studio keymap it deletes, as FL users expect. Both are a setting.
 
 **Editing commands:**
@@ -216,21 +220,25 @@ Esc returns to the Smart Tool. The current tool and its key show on the toolbar 
 - bounce clips to audio.
 
 **Tracks:**
-- color and name (automatic from the content, editable), height;
+- **add one** with the "+ Track" button over the track headers (below the selected track), the row after the last track (at the end; right-click it for a folder or a return track), a double-click under the last track, or the Add menu, as Logic, Cubase and Studio One place it (2026-10-13);
+- color and name (automatic from the content, editable), height. The color runs through the track's whole row: its header in it, and its row tinted with it, as in FL Studio and Ableton Live;
 - collapsible folders;
 - **pin** tracks so they stay visible while scrolling, like Pro Tools' Track Pin;
 - a **focus mode** that collapses all other tracks;
 - mute, solo and record-arm;
 - a CPU readout.
 
-**Sections strip:**
-- drag a section to move it, with everything in it, across all tracks;
+**Sections** (redesigned 2026-10-13) don't take a row of their own:
+- they are a thin band in the time bar, above the bar numbers: each section's name over its time, with the energy curve faintly behind;
+- behind the tracks they show as ghosts: a faint wash of each one's color and a line where it starts, so the song's shape stays in view;
+- drag a section to move it, with everything in it, across all tracks (where it would go shows across the tracks too); drag its right edge to resize it; double-click to add or rename one;
 - duplicate, duplicate as aliases, delete, rename, recolor;
-- "Apply outline" ([section 13](#13-getting-started-and-song-outlines)).
+- right-click the band or the bar numbers to add a section there or apply a song outline ([section 13](#13-getting-started-and-song-outlines)). The Add menu has both too; there is no Song menu.
 
 **Grid, zoom and scrolling:**
 - The grid adapts to the zoom level, with snap on by default; hold a modifier to bypass it. Triplets are available.
 - Scrolling is smooth in both directions, never jumping a whole track at a time (an Ardour complaint).
+- Dragging anything (clips, edges, ranges, rectangles, tracks, sections, notes, the playhead) near or past an edge scrolls the view along, faster the further out the pointer is (2026-10-13).
 - Zoom to selection.
 
 **Clip picker:** a searchable list of every clip in the project, like FL Studio's Picker panel. Drag a clip into the playlist, or pick it as the clip the draw tool places.
@@ -239,6 +247,8 @@ Esc returns to the Smart Tool. The current tool and its key show on the toolbar 
 
 This is the editor the target users spend most time in, and FL Studio's is its most-praised feature: "designed… like a paint program" ([B11](#appendix-b-sources)). Gaps here are what sent FL Studio users away from Bitwig and Reason ([appendix A](#appendix-a-research-summary)).
 
+- **Time counts from the clip (2026-10-13),** as in FL Studio and Live: bar 1 is where the clip's content starts, and a clip opens there. The grid and snapping count from it too; the header says where the clip is in the song, and the playhead shows when the clip plays. With several clips it counts from the first. Later, a switch to song time like Bitwig 6's could edit a whole track.
+- **What it shows:** the MIDI clips selected in the playlist, or, when a track is selected, its clip at the playhead or the nearest one. A track without clips shows from the bar the playhead is in, and the first note drawn starts a clip there.
 - **Mouse model from FL Studio:**
   - left-click adds a note and right-click deletes it;
   - new notes reuse the last length and velocity;
@@ -249,9 +259,9 @@ This is the editor the target users spend most time in, and FL Studio's is its m
 - **Tools:** draw, paint (drag to lay notes along the grid, like Ardour's note brushing), slice, select, mute and delete, on the same keys as in the playlist.
 - **Ghost notes:** notes from other tracks, chosen per track, show faintly behind the clip being edited. Click one to jump to its track.
 - **Key and chords:**
-  - rows outside the project scale are shaded;
+  - **a key is a track's (2026-10-13),** chosen in the piano roll's toolbar, and off until chosen: then the rows are a piano's, black keys darker. With a key, the rows outside it are shaded and notes can snap to it. A new track gets the key chosen last in the song, and one command gives every track the same key. (Tracktion's own key is one for the whole song, so this is Phazite's.) The top bar shows no key;
   - the tones of the current chord on the chord lane are highlighted;
-  - snapping to the scale is optional.
+  - transposing in steps of the key needs one; without, it is in semitones.
 
   Out-of-scale shading should be subtle and explained, because an Ardour user found its version confusing.
 - **Chord stamps:** pick a chord type and click to place it. When the song has a chord lane, there is also "stamp the current chord".
@@ -261,7 +271,7 @@ This is the editor the target users spend most time in, and FL Studio's is its m
   - Each has a hotkey.
 - **Several clips at once:** edit the notes of several selected clips together, each in its own color.
 - **Lanes under the notes:** velocity is always shown. CC, pitch-bend and per-note expression lanes appear on demand.
-- **Drum mode:** for drum-sampler tracks, rows show pad names instead of piano keys and notes are drawn as hits without length. Rows can be reordered or hidden.
+- **Drum mode:** for drum-sampler tracks, rows show pad names instead of piano keys and notes are drawn as hits without length. Rows can be reordered or hidden. It comes on by itself with such tracks, and the grid's menu and the command palette turn it on or off; it has no button (2026-10-13).
 - **Slides:** pitch glides between notes are sent as MPE note expression to plug-ins that support it. FL Studio's slide notes only work with its own instruments.
 - **Capture:** press Capture after playing and the last phrase becomes a clip ([section 17](#17-recording-and-capture)).
 
@@ -359,6 +369,13 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 
 **Command palette (Ctrl+K):** a fuzzy search over every command, showing each one's shortcut. Enter runs the selected command.
 
+**Menu bar (2026-10-13): File, Edit, Add, View, Options and Help.** Like FL Studio's, Live's and Bitwig's, it has no Track, Song or Transport menu:
+- **Add:** a track, a folder or a return track, a section, and the song outlines;
+- **Edit** also holds the selected tracks' edits (color, mute, solo, folders, order) and inserting and removing time;
+- **View** also holds going to the start or end, focus mode, pinning, collapsing and track heights;
+- **Help:** the command search, the keyboard shortcuts and hover help;
+- play and stop are on the top bar and the keys. Every command stays in a menu as well as in right-click menus, as Apple's and Microsoft's guidelines ask.
+
 **Keymaps (decided: whatever users find most intuitive; FL Studio style is fine):**
 - **First launch asks** "Coming from FL Studio, Ableton Live, Logic, Pro Tools, or new to music software?" and loads a matching keymap. Digital Performer 12 has switchable keysets that copy other DAWs' shortcuts ([B13](#appendix-b-sources)). v1 ships the Phazite default and FL Studio keymaps, with Ableton Live next.
 - **The Phazite default** follows conventions that most DAWs and the operating system share:
@@ -373,7 +390,7 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 - **The computer keyboard plays notes**, on by default so a new project makes sound right away (step 0.7):
   - the layout of Ableton Live and Logic Pro: the middle row of letters plays the white keys from middle C, the row above the black keys, Z and X change the octave and C and V the velocity in steps of 20 ([B40](#appendix-b-sources));
   - it takes only keys pressed without Shift, Ctrl, Alt or Cmd, and never keys typed into a text field;
-  - a top-bar button and the Options menu turn it off. In the FL Studio keymap Ctrl+T does too, and F10 opens the MIDI settings, as in FL Studio ([B41](#appendix-b-sources)). FL's manual doesn't document which keys play which notes, so that keymap uses the same layout;
+  - a top-bar button, M in Phazite's keymap (as in Ableton Live) and the Options menu turn it off. In the FL Studio keymap Ctrl+T does, and F10 opens the MIDI settings, as in FL Studio ([B41](#appendix-b-sources)). FL's manual doesn't document which keys play which notes, so that keymap uses the same layout;
   - **single-key shortcuts (decided, open question 9):** as in Ableton Live 12 ([B40](#appendix-b-sources)), while the computer keyboard plays notes, Shift and a letter run that letter's shortcut (FL Studio's tools, for example), unless Shift and that letter have a shortcut of their own. With the computer keyboard off, the letters alone run them. So a keymap shouldn't give Shift and a letter a different command than the letter alone.
 - **How "most intuitive" gets settled:**
   - watch three to five people, both FL Studio users and complete beginners, do the same tasks with a prototype: place a kick on every beat, trim, fade, duplicate a section, write a chord;
@@ -401,7 +418,7 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 
 **Song outlines (decided)** are templates that lay out a song's sections, so newcomers see how songs are usually shaped. Applying one:
 - creates colored sections with typical lengths;
-- draws an **energy curve** above them;
+- draws an **energy curve**, faintly, behind the sections' names in the time bar;
 - gives each section a one-line tip, such as for a build-up: "Raise the energy: risers, a snare roll, open a filter".
 
 Sections stay fully editable, and later features use them; chord suggestions, for example, can tell a chorus from a verse.
@@ -414,8 +431,12 @@ v1 outlines (decided), with typical lengths in bars at the project tempo, all ed
 | Rock | Intro 8, Verse 16, Chorus 8, Verse 16, Chorus 8, Solo 8, Bridge 8, Chorus 16, Outro 8 |
 | Electronic (house, EDM) | Intro 16, Build-up 8, Drop 16, Breakdown 16, Build-up 8, Drop 16, Outro 16 |
 | Hip-hop and trap | Intro 4, Hook 8, Verse 16, Hook 8, Verse 16, Hook 8, Outro 4 |
+| Lo-fi beat (2026-10-13) | Intro 4, Loop A 8, Loop B 8, Loop A 8, Break 4, Loop B 8, Outro 8 |
+| R&B (2026-10-13) | Intro 4, Verse 16, Pre-chorus 4, Chorus 8, Verse 16, Pre-chorus 4, Chorus 8, Bridge 8, Chorus 8, Outro 4 |
+| Drum and bass (2026-10-13) | Intro 32, Build-up 8, Drop 32, Breakdown 24, Build-up 8, Drop 32, Outro 24 |
+| Techno (2026-10-13) | Intro 32, Groove 32, Build-up 16, Breakdown 16, Peak 32, Outro 32 |
 
-- **Later:** drum and bass, techno, dubstep, lo-fi, trance and future bass, plus DJ-friendly variants with 32-bar intros and outros.
+- **Later:** dubstep, trance and future bass, DJ-friendly variants with 32-bar intros and outros, and outlines saved from a song's own sections.
 - **Outlines are data files**, so adding a style needs no code changes.
 - Each outline can also suggest a chord progression per section, linking to [section 14](#14-chords).
 
@@ -728,6 +749,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 7. **Plug-in sandboxing:** first update after v1 (proposed), or before v1?
 8. **Ableton Live keymap:** in v1, or soon after?
 9. ~~Single-key tools and the computer keyboard~~ **Decided:** Ableton Live's way. The computer keyboard plays notes by default, and Shift and a letter run that letter's single-key shortcut ([section 12](#12-commands-keys-and-help)).
+10. **The computer keyboard at startup (raised 2026-10-13):** while it plays notes, 7 of the 9 tool letters (P, S, T, D, E, C, Z) play notes or change the octave or velocity instead, unless Shift is held, and the owner found tool keys that "don't work". Proposed: start with it off, as Ableton Live does when a Set loads so that shortcuts work, and turn it on with M or the top bar's button. The digits 1 to 9 pick the tools either way.
 
 ## 25. Decision log
 
@@ -754,6 +776,8 @@ No permissively licensed drum-generation model was found. This table summarizes 
 | 2026-10-12 | Step 1.2 defaults: a dragged section goes in at the section boundary nearest the pointer, and the sections between make room, as with Studio One's arranger track; Ctrl copies it and Ctrl+Shift copies it as aliases. Dragging a section's right edge inserts or removes time at its end, so the rest of the song moves along; Shift resizes the section alone. Clips are split at a section's edges so that what is inside goes along, automation moves with them, and tempo and time-signature changes stay where they are when a section moves. Each outline section has an energy level (drawn as the curve) and a tip (shown in the hint bar), in the outline's data file. Section colors follow their role, from the track palette |
 | 2026-10-12 | Step 1.3 defaults: the piano roll follows the MIDI clips selected in the playlist and edits several at once. As in FL Studio, new notes take the length and velocity of the note clicked last, a drag that follows the click moves the new note, Ctrl+drag selects in a rectangle and Shift+drag copies. Ghost notes show every other track's notes until they can be chosen per track, and a double-right-click on one edits its clip (as in FL Studio: a click adds a note). With notes selected, the note keys come before the playlist's: Ableton Live's in Phazite's keymap (the arrows transpose and move, Shift+Up and Shift+Down by octaves, Shift+Left and Shift+Right change the length), FL Studio's in its keymap. Drum mode is on for tracks whose instrument is a sampler, and the rows' order and hidden rows are kept in the track without undo steps. Quantize's swing makes every other grid line up to a third of a step late (a triplet feel at 100 %), and each transform keeps the settings used last |
 | 2026-10-12 | Step 1.4 defaults: devices go before a channel's sends and fader, instruments first, and instruments only on tracks. A folder becomes a bus when it gets a device, its fader starting where the plain folder's volume was, and turns plain again when its last device goes. A new send starts at −6 dB, after the fader. The loudness meter measures the master's devices, before the master fader. Until step 1.6 the device list offers Tracktion's reverb and 4OSC synth only, besides scanned plug-ins, because Tracktion's other devices break the real-time rules. Device windows stay above the main window while Phazite is in front |
+| 2026-10-13 | After trying steps 1.1 to 1.4: a track's color runs through its whole row; dragging past an edge scrolls; sections become a band in the time bar and ghosts behind the tracks, with no row or Song menu of their own, and four more outlines (lo-fi, R&B, drum and bass, techno); the piano roll counts bars from the clip's start and opens there, shows a selected track's clip at or nearest the playhead, and on a track without clips the first note starts one; a key is a track's, off until chosen, and the top bar shows none; drum mode has no button; the menu bar is File, Edit, Add, View, Options and Help; "+ Track" sits over the track headers, with a row after the last track that adds one; the Smart Tool's fades are for audio clips, and short clips move from anywhere but their edges |
+| 2026-10-13 | Keys: a held key repeats only the commands that take a step; tool keys spring back after a hold with the mouse, as in Bitwig and Ableton Live; in Phazite's keymap the digits 1 to 9 pick the tools and M turns the computer keyboard on and off |
 
 ## Appendix A. Research summary
 

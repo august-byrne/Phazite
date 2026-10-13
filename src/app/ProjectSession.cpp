@@ -174,7 +174,7 @@ void ProjectSession::chooseRecentProject()
     menu.showMenuAsync (options,
                         [this, projects] (int chosen)
                         {
-                            if (juce::isPositiveAndNotGreaterThan (chosen, projects.size()))
+                            if (chosen > 0 && chosen <= projects.size()) // 0: dismissed
                                 openProject (projects[chosen - 1]);
                         });
 }

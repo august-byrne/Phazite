@@ -30,8 +30,11 @@ private:
     te::SafeSelectable<te::Edit> edit;
     juce::ValueTree editState; // listened to for tracks being added, deleted and moved
 
-    juce::Viewport viewport;
-    juce::Component stripHolder; // the tracks' strips, side by side, in the viewport
+    // The tracks' strips side by side in a view that scrolls sideways, and the master on the right. When the mixer is
+    // shorter than the strips need, the whole of it scrolls up and down.
+    juce::Viewport verticalView, viewport;
+    juce::Component content;     // in verticalView: viewport and master
+    juce::Component stripHolder; // in viewport: the tracks' strips
     juce::OwnedArray<ChannelStrip> strips;
     MasterStrip master;
     juce::TextButton addReturnButton { "+ Return" };

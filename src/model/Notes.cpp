@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Notes.h"
+#include "Project.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,6 +13,33 @@ namespace
 {
     const juce::Identifier drumModeProperty { "phaziteDrumMode" }, drumOrderProperty { "phaziteDrumOrder" },
         drumHiddenProperty { "phaziteDrumHidden" };
+
+    // A key, on a track's state or in the song's Phazite state: the root, and the scale as Tracktion's number
+    // for it (Tracktion stores scales that way too; their names are translated).
+    const juce::Identifier keyRootProperty { "phaziteKeyRoot" }, keyScaleProperty { "phaziteKeyScale" }, lastKeyType { "LASTKEY" };
+
+    std::optional<Key> readKey (const juce::ValueTree& state)
+    {
+        if (! state.hasProperty (keyRootProperty))
+            return std::nullopt;
+
+        return Key { juce::jlimit (0, 11, (int) state[keyRootProperty]),
+                     (te::Scale::ScaleType) juce::jlimit ((int) te::Scale::major, (int) te::Scale::harmonicMinor,
+                                                          (int) state[keyScaleProperty]) };
+    }
+
+    void writeKey (juce::ValueTree state, const std::optional<Key>& key, juce::UndoManager* undo)
+    {
+        if (! key.has_value())
+        {
+            state.removeProperty (keyRootProperty, undo);
+            state.removeProperty (keyScaleProperty, undo);
+            return;
+        }
+
+        state.setProperty (keyRootProperty, key->root, undo);
+        state.setProperty (keyScaleProperty, (int) key->scale, undo);
+    }
 
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
     constexpr int maxPiecesPerNote = 256; // chopping into tinier pieces than this makes no musical sense
@@ -366,6 +394,32 @@ bool isInKey (int pitch, const Key& key)
     return std::find (steps.begin(), steps.end(), floorModulo (pitch - key.root, 12)) != steps.end();
 }
 
+juce::Array<te::Scale::ScaleType> getKeyScales()
+{
+    return { te::Scale::major,      te::Scale::minor,   te::Scale::dorian,        te::Scale::phrygian,    te::Scale::lydian,
+             te::Scale::mixolydian, te::Scale::locrian, te::Scale::harmonicMinor, te::Scale::melodicMinor };
+}
+
+std::optional<Key> getTrackKey (const te::Track& track)
+{
+    return readKey (track.state);
+}
+
+void setTrackKey (te::Track& track, const std::optional<Key>& key)
+{
+    writeKey (track.state, key, &track.edit.getUndoManager());
+
+    // What new tracks get; not an edit to undo.
+    if (key.has_value())
+        writeKey (getPhaziteState (track.edit).getOrCreateChildWithName (lastKeyType, nullptr), key, nullptr);
+}
+
+void applyLastKey (te::Track& track)
+{
+    if (const auto last = readKey (findPhaziteState (track.edit).getChildWithName (lastKeyType)))
+        writeKey (track.state, last, nullptr);
+}
+
 int snapToKey (int pitch, const Key& key)
 {
     for (int distance = 0; distance < 12; ++distance)
@@ -621,7 +675,8 @@ void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection
                         .perform = [&selection, action = simple.action] { action (getSelectedNotes (selection)); },
                         .isEnabled = hasNotes,
                         .undoTarget = getEdit,
-                        .keyPriority = Command::notePriority });
+                        .keyPriority = Command::notePriority,
+                        .repeatsWhileHeld = true });
     }
 
     registry.add ({ .id = "note.legato",

@@ -142,14 +142,9 @@ void TrackHeader::paint (juce::Graphics& g)
     const auto& p = getPalette (*this);
     auto area = getLocalBounds();
 
-    g.setColour (p.surface);
+    // In the track's color, which runs on through its row in the playlist; more of it while selected.
+    g.setColour (p.surface.interpolatedWith (colour, selected ? TrackTint::selectedHeader : TrackTint::header));
     g.fillRect (area);
-
-    if (selected)
-    {
-        g.setColour (p.accent.withAlpha (0.22f));
-        g.fillRect (area);
-    }
 
     g.setColour (colour);
     g.fillRect (getColourArea());

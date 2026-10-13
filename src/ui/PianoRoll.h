@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll (docs/design.md, section 7; roadmap step 1.3): the notes of the MIDI clips selected in the
-// playlist, several at once, each in its clip's color. FL Studio's mouse model: a click adds a note with
-// the last length and velocity, a right-click deletes, dragging a note moves it and dragging its edge
-// resizes it. It has the playlist's tools and grid (TimelineEditor), a velocity lane, ghost notes from other
-// tracks, shading for notes outside the song's key, chord stamps, drum mode, and transforms that show what
-// they would do before they are applied.
+// playlist, several at once, each in its clip's color, or of the selected track's clip nearest the playhead.
+// Bar 1 is where the (first) clip starts, as in FL Studio and Live. FL Studio's mouse model: a click adds a
+// note with the last length and velocity, a right-click deletes, dragging a note moves it and dragging its
+// edge resizes it. It has the playlist's tools and grid (TimelineEditor), a velocity lane, ghost notes from
+// other tracks, shading for notes outside the track's key, chord stamps, drum mode for drum tracks, and
+// transforms that show what they would do before they are applied.
 #pragma once
 
 #include "TimelineEditor.h"
@@ -31,6 +32,11 @@ public:
     // opening a clip, as double-clicking it in the playlist does.
     void showClips (const juce::Array<te::MidiClip*>&);
     juce::Array<te::MidiClip*> getClips() const; // those still in the song
+
+    // Shows a track's MIDI clip at the playhead, or the one nearest to it. Without one, the piano roll shows
+    // the track from the bar the playhead is in, and the first note drawn makes a clip there.
+    void showTrack (te::AudioTrack&);
+    te::AudioTrack* getTrack() const; // the track shown: the first clip's, or the one showTrack() was given
 
     // The piano roll's commands: select all notes, and the transforms with their settings.
     void addCommands (CommandRegistry&);
@@ -76,6 +82,7 @@ private:
     std::vector<te::SafeSelectable<te::MidiClip>> clips;
     std::unique_ptr<te::SelectedMidiEvents> selectedEvents; // the selection of these clips' notes
     te::SafeSelectable<te::MidiClip> targetClip;            // where new notes go, if the click isn't in a clip
+    te::SafeSelectable<te::AudioTrack> emptyTrack;          // a track shown without clips; a note drawn makes one
 
     // The rows: one per pitch, high to low, or in drum mode one per drum.
     int rowHeight = 14;
@@ -91,8 +98,8 @@ private:
     Transform transform;        // the transform the bar shows, with the settings used last
     bool transformOpen = false; // while its preview shows
 
-    juce::TextButton chordButton, keyButton, drumButton { "Drums" }, ghostButton { "Ghosts" }, transformButton { "Transform" };
-    juce::Label clipLabel; // which clips are shown
+    juce::TextButton chordButton, keyButton, ghostButton { "Ghosts" }, transformButton { "Transform" };
+    juce::Label clipLabel; // which clips are shown, and where they are in the song
 
     std::unique_ptr<Keys> keys;
     std::unique_ptr<NoteGrid> grid;
@@ -101,8 +108,8 @@ private:
     te::SafeSelectable<te::AudioTrack> auditionTrack; // the track a note is being auditioned on
 
     //==============================================================================
-    // The clips and their notes.
-    void setClips (const juce::Array<te::MidiClip*>&);
+    // The clips and their notes. New clips open at bar 1 with their notes in view, unless keepView is set.
+    void setClips (const juce::Array<te::MidiClip*>&, bool keepView = false);
     void clipsChanged(); // the notes or the clips moved: repaint, and update the drum rows
     std::vector<ClipNote> getAllNotes() const;
     std::vector<ClipNote> getSelectedNotesHere() const; // the selected notes, if they are these clips'
@@ -110,7 +117,10 @@ private:
     void selectNotes (const juce::Array<te::MidiNote*>&, bool addToSelection);
     void selectAllNotes();
     te::MidiClip* getClipForNewNote (te::BeatPosition) const; // the clip the beat is in, or the target clip
-    Key getKey() const;                                       // the song's key where the clips start
+    te::MidiClip* makeClipForNewNotes();                      // on a track shown without clips, from the time origin
+    void updateTimeOrigin (bool scrollToStart);               // bar 1 at the first clip's content start
+    std::optional<Key> getKey() const;                        // the track's key, if it has one
+    void setKey (const std::optional<Key>&);
     int getRowHeight() const;
     std::vector<NoteData> getPreview() const; // the selected notes as the open transform would make them
     void applyTransform();
@@ -147,6 +157,7 @@ private:
     void toolChanged() override;
     void gridChanged() override;
     void verticalScrollBarMoved (double newRangeStart) override;
+    bool scrollVerticallyBy (int pixels) override;
     juce::String describeToolHere (Tool) const override;
     static juce::String describeNoteTool (Tool); // what the tool does to notes (PianoRollNotes.cpp)
 

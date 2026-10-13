@@ -1,0 +1,14 @@
+{
+  "id": "techno",
+  "name": "Techno",
+  "order": 8,
+  "description": "A techno track that grows slowly: parts come in every 16 bars, one breakdown, and a long outro. 160 bars.",
+  "sections": [
+    { "name": "Intro", "role": "intro", "bars": 32, "energy": 0.4, "tip": "Kick and percussion only, for a DJ to mix in." },
+    { "name": "Groove", "role": "verse", "bars": 32, "energy": 0.6, "tip": "Bring in the bass and the main loop; add or change one part every 8 or 16 bars." },
+    { "name": "Build-up", "role": "buildUp", "bars": 16, "energy": 0.75, "tip": "More tension: open filters, add noise and percussion." },
+    { "name": "Breakdown", "role": "breakdown", "bars": 16, "energy": 0.4, "tip": "Take the kick out and let a pad or a stab carry the track." },
+    { "name": "Peak", "role": "drop", "bars": 32, "energy": 1.0, "tip": "The kick comes back with everything: the most intense part." },
+    { "name": "Outro", "role": "outro", "bars": 32, "energy": 0.4, "tip": "Strip back to the kick and percussion, for a DJ to mix out." }
+  ]
+}

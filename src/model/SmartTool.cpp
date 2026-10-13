@@ -3,6 +3,11 @@
 
 namespace phazite
 {
+namespace
+{
+    constexpr float minSplitHeight = 36.0f; // clips shorter than this don't select time from their upper half
+} // namespace
+
 juce::String getToolName (Tool tool)
 {
     switch (tool)
@@ -77,8 +82,8 @@ juce::String describeTool (Tool tool)
             return "Click to zoom in, Alt-click to zoom out, or drag across the time to zoom to.";
         case Tool::smart:
         default:
-            return "Where you drag a clip decides what happens: edges trim, top corners fade, the upper half selects time, "
-                   "the lower half moves.";
+            return "Where you drag a clip decides what happens: its edges trim it, its lower half moves it (Ctrl copies), and its "
+                   "upper half selects a time range. Audio clips also fade from their top corners, and crossfade where they meet.";
     }
 }
 
@@ -88,7 +93,7 @@ ClipZone getClipZone (juce::Rectangle<float> bounds, juce::Point<float> point, b
     const auto width = bounds.getWidth(), height = bounds.getHeight();
 
     // Narrow clips keep most of their width for moving.
-    const auto edge = std::min (6.0f, width / 4.0f);
+    const auto edge = std::min (8.0f, width / 4.0f);
     const auto corner = std::min (12.0f, width / 3.0f);
 
     if (hasFades && y < std::min (10.0f, height / 3.0f))
@@ -106,7 +111,8 @@ ClipZone getClipZone (juce::Rectangle<float> bounds, juce::Point<float> point, b
     if (x > width - edge)
         return ClipZone::trimEnd;
 
-    return y < height / 2.0f ? ClipZone::selectRange : ClipZone::move;
+    // A short clip (on a short track) is too short to split in two: all of it moves.
+    return y < height / 2.0f && height >= minSplitHeight ? ClipZone::selectRange : ClipZone::move;
 }
 
 juce::String describeClipZone (ClipZone zone)

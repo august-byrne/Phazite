@@ -134,7 +134,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Done when:*
   - applying the electronic outline creates its seven sections at the project tempo;
   - moving the Drop moves everything in it (unit-tested).
-- *Status:* done, pending a check by hand. Sections are Tracktion's arranger clips with a role, a tip and an energy level (`src/model/Sections.h`). Moving, copying (also as aliases), deleting and resizing a section edit every track (`src/model/Arrangement.h`): clips are split at its edges, automation goes along, and Insert and Remove Time stretch sections instead of splitting them. The outlines are data files (`resources/outlines/*.outline.json`, read by `src/model/Outlines.h`), offered by **File > New Project**, the **Song outline** button and **Song > Apply Song Outline**. The sections strip (`src/ui/SectionsStrip.h`) draws the energy curve and shows each section's tip in the hint bar. Both "done when" checks are unit tests (`tests/SectionTests.cpp`). Before this step, the playlist's time line, grid and tools moved into `src/ui/TimelineEditor.h`, for the piano roll to share.
+- *Status:* done, pending a check by hand. Sections are Tracktion's arranger clips with a role, a tip and an energy level (`src/model/Sections.h`). Moving, copying (also as aliases), deleting and resizing a section edit every track (`src/model/Arrangement.h`): clips are split at its edges, automation goes along, and Insert and Remove Time stretch sections instead of splitting them. The outlines are data files (`resources/outlines/*.outline.json`, read by `src/model/Outlines.h`), offered by **File > New Project**, **Add > Song Outline** and the time bar's right-click menu. The sections show in the playlist's time bar (`src/ui/SectionsStrip.h`), over the bar numbers with the energy curve faintly behind, and as ghosts behind the tracks; the hint bar shows each section's tip. Both "done when" checks are unit tests (`tests/SectionTests.cpp`). Before this step, the playlist's time line, grid and tools moved into `src/ui/TimelineEditor.h`, for the piano roll to share.
 
 **1.3 Piano roll (XL)**
 - **Editing:**
@@ -153,6 +153,14 @@ Done before this plan (progress since then is under [Status](#status)):
 - Sends and returns (pre/post), folder buses, and a master with a loudness meter.
 - *Done when:* a mix with a reverb return and a bus works and matches the playlist's tracks.
 - *Status:* done, pending a check by hand. The mixer (`src/ui/Mixer.h`) has a strip for every track, in the playlist's order and colors (`src/ui/ChannelStrip.h`): the track's name and output, its devices (an on/off switch and two key controls each; click to open its window, right-click to turn it off, move or remove it), its sends with a level and a Pre/Post switch, pan, mute, solo, fader and meter. A folder becomes a bus with its first device and turns plain again without one; return tracks take an aux bus (`src/model/Mixer.h`, with tests in `tests/MixerTests.cpp`). The master's strip has its devices, fader and meter, and the loudness meter: a plug-in at the end of the master's devices that wraps Tracktion's real-time-safe EBU R128 meter (`src/model/LoudnessMeterPlugin.h`). Devices open in windows of their own (`src/ui/PluginWindow.h`), with a knob for each parameter of a built-in device. Until step 1.6 the device list offers Tracktion's reverb and 4OSC synth, besides scanned plug-ins ([real-time audit](realtime-audit.md), finding 16). A guarded real-time audit scenario plays the "done when" mix: a bus, a send to a reverb return and the loudness meter.
+
+**First feedback round on steps 1.1 to 1.4 (2026-10-13)**, after the owner tried them ([design decision log](design.md#25-decision-log)):
+- **Fixes:** dismissing the track color menu crashed the app (two other menus had the same mistake); a held key repeated its command, so holding a tool's key ended a drag after a copy or two and holding Space started and stopped playing; every mouse-wheel step was handled twice in the playlist and the piano roll.
+- **Playlist:** track colors run through their rows; dragging past an edge scrolls; "+ Track" moved over the track headers, with a row after the last track that adds one; the sections became a band in the time bar and ghosts behind the tracks; four more outlines.
+- **Piano roll:** bar 1 is the clip's start; a selected track shows its clip nearest the playhead, and on a track without clips the first note starts one; a key is a track's, off until chosen; no Drums button.
+- **Mixer:** strips keep their parts apart at any height, and the mixer scrolls when it is shorter than they need.
+- **Keys and menus:** tool keys spring back after a hold; the digits 1 to 9 pick tools and M turns the computer keyboard on and off; the menu bar is File, Edit, Add, View, Options and Help.
+- **Tests that drive the UI:** the components are in a library of their own (`phazite_ui`), and `tests/UiTestHelpers.h` puts them in a window that isn't on any screen, so tests send them mouse and key events through JUCE as the app does (`tests/PlaylistTests.cpp`, `tests/PianoRollTests.cpp`, `tests/MixerViewTests.cpp`).
 
 **1.5 Browser (L)**
 - Folders, the plug-in list, search, tags and favorites.
@@ -356,7 +364,7 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: steps 1.1 to 1.4 (the playlist, sections and song outlines, the piano roll, the mixer) done, pending checks by hand; next, step 1.5 |
+| 1. Make a beat | In progress: steps 1.1 to 1.4 (the playlist, sections and song outlines, the piano roll, the mixer) done, with a first round of fixes from trying them (2026-10-13), pending checks by hand; next, step 1.5 |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |

@@ -19,7 +19,8 @@ namespace
     constexpr double scrollPerNotch = 48.0;
 
     const juce::String emptySpaceHint ("Click to select the track, drag to select a time range, and double-click on a track with an "
-                                       "instrument to add a MIDI clip. Ctrl+wheel zooms; Alt+wheel resizes the tracks.");
+                                       "instrument to add a MIDI clip, or under the last track to add a track. Ctrl+wheel zooms; "
+                                       "Alt+wheel resizes the tracks.");
 
     bool isTrackState (const juce::ValueTree& state)
     {
@@ -135,10 +136,32 @@ struct Playlist::Lanes : public juce::Component
         const auto clip = g.getClipBounds();
         g.fillAll (p.background);
 
-        if (playlist.getEdit() == nullptr)
+        auto* ed = playlist.getEdit();
+
+        if (ed == nullptr)
             return;
 
-        // Folders are tinted in their color, and selected tracks in the accent color.
+        // The song's sections, as ghosts behind the tracks: a faint wash of each one's color.
+        const auto sections = getSections (*ed);
+        const auto& timeline = playlist.getView();
+        const auto xOf = [&timeline] (te::BeatPosition beat) { return juce::roundToInt (timeline.beatToX (beat)); };
+
+        for (auto* section : sections)
+        {
+            const auto left = xOf (section->getStartBeat());
+            const auto wash =
+                juce::Rectangle<int> (left, clip.getY(), xOf (section->getEndBeat()) - left, clip.getHeight()).getIntersection (clip);
+
+            if (! wash.isEmpty())
+            {
+                g.setColour (getSectionColour (*section).withAlpha (playlist.selection.isSelected (section) ? SectionTint::selectedWash
+                                                                                                            : SectionTint::wash));
+                g.fillRect (wash);
+            }
+        }
+
+        // Each row in its track's color, as the track's header is: more of it for folders, and for the
+        // selected tracks.
         for (const auto& row : playlist.rows)
         {
             auto* track = row.track.get();
@@ -147,17 +170,11 @@ struct Playlist::Lanes : public juce::Component
             if (track == nullptr || area.isEmpty())
                 continue;
 
-            if (track->isFolderTrack())
-            {
-                g.setColour (row.colour.withAlpha (0.12f));
-                g.fillRect (area);
-            }
-
-            if (playlist.selection.isSelected (track))
-            {
-                g.setColour (p.accent.withAlpha (0.08f));
-                g.fillRect (area);
-            }
+            const auto tint = playlist.selection.isSelected (track) ? TrackTint::selectedRow
+                              : track->isFolderTrack()              ? TrackTint::folderRow
+                                                                    : TrackTint::row;
+            g.setColour (row.colour.withAlpha (tint));
+            g.fillRect (area);
         }
 
         paintGridLines (g, playlist, clip);
@@ -172,6 +189,19 @@ struct Playlist::Lanes : public juce::Component
         {
             g.setColour (p.textMuted);
             g.fillRect (clip.getX(), playlist.pinnedHeight - 2, clip.getWidth(), 2);
+        }
+
+        // Where each section starts, and where the last one ends: lines in their colors, over the grid.
+        for (auto* section : sections)
+        {
+            g.setColour (getSectionColour (*section).withAlpha (SectionTint::edge));
+            g.fillRect (xOf (section->getStartBeat()), clip.getY(), 1, clip.getHeight());
+        }
+
+        if (auto* last = sections.getLast())
+        {
+            g.setColour (getSectionColour (*last).withAlpha (SectionTint::edge));
+            g.fillRect (xOf (last->getEndBeat()), clip.getY(), 1, clip.getHeight());
         }
     }
 
@@ -227,6 +257,13 @@ struct Playlist::Lanes : public juce::Component
             g.setColour (p.accent);
             g.drawRect (playlist.rubberBand, 1);
         }
+
+        // Where a section dragged in the time bar would go, or where its end would be.
+        if (const auto target = playlist.sectionsStrip.getDragTarget())
+        {
+            g.setColour (p.accent);
+            g.fillRect (juce::roundToInt (timeline.beatToX (*target)) - 1, 0, 3, getHeight());
+        }
     }
 
     // The tools' work is the playlist's.
@@ -235,6 +272,50 @@ struct Playlist::Lanes : public juce::Component
     void mouseDrag (const juce::MouseEvent& e) override { playlist.lanesMouseDrag (e); }
     void mouseUp (const juce::MouseEvent& e) override { playlist.lanesMouseUp (e); }
     void mouseDoubleClick (const juce::MouseEvent& e) override { playlist.lanesDoubleClick (e); }
+
+    Playlist& playlist;
+};
+
+//==============================================================================
+// After the last track's header: a row that adds a track at the end, as the space after the tracks does in
+// Logic, Cubase and REAPER. Right-clicking it offers a folder or a return track too.
+struct Playlist::AddTrackRow : public juce::Button
+{
+    explicit AddTrackRow (Playlist& p)
+        : juce::Button ("Add track at the end"),
+          playlist (p)
+    {
+        setTitle ("Add track at the end");
+        setDescription ("Click to add a track at the end, or right-click for a folder or a return track. Double-clicking under "
+                        "the last track adds one too, and so does dropping an audio or MIDI file there.");
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        onClick = [this] { playlist.addTrackAtEnd (false); };
+    }
+
+    void paintButton (juce::Graphics& g, bool highlighted, bool down) override
+    {
+        // A dashed outline, as a place for a track to be.
+        const auto& p = getPalette (*this);
+        const auto area = getLocalBounds().reduced (Space::s, Space::s).toFloat();
+        g.setColour (highlighted || down ? p.text : p.textMuted);
+
+        juce::Path outline, dashed;
+        outline.addRoundedRectangle (area, cornerRadius);
+        const float dashes[] = { 4.0f, 3.0f };
+        juce::PathStrokeType (1.0f).createDashedStroke (dashed, outline, dashes, 2);
+        g.fillPath (dashed);
+
+        g.setFont (juce::FontOptions (TextSize::body));
+        g.drawText ("+ Add track", area, juce::Justification::centred);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+            playlist.showAddTrackMenu();
+        else
+            juce::Button::mouseDown (e);
+    }
 
     Playlist& playlist;
 };
@@ -269,11 +350,38 @@ struct Playlist::Gesture
         int row = -1;
     };
 
+    // Which ways the lanes scroll when this drags past their edges, if at all.
+    std::optional<TimelineEditor::ScrollDirections> getAutoScrollDirections() const
+    {
+        switch (kind)
+        {
+            case Kind::move:
+            case Kind::selectRange:
+            case Kind::mute:
+            case Kind::erase:
+            case Kind::select:
+                return TimelineEditor::ScrollDirections::both;
+            case Kind::trimStart:
+            case Kind::trimEnd:
+            case Kind::paint:
+            case Kind::zoom:
+                return TimelineEditor::ScrollDirections::sideways;
+            case Kind::pending:
+            case Kind::fadeIn:
+            case Kind::fadeOut:
+            case Kind::crossfade:
+            case Kind::slip:
+            default:
+                return std::nullopt;
+        }
+    }
+
     Kind kind = Kind::pending;
     te::SafeSelectable<te::Clip> clip; // the clip the mouse went down on, if any
     std::optional<ClipZone> zone;      // and where on it
     te::BeatPosition startBeat;        // the beat under the mouse when it went down
     int startRow = -1;
+    int startScrollY = 0;        // how far the rows had scrolled then
     bool clickOnMouseUp = false; // the click's selection waits for the mouse to go up without a drag
 
     std::vector<MovingClip> moving;
@@ -293,6 +401,7 @@ Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionMa
     : TimelineEditor (registry, {}),
       selection (selectionManager),
       range (rangeSelection),
+      addTrackRow (std::make_unique<AddTrackRow> (*this)),
       lanes (std::make_unique<Lanes> (*this))
 {
     setTitle ("Playlist");
@@ -301,14 +410,14 @@ Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionMa
     addTrackButton.onClick = [this] { getCommands().invoke ("track.add"); };
     addTrackButton.setEnabled (false); // until a project is open
 
-    outlineButton.setTooltip ("Lays out the song's sections from an outline: pop, rock, electronic, or hip-hop and trap");
-    outlineButton.onClick = [this] { showOutlineMenu(); };
-    outlineButton.setEnabled (false);
+    // While a section is dragged, where it would go shows across the tracks too.
+    sectionsStrip.onDragChanged = [this] { lanes->repaint(); };
 
     headerColumn.setTitle ("Track headers");
     headerColumn.addAndMakeVisible (scrollingHeaders);
     headerColumn.addAndMakeVisible (pinnedHeaders);
     scrollingHeaders.addAndMakeVisible (headerContent);
+    headerContent.addChildComponent (*addTrackRow); // shown while a project is open
     pinnedHeaders.setTitle ("Pinned tracks");
 
     // The clips' layers let the mouse through to the lanes, which handle it.
@@ -318,12 +427,12 @@ Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionMa
         lanes->addAndMakeVisible (layer);
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &outlineButton, &sectionsStrip, &headerColumn, lanes.get() })
+    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &sectionsStrip, &headerColumn, lanes.get() })
         addAndMakeVisible (c);
 
     selection.addChangeListener (this);
     range.addChangeListener (this);
-    setTool (Tool::smart);
+    toolChanged(); // the Smart Tool's pointer and hint
 }
 
 Playlist::~Playlist()
@@ -360,7 +469,7 @@ void Playlist::setEdit (te::Edit* newEdit)
     setTimelineEdit (newEdit);
     sectionsStrip.setEdit (newEdit);
     addTrackButton.setEnabled (newEdit != nullptr);
-    outlineButton.setEnabled (newEdit != nullptr);
+    addTrackRow->setVisible (newEdit != nullptr);
     rebuild();
 }
 
@@ -436,7 +545,8 @@ void Playlist::layOutRows()
 
     pinnedHeaders.setBounds (0, 0, headerWidth, pinnedHeight);
     scrollingHeaders.setBounds (0, pinnedHeight, headerWidth, std::max (0, headerColumn.getHeight() - pinnedHeight));
-    headerContent.setSize (headerWidth, std::max (contentHeight, 1));
+    headerContent.setSize (headerWidth, contentHeight + TrackHeight::standard); // the scrolling leaves room for the row that adds a track
+    addTrackRow->setBounds (0, contentHeight, headerWidth, TrackHeight::standard);
     pinnedClips.setBounds (0, 0, lanes->getWidth(), pinnedHeight);
     scrollingClips.setBounds (0, pinnedHeight, lanes->getWidth(), std::max (0, lanes->getHeight() - pinnedHeight));
 
@@ -1021,6 +1131,8 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     gesture->startPosition = e.getPosition();
     gesture->startBeat = getView().xToBeat (e.position.x);
     gesture->startRow = getRowAt (e.y);
+    gesture->startScrollY = scrollY;
+    beginDragAutoRepeat (autoRepeatInterval); // so the lanes go on scrolling while the mouse rests past an edge
 
     auto* component = getClipComponentAt (e.getPosition());
     auto* clip = component != nullptr ? component->getClip() : nullptr;
@@ -1221,7 +1333,13 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
         beginDrag (e);
     }
 
+    // Past an edge, the lanes scroll along, and the drag goes on from what is under the pointer then. Rows are
+    // found where the pointer is, or at the edge it is past.
+    if (const auto directions = gesture->getAutoScrollDirections())
+        autoScroll (e.getPosition(), lanes->getLocalBounds().withTrimmedTop (pinnedHeight), *directions);
+
     const auto beat = getView().xToBeat (e.position.x);
+    const auto rowAtPointer = getRowAt (juce::jlimit (0, lanes->getHeight() - 1, e.y));
     auto* clip = gesture->clip.get();
 
     switch (gesture->kind)
@@ -1236,7 +1354,7 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
                 delta = std::max (delta, te::BeatPosition() - moving.start);
 
             // Up or down by whole rows, as long as every clip lands on a track that holds clips.
-            if (const auto row = getRowAt (e.y); row >= 0 && gesture->startRow >= 0)
+            if (const auto row = rowAtPointer; row >= 0 && gesture->startRow >= 0)
             {
                 const auto offset = row - gesture->startRow;
                 const auto fits = std::all_of (gesture->moving.begin(), gesture->moving.end(),
@@ -1291,7 +1409,7 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
             // From where the drag started to the pointer, across the rows between them.
             const auto lastRow = (int) rows.size() - 1;
             const auto from = snap (gesture->startBeat, e.mods), to = snap (beat, e.mods);
-            const auto row = getRowAt (e.y) >= 0 ? getRowAt (e.y) : (e.y < 0 ? 0 : lastRow);
+            const auto row = rowAtPointer >= 0 ? rowAtPointer : lastRow; // below the last row: up to it
 
             if (lastRow >= 0 && from != to)
                 selectRange (from, to, gesture->startRow >= 0 ? gesture->startRow : lastRow, row);
@@ -1347,13 +1465,13 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
             break;
 
         case Gesture::Kind::select:
-            rubberBand = juce::Rectangle<int> (gesture->startPosition, e.getPosition());
+            rubberBand = juce::Rectangle<int> (getGestureStart(), e.getPosition());
             selectClipsIn (rubberBand, e.mods.isCommandDown());
             lanes->repaint();
             break;
 
         case Gesture::Kind::zoom:
-            rubberBand = juce::Rectangle<int> (gesture->startPosition, e.getPosition()).withY (0).withHeight (lanes->getHeight());
+            rubberBand = juce::Rectangle<int> (getGestureStart(), e.getPosition()).withY (0).withHeight (lanes->getHeight());
             lanes->repaint();
             break;
 
@@ -1466,6 +1584,14 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
         gesture->moving.push_back ({ c, c->getStartBeat(), getRowOf (c->getTrack()) });
 }
 
+juce::Point<int> Playlist::getGestureStart() const
+{
+    // The lanes may have scrolled since; the pinned band doesn't scroll up and down.
+    const auto& start = gesture->startPosition;
+    const auto y = start.y < pinnedHeight ? start.y : start.y + gesture->startScrollY - scrollY;
+    return { juce::roundToInt (getView().beatToX (gesture->startBeat)), y };
+}
+
 void Playlist::lanesMouseUp (const juce::MouseEvent& e)
 {
     if (gesture == nullptr)
@@ -1510,8 +1636,17 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
     auto* ed = getEdit();
     const auto row = getRowAt (e.y);
 
-    if (ed == nullptr || getTool() != Tool::smart || row < 0)
+    if (ed == nullptr || getTool() != Tool::smart)
         return;
+
+    // Under the last track: a new one at the end, as in Logic, Cubase and REAPER.
+    if (row < 0)
+    {
+        if (e.y >= pinnedHeight + contentHeight - scrollY)
+            addTrackAtEnd (false);
+
+        return;
+    }
 
     // On a MIDI clip: open it in the piano roll.
     if (auto* component = getClipComponentAt (e.getPosition()))
@@ -1567,18 +1702,65 @@ void Playlist::verticalScrollBarMoved (double newRangeStart)
     setScrollY (juce::roundToInt (newRangeStart));
 }
 
-void Playlist::showOutlineMenu()
+bool Playlist::scrollVerticallyBy (int pixels)
 {
-    auto& registry = getCommands();
+    const auto before = scrollY;
+    setScrollY (scrollY + pixels);
+    return scrollY != before;
+}
+
+void Playlist::addTrackAtEnd (bool folder)
+{
+    auto* e = getEdit();
+
+    if (e == nullptr)
+        return;
+
+    e->getUndoManager().beginNewTransaction (folder ? "Add Folder" : "Add Track");
+    te::Track* added = folder ? static_cast<te::Track*> (insertFolder (*e, nullptr, &selection)) : insertTrack (*e, nullptr, &selection);
+
+    handleUpdateNowIfNeeded(); // its row is there now
+    scrollToShow (getRowOf (added));
+}
+
+void Playlist::showAddTrackMenu()
+{
+    const juce::Component::SafePointer<Playlist> safeThis (this);
     juce::PopupMenu menu;
-    menu.addSectionHeader ("Lay out the song's sections");
+    menu.addSectionHeader ("Add at the end");
 
-    for (const auto& outline : getBuiltInOutlines())
-        addCommandItem (menu, registry, "section.outline." + outline.id);
+    menu.addItem ("Track",
+                  [safeThis]
+                  {
+                      if (safeThis != nullptr)
+                          safeThis->addTrackAtEnd (false);
+                  });
 
-    menu.addSeparator();
-    addCommandItems (menu, registry, { "section.add" });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&outlineButton));
+    menu.addItem ("Folder",
+                  [safeThis]
+                  {
+                      if (safeThis != nullptr)
+                          safeThis->addTrackAtEnd (true);
+                  });
+
+    addCommandItem (menu, getCommands(), "track.addReturn"); // returns go at the end anyway
+    menu.showMenuAsync (juce::PopupMenu::Options());
+}
+
+void Playlist::showRulerMenu (te::BeatPosition beat)
+{
+    auto* e = getEdit();
+
+    if (e == nullptr)
+        return;
+
+    // As a right-click on the section there would.
+    auto* section = getSectionAt (*e, beat);
+
+    if (section != nullptr && ! selection.isSelected (section))
+        selection.selectOnly (section);
+
+    sectionsStrip.showMenu (section, beat);
 }
 
 void Playlist::setColourOfSelectedTracks (juce::Colour colour)
@@ -1653,13 +1835,11 @@ void Playlist::showColourMenu (te::Track& track, juce::Component& target)
 
 void Playlist::trackDragged (TrackHeader&, const juce::MouseEvent& e)
 {
-    // Scroll when dragging past the top or bottom.
-    const auto y = e.getEventRelativeTo (lanes.get()).getPosition().y;
-
-    if (y < 0)
-        setScrollY (scrollY + y / 4);
-    else if (y > lanes->getHeight())
-        setScrollY (scrollY + (y - lanes->getHeight()) / 4);
+    // Past the top or bottom, the tracks scroll along.
+    const auto position = e.getEventRelativeTo (lanes.get()).getPosition();
+    beginDragAutoRepeat (autoRepeatInterval);
+    autoScroll (position, lanes->getLocalBounds().withTrimmedTop (pinnedHeight), ScrollDirections::upAndDown);
+    const auto y = position.y;
 
     // The track would go to the nearest boundary between rows, as they are on screen.
     const auto boundary = [this] (size_t i) { return i < rows.size() ? getRowTop (rows[i]) : pinnedHeight + contentHeight - scrollY; };
@@ -1803,19 +1983,19 @@ void Playlist::paintOverChildren (juce::Graphics& g)
 void Playlist::resized()
 {
     auto area = getLocalBounds();
-    auto toolbar = area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs);
-    addTrackButton.setBounds (toolbar.removeFromLeft (96));
-    toolbar.removeFromLeft (Space::s);
-    layOutToolbarControls (toolbar);
+    layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
 
     horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (headerWidth).withTrimmedRight (scrollBarSize));
-    auto rulerArea = area.removeFromTop (rulerHeight);
-    auto sectionsArea = area.removeFromTop (SectionsStrip::preferredHeight);
+
+    // The time bar: the song's sections over the bar numbers. Left of it, over the track headers, the button
+    // that adds a track.
+    auto timeBar = area.removeFromTop (SectionsStrip::preferredHeight + rulerHeight).withTrimmedRight (scrollBarSize);
+    addTrackButton.setBounds (timeBar.removeFromLeft (headerWidth).reduced (Space::s, Space::s).withWidth (96));
+    sectionsStrip.setBounds (timeBar.removeFromTop (SectionsStrip::preferredHeight));
+    ruler.setBounds (timeBar);
+
     verticalScrollBar.setBounds (area.removeFromRight (scrollBarSize));
     headerColumn.setBounds (area.removeFromLeft (headerWidth));
-    ruler.setBounds (rulerArea.withTrimmedLeft (headerWidth).withTrimmedRight (scrollBarSize));
-    outlineButton.setBounds (sectionsArea.removeFromLeft (headerWidth).reduced (Space::s, Space::s));
-    sectionsStrip.setBounds (sectionsArea.withTrimmedRight (scrollBarSize));
     lanes->setBounds (area);
 
     layOutRows();

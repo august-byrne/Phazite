@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The sections strip along the top of the playlist (docs/design.md, section 6): the song's sections as
-// colored blocks over the time line, with the energy curve above them. Dragging a section moves it with
-// everything in it, across every track; Ctrl copies it and Ctrl+Shift copies it as aliases. Dragging its
-// right edge makes it longer or shorter, and the rest of the song moves along. The hint bar shows each
-// section's tip.
+// The song's sections in the playlist's time bar (docs/design.md, section 6): a thin band above the bar
+// numbers, with each section's name over its time and the energy curve faintly behind. The playlist draws
+// the sections as ghosts behind the tracks too. Dragging a section moves it with everything in it, across
+// every track; Ctrl copies it and Ctrl+Shift copies it as aliases. Dragging its right edge makes it longer or
+// shorter, and the rest of the song moves along. Double-clicking adds or renames one, and right-clicking here
+// or on the bar numbers offers the song outlines. The hint bar shows each section's tip.
 #pragma once
 
 #include "TimelineEditor.h"
@@ -18,7 +19,7 @@ class SectionsStrip : public juce::Component,
                       private juce::ChangeListener
 {
 public:
-    static constexpr int preferredHeight = 44;
+    static constexpr int preferredHeight = 18;
 
     SectionsStrip (TimelineEditor&, te::SelectionManager&, RangeSelection&);
     ~SectionsStrip() override;
@@ -28,6 +29,15 @@ public:
 
     // Shows the section's name in a text field, to rename it.
     void startRenaming (te::ArrangerClip&);
+
+    // The menu for a section (or none) at a place in the song: renaming and coloring it, adding one there,
+    // and the song outlines. The time bar's bar numbers show it too.
+    void showMenu (te::ArrangerClip*, te::BeatPosition where);
+
+    // While a section is dragged: where it would go (moving), or where its end would be (resizing). The
+    // playlist draws it across the tracks too; onDragChanged says when to repaint.
+    std::optional<te::BeatPosition> getDragTarget() const;
+    std::function<void()> onDragChanged;
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -68,9 +78,9 @@ private:
     bool isOnRightEdge (const te::Clip&, juce::Point<int>) const;
     te::BeatPosition findNearestBoundary (const te::ArrangerClip&, double x) const;
     void paintEnergyCurve (juce::Graphics&, const juce::Array<te::ArrangerClip*>&);
-    void showMenu (te::ArrangerClip*);
     void addSectionAt (te::BeatPosition);
     void renamed(); // the name field closed
+    void dragChanged();
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;

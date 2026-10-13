@@ -113,6 +113,18 @@ Key getKeyAt (const te::Edit&, te::BeatPosition);
 juce::String describeKey (const Key&); // "C major"
 bool isInKey (int pitch, const Key&);
 
+// The scales offered for a key, without Tracktion's duplicates (ionian is major, aeolian minor).
+juce::Array<te::Scale::ScaleType> getKeyScales();
+
+// A track's key, which the piano roll shades its rows by and can snap notes to. A track has none until one
+// is chosen: Phazite keeps it per track, since Tracktion's pitch sequence is one key for the whole song.
+std::optional<Key> getTrackKey (const te::Track&);
+
+// Sets a track's key (or none), with the Edit's undo manager. The song remembers it, and new tracks get it
+// (applyLastKey()).
+void setTrackKey (te::Track&, const std::optional<Key>&);
+void applyLastKey (te::Track&); // the key set last on any of the song's tracks, if there is one
+
 // The pitch in the key nearest to a pitch (the lower one when two are as near).
 int snapToKey (int pitch, const Key&);
 

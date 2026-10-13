@@ -113,6 +113,10 @@ juce_add_binary_data(phazite_data
         resources/outlines/rock.outline.json
         resources/outlines/electronic.outline.json
         resources/outlines/hip_hop.outline.json
+        resources/outlines/lofi.outline.json
+        resources/outlines/rnb.outline.json
+        resources/outlines/drum_and_bass.outline.json
+        resources/outlines/techno.outline.json
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
         resources/icons/lucide/eraser.svg
@@ -184,30 +188,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(phazite_core PUBLIC atomic)
 endif()
 
-# Links an executable to phazite_core and gives it the module headers and phazite_core's definitions
-# (including JUCE's JUCE_MODULE_AVAILABLE_* ones), without compiling the modules a second time.
+# Links a target (an executable, or phazite_ui) to phazite_core and gives it the module headers and
+# phazite_core's definitions (including JUCE's JUCE_MODULE_AVAILABLE_* ones), without compiling the
+# modules a second time.
 function(phazite_use_core target)
     target_include_directories(${target} PRIVATE $<TARGET_PROPERTY:phazite_core,INCLUDE_DIRECTORIES>)
     target_compile_definitions(${target} PRIVATE $<TARGET_PROPERTY:phazite_core,COMPILE_DEFINITIONS>)
     target_link_libraries(${target} PRIVATE phazite_core)
 endfunction()
 
-# --- The app ---
-juce_add_gui_app(Phazite
-    PRODUCT_NAME "Phazite"
-    COMPANY_NAME "Phazite"
-    BUNDLE_ID "io.github.august-byrne.phazite"
-    MICROPHONE_PERMISSION_ENABLED TRUE
-    NEEDS_CURL FALSE
-    NEEDS_WEB_BROWSER FALSE
-    PLUGINHOST_AU TRUE)
+# --- phazite_ui: the window's components and the look ---
+# A static library like phazite_core, so that the tests can build the real playlist, piano roll and mixer
+# and drive them with the mouse.
+add_library(phazite_ui STATIC)
 
-target_sources(Phazite PRIVATE
-    src/app/Main.cpp
-    src/app/MainWindow.cpp
-    src/app/MainWindow.h
-    src/app/ProjectSession.cpp
-    src/app/ProjectSession.h
+target_sources(phazite_ui PRIVATE
     src/ui/AppShell.cpp
     src/ui/AppShell.h
     src/ui/ChannelStrip.cpp
@@ -251,11 +246,31 @@ target_sources(Phazite PRIVATE
     src/ui/TrackHeader.cpp
     src/ui/TrackHeader.h)
 
+phazite_use_core(phazite_ui)
+
+# --- The app ---
+juce_add_gui_app(Phazite
+    PRODUCT_NAME "Phazite"
+    COMPANY_NAME "Phazite"
+    BUNDLE_ID "io.github.august-byrne.phazite"
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    NEEDS_CURL FALSE
+    NEEDS_WEB_BROWSER FALSE
+    PLUGINHOST_AU TRUE)
+
+target_sources(Phazite PRIVATE
+    src/app/Main.cpp
+    src/app/MainWindow.cpp
+    src/app/MainWindow.h
+    src/app/ProjectSession.cpp
+    src/app/ProjectSession.h)
+
 target_compile_definitions(Phazite PRIVATE
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Phazite,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Phazite,JUCE_VERSION>")
 
 phazite_use_core(Phazite)
+target_link_libraries(Phazite PRIVATE phazite_ui)
 
 # The UI font, Inter (SIL Open Font License 1.1), goes next to the app as separate files with its licence
 # text (fonts/Inter), as CLAUDE.md asks of fonts. ui::LookAndFeel loads it from there.
@@ -294,19 +309,21 @@ if(PHAZITE_BUILD_TESTS)
         tests/ImportTests.cpp
         tests/LiveInputTests.cpp
         tests/MixerTests.cpp
+        tests/MixerViewTests.cpp
         tests/NoteTests.cpp
+        tests/PianoRollTests.cpp
+        tests/PlaylistTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp
         tests/SectionTests.cpp
         tests/TimelineTests.cpp
         tests/TrackTests.cpp
-        tests/ValueTextTests.cpp
-        # The UI files the tests use: the base controls, which link to the engine's parameters, and the icons.
-        src/ui/Controls.cpp
-        src/ui/Icons.cpp
-        src/ui/LookAndFeel.cpp)
+        tests/UiTestHelpers.cpp
+        tests/UiTestHelpers.h
+        tests/ValueTextTests.cpp)
 
     phazite_use_core(phazite_tests)
+    target_link_libraries(phazite_tests PRIVATE phazite_ui)
 
     add_test(NAME phazite_tests COMMAND phazite_tests)
 endif()

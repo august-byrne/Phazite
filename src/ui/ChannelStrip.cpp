@@ -16,6 +16,14 @@ namespace
     constexpr int slotNameHeight = 22, slotKnobHeight = 30, sendHeight = 26, buttonHeight = 24;
     constexpr int keyControlsPerDevice = 2;
     constexpr int panKnobSize = 44, meterWidth = 10, headerHeight = 46, colourBarHeight = 4;
+    constexpr int minFaderHeight = 72, minSlotsHeight = buttonHeight;
+    constexpr int loudnessHeight = 4 * 16 + buttonHeight + Space::xs; // the master's readout: four lines and the Reset button
+
+    // The fader's height: half of what there is, at least the minimum, but leaving the rest of the strip what it needs.
+    int getFaderHeight (int available, int forTheRest)
+    {
+        return juce::jlimit (minFaderHeight, std::max (minFaderHeight, available - forTheRest), std::max (120, available / 2));
+    }
 
     // A button that tells a right-click (which opens a menu) from a click.
     struct MenuButton : public juce::TextButton
@@ -267,8 +275,7 @@ void DeviceSlots::showAddMenu()
                         {
                             auto* chosenEdit = safeEdit.get();
 
-                            if (safeThis == nullptr || chosenEdit == nullptr
-                                || ! juce::isPositiveAndNotGreaterThan (result, (int) types.size()))
+                            if (safeThis == nullptr || chosenEdit == nullptr || result <= 0 || result > (int) types.size()) // 0: dismissed
                                 return;
 
                             const auto& type = types[(size_t) result - 1];
@@ -661,8 +668,9 @@ void ChannelStrip::resized()
     nameLabel.setBounds (header.removeFromTop (controlHeight - 4));
     outputLabel.setBounds (header);
 
-    // At the bottom: pan, mute and solo, and the fader with the meter, which get what is left above the slots.
-    const auto faderHeight = std::max (120, area.getHeight() / 2);
+    // At the bottom: the fader with the meter, then mute and solo, and pan. The device and send slots get what is
+    // left above them, and scroll. (The mixer keeps the strip at least getMinimumHeight() tall.)
+    const auto faderHeight = getFaderHeight (area.getHeight(), buttonHeight + panKnobSize + 3 * Space::xs + minSlotsHeight);
     auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);
@@ -677,6 +685,12 @@ void ChannelStrip::resized()
 
     slotView.setBounds (area);
     layOutSlots();
+}
+
+int ChannelStrip::getMinimumHeight()
+{
+    // As resized() lays it out: the header, a row of slots, pan, mute and solo, and the shortest fader.
+    return 2 * Space::xs + headerHeight + minSlotsHeight + panKnobSize + buttonHeight + minFaderHeight + 3 * Space::xs;
 }
 
 void ChannelStrip::layOutSlots()
@@ -770,6 +784,8 @@ void MasterStrip::paint (juce::Graphics& g)
 {
     const auto& p = getPalette (*this);
     g.fillAll (p.surface);
+    g.setColour (p.border);
+    g.fillRect (0, 0, 1, getHeight()); // between the tracks' strips and this
     g.setColour (p.text);
     g.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
     g.drawText ("Master", getLocalBounds().reduced (Space::s).removeFromTop (controlHeight), juce::Justification::centred);
@@ -780,12 +796,13 @@ void MasterStrip::resized()
     auto area = getLocalBounds().reduced (Space::s);
     area.removeFromTop (controlHeight);
 
-    auto readout = area.removeFromBottom (4 * 16 + buttonHeight + Space::xs);
+    auto readout = area.removeFromBottom (loudnessHeight);
     resetButton.setBounds (readout.removeFromBottom (buttonHeight).removeFromLeft (64));
     loudness.setBounds (readout);
     area.removeFromBottom (Space::s);
 
-    const auto faderHeight = std::max (120, area.getHeight() / 2);
+    // The fader, and above it the devices, which scroll. (The mixer keeps the strip at least getMinimumHeight() tall.)
+    const auto faderHeight = getFaderHeight (area.getHeight(), Space::xs + minSlotsHeight);
     auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);
@@ -793,6 +810,12 @@ void MasterStrip::resized()
 
     deviceView.setBounds (area);
     devices.setSize (std::max (1, area.getWidth() - deviceView.getScrollBarThickness()), devices.getPreferredHeight());
+}
+
+int MasterStrip::getMinimumHeight()
+{
+    // As resized() lays it out: the name, a row of device slots, the shortest fader and the loudness readout.
+    return 2 * Space::s + controlHeight + minSlotsHeight + Space::xs + minFaderHeight + Space::s + loudnessHeight;
 }
 
 //==============================================================================
@@ -804,7 +827,9 @@ Inspector::Inspector (te::Engine& engine, CommandRegistry& registry, std::functi
 {
     setTitle ("Inspector");
     setDescription ("The channel of the selected track.");
-    addAndMakeVisible (strip);
+    stripView.setViewedComponent (&strip, false);
+    stripView.setScrollBarsShown (true, false);
+    addAndMakeVisible (stripView);
     selection.addChangeListener (this);
     startTimerHz (2);
 }
@@ -850,6 +875,10 @@ void Inspector::resized()
 {
     auto area = getLocalBounds().reduced (Space::m);
     area.removeFromTop (24 + Space::s);
-    strip.setBounds (area.removeFromLeft (ChannelStrip::width).withHeight (std::min (area.getHeight(), 640)));
+    // Up to 640 pixels tall, but no shorter than its parts need: then it scrolls.
+    const auto height = std::min (area.getHeight(), 640);
+    const auto scrolls = height < ChannelStrip::getMinimumHeight();
+    stripView.setBounds (area.removeFromLeft (ChannelStrip::width + (scrolls ? stripView.getScrollBarThickness() : 0)).withHeight (height));
+    strip.setSize (ChannelStrip::width, std::max (height, ChannelStrip::getMinimumHeight()));
 }
 } // namespace phazite::ui
