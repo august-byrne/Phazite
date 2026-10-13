@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Controls.h"
 #include "LookAndFeel.h"
+#include "model/Tracks.h"
 #include "model/ValueText.h"
 
 namespace phazite::ui
@@ -12,6 +13,12 @@ namespace
     constexpr int meterRefreshRateHz = 30;
     constexpr float meterFallDbPerTick = 1.0f; // 30 dB a second
     constexpr juce::uint32 peakHoldMs = 1000;
+
+    juce::String getMuteTooltip (bool silencedBySolo)
+    {
+        return silencedBySolo ? "Silent while other tracks are soloed. Click to mute it anyway, or right-click to solo it alone"
+                              : "Mute: silences this track. Right-click to solo it alone, as in FL Studio";
+    }
 
     // Tracktion stores a parameter's value in the project only once it changes, and undoing that
     // first change removes it again. phazite::undo() then couldn't play the old value without an undo
@@ -319,5 +326,111 @@ std::unique_ptr<juce::AccessibilityHandler> LevelMeter::createAccessibilityHandl
 
     return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::progressBar, juce::AccessibilityActions(),
                                                          juce::AccessibilityHandler::Interfaces { std::make_unique<Value> (*this) });
+}
+
+//==============================================================================
+// A button that shows the track's state rather than toggling itself, and tells a right-click (which JUCE's
+// buttons report as clicks too) from a click by the keys it passes on. Half lit is a state between off and on.
+struct MuteSoloButtons::Button : public juce::TextButton
+{
+    Button (const juce::String& text, const juce::String& title)
+        : juce::TextButton (text)
+    {
+        setTitle (title);
+    }
+
+    using juce::TextButton::clicked;
+
+    void clicked (const juce::ModifierKeys& mods) override
+    {
+        if (onClickWith != nullptr)
+            onClickWith (mods);
+    }
+
+    void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
+    {
+        auto& lf = getLookAndFeel();
+        const auto off = findColour (buttonColourId), on = findColour (buttonOnColourId);
+        lf.drawButtonBackground (g, *this, getToggleState() ? on : (halfLit ? off.interpolatedWith (on, halfLitAmount) : off),
+                                 isHighlighted, isDown);
+        lf.drawButtonText (g, *this, isHighlighted, isDown);
+    }
+
+    static constexpr float halfLitAmount = 0.4f;
+    std::function<void (const juce::ModifierKeys&)> onClickWith;
+    bool halfLit = false;
+};
+
+MuteSoloButtons::MuteSoloButtons()
+    : mute (std::make_unique<Button> ("M", "Mute")),
+      solo (std::make_unique<Button> ("S", "Solo"))
+{
+    mute->setTooltip (getMuteTooltip (false));
+    solo->setTooltip ("Solo: plays only the soloed tracks, and leaves the mute switches as they are. Ctrl+click solos this track alone");
+
+    mute->onClickWith = [this] (const juce::ModifierKeys& mods)
+    {
+        if (auto* t = track.get())
+        {
+            if (mods.isPopupMenu())
+                toggleSoloAlone (*t);
+            else
+                t->setMute (! t->isMuted (false));
+        }
+
+        update();
+    };
+
+    solo->onClickWith = [this] (const juce::ModifierKeys& mods)
+    {
+        if (auto* t = track.get())
+        {
+            if (mods.isCommandDown())
+                toggleSoloAlone (*t);
+            else
+                t->setSolo (! t->isSolo (false));
+        }
+
+        update();
+    };
+
+    addAndMakeVisible (*mute);
+    addAndMakeVisible (*solo);
+    update();
+}
+
+MuteSoloButtons::~MuteSoloButtons() = default;
+
+void MuteSoloButtons::setTrack (te::Track* newTrack)
+{
+    track = newTrack;
+    update();
+}
+
+void MuteSoloButtons::update()
+{
+    auto* t = track.get();
+    const auto silenced = t != nullptr && isSilencedBySolo (*t);
+
+    mute->setEnabled (t != nullptr);
+    solo->setEnabled (t != nullptr);
+    mute->setToggleState (t != nullptr && t->isMuted (false), juce::dontSendNotification);
+    solo->setToggleState (t != nullptr && t->isSolo (false), juce::dontSendNotification);
+
+    if (mute->halfLit != silenced)
+    {
+        mute->halfLit = silenced;
+        mute->setTooltip (getMuteTooltip (silenced));
+        mute->repaint();
+    }
+}
+
+void MuteSoloButtons::resized()
+{
+    // Two buttons, a small gap between them.
+    auto area = getLocalBounds();
+    const auto width = (area.getWidth() - Space::xs / 2) / 2;
+    mute->setBounds (area.removeFromLeft (width));
+    solo->setBounds (area.removeFromRight (width));
 }
 } // namespace phazite::ui

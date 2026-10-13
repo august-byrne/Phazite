@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "CommandUI.h"
+#include "DeviceMenus.h"
 #include "LookAndFeel.h"
 #include "PianoRollParts.h"
 #include "model/Clips.h"
 #include "model/LiveInput.h"
+#include "model/Mixer.h"
 #include "model/Tracks.h"
 
 namespace phazite::ui
@@ -37,6 +39,8 @@ PianoRoll::PianoRoll (CommandRegistry& registry, te::SelectionManager& selection
 {
     setTitle ("Piano roll");
 
+    instrumentButton.setTitle ("Instrument");
+    instrumentButton.onClick = [this] { instrumentClicked(); };
     chordButton.setTitle ("Chord stamp");
     chordButton.onClick = [this] { showChordMenu(); };
     keyButton.setTitle ("Key");
@@ -51,8 +55,8 @@ PianoRoll::PianoRoll (CommandRegistry& registry, te::SelectionManager& selection
     clipLabel.setJustificationType (juce::Justification::centredRight);
     clipLabel.setFont (juce::FontOptions (TextSize::small));
 
-    for (auto* c : std::initializer_list<juce::Component*> { &chordButton, &keyButton, &ghostButton, &transformButton, &clipLabel,
-                                                             keys.get(), grid.get(), velocityLane.get() })
+    for (auto* c : std::initializer_list<juce::Component*> { &instrumentButton, &chordButton, &keyButton, &ghostButton, &transformButton,
+                                                             &clipLabel, keys.get(), grid.get(), velocityLane.get() })
         addAndMakeVisible (c);
 
     addChildComponent (*transformBar);
@@ -588,6 +592,18 @@ void PianoRoll::updateToolbar()
     for (auto* c : std::initializer_list<juce::Component*> { &chordButton, &keyButton, &ghostButton, &transformButton })
         c->setEnabled (track != nullptr);
 
+    // The instrument that plays the notes, or a request for one: without it they make no sound.
+    const auto& p = getPalette (*this);
+    auto* instrument = track != nullptr ? getInstrument (*track) : nullptr;
+    const auto silent = track != nullptr && instrument == nullptr;
+    instrumentButton.setButtonText (instrument != nullptr ? instrument->getName() : juce::String ("Choose instrument"));
+    instrumentButton.setEnabled (track != nullptr && getReturnBus (*track) < 0);
+    instrumentButton.setColour (juce::TextButton::buttonColourId,
+                                silent ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint) : p.surfaceRaised);
+    instrumentButton.setTooltip (silent
+                                     ? "This track has no instrument, so its notes make no sound. Click to choose one: a synth or a sampler"
+                                     : "The instrument that plays this track's notes. Click to open or replace it");
+
     // Which clips are shown, and where in the song: the ruler counts from the clip.
     const auto songBar = [this] (te::BeatPosition beat)
     {
@@ -606,6 +622,43 @@ void PianoRoll::updateToolbar()
         text = track->getName() + ": draw a note to start a clip at bar " + songBar (getTimeOrigin()) + " of the song";
 
     clipLabel.setText (text, juce::dontSendNotification);
+}
+
+void PianoRoll::instrumentClicked()
+{
+    auto* track = getTrack();
+
+    if (track == nullptr)
+        return;
+
+    auto* instrument = getInstrument (*track);
+
+    if (instrument == nullptr)
+    {
+        showInstrumentMenu (*track, instrumentButton);
+        return;
+    }
+
+    const te::SafeSelectable<te::Plugin> safeInstrument (instrument);
+    const te::SafeSelectable<te::AudioTrack> safeTrack (track);
+    const juce::Component::SafePointer<juce::Component> safeButton (&instrumentButton);
+    juce::PopupMenu menu;
+
+    menu.addItem ("Open " + instrument->getName(),
+                  [safeInstrument]
+                  {
+                      if (auto* opened = safeInstrument.get())
+                          opened->showWindowExplicitly();
+                  });
+
+    menu.addItem ("Replace Instrument...",
+                  [safeTrack, safeButton]
+                  {
+                      if (auto* t = safeTrack.get(); t != nullptr && safeButton != nullptr)
+                          showInstrumentMenu (*t, *safeButton);
+                  });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&instrumentButton));
 }
 
 void PianoRoll::showChordMenu()
@@ -925,8 +978,8 @@ void PianoRoll::resized()
     auto area = getLocalBounds();
     auto toolbar = layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
 
-    for (auto [button, width] : { std::pair { &chordButton, 120 }, std::pair { &keyButton, 150 }, std::pair { &ghostButton, 64 },
-                                  std::pair { &transformButton, 96 } })
+    for (auto [button, width] : { std::pair { &instrumentButton, 140 }, std::pair { &chordButton, 120 }, std::pair { &keyButton, 150 },
+                                  std::pair { &ghostButton, 64 }, std::pair { &transformButton, 96 } })
     {
         button->setBounds (toolbar.removeFromLeft (width));
         toolbar.removeFromLeft (Space::xs);

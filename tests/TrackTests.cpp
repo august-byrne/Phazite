@@ -362,3 +362,32 @@ TEST_CASE ("Pinning a track is kept in the project, but isn't an undo step")
     REQUIRE (tracks.registry.invoke ("track.pin"));
     CHECK_FALSE (phazite::isPinned (*tracks["B"]));
 }
+
+TEST_CASE ("Solo leaves the mute switches alone, and a track can be soloed alone")
+{
+    Tracks tracks (3);
+    auto& a = *tracks["A"];
+    auto& b = *tracks["B"];
+    auto& c = *tracks["C"];
+    c.setMute (true);
+
+    a.setSolo (true);
+    CHECK (phazite::isSilencedBySolo (b));
+    CHECK_FALSE (phazite::isSilencedBySolo (a));
+    CHECK_FALSE (phazite::isSilencedBySolo (c)); // muted by its own switch
+    b.setSolo (true);
+
+    // Alone: the other solos go, and the mute switches stay as they were.
+    phazite::toggleSoloAlone (a);
+    CHECK (a.isSolo (false));
+    CHECK_FALSE (b.isSolo (false));
+    CHECK (c.isMuted (false));
+    CHECK (phazite::isSilencedBySolo (b));
+
+    // Again: no solo at all, and C is still muted.
+    phazite::toggleSoloAlone (a);
+    CHECK_FALSE (a.isSolo (false));
+    CHECK_FALSE (tracks.edit->areAnyTracksSolo());
+    CHECK (c.isMuted (false));
+    CHECK_FALSE (phazite::isSilencedBySolo (b));
+}

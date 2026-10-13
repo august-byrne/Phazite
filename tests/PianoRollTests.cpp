@@ -2,6 +2,7 @@
 // The piano roll, driven with the mouse and the selection as the user would.
 #include "UiTestHelpers.h"
 #include "model/Clips.h"
+#include "model/Mixer.h"
 #include "model/Notes.h"
 #include "model/Selection.h"
 #include "model/Tracks.h"
@@ -147,4 +148,20 @@ TEST_CASE ("The piano roll paints notes, with and without a key")
     phazite::setTrackKey (*screen.tracks[0], phazite::Key { 2, te::Scale::dorian });
     phazite::test::dispatchPendingMessages();
     CHECK (screen.window.paintEverything().getWidth() == 1000);
+}
+
+TEST_CASE ("On a track without an instrument, the piano roll asks for one, since its notes make no sound")
+{
+    PianoRollScreen screen;
+    auto& clip = screen.addClip (0, 0.0, 4.0);
+    screen.select (clip);
+
+    auto* button = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (screen.pianoRoll, "Instrument"));
+    REQUIRE (button != nullptr);
+    CHECK (button->getButtonText() == juce::String ("Choose instrument"));
+
+    auto synth = screen.edit->getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {});
+    REQUIRE (phazite::setInstrument (*screen.tracks[0], synth) != nullptr);
+    phazite::test::dispatchPendingMessages();
+    CHECK (button->getButtonText() == synth->getName());
 }

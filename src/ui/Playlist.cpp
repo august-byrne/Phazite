@@ -6,6 +6,7 @@
 #include "model/Import.h"
 #include "model/LiveInput.h"
 #include "model/Outlines.h"
+#include "model/Playback.h"
 #include "model/Sections.h"
 #include "model/Tracks.h"
 
@@ -1142,7 +1143,8 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu())
     {
         // In FL Studio's keymap, right-click deletes, as in FL Studio: this clip and those the mouse moves on to.
-        if (getCommands().getKeymap().rightClickDeletes)
+        // Shift+right-click opens the menu, as in the piano roll.
+        if (getCommands().getKeymap().rightClickDeletes && ! e.mods.isShiftDown())
         {
             undo.beginNewTransaction ("Delete Clips");
             gesture->kind = Gesture::Kind::erase;
@@ -1868,6 +1870,31 @@ void Playlist::trackDragged (TrackHeader&, const juce::MouseEvent& e)
     repaint();
 }
 
+void Playlist::trackSelectionDragged (TrackHeader& header, const juce::MouseEvent& e)
+{
+    // From the track the drag started on to the one under the pointer, as a Shift+click would.
+    const auto position = e.getEventRelativeTo (lanes.get()).getPosition();
+    beginDragAutoRepeat (autoRepeatInterval);
+    autoScroll (position, lanes->getLocalBounds().withTrimmedTop (pinnedHeight), ScrollDirections::upAndDown);
+
+    const auto from = getRowOf (header.getTrack());
+    auto to = getRowAt (juce::jlimit (0, lanes->getHeight() - 1, position.y));
+
+    if (from < 0)
+        return;
+
+    if (to < 0) // below the last row
+        to = (int) rows.size() - 1;
+
+    selection.deselectAll();
+
+    for (auto i = std::min (from, to); i <= std::max (from, to); ++i)
+        if (auto* t = rows[(size_t) i].track.get())
+            selection.addToSelection (t);
+
+    selectionAnchor = header.getTrack();
+}
+
 void Playlist::trackDragEnded (TrackHeader&, const juce::MouseEvent&)
 {
     const auto target = dropRow;
@@ -2058,6 +2085,18 @@ void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (source == &range)
     {
         lanes->repaint();
+
+        // With FL Studio's keymap, the selected time range loops while it is selected, and then the song again.
+        if (auto* e = getEdit(); e != nullptr && getCommands().getKeymap().selectionLoops)
+        {
+            if (! range.isEmpty())
+                loopRange (*e, e->tempoSequence.toTime (range.getRange()));
+            else if (loopsSelection)
+                loopSong (*e);
+
+            loopsSelection = ! range.isEmpty();
+        }
+
         return;
     }
 

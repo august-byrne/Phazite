@@ -40,26 +40,7 @@ TrackHeader::TrackHeader (Owner& o, te::Track& trackToShow)
         }
     };
 
-    muteButton.setTitle ("Mute");
-    muteButton.setTooltip ("Mute: silences this track");
-    soloButton.setTitle ("Solo");
-    soloButton.setTooltip ("Solo: plays only this track, and any others that are soloed");
-
-    for (auto* button : { &muteButton, &soloButton })
-        button->setClickingTogglesState (true);
-
-    // Tracktion keeps mute and solo out of the undo history, as many DAWs do.
-    muteButton.onClick = [this]
-    {
-        if (auto* t = track.get())
-            t->setMute (muteButton.getToggleState());
-    };
-
-    soloButton.onClick = [this]
-    {
-        if (auto* t = track.get())
-            t->setSolo (soloButton.getToggleState());
-    };
+    muteSolo.setTrack (&trackToShow);
 
     // The chevron collapses a track to a thin row, and hides a folder's tracks.
     isFolder = trackToShow.isFolderTrack();
@@ -67,11 +48,22 @@ TrackHeader::TrackHeader (Owner& o, te::Track& trackToShow)
     collapseButton.setMouseClickGrabsKeyboardFocus (false);
     collapseButton.onClick = [this]
     {
-        if (auto* t = track.get())
-            setCollapsed (*t, ! isCollapsed (*t));
+        auto* t = track.get();
+
+        if (t == nullptr)
+            return;
+
+        // Alt+click: every track, as in Ableton Live.
+        const auto collapse = ! isCollapsed (*t);
+
+        if (juce::ModifierKeys::currentModifiers.isAltDown())
+            for (auto* other : getPlaylistTracks (t->edit))
+                setCollapsed (*other, collapse);
+        else
+            setCollapsed (*t, collapse);
     };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &muteButton, &soloButton, &collapseButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &muteSolo, &collapseButton })
         addAndMakeVisible (c);
 
     updateCollapseButton();
@@ -91,8 +83,7 @@ void TrackHeader::update (juce::Colour newColour, bool isSelected, int newDepth)
     if (! nameLabel.isBeingEdited())
         nameLabel.setText (name, juce::dontSendNotification);
 
-    muteButton.setToggleState (t->isMuted (false), juce::dontSendNotification);
-    soloButton.setToggleState (t->isSolo (false), juce::dontSendNotification);
+    muteSolo.update(); // and whether other tracks' solos silence it
 
     if (collapsed != isCollapsed (*t))
     {
@@ -119,12 +110,14 @@ void TrackHeader::updateCollapseButton()
     if (isFolder)
     {
         collapseButton.setTitle (collapsed ? "Expand folder" : "Collapse folder");
-        collapseButton.setTooltip (collapsed ? "Shows the folder's tracks" : "Hides the folder's tracks");
+        collapseButton.setTooltip (collapsed ? "Shows the folder's tracks. Alt+click: every track"
+                                             : "Hides the folder's tracks. Alt+click: every track");
     }
     else
     {
         collapseButton.setTitle (collapsed ? "Expand track" : "Collapse track");
-        collapseButton.setTooltip (collapsed ? "Shows the track at its full height" : "Makes the track a thin row that shows its name");
+        collapseButton.setTooltip (collapsed ? "Shows the track at its full height. Alt+click: every track"
+                                             : "Makes the track a thin row that shows its name. Alt+click: every track");
     }
 }
 
@@ -203,15 +196,13 @@ void TrackHeader::resized()
     // Mute and solo shrink to fit a collapsed row. A row shorter than that has room only for the name.
     const auto size = juce::jmin (buttonSize, top.getHeight() - 2);
     const auto roomForButtons = size >= minButtonSize;
-    muteButton.setVisible (roomForButtons);
-    soloButton.setVisible (roomForButtons);
+    muteSolo.setVisible (roomForButtons);
     collapseButton.setVisible (roomForButtons);
 
     if (roomForButtons)
     {
-        soloButton.setBounds (top.removeFromRight (size).withSizeKeepingCentre (size, size));
-        top.removeFromRight (Space::xs / 2);
-        muteButton.setBounds (top.removeFromRight (size).withSizeKeepingCentre (size, size));
+        const auto buttonsWidth = 2 * size + Space::xs / 2;
+        muteSolo.setBounds (top.removeFromRight (buttonsWidth).withSizeKeepingCentre (buttonsWidth, size));
         top.removeFromRight (Space::xs);
         collapseButton.setBounds (top.removeFromLeft (collapseButtonSize).withSizeKeepingCentre (collapseButtonSize, size));
     }
@@ -278,9 +269,8 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
     else
         owner.trackClicked (*t, e.mods);
 
-    // Only the handle moves tracks, so that clicks elsewhere don't move them by accident.
-    if (getGripArea().contains (e.getPosition()))
-        drag = Drag::pending;
+    // Only the handle moves tracks, so that clicks elsewhere don't move them by accident: there, a drag selects.
+    drag = getGripArea().contains (e.getPosition()) ? Drag::pending : Drag::selectPending;
 }
 
 void TrackHeader::mouseDrag (const juce::MouseEvent& e)
@@ -297,11 +287,23 @@ void TrackHeader::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
-    if (drag == Drag::pending && e.getDistanceFromDragStart() > dragThreshold)
-        drag = Drag::move;
+    if (e.getDistanceFromDragStart() > dragThreshold)
+    {
+        if (drag == Drag::pending)
+            drag = Drag::move;
+        else if (drag == Drag::selectPending)
+            drag = Drag::select;
+    }
 
     if (drag == Drag::move)
+    {
         owner.trackDragged (*this, e);
+    }
+    else if (drag == Drag::select)
+    {
+        selectOnMouseUp = false;
+        owner.trackSelectionDragged (*this, e);
+    }
 }
 
 void TrackHeader::mouseUp (const juce::MouseEvent& e)

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A track's header in the playlist: its color, a handle to move it by, a chevron that collapses it, its name,
 // mute and solo. Clicking selects the track, double-clicking the name renames it, dragging the handle moves the
-// track, and dragging the bottom edge resizes it.
+// track, dragging the bottom edge resizes it, and dragging elsewhere selects the tracks the mouse passes.
 #pragma once
 
+#include "Controls.h"
 #include "Icons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -26,7 +27,8 @@ public:
         virtual void showColourMenu (te::Track&, juce::Component& target) = 0;
         virtual void trackDragged (TrackHeader&, const juce::MouseEvent&) = 0; // moving it to another row
         virtual void trackDragEnded (TrackHeader&, const juce::MouseEvent&) = 0;
-        virtual void trackHeightChanged() = 0; // while its edge is dragged
+        virtual void trackSelectionDragged (TrackHeader&, const juce::MouseEvent&) = 0; // selecting the tracks it passes
+        virtual void trackHeightChanged() = 0;                                          // while its edge is dragged
     };
 
     TrackHeader (Owner&, te::Track&);
@@ -57,13 +59,15 @@ private:
         none,
         pending, // the mouse went down on the handle, but hasn't moved far enough to drag yet
         move,
-        resize
+        resize,
+        selectPending, // elsewhere on the header: a drag selects the tracks it passes
+        select
     };
 
     Owner& owner;
     te::SafeSelectable<te::Track> track;
     juce::Label nameLabel;
-    juce::TextButton muteButton { "M" }, soloButton { "S" };
+    MuteSoloButtons muteSolo;
     IconButton collapseButton { "Collapse track", Icon::expanded };
     std::unique_ptr<juce::Drawable> gripIcon;
     juce::Colour gripIconColour { juce::Colours::black }; // the color the drawing is in now

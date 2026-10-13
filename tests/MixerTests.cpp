@@ -60,6 +60,37 @@ TEST_CASE ("Devices go before the fader, instruments first")
     CHECK (phazite::getKeyControls (*delay, 2).size() == 2);
 }
 
+TEST_CASE ("A track's instrument plays its notes, and its effects come after it")
+{
+    Mix mix;
+    CHECK (phazite::getInstrument (*mix.a) == nullptr);
+    CHECK_FALSE (phazite::needsInstrument (*mix.a)); // no notes yet
+
+    // Notes without an instrument make no sound.
+    mix.a->insertMIDIClip ({ 0_tp, 2_tp }, nullptr);
+    CHECK (phazite::needsInstrument (*mix.a));
+
+    // An effect doesn't play notes.
+    auto* reverb = phazite::insertDevice (*mix.a, mix.create (te::ReverbPlugin::xmlTypeName));
+    REQUIRE (reverb != nullptr);
+    CHECK (phazite::getInstrument (*mix.a) == nullptr);
+    CHECK (phazite::needsInstrument (*mix.a));
+    CHECK (phazite::getEffects (*mix.a) == juce::Array<te::Plugin*> { reverb });
+
+    auto* synth = phazite::setInstrument (*mix.a, mix.create (te::FourOscPlugin::xmlTypeName));
+    REQUIRE (synth != nullptr);
+    CHECK (phazite::getInstrument (*mix.a) == synth);
+    CHECK_FALSE (phazite::needsInstrument (*mix.a));
+    CHECK (phazite::getEffects (*mix.a) == juce::Array<te::Plugin*> { reverb });
+
+    // Another instrument takes the first one's place; an effect isn't one.
+    auto* other = phazite::setInstrument (*mix.a, mix.create (te::FourOscPlugin::xmlTypeName));
+    REQUIRE (other != nullptr);
+    CHECK (phazite::getDevices (*mix.a) == juce::Array<te::Plugin*> { other, reverb });
+    CHECK (phazite::setInstrument (*mix.a, mix.create (te::DelayPlugin::xmlTypeName)) == nullptr);
+    CHECK (phazite::getInstrument (*mix.a) == other);
+}
+
 TEST_CASE ("A folder becomes a bus with its first device, and plain again without one")
 {
     Mix mix;
@@ -120,6 +151,12 @@ TEST_CASE ("Return tracks take a bus, and sends feed them from before or after t
     CHECK (phazite::getReturnBus (*second) == 1);
     CHECK (phazite::findReturnTrack (*mix.edit, 1) == second);
     CHECK (phazite::getReturnTracks (*mix.edit).size() == 2);
+
+    // Returns are solo-safe: soloing a track leaves them audible, so its sends to them are heard.
+    mix.a->setSolo (true);
+    CHECK_FALSE (phazite::isSilencedBySolo (*reverbReturn));
+    CHECK (phazite::isSilencedBySolo (*mix.b));
+    mix.a->setSolo (false);
 }
 
 TEST_CASE ("The master's loudness meter reads a stereo sine at its level")
@@ -180,4 +217,65 @@ TEST_CASE ("Until Phazite's own devices arrive, the device list offers two of Tr
     }
 
     CHECK (builtIn == juce::StringArray { te::FourOscPlugin::xmlTypeName, te::ReverbPlugin::xmlTypeName });
+}
+
+TEST_CASE ("A folder's bus switch makes it a bus that stays one, and plain again while it has no effects")
+{
+    Mix mix;
+    auto* folder = phazite::groupIntoFolder ({ mix.a, mix.b }, nullptr);
+    REQUIRE (folder != nullptr);
+
+    phazite::setMixedAsBus (*folder, true);
+    CHECK (phazite::isBus (*folder));
+
+    // Made a bus with the switch, it stays one when its last effect goes.
+    auto* compressor = phazite::insertDevice (*folder, mix.create (te::CompressorPlugin::xmlTypeName));
+    REQUIRE (compressor != nullptr);
+    phazite::removeDevice (*compressor);
+    CHECK (phazite::isBus (*folder));
+
+    // With an effect, it stays a bus: making it plain would take the effect away.
+    auto* reverb = phazite::insertDevice (*folder, mix.create (te::ReverbPlugin::xmlTypeName));
+    REQUIRE (reverb != nullptr);
+    phazite::setMixedAsBus (*folder, false);
+    CHECK (phazite::isBus (*folder));
+
+    phazite::removeDevice (*reverb);
+    phazite::setMixedAsBus (*folder, false);
+    CHECK_FALSE (phazite::isBus (*folder));
+    REQUIRE (folder->getVCAPlugin() != nullptr);
+
+    // A bus that became one by getting an effect turns plain again without it, as before.
+    auto* delay = phazite::insertDevice (*folder, mix.create (te::DelayPlugin::xmlTypeName));
+    REQUIRE (delay != nullptr);
+    CHECK (phazite::isBus (*folder));
+    phazite::removeDevice (*delay);
+    CHECK_FALSE (phazite::isBus (*folder));
+}
+
+TEST_CASE ("A return with an effect comes in one step, named after the effect, with a send to it")
+{
+    Mix mix;
+    auto* reverbReturn = phazite::addReturnWithEffect (*mix.a, mix.create (te::ReverbPlugin::xmlTypeName));
+    REQUIRE (reverbReturn != nullptr);
+    CHECK (reverbReturn->getName() == juce::String ("Reverb"));
+    CHECK (reverbReturn->isSoloIsolate (false));
+
+    // The reverb gives only its effect: the dry sound reaches the master through the track itself.
+    auto* reverb = dynamic_cast<te::ReverbPlugin*> (phazite::getEffects (*reverbReturn).getFirst());
+    REQUIRE (reverb != nullptr);
+    CHECK (reverb->dryParam->getCurrentValue() == doctest::Approx (0.0f));
+
+    const auto sends = phazite::getSends (*mix.a);
+    REQUIRE (sends.size() == 1);
+    CHECK (sends[0]->getBusNumber() == phazite::getReturnBus (*reverbReturn));
+    CHECK_FALSE (phazite::isPreFader (*sends[0]));
+
+    // Another one gets a name of its own.
+    auto* second = phazite::addReturnWithEffect (*mix.b, mix.create (te::ReverbPlugin::xmlTypeName));
+    REQUIRE (second != nullptr);
+    CHECK (second->getName() == juce::String ("Reverb 2"));
+
+    // Instruments don't go on returns.
+    CHECK (phazite::addReturnWithEffect (*mix.a, mix.create (te::FourOscPlugin::xmlTypeName)) == nullptr);
 }

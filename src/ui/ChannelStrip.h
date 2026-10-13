@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A channel's controls, as the mixer and the inspector show them (docs/design.md, section 8): the track's name
-// and where it goes, its devices with a few key controls each, its sends, pan, mute, solo, fader and meter.
-// The master's strip has its devices, fader and meter, and the loudness meter.
+// A channel's controls, as the mixer and the inspector show them (docs/design.md, section 8), top to bottom in the
+// order the sound goes through them, as in Logic Pro and Studio One: the track's name and what feeds it, its
+// instrument, its effects (each with a few key controls), its sends, where its sound goes, pan, mute, solo, fader
+// and meter. The master's strip has its effects, fader and meter, and the loudness meter.
 #pragma once
 
 #include "Controls.h"
@@ -10,12 +11,32 @@
 
 namespace phazite::ui
 {
-// The devices of a channel, each as a slot: its name (click to open its window, right-click for more), an
-// on/off switch and its key controls. Shared by track and master strips.
+// A small heading over a group of a strip's controls, such as "Effects", in the theme's muted text color. Screen
+// readers skip it: the group it heads has the same name.
+class StripHeading : public juce::Component
+{
+public:
+    explicit StripHeading (const juce::String& text);
+    void paint (juce::Graphics&) override;
+
+private:
+    juce::String text;
+};
+
+//==============================================================================
+// A channel's devices of one kind, each as a slot: its name (click to open its window, right-click for more), an
+// on/off switch and its key controls, and a button that adds one. A track has an instrument, which turns its
+// notes into sound, and effects, which change the sound; folders, returns and the master have effects only.
 class DeviceSlots : public juce::Component
 {
 public:
-    DeviceSlots (te::Engine&, CommandRegistry&);
+    enum class Kind
+    {
+        instrument, // a track's instrument, or a button that chooses one
+        effects
+    };
+
+    explicit DeviceSlots (Kind);
     ~DeviceSlots() override;
 
     // The track whose devices to show, or with nullptr the master's of the Edit.
@@ -26,20 +47,22 @@ public:
 
     int getPreferredHeight() const;
     void resized() override;
+    void lookAndFeelChanged() override; // the add button's color
 
 private:
     struct Slot;
 
-    te::Engine& engine;
-    CommandRegistry& commands;
+    const Kind kind;
     te::SafeSelectable<te::Track> track;
     te::SafeSelectable<te::Edit> edit;
     juce::OwnedArray<Slot> slots;
-    juce::TextButton addButton { "+ Device" };
+    juce::TextButton addButton;
     std::vector<te::EditItemID> shownDevices; // the devices the slots show
+    int shownNeed = -1;                       // whether the add button asks for an instrument, as it shows now
 
     juce::Array<te::Plugin*> getChannelDevices() const;
     void rebuild();
+    void updateAddButton();
     void showAddMenu();
     void showSlotMenu (te::Plugin&);
 };
@@ -49,7 +72,7 @@ class ChannelStrip : public juce::Component,
                      private juce::Timer
 {
 public:
-    static constexpr int width = 120;
+    static constexpr int width = 128;
 
     // How tall the strip must be for its parts not to overlap; the mixer scrolls when it is shorter.
     static int getMinimumHeight();
@@ -63,6 +86,8 @@ public:
     te::Track* getTrack() const { return track.get(); }
 
     void setSelected (bool);
+    void setRelated (bool); // its sound reaches the selected channel, or the selected channel's reaches it
+    bool isRelated() const noexcept { return related; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -75,30 +100,32 @@ private:
     CommandRegistry& commands;
     te::SelectionManager& selection;
     te::SafeSelectable<te::Track> track;
-    bool selected = false;
+    bool selected = false, related = false;
     juce::Colour shownColour; // the track's color, as the bar along the top shows it
 
-    juce::Label nameLabel, outputLabel;
-    DeviceSlots devices;
+    juce::Label nameLabel, inputLabel, outputLabel; // the name, what the channel is and what feeds it, and where it goes
+    juce::TextButton busButton { "Bus" };           // a folder's: whether it mixes its tracks, or only scales them
+    StripHeading instrumentHeading { "Instrument" }, effectsHeading { "Effects" }, sendsHeading { "Sends" };
+    DeviceSlots instrument { DeviceSlots::Kind::instrument }, effects { DeviceSlots::Kind::effects };
     juce::OwnedArray<SendSlot> sendSlots;
     juce::TextButton addSendButton { "+ Send" };
     std::vector<te::EditItemID> shownSends; // the sends the slots show
-    juce::Component slotHolder;             // devices and sends, scrolling when they don't fit
+    juce::Component slotHolder;             // the instrument, effects and sends, scrolling when they don't fit
     juce::Viewport slotView;
 
     LevelMeter meter { "Level" };
     Fader volume { Fader::Direction::vertical, "Volume", te::decibelsToVolumeFaderPosition (0.0f) };
     Knob pan { "Pan", 0.0 };
-    juce::TextButton muteButton { "M" }, soloButton { "S" };
+    MuteSoloButtons muteSolo;
     ParameterAttachment volumeAttachment { volume, "Change Volume" }, panAttachment { pan, "Change Pan" };
 
     void attachControls();
     void rebuildSends();
     void layOutSlots();
     void showSendMenu();
+    juce::String describeInput() const;
     juce::String describeOutput() const;
     void timerCallback() override; // shows changes made elsewhere: names, devices, undo, automation
-    void setMuteOrSolo (bool mute, bool on);
 };
 
 //==============================================================================
@@ -109,7 +136,7 @@ public:
     static constexpr int width = 156;
     static int getMinimumHeight(); // as ChannelStrip's
 
-    MasterStrip (te::Engine&, CommandRegistry&);
+    MasterStrip();
 
     void setEdit (te::Edit*);
 
@@ -118,7 +145,8 @@ public:
 
 private:
     te::SafeSelectable<te::Edit> edit;
-    DeviceSlots devices;
+    StripHeading effectsHeading { "Effects" };
+    DeviceSlots effects { DeviceSlots::Kind::effects };
     juce::Viewport deviceView;
     LevelMeter meter { "Master level" };
     Fader volume { Fader::Direction::vertical, "Master volume", te::decibelsToVolumeFaderPosition (0.0f) };

@@ -236,7 +236,7 @@ Esc returns to the Smart Tool. The current tool and its key show on the toolbar 
 - duplicate, duplicate as aliases, delete, rename, recolor;
 - right-click the band or the bar numbers to add a section there or apply a song outline ([section 13](#13-getting-started-and-song-outlines)). The Add menu has both too; there is no Song menu.
 
-**The loop (2026-10-13):** playback loops the song, as FL Studio's song mode does: from its start to the end of the bar where its last clip ends, so the loop grows as clips go later. Sections don't count, since an outline can run longer than what is in it so far. Loop Selection (Ctrl+Shift+L) loops the time range selected in the playlist instead, Loop Section the selected sections, and Loop the Song goes back to following the song. The Loop button in the top bar (L) turns looping on or off, and the rulers show the loop as a band. Where the loop is isn't an undo step, as in other DAWs.
+**The loop (2026-10-13):** playback loops the song, as FL Studio's song mode does: from its start to the end of the bar where its last clip ends, so the loop grows as clips go later. Sections don't count, since an outline can run longer than what is in it so far. Loop Selection (Ctrl+L, as in Ableton Live) loops the time range selected in the playlist instead, or the whole song when none is selected; Loop Section loops the selected sections, and Loop the Song goes back to following the song. With FL Studio's keymap, as in FL Studio, a selected time range loops while it is selected, and the song again after. The Loop button in the top bar (L) turns looping on or off, and the rulers show the loop as a band. Playback that doesn't loop stops at the song's end and goes back to where it started, rather than playing on into silence, as Logic stops at its end marker. Where the loop is isn't an undo step, as in other DAWs.
 
 **Grid, zoom and scrolling:**
 - The grid adapts to the zoom level, with snap on by default; hold a modifier to bypass it. Triplets are available.
@@ -280,19 +280,25 @@ This is the editor the target users spend most time in, and FL Studio's is its m
 
 ## 8. The mixer
 
-- **Channels:** one per track, in playlist order and colors. Folders appear as bus channels with their tracks grouped beside them.
-- **Each channel strip shows:**
-  - input and output;
-  - device slots, each with a few key controls, so plug-in windows rarely need opening (like Logic's Smart Controls and Studio Pro's Channel Overview);
-  - sends, pan, fader, meter;
-  - mute, solo and record-arm;
-  - CPU.
-- **Returns:** add a return track (for a shared reverb, say) and send to it from any track, pre- or post-fader per send. Tracktion has no pre/post switch, so Phazite places the send before or after the fader in the device chain.
+**Redesigned 2026-10-13.** The owner gave a track with notes an effect instead of an instrument, heard nothing, and found "+ Device", returns and routing confusing. Research into the mixers people praise (summed up in [Appendix A](#appendix-a-research-summary)) showed the cause: Phazite's single device list followed Waveform's model, which Tracktion's own DAW uses and where instruments and effects share one list. The DAWs that don't trip people up (Logic Pro, Reason, Live, Studio One) give the instrument a place of its own above the effects.
+
+- **Channels:** one per track, in playlist order and colors. Folders appear as their own channels, with their tracks after them. The return tracks come last, together next to the master as in Ableton Live, set apart by a gap.
+- **A strip reads top to bottom as the sound goes,** as in Logic Pro and Reason's Track Panel:
+  - **the name**, and what the channel is and what feeds it: "Bus: mixes its tracks", or "Return, from Lead, Pad";
+  - **the instrument** (tracks only): the device that turns the track's notes into sound, in a slot of its own above the effects. A track with notes but no instrument asks for one ("Choose instrument", tinted), and so does the piano roll's toolbar. Its menu lists instruments only;
+  - **effects**, which change the sound, each with an on/off switch and two key controls, so plug-in windows rarely need opening (like Logic's Smart Controls and Studio Pro's Channel Overview). "+ Effect" lists effects only; on a track whose notes have no instrument, it offers the instrument first;
+  - **sends** to return tracks, each with its level and a Pre/Post switch. "+ Send" offers the returns there are, a new return with an effect, or an empty one;
+  - **where the sound goes:** "Out: Master", or the bus of the folder the track is in;
+  - pan, mute and solo, fader and meter (record-arm and CPU later).
+- **Returns** hold effects that several tracks share. A new return with an effect comes in one step, as in Studio One: the return, named after the effect, and a send to it from the track. A built-in reverb on it gives only its wet sound. Returns are solo-safe, as Studio One's effect channels are, so soloing a track keeps its reverb audible. Tracktion has no pre/post switch for sends, so Phazite places the send before or after the fader in the device chain.
+- **Folders** have a Bus switch. A plain folder's fader scales its tracks' volumes (a VCA); a bus mixes its tracks through its own effects, fader and meter. A folder also becomes a bus when it gets an effect, and turns plain again when its last one goes, unless the switch made it a bus.
+- **Routing shows on selection:** selecting a channel outlines the channels it feeds (the returns it sends to, the bus it is in) and the ones that feed it. This shows routing without cables, whose views (REAPER's, FL Studio's) get mixed reviews.
+- **Mute and solo (2026-10-13):** separate M and S buttons, and a solo never changes the mute switches. FL Studio's solo turns the others' mute switches off and back on, which loses earlier mutes: a complaint on its forum since 2007. As FL users expect, right-clicking M solos the track alone, and does so again to unsolo it; Ctrl+click on S does the same. A track that other tracks' solos silence shows its M half lit, as Logic flashes it. Soloing a folder solos its tracks, and soloing a track in a bus keeps the bus audible.
 - **Sidechain:** any device with a sidechain input gets a source picker that lists the tracks. The source must be a track, not a folder bus (an engine limit).
-- **Routing view:** a diagram of every track, bus, send and sidechain drawn as cables, like Reason's back panel. Drag a cable to reroute it.
-- **Master:** ends with a loudness meter (LUFS and true peak), built on Tracktion's real-time-safe EBU R128 meter.
+- **Routing view (later):** a diagram of every track, bus, send and sidechain, like Reason's back panel, with wires only for the selected or hovered track. Drag a wire to reroute it.
+- **Master:** its effects, fader and meter, ending with a loudness meter (LUFS and true peak), built on Tracktion's real-time-safe EBU R128 meter.
 - **One output per track:** FL Studio's "route one insert to several inserts" is done with sends.
-- **Later:** VCA faders on folders.
+- **Open:** see [section 24](#24-open-questions), questions 11 to 15.
 
 ## 9. Devices, containers and presets
 
@@ -754,6 +760,14 @@ No permissively licensed drum-generation model was found. This table summarizes 
 9. ~~Single-key tools and the computer keyboard~~ **Decided:** Ableton Live's way. The computer keyboard plays notes by default, and Shift and a letter run that letter's single-key shortcut ([section 12](#12-commands-keys-and-help)).
 10. **The computer keyboard at startup (raised 2026-10-13):** while it plays notes, 7 of the 9 tool letters (P, S, T, D, E, C, Z) play notes or change the octave or velocity instead, unless Shift is held, and the owner found tool keys that "don't work". Proposed: start with it off, as Ableton Live does when a Set loads so that shortcuts work, and turn it on with M or the top bar's button. The digits 1 to 9 pick the tools either way.
 
+Raised by the mixer research (2026-10-13), each with what the research recommends:
+
+11. **Folders as buses:** should every folder be a bus from the start, as in Live and Bitwig? Now a folder is plain (a VCA) until it gets an effect or its Bus switch is turned on.
+12. **Choosing where a track's sound goes:** should the Out line on a strip be a menu (Master, the buses, a new bus from the selected tracks), and should choosing a bus there move the track into that folder? Tracktion can also send a track's output to another track, as FL Studio's "route to this track only" does.
+13. **Sends:** a send row for every return on every strip, off until first touched (Live, Bitwig, Mixbus; recommended, since one sentence explains it to beginners), or "+ Send" on each strip, as now?
+14. **New tracks:** should "+ Track" ask for an instrument (Logic, Cubase), or make an empty track, as now?
+15. **Starter project:** should a new project come with a reverb return, as Live's default set did? It costs some CPU even when nothing is sent to it.
+
 ## 25. Decision log
 
 | Date | Decision |
@@ -782,6 +796,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 | 2026-10-13 | After trying steps 1.1 to 1.4: a track's color runs through its whole row; dragging past an edge scrolls; sections become a band in the time bar and ghosts behind the tracks, with no row or Song menu of their own, and four more outlines (lo-fi, R&B, drum and bass, techno); the piano roll counts bars from the clip's start and opens there, shows a selected track's clip at or nearest the playhead, and on a track without clips the first note starts one; a key is a track's, off until chosen, and the top bar shows none; drum mode has no button; the menu bar is File, Edit, Add, View, Options and Help; "+ Track" sits over the track headers, with a row after the last track that adds one; the Smart Tool's fades are for audio clips, and short clips move from anywhere but their edges |
 | 2026-10-13 | Keys: a held key repeats only the commands that take a step; tool keys spring back after a hold with the mouse, as in Bitwig and Ableton Live; in Phazite's keymap the digits 1 to 9 pick the tools and M turns the computer keyboard on and off |
 | 2026-10-13 | Second round: playback loops the whole song and the loop grows with it, as in FL Studio's song mode, unless a selection or sections are looped on purpose; a Loop button and L turn looping on or off. A track moves only by the handle in its header. Tracks collapse to a thin row (the arrow in the header, U, or dragging the bottom edge past the smallest height). Track colors are stronger in headers and rows, with black or white names, whichever reads better. With FL Studio's keymap a click on empty space places the last clip used |
+| 2026-10-13 | Mixer redesign, after research into the mixers people praise: a strip reads top to bottom as the sound goes, with the instrument in a slot of its own above the effects, and "+ Effect" and "Choose instrument" menus that list only what they add; a track with notes but no instrument asks for one, in the mixer, the inspector and the piano roll. "+ Send" can make a return with an effect in one step, named after it; returns are solo-safe and sit together next to the master; folders get a Bus switch; selecting a channel outlines what it feeds and what feeds it. Mute and solo stay separate buttons, and a solo never changes the mute switches (FL Studio's destructive solo is a long-standing complaint); right-click M solos a track alone, as FL users expect. Ctrl+L loops the selection, or the song with none; with FL Studio's keymap a selected time range loops while it is selected; playback that doesn't loop stops at the song's end |
 
 ## Appendix A. Research summary
 
@@ -804,6 +819,13 @@ In October 2026, research agents reviewed about 20 DAWs, and the Tracktion Engin
 | Ardour 9 | Open source, pay what you want; Region FX; note brushing | Clip effects, paint tool | "If in doubt, right-click somewhere"; track-snapped scrolling |
 | Waveform 14 (same engine) | One-screen layout; one track type; racks and drag-on modifiers | The engine's track model and modulators | An "eccentric" first screen; sandboxing off by default |
 | Digital Performer, Sonar, LUNA, Renoise, MPC, BandLab | Several arrangements per project; workspace presets; automatic track naming and coloring; keyboard-first editing; perform then commit; sound in seconds | Keymap import, auto-naming, Capture | Private vocabulary; account and activation hurdles |
+
+**Mixers (researched 2026-10-13, for the [mixer redesign](#8-the-mixer)):** Logic Pro, Pro Tools, Live, Bitwig, Studio One, Cubase, FL Studio, REAPER, Reason, Ardour, Mixbus and Waveform, from their manuals, reviews and forums.
+- **The instrument has a place of its own** above the effects in the DAWs that don't trip people up (Logic, Reason's Track Panel, Live's enforced chain order). Where instruments share the effect slots (Pro Tools, REAPER, Waveform), order mistakes cause silence.
+- **Sends:** a send for every return on every track (Live, Bitwig, Mixbus) is explained to beginners in one sentence, and Studio One's "drop an effect on the sends to make a return" is the most praised setup. Logic's hidden auxes and FL Studio's unnamed mixer inserts confuse newcomers. The words aux, bus, send and return mean different things from one DAW to the next.
+- **Folders that are buses** are where the field converges (Live, Pro Tools routing folders, Cubase 15, Logic's summing stacks).
+- **Routing diagrams** get mixed reviews; showing routing on the selected strip (Logic, REAPER's route button) works without clutter.
+- **Solo:** every other DAW keeps solo apart from the mute switches; FL Studio's solo changes them, a complaint on its forum since 2007.
 
 **Where the field is converging:**
 - Each track is a row, a chain and a channel.

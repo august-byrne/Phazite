@@ -98,7 +98,7 @@ private:
     Transform transform;        // the transform the bar shows, with the settings used last
     bool transformOpen = false; // while its preview shows
 
-    juce::TextButton chordButton, keyButton, ghostButton { "Ghosts" }, transformButton { "Transform" };
+    juce::TextButton instrumentButton, chordButton, keyButton, ghostButton { "Ghosts" }, transformButton { "Transform" };
     juce::Label clipLabel; // which clips are shown, and where they are in the song
 
     std::unique_ptr<Keys> keys;
@@ -145,6 +145,7 @@ private:
     void stopAudition();
 
     void updateToolbar();
+    void instrumentClicked(); // opens or replaces the track's instrument, or chooses one
     void showChordMenu();
     void showKeyMenu();
     void showTransformMenu();

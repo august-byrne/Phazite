@@ -158,7 +158,7 @@ juce::File Project::getAutosaveFile (const juce::File& projectFile)
 Project::Project (std::unique_ptr<te::Edit> e, const juce::File& f)
     : edit (std::move (e)),
       file (f),
-      songLoop (std::make_unique<SongLoopFollower> (*edit))
+      songFollower (std::make_unique<SongFollower> (*edit))
 {
     edit->state.addListener (this);
 }
@@ -167,7 +167,7 @@ Project::~Project()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    songLoop = nullptr;
+    songFollower = nullptr;
     edit->state.removeListener (this);
     getAutosaveFile (file).deleteFile();
 }

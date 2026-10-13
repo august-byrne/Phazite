@@ -8,6 +8,7 @@ namespace phazite
 namespace
 {
     constexpr float newSendDb = -6.0f;
+    const juce::Identifier busSwitchProperty { "phaziteBus" }; // a folder made a bus with the bus switch
 
     template <typename... Types>
     bool isAnyOf (const te::Plugin& plugin)
@@ -89,6 +90,44 @@ juce::Array<te::Plugin*> getMasterDevices (const te::Edit& edit)
     return getDevicesIn (edit.getMasterPluginList());
 }
 
+te::Plugin* getInstrument (const te::Track& track)
+{
+    const auto devices = getDevices (track);
+    return ! devices.isEmpty() && devices.getFirst()->isSynth() ? devices.getFirst() : nullptr;
+}
+
+juce::Array<te::Plugin*> getEffects (const te::Track& track)
+{
+    auto devices = getDevices (track);
+    devices.removeFirstMatchingValue (getInstrument (track));
+    return devices;
+}
+
+bool needsInstrument (const te::Track& track)
+{
+    auto* audioTrack = dynamic_cast<const te::AudioTrack*> (&track);
+
+    if (audioTrack == nullptr || getReturnBus (track) >= 0 || getInstrument (track) != nullptr)
+        return false;
+
+    for (auto* clip : audioTrack->getClips())
+        if (dynamic_cast<te::MidiClip*> (clip) != nullptr)
+            return true;
+
+    return false;
+}
+
+te::Plugin* setInstrument (te::AudioTrack& track, const te::Plugin::Ptr& plugin)
+{
+    if (plugin == nullptr || ! plugin->isSynth() || getReturnBus (track) >= 0)
+        return nullptr;
+
+    if (auto* old = getInstrument (track))
+        old->deleteFromParent();
+
+    return insertInto (track.pluginList, plugin, 0);
+}
+
 te::Plugin* insertDevice (te::Track& track, const te::Plugin::Ptr& plugin, int index)
 {
     if (auto* folder = dynamic_cast<te::FolderTrack*> (&track); folder != nullptr && ! isBus (*folder))
@@ -107,7 +146,7 @@ void removeDevice (te::Plugin& device)
     auto* folder = dynamic_cast<te::FolderTrack*> (device.getOwnerTrack());
     device.deleteFromParent();
 
-    if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty())
+    if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty() && ! folder->state.getProperty (busSwitchProperty, false))
         makePlainFolder (*folder);
 }
 
@@ -216,6 +255,22 @@ void makePlainFolder (te::FolderTrack& folder)
         vca->setVolumeDb (volumeDb);
 }
 
+void setMixedAsBus (te::FolderTrack& folder, bool bus)
+{
+    auto* undoManager = &folder.edit.getUndoManager();
+
+    if (bus)
+    {
+        makeBus (folder);
+        folder.state.setProperty (busSwitchProperty, true, undoManager);
+    }
+    else if (getDevices (folder).isEmpty())
+    {
+        folder.state.removeProperty (busSwitchProperty, undoManager);
+        makePlainFolder (folder);
+    }
+}
+
 te::Plugin* getVolumeDevice (te::Track& track)
 {
     if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))
@@ -301,7 +356,40 @@ te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, te::Se
 
     track->pluginList.insertPlugin (input, 0, nullptr);
     edit.setAuxBusName (bus, name);
+
+    // Solo-safe, as Studio One's effect channels are: soloing a track keeps its reverb, say, audible.
+    track->setSoloIsolate (true);
     return track;
+}
+
+te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& effect)
+{
+    if (effect == nullptr || effect->isSynth())
+        return nullptr;
+
+    // Named after the effect: "Reverb", or "Reverb 2" if there is one already.
+    auto& edit = sender.edit;
+    const auto returns = getReturnTracks (edit);
+    const auto isTaken = [&returns] (const juce::String& candidate)
+    { return std::any_of (returns.begin(), returns.end(), [&candidate] (te::AudioTrack* r) { return r->getName() == candidate; }); };
+
+    auto name = effect->getName();
+
+    for (auto number = 2; isTaken (name); ++number)
+        name = effect->getName() + " " + juce::String (number);
+
+    auto* created = addReturnTrack (edit, name, nullptr);
+
+    if (created == nullptr)
+        return nullptr;
+
+    insertDevice (*created, effect);
+
+    if (auto* reverb = dynamic_cast<te::ReverbPlugin*> (effect.get()))
+        reverb->setDry (0.0f);
+
+    addSend (sender, getReturnBus (*created), false);
+    return created;
 }
 
 juce::Array<te::AuxSendPlugin*> getSends (const te::Track& track)

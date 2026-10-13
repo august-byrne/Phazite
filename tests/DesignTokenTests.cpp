@@ -35,6 +35,9 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
 
         // The loop, in the rulers.
         CHECK (getContrastRatio (p.loop, p.surfaceRaised) >= 3.0);
+
+        // Text on a button that needs attention.
+        CHECK (getContrastRatio (p.text, p.surfaceRaised.interpolatedWith (p.warning, attentionTint)) >= 4.5);
     }
 }
 

@@ -8,6 +8,8 @@
 #include "Commands.h"
 #include "Selection.h"
 
+#include <optional>
+
 namespace phazite
 {
 // The song as a loop: from its start to the end of the bar its last clip ends in, and at least a bar long.
@@ -25,26 +27,31 @@ void loopRange (te::Edit&, te::TimeRange);
 void updateSongLoop (te::Edit&);
 
 //==============================================================================
-// Keeps an Edit's loop around its song while the loop follows it: when clips are added, moved, trimmed or
-// deleted, and when the tempo changes. Each open project has one.
-class SongLoopFollower : private juce::ValueTree::Listener,
-                         private juce::AsyncUpdater
+// Follows where an Edit's song ends, as clips are added, moved, trimmed or deleted and the tempo changes: keeps the
+// loop around the song while the loop follows it, and stops playback that doesn't loop at the song's end, rather
+// than playing on into silence (as Logic does), going back to where playback started. Each open project has one.
+class SongFollower : private juce::ValueTree::Listener,
+                     private juce::AsyncUpdater,
+                     private juce::Timer
 {
 public:
-    explicit SongLoopFollower (te::Edit&);
-    ~SongLoopFollower() override;
+    explicit SongFollower (te::Edit&);
+    ~SongFollower() override;
 
 private:
     te::Edit& edit;
     juce::ValueTree editState;
+    te::TimePosition songEnd;
+    std::optional<te::TimePosition> lastPosition; // while playing without a loop: where the playhead was last time
 
     void changed (const juce::ValueTree&);
-    void handleAsyncUpdate() override { updateSongLoop (edit); }
+    void handleAsyncUpdate() override;
+    void timerCallback() override; // stops playback at the song's end
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { changed (tree); }
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override { changed (child); }
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int) override { changed (child); }
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SongLoopFollower)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SongFollower)
 };
 
 //==============================================================================

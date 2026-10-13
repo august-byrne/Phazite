@@ -2,6 +2,7 @@
 #include "Mixer.h"
 #include "CommandUI.h"
 #include "LookAndFeel.h"
+#include "model/Mixer.h"
 #include "model/Tracks.h"
 
 namespace phazite::ui
@@ -10,20 +11,37 @@ namespace
 {
     constexpr int toolbarHeight = 36;
 
+    constexpr int returnsGap = Space::m; // between the tracks' strips and the returns'
+
     bool isTrackState (const juce::ValueTree& state)
     {
         return state.hasType (te::IDs::TRACK) || state.hasType (te::IDs::FOLDERTRACK);
+    }
+
+    // Whether a channel's sound reaches another's: through a send to a return, or by being in a bus folder.
+    bool feeds (const te::Track& from, const te::Track& to)
+    {
+        if (const auto bus = getReturnBus (to); bus >= 0)
+            for (auto* send : getSends (from))
+                if (send->getBusNumber() == bus)
+                    return true;
+
+        for (auto* parent = from.getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
+            if (parent == &to && isBus (*parent))
+                return true;
+
+        return false;
     }
 } // namespace
 
 Mixer::Mixer (te::Engine& e, CommandRegistry& registry, te::SelectionManager& selectionManager)
     : engine (e),
       commands (registry),
-      selection (selectionManager),
-      master (e, registry)
+      selection (selectionManager)
 {
     setTitle ("Mixer");
-    setDescription ("A channel for every track, in the playlist's order. Click a channel's name to select its track.");
+    setDescription ("A channel for every track, in the playlist's order, and the return tracks next to the master. Click a channel to "
+                    "select its track: the channels it feeds, and those that feed it, get an outline.");
 
     viewport.setViewedComponent (&stripHolder, false);
     viewport.setScrollBarsShown (false, true);
@@ -38,10 +56,12 @@ Mixer::Mixer (te::Engine& e, CommandRegistry& registry, te::SelectionManager& se
     addAndMakeVisible (addReturnButton);
 
     selection.addChangeListener (this);
+    startTimerHz (4);
 }
 
 Mixer::~Mixer()
 {
+    stopTimer();
     selection.removeChangeListener (this);
     editState.removeListener (this);
     strips.clear(); // before stripHolder, which holds them
@@ -68,8 +88,18 @@ void Mixer::setEdit (te::Edit* newEdit)
 
 void Mixer::rebuild()
 {
+    // The tracks in the playlist's order, then the returns, together next to the master.
     auto* e = edit.get();
-    const auto tracks = e != nullptr ? getPlaylistTracks (*e) : juce::Array<te::Track*>();
+    auto tracks = e != nullptr ? getPlaylistTracks (*e) : juce::Array<te::Track*>();
+    juce::Array<te::Track*> returns;
+
+    for (auto* track : tracks)
+        if (getReturnBus (*track) >= 0)
+            returns.add (track);
+
+    tracks.removeValuesIn (returns);
+    firstReturn = tracks.size();
+    tracks.addArray (returns);
 
     // The strips of tracks that are still there are kept, in the tracks' new order.
     juce::OwnedArray<ChannelStrip> kept;
@@ -103,8 +133,17 @@ void Mixer::rebuild()
 
 void Mixer::updateSelection()
 {
+    const auto selected = getSelectedTracks (selection);
+
     for (auto* strip : strips)
-        strip->setSelected (strip->getTrack() != nullptr && selection.isSelected (strip->getTrack()));
+    {
+        auto* t = strip->getTrack();
+        const auto isSelected = t != nullptr && selection.isSelected (t);
+        strip->setSelected (isSelected);
+        strip->setRelated (
+            t != nullptr && ! isSelected
+            && std::any_of (selected.begin(), selected.end(), [t] (te::Track* s) { return feeds (*s, *t) || feeds (*t, *s); }));
+    }
 }
 
 void Mixer::paint (juce::Graphics& g)
@@ -137,12 +176,13 @@ void Mixer::resized()
     master.setBounds (inside.removeFromRight (MasterStrip::width));
     viewport.setBounds (inside);
 
-    // The strips fill the height, leaving room for the scroll bar along the bottom.
+    // The strips fill the height, leaving room for the scroll bar along the bottom. A gap sets the returns apart.
     const auto height = inside.getHeight() - viewport.getScrollBarThickness();
-    stripHolder.setSize (std::max (1, strips.size() * ChannelStrip::width), height);
+    const auto gap = firstReturn > 0 && firstReturn < strips.size() ? returnsGap : 0;
+    stripHolder.setSize (std::max (1, strips.size() * ChannelStrip::width + gap), height);
 
     for (int i = 0; i < strips.size(); ++i)
-        strips[i]->setBounds (i * ChannelStrip::width, 0, ChannelStrip::width, height);
+        strips[i]->setBounds (i * ChannelStrip::width + (i >= firstReturn ? gap : 0), 0, ChannelStrip::width, height);
 }
 
 void Mixer::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)

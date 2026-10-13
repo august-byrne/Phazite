@@ -92,6 +92,13 @@ void setPinned (te::Track&, bool);
 // True if the track is inside a collapsed folder, so the playlist doesn't show it.
 bool isHiddenInCollapsedFolder (const te::Track&);
 
+// Solo, which Tracktion keeps apart from mute: soloing never changes a track's mute switch. Solos a track alone,
+// unsoloing the others, as a right-click on FL Studio's mute switch does; or unsolos it if it is the only one.
+void toggleSoloAlone (te::Track&);
+
+// True if a track is silent because other tracks are soloed, though it isn't muted itself.
+bool isSilencedBySolo (const te::Track&);
+
 // The track commands that need no window: add, select the track above or below, move, mute, solo and
 // height. They act on the tracks selected in the selection manager's Edit. Delete and duplicate are
 // selection commands (Selection.h); the playlist adds rename and color.

@@ -116,4 +116,28 @@ private:
     void detach();
     void timerCallback() override;
 };
+
+//==============================================================================
+// A track's mute (M) and solo (S) buttons, side by side. Clicking M mutes or unmutes the track; right-clicking it
+// solos the track alone, as in FL Studio, and again unsolos it. Clicking S solos the track along with others,
+// and Ctrl+click solos it alone. Soloing never changes the mute switches (FL Studio's solo does, a long-standing
+// complaint): a track silent because others are soloed shows its M half lit. Neither is an undo step, as in
+// many DAWs.
+class MuteSoloButtons : public juce::Component
+{
+public:
+    MuteSoloButtons();
+    ~MuteSoloButtons() override;
+
+    void setTrack (te::Track*);
+    void update(); // shows the track's mute and solo as they are now
+
+    void resized() override;
+
+private:
+    struct Button;
+
+    te::SafeSelectable<te::Track> track;
+    std::unique_ptr<Button> mute, solo;
+};
 } // namespace phazite::ui

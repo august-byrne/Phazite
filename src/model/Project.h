@@ -9,7 +9,7 @@ namespace phazite
 {
 namespace te = tracktion;
 
-class SongLoopFollower;
+class SongFollower;
 
 //==============================================================================
 // The project folder:
@@ -74,7 +74,7 @@ private:
 
     std::unique_ptr<te::Edit> edit;
     juce::File file;
-    std::unique_ptr<SongLoopFollower> songLoop; // keeps the loop around the song (Playback.h)
+    std::unique_ptr<SongFollower> songFollower; // keeps the loop around the song, and stops at its end (Playback.h)
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
 
     void backUpProjectFile();

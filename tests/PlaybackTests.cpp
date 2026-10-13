@@ -87,7 +87,7 @@ TEST_CASE ("The loop follows the song as clips are added, moved, trimmed and del
 {
     Song song;
     phazite::loopSong (*song.edit);
-    phazite::SongLoopFollower follower (*song.edit);
+    phazite::SongFollower follower (*song.edit);
     CHECK (song.isLooping());
     CHECK (phazite::doesLoopFollowSong (*song.edit));
     CHECK (song.getLoop() == "0.000-2.000");
@@ -125,14 +125,14 @@ TEST_CASE ("A project saved with another loop around its song gets the song's ag
     song.addClip (0, 0.0, 16.0);
     song.edit->getTransport().setLoopRange ({ seconds (0.0), seconds (2.0) });
 
-    phazite::SongLoopFollower follower (*song.edit);
+    phazite::SongFollower follower (*song.edit);
     CHECK (song.getLoop() == "0.000-8.000");
 }
 
 TEST_CASE ("Looping a range on purpose stops the loop following the song, until the song is looped again")
 {
     Song song;
-    phazite::SongLoopFollower follower (*song.edit);
+    phazite::SongFollower follower (*song.edit);
     song.addClip (0, 0.0, 8.0);
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-4.000");
@@ -158,7 +158,7 @@ TEST_CASE ("Looping a range on purpose stops the loop following the song, until 
 TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, sections or the song")
 {
     Song song;
-    phazite::SongLoopFollower follower (*song.edit);
+    phazite::SongFollower follower (*song.edit);
     song.addClip (0, 0.0, 8.0);
     phazite::test::dispatchPendingMessages();
 
@@ -174,8 +174,10 @@ TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, s
     CHECK_FALSE (song.isLooping());
     CHECK_FALSE (song.isTicked ("transport.loopSong"));
 
-    // Loop Selection needs a time range selected.
-    CHECK_FALSE (song.registry.invoke ("transport.loopSelection"));
+    // Loop Selection loops the time range selected, or with none, the song, as Ctrl+L does in Ableton Live.
+    REQUIRE (song.registry.invoke ("transport.loopSelection"));
+    CHECK (song.isLooping());
+    CHECK (song.isTicked ("transport.loopSong"));
     song.range.set ({ beats (2.0), beats (6.0) }, { song.tracks[0] });
     REQUIRE (song.registry.invoke ("transport.loopSelection"));
     CHECK (song.isLooping());

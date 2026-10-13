@@ -280,6 +280,26 @@ bool isHiddenInCollapsedFolder (const te::Track& track)
     return false;
 }
 
+void toggleSoloAlone (te::Track& track)
+{
+    auto alone = track.isSolo (false);
+
+    for (auto* other : te::getAllTracks (track.edit))
+        if (other != &track && other->isSolo (false))
+            alone = false;
+
+    for (auto* other : te::getAllTracks (track.edit))
+        if (other != &track)
+            other->setSolo (false);
+
+    track.setSolo (! alone);
+}
+
+bool isSilencedBySolo (const te::Track& track)
+{
+    return track.edit.areAnyTracksSolo() && ! track.isSolo (true) && ! track.isSoloIsolate (true) && ! track.isMuted (false);
+}
+
 //==============================================================================
 te::AudioTrack* insertTrack (te::Edit& edit, te::Track* after, te::SelectionManager* selection)
 {

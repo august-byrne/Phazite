@@ -75,6 +75,10 @@ namespace Space
 inline constexpr int controlHeight = 28;
 inline constexpr float cornerRadius = 4.0f;
 
+// How far a button that needs attention, such as one asking for the instrument a track's notes need, is mixed with the
+// warning color.
+inline constexpr float attentionTint = 0.35f;
+
 // Track colors are saved in projects, so their palette is in the model: phazite::getTrackColours().
 
 // How strongly a track's color tints what belongs to the track, so that its color runs through its row: the

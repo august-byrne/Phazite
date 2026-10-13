@@ -1,11 +1,13 @@
 {
   "name": "FL Studio",
-  "description": "FL Studio's shortcuts, from its manual, for the commands Phazite has so far. Ctrl+Z undoes or redoes the last change; Ctrl+Alt+Z undoes step by step. Ctrl+T turns the computer keyboard's notes on or off, and F10 opens the MIDI settings. In the playlist, a click on empty space places the last clip used (Ctrl+drag selects a time range), and right-click deletes clips.",
+  "description": "FL Studio's shortcuts, from its manual, for the commands Phazite has so far. Ctrl+Z undoes or redoes the last change; Ctrl+Alt+Z undoes step by step. Ctrl+T turns the computer keyboard's notes on or off, and F10 opens the MIDI settings. In the playlist, a click on empty space places the last clip used, right-click deletes clips, and Ctrl+drag selects a time range, which loops while it is selected.",
   "rightClickDeletes": true,
   "clickPlacesClips": true,
+  "selectionLoops": true,
   "keys": {
     "transport.playStop": [ "spacebar" ],
     "transport.goToStart": [ "home" ],
+    "transport.loopSelection": [ "command + L" ],
     "edit.undoOrRedo": [ "command + Z" ],
     "edit.undo": [ "command + alt + Z" ],
     "edit.delete": [ "delete" ],

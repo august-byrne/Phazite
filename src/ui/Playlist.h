@@ -80,6 +80,7 @@ private:
 
     IconButton addTrackButton { "Add track", Icon::plus }; // over the track headers, left of the time bar
     te::SafeSelectable<te::Clip> lastClip;                 // the clip the Draw and Paint tools place copies of
+    bool loopsSelection = false;                           // with a keymap whose selection loops: the loop is the selected time range's
 
     // The header column holds the pinned headers in a band at the top, and below it the scrolling
     // headers, inside headerContent, with a row after them that adds a track; the lanes hold the clips in two
@@ -172,6 +173,7 @@ private:
     void showColourMenu (te::Track&, juce::Component& target) override;
     void trackDragged (TrackHeader&, const juce::MouseEvent&) override;
     void trackDragEnded (TrackHeader&, const juce::MouseEvent&) override;
+    void trackSelectionDragged (TrackHeader&, const juce::MouseEvent&) override;
     void trackHeightChanged() override { layOutRows(); }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection or the range changed

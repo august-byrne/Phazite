@@ -18,6 +18,17 @@ bool isDevice (const te::Plugin&);
 juce::Array<te::Plugin*> getDevices (const te::Track&);
 juce::Array<te::Plugin*> getMasterDevices (const te::Edit&);
 
+// A track's instrument, which turns its notes into sound: its first device, if that is an instrument. Its effects
+// are the devices after it, which change the sound. Folders, returns and the master have effects only.
+te::Plugin* getInstrument (const te::Track&);
+juce::Array<te::Plugin*> getEffects (const te::Track&);
+
+// True if a track has notes but no instrument to play them, so they make no sound.
+bool needsInstrument (const te::Track&);
+
+// Puts an instrument on a track, in place of the one it had. Returns it, or nullptr if the track can't hold one.
+te::Plugin* setInstrument (te::AudioTrack&, const te::Plugin::Ptr&);
+
 // Adds a device to a track's chain, at a place among its devices (-1 for the end), before its fader. A plain
 // folder becomes a bus first. Returns the device, or nullptr if the track can't hold it.
 te::Plugin* insertDevice (te::Track&, const te::Plugin::Ptr&, int index = -1);
@@ -54,6 +65,10 @@ bool isBus (const te::Track&);
 void makeBus (te::FolderTrack&);
 void makePlainFolder (te::FolderTrack&);
 
+// The bus switch on a folder's strip, as an undo step. A folder made a bus with it stays one when its last effect
+// goes, while one that became a bus by getting an effect turns plain again then. A bus with effects stays a bus.
+void setMixedAsBus (te::FolderTrack&, bool);
+
 // The plug-in whose volume a channel's fader moves: a track's or a bus's volume, or a plain folder's VCA.
 te::Plugin* getVolumeDevice (te::Track&);
 juce::String getVolumeParameterID (te::Track&);
@@ -68,6 +83,11 @@ te::AudioTrack* findReturnTrack (const te::Edit&, int bus);
 
 // Adds a return track after the last track, on a bus of its own, named as given, and selects it.
 te::AudioTrack* addReturnTrack (te::Edit&, const juce::String& name, te::SelectionManager*);
+
+// In one step, as Studio One does: a return track holding an effect, named after it, and a send to it from a track,
+// after the track's fader. A built-in reverb drops its dry sound, which reaches the master through the track itself.
+// Returns the return track, or nullptr if there was no room for it.
+te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& effect);
 
 juce::Array<te::AuxSendPlugin*> getSends (const te::Track&);
 

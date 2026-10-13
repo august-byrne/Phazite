@@ -221,6 +221,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/CommandUI.h
     src/ui/Controls.cpp
     src/ui/Controls.h
+    src/ui/DeviceMenus.cpp
+    src/ui/DeviceMenus.h
     src/ui/DesignTokens.h
     src/ui/HintBar.cpp
     src/ui/HintBar.h

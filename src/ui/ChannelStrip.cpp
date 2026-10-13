@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ChannelStrip.h"
 #include "CommandUI.h"
+#include "DeviceMenus.h"
 #include "LookAndFeel.h"
 #include "model/LiveInput.h"
 #include "model/LoudnessMeterPlugin.h"
 #include "model/Mixer.h"
 #include "model/Tracks.h"
 
-#include <map>
-
 namespace phazite::ui
 {
 namespace
 {
-    constexpr int slotNameHeight = 22, slotKnobHeight = 30, sendHeight = 26, buttonHeight = 24;
+    constexpr int slotNameHeight = 22, slotKnobHeight = 30, sendHeight = 26, buttonHeight = 24, headingHeight = 16;
     constexpr int keyControlsPerDevice = 2;
-    constexpr int panKnobSize = 44, meterWidth = 10, headerHeight = 46, colourBarHeight = 4;
-    constexpr int minFaderHeight = 72, minSlotsHeight = buttonHeight;
+    constexpr int panKnobSize = 44, meterWidth = 10, headerHeight = 46, colourBarHeight = 4, outputHeight = 18;
+    constexpr int minFaderHeight = 72, minSlotsHeight = headingHeight + buttonHeight;
     constexpr int loudnessHeight = 4 * 16 + buttonHeight + Space::xs; // the master's readout: four lines and the Reset button
+    constexpr float relatedOutlineAlpha = 0.5f;                       // a channel the selected one feeds, or is fed by
 
     // The fader's height: half of what there is, at least the minimum, but leaving the rest of the strip what it needs.
     int getFaderHeight (int available, int forTheRest)
@@ -66,7 +66,35 @@ namespace
         parent.addAndMakeVisible (knob);
         return knob;
     }
+
+    // The tracks that send to a return's bus.
+    juce::StringArray getSenderNames (const te::Edit& edit, int bus)
+    {
+        juce::StringArray names;
+
+        for (auto* track : te::getAudioTracks (edit))
+            for (auto* send : getSends (*track))
+                if (send->getBusNumber() == bus)
+                    names.addIfNotAlreadyThere (track->getName());
+
+        return names;
+    }
 } // namespace
+
+//==============================================================================
+StripHeading::StripHeading (const juce::String& headingText)
+    : text (headingText)
+{
+    setAccessible (false);
+    setInterceptsMouseClicks (false, false);
+}
+
+void StripHeading::paint (juce::Graphics& g)
+{
+    g.setColour (getPalette (*this).textMuted);
+    g.setFont (juce::FontOptions (TextSize::small));
+    g.drawText (text, getLocalBounds(), juce::Justification::centredLeft, true);
+}
 
 //==============================================================================
 // A device: its name, which opens its window (right-click for more), an on/off switch, and its key controls.
@@ -78,7 +106,8 @@ struct DeviceSlots::Slot : public juce::Component
     {
         nameButton.setButtonText (device.getName());
         nameButton.setTitle (device.getName());
-        nameButton.setTooltip ("Opens " + device.getName() + "'s window. Right-click to turn it off, move or remove it");
+        nameButton.setTooltip ("Opens " + device.getName() + "'s window. Right-click to turn it off, "
+                               + (owner.kind == Kind::instrument ? "replace or remove it" : "move or remove it"));
         nameButton.onClicked = [this] (bool isMenuClick)
         {
             if (auto* d = plugin.get())
@@ -145,14 +174,13 @@ struct DeviceSlots::Slot : public juce::Component
 };
 
 //==============================================================================
-DeviceSlots::DeviceSlots (te::Engine& e, CommandRegistry& registry)
-    : engine (e),
-      commands (registry)
+DeviceSlots::DeviceSlots (Kind k)
+    : kind (k)
 {
-    setTitle ("Devices");
-    addButton.setTooltip ("Adds a device: an instrument or an effect, built in or a plug-in");
+    setTitle (kind == Kind::instrument ? "Instrument" : "Effects");
     addButton.onClick = [this] { showAddMenu(); };
     addAndMakeVisible (addButton);
+    updateAddButton();
 }
 
 DeviceSlots::~DeviceSlots() = default;
@@ -168,9 +196,17 @@ void DeviceSlots::setChannel (te::Track* newTrack, te::Edit* newEdit)
 juce::Array<te::Plugin*> DeviceSlots::getChannelDevices() const
 {
     if (auto* t = track.get())
-        return getDevices (*t);
+    {
+        if (kind == Kind::effects)
+            return getEffects (*t);
 
-    if (auto* e = edit.get())
+        if (auto* instrumentDevice = getInstrument (*t))
+            return { instrumentDevice };
+
+        return {};
+    }
+
+    if (auto* e = edit.get(); e != nullptr && kind == Kind::effects)
         return getMasterDevices (*e);
 
     return {};
@@ -187,6 +223,8 @@ void DeviceSlots::update()
 
     for (auto* slot : slots)
         slot->update();
+
+    updateAddButton();
 }
 
 void DeviceSlots::rebuild()
@@ -198,13 +236,49 @@ void DeviceSlots::rebuild()
     for (auto* device : channelDevices)
         addAndMakeVisible (slots.add (new Slot (*this, *device)));
 
-    addButton.setEnabled (track.get() != nullptr || edit.get() != nullptr);
+    shownNeed = -1;
+    updateAddButton();
     resized();
+}
+
+void DeviceSlots::updateAddButton()
+{
+    if (kind == Kind::effects)
+    {
+        addButton.setButtonText ("+ Effect");
+        addButton.setTooltip ("Adds an effect, which changes the sound, such as a reverb: built in or a plug-in");
+        addButton.setEnabled (track.get() != nullptr || edit.get() != nullptr);
+        return;
+    }
+
+    // A track has one instrument: the button shows while it has none, and asks for one, tinted, while the track has
+    // notes that make no sound without it.
+    auto* t = track.get();
+    addButton.setVisible (slots.isEmpty());
+    addButton.setEnabled (dynamic_cast<te::AudioTrack*> (t) != nullptr);
+
+    if (const auto need = t != nullptr && needsInstrument (*t) ? 1 : 0; need != shownNeed)
+    {
+        shownNeed = need;
+        const auto& p = getPalette (*this);
+        addButton.setButtonText (need == 1 ? "Choose instrument" : "+ Instrument");
+        addButton.setTooltip (need == 1 ? "This track has notes, but no instrument to play them, so they make no sound. Choose "
+                                          "one: a synth or a sampler"
+                                        : "Adds an instrument, which plays the track's notes: a synth or a sampler, built in or a plug-in");
+        addButton.setColour (juce::TextButton::buttonColourId,
+                             need == 1 ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint) : p.surfaceRaised);
+    }
+}
+
+void DeviceSlots::lookAndFeelChanged()
+{
+    shownNeed = -1; // the theme's colors
+    updateAddButton();
 }
 
 int DeviceSlots::getPreferredHeight() const
 {
-    auto height = buttonHeight;
+    auto height = addButton.isVisible() ? buttonHeight : 0;
 
     for (auto* slot : slots)
         height += slotNameHeight + (slot->knobs.isEmpty() ? 0 : slotKnobHeight) + Space::xs;
@@ -227,74 +301,24 @@ void DeviceSlots::resized()
 
 void DeviceSlots::showAddMenu()
 {
-    auto* e = track.get() != nullptr ? &track->edit : edit.get();
-
-    if (e == nullptr)
-        return;
-
-    // Built-in devices, then the plug-ins found by scanning, by maker. Only tracks play instruments: folders and
-    // the master take effects.
-    const auto types = getDeviceTypes (engine);
-    const auto canHoldInstruments = dynamic_cast<te::AudioTrack*> (track.get()) != nullptr;
-    juce::PopupMenu instruments, effects;
-    std::map<juce::String, juce::PopupMenu> plugins;
-
-    for (size_t i = 0; i < types.size(); ++i)
+    if (kind == Kind::instrument)
     {
-        const auto& type = types[i];
-        const auto id = (int) i + 1;
-
-        if (te::PluginManager::isBuiltInPlugin (type.description))
-            (type.isInstrument ? instruments : effects).addItem (id, type.name);
-        else
-            plugins[type.description.manufacturerName.isNotEmpty() ? type.description.manufacturerName : juce::String ("Other")].addItem (
-                id, type.name + (type.isInstrument ? " (instrument)" : ""), ! type.isInstrument || canHoldInstruments);
+        if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (track.get()))
+            showInstrumentMenu (*audioTrack, addButton);
     }
-
-    juce::PopupMenu menu;
-    menu.addSubMenu ("Instruments", instruments, canHoldInstruments);
-    menu.addSubMenu ("Effects", effects);
-
-    if (plugins.empty())
+    else if (auto* e = track.get() != nullptr ? &track->edit : edit.get())
     {
-        menu.addItem ("No plug-ins yet: Options > Scan for Plug-ins finds them", false, false, [] {});
+        showEffectMenu (*e, track.get(), addButton);
     }
-    else
-    {
-        menu.addSectionHeader ("Plug-ins");
-
-        for (auto& [maker, list] : plugins)
-            menu.addSubMenu (maker, list);
-    }
-
-    const te::SafeSelectable<te::Track> safeTrack (track.get());
-    const te::SafeSelectable<te::Edit> safeEdit (e);
-
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton),
-                        [safeThis = juce::Component::SafePointer<DeviceSlots> (this), safeTrack, safeEdit, types] (int result)
-                        {
-                            auto* chosenEdit = safeEdit.get();
-
-                            if (safeThis == nullptr || chosenEdit == nullptr || result <= 0 || result > (int) types.size()) // 0: dismissed
-                                return;
-
-                            const auto& type = types[(size_t) result - 1];
-                            chosenEdit->getUndoManager().beginNewTransaction ("Add " + type.name);
-                            auto device = createDevice (*chosenEdit, type);
-
-                            if (auto* t = safeTrack.get())
-                                insertDevice (*t, device);
-                            else
-                                insertMasterDevice (*chosenEdit, device);
-
-                            safeThis->update();
-                        });
 }
 
 void DeviceSlots::showSlotMenu (te::Plugin& device)
 {
-    const auto devices = getChannelDevices();
-    const auto index = devices.indexOf (&device);
+    // Effects move among the channel's effects, which follow its instrument among all its devices.
+    const auto shown = getChannelDevices();
+    const auto index = shown.indexOf (&device);
+    const auto all = track.get() != nullptr ? getDevices (*track.get()) : (edit.get() != nullptr ? getMasterDevices (*edit.get()) : shown);
+    const auto position = all.indexOf (&device);
     const te::SafeSelectable<te::Plugin> safeDevice (&device);
     const juce::Component::SafePointer<DeviceSlots> safeThis (this);
 
@@ -323,9 +347,24 @@ void DeviceSlots::showSlotMenu (te::Plugin& device)
     menu.addItem ("On", true, device.isEnabled(),
                   act (device.isEnabled() ? "Turn Device Off" : "Turn Device On", [] (te::Plugin& d) { d.setEnabled (! d.isEnabled()); }));
     menu.addSeparator();
-    menu.addItem ("Move Up", index > 0, false, act ("Move Device", [index] (te::Plugin& d) { moveDevice (d, index - 1); }));
-    menu.addItem ("Move Down", index < devices.size() - 1, false,
-                  act ("Move Device", [index] (te::Plugin& d) { moveDevice (d, index + 1); }));
+
+    if (kind == Kind::instrument)
+    {
+        menu.addItem ("Replace...",
+                      [safeThis]
+                      {
+                          if (safeThis != nullptr)
+                              if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (safeThis->track.get()))
+                                  showInstrumentMenu (*audioTrack, *safeThis);
+                      });
+    }
+    else
+    {
+        menu.addItem ("Move Up", index > 0, false, act ("Move Device", [position] (te::Plugin& d) { moveDevice (d, position - 1); }));
+        menu.addItem ("Move Down", index < shown.size() - 1, false,
+                      act ("Move Device", [position] (te::Plugin& d) { moveDevice (d, position + 1); }));
+    }
+
     menu.addSeparator();
     menu.addItem ("Remove", act ("Remove " + device.getName(), [] (te::Plugin& d) { removeDevice (d); }));
     menu.showMenuAsync (juce::PopupMenu::Options());
@@ -338,7 +377,7 @@ struct ChannelStrip::SendSlot : public juce::Component
     explicit SendSlot (te::AuxSendPlugin& s)
         : send (&s)
     {
-        nameButton.setTooltip ("A send to this return. Right-click to remove it");
+        nameButton.setTooltip ("A send to this return track. Right-click to remove it");
         nameButton.onClicked = [this] (bool isMenuClick)
         {
             if (isMenuClick)
@@ -376,7 +415,7 @@ struct ChannelStrip::SendSlot : public juce::Component
 
         const auto* target = findReturnTrack (aux->edit, aux->getBusNumber());
         const auto name = target != nullptr ? target->getName() : aux->getBusName();
-        nameButton.setButtonText (name);
+        nameButton.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92 ")) + name);
         nameButton.setTitle ("Send to " + name);
         prePost.setButtonText (isPreFader (*aux) ? "Pre" : "Post");
         attachment.update();
@@ -416,45 +455,56 @@ struct ChannelStrip::SendSlot : public juce::Component
 ChannelStrip::ChannelStrip (te::Engine& e, CommandRegistry& registry, te::SelectionManager& selectionManager)
     : engine (e),
       commands (registry),
-      selection (selectionManager),
-      devices (e, registry)
+      selection (selectionManager)
 {
     setTitle ("Channel");
 
     nameLabel.setJustificationType (juce::Justification::centred);
     nameLabel.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
     nameLabel.setInterceptsMouseClicks (false, false); // a click on the name selects the track
-    outputLabel.setJustificationType (juce::Justification::centred);
-    outputLabel.setFont (juce::FontOptions (TextSize::small));
-    outputLabel.setInterceptsMouseClicks (false, false);
+
+    for (auto* label : { &inputLabel, &outputLabel })
+    {
+        label->setJustificationType (juce::Justification::centred);
+        label->setFont (juce::FontOptions (TextSize::small));
+        label->setMinimumHorizontalScale (0.8f);
+        label->setInterceptsMouseClicks (false, false);
+    }
+
+    outputLabel.setTitle ("Output");
+
+    busButton.setTitle ("Mix as a bus");
+    busButton.onClick = [this]
+    {
+        if (auto* folder = dynamic_cast<te::FolderTrack*> (track.get()))
+        {
+            const auto bus = ! isBus (*folder);
+            folder->edit.getUndoManager().beginNewTransaction (bus ? "Mix Folder as Bus" : "Make Folder Plain");
+            setMixedAsBus (*folder, bus);
+        }
+
+        timerCallback();
+    };
 
     showAsDecibels (volume);
     showAsPan (pan);
     volume.setTooltip ("The track's volume. Double-click for 0 dB; drag with Shift held for fine steps");
     pan.setTooltip ("Where the track sits between the left and right speakers. Double-click to center it");
 
-    muteButton.setTitle ("Mute");
-    muteButton.setTooltip ("Mute: silences this track");
-    soloButton.setTitle ("Solo");
-    soloButton.setTooltip ("Solo: plays only this track, and any others that are soloed");
-
-    for (auto* button : { &muteButton, &soloButton })
-        button->setClickingTogglesState (true);
-
-    muteButton.onClick = [this] { setMuteOrSolo (true, muteButton.getToggleState()); };
-    soloButton.onClick = [this] { setMuteOrSolo (false, soloButton.getToggleState()); };
-
-    addSendButton.setTooltip ("Sends some of this track to a return track, for an effect such as a reverb");
+    addSendButton.setTooltip ("Sends some of this track to a return track, which holds an effect that several tracks share, "
+                              "such as a reverb");
     addSendButton.onClick = [this] { showSendMenu(); };
 
     slotView.setViewedComponent (&slotHolder, false);
     slotView.setScrollBarsShown (true, false);
     slotView.setScrollBarThickness (6);
-    slotHolder.addAndMakeVisible (devices);
-    slotHolder.addAndMakeVisible (addSendButton);
 
-    for (auto* c :
-         std::initializer_list<juce::Component*> { &nameLabel, &outputLabel, &slotView, &meter, &volume, &pan, &muteButton, &soloButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &instrumentHeading, &instrument, &effectsHeading, &effects, &sendsHeading,
+                                                             &addSendButton })
+        slotHolder.addAndMakeVisible (c);
+
+    for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &inputLabel, &busButton, &slotView, &outputLabel, &meter, &volume,
+                                                             &pan, &muteSolo })
         addAndMakeVisible (c);
 
     setTrack (nullptr);
@@ -469,11 +519,14 @@ ChannelStrip::~ChannelStrip()
 void ChannelStrip::setTrack (te::Track* newTrack)
 {
     track = newTrack;
-    devices.setChannel (newTrack, nullptr);
+    instrument.setChannel (newTrack, nullptr);
+    effects.setChannel (newTrack, nullptr);
+    muteSolo.setTrack (newTrack);
     shownSends.clear();
     rebuildSends();
     attachControls();
     timerCallback();
+    resized(); // a folder's header has the bus switch
 }
 
 void ChannelStrip::setSelected (bool isSelected)
@@ -481,6 +534,15 @@ void ChannelStrip::setSelected (bool isSelected)
     if (selected != isSelected)
     {
         selected = isSelected;
+        repaint();
+    }
+}
+
+void ChannelStrip::setRelated (bool isRelated)
+{
+    if (related != isRelated)
+    {
+        related = isRelated;
         repaint();
     }
 }
@@ -496,8 +558,26 @@ void ChannelStrip::attachControls()
     panAttachment.setParameter (panDevice, panDevice != nullptr ? panDevice->panParam->paramID : juce::String());
     meter.setSource (t != nullptr ? getLevelMeasurer (*t) : nullptr);
 
-    // Sends come from tracks; folders route through their tracks.
-    addSendButton.setVisible (dynamic_cast<te::AudioTrack*> (t) != nullptr);
+    // Instruments go on tracks: folders and returns take effects only. Sends come from tracks.
+    auto* audioTrack = dynamic_cast<te::AudioTrack*> (t);
+    const auto canHoldInstrument = audioTrack != nullptr && getReturnBus (*audioTrack) < 0;
+    instrumentHeading.setVisible (canHoldInstrument);
+    instrument.setVisible (canHoldInstrument);
+    sendsHeading.setVisible (audioTrack != nullptr);
+    addSendButton.setVisible (audioTrack != nullptr);
+
+    // A folder's bus switch. A bus with effects stays one: making it plain would take them away.
+    auto* folder = dynamic_cast<te::FolderTrack*> (t);
+    const auto bus = folder != nullptr && isBus (*folder), hasEffects = folder != nullptr && ! getEffects (*folder).isEmpty();
+    busButton.setVisible (folder != nullptr);
+    busButton.setToggleState (bus, juce::dontSendNotification);
+    busButton.setEnabled (! (bus && hasEffects));
+    busButton.setTooltip (! bus ? "Mix as a bus: the folder's tracks then mix together, through its own effects, fader and meter. Now "
+                                  "its fader only scales their volumes"
+                          : hasEffects
+                              ? "A bus: its tracks mix together through its effects. Remove them to make it a plain folder"
+                              : "A bus: its tracks mix together through its fader and meter. Click to make it a plain folder, whose "
+                                "fader only scales their volumes");
 }
 
 void ChannelStrip::rebuildSends()
@@ -519,8 +599,10 @@ void ChannelStrip::showSendMenu()
     if (audio == nullptr)
         return;
 
+    // The returns there are, then new ones: one with an effect, as Studio One makes it in one step, or an empty one.
     juce::PopupMenu menu;
     const te::SafeSelectable<te::AudioTrack> safeTrack (audio);
+    menu.addSectionHeader ("Return tracks hold effects that tracks share");
 
     for (auto* target : getReturnTracks (audio->edit))
     {
@@ -541,7 +623,14 @@ void ChannelStrip::showSendMenu()
     }
 
     menu.addSeparator();
-    menu.addItem ("To a New Return Track",
+    menu.addItem ("To a New Return With an Effect...",
+                  [safeTrack, safeButton = juce::Component::SafePointer<juce::Component> (&addSendButton)]
+                  {
+                      if (auto* t = safeTrack.get(); t != nullptr && safeButton != nullptr)
+                          showNewReturnMenu (*t, *safeButton);
+                  });
+
+    menu.addItem ("To a New Empty Return",
                   [safeTrack]
                   {
                       if (auto* t = safeTrack.get())
@@ -557,6 +646,26 @@ void ChannelStrip::showSendMenu()
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addSendButton));
 }
 
+juce::String ChannelStrip::describeInput() const
+{
+    auto* t = track.get();
+
+    if (t == nullptr)
+        return {};
+
+    if (auto* folder = dynamic_cast<te::FolderTrack*> (t))
+        return isBus (*folder) ? "Bus: mixes its tracks" : "Folder: scales its tracks";
+
+    // A return says which tracks send to it.
+    if (const auto bus = getReturnBus (*t); bus >= 0)
+    {
+        const auto senders = getSenderNames (t->edit, bus);
+        return senders.isEmpty() ? juce::String ("Return: nothing sends to it yet") : "Return, from " + senders.joinIntoString (", ");
+    }
+
+    return {};
+}
+
 juce::String ChannelStrip::describeOutput() const
 {
     auto* t = track.get();
@@ -565,15 +674,14 @@ juce::String ChannelStrip::describeOutput() const
         return {};
 
     if (auto* folder = dynamic_cast<te::FolderTrack*> (t); folder != nullptr && ! isBus (*folder))
-        return "Folder: scales its tracks";
+        return "No sound of its own";
 
     // A track goes into the nearest bus it is in, or else to the master.
     for (auto* parent = t->getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
         if (isBus (*parent))
-            return juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92 ")) + parent->getName();
+            return "Out: " + parent->getName();
 
-    const auto prefix = getReturnBus (*t) >= 0 ? juce::String ("Return ") : (isBus (*t) ? juce::String ("Bus ") : juce::String());
-    return prefix + juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92 Master"));
+    return "Out: Master";
 }
 
 void ChannelStrip::timerCallback()
@@ -593,16 +701,17 @@ void ChannelStrip::timerCallback()
     }
 
     nameLabel.setText (t != nullptr ? t->getName() : juce::String ("No track"), juce::dontSendNotification);
+    inputLabel.setText (describeInput(), juce::dontSendNotification);
     outputLabel.setText (describeOutput(), juce::dontSendNotification);
+    outputLabel.setTooltip (t != nullptr && getReturnBus (*t) < 0
+                                ? "Where the sound goes: to the master, which you hear, or to the bus of the folder the track is in"
+                                : "Where the sound goes");
     volumeAttachment.update();
     panAttachment.update();
+    muteSolo.update();
 
-    muteButton.setEnabled (t != nullptr);
-    soloButton.setEnabled (t != nullptr);
-    muteButton.setToggleState (t != nullptr && t->isMuted (false), juce::dontSendNotification);
-    soloButton.setToggleState (t != nullptr && t->isSolo (false), juce::dontSendNotification);
-
-    devices.update();
+    instrument.update();
+    effects.update();
     layOutSlots(); // the devices may have changed
 
     if (getIDs (t != nullptr ? getSends (*t) : juce::Array<te::AuxSendPlugin*>()) != shownSends)
@@ -617,18 +726,6 @@ void ChannelStrip::timerCallback()
     {
         shownColour = colour;
         repaint (getLocalBounds().removeFromTop (colourBarHeight));
-    }
-}
-
-void ChannelStrip::setMuteOrSolo (bool mute, bool on)
-{
-    // Tracktion keeps mute and solo out of the undo history, as many DAWs do.
-    if (auto* t = track.get())
-    {
-        if (mute)
-            t->setMute (on);
-        else
-            t->setSolo (on);
     }
 }
 
@@ -652,9 +749,10 @@ void ChannelStrip::paint (juce::Graphics& g)
         g.fillRect (area.removeFromTop (colourBarHeight));
     }
 
-    if (selected)
+    // Selected, or related to the selected channel by a send or a bus: then fainter, so the routing shows.
+    if (selected || related)
     {
-        g.setColour (p.accent);
+        g.setColour (p.accent.withAlpha (selected ? 1.0f : relatedOutlineAlpha));
         g.drawRoundedRectangle (getLocalBounds().reduced (2, 0).toFloat().reduced (0.5f), cornerRadius, 1.0f);
     }
 }
@@ -666,21 +764,25 @@ void ChannelStrip::resized()
 
     auto header = area.removeFromTop (headerHeight - colourBarHeight);
     nameLabel.setBounds (header.removeFromTop (controlHeight - 4));
-    outputLabel.setBounds (header);
 
-    // At the bottom: the fader with the meter, then mute and solo, and pan. The device and send slots get what is
-    // left above them, and scroll. (The mixer keeps the strip at least getMinimumHeight() tall.)
-    const auto faderHeight = getFaderHeight (area.getHeight(), buttonHeight + panKnobSize + 3 * Space::xs + minSlotsHeight);
+    if (dynamic_cast<te::FolderTrack*> (track.get()) != nullptr)
+        busButton.setBounds (header.removeFromRight (40).reduced (0, 1));
+
+    inputLabel.setBounds (header);
+
+    // At the bottom: the fader with the meter, mute and solo, pan, and where the sound goes. The instrument, effects
+    // and sends get what is left above them, and scroll. (The mixer keeps the strip at least getMinimumHeight() tall.)
+    const auto faderHeight = getFaderHeight (area.getHeight(), buttonHeight + panKnobSize + outputHeight + 4 * Space::xs + minSlotsHeight);
     auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);
     area.removeFromBottom (Space::xs);
 
-    auto buttons = area.removeFromBottom (buttonHeight);
-    muteButton.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2).reduced (Space::xs / 2, 0));
-    soloButton.setBounds (buttons.reduced (Space::xs / 2, 0));
+    muteSolo.setBounds (area.removeFromBottom (buttonHeight));
     area.removeFromBottom (Space::xs);
     pan.setBounds (area.removeFromBottom (panKnobSize).withSizeKeepingCentre (panKnobSize, panKnobSize));
+    area.removeFromBottom (Space::xs);
+    outputLabel.setBounds (area.removeFromBottom (outputHeight));
     area.removeFromBottom (Space::xs);
 
     slotView.setBounds (area);
@@ -689,32 +791,47 @@ void ChannelStrip::resized()
 
 int ChannelStrip::getMinimumHeight()
 {
-    // As resized() lays it out: the header, a row of slots, pan, mute and solo, and the shortest fader.
-    return 2 * Space::xs + headerHeight + minSlotsHeight + panKnobSize + buttonHeight + minFaderHeight + 3 * Space::xs;
+    // As resized() lays it out: the header, a heading and a button, where the sound goes, pan, mute and solo, and the
+    // shortest fader.
+    return 2 * Space::xs + headerHeight + minSlotsHeight + outputHeight + panKnobSize + buttonHeight + minFaderHeight + 4 * Space::xs;
 }
 
 void ChannelStrip::layOutSlots()
 {
+    // Top to bottom as the sound goes: the instrument (on tracks), the effects, then the sends (from tracks).
     const auto slotWidth = std::max (1, slotView.getWidth() - slotView.getScrollBarThickness());
     auto y = 0;
 
-    devices.setBounds (0, y, slotWidth, devices.getPreferredHeight());
-    y += devices.getHeight() + Space::s;
-
-    for (auto* slot : sendSlots)
+    const auto place = [&y, slotWidth] (juce::Component& component, int height, int gapAfter)
     {
-        slot->setBounds (0, y, slotWidth, sendHeight);
-        y += sendHeight + Space::xs;
+        component.setBounds (0, y, slotWidth, height);
+        y += height + gapAfter;
+    };
+
+    if (instrument.isVisible())
+    {
+        place (instrumentHeading, headingHeight, 0);
+        place (instrument, instrument.getPreferredHeight(), Space::s);
     }
 
-    addSendButton.setBounds (0, y, slotWidth, buttonHeight);
-    y += addSendButton.isVisible() ? buttonHeight : 0;
+    place (effectsHeading, headingHeight, 0);
+    place (effects, effects.getPreferredHeight(), Space::s);
+
+    if (addSendButton.isVisible())
+    {
+        place (sendsHeading, headingHeight, 0);
+
+        for (auto* slot : sendSlots)
+            place (*slot, sendHeight, Space::xs);
+
+        place (addSendButton, buttonHeight, 0);
+    }
+
     slotHolder.setSize (slotWidth, y);
 }
 
 //==============================================================================
-MasterStrip::MasterStrip (te::Engine& e, CommandRegistry& registry)
-    : devices (e, registry)
+MasterStrip::MasterStrip()
 {
     setTitle ("Master");
     showAsDecibels (volume);
@@ -724,7 +841,7 @@ MasterStrip::MasterStrip (te::Engine& e, CommandRegistry& registry)
     loudness.setJustificationType (juce::Justification::topLeft);
     loudness.setTitle ("Loudness");
     loudness.setTooltip ("Loudness, measured as streaming services do (EBU R128): momentary, over the last 3 seconds, and integrated since "
-                         "the reset, with the true peak. It measures the master's devices, before the master volume");
+                         "the reset, with the true peak. It measures the master's effects, before the master volume");
 
     resetButton.setTooltip ("Starts the integrated loudness and the true peak again");
     resetButton.onClick = [this]
@@ -734,11 +851,11 @@ MasterStrip::MasterStrip (te::Engine& e, CommandRegistry& registry)
                 meterPlugin->resetReadings();
     };
 
-    deviceView.setViewedComponent (&devices, false);
+    deviceView.setViewedComponent (&effects, false);
     deviceView.setScrollBarsShown (true, false);
     deviceView.setScrollBarThickness (6);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &deviceView, &meter, &volume, &loudness, &resetButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &effectsHeading, &deviceView, &meter, &volume, &loudness, &resetButton })
         addAndMakeVisible (c);
 
     startTimerHz (5);
@@ -747,7 +864,7 @@ MasterStrip::MasterStrip (te::Engine& e, CommandRegistry& registry)
 void MasterStrip::setEdit (te::Edit* newEdit)
 {
     edit = newEdit;
-    devices.setChannel (nullptr, newEdit);
+    effects.setChannel (nullptr, newEdit);
 
     const auto volumePlugin = newEdit != nullptr ? newEdit->getMasterVolumePlugin() : nullptr;
     volumeAttachment.setParameter (volumePlugin.get(), volumePlugin != nullptr ? volumePlugin->volParam->paramID : juce::String());
@@ -758,8 +875,8 @@ void MasterStrip::timerCallback()
 {
     auto* e = edit.get();
     volumeAttachment.update();
-    devices.update();
-    devices.setSize (devices.getWidth(), devices.getPreferredHeight());
+    effects.update();
+    effects.setSize (effects.getWidth(), effects.getPreferredHeight());
 
     auto* context = e != nullptr ? e->getCurrentPlaybackContext() : nullptr;
     meter.setSource (context != nullptr ? &context->masterLevels : nullptr);
@@ -801,20 +918,21 @@ void MasterStrip::resized()
     loudness.setBounds (readout);
     area.removeFromBottom (Space::s);
 
-    // The fader, and above it the devices, which scroll. (The mixer keeps the strip at least getMinimumHeight() tall.)
+    // The fader, and above it the effects, which scroll. (The mixer keeps the strip at least getMinimumHeight() tall.)
     const auto faderHeight = getFaderHeight (area.getHeight(), Space::xs + minSlotsHeight);
     auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);
     area.removeFromBottom (Space::xs);
 
+    effectsHeading.setBounds (area.removeFromTop (headingHeight));
     deviceView.setBounds (area);
-    devices.setSize (std::max (1, area.getWidth() - deviceView.getScrollBarThickness()), devices.getPreferredHeight());
+    effects.setSize (std::max (1, area.getWidth() - deviceView.getScrollBarThickness()), effects.getPreferredHeight());
 }
 
 int MasterStrip::getMinimumHeight()
 {
-    // As resized() lays it out: the name, a row of device slots, the shortest fader and the loudness readout.
+    // As resized() lays it out: the name, a heading and a button, the shortest fader and the loudness readout.
     return 2 * Space::s + controlHeight + minSlotsHeight + Space::xs + minFaderHeight + Space::s + loudnessHeight;
 }
 

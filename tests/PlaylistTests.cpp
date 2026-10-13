@@ -3,6 +3,7 @@
 #include "UiTestHelpers.h"
 #include "model/Clips.h"
 #include "model/Outlines.h"
+#include "model/Playback.h"
 #include "model/Selection.h"
 #include "model/Tracks.h"
 #include "ui/Playlist.h"
@@ -230,15 +231,19 @@ TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge
     const auto inPlaylist = [&screen, &header] (juce::Point<int> p) { return screen.playlist.getLocalPoint (&header, p); };
     const auto down = juce::Point<int> (0, 2 * phazite::TrackHeight::standard + 40); // near the boundary under the third track
 
-    // Dragging the middle of the header moves nothing.
+    // Dragging the middle of the header moves nothing: it selects the tracks the mouse passes.
     const auto middle = inPlaylist (header.getLocalBounds().getCentre());
     mouse.press (middle);
     mouse.dragTo (middle + down);
     mouse.release();
     phazite::test::dispatchPendingMessages();
     CHECK (te::getAudioTracks (*screen.edit) == screen.tracks);
+    CHECK (phazite::getSelectedTracks (screen.selection).size() == 3);
 
-    // Dragging the handle does: the track goes last.
+    // Dragging the handle moves the track (selected alone by a click first): it goes last.
+    mouse.click (middle);
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getSelectedTracks (screen.selection).size() == 1);
     const auto grip = inPlaylist (header.getGripArea().getCentre());
     mouse.press (grip);
     mouse.dragTo (grip + down);
@@ -290,4 +295,33 @@ TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip
     phazite::test::dispatchPendingMessages();
     CHECK (screen.getClipStarts (1).empty());
     CHECK (screen.selection.isSelected (screen.tracks[1]));
+}
+
+TEST_CASE ("With FL Studio's keymap, a selected time range loops while it is selected")
+{
+    PlaylistScreen screen;
+    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("FL Studio"));
+    screen.addClip (0, 0.0, 16.0);
+    phazite::test::dispatchPendingMessages();
+    auto& transport = screen.edit->getTransport();
+
+    // Ctrl+drag over empty space selects a time range (a plain click would place a clip), and it loops.
+    phazite::test::Mouse mouse (*screen.lanes);
+    mouse.press (screen.at (20.0, 1), juce::ModifierKeys::commandModifier);
+    mouse.dragTo (screen.at (28.0, 1));
+    mouse.release();
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (screen.range.isEmpty());
+    CHECK (transport.looping.get());
+    CHECK_FALSE (phazite::doesLoopFollowSong (*screen.edit));
+    const auto loop = screen.edit->tempoSequence.toBeats (transport.getLoopRange());
+    CHECK (loop.getStart().inBeats() == doctest::Approx (screen.range.getRange().getStart().inBeats()));
+    CHECK (loop.getEnd().inBeats() == doctest::Approx (screen.range.getRange().getEnd().inBeats()));
+
+    // Without a selection, the song loops again.
+    mouse.click (screen.at (2.0, 2), juce::ModifierKeys::commandModifier);
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.range.isEmpty());
+    CHECK (phazite::doesLoopFollowSong (*screen.edit));
+    CHECK (screen.edit->tempoSequence.toBeats (transport.getLoopRange()).getEnd().inBeats() == doctest::Approx (16.0));
 }

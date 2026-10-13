@@ -164,8 +164,11 @@ Done before this plan (progress since then is under [Status](#status)):
 
 **Second feedback round (2026-10-13):**
 - **The loop:** playback loops the whole song and grows with it, as FL Studio's song mode does (`src/model/Playback.h`); a new project looped a fixed 4 bars, so clips placed later never played. Loop Selection and Loop Section loop a part on purpose, and Loop the Song goes back. A Loop button in the top bar (L), and the loop drawn in the rulers.
-- **Track headers:** a handle moves the track, so clicks elsewhere on the header don't; an arrow collapses a track to a thin row (and a folder's tracks out of sight), as do U and dragging the bottom edge past the smallest height; stronger track colors, with names in black or white, whichever reads better.
-- **FL Studio's keymap:** a click on empty space places the last clip used, as FL's Draw tool does.
+- **Track headers:** a handle moves the track, so clicks elsewhere on the header don't; an arrow collapses a track to a thin row (and a folder's tracks out of sight), as do U and dragging the bottom edge past the smallest height; stronger track colors, with names in black or white, whichever reads better; dragging along the headers selects the tracks it passes, and Alt+click on an arrow collapses every track.
+- **FL Studio's keymap:** a click on empty space places the last clip used, as FL's Draw tool does; a time range selected with Ctrl+drag loops while it is selected; Shift+right-click opens the menu.
+- **Mixer, redesigned after research into the mixers people praise** ([design](design.md#8-the-mixer)): a strip reads top to bottom as the sound goes; the instrument has a slot of its own above the effects, with menus that list only instruments or only effects (`src/ui/DeviceMenus.h`); a track whose notes have no instrument asks for one in the mixer, the inspector and the piano roll. "+ Send" makes a return with an effect in one step; returns are solo-safe and sit next to the master; folders have a Bus switch; selecting a channel outlines what it feeds and what feeds it.
+- **Mute and solo:** one control for the playlist and the mixer (`ui::MuteSoloButtons`); a solo never changes the mute switches, right-click M solos a track alone, and a track silenced by solos shows its M half lit.
+- **The loop, refined after research:** Ctrl+L loops the selection, or the song with none; playback that doesn't loop stops at the song's end.
 
 **1.5 Browser (L)**
 - Folders, the plug-in list, search, tags and favorites.

@@ -73,21 +73,53 @@ void updateSongLoop (te::Edit& edit)
 }
 
 //==============================================================================
-SongLoopFollower::SongLoopFollower (te::Edit& e)
+SongFollower::SongFollower (te::Edit& e)
     : edit (e),
       editState (e.state)
 {
     editState.addListener (this);
-    updateSongLoop (edit); // a project saved with another loop around its song gets the song's again
+    handleAsyncUpdate(); // a project saved with another loop around its song gets the song's again
+    startTimerHz (30);
 }
 
-SongLoopFollower::~SongLoopFollower()
+SongFollower::~SongFollower()
 {
+    stopTimer();
     cancelPendingUpdate();
     editState.removeListener (this);
 }
 
-void SongLoopFollower::changed (const juce::ValueTree& tree)
+void SongFollower::handleAsyncUpdate()
+{
+    songEnd = getSongLoopRange (edit).getEnd();
+    updateSongLoop (edit);
+}
+
+void SongFollower::timerCallback()
+{
+    auto& transport = edit.getTransport();
+
+    if (! transport.isPlaying() || transport.looping.get() || transport.isRecording())
+    {
+        lastPosition.reset();
+        return;
+    }
+
+    // Only when the playhead crosses the end: playback started past it plays on, there being nothing to cut short.
+    const auto position = transport.getPosition();
+
+    if (lastPosition.has_value() && *lastPosition < songEnd && position >= songEnd)
+    {
+        transport.stop (false, false);
+        transport.setPosition (transport.getTimeWhenStarted());
+        lastPosition.reset();
+        return;
+    }
+
+    lastPosition = position;
+}
+
+void SongFollower::changed (const juce::ValueTree& tree)
 {
     // Clips (where they are and how long), tracks (with their clips) and the tempo (where bars end). Not the
     // transport, which the loop itself is in.
@@ -135,15 +167,20 @@ void addLoopCommands (CommandRegistry& registry, te::SelectionManager& selection
     registry.add ({ .id = "transport.loopSelection",
                     .name = "Loop Selection",
                     .category = "Transport",
-                    .description = "Loops the time range selected in the playlist instead of the whole song.",
-                    .synonyms = { "loop range", "cycle region", "loop brace" },
+                    .description = "Loops the time range selected in the playlist, or the whole song when none is selected.",
+                    .synonyms = { "loop range", "cycle region", "loop brace", "set loop" },
                     .perform =
                         [&selection, &range]
                     {
-                        if (auto* edit = selection.getEdit(); edit != nullptr && ! range.isEmpty())
-                            loopRange (*edit, edit->tempoSequence.toTime (range.getRange()));
+                        if (auto* edit = selection.getEdit())
+                        {
+                            if (range.isEmpty())
+                                loopSong (*edit);
+                            else
+                                loopRange (*edit, edit->tempoSequence.toTime (range.getRange()));
+                        }
                     },
-                    .isEnabled = [&selection, &range] { return selection.getEdit() != nullptr && ! range.isEmpty(); } });
+                    .isEnabled = hasEdit });
 
     registry.add ({ .id = "section.loop",
                     .name = "Loop Section",
