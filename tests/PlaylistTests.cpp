@@ -6,6 +6,7 @@
 #include "model/Selection.h"
 #include "model/Tracks.h"
 #include "ui/Playlist.h"
+#include "ui/TrackHeader.h"
 
 namespace
 {
@@ -215,4 +216,78 @@ TEST_CASE ("The playlist paints, with sections, a clip and a selected track")
 
     const auto image = screen.window.paintEverything();
     CHECK (image.getWidth() == 1000);
+}
+
+TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge resizes it")
+{
+    PlaylistScreen screen;
+    auto headers = phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist);
+    REQUIRE (headers.size() == 3);
+    auto& header = *headers[0];
+    REQUIRE (header.getTrack() == screen.tracks[0]);
+
+    phazite::test::Mouse mouse (screen.playlist);
+    const auto inPlaylist = [&screen, &header] (juce::Point<int> p) { return screen.playlist.getLocalPoint (&header, p); };
+    const auto down = juce::Point<int> (0, 2 * phazite::TrackHeight::standard + 40); // near the boundary under the third track
+
+    // Dragging the middle of the header moves nothing.
+    const auto middle = inPlaylist (header.getLocalBounds().getCentre());
+    mouse.press (middle);
+    mouse.dragTo (middle + down);
+    mouse.release();
+    phazite::test::dispatchPendingMessages();
+    CHECK (te::getAudioTracks (*screen.edit) == screen.tracks);
+
+    // Dragging the handle does: the track goes last.
+    const auto grip = inPlaylist (header.getGripArea().getCentre());
+    mouse.press (grip);
+    mouse.dragTo (grip + down);
+    mouse.release();
+    phazite::test::dispatchPendingMessages();
+    CHECK (te::getAudioTracks (*screen.edit).getLast() == screen.tracks[0]);
+
+    // The arrow collapses the track to a thin row, which shows its name.
+    auto* collapse = phazite::test::findComponentWithTitle (header, "Collapse track");
+    REQUIRE (collapse != nullptr);
+    mouse.click (inPlaylist (collapse->getBounds().getCentre()));
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::isCollapsed (*screen.tracks[0]));
+    CHECK (header.getHeight() == phazite::TrackHeight::collapsed);
+    CHECK (phazite::test::findComponentWithTitle (header, "Expand track") != nullptr);
+
+    // Dragging its bottom edge down expands it to where the edge is let go.
+    const auto edge = inPlaylist ({ header.getWidth() / 2, header.getHeight() - 2 });
+    mouse.press (edge);
+    mouse.dragTo (edge + juce::Point<int> (0, 30));
+    mouse.release();
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (phazite::isCollapsed (*screen.tracks[0]));
+    CHECK (header.getHeight() == phazite::TrackHeight::collapsed + 30);
+}
+
+TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip used, and right-click deletes it")
+{
+    PlaylistScreen screen;
+    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("FL Studio"));
+    auto& clip = screen.addClip (0, 0.0, 4.0);
+    phazite::test::dispatchPendingMessages();
+    screen.selection.selectOnly (clip); // the clip used last
+    phazite::test::dispatchPendingMessages();
+
+    phazite::test::Mouse mouse (*screen.lanes);
+    mouse.click (screen.at (8.05, 1));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.getClipStarts (1).size() == 1);
+    CHECK (screen.getClipStarts (1)[0] == doctest::Approx (8.0).epsilon (0.01)); // from the grid line before the click
+
+    mouse.click (screen.at (9.0, 1), juce::ModifierKeys::rightButtonModifier);
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.getClipStarts (1).empty());
+
+    // In Phazite's own keymap, a click on empty space selects the track, and places nothing.
+    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("Phazite"));
+    mouse.click (screen.at (8.05, 1));
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.getClipStarts (1).empty());
+    CHECK (screen.selection.isSelected (screen.tracks[1]));
 }

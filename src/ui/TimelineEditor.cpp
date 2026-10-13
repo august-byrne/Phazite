@@ -34,6 +34,18 @@ namespace
         return 0.0;
     }
 
+    // Where playback loops, in song beats, or an empty range while it doesn't loop.
+    te::BeatRange getLoopBeats (const te::Edit& edit)
+    {
+        const auto& transport = edit.getTransport();
+        return transport.looping.get() ? edit.tempoSequence.toBeats (transport.getLoopRange()) : te::BeatRange();
+    }
+
+    bool isNear (te::BeatRange a, te::BeatRange b)
+    {
+        return std::abs ((a.getStart() - b.getStart()).inBeats()) < 1.0e-6 && std::abs ((a.getEnd() - b.getEnd()).inBeats()) < 1.0e-6;
+    }
+
     juce::StringArray getToolSynonyms (Tool tool)
     {
         juce::StringArray synonyms { "tool", "pointer", "mode" };
@@ -129,6 +141,17 @@ void TimelineRuler::paint (juce::Graphics& g)
     const auto origin = te::toDuration (editor.getTimeOrigin());
     const te::BeatRange visible (view.xToBeat (clip.getX() - 1) - origin, view.xToBeat (clip.getRight() + 1) - origin);
     const auto xOf = [&view, origin] (te::BeatPosition beat) { return view.beatToX (beat + origin); };
+
+    // The loop, under the ticks: song beats, not counted from the origin.
+    if (const auto loop = getLoopBeats (*edit); ! loop.isEmpty())
+    {
+        const auto loopStart = (float) view.beatToX (loop.getStart()), loopEnd = (float) view.beatToX (loop.getEnd());
+        const juce::Rectangle<float> area (loopStart, 0.0f, loopEnd - loopStart, (float) getHeight() - 1.0f);
+        g.setColour (p.loop.withAlpha (LoopTint::wash));
+        g.fillRect (area);
+        g.setColour (p.loop.withAlpha (LoopTint::bar));
+        g.fillRect (area.withHeight ((float) LoopTint::barHeight));
+    }
 
     // Ticks: tall for bars, shorter for beats, shortest between them.
     const auto tickType = getAdaptiveSnapType (tempo, visible.getStart(), view.pixelsPerBeat, false, minLineSpacing);
@@ -681,6 +704,13 @@ void TimelineEditor::refreshShortcutTexts()
                                                         getToolCommandID (allTools[i])));
 }
 
+void TimelineEditor::showRulerMenu (te::BeatPosition)
+{
+    juce::PopupMenu menu;
+    addCommandItems (menu, commands, { "transport.loop", "transport.loopSong" });
+    menu.showMenuAsync (juce::PopupMenu::Options());
+}
+
 //==============================================================================
 void TimelineEditor::scrollBarMoved (juce::ScrollBar* scrollBar, double newRangeStart)
 {
@@ -718,6 +748,12 @@ void TimelineEditor::timerCallback()
 
     if (std::abs (getContentRange().getEnd().inBeats() - contentEnd) > 1.0e-6)
         updateScrollBar();
+
+    if (const auto loop = getLoopBeats (*e); ! isNear (loop, shownLoop))
+    {
+        shownLoop = loop;
+        ruler.repaint();
+    }
 
     updatePlayhead();
 }

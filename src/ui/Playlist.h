@@ -151,7 +151,7 @@ private:
     te::BeatPosition getFileDropBeat (int x) const; // at the grid line at or before x, unless Alt is held
 
     void setColourOfSelectedTracks (juce::Colour);
-    void showRulerMenu (te::BeatPosition) override; // the sections there, and the song outlines
+    void showRulerMenu (te::BeatPosition) override; // the sections there, the song outlines and the loop
 
     // After the last track: a track or a folder (and it shows), and the menu of what can be added there.
     void addTrackAtEnd (bool folder);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "model/Tracks.h"
 #include "ui/DesignTokens.h"
 
 using namespace phazite::ui;
@@ -31,5 +32,28 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
         CHECK (getContrastRatio (p.accent, p.surface) >= 3.0);
         CHECK (getContrastRatio (p.warning, p.surface) >= 3.0);
         CHECK (getContrastRatio (p.danger, p.surface) >= 3.0);
+
+        // The loop, in the rulers.
+        CHECK (getContrastRatio (p.loop, p.surfaceRaised) >= 3.0);
+    }
+}
+
+TEST_CASE ("Track names and handles stay readable on their headers, in every theme and track color")
+{
+    for (auto theme : { ThemeName::dark, ThemeName::light, ThemeName::highContrast })
+    {
+        const auto p = getPalette (theme);
+
+        for (const auto& trackColour : phazite::getTrackColours())
+        {
+            for (auto tint : { TrackTint::header, TrackTint::selectedHeader })
+            {
+                CAPTURE ((int) theme);
+                CAPTURE (trackColour.name);
+                CAPTURE (tint);
+                const auto background = p.surface.interpolatedWith (trackColour.colour, tint);
+                CHECK (getContrastRatio (getInkFor (background), background) >= 4.5);
+            }
+        }
     }
 }

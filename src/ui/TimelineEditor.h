@@ -122,8 +122,9 @@ public:
     // they act on this editor. (JUCE reports focus changes later.)
     std::function<void()> onUsed;
 
-    // A right-click on the ruler, at a place in the song: the playlist offers the song's sections there.
-    virtual void showRulerMenu (te::BeatPosition) {}
+    // A right-click on the ruler, at a place in the song: the loop's commands. The playlist offers the song's
+    // sections there too.
+    virtual void showRulerMenu (te::BeatPosition);
 
 protected:
     // Fills the editor's background, with the toolbar's border and, while active, the accent line.
@@ -186,6 +187,7 @@ private:
     bool mouseIsDown = false;
     bool followPlayback = true, wasPlaying = false, active = false;
     double contentEnd = 0.0;         // in beats, as the scroll bar knows it
+    te::BeatRange shownLoop;         // the loop the ruler shows (empty while playback doesn't loop), to repaint it on changes
     double lastAutoScrollTime = 0.0; // milliseconds (juce::Time::getMillisecondCounterHiRes())
     std::unique_ptr<Playhead> playhead;
     std::unique_ptr<UseListener> useListener;

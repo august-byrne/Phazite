@@ -546,6 +546,13 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             add (menu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback" });
             add (menu, { "transport.goToStart", "transport.goToEnd" });
 
+            // Where playback loops: the song, unless something else is looped on purpose.
+            juce::PopupMenu loopMenu;
+            add (loopMenu, { "transport.loop" });
+            loopMenu.addSeparator();
+            add (loopMenu, { "transport.loopSong", "transport.loopSelection", "section.loop" });
+            menu.addSubMenu ("Loop", loopMenu);
+
             juce::PopupMenu gridMenu;
             add (gridMenu, { "grid.snap" });
             gridMenu.addSeparator();

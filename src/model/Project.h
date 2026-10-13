@@ -9,6 +9,8 @@ namespace phazite
 {
 namespace te = tracktion;
 
+class SongLoopFollower;
+
 //==============================================================================
 // The project folder:
 //   <name>.phazite   the project file: Tracktion's Edit, with Phazite's own data inside
@@ -72,6 +74,7 @@ private:
 
     std::unique_ptr<te::Edit> edit;
     juce::File file;
+    std::unique_ptr<SongLoopFollower> songLoop; // keeps the loop around the song (Playback.h)
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
 
     void backUpProjectFile();
@@ -79,7 +82,7 @@ private:
 
     // Tracktion writes these while it plays, without anyone changing the song, so they don't count
     // as changes: the playhead position, and the Edit's input-device states (the inputs it knows,
-    // and which track live input goes to).
+    // and which track live input goes to). Nor does where the loop is, which follows the song.
     static bool isPlaybackState (const juce::ValueTree&, const juce::Identifier& property);
 
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }

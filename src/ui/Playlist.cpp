@@ -528,7 +528,7 @@ void Playlist::layOutRows()
         row.top = top;
 
         if (auto* track = row.track.get())
-            row.height = isInFocus (*track) ? getTrackHeight (*track) : focusedOutHeight;
+            row.height = isInFocus (*track) ? getShownTrackHeight (*track) : focusedOutHeight;
 
         auto* header = headers[(int) i];
         auto& parent = row.pinned ? pinnedHeaders : headerContent;
@@ -1137,7 +1137,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     auto* component = getClipComponentAt (e.getPosition());
     auto* clip = component != nullptr ? component->getClip() : nullptr;
     auto& undo = ed->getUndoManager();
-    const auto currentTool = getTool();
+    auto currentTool = getTool();
 
     if (e.mods.isPopupMenu())
     {
@@ -1155,6 +1155,14 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 
         return;
     }
+
+    // With FL Studio's keymap, the Smart Tool places the last clip used where empty space is clicked, as FL's Draw
+    // tool does. Ctrl+drag still selects a time range there.
+    const auto placesForSmartTool = currentTool == Tool::smart && clip == nullptr && getCommands().getKeymap().clickPlacesClips
+                                    && ! e.mods.isCommandDown() && ! findCrossfadeAt (e.getPosition()).has_value();
+
+    if (placesForSmartTool)
+        currentTool = Tool::draw;
 
     switch (currentTool)
     {
@@ -1183,6 +1191,13 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 
             if (placed == nullptr)
             {
+                // Nothing to place (a track without an instrument, before any clip was used): the Smart Tool's click.
+                if (placesForSmartTool)
+                {
+                    smartToolDown (e);
+                    return;
+                }
+
                 gesture = nullptr;
                 return;
             }
@@ -2019,7 +2034,7 @@ void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
             const auto change = juce::roundToInt (getWheelNotches (wheel.deltaY) * TrackHeight::step / 2);
 
             for (auto* track : getPlaylistTracks (*ed))
-                setTrackHeight (*track, getTrackHeight (*track) + change);
+                resizeTrack (*track, change);
 
             layOutRows();
         }

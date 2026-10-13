@@ -7,6 +7,7 @@
 #include "model/Commands.h"
 #include "model/EngineSetup.h"
 #include "model/Mixer.h"
+#include "model/Playback.h"
 #include "model/Sections.h"
 #include "model/Selection.h"
 #include "model/Tracks.h"
@@ -60,6 +61,7 @@ public:
         addTrackCommands (*commands, session->getSelection());
         addSectionCommands (*commands, session->getSelection());
         addMixerCommands (*commands, session->getSelection());
+        addLoopCommands (*commands, session->getSelection(), session->getRangeSelection());
         session->addCommands (*commands);
         mainWindow->addCommands();
 

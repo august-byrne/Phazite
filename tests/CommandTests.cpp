@@ -155,9 +155,12 @@ TEST_CASE ("Keymaps load, switch, and keep the user's own changes")
     const auto flStudio = phazite::Keymap::findBuiltIn ("FL Studio");
     REQUIRE (flStudio.has_value());
 
-    // In FL Studio's keymap, right-click deletes clips, as in FL Studio; otherwise it opens a menu.
+    // In FL Studio's keymap, right-click deletes clips and a click on empty space places one, as in FL Studio;
+    // otherwise right-click opens a menu and a click selects.
     CHECK (flStudio->rightClickDeletes);
+    CHECK (flStudio->clickPlacesClips);
     CHECK_FALSE (phazite::Keymap::findBuiltIn ("Phazite")->rightClickDeletes);
+    CHECK_FALSE (phazite::Keymap::findBuiltIn ("Phazite")->clickPlacesClips);
 
     phazite::CommandRegistry registry;
     registry.add (makeCommand ("transport.playStop", "Play / Stop"));

@@ -162,6 +162,11 @@ Done before this plan (progress since then is under [Status](#status)):
 - **Keys and menus:** tool keys spring back after a hold; the digits 1 to 9 pick tools and M turns the computer keyboard on and off; the menu bar is File, Edit, Add, View, Options and Help.
 - **Tests that drive the UI:** the components are in a library of their own (`phazite_ui`), and `tests/UiTestHelpers.h` puts them in a window that isn't on any screen, so tests send them mouse and key events through JUCE as the app does (`tests/PlaylistTests.cpp`, `tests/PianoRollTests.cpp`, `tests/MixerViewTests.cpp`).
 
+**Second feedback round (2026-10-13):**
+- **The loop:** playback loops the whole song and grows with it, as FL Studio's song mode does (`src/model/Playback.h`); a new project looped a fixed 4 bars, so clips placed later never played. Loop Selection and Loop Section loop a part on purpose, and Loop the Song goes back. A Loop button in the top bar (L), and the loop drawn in the rulers.
+- **Track headers:** a handle moves the track, so clicks elsewhere on the header don't; an arrow collapses a track to a thin row (and a folder's tracks out of sight), as do U and dragging the bottom edge past the smallest height; stronger track colors, with names in black or white, whichever reads better.
+- **FL Studio's keymap:** a click on empty space places the last clip used, as FL's Draw tool does.
+
 **1.5 Browser (L)**
 - Folders, the plug-in list, search, tags and favorites.
 - Preview, with loops in time and key.

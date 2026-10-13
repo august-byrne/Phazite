@@ -5,6 +5,8 @@
     "transport.playStop": [ "spacebar" ],
     "transport.goToStart": [ "home" ],
     "transport.goToEnd": [ "end" ],
+    "transport.loop": [ "L" ],
+    "transport.loopSelection": [ "command + shift + L" ],
     "edit.undo": [ "command + Z" ],
     "edit.redo": [ "command + shift + Z", "command + Y" ],
     "edit.delete": [ "delete", "backspace" ],

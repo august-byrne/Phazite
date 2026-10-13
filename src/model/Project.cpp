@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Project.h"
 #include "LoudnessMeterPlugin.h"
+#include "Playback.h"
 
 namespace phazite
 {
@@ -156,7 +157,8 @@ juce::File Project::getAutosaveFile (const juce::File& projectFile)
 //==============================================================================
 Project::Project (std::unique_ptr<te::Edit> e, const juce::File& f)
     : edit (std::move (e)),
-      file (f)
+      file (f),
+      songLoop (std::make_unique<SongLoopFollower> (*edit))
 {
     edit->state.addListener (this);
 }
@@ -165,6 +167,7 @@ Project::~Project()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
+    songLoop = nullptr;
     edit->state.removeListener (this);
     getAutosaveFile (file).deleteFile();
 }
@@ -342,7 +345,8 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
 
 bool Project::isPlaybackState (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (tree.hasType (te::IDs::TRANSPORT) && property == te::IDs::position)
+    if (tree.hasType (te::IDs::TRANSPORT)
+        && (property == te::IDs::position || property == te::IDs::loopPoint1 || property == te::IDs::loopPoint2))
         return true;
 
     for (auto t = tree; t.isValid(); t = t.getParent())

@@ -43,10 +43,22 @@ te::TrackInsertPoint getInsertPointAfter (te::Track&);
 namespace TrackHeight
 {
     inline constexpr int minimum = 32, standard = 64, maximum = 320, step = 16;
-}
+    inline constexpr int collapsed = 24; // a collapsed track's row, which shows its name
+} // namespace TrackHeight
 
 int getTrackHeight (const te::Track&);
 void setTrackHeight (te::Track&, int height); // kept between the minimum and the maximum
+
+// How tall the playlist shows a track: its height, or TrackHeight::collapsed while it is collapsed. A collapsed
+// folder keeps its height, as collapsing it hides its tracks instead.
+int getShownTrackHeight (const te::Track&);
+
+// Sets how tall the playlist shows a track, as dragging its bottom edge does: well below the minimum, a track
+// collapses, and above it, a collapsed track expands again. (A folder stops at the minimum.)
+void setShownTrackHeight (te::Track&, int height);
+
+// Makes a track taller or shorter by some pixels, as the height commands do, collapsing or expanding it the same way.
+void resizeTrack (te::Track&, int change);
 
 //==============================================================================
 // Inserts an empty track after another one (at the end if that is nullptr), in the palette's next
@@ -69,8 +81,9 @@ void moveTrackIntoFolder (te::Track&, te::FolderTrack&);
 // Takes a folder's tracks out, to where the folder was, and deletes the folder.
 void ungroupFolder (te::FolderTrack&);
 
-// A collapsed folder hides its tracks in the playlist; a pinned track stays in view while the others
-// scroll. Projects keep both, without undo steps, as they keep track heights.
+// A collapsed track is a thin row in the playlist, with only its name, and a collapsed folder hides its tracks.
+// A pinned track stays in view while the others scroll. Projects keep both, without undo steps, as they keep
+// track heights.
 bool isCollapsed (const te::Track&);
 void setCollapsed (te::Track&, bool);
 bool isPinned (const te::Track&);

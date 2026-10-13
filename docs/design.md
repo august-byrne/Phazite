@@ -102,7 +102,7 @@ Why this audience:
 +-----------------------------------------------------------------------+
 ```
 
-- **Top bar:** play and record, tempo, time signature, CPU and disk meters, the master level, the computer keyboard and the command search (Ctrl+K). A key is a track's, so the piano roll shows it, not the top bar (2026-10-13).
+- **Top bar:** play, loop and record, tempo, time signature, CPU and disk meters, the master level, the computer keyboard and the command search (Ctrl+K). A key is a track's, so the piano roll shows it, not the top bar (2026-10-13).
 - **Browser (left):** instruments, effects, plug-ins, presets, samples, generated sounds and projects ([section 11](#11-the-browser)).
 - **Playlist (center):** the time bar (the song's sections over the bar numbers, with the button that adds a track beside it), then global lanes (chords, tempo, markers), then the tracks, with the sections drawn faintly behind them ([section 6](#6-the-playlist)).
 - **Inspector (right):** the properties of whatever is selected: a track's devices and sends, a clip's gain and fades, a device's macros and modulators.
@@ -207,7 +207,7 @@ Esc returns to the Smart Tool. The current tool and its key show on the toolbar 
 - **Tool keys spring back (2026-10-13),** as in Bitwig and Ableton Live: a tap of a tool's key switches to the tool, but holding the key while using the mouse keeps the tool only until the key is let go (or until a drag still going on then ends).
 - **A held key repeats only the commands that take a step** (nudging, zooming, moving through tracks, undo). Choosing the tool in use again changes nothing, so holding a tool's key never ends a drag.
 
-**Right-click** opens a context menu by default. With the FL Studio keymap it deletes, as FL users expect. Both are a setting.
+**Right-click** opens a context menu by default. With the FL Studio keymap it deletes clips, as FL users expect, and a click on empty space places the last clip used, as FL's Draw tool does; Ctrl+drag selects a time range there instead (2026-10-13). Both are keymap settings (`rightClickDeletes`, `clickPlacesClips`). In Phazite's keymap a click on empty space selects, so a click never adds a clip by accident; the piano roll adds a note with a click and deletes it with a right-click in every keymap.
 
 **Editing commands:**
 - split at the playhead or pointer;
@@ -221,8 +221,9 @@ Esc returns to the Smart Tool. The current tool and its key show on the toolbar 
 
 **Tracks:**
 - **add one** with the "+ Track" button over the track headers (below the selected track), the row after the last track (at the end; right-click it for a folder or a return track), a double-click under the last track, or the Add menu, as Logic, Cubase and Studio One place it (2026-10-13);
-- color and name (automatic from the content, editable), height. The color runs through the track's whole row: its header in it, and its row tinted with it, as in FL Studio and Ableton Live;
-- collapsible folders;
+- color and name (automatic from the content, editable), height. The color runs through the track's whole row: its header in it, and its row tinted with it, as in FL Studio and Ableton Live, strongly enough to tell tracks apart at a glance (2026-10-13);
+- **move** a track by the handle at the left of its header (2026-10-13). The rest of the header selects, renames and resizes, so a click never moves a track by accident;
+- **collapse** a track to a thin row that shows its name: the arrow in its header, U, or dragging its bottom edge up past the smallest height (2026-10-13). A collapsed folder hides its tracks instead;
 - **pin** tracks so they stay visible while scrolling, like Pro Tools' Track Pin;
 - a **focus mode** that collapses all other tracks;
 - mute, solo and record-arm;
@@ -234,6 +235,8 @@ Esc returns to the Smart Tool. The current tool and its key show on the toolbar 
 - drag a section to move it, with everything in it, across all tracks (where it would go shows across the tracks too); drag its right edge to resize it; double-click to add or rename one;
 - duplicate, duplicate as aliases, delete, rename, recolor;
 - right-click the band or the bar numbers to add a section there or apply a song outline ([section 13](#13-getting-started-and-song-outlines)). The Add menu has both too; there is no Song menu.
+
+**The loop (2026-10-13):** playback loops the song, as FL Studio's song mode does: from its start to the end of the bar where its last clip ends, so the loop grows as clips go later. Sections don't count, since an outline can run longer than what is in it so far. Loop Selection (Ctrl+Shift+L) loops the time range selected in the playlist instead, Loop Section the selected sections, and Loop the Song goes back to following the song. The Loop button in the top bar (L) turns looping on or off, and the rulers show the loop as a band. Where the loop is isn't an undo step, as in other DAWs.
 
 **Grid, zoom and scrolling:**
 - The grid adapts to the zoom level, with snap on by default; hold a modifier to bypass it. Triplets are available.
@@ -778,6 +781,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 | 2026-10-12 | Step 1.4 defaults: devices go before a channel's sends and fader, instruments first, and instruments only on tracks. A folder becomes a bus when it gets a device, its fader starting where the plain folder's volume was, and turns plain again when its last device goes. A new send starts at −6 dB, after the fader. The loudness meter measures the master's devices, before the master fader. Until step 1.6 the device list offers Tracktion's reverb and 4OSC synth only, besides scanned plug-ins, because Tracktion's other devices break the real-time rules. Device windows stay above the main window while Phazite is in front |
 | 2026-10-13 | After trying steps 1.1 to 1.4: a track's color runs through its whole row; dragging past an edge scrolls; sections become a band in the time bar and ghosts behind the tracks, with no row or Song menu of their own, and four more outlines (lo-fi, R&B, drum and bass, techno); the piano roll counts bars from the clip's start and opens there, shows a selected track's clip at or nearest the playhead, and on a track without clips the first note starts one; a key is a track's, off until chosen, and the top bar shows none; drum mode has no button; the menu bar is File, Edit, Add, View, Options and Help; "+ Track" sits over the track headers, with a row after the last track that adds one; the Smart Tool's fades are for audio clips, and short clips move from anywhere but their edges |
 | 2026-10-13 | Keys: a held key repeats only the commands that take a step; tool keys spring back after a hold with the mouse, as in Bitwig and Ableton Live; in Phazite's keymap the digits 1 to 9 pick the tools and M turns the computer keyboard on and off |
+| 2026-10-13 | Second round: playback loops the whole song and the loop grows with it, as in FL Studio's song mode, unless a selection or sections are looped on purpose; a Loop button and L turn looping on or off. A track moves only by the handle in its header. Tracks collapse to a thin row (the arrow in the header, U, or dragging the bottom edge past the smallest height). Track colors are stronger in headers and rows, with black or white names, whichever reads better. With FL Studio's keymap a click on empty space places the last clip used |
 
 ## Appendix A. Research summary
 

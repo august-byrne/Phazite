@@ -83,6 +83,8 @@ target_sources(phazite_core PRIVATE
     src/model/Notes.h
     src/model/Outlines.cpp
     src/model/Outlines.h
+    src/model/Playback.cpp
+    src/model/Playback.h
     src/model/Project.cpp
     src/model/Project.h
     src/model/Sections.cpp
@@ -119,7 +121,10 @@ juce_add_binary_data(phazite_data
         resources/outlines/techno.outline.json
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
+        resources/icons/lucide/chevron-down.svg
+        resources/icons/lucide/chevron-right.svg
         resources/icons/lucide/eraser.svg
+        resources/icons/lucide/grip-vertical.svg
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/magnet.svg
         resources/icons/lucide/mouse-pointer-2.svg
@@ -128,6 +133,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/pencil.svg
         resources/icons/lucide/play.svg
         resources/icons/lucide/plus.svg
+        resources/icons/lucide/repeat.svg
         resources/icons/lucide/scissors.svg
         resources/icons/lucide/search.svg
         resources/icons/lucide/square-dashed-mouse-pointer.svg
@@ -312,6 +318,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MixerViewTests.cpp
         tests/NoteTests.cpp
         tests/PianoRollTests.cpp
+        tests/PlaybackTests.cpp
         tests/PlaylistTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp

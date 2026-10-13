@@ -471,6 +471,8 @@ void SectionsStrip::showMenu (te::ArrangerClip* section, te::BeatPosition where)
                       });
 
         menu.addSeparator();
+        addCommandItem (menu, registry, "section.loop");
+        menu.addSeparator();
         addCommandItems (menu, registry, { "edit.duplicate", "edit.duplicateAsAlias", "edit.delete" });
         menu.addSeparator();
     }
@@ -489,6 +491,10 @@ void SectionsStrip::showMenu (te::ArrangerClip* section, te::BeatPosition where)
         addCommandItem (outlines, registry, "section.outline." + outline.id);
 
     menu.addSubMenu ("Song Outline", outlines);
+
+    // Where playback loops: the whole song, unless something else is looped on purpose.
+    menu.addSeparator();
+    addCommandItems (menu, registry, { "transport.loop", "transport.loopSong", "transport.loopSelection" });
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 

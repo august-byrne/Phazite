@@ -254,6 +254,53 @@ TEST_CASE ("Track heights stay within limits, and change for the selection or al
     REQUIRE (tracks.registry.invoke ("track.shorter"));
     CHECK (phazite::getTrackHeight (b) == phazite::TrackHeight::standard);
     CHECK (phazite::getTrackHeight (a) == phazite::TrackHeight::minimum);
+    CHECK (phazite::isCollapsed (a)); // past the minimum, a track collapses
+    CHECK_FALSE (phazite::isCollapsed (b));
+}
+
+TEST_CASE ("A track collapses to a thin row by its command, or by getting shorter than the minimum")
+{
+    Tracks tracks (2);
+    auto& a = *tracks["A"];
+    CHECK (phazite::getShownTrackHeight (a) == phazite::TrackHeight::standard);
+
+    tracks.select ({ "A" });
+    REQUIRE (tracks.registry.invoke ("track.collapse"));
+    CHECK (phazite::isCollapsed (a));
+    CHECK (tracks.registry.find ("track.collapse")->isTicked());
+    CHECK (phazite::getShownTrackHeight (a) == phazite::TrackHeight::collapsed);
+    CHECK (phazite::getTrackHeight (a) == phazite::TrackHeight::standard); // kept for when it expands
+    REQUIRE (tracks.registry.invoke ("track.collapse"));
+    CHECK_FALSE (phazite::isCollapsed (a));
+    CHECK (phazite::getShownTrackHeight (a) == phazite::TrackHeight::standard);
+
+    // Shorter and shorter: 48, 32, then collapsed. Taller expands it again, from the thin row.
+    for (int i = 0; i < 3; ++i)
+        REQUIRE (tracks.registry.invoke ("track.shorter"));
+
+    CHECK (phazite::isCollapsed (a));
+    REQUIRE (tracks.registry.invoke ("track.taller"));
+    CHECK_FALSE (phazite::isCollapsed (a));
+    CHECK (phazite::getShownTrackHeight (a) == phazite::TrackHeight::collapsed + phazite::TrackHeight::step);
+
+    // Dragging the edge: halfway between the thin row and the minimum, it snaps to one or the other.
+    phazite::setShownTrackHeight (a, 27);
+    CHECK (phazite::isCollapsed (a));
+    phazite::setShownTrackHeight (a, 29);
+    CHECK_FALSE (phazite::isCollapsed (a));
+    CHECK (phazite::getShownTrackHeight (a) == phazite::TrackHeight::minimum);
+    CHECK_FALSE (tracks.edit->getUndoManager().canUndo()); // collapsing changes the view, as heights do
+
+    // A collapsed folder keeps its height (its tracks are hidden instead), and doesn't collapse by resizing.
+    tracks.select ({ "B" });
+    REQUIRE (tracks.registry.invoke ("track.groupIntoFolder"));
+    auto& folder = *tracks["Folder"];
+    phazite::setCollapsed (folder, true);
+    CHECK (phazite::getShownTrackHeight (folder) == phazite::TrackHeight::standard);
+    phazite::setCollapsed (folder, false);
+    phazite::setShownTrackHeight (folder, 0);
+    CHECK_FALSE (phazite::isCollapsed (folder));
+    CHECK (phazite::getShownTrackHeight (folder) == phazite::TrackHeight::minimum);
 }
 
 TEST_CASE ("Tracks group into a folder, which collapses, takes more tracks and ungroups")

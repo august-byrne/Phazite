@@ -14,6 +14,7 @@ TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyb
     setTitle ("Transport");
 
     playButton.onClick = [this] { commands.invoke ("transport.playStop"); };
+    loopButton.onClick = [this] { commands.invoke ("transport.loop"); };
     keyboardButton.onClick = [this] { commands.invoke ("input.computerKeyboard"); };
 
     searchButton.setButtonText ("Search commands");
@@ -34,7 +35,7 @@ TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyb
     masterVolume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
-    for (auto* button : { &playButton, &keyboardButton, &searchButton })
+    for (auto* button : { &playButton, &loopButton, &keyboardButton, &searchButton })
     {
         button->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (button);
@@ -50,6 +51,10 @@ TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyb
 void TopBar::refreshTooltips()
 {
     playButton.setTooltip (withShortcut (commands, "Play or stop", "transport.playStop"));
+    loopButton.setTooltip (withShortcut (commands,
+                                         "Loop: at the end of the song, playback starts again from its start. The song ends with "
+                                         "the bar its last clip ends in, so the loop grows as you add clips later",
+                                         "transport.loop"));
     searchButton.setTooltip (withShortcut (commands, "Find and run any command by typing part of its name", "view.commandPalette"));
 
     shownKeyboardState = -1; // its tooltip names a shortcut too
@@ -93,6 +98,7 @@ void TopBar::resized()
     auto area = getLocalBounds().reduced (Space::s, (getHeight() - controlHeight) / 2);
 
     playButton.setBounds (area.removeFromLeft (44));
+    loopButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::m);
 
     searchButton.setBounds (area.removeFromRight (180));
@@ -125,6 +131,8 @@ void TopBar::timerCallback()
     }
 
     playButton.setEnabled (edit != nullptr);
+    loopButton.setEnabled (edit != nullptr);
+    loopButton.setToggleState (edit != nullptr && edit->getTransport().looping.get(), juce::dontSendNotification);
 
     juce::String tempo;
 

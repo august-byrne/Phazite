@@ -133,7 +133,7 @@ namespace
                 tracks = getPlaylistTracks (*edit);
 
         for (auto* track : tracks)
-            setTrackHeight (*track, getTrackHeight (*track) + change);
+            resizeTrack (*track, change);
     }
 } // namespace
 
@@ -222,6 +222,33 @@ int getTrackHeight (const te::Track& track)
 void setTrackHeight (te::Track& track, int height)
 {
     track.state.setProperty (heightProperty, juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, height), nullptr);
+}
+
+int getShownTrackHeight (const te::Track& track)
+{
+    return isCollapsed (track) && ! track.isFolderTrack() ? TrackHeight::collapsed : getTrackHeight (track);
+}
+
+void setShownTrackHeight (te::Track& track, int height)
+{
+    if (track.isFolderTrack())
+    {
+        setTrackHeight (track, height);
+        return;
+    }
+
+    // Halfway between the collapsed height and the minimum, the track snaps to one or the other.
+    const auto collapse = height < (TrackHeight::collapsed + TrackHeight::minimum) / 2;
+
+    if (! collapse)
+        setTrackHeight (track, height);
+
+    setCollapsed (track, collapse);
+}
+
+void resizeTrack (te::Track& track, int change)
+{
+    setShownTrackHeight (track, getShownTrackHeight (track) + change);
 }
 
 bool isCollapsed (const te::Track& track)
@@ -413,27 +440,27 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
 
     // Collapsing and pinning change the view, so they aren't undo steps.
     registry.add ({ .id = "track.collapse",
-                    .name = "Collapse Folder",
+                    .name = "Collapse Track",
                     .category = "Track",
-                    .description = "Hides the tracks in the selected folders, or shows them again.",
-                    .synonyms = { "fold", "unfold", "expand", "hide" },
+                    .description = "Makes the selected tracks thin rows that show only their names, or full height again. A "
+                                   "collapsed folder hides its tracks.",
+                    .synonyms = { "fold", "unfold", "expand", "hide", "minimize", "folder" },
                     .perform =
-                        [getSelectedFolders]
+                        [&selection]
                     {
-                        const auto folders = getSelectedFolders();
-                        const auto collapse =
-                            ! std::all_of (folders.begin(), folders.end(), [] (te::FolderTrack* f) { return isCollapsed (*f); });
+                        const auto tracks = getSelectedTracks (selection);
+                        const auto collapse = ! std::all_of (tracks.begin(), tracks.end(), [] (te::Track* t) { return isCollapsed (*t); });
 
-                        for (auto* folder : folders)
-                            setCollapsed (*folder, collapse);
+                        for (auto* track : tracks)
+                            setCollapsed (*track, collapse);
                     },
-                    .isEnabled = hasSelectedFolders,
+                    .isEnabled = hasSelectedTracks,
                     .isTicked =
-                        [getSelectedFolders]
+                        [&selection]
                     {
-                        const auto folders = getSelectedFolders();
-                        return ! folders.isEmpty()
-                               && std::all_of (folders.begin(), folders.end(), [] (te::FolderTrack* f) { return isCollapsed (*f); });
+                        const auto tracks = getSelectedTracks (selection);
+                        return ! tracks.isEmpty()
+                               && std::all_of (tracks.begin(), tracks.end(), [] (te::Track* t) { return isCollapsed (*t); });
                     } });
 
     registry.add ({ .id = "track.pin",
@@ -525,13 +552,15 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .isEnabled = hasEdit,
                     .repeatsWhileHeld = true });
 
-    registry.add ({ .id = "track.shorter",
-                    .name = "Shorter Tracks",
-                    .category = "Track",
-                    .description = "Makes the selected tracks shorter, or all tracks if none is selected.",
-                    .synonyms = { "height", "smaller", "vertical zoom", "compact" },
-                    .perform = [&selection] { resizeTracks (selection, -TrackHeight::step); },
-                    .isEnabled = hasEdit,
-                    .repeatsWhileHeld = true });
+    registry.add (
+        { .id = "track.shorter",
+          .name = "Shorter Tracks",
+          .category = "Track",
+          .description =
+              "Makes the selected tracks shorter, or all tracks if none is selected. Past the shortest, a track collapses to its name.",
+          .synonyms = { "height", "smaller", "vertical zoom", "compact" },
+          .perform = [&selection] { resizeTracks (selection, -TrackHeight::step); },
+          .isEnabled = hasEdit,
+          .repeatsWhileHeld = true });
 }
 } // namespace phazite

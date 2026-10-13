@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "StarterProject.h"
 #include "AppInfo.h"
+#include "Playback.h"
 #include "Tracks.h"
 
 using namespace tracktion::literals; // 0_tp (time position), 16_bp (beat position), ...
@@ -59,11 +60,9 @@ void addStarterContent (te::Edit& edit)
             sequence.addNote (chordNotes[bar][arpOrder[step]], te::BeatPosition::fromBeats (bar * 4.0 + step * 0.5),
                               te::BeatDuration::fromBeats (0.45), 100, 0, nullptr);
 
-    // Loop the transport around the clip.
-    auto& transport = edit.getTransport();
-    transport.setLoopRange (clip->getEditTimeRange());
-    transport.looping = true;
-    transport.setPosition (0_tp);
+    // Playback loops the song, which grows as clips go later.
+    loopSong (edit);
+    edit.getTransport().setPosition (0_tp);
 }
 
 juce::File getDefaultProjectsFolder()

@@ -16,6 +16,10 @@ enum class Icon
     detach,
     plus,
     magnet,
+    loop,
+    grip,     // a handle to drag something by
+    expanded, // a chevron pointing down: something open that can fold
+    folded,   // pointing right: folded
     // The playlist's tools
     smartTool,
     draw,
@@ -40,10 +44,16 @@ public:
     IconButton (const juce::String& title, Icon);
 
     void setIcon (Icon);
+
+    // A quiet button shows only its icon, without a background until the mouse is over it: for small buttons
+    // inside other controls, such as the chevron that collapses a track.
+    void setQuiet (bool);
+
     void paintButton (juce::Graphics&, bool isHighlighted, bool isDown) override;
 
 private:
     Icon icon;
+    bool quiet = false;
     std::unique_ptr<juce::Drawable> drawable;
     juce::Colour drawableColour { juce::Colours::black }; // the color the drawing is in now
 };

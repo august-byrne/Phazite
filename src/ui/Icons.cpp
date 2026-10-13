@@ -28,6 +28,14 @@ namespace
                 return "plus.svg";
             case Icon::magnet:
                 return "magnet.svg";
+            case Icon::loop:
+                return "repeat.svg";
+            case Icon::grip:
+                return "grip-vertical.svg";
+            case Icon::expanded:
+                return "chevron-down.svg";
+            case Icon::folded:
+                return "chevron-right.svg";
             case Icon::smartTool:
                 return "mouse-pointer-2.svg";
             case Icon::draw:
@@ -93,13 +101,20 @@ void IconButton::setIcon (Icon newIcon)
     repaint();
 }
 
+void IconButton::setQuiet (bool shouldBeQuiet)
+{
+    quiet = shouldBeQuiet;
+    repaint();
+}
+
 void IconButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown)
 {
     const auto& p = getPalette (*this);
     const bool on = getToggleState();
 
-    getLookAndFeel().drawButtonBackground (
-        g, *this, findColour (on ? juce::TextButton::buttonOnColourId : juce::TextButton::buttonColourId), isHighlighted, isDown);
+    if (! quiet || on || isHighlighted || isDown || hasKeyboardFocus (false))
+        getLookAndFeel().drawButtonBackground (
+            g, *this, findColour (on ? juce::TextButton::buttonOnColourId : juce::TextButton::buttonColourId), isHighlighted, isDown);
 
     const auto colour = (on ? p.textOnAccent : p.text).withMultipliedAlpha (isEnabled() ? 1.0f : 0.5f);
     const auto label = getButtonText();
@@ -107,8 +122,9 @@ void IconButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown
     const auto gap = label.isEmpty() ? 0.0f : (float) Space::s;
     const auto textWidth = label.isEmpty() ? 0.0f : juce::GlyphArrangement::getStringWidth (font, label);
 
-    // The icon and the text, centered together.
-    const auto area = getLocalBounds().toFloat().reduced ((float) Space::s, 0.0f);
+    // The icon and the text, centered together. A button too small for the usual margins gets smaller ones.
+    const auto margin = juce::jlimit (0.0f, (float) Space::s, ((float) getWidth() - iconSize) / 2.0f);
+    const auto area = getLocalBounds().toFloat().reduced (margin, 0.0f);
     auto content = area.withSizeKeepingCentre (juce::jmin (area.getWidth(), iconSize + gap + textWidth), area.getHeight());
 
     if (drawable != nullptr)

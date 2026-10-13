@@ -57,6 +57,7 @@ struct Keymap
     juce::String name, description;
     std::map<juce::String, juce::StringArray> keys;
     bool rightClickDeletes = false; // in the playlist, as in FL Studio; otherwise right-click opens a menu
+    bool clickPlacesClips = false;  // in the playlist's empty space, with the Smart Tool, as FL Studio's Draw tool does
 
     static std::optional<Keymap> fromJSON (const juce::String&);
 
