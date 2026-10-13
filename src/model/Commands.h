@@ -42,6 +42,9 @@ struct Command
     bool repeatsWhileHeld {};
     // Optional: called when the key that ran the command is let go. The tools use it to spring back.
     std::function<void()> keyReleased {};
+    // Optional: whether the command's keys work while a plug-in's window has the keyboard focus, so that a sound can be
+    // played while it is tweaked (play and stop). The plug-in gets every other key.
+    bool overPlugins {};
 
     static constexpr int notePriority = 1;
 };
@@ -97,6 +100,11 @@ public:
     // repeatsWhileHeld; keyStateChanged() sees the key let go.
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
     bool keyStateChanged (bool isKeyDown, juce::Component*) override;
+
+    // While a plug-in's window has the keyboard focus: whether a key runs a command that works over plug-ins
+    // (overPlugins), and running it. The plug-in gets the other keys.
+    bool runsOverPlugins (const juce::KeyPress&) const;
+    bool keyPressedOverPlugin (const juce::KeyPress&);
 
     // Forgets the held keys, as if they were let go: when the window loses the keyboard, their release goes
     // elsewhere.

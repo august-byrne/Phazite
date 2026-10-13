@@ -82,7 +82,8 @@ private:
 
     // Tracktion writes these while it plays, without anyone changing the song, so they don't count
     // as changes: the playhead position, and the Edit's input-device states (the inputs it knows,
-    // and which track live input goes to). Nor does where the loop is, which follows the song.
+    // and which track live input goes to). Nor does where the loop is, which follows the song, or
+    // where playback starts.
     static bool isPlaybackState (const juce::ValueTree&, const juce::Identifier& property);
 
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }

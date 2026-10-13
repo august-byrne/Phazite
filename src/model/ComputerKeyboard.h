@@ -39,6 +39,10 @@ public:
     // ended, or the octave or velocity changed. keyStateChanged() calls it with the real keyboard.
     bool update (const std::function<bool (int keyCode)>& isKeyDown, juce::ModifierKeys);
 
+    // Whether a key is one it plays notes with or changes the octave or velocity with, while it is enabled: a layout
+    // key without Shift, Ctrl, Alt or Cmd.
+    bool takesKey (const juce::KeyPress&) const;
+
     std::function<void()> onChange; // isEnabled(), the octave or the velocity changed
 
     //==============================================================================

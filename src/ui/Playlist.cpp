@@ -4,7 +4,9 @@
 #include "LookAndFeel.h"
 #include "model/Clips.h"
 #include "model/Import.h"
+#include "model/Library.h"
 #include "model/LiveInput.h"
+#include "model/Mixer.h"
 #include "model/Outlines.h"
 #include "model/Playback.h"
 #include "model/Sections.h"
@@ -249,6 +251,21 @@ struct Playlist::Lanes : public juce::Component
                                   : getLocalBounds();
             g.setColour (p.accent);
             g.fillRect (x - 1, area.getY(), 3, area.getHeight());
+        }
+
+        // Where a device dragged from the browser would go: onto a track, or onto a new track under the last.
+        if (playlist.deviceDropping)
+        {
+            auto lastRowBottom = 0;
+
+            for (const auto& row : playlist.rows)
+                lastRowBottom = std::max (lastRowBottom, getRowArea (row).getBottom());
+
+            const auto area = juce::isPositiveAndBelow (playlist.fileDropRow, (int) playlist.rows.size())
+                                  ? getRowArea (playlist.rows[(size_t) playlist.fileDropRow])
+                                  : getLocalBounds().withTop (lastRowBottom);
+            g.setColour (p.accent);
+            g.drawRect (area, 2);
         }
 
         if (! playlist.rubberBand.isEmpty())
@@ -992,16 +1009,28 @@ te::BeatPosition Playlist::getFileDropBeat (int x) const
 
 void Playlist::importFiles (const juce::StringArray& paths, juce::Point<int> position)
 {
+    const auto row = getRowAt (position.y);
+    addFiles (paths, row >= 0 ? rows[(size_t) row].track.get() : nullptr, getFileDropBeat (position.x));
+}
+
+bool Playlist::placeFile (const juce::File& file)
+{
     auto* e = getEdit();
 
     if (e == nullptr)
-        return;
+        return false;
 
-    const auto start = getFileDropBeat (position.x);
+    return addFiles ({ file.getFullPathName() }, getSelectedTracks (selection).getFirst(), e->tempoSequence.toBeats (getPlayStart (*e)));
+}
 
-    // The first file can go on the track it was dropped on; the others get new tracks below it.
-    const auto row = getRowAt (position.y);
-    auto* target = row >= 0 ? rows[(size_t) row].track.get() : nullptr;
+bool Playlist::addFiles (const juce::StringArray& paths, te::Track* target, te::BeatPosition start)
+{
+    auto* e = getEdit();
+
+    if (e == nullptr)
+        return false;
+
+    // The first file can go on the target track; the others get new tracks below it.
     auto* after = target != nullptr ? target : getPlaylistTracks (*e).getLast();
     juce::Array<te::Clip*> added;
 
@@ -1044,8 +1073,11 @@ void Playlist::importFiles (const juce::StringArray& paths, juce::Point<int> pos
     for (auto* clip : added)
         selection.addToSelection (clip);
 
-    if (! added.isEmpty())
-        lastClip = added.getFirst(); // what Draw and Paint place next
+    if (added.isEmpty())
+        return false;
+
+    lastClip = added.getFirst(); // what Draw and Paint place next
+    return true;
 }
 
 bool Playlist::isInterestedInFileDrag (const juce::StringArray& paths)
@@ -1079,6 +1111,63 @@ void Playlist::filesDropped (const juce::StringArray& paths, int x, int y)
     fileDropBeat.reset();
     lanes->repaint();
     importFiles (paths, lanes->getLocalPoint (this, juce::Point<int> (x, y)));
+}
+
+bool Playlist::isInterestedInDragSource (const SourceDetails& details)
+{
+    auto* e = getEdit();
+
+    if (e == nullptr)
+        return false;
+
+    if (const auto file = getDraggedFile (details.description))
+        return getFileKind (e->engine, *file) != FileKind::other;
+
+    return getDraggedDevice (details.description).has_value();
+}
+
+void Playlist::itemDragMove (const SourceDetails& details)
+{
+    // Where it would go, as for files from Explorer: a file at a beat, a device onto a track.
+    const auto position = lanes->getLocalPoint (this, details.localPosition);
+    fileDropRow = getRowAt (position.y);
+    deviceDropping = getDraggedDevice (details.description).has_value();
+
+    if (deviceDropping)
+        fileDropBeat.reset();
+    else
+        fileDropBeat = getFileDropBeat (std::max (0, position.x));
+
+    lanes->repaint();
+}
+
+void Playlist::itemDragExit (const SourceDetails&)
+{
+    fileDropBeat.reset();
+    deviceDropping = false;
+    lanes->repaint();
+}
+
+void Playlist::itemDropped (const SourceDetails& details)
+{
+    itemDragExit (details);
+    auto* e = getEdit();
+
+    if (e == nullptr)
+        return;
+
+    const auto position = lanes->getLocalPoint (this, details.localPosition);
+    const auto row = getRowAt (position.y);
+    auto* track = row >= 0 ? rows[(size_t) row].track.get() : nullptr;
+    auto placed = false;
+
+    if (const auto file = getDraggedFile (details.description))
+        placed = addFiles ({ file->getFullPathName() }, track, getFileDropBeat (std::max (0, position.x)));
+    else if (const auto device = getDraggedDevice (details.description))
+        placed = addDeviceTo (*e, track, *device, &selection) != nullptr;
+
+    if (placed)
+        markPlaced (details.description);
 }
 
 //==============================================================================

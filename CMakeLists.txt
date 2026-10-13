@@ -73,6 +73,8 @@ target_sources(phazite_core PRIVATE
     src/model/EngineSetup.h
     src/model/Import.cpp
     src/model/Import.h
+    src/model/Library.cpp
+    src/model/Library.h
     src/model/LiveInput.cpp
     src/model/LiveInput.h
     src/model/LoudnessMeterPlugin.cpp
@@ -85,6 +87,8 @@ target_sources(phazite_core PRIVATE
     src/model/Outlines.h
     src/model/Playback.cpp
     src/model/Playback.h
+    src/model/Preview.cpp
+    src/model/Preview.h
     src/model/Project.cpp
     src/model/Project.h
     src/model/Sections.cpp
@@ -93,6 +97,8 @@ target_sources(phazite_core PRIVATE
     src/model/Selection.h
     src/model/SmartTool.cpp
     src/model/SmartTool.h
+    src/model/SoundPack.cpp
+    src/model/SoundPack.h
     src/model/StarterProject.cpp
     src/model/StarterProject.h
     src/model/Timeline.cpp
@@ -121,23 +127,33 @@ juce_add_binary_data(phazite_data
         resources/outlines/techno.outline.json
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
+        resources/icons/lucide/audio-lines.svg
         resources/icons/lucide/chevron-down.svg
         resources/icons/lucide/chevron-right.svg
+        resources/icons/lucide/clock.svg
+        resources/icons/lucide/download.svg
         resources/icons/lucide/eraser.svg
+        resources/icons/lucide/folder-plus.svg
+        resources/icons/lucide/folder.svg
         resources/icons/lucide/grip-vertical.svg
+        resources/icons/lucide/headphones.svg
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/magnet.svg
         resources/icons/lucide/mouse-pointer-2.svg
         resources/icons/lucide/move-horizontal.svg
+        resources/icons/lucide/music.svg
         resources/icons/lucide/paintbrush.svg
         resources/icons/lucide/pencil.svg
+        resources/icons/lucide/piano.svg
         resources/icons/lucide/play.svg
         resources/icons/lucide/plus.svg
         resources/icons/lucide/repeat.svg
         resources/icons/lucide/scissors.svg
         resources/icons/lucide/search.svg
+        resources/icons/lucide/sliders-horizontal.svg
         resources/icons/lucide/square-dashed-mouse-pointer.svg
         resources/icons/lucide/square.svg
+        resources/icons/lucide/star.svg
         resources/icons/lucide/volume-x.svg
         resources/icons/lucide/zoom-in.svg)
 
@@ -172,6 +188,7 @@ target_link_libraries(phazite_core
         juce::juce_audio_devices
         juce::juce_audio_processors
         juce::juce_audio_utils
+        juce::juce_cryptography # SHA-256, to check downloads
     PUBLIC
         juce::juce_recommended_warning_flags) # for Phazite's own files in every target, too
 
@@ -211,6 +228,8 @@ add_library(phazite_ui STATIC)
 target_sources(phazite_ui PRIVATE
     src/ui/AppShell.cpp
     src/ui/AppShell.h
+    src/ui/Browser.cpp
+    src/ui/Browser.h
     src/ui/ChannelStrip.cpp
     src/ui/ChannelStrip.h
     src/ui/ClipComponent.cpp
@@ -241,6 +260,10 @@ target_sources(phazite_ui PRIVATE
     src/ui/PianoRollParts.h
     src/ui/Playlist.cpp
     src/ui/Playlist.h
+    src/ui/PluginKeys.cpp
+    src/ui/PluginKeys.h
+    src/ui/PluginPicker.cpp
+    src/ui/PluginPicker.h
     src/ui/PluginWindow.cpp
     src/ui/PluginWindow.h
     src/ui/SectionsStrip.cpp
@@ -252,7 +275,9 @@ target_sources(phazite_ui PRIVATE
     src/ui/TopBar.cpp
     src/ui/TopBar.h
     src/ui/TrackHeader.cpp
-    src/ui/TrackHeader.h)
+    src/ui/TrackHeader.h
+    src/ui/Welcome.cpp
+    src/ui/Welcome.h)
 
 phazite_use_core(phazite_ui)
 
@@ -293,6 +318,13 @@ add_custom_command(TARGET Phazite POST_BUILD
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/lucide/LICENSE" "$<TARGET_FILE_DIR:Phazite>/licenses/Lucide.txt"
     VERBATIM)
 
+# --- phazite_soundkit: renders Phazite Sounds, the pack Phazite offers to download, from the recipes in the
+# phazite-sounds repository (CC0 sample libraries and its own synthesis), and zips it for a release. It is run by hand
+# when the sounds change, not as part of the build. ---
+juce_add_console_app(phazite_soundkit)
+target_sources(phazite_soundkit PRIVATE tools/soundkit/SoundKit.cpp)
+phazite_use_core(phazite_soundkit)
+
 # --- Tests: doctest (MIT), bundled with Tracktion Engine. Run them with `ctest --preset <preset>`. ---
 option(PHAZITE_BUILD_TESTS "Build Phazite's unit tests (phazite_tests)" ON)
 
@@ -307,6 +339,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppInfoTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/BrowserTests.cpp
         tests/ClipTests.cpp
         tests/CommandTests.cpp
         tests/ComputerKeyboardTests.cpp
@@ -315,21 +348,26 @@ if(PHAZITE_BUILD_TESTS)
         tests/EngineSetupTests.cpp
         tests/IconTests.cpp
         tests/ImportTests.cpp
+        tests/LibraryTests.cpp
         tests/LiveInputTests.cpp
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
         tests/NoteTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp
+        tests/PluginKeysTests.cpp
         tests/PlaylistTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp
         tests/SectionTests.cpp
+        tests/SoundPackTestHelpers.h
+        tests/SoundPackTests.cpp
         tests/TimelineTests.cpp
         tests/TrackTests.cpp
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h
-        tests/ValueTextTests.cpp)
+        tests/ValueTextTests.cpp
+        tests/WelcomeTests.cpp)
 
     phazite_use_core(phazite_tests)
     target_link_libraries(phazite_tests PRIVATE phazite_ui)

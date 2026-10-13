@@ -3,6 +3,7 @@
 #include "CommandUI.h"
 #include "DeviceMenus.h"
 #include "LookAndFeel.h"
+#include "model/Library.h"
 #include "model/LiveInput.h"
 #include "model/LoudnessMeterPlugin.h"
 #include "model/Mixer.h"
@@ -66,6 +67,65 @@ namespace
         parent.addAndMakeVisible (knob);
         return knob;
     }
+
+    // Links a knob to an effect's mix (phazite::setMix()), as ParameterAttachment links one to a parameter: one named undo
+    // step per drag or key press.
+    class MixAttachment
+    {
+    public:
+        MixAttachment (juce::Slider& s, te::Plugin& device)
+            : slider (s),
+              plugin (&device)
+        {
+            slider.setRange (0.0, 1.0);
+            slider.setDoubleClickReturnValue (true, 1.0);
+
+            slider.onDragStart = [this]
+            {
+                dragging = true;
+                beginUndoStep();
+            };
+
+            slider.onDragEnd = [this] { dragging = false; };
+
+            slider.onValueChange = [this]
+            {
+                if (auto* d = plugin.get())
+                {
+                    if (! dragging)
+                        beginUndoStep(); // a key press or a double-click: one undo step each
+
+                    setMix (*d, (float) slider.getValue());
+                }
+            };
+
+            update();
+        }
+
+        void update()
+        {
+            if (auto* d = plugin.get(); d != nullptr && ! dragging)
+                slider.setValue (getMix (*d), juce::dontSendNotification);
+        }
+
+    private:
+        juce::Slider& slider;
+        te::SafeSelectable<te::Plugin> plugin;
+        bool dragging = false;
+
+        void beginUndoStep()
+        {
+            if (auto* d = plugin.get())
+            {
+                // As ParameterAttachment does, the levels are stored first, without an undo step, so that undoing the
+                // first change plays the old mix.
+                for (auto* parameter : getMixParameters (*d))
+                    parameter->setParameter (parameter->getCurrentValue(), juce::sendNotification);
+
+                d->edit.getUndoManager().beginNewTransaction ("Change Mix");
+            }
+        }
+    };
 
     // The tracks that send to a return's bus.
     juce::StringArray getSenderNames (const te::Edit& edit, int bus)
@@ -132,6 +192,24 @@ struct DeviceSlots::Slot : public juce::Component
             }
         };
 
+        // An effect's mix first, as FL Studio's mixer slots have it, then its key controls.
+        if (owner.kind == Kind::effects && hasMix (device))
+        {
+            auto* knob = knobs.add (new Knob ("Mix", 1.0));
+            knob->textFromValueFunction = [] (double value) { return juce::String (juce::roundToInt (value * 100.0)) + "% wet"; };
+            juce::String tooltip ("Mix: how much of the sound is the effect. At 100% it is the effect alone; lower lets the sound "
+                                  "that comes in through as well. Double-click for 100%");
+
+            // Tracktion adds the dry sound back without waiting for the effect, as FL Studio's mix knob does.
+            if (const auto latency = device.getLatencySeconds(); latency > 0.0)
+                tooltip << ". This effect delays its sound by " << juce::jmax (1, juce::roundToInt (latency * 1000.0))
+                        << " ms, so below 100% the two blur together: use the effect's own mix control if it has one";
+
+            knob->setTooltip (tooltip);
+            mixAttachment = std::make_unique<MixAttachment> (*knob, device);
+            addAndMakeVisible (knob);
+        }
+
         for (const auto& id : getKeyControls (device, keyControlsPerDevice))
             addParameterKnob (*this, knobs, attachments, device, id);
 
@@ -147,6 +225,9 @@ struct DeviceSlots::Slot : public juce::Component
 
         for (auto* attachment : attachments)
             attachment->update();
+
+        if (mixAttachment != nullptr)
+            mixAttachment->update();
     }
 
     void resized() override
@@ -171,6 +252,7 @@ struct DeviceSlots::Slot : public juce::Component
     juce::TextButton power;
     juce::OwnedArray<Knob> knobs;
     juce::OwnedArray<ParameterAttachment> attachments;
+    std::unique_ptr<MixAttachment> mixAttachment; // an effect's, for its first knob
 };
 
 //==============================================================================
@@ -735,6 +817,33 @@ void ChannelStrip::mouseDown (const juce::MouseEvent&)
         selection.selectOnly (t);
 }
 
+bool ChannelStrip::isInterestedInDragSource (const SourceDetails& details)
+{
+    return track.get() != nullptr && getDraggedDevice (details.description).has_value();
+}
+
+void ChannelStrip::itemDragEnter (const SourceDetails&)
+{
+    dropping = true;
+    repaint();
+}
+
+void ChannelStrip::itemDragExit (const SourceDetails&)
+{
+    dropping = false;
+    repaint();
+}
+
+void ChannelStrip::itemDropped (const SourceDetails& details)
+{
+    itemDragExit (details);
+
+    if (auto* t = track.get())
+        if (const auto device = getDraggedDevice (details.description))
+            if (addDeviceTo (t->edit, t, *device, &selection) != nullptr)
+                markPlaced (details.description);
+}
+
 void ChannelStrip::paint (juce::Graphics& g)
 {
     const auto& p = getPalette (*this);
@@ -749,11 +858,12 @@ void ChannelStrip::paint (juce::Graphics& g)
         g.fillRect (area.removeFromTop (colourBarHeight));
     }
 
-    // Selected, or related to the selected channel by a send or a bus: then fainter, so the routing shows.
-    if (selected || related)
+    // Selected, or related to the selected channel by a send or a bus: then fainter, so the routing shows. Thicker while a
+    // device from the browser is dragged over it.
+    if (selected || related || dropping)
     {
-        g.setColour (p.accent.withAlpha (selected ? 1.0f : relatedOutlineAlpha));
-        g.drawRoundedRectangle (getLocalBounds().reduced (2, 0).toFloat().reduced (0.5f), cornerRadius, 1.0f);
+        g.setColour (p.accent.withAlpha (selected || dropping ? 1.0f : relatedOutlineAlpha));
+        g.drawRoundedRectangle (getLocalBounds().reduced (2, 0).toFloat().reduced (0.5f), cornerRadius, dropping ? 2.0f : 1.0f);
     }
 }
 
@@ -906,6 +1016,35 @@ void MasterStrip::paint (juce::Graphics& g)
     g.setColour (p.text);
     g.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
     g.drawText ("Master", getLocalBounds().reduced (Space::s).removeFromTop (controlHeight), juce::Justification::centred);
+
+    // While an effect from the browser is dragged over it.
+    if (dropping)
+    {
+        g.setColour (p.accent);
+        g.drawRect (getLocalBounds(), 2);
+    }
+}
+
+bool MasterStrip::isInterestedInDragSource (const SourceDetails& details)
+{
+    const auto device = getDraggedDevice (details.description);
+    return edit.get() != nullptr && device.has_value() && ! device->isInstrument;
+}
+
+void MasterStrip::setDropping (bool isDropping)
+{
+    dropping = isDropping;
+    repaint();
+}
+
+void MasterStrip::itemDropped (const SourceDetails& details)
+{
+    setDropping (false);
+
+    if (auto* e = edit.get())
+        if (const auto device = getDraggedDevice (details.description))
+            if (addDeviceTo (*e, nullptr, *device, nullptr) != nullptr)
+                markPlaced (details.description);
 }
 
 void MasterStrip::resized()
@@ -991,12 +1130,13 @@ void Inspector::paint (juce::Graphics& g)
 
 void Inspector::resized()
 {
+    // The strip fills the panel, but is no shorter than its parts need (then it scrolls) and no narrower than the
+    // mixer's strips.
     auto area = getLocalBounds().reduced (Space::m);
     area.removeFromTop (24 + Space::s);
-    // Up to 640 pixels tall, but no shorter than its parts need: then it scrolls.
-    const auto height = std::min (area.getHeight(), 640);
-    const auto scrolls = height < ChannelStrip::getMinimumHeight();
-    stripView.setBounds (area.removeFromLeft (ChannelStrip::width + (scrolls ? stripView.getScrollBarThickness() : 0)).withHeight (height));
-    strip.setSize (ChannelStrip::width, std::max (height, ChannelStrip::getMinimumHeight()));
+    const auto scrolls = area.getHeight() < ChannelStrip::getMinimumHeight();
+    stripView.setBounds (area);
+    strip.setSize (std::max (ChannelStrip::width, area.getWidth() - (scrolls ? stripView.getScrollBarThickness() : 0)),
+                   std::max (area.getHeight(), ChannelStrip::getMinimumHeight()));
 }
 } // namespace phazite::ui

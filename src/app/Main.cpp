@@ -70,6 +70,7 @@ public:
         mainWindow->getShell().refreshShortcutTexts();
 
         session->openAtStartup();
+        mainWindow->showWelcomeOnFirstRun();
     }
 
     void shutdown() override

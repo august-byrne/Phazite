@@ -114,6 +114,11 @@ bool ComputerKeyboard::update (const std::function<bool (int)>& isKeyDown, juce:
 bool ComputerKeyboard::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
     // Takes the layout's keys, so that they don't also run a shortcut.
+    return takesKey (key);
+}
+
+bool ComputerKeyboard::takesKey (const juce::KeyPress& key) const
+{
     if (! enabled || isShortcut (key.getModifiers()))
         return false;
 

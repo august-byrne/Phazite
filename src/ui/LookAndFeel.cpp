@@ -83,6 +83,8 @@ void LookAndFeel::setTheme (ThemeName newTheme)
     setColour (juce::TreeView::backgroundColourId, p.surface);
     setColour (juce::TreeView::linesColourId, p.border);
     setColour (juce::TreeView::selectedItemBackgroundColourId, p.accent.withAlpha (0.25f));
+    setColour (juce::ProgressBar::backgroundColourId, p.surfaceRaised);
+    setColour (juce::ProgressBar::foregroundColourId, p.accent);
 }
 
 juce::Font LookAndFeel::getNumberFont (float height)

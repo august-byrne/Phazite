@@ -160,6 +160,8 @@ Project::Project (std::unique_ptr<te::Edit> e, const juce::File& f)
       file (f),
       songFollower (std::make_unique<SongFollower> (*edit))
 {
+    // A project opens with the playhead at the song's start, where playback starts.
+    movePlayhead (*edit, te::TimePosition());
     edit->state.addListener (this);
 }
 
@@ -346,7 +348,8 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
 bool Project::isPlaybackState (const juce::ValueTree& tree, const juce::Identifier& property)
 {
     if (tree.hasType (te::IDs::TRANSPORT)
-        && (property == te::IDs::position || property == te::IDs::loopPoint1 || property == te::IDs::loopPoint2))
+        && (property == te::IDs::position || property == te::IDs::start || property == te::IDs::loopPoint1
+            || property == te::IDs::loopPoint2))
         return true;
 
     for (auto t = tree; t.isValid(); t = t.getParent())

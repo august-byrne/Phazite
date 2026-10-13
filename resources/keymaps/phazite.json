@@ -3,6 +3,7 @@
   "description": "Shortcuts that most music apps and the operating system share. \"command\" is Ctrl on Windows and Linux, Cmd on macOS.",
   "keys": {
     "transport.playStop": [ "spacebar" ],
+    "transport.playPause": [ "shift + spacebar" ],
     "transport.goToStart": [ "home" ],
     "transport.goToEnd": [ "end" ],
     "transport.loop": [ "L" ],
@@ -55,7 +56,9 @@
     "project.saveAs": [ "command + shift + S" ],
     "view.commandPalette": [ "command + K" ],
     "view.pianoRoll": [ "F7" ],
-    "view.toggleBrowser": [ "F8" ],
+    "view.toggleBrowser": [ "command + alt + B" ],
+    "view.searchBrowser": [ "command + F" ],
+    "device.add": [ "F8" ],
     "view.mixer": [ "F9" ],
     "view.zoomIn": [ "=", "numpad +" ],
     "view.zoomOut": [ "-", "numpad -" ],

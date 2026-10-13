@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Commands.h"
 #include "EngineSetup.h"
+#include "Playback.h"
 
 #include <PhaziteData.h>
 
@@ -204,6 +205,20 @@ const Command* CommandRegistry::findCommandForKey (const juce::KeyPress& key) co
 bool CommandRegistry::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
     if (const auto* command = findCommandForKey (key))
+        return runForKey (*command, key);
+
+    return false;
+}
+
+bool CommandRegistry::runsOverPlugins (const juce::KeyPress& key) const
+{
+    const auto* command = findCommandForKey (key);
+    return command != nullptr && command->overPlugins;
+}
+
+bool CommandRegistry::keyPressedOverPlugin (const juce::KeyPress& key)
+{
+    if (const auto* command = findCommandForKey (key); command != nullptr && command->overPlugins)
         return runForKey (*command, key);
 
     return false;
@@ -616,25 +631,35 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                         return nameWithStep (! (edit != nullptr && edit->getUndoManager().canRedo()));
                     } });
 
+    // As in FL Studio and Ableton Live, stopping goes back to where playback started, so that a part can be heard
+    // again and again while it is tweaked; Play / Pause goes on from where it stopped. Both work over plug-in windows.
     registry.add ({ .id = "transport.playStop",
                     .name = "Play / Stop",
                     .category = "Transport",
-                    .description = "Starts or stops playback.",
-                    .synonyms = { "start", "pause", "playback" },
+                    .description = "Plays from where you last put the playhead, or stops and goes back there.",
+                    .synonyms = { "start", "playback", "return to start" },
                     .perform =
                         [focusedEdit]
                     {
                         if (auto* edit = focusedEdit())
-                        {
-                            auto& transport = edit->getTransport();
-
-                            if (transport.isPlaying())
-                                transport.stop (false, false);
-                            else
-                                transport.play (false);
-                        }
+                            playOrStop (*edit);
                     },
-                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; } });
+                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; },
+                    .overPlugins = true });
+
+    registry.add ({ .id = "transport.playPause",
+                    .name = "Play / Pause",
+                    .category = "Transport",
+                    .description = "Plays from where the playhead is, or stops it there, so that playback goes on from there.",
+                    .synonyms = { "pause", "continue", "resume" },
+                    .perform =
+                        [focusedEdit]
+                    {
+                        if (auto* edit = focusedEdit())
+                            playOrPause (*edit);
+                    },
+                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; },
+                    .overPlugins = true });
 
     registry.add ({ .id = "transport.goToStart",
                     .name = "Go to Start",
@@ -645,7 +670,7 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                         [focusedEdit]
                     {
                         if (auto* edit = focusedEdit())
-                            edit->getTransport().setPosition (te::TimePosition());
+                            movePlayhead (*edit, te::TimePosition());
                     },
                     .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; } });
 
@@ -658,7 +683,7 @@ void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
                         [focusedEdit]
                     {
                         if (auto* edit = focusedEdit())
-                            edit->getTransport().setPosition (te::toPosition (edit->getLength()));
+                            movePlayhead (*edit, te::toPosition (edit->getLength()));
                     },
                     .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; } });
 }

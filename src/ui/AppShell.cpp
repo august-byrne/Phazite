@@ -2,6 +2,9 @@
 #include "AppShell.h"
 #include "CommandPalette.h"
 #include "LookAndFeel.h"
+#include "PluginPicker.h"
+#include "model/Mixer.h"
+#include "model/Tracks.h"
 
 namespace phazite::ui
 {
@@ -68,13 +71,17 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 };
 
 //==============================================================================
-AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard, std::function<te::Edit*()> getEdit,
-                    te::SelectionManager& selectionManager, RangeSelection& range)
+AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard,
+                    std::function<te::Edit*()> editGetter, te::SelectionManager& selectionManager, RangeSelection& range)
     : commands (registry),
       selection (selectionManager),
+      getEdit (std::move (editGetter)),
+      library (engine, engine.getPropertyStorage().getPropertiesFile(), soundPack.getFolder()),
+      previewer (engine),
       topBar (engine, registry, computerKeyboard, getEdit),
+      browser (library, previewer, soundPack, getEdit),
       playlist (registry, selectionManager, range),
-      inspector (engine, registry, std::move (getEdit), selectionManager),
+      inspector (engine, registry, getEdit, selectionManager),
       pianoRoll (registry, selectionManager),
       mixer (engine, registry, selectionManager)
 {
@@ -88,6 +95,10 @@ AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeybo
         pianoRoll.grabKeyboardFocus();
         setActiveEditor (&pianoRoll);
     };
+
+    // Enter or a double-click in the browser, and the plug-in picker.
+    browser.onPlace = [this] (const LibraryItem& item) { return placeItem (item); };
+    browser.onShowSoundPack = [this] { commands.invoke ("help.phaziteSounds"); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &topBar, &browser, &browserDivider, &centre, &inspectorDivider, &inspector,
                                                              &hintBar, &browserDetachButton, &inspectorDetachButton })
@@ -147,6 +158,7 @@ void AppShell::setActiveEditor (TimelineEditor* editor)
 
 void AppShell::setEdit (te::Edit* edit)
 {
+    previewer.stop(); // which may be in time with the project that closes
     playlist.setEdit (edit);
     pianoRoll.setEdit (edit);
     mixer.setEdit (edit);
@@ -203,6 +215,30 @@ void AppShell::revealEditor (EditorDock::Tab tab)
 void AppShell::showCommandPalette()
 {
     CommandPalette::show (commands, topBar.getSearchButton());
+}
+
+void AppShell::showPluginPicker()
+{
+    PluginPicker::show (library, topBar.getSearchButton(),
+                        [safeThis = juce::Component::SafePointer<AppShell> (this)] (const LibraryItem& item)
+                        {
+                            if (safeThis != nullptr)
+                                safeThis->browser.place (item);
+                        });
+}
+
+bool AppShell::placeItem (const LibraryItem& item)
+{
+    auto* edit = getEdit();
+
+    if (edit == nullptr)
+        return false;
+
+    // A device goes onto the selected track (or a new one: phazite::addDeviceTo()), a sound at the play start.
+    if (item.device.has_value())
+        return addDeviceTo (*edit, getSelectedTracks (selection).getFirst(), *item.device, &selection) != nullptr;
+
+    return playlist.placeFile (item.file);
 }
 
 //==============================================================================
@@ -393,6 +429,32 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     add ("view.commandPalette", "Search Commands", "Finds and runs any command by name.", { "palette", "find", "run" },
          [this] { showCommandPalette(); });
+
+    add ("view.searchBrowser", "Search the Browser", "Shows the browser and puts the cursor in its search field.",
+         { "find", "sounds", "samples", "plugins" },
+         [this]
+         {
+             if (browserWindow != nullptr)
+             {
+                 browserWindow->toFront (true);
+             }
+             else if (! browserShown)
+             {
+                 browserShown = true;
+                 updateLayout();
+             }
+
+             browser.focusSearch();
+         });
+
+    registry.add ({ .id = "device.add",
+                    .name = "Add Instrument or Effect",
+                    .category = "Device",
+                    .description = "Finds an instrument or effect by name and adds it to the selected track, as FL Studio's plug-in "
+                                   "picker does.",
+                    .synonyms = { "plug-in picker", "plugin", "vst", "synth", "insert", "fx" },
+                    .perform = [this] { showPluginPicker(); },
+                    .isEnabled = [this] { return getEdit() != nullptr; } });
 
     // Showing and hiding apply to the main window; a panel in its own window is closed there.
     add (

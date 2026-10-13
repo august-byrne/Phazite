@@ -69,6 +69,7 @@ private:
 
 //==============================================================================
 class ChannelStrip : public juce::Component,
+                     public juce::DragAndDropTarget,
                      private juce::Timer
 {
 public:
@@ -93,6 +94,12 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override; // selects the track
 
+    // A device dragged from the browser goes onto this channel (phazite::addDeviceTo()).
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped (const SourceDetails&) override;
+
 private:
     struct SendSlot;
 
@@ -100,7 +107,7 @@ private:
     CommandRegistry& commands;
     te::SelectionManager& selection;
     te::SafeSelectable<te::Track> track;
-    bool selected = false, related = false;
+    bool selected = false, related = false, dropping = false;
     juce::Colour shownColour; // the track's color, as the bar along the top shows it
 
     juce::Label nameLabel, inputLabel, outputLabel; // the name, what the channel is and what feeds it, and where it goes
@@ -130,6 +137,7 @@ private:
 
 //==============================================================================
 class MasterStrip : public juce::Component,
+                    public juce::DragAndDropTarget,
                     private juce::Timer
 {
 public:
@@ -143,8 +151,17 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    // An effect dragged from the browser goes onto the master.
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails&) override { setDropping (true); }
+    void itemDragExit (const SourceDetails&) override { setDropping (false); }
+    void itemDropped (const SourceDetails&) override;
+
 private:
     te::SafeSelectable<te::Edit> edit;
+    bool dropping = false;
+
+    void setDropping (bool);
     StripHeading effectsHeading { "Effects" };
     DeviceSlots effects { DeviceSlots::Kind::effects };
     juce::Viewport deviceView;

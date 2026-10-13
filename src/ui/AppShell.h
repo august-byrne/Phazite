@@ -2,6 +2,7 @@
 // The main window's content: top bar, browser, playlist, inspector, editor dock and hint bar.
 #pragma once
 
+#include "Browser.h"
 #include "ChannelStrip.h"
 #include "HintBar.h"
 #include "Icons.h"
@@ -45,6 +46,7 @@ public:
 
     void setLayout (Layout);
     void showCommandPalette();
+    void showPluginPicker(); // F8
 
     // Adds the commands for panels, layouts and the palette (the "view." commands).
     void addCommands (CommandRegistry&);
@@ -52,16 +54,21 @@ public:
     // Updates tooltips and hints that mention shortcuts, e.g. after the keymap changed.
     void refreshShortcutTexts();
 
+    SoundPack& getSoundPack() noexcept { return soundPack; } // Phazite Sounds, which the browser shows
+
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
     CommandRegistry& commands;
     te::SelectionManager& selection;
+    std::function<te::Edit*()> getEdit;
+    SoundPack soundPack; // Phazite Sounds, downloaded when the user asks
+    Library library;     // what the browser and the plug-in picker show
+    Previewer previewer; // the browser's
 
     TopBar topBar;
-    Panel browser { "Browser",
-                    "Instruments, effects, plug-ins, samples and projects, by folder or by search. Coming in roadmap step 1.5." };
+    Browser browser;
     Playlist playlist;
     Inspector inspector;
     PianoRoll pianoRoll;
@@ -106,6 +113,7 @@ private:
     void revealEditor (EditorDock::Tab); // shows it, even if it is showing already
     void placeDetachButtons();
     void setActiveEditor (TimelineEditor*);
+    bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track
     void globalFocusChanged (juce::Component*) override; // makes the editor that has the focus the active one
 
     juce::Component& getPanel (DetachablePanel);

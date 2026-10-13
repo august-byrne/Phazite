@@ -2,6 +2,7 @@
 #include "PluginWindow.h"
 #include "Controls.h"
 #include "LookAndFeel.h"
+#include "PluginKeys.h"
 
 namespace phazite::ui
 {
@@ -93,6 +94,9 @@ namespace
 
         ~PluginWindow() override
         {
+            if (auto* keys = getPluginKeys())
+                keys->unwatch (*this);
+
             storeBounds = false;
             plugin.edit.flushPluginStateIfNeeded (plugin);
             setEditor (nullptr);
@@ -150,6 +154,10 @@ namespace
 
             if (editor->allowWindowResizing())
                 setConstrainer (editor->getBoundsConstrainer());
+
+            // Play and stop, and the computer keyboard, work while the plug-in is being tweaked (PluginKeys.h).
+            if (auto* keys = getPluginKeys())
+                keys->watch (*this);
         }
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginWindow)

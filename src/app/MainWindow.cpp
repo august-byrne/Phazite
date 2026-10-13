@@ -15,6 +15,7 @@ namespace
     constexpr const char* hoverHelpSettingKey = "phaziteHoverHelp";
     constexpr const char* computerKeyboardSettingKey = "phaziteComputerKeyboard";
     constexpr const char* interfaceScaleSettingKey = "phaziteInterfaceScale";
+    constexpr const char* welcomeShownSettingKey = "phaziteWelcomeShown";
 
     // Interface sizes, on top of the operating system's display scaling.
     constexpr std::array<float, 8> interfaceScales { 0.75f, 0.9f, 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f };
@@ -102,6 +103,10 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     addKeyListener (&computerKeyboard);
     commands.getCommandManager().getKeyMappings()->addChangeListener (this);
 
+    // Play and stop, and the computer keyboard, work over plug-in windows too.
+    pluginKeys = std::make_unique<ui::PluginKeys> (commands, computerKeyboard);
+    ui::setPluginKeys (pluginKeys.get());
+
     session.dialogParent = this;
     session.onProjectClosing = [this] { shell->setEdit (nullptr); };
     session.onProjectChanged = [this]
@@ -128,7 +133,10 @@ MainWindow::~MainWindow()
     // this window.
     delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
+    delete welcomeWindow.getComponent();
 
+    ui::setPluginKeys (nullptr);
+    pluginKeys = nullptr;
     commands.getCommandManager().getKeyMappings()->removeChangeListener (this);
     removeKeyListener (&computerKeyboard);
     removeKeyListener (&commands);
@@ -285,6 +293,21 @@ void MainWindow::addCommands()
                     .synonyms = { "tooltips", "help" },
                     .perform = [this] { setHoverHelp (tooltipWindow == nullptr); },
                     .isTicked = [this] { return tooltipWindow != nullptr; } });
+
+    commands.add ({ .id = "help.welcome",
+                    .name = "Welcome",
+                    .category = "Help",
+                    .description = "Opens the welcome window, which sets Phazite up. For now, it offers Phazite Sounds.",
+                    .synonyms = { "getting started", "onboarding", "setup", "first run", "start" },
+                    .perform = [this] { showWelcome (ui::WelcomePanel::sounds); } });
+
+    commands.add (
+        { .id = "help.phaziteSounds",
+          .name = "Phazite Sounds",
+          .category = "Help",
+          .description = "Downloads Phazite Sounds, 85 free drums, loops and effects to start with, or installs them from a file.",
+          .synonyms = { "samples", "sample pack", "sound pack", "library", "download", "drums", "loops", "content" },
+          .perform = [this] { showWelcome (ui::WelcomePanel::sounds); } });
 }
 
 //==============================================================================
@@ -315,6 +338,54 @@ void MainWindow::showSettings (std::optional<ui::SettingsPanel::Tab> tab)
     o.content.setOwned (panel);
 
     settingsWindow = o.launchAsync();
+}
+
+void MainWindow::showWelcome (ui::WelcomePanel::Page page)
+{
+    if (welcomeWindow != nullptr)
+    {
+        if (welcomePanel != nullptr)
+            welcomePanel->showPage (page);
+
+        welcomeWindow->toFront (true);
+        return;
+    }
+
+    auto* panel = new ui::WelcomePanel (shell->getSoundPack());
+    panel->setSize (560, 460);
+    panel->showPage (page);
+    welcomePanel = panel;
+
+    juce::DialogWindow::LaunchOptions o;
+    o.dialogTitle = "Welcome to Phazite";
+    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = false;
+    o.componentToCentreAround = this;
+    o.content.setOwned (panel);
+
+    welcomeWindow = o.launchAsync();
+}
+
+void MainWindow::showWelcomeOnFirstRun()
+{
+    auto& settings = engine.getPropertyStorage().getPropertiesFile();
+
+    if (settings.getBoolValue (welcomeShownSettingKey, false))
+        return;
+
+    settings.setValue (welcomeShownSettingKey, true);
+    settings.saveIfNeeded();
+
+    // Once the window is on the screen.
+    if (! shell->getSoundPack().isInstalled())
+        juce::MessageManager::callAsync (
+            [safeThis = juce::Component::SafePointer<MainWindow> (this)]
+            {
+                if (safeThis != nullptr)
+                    safeThis->showWelcome (ui::WelcomePanel::sounds);
+            });
 }
 
 void MainWindow::showPluginList()
@@ -595,6 +666,8 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
         case 5: // Help: where to find things
             add (menu, { "view.commandPalette", "options.keyboardShortcuts", "view.hoverHelp" });
+            menu.addSeparator();
+            add (menu, { "help.phaziteSounds", "help.welcome" });
             break;
 
         default:

@@ -87,7 +87,22 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
                 return nullptr;
 
             const auto time = edit.tempoSequence.toTime (start);
-            return track.insertWaveClip (file.getFileNameWithoutExtension(), copy, { te::TimeRange (time, time + length) }, false).get();
+            auto clip = track.insertWaveClip (file.getFileNameWithoutExtension(), copy, { te::TimeRange (time, time + length) }, false);
+
+            if (clip == nullptr)
+                return nullptr;
+
+            // A loop that knows its tempo (from its loop data, or from its name when it lasts whole bars) follows the
+            // song's tempo, as the browser's preview played it: stretched to its beats from where it starts.
+            if (const auto loop = audio.getInfo().loopInfo; loop.getNumBeats() > 0.0 && ! loop.isOneShot())
+            {
+                clip->setLoopInfo (loop);
+                clip->setTimeStretchMode (te::TimeStretcher::defaultMode);
+                clip->setAutoTempo (true);
+                clip->setEnd (edit.tempoSequence.toTime (start + te::BeatDuration::fromBeats (loop.getNumBeats())), true);
+            }
+
+            return clip.get();
         }
 
         case FileKind::midi:

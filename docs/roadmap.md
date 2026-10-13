@@ -175,6 +175,8 @@ Done before this plan (progress since then is under [Status](#status)):
 - Preview, with loops in time and key.
 - Drag-and-drop rules and the plug-in picker (F8).
 - *Done when:* finding and placing a kick takes seconds, and loops preview in time.
+- *Status:* done, pending a check by hand. The browser (`src/ui/Browser.h`) is a tree of places, as FL Studio's: Favorites, Recent, Sounds by Type, Phazite Sounds, Instruments, Effects, the user's folders and **Add Folder...**; search finds sounds and devices by their names and tags as you type (`src/model/Library.h`, which indexes the sounds on a background thread). Clicking a sound or moving to it with the arrow keys previews it (`src/model/Preview.h`): loops in time with the project, stretched by SoundTouch, and on its bars while it plays. Dragging puts sounds and devices onto the playlist (a track, or below the tracks for a new one) and devices onto mixer channels; Enter puts the selected item on the selected track at the play start. The plug-in picker (F8, `src/ui/PluginPicker.h`) adds a device by name. Tests: `tests/LibraryTests.cpp` and `tests/BrowserTests.cpp` (finding and placing a kick, and the loop previewing in time, are both there). Phazite Sounds: 85 CC0 sounds for a new user to start with (9.3 MB): drums, 808s, loops, effects and foley from CC0 libraries and Phazite's own synthesis. They are an optional download from their own repository, [phazite-sounds](https://github.com/august-byrne/phazite-sounds), whose CI checks that each is listed as CC0 with its source; `tools/soundkit/` renders and zips them. Phazite offers them once, in a welcome window (`src/ui/Welcome.h`), and in the browser until they are installed; `src/model/SoundPack.h` downloads the pinned release, checks its SHA-256 and unpacks it into `Documents/Phazite/Packs` (tests: `tests/SoundPackTests.cpp`, `tests/WelcomeTests.cpp`). Still to come in later steps: drops onto device slots and drum pads (step 1.6), loops in key once songs have a key, previews through the track's devices, tempo detection for loops whose names don't give one, and collections.
+- **Fixes from the third round of feedback (2026-10-13):** Space stops back at the play start (the last click in a ruler, or the song's start in a project just opened), and Shift+Space (Ctrl+Space in FL Studio's keymap) pauses; play, stop and the computer keyboard work while a plug-in window has the focus (`src/ui/PluginKeys.h`); each effect has a Mix knob; the inspector's channel strip fills its height.
 
 **1.6 First built-in devices (XL)**
 - The first devices:
@@ -372,7 +374,7 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: steps 1.1 to 1.4 (the playlist, sections and song outlines, the piano roll, the mixer) done, with a first round of fixes from trying them (2026-10-13), pending checks by hand; next, step 1.5 |
+| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; next, step 1.6 |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |

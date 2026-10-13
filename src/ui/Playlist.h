@@ -16,6 +16,7 @@ namespace phazite::ui
 {
 class Playlist : public TimelineEditor,
                  public juce::FileDragAndDropTarget,
+                 public juce::DragAndDropTarget,
                  private TrackHeader::Owner,
                  private juce::ChangeListener,
                  private juce::ValueTree::Listener,
@@ -30,6 +31,10 @@ public:
 
     // Called when a MIDI clip is double-clicked, to open it in the piano roll.
     std::function<void (te::MidiClip&)> onOpenClip;
+
+    // Adds an audio or MIDI file at the play start (where Space plays from), as the browser's Enter does: onto the
+    // selected track if it suits the file, or a new track after it. Returns false if nothing could be added.
+    bool placeFile (const juce::File&);
 
     // Adds the playlist's own commands: renaming and coloring tracks, and focus mode. The time line's
     // commands are addTimelineCommands()'s.
@@ -98,6 +103,7 @@ private:
     bool focusMode = false;
     std::optional<te::BeatPosition> fileDropBeat; // where files dragged over the playlist would go
     int fileDropRow = -1;
+    bool deviceDropping = false;                   // a device from the browser is dragged over the playlist, to fileDropRow
     te::SafeSelectable<te::Track> selectionAnchor; // where Shift-click ranges start
     int dropRow = -1;                              // while a track is dragged: the row it would go before (rows.size() for the end)
     std::unique_ptr<Gesture> gesture;              // what the mouse is doing in the lanes, from mouse down to mouse up
@@ -145,10 +151,18 @@ private:
 
     // Audio and MIDI files dropped from Explorer: onto a track that suits them, or onto new tracks.
     void importFiles (const juce::StringArray& paths, juce::Point<int> position);
+    bool addFiles (const juce::StringArray& paths, te::Track* target, te::BeatPosition start); // as one undo step
     bool isInterestedInFileDrag (const juce::StringArray&) override;
     void fileDragMove (const juce::StringArray&, int x, int y) override;
     void fileDragExit (const juce::StringArray&) override;
     void filesDropped (const juce::StringArray&, int x, int y) override;
+
+    // Items dragged from the browser: a sound or MIDI file goes in as a file from Explorer does; a device goes on the track
+    // it is dropped on, or a new track below the last (phazite::addDeviceTo()).
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragMove (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped (const SourceDetails&) override;
     te::BeatPosition getFileDropBeat (int x) const; // at the grid line at or before x, unless Alt is held
 
     void setColourOfSelectedTracks (juce::Colour);

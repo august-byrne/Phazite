@@ -211,3 +211,20 @@ TEST_CASE ("The starter project loops its song")
     CHECK (phazite::doesLoopFollowSong (*edit));
     CHECK (describe (edit->getTransport().getLoopRange()) == describe (phazite::getSongLoopRange (*edit)));
 }
+
+TEST_CASE ("Playback starts where the playhead was last put, and stopping goes back there")
+{
+    Song song;
+    auto& transport = song.edit->getTransport();
+
+    // A click in a ruler puts the playhead there, and playback starts there from now on.
+    phazite::movePlayhead (*song.edit, seconds (4.0));
+    CHECK (phazite::getPlayStart (*song.edit).inSeconds() == doctest::Approx (4.0));
+    CHECK (transport.getPosition().inSeconds() == doctest::Approx (4.0));
+
+    // Playback took the playhead on; stopping puts it back, so that the part can be heard again.
+    transport.setPosition (seconds (9.0));
+    phazite::stopAndReturn (*song.edit);
+    CHECK (transport.getPosition().inSeconds() == doctest::Approx (4.0));
+    CHECK_FALSE (transport.isPlaying());
+}

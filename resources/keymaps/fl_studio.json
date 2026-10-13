@@ -6,6 +6,7 @@
   "selectionLoops": true,
   "keys": {
     "transport.playStop": [ "spacebar" ],
+    "transport.playPause": [ "command + spacebar" ],
     "transport.goToStart": [ "home" ],
     "transport.loopSelection": [ "command + L" ],
     "edit.undoOrRedo": [ "command + Z" ],
@@ -47,6 +48,7 @@
     "view.commandPalette": [ "command + K" ],
     "view.pianoRoll": [ "F7" ],
     "view.toggleBrowser": [ "alt + F8" ],
+    "device.add": [ "F8" ],
     "view.mixer": [ "F9" ],
     "view.zoomIn": [ "page up" ],
     "view.zoomOut": [ "page down" ],

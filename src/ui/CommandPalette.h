@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include "Controls.h"
 #include "model/Commands.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -22,18 +23,6 @@ public:
     void resized() override;
 
 private:
-    // A search field that hands the up and down keys to the list (a single-line TextEditor would
-    // otherwise use them to move its caret).
-    struct SearchField : public juce::TextEditor
-    {
-        std::function<bool (const juce::KeyPress&)> onNavigationKey;
-
-        bool keyPressed (const juce::KeyPress& key) override
-        {
-            return (onNavigationKey != nullptr && onNavigationKey (key)) || juce::TextEditor::keyPressed (key);
-        }
-    };
-
     CommandRegistry& registry;
     SearchField searchField;
     juce::ListBox list;

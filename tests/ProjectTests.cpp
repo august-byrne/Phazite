@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "model/Playback.h"
 #include "model/Project.h"
 
 namespace
@@ -198,4 +199,20 @@ TEST_CASE ("Recent projects list the newest first and skip missing ones")
     CHECK (recent.getProjects() == juce::Array<juce::File> { a });
 
     recent.remove (a);
+}
+
+TEST_CASE ("A project opens with the playhead at the song's start, where playback starts")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Start");
+    phazite::movePlayhead (project->getEdit(), te::TimePosition::fromSeconds (6.0));
+    CHECK_FALSE (project->hasUnsavedChanges()); // where playback starts changes nothing in the song
+
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+
+    auto reopened = openProject (file);
+    CHECK (reopened->getEdit().getTransport().getPosition().inSeconds() == doctest::Approx (0.0));
+    CHECK (phazite::getPlayStart (reopened->getEdit()).inSeconds() == doctest::Approx (0.0));
 }

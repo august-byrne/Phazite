@@ -72,6 +72,45 @@ void updateSongLoop (te::Edit& edit)
         transport.setLoopRange (song);
 }
 
+te::TimePosition getPlayStart (const te::Edit& edit)
+{
+    return edit.getTransport().startPosition.get();
+}
+
+void movePlayhead (te::Edit& edit, te::TimePosition position)
+{
+    auto& transport = edit.getTransport();
+    transport.startPosition = position;
+    transport.setPosition (position);
+}
+
+void playOrStop (te::Edit& edit)
+{
+    auto& transport = edit.getTransport();
+
+    if (transport.isPlaying())
+        stopAndReturn (edit);
+    else
+        transport.playFromStart (false);
+}
+
+void playOrPause (te::Edit& edit)
+{
+    auto& transport = edit.getTransport();
+
+    if (transport.isPlaying())
+        transport.stop (false, false);
+    else
+        transport.play (false);
+}
+
+void stopAndReturn (te::Edit& edit)
+{
+    auto& transport = edit.getTransport();
+    transport.stop (false, false);
+    transport.setPosition (transport.startPosition);
+}
+
 //==============================================================================
 SongFollower::SongFollower (te::Edit& e)
     : edit (e),
@@ -110,8 +149,7 @@ void SongFollower::timerCallback()
 
     if (lastPosition.has_value() && *lastPosition < songEnd && position >= songEnd)
     {
-        transport.stop (false, false);
-        transport.setPosition (transport.getTimeWhenStarted());
+        stopAndReturn (edit);
         lastPosition.reset();
         return;
     }

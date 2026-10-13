@@ -5,7 +5,9 @@
 #include "model/ComputerKeyboard.h"
 #include "ui/AppShell.h"
 #include "ui/LookAndFeel.h"
+#include "ui/PluginKeys.h"
 #include "ui/SettingsPanel.h"
+#include "ui/Welcome.h"
 
 #include <optional>
 
@@ -24,8 +26,11 @@ public:
 
     ui::AppShell& getShell() noexcept { return *shell; }
 
-    // The window's commands ("options.", "input." and the shell's "view." commands).
+    // The window's commands ("options.", "input.", "help." and the shell's "view." commands).
     void addCommands();
+
+    // The welcome window, the first time Phazite opens, unless Phazite Sounds are installed already.
+    void showWelcomeOnFirstRun();
 
     void closeButtonPressed() override;
     void activeWindowStatusChanged() override;
@@ -37,14 +42,17 @@ private:
     ProjectSession& session;
     ui::LookAndFeel& lookAndFeel;
     ComputerKeyboard computerKeyboard;
-    ui::AppShell* shell = nullptr; // owned by the window as its content
+    std::unique_ptr<ui::PluginKeys> pluginKeys; // play, stop and the computer keyboard over plug-in windows
+    ui::AppShell* shell = nullptr;              // owned by the window as its content
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow; // hover help; null when it is turned off
-    juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow;
+    juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow;
     juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
+    juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
 
     void showSettings (std::optional<ui::SettingsPanel::Tab>); // no tab: Audio, or the open window's tab
     void showPluginList();
+    void showWelcome (ui::WelcomePanel::Page);
     void setTheme (ui::ThemeName);
     void setHoverHelp (bool);
     void setInterfaceScale (float);

@@ -29,11 +29,23 @@ enum class Icon
     mute,
     erase,
     select,
-    zoom
+    zoom,
+    // The browser
+    folder,
+    addFolder,
+    favorite,
+    recent,
+    sound,
+    midi,
+    instrument,
+    effect,
+    preview,
+    download
 };
 
-// The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read.
-std::unique_ptr<juce::Drawable> createIcon (Icon);
+// The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read. A filled icon has its shape
+// filled as well as outlined, such as a favorite's star.
+std::unique_ptr<juce::Drawable> createIcon (Icon, bool filled = false);
 
 //==============================================================================
 // A button that shows an icon, with its text beside it if it has any, in the theme's colors.

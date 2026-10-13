@@ -54,13 +54,33 @@ namespace
                 return "square-dashed-mouse-pointer.svg";
             case Icon::zoom:
                 return "zoom-in.svg";
+            case Icon::folder:
+                return "folder.svg";
+            case Icon::addFolder:
+                return "folder-plus.svg";
+            case Icon::favorite:
+                return "star.svg";
+            case Icon::recent:
+                return "clock.svg";
+            case Icon::sound:
+                return "audio-lines.svg";
+            case Icon::midi:
+                return "music.svg";
+            case Icon::instrument:
+                return "piano.svg";
+            case Icon::effect:
+                return "sliders-horizontal.svg";
+            case Icon::preview:
+                return "headphones.svg";
+            case Icon::download:
+                return "download.svg";
         }
 
         return "";
     }
 } // namespace
 
-std::unique_ptr<juce::Drawable> createIcon (Icon icon)
+std::unique_ptr<juce::Drawable> createIcon (Icon icon, bool filled)
 {
     const juce::String fileName (getFileName (icon));
 
@@ -73,8 +93,15 @@ std::unique_ptr<juce::Drawable> createIcon (Icon icon)
 
         // Lucide draws in "currentColor", which JUCE's SVG reader doesn't know: read it as black.
         if (const auto* data = PhaziteData::getNamedResource (PhaziteData::namedResourceList[i], size))
-            if (const auto svg = juce::parseXML (juce::String::fromUTF8 (data, size).replace ("currentColor", "#000000")))
+        {
+            auto text = juce::String::fromUTF8 (data, size).replace ("currentColor", "#000000");
+
+            if (filled)
+                text = text.replace ("fill=\"none\"", "fill=\"#000000\"");
+
+            if (const auto svg = juce::parseXML (text))
                 return juce::Drawable::createFromSVG (*svg);
+        }
     }
 
     return {};

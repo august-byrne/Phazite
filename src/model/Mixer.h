@@ -42,8 +42,18 @@ void removeDevice (te::Plugin&);
 // Moves a device to another place among its channel's devices.
 void moveDevice (te::Plugin&, int newIndex);
 
-// The parameters a device's slot shows as small knobs, by ID: its quick control, then the first others.
+// The parameters a device's slot shows as small knobs, by ID: its quick control, then the first others (not the dry
+// and wet levels, which its mix sets).
 juce::StringArray getKeyControls (te::Plugin&, int maximum);
+
+// An effect's mix: how much of what it puts out is its effect, from 0 (only the sound that comes into it, "dry") to 1
+// (only the effect, "wet"), as FL Studio's mixer slots and REAPER's effect chains have for every effect. It crossfades
+// the dry and wet levels Tracktion gives each plug-in (and its reverb), linearly. A device without them, such as an
+// instrument, has no mix.
+bool hasMix (te::Plugin&);
+float getMix (te::Plugin&); // 1 for a device without a mix
+void setMix (te::Plugin&, float mix);
+te::AutomatableParameter::Array getMixParameters (te::Plugin&); // the dry and wet levels, or none
 
 //==============================================================================
 // The devices that can be added: Tracktion's built-in ones and the plug-ins found by scanning.
@@ -57,6 +67,13 @@ struct DeviceType
 
 std::vector<DeviceType> getDeviceTypes (te::Engine&);
 te::Plugin::Ptr createDevice (te::Edit&, const DeviceType&);
+
+// Adds a device dropped from the browser or chosen in the plug-in picker, as one named undo step. An instrument becomes a
+// track's instrument, in place of the one it had; a track that can't hold one (a folder or a return), or none, gets a
+// new track after it, named and colored after the instrument, and so does a track with audio clips, which an
+// instrument would silence. An effect goes after the track's effects, or with no track on the master. Returns the
+// device, or nullptr.
+te::Plugin* addDeviceTo (te::Edit&, te::Track*, const DeviceType&, te::SelectionManager*);
 
 //==============================================================================
 // Folders. A plain folder's volume scales its tracks' volumes, as a VCA does; a bus mixes its tracks

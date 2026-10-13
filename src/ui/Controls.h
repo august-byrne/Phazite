@@ -118,6 +118,20 @@ private:
 };
 
 //==============================================================================
+// A one-line search field over a list: Up and Down go to onNavigationKey, for the list, where a TextEditor would move
+// its caret. The command palette, the plug-in picker and the browser have one.
+class SearchField : public juce::TextEditor
+{
+public:
+    std::function<bool (const juce::KeyPress&)> onNavigationKey;
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        return (onNavigationKey != nullptr && onNavigationKey (key)) || juce::TextEditor::keyPressed (key);
+    }
+};
+
+//==============================================================================
 // A track's mute (M) and solo (S) buttons, side by side. Clicking M mutes or unmutes the track; right-clicking it
 // solos the track alone, as in FL Studio, and again unsolos it. Clicking S solos the track along with others,
 // and Ctrl+click solos it alone. Soloing never changes the mute switches (FL Studio's solo does, a long-standing

@@ -279,3 +279,35 @@ TEST_CASE ("A return with an effect comes in one step, named after the effect, w
     // Instruments don't go on returns.
     CHECK (phazite::addReturnWithEffect (*mix.a, mix.create (te::FourOscPlugin::xmlTypeName)) == nullptr);
 }
+
+TEST_CASE ("An effect's mix crossfades between the sound that comes in and the effect")
+{
+    Mix mix;
+    auto* reverb = phazite::insertDevice (*mix.a, mix.create (te::ReverbPlugin::xmlTypeName));
+    REQUIRE (reverb != nullptr);
+    REQUIRE (phazite::hasMix (*reverb));
+    auto& reverbPlugin = dynamic_cast<te::ReverbPlugin&> (*reverb);
+
+    // Tracktion's reverb passes both at full level to start with: an even mix.
+    CHECK (phazite::getMix (*reverb) == doctest::Approx (0.5f));
+
+    // It scales its wet level by 3 and its dry level by 2.
+    phazite::setMix (*reverb, 0.25f);
+    CHECK (reverbPlugin.wetParam->getCurrentValue() == doctest::Approx (0.25f / 3.0f));
+    CHECK (reverbPlugin.dryParam->getCurrentValue() == doctest::Approx (0.75f * 0.5f));
+    CHECK (phazite::getMix (*reverb) == doctest::Approx (0.25f));
+
+    phazite::setMix (*reverb, 1.0f);
+    CHECK (reverbPlugin.dryParam->getCurrentValue() == doctest::Approx (0.0f));
+    CHECK (phazite::getMixParameters (*reverb).size() == 2);
+
+    // The mix sets the dry and wet levels, so the slot's key controls are others.
+    for (const auto& id : phazite::getKeyControls (*reverb, 2))
+        CHECK ((id != "dry level" && id != "wet level"));
+
+    // An instrument has no mix.
+    auto* synth = phazite::setInstrument (*mix.a, mix.create (te::FourOscPlugin::xmlTypeName));
+    REQUIRE (synth != nullptr);
+    CHECK_FALSE (phazite::hasMix (*synth));
+    CHECK (phazite::getMix (*synth) == doctest::Approx (1.0f));
+}

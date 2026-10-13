@@ -20,6 +20,36 @@ te::Engine& getEngine();
 // MIDI devices, for example). This runs the timers that are due, as the loop would, until the
 // condition holds. Returns false if it still doesn't after timeoutMilliseconds.
 bool runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds = 2000);
+
+// A folder in the temp directory, deleted again at the end of the test.
+struct TemporaryFolder
+{
+    TemporaryFolder() { folder.createDirectory(); }
+    ~TemporaryFolder() { folder.deleteRecursively(); }
+
+    const juce::File folder =
+        juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("PhaziteTests", {}, false);
+};
+
+// Writes a WAV file (and the folders it is in) of a quiet sine, some seconds long, and returns it.
+inline juce::File writeSound (const juce::File& file, double seconds)
+{
+    constexpr double sampleRate = 44100.0;
+    juce::AudioBuffer<float> buffer (1, (int) (seconds * sampleRate));
+
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+        buffer.setSample (0, i, 0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / sampleRate));
+
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+
+    if (auto writer = juce::WavAudioFormat().createWriterFor (
+            stream, juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels (1).withBitsPerSample (16)))
+        writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+
+    return file;
+}
 } // namespace phazite::test
 
 // doctest prints juce::Strings in failure messages.

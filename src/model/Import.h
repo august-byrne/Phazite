@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Bringing files into a project: audio and MIDI files dropped onto the playlist (from Explorer now, from
-// the browser in roadmap step 1.5). Audio is copied into the project's Audio folder, so the project keeps
-// working when the original moves, and Save As takes it along.
+// Bringing files into a project: audio and MIDI files dropped onto the playlist from Explorer or the browser, or
+// put there with the browser's Enter. Audio is copied into the project's Audio folder, so the project keeps working
+// when the original moves, and Save As takes it along. A loop that knows its tempo follows the song's.
 #pragma once
 
 #include <tracktion_engine/tracktion_engine.h>
@@ -31,7 +31,8 @@ juce::File copyIntoProject (te::Edit&, const juce::File&);
 // and so on (docs/design.md, section 5). Nothing if the name says nothing about the sound.
 std::optional<juce::Colour> getColourForName (const juce::String&);
 
-// Adds a file as a clip starting at a beat: an audio clip, from the project's copy of the file, or a
-// MIDI clip. Returns nullptr for other files, or if the file can't be read.
+// Adds a file as a clip starting at a beat: an audio clip, from the project's copy of the file (a loop that knows its
+// tempo stretched to the song's, as the browser previews it), or a MIDI clip. Returns nullptr for other files, or if
+// the file can't be read.
 te::Clip* importFile (te::ClipTrack&, const juce::File&, te::BeatPosition start);
 } // namespace phazite

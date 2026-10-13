@@ -3,6 +3,7 @@
 #include "UiTestHelpers.h"
 #include "model/Mixer.h"
 #include "ui/ChannelStrip.h"
+#include "ui/DesignTokens.h"
 #include "ui/Mixer.h"
 
 TEST_CASE ("The mixer's strips keep their parts apart, however short the window is")
@@ -124,4 +125,26 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
 
     selection.deselectAll();
     mixer.setEdit (nullptr);
+}
+
+TEST_CASE ("The inspector's channel fills the panel, and scrolls only when the panel is shorter than it needs")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    te::SelectionManager selection { phazite::test::getEngine() };
+    selection.edit = edit.get();
+    phazite::CommandRegistry registry;
+    phazite::ui::Inspector inspector { phazite::test::getEngine(), registry, [&edit] { return edit.get(); }, selection };
+    phazite::test::TestWindow window { inspector, 300, 1000 };
+    phazite::test::dispatchPendingMessages();
+
+    // A margin all round, and the title over the strip.
+    const auto strips = phazite::test::findAll<phazite::ui::ChannelStrip> (inspector);
+    REQUIRE (strips.size() == 1);
+    CHECK (strips[0]->getWidth() == 300 - 2 * phazite::ui::Space::m);
+    CHECK (strips[0]->getHeight() == 1000 - 2 * phazite::ui::Space::m - 24 - phazite::ui::Space::s);
+    phazite::test::checkChildrenApart (*strips[0]);
+
+    window.setSize (300, 200);
+    CHECK (strips[0]->getHeight() == phazite::ui::ChannelStrip::getMinimumHeight());
+    selection.deselectAll();
 }

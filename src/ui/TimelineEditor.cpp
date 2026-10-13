@@ -2,6 +2,7 @@
 #include "TimelineEditor.h"
 #include "CommandUI.h"
 #include "LookAndFeel.h"
+#include "model/Playback.h"
 #include "model/Project.h"
 
 namespace phazite::ui
@@ -426,8 +427,9 @@ void TimelineEditor::centreOnPlayhead()
 
 void TimelineEditor::movePlayheadTo (te::BeatPosition beat)
 {
+    // Playback starts there from now on, and Space comes back there when it stops.
     if (auto* e = edit.get())
-        e->getTransport().setPosition (e->tempoSequence.toTime (beat));
+        movePlayhead (*e, e->tempoSequence.toTime (beat));
 
     updatePlayhead();
 }

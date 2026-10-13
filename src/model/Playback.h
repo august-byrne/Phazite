@@ -27,9 +27,28 @@ void loopRange (te::Edit&, te::TimeRange);
 void updateSongLoop (te::Edit&);
 
 //==============================================================================
+// Where playback starts: where the playhead was last put (a click in a ruler, Home or End), or the song's start when a
+// project opens. Stopping goes back there, as in FL Studio and Ableton Live, so that a part can be heard again and
+// again while it is tweaked; pausing leaves the playhead where it is. It is Tracktion's transport start position.
+te::TimePosition getPlayStart (const te::Edit&);
+
+// Puts the playhead somewhere, as a click in a ruler does: playback starts there from now on (and goes on from there,
+// if it is playing).
+void movePlayhead (te::Edit&, te::TimePosition);
+
+// Space: plays from where playback starts, or stops and goes back there.
+void playOrStop (te::Edit&);
+
+// Plays from where the playhead is, or stops it where it is, as Shift+Space does in Ableton Live.
+void playOrPause (te::Edit&);
+
+// Stops playback and puts the playhead back where playback starts.
+void stopAndReturn (te::Edit&);
+
+//==============================================================================
 // Follows where an Edit's song ends, as clips are added, moved, trimmed or deleted and the tempo changes: keeps the
 // loop around the song while the loop follows it, and stops playback that doesn't loop at the song's end, rather
-// than playing on into silence (as Logic does), going back to where playback started. Each open project has one.
+// than playing on into silence (as Logic does), going back to where playback starts. Each open project has one.
 class SongFollower : private juce::ValueTree::Listener,
                      private juce::AsyncUpdater,
                      private juce::Timer

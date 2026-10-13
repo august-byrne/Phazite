@@ -59,7 +59,7 @@ public:
     void zoomTo (te::BeatRange);
     void zoomToFit(); // shows getContentRange()
     void centreOnPlayhead();
-    void movePlayheadTo (te::BeatPosition);
+    void movePlayheadTo (te::BeatPosition); // playback starts there from now on (phazite::movePlayhead())
     te::BeatPosition getPlayheadBeat() const;
 
     // While playing, turn the page when the playhead reaches the right edge.

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Mixer.h"
+#include "Import.h"
 #include "LoudnessMeterPlugin.h"
 #include "Tracks.h"
+
+#include <optional>
 
 namespace phazite
 {
@@ -9,6 +12,36 @@ namespace
 {
     constexpr float newSendDb = -6.0f;
     const juce::Identifier busSwitchProperty { "phaziteBus" }; // a folder made a bus with the bus switch
+
+    // A device's dry and wet levels, and the value of each at which it passes its sound at full level: 1 for Tracktion's
+    // plug-ins, and a half (dry) and a third (wet) for its reverb, which scales them up.
+    struct MixLevels
+    {
+        te::AutomatableParameter::Ptr dry, wet;
+        float dryAtFull = 1.0f, wetAtFull = 1.0f;
+    };
+
+    std::optional<MixLevels> findMixLevels (te::Plugin& device)
+    {
+        if (device.isSynth())
+            return {};
+
+        auto dry = device.getAutomatableParameterByID ("dry level");
+        auto wet = device.getAutomatableParameterByID ("wet level");
+
+        if (dry == nullptr || wet == nullptr)
+            return {};
+
+        if (dynamic_cast<te::ReverbPlugin*> (&device) != nullptr)
+            return MixLevels { dry, wet, 0.5f, 1.0f / 3.0f };
+
+        return MixLevels { dry, wet, 1.0f, 1.0f };
+    }
+
+    bool isMixLevel (const te::AutomatableParameter& parameter)
+    {
+        return parameter.paramID == "dry level" || parameter.paramID == "wet level";
+    }
 
     template <typename... Types>
     bool isAnyOf (const te::Plugin& plugin)
@@ -173,14 +206,54 @@ juce::StringArray getKeyControls (te::Plugin& device, int maximum)
 {
     juce::StringArray ids;
 
-    if (auto quick = device.getQuickControlParameter())
+    if (auto quick = device.getQuickControlParameter(); quick != nullptr && ! isMixLevel (*quick))
         ids.add (quick->paramID);
 
     for (auto* parameter : device.getAutomatableParameters())
-        if (ids.size() < maximum)
+        if (ids.size() < maximum && ! isMixLevel (*parameter))
             ids.addIfNotAlreadyThere (parameter->paramID);
 
     return ids;
+}
+
+bool hasMix (te::Plugin& device)
+{
+    return findMixLevels (device).has_value();
+}
+
+float getMix (te::Plugin& device)
+{
+    const auto levels = findMixLevels (device);
+
+    if (! levels.has_value())
+        return 1.0f;
+
+    const auto wet = levels->wet->getCurrentValue() / levels->wetAtFull;
+    const auto dry = levels->dry->getCurrentValue() / levels->dryAtFull;
+    return wet + dry > 0.0f ? juce::jlimit (0.0f, 1.0f, wet / (wet + dry)) : 1.0f;
+}
+
+void setMix (te::Plugin& device, float mix)
+{
+    if (const auto levels = findMixLevels (device))
+    {
+        const auto wet = juce::jlimit (0.0f, 1.0f, mix);
+        levels->wet->setParameter (wet * levels->wetAtFull, juce::sendNotification);
+        levels->dry->setParameter ((1.0f - wet) * levels->dryAtFull, juce::sendNotification);
+    }
+}
+
+te::AutomatableParameter::Array getMixParameters (te::Plugin& device)
+{
+    te::AutomatableParameter::Array parameters;
+
+    if (const auto levels = findMixLevels (device))
+    {
+        parameters.add (levels->dry);
+        parameters.add (levels->wet);
+    }
+
+    return parameters;
 }
 
 //==============================================================================
@@ -204,6 +277,39 @@ te::Plugin::Ptr createDevice (te::Edit& edit, const DeviceType& type)
         return edit.getPluginCache().createNewPlugin (type.description.fileOrIdentifier, type.description);
 
     return edit.getPluginCache().createNewPlugin (te::ExternalPlugin::xmlTypeName, type.description);
+}
+
+te::Plugin* addDeviceTo (te::Edit& edit, te::Track* track, const DeviceType& type, te::SelectionManager* selection)
+{
+    edit.getUndoManager().beginNewTransaction ("Add " + type.name);
+    auto device = createDevice (edit, type);
+
+    if (device == nullptr)
+        return nullptr;
+
+    if (! type.isInstrument)
+        return track != nullptr ? insertDevice (*track, device) : insertMasterDevice (edit, device);
+
+    // An instrument silences a track's audio clips in Tracktion, so a track with audio gets one next to it instead.
+    auto* audioTrack = dynamic_cast<te::AudioTrack*> (track);
+    const auto holdsAudio = audioTrack != nullptr
+                            && std::any_of (audioTrack->getClips().begin(), audioTrack->getClips().end(),
+                                            [] (te::Clip* clip) { return dynamic_cast<te::AudioClipBase*> (clip) != nullptr; });
+
+    if (audioTrack == nullptr || getReturnBus (*audioTrack) >= 0 || holdsAudio)
+    {
+        audioTrack = insertTrack (edit, track, selection);
+
+        if (audioTrack == nullptr)
+            return nullptr;
+
+        audioTrack->setName (type.name);
+
+        if (const auto colour = getColourForName (type.name))
+            audioTrack->setColour (*colour);
+    }
+
+    return setInstrument (*audioTrack, device);
 }
 
 //==============================================================================

@@ -41,6 +41,8 @@ The first column covers the first 0.25 s after playback starts; the second cover
 | Two tracks in a folder bus with a compressor | 7 allocations, 1 free | 0 |
 | MIDI into Tracktion's 4OSC synth | 29 allocations, 3 frees | 10 allocations, 8 frees |
 | One empty track with two audio inputs enabled | 8 allocations, 4 frees | 0 |
+| A loop at 120 BPM stretched to 100 BPM, played from its rendered proxy (a loop dropped from the browser) | 7 allocations, 3 frees (from a file cache miss) | 0 |
+| A loop at 120 BPM previewed at 100 BPM, stretched as it plays (the browser's preview) | 22 allocations, 14 frees | 0 |
 
 Steady playback is clean everywhere except in 4OSC. Every scenario allocates something in its first blocks, though.
 
@@ -100,7 +102,8 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 
 **10. Modulator timing** (source): the Edit takes a lock once per block to update its modulators, and the MIDI tracker modulator takes a spin lock. Report upstream; measure in step 3.5.
 
-**11. Scratch buffers** (source): `AudioScratchBuffer` takes a shared mutex. It allocates when its 8 pooled buffers are busy or a buffer has more than 2 channels. It is used by time-stretching, multi-output plug-ins and sidechains. Revisit when time-stretching (step 1.5) and sidechains (step 2.7) land.
+**11. Scratch buffers** (source): `AudioScratchBuffer` takes a shared mutex. It allocates when its 8 pooled buffers are busy or a buffer has more than 2 channels. It is used by time-stretching, multi-output plug-ins and sidechains. Revisit when sidechains (step 2.7) land.
+  - **Time-stretching, revisited in step 1.5 (2026-10-13):** a loop dropped from the browser follows the song's tempo, and Tracktion plays it from a stretched copy that it renders in the background (a "proxy"), so the audio thread only reads a file: its steady playback allocates nothing (measured). The render starts 600 ms after the clip changes, and the clip is silent until it is ready, usually well under a second for a loop. The browser's preview stretches as it plays instead (finding 17).
 
 **12. Tempo changes** (source): the tempo map swaps its rebuilt sequence under the audio callback's lock. Report upstream; test with tempo automation later.
 
@@ -121,6 +124,9 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
   - the patch bays and the channel mapper;
   - the Airwindows wrapper.
 - **Action:** Phazite ships its own devices (steps 1.6 and 2.8), and Tracktion's stay out of Phazite's device list. Until step 1.6, the list (`phazite::getDeviceTypes()`) offers two of them: the reverb, which reads its parameters atomically and allocates nothing (measured), and the 4OSC synth, which the starter project uses. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stay out too.
+
+**17. Previews** (measured, step 1.5): the browser's preview plays a loop in an Edit of its own, mixed on the same audio thread as the song, and stretches it as it plays (Tracktion's preview Edit uses no proxy). In its first blocks, SoundTouch grows its buffers (`FIFOSampleBuffer::ensureCapacity`, 10 allocations), and a file cache miss logs in Debug builds; then it allocates nothing. A preview started while the song plays could therefore make it glitch.
+- **Action:** accept it for now: previews are short, and are mostly started while the song is stopped. Later, prime the stretcher on the message thread before the preview starts, or render the preview ahead as the clips do. Report SoundTouch's growing buffers upstream with finding 11.
 
 ## Reporting upstream
 

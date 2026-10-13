@@ -12,6 +12,8 @@
 
 #include "AudioThreadMonitor.h"
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
+#include "model/Import.h"
 #include "model/LoudnessMeterPlugin.h"
 #include "model/Mixer.h"
 #include "model/Tracks.h"
@@ -299,6 +301,59 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playAndMeasure (*edit);
         report ("An audio clip", m);
+        CHECK (m.peakLevel > 0.01f);
+    }
+
+    TEST_CASE ("Real-time audit: a loop stretched to the song's tempo")
+    {
+        // As a loop dropped from the browser plays (roadmap step 1.5), stretched to the song's tempo with SoundTouch.
+        SineFile sine; // 2 seconds: a bar at 120 BPM
+        phazite::test::TemporaryFolder temp;
+        const auto loop = temp.folder.getChildFile ("Loop 120 BPM.wav");
+        REQUIRE (sine.getFile().copyFileTo (loop));
+
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        edit->tempoSequence.getTempos()[0]->setBpm (100.0);
+        auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (getTrack (*edit, 0), loop, te::BeatPosition()));
+        REQUIRE (clip != nullptr);
+        REQUIRE (clip->getAutoTempo());
+
+        // Tracktion renders the stretched loop to a file in the background (a "proxy"), and plays that, so the audio
+        // thread only reads a file; until it is ready, the clip is silent.
+        const auto giveUpAt = juce::Time::getMillisecondCounter() + 20000;
+
+        while (clip->getPlaybackFile().getSampleRate() <= 0.0 && juce::Time::getMillisecondCounter() < giveUpAt)
+        {
+            phazite::test::dispatchPendingMessages(); // the render finishing comes as a message
+            juce::Thread::sleep (5);
+        }
+
+        REQUIRE (clip->getPlaybackFile().getSampleRate() > 0.0);
+
+        const auto m = playAndMeasure (*edit);
+        report ("A loop at 120 BPM stretched to 100 BPM, from its rendered proxy", m);
+        CHECK (m.peakLevel > 0.01f);
+    }
+
+    TEST_CASE ("Real-time audit: a loop previewed in time")
+    {
+        // The browser's preview (src/model/Preview.h): Tracktion stretches the loop as it plays, without a proxy.
+        SineFile sine;
+        phazite::test::TemporaryFolder temp;
+        const auto loop = temp.folder.getChildFile ("Loop 120 BPM.wav");
+        REQUIRE (sine.getFile().copyFileTo (loop));
+
+        auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        project->tempoSequence.getTempos()[0]->setBpm (100.0);
+        auto matched = false;
+        auto preview = te::Edit::createEditForPreviewingFile (phazite::test::getEngine(), loop, project.get(), true, false, &matched, {},
+                                                              {}, false, {});
+        REQUIRE (preview != nullptr);
+        REQUIRE (matched);
+        preview->getTransport().looping = true;
+
+        const auto m = playAndMeasure (*preview);
+        report ("A loop at 120 BPM previewed at 100 BPM, stretched as it plays", m);
         CHECK (m.peakLevel > 0.01f);
     }
 

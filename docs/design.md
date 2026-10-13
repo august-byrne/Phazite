@@ -88,7 +88,7 @@ Why this audience:
 | Play  Rec   140 BPM   4/4   CPU 12%        Ctrl+K: search any command |
 +----------+--------------------------------------------+---------------+
 | Browser  | + Track  Intro    Build    Drop    (bars)  | Inspector     |
-|  (F8)    | v Drums  (folder = bus)                    | (selection)   |
+| (Ctrl+F) | v Drums  (folder = bus)                    | (selection)   |
 | folders  |     Kick    [] [] [] [] [] [] [] []        | devices       |
 | tags     |     Snare      []    []    []    []        | sends         |
 | plug-ins | v Synths                                   | macros        |
@@ -115,7 +115,7 @@ Why this audience:
   - *Beat:* playlist and piano roll;
   - *Mix:* a large mixer;
   - *Full.*
-- Function keys follow FL Studio where that makes sense: F5 playlist, F7 piano roll, F8 plug-in picker and browser, F9 mixer.
+- Function keys follow FL Studio where that makes sense: F5 playlist, F7 piano roll, F8 plug-in picker, F9 mixer. The browser shows and hides with Ctrl+Alt+B (Ableton Live's key; Alt+F8 in FL Studio's keymap).
 
 ### Design language
 
@@ -306,6 +306,8 @@ This is the editor the target users spend most time in, and FL Studio's is its m
 - each track has an instrument first, then its effects;
 - drag devices to reorder them; bypass, dry/wet and A/B comparison for each.
 
+**Mix (2026-10-13):** each effect has a Mix knob, first among its knobs in the strip: how much of what it puts out is its effect, from 0 (only the sound coming in) to 100 % (only the effect). The owner asked for it, from FL Studio. Research found it isn't standard: FL Studio's mixer slots and REAPER's effect windows have one for every plug-in, and Tracktion has one in its engine; Bitwig and Ableton Live put one on their own devices and blend a plug-in through a container or rack; Logic Pro, Cubase, Pro Tools and Studio One leave it to the plug-in's own control or to sends. It crossfades the dry and wet levels Tracktion gives every plug-in, linearly (Ableton's "equal-loudness" option could come later for reverbs and delays). Known limits, until Phazite's own mix replaces it (latency-compensated and ramped, as Tracktion's rack wet/dry is): the dry sound isn't delayed to match an effect's latency, so the knob's tooltip warns on effects with latency, as FL Studio's manual does; and a change applies per audio block, so a fast move can click. Keep effects on returns at 100 %.
+
 **Containers:**
 - Select some devices and choose "Group into container". The container shows its devices in a row, with up to eight macro knobs that can drive any parameter inside, and saves as one preset. This is like Reason's Combinator and Ableton's racks.
 - Parallel chains inside a container come later; Tracktion racks can be wired freely.
@@ -317,6 +319,8 @@ This is the editor the target users spend most time in, and FL Studio's is its m
 - container presets.
 
 **Plug-in windows:** each opens in its own window, kept above the main window, and its position is remembered.
+
+**Keys over plug-in windows (2026-10-13):** play and stop (and pause), and the computer keyboard while it plays notes, work while a plug-in's window has the keyboard focus, so a sound can be played while it is tweaked (`src/ui/PluginKeys.h`; commands opt in with `Command::overPlugins`). Every other key goes to the plug-in. DAWs differ here: Bitwig gives a focused plug-in every key, REAPER and FL Studio have a per-plug-in switch, and Ableton Live keeps Space on Windows. On Windows, a plug-in's native window gets keys before JUCE sees them, so a message hook on the message thread catches these keys on their way to it. The hook is installed at startup, before any plug-in window: Windows calls the hook installed last first, and a plug-in built with JUCE installs its own hook, which offers each key to its focused control (a preset name being typed) and passes on the keys it doesn't use. A key typed into a native text field goes to the plug-in too. **Open:** a per-plug-in "send all keys to the plug-in" switch, as REAPER and FL Studio have, for plug-ins whose own text fields Phazite can't see ([question 16](#24-open-questions)).
 
 **Track limit:** Tracktion's default of 16 devices per track is raised. FL Studio's 10 effect slots per mixer track is a known complaint ([B12](#appendix-b-sources)).
 
@@ -352,22 +356,27 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 
 ## 11. The browser
 
-- **One browser, two ways in:**
-  - **folders**, showing your sample folders as they are on disk (FL Studio users ask other DAWs for this);
-  - **tags and search** across everything: instruments, effects, plug-ins, presets, samples, generated sounds and projects.
-- **Preview:**
-  - click to hear;
-  - loops play in time with the project's tempo and key, one-shots at their own pitch;
-  - optionally, previews play through the selected track's devices.
+**Built in step 1.5 (2026-10-13)** (`src/ui/Browser.h`, `src/model/Library.h`, `src/model/Preview.h`, `src/ui/PluginPicker.h`):
 
-  Loops are detected and their tempo measured on import (Tracktion includes a tempo detector).
-- **Drag and drop:**
-  - onto empty space: a new track;
-  - onto a track: adds a clip or a device;
-  - onto a device slot: replaces it;
-  - onto a drum pad: loads the sound.
-- **Plug-in picker (F8):** type to filter, then press Enter to add the plug-in to the selected track or a new one.
-- **Favorites, recent items and collections.**
+- **One browser, two ways in:**
+  - **a tree of places**, as FL Studio's browser has it: Favorites, Recent, Sounds by Type, Phazite Sounds (the free sounds, once downloaded), Instruments, Effects, then your own folders as they are on disk (FL Studio users ask other DAWs for this), and **Add Folder...**. One click opens a folder, as in FL Studio. The folders open when Phazite closes are open again at the next start;
+  - **search** across your sounds and the devices, as you type, best matches first (names that start with what you typed, then names with a word that does). Ctrl+F (Phazite's keymap) puts the cursor in the search field; Down or Enter moves to the results.
+- **Tags** come from the words in a sound's name and folders: what it is (Kick, Snare, Clap, Hat, Cymbal, Tom, Percussion, Bass, FX, Foley, Vocal, Synth), Loop or One-shot, and its tempo ("120 BPM"). Search finds them, so "kick loop" finds a kick loop in a folder called Loops. A background thread indexes the sounds (up to 50,000).
+- **Preview:**
+  - click a sound, or move to it with the arrow keys, to hear it; Esc stops it. The headphones switch under the tree turns previews off, and a fader sets how loud they play;
+  - loops play in time with the project's tempo, stretched by SoundTouch; while the song plays, a loop starts on one of its bars. Tracktion knows a loop by its loop data, or by a tempo in its name ("Break 120 BPM") when it lasts whole bars at that tempo. Effects made for some bars ("Riser 4 Bars 128 BPM") play in time but once. One-shots play at their own pitch. MIDI files play on the 4OSC synth;
+  - loops keep their own pitch for now. Tracktion's pitch matching would pull every loop toward the song's pitch, which is C in a song without a key, and it ignores major and minor (an A minor loop would go up to C in C major). **Later:** in key, once songs have a key: the selected track's, treating relative major and minor as the same key, as Logic Pro does;
+  - **later:** previews through the selected track's devices, and tempo detection for loops whose names don't say (Tracktion includes a tempo detector).
+- **Putting things into the song:**
+  - **drag and drop:** onto empty space below the tracks, a new track; onto a track, a clip at the grid line before the pointer, or a device; onto a mixer channel, a device; onto the master, an effect. An instrument dropped on a track that can't hold one (a folder, a return, a track with audio clips) gets a new track next to it, named and colored after it. **Later:** onto a device slot replaces it; onto a drum pad loads the sound (step 1.6);
+  - **Enter or a double-click** puts a sound on the selected track at the play start (where Space plays from), or on a new track; a device goes onto the selected track.
+- **Plug-in picker (F8, as in FL Studio):** type part of an instrument's or effect's name or maker, then press Enter (or click it) to add it to the selected track, or to a new one. Instruments come before effects. Phazite's keymap moves the browser's show-and-hide key to Ctrl+Alt+B, Ableton Live's; FL Studio's keymap keeps Alt+F8.
+- **Favorites and recent items:** the star at the end of a row (on the selected row, and filled on favorites) or the right-click menu makes an item a favorite. Recent lists the last 50 items put into the song. **Later:** collections (named sets, as Ableton Live's colored ones).
+- **Sounds by Type** lists every sound, from Phazite's library and the user's folders, by its type tag (Kicks, Snares, ... Loops), as Ableton Live's labels and Bitwig's "Drum Hits" do.
+- **Phazite Sounds (2026-10-13):** 85 free sounds for a new user to start with (9.3 MB of FLAC): acoustic and electronic drums, 808s, loops at 90 to 174 BPM, risers, impacts and other effects, and foley.
+  - **An optional download, not part of Phazite.** They live in their own public repository, [phazite-sounds](https://github.com/august-byrne/phazite-sounds), whose releases hold the pack as a zip, so Phazite's repository and installer stay small and contributing a sound never touches Phazite's code. Phazite offers them once, in the welcome window ([section 13](#13-getting-started-and-song-outlines)), and the browser's Phazite Sounds place has a **Download** row until they are installed; Help > Phazite Sounds offers them again. This follows Bitwig's and Studio One's sound packages, which install after the program, rather than FL Studio's bundled library; experienced users skip them.
+  - **Download (`src/model/SoundPack.h`):** only when the user asks, over HTTPS from GitHub, on a thread of its own, with progress in the browser and the welcome window. Phazite pins the release it installs by address, size and SHA-256, so a changed or damaged file is refused, and a released zip is never replaced; a new release means a new pin in Phazite. The zip unpacks into `Documents/Phazite/Packs/Phazite Sounds` (entries that would land outside are refused), whose `sources.json` names the pack and version. A zip downloaded by hand installs the same way (**Install from a File...**), for computers without a connection. Linux builds have no TLS without curl, so there the button opens the release page; **later:** curl on Linux, and updates when a new version is pinned.
+  - **They are CC0 only**, so songs made with them carry no conditions; CC BY and CC BY-SA would make every released song owe credits, and "royalty-free" licences forbid redistribution. Third-party sounds come from libraries whose licence files say CC0 and whose descriptions show no one else's material: VCSL, Virtuosity Drums, Big Rusty Drums, body_percussion, FreePats, screened Sonic Pi samples, EatMe's breakbeat and Kenney's foley. Phazite synthesizes the rest (808s, analog-style drums, risers, sweeps and impacts) and plays its loops from these sounds to its own patterns: `phazite_soundkit` (`tools/soundkit/`) renders the pack from the recipes in the sounds repository, the same bytes every time, and zips it the same way every time. The pack's `sources.json` records each sound's source, licence evidence and hash, and the sounds repository's CI checks that every sound is listed there as CC0. Drum machines' own recordings (the 909's cymbals), sampled records (the Amen break) and the makers' names are kept out.
 - **Later:** automatic tags for your own samples, from analysis (one-shot or loop, drum type, brightness, key, tempo), and "find similar".
 
 ## 12. Commands, keys and help
@@ -388,7 +397,7 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 **Keymaps (decided: whatever users find most intuitive; FL Studio style is fine):**
 - **First launch asks** "Coming from FL Studio, Ableton Live, Logic, Pro Tools, or new to music software?" and loads a matching keymap. Digital Performer 12 has switchable keysets that copy other DAWs' shortcuts ([B13](#appendix-b-sources)). v1 ships the Phazite default and FL Studio keymaps, with Ableton Live next.
 - **The Phazite default** follows conventions that most DAWs and the operating system share:
-  - Space plays and stops;
+  - Space plays, and stops back at the play start: where playback last started (the last click in a time ruler, or the song's start in a project just opened), so a sound can be replayed quickly while it is tweaked. FL Studio, Ableton Live, REAPER and Waveform do this; Logic Pro, Studio One and Bitwig pause instead, with an option to go back. Shift+Space pauses and plays on from there, as in Ableton Live (Ctrl+Space in FL Studio's keymap, as in FL Studio);
   - Ctrl+Z and Ctrl+Shift+Z undo and redo;
   - Ctrl+S saves;
   - Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste.
@@ -422,6 +431,8 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 1. "Coming from…?" chooses a keymap.
 2. Audio setup: pick an output, or an ASIO® driver when an audio interface is present.
 3. A starter project opens with a drum track loaded with a kit and a synth track. The computer keyboard plays notes, and the hint bar suggests a next step ("Press Space to play", "Drag a kick from the browser").
+
+**The welcome window (2026-10-13)** is where first launch asks these things, a page at a time (`src/ui/Welcome.h`). It opens once, over the starter project, the first time Phazite starts, and **Help > Welcome** opens it again. Every page is optional. Its first page offers Phazite Sounds ([section 11](#11-the-browser)): **Download**, which shows its progress, or **Install from a File...**, and **Not Now**; it doesn't open at all when they are installed already. The keymap and audio pages come later.
 
 **New project:** a dialog with tempo, key and an optional song outline.
 
@@ -696,11 +707,13 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - **No account and no telemetry by default.** Any future crash reporting is opt-in.
 - **No personal data in project files.** Tracktion writes the operating system user's full name into every saved project (`modifiedBy` in `tracktion_Edit.cpp`). Phazite overrides it before it saves any project.
 - **API keys** for optional cloud AI (later) are stored in the operating system's credential store, never in projects or settings files.
+- **Downloads (2026-10-13):** Phazite connects to the internet only when the user asks it to download something, so far only Phazite Sounds (from GitHub, over HTTPS). It checks each download against the SHA-256 it was built with.
 
 **Licences:**
 - **Compatibility:** only AGPL-compatible code, models and data; the list is in `CLAUDE.md`.
 - **Notices:** third-party notices ship with the app, for example SoundTouch (LGPL-2.1-or-later), Signalsmith Stretch (MIT) and the Inter font (SIL OFL 1.1).
 - **Fonts:** fonts may use the SIL Open Font License 1.1. They ship as separate files with their licence text.
+- **Sounds:** Phazite Sounds are CC0 1.0 and a separate download from their own repository; the program never includes sounds.
 - **Proprietary options:** Tracktion's proprietary options stay off: Elastique, REX and ReWire.
 
 **Trademarks:**
@@ -768,6 +781,10 @@ Raised by the mixer research (2026-10-13), each with what the research recommend
 14. **New tracks:** should "+ Track" ask for an instrument (Logic, Cubase), or make an empty track, as now?
 15. **Starter project:** should a new project come with a reverb return, as Live's default set did? It costs some CPU even when nothing is sent to it.
 
+Raised by the third round of feedback (2026-10-13):
+
+16. **Keys over plug-in windows:** add a per-plug-in "send all keys to the plug-in" switch, as REAPER and FL Studio have, for plug-ins that draw their own text fields without JUCE, where Phazite can't tell that a name is being typed? Proposed: yes, in each plug-in window's menu, off by default ([section 9](#9-devices-containers-and-presets)).
+
 ## 25. Decision log
 
 | Date | Decision |
@@ -797,6 +814,9 @@ Raised by the mixer research (2026-10-13), each with what the research recommend
 | 2026-10-13 | Keys: a held key repeats only the commands that take a step; tool keys spring back after a hold with the mouse, as in Bitwig and Ableton Live; in Phazite's keymap the digits 1 to 9 pick the tools and M turns the computer keyboard on and off |
 | 2026-10-13 | Second round: playback loops the whole song and the loop grows with it, as in FL Studio's song mode, unless a selection or sections are looped on purpose; a Loop button and L turn looping on or off. A track moves only by the handle in its header. Tracks collapse to a thin row (the arrow in the header, U, or dragging the bottom edge past the smallest height). Track colors are stronger in headers and rows, with black or white names, whichever reads better. With FL Studio's keymap a click on empty space places the last clip used |
 | 2026-10-13 | Mixer redesign, after research into the mixers people praise: a strip reads top to bottom as the sound goes, with the instrument in a slot of its own above the effects, and "+ Effect" and "Choose instrument" menus that list only what they add; a track with notes but no instrument asks for one, in the mixer, the inspector and the piano roll. "+ Send" can make a return with an effect in one step, named after it; returns are solo-safe and sit together next to the master; folders get a Bus switch; selecting a channel outlines what it feeds and what feeds it. Mute and solo stay separate buttons, and a solo never changes the mute switches (FL Studio's destructive solo is a long-standing complaint); right-click M solos a track alone, as FL users expect. Ctrl+L loops the selection, or the song with none; with FL Studio's keymap a selected time range loops while it is selected; playback that doesn't loop stops at the song's end |
+| 2026-10-13 | Third round, after the owner tried the mixer: Space stops back at the play start, which a click in a time ruler sets and which is the song's start in a project just opened, as in FL Studio, Ableton Live, REAPER and Waveform; Shift+Space pauses (Ctrl+Space in FL Studio's keymap). Play, stop and the computer keyboard work while a plug-in window has the keyboard focus, through a message hook installed before any plug-in's. Each effect has a Mix knob, as FL Studio's mixer slots have, with its limits documented (no latency compensation or ramping yet). The inspector's channel strip fills its height |
+| 2026-10-13 | Step 1.5 defaults, after research into the browsers people praise: one tree of places, as in FL Studio, where one click opens a folder; clicking a sound or moving to it with the arrow keys previews it (on by default), Esc stops it, and Shift+Enter or Right plays it again; loops preview at the song's tempo and start on its bar while it plays, and keep their own pitch until Phazite has a song key to match; Enter or a double-click puts the item on the selected track at the play start; a dropped loop follows the song's tempo, as it previewed; F8 is the plug-in picker in both keymaps, Phazite's keymap moves the browser to Ctrl+Alt+B and adds Ctrl+F for its search; favorites by a star; Recent keeps the last 50 items put into the song; "Sounds by Type" lists every library's sounds by tag. Phazite's own sounds are CC0 only: CC0 libraries plus Phazite's own synthesis, each recorded with its source |
+| 2026-10-13 | Phazite Sounds become an optional download, kept out of Phazite's repository and installer: the releases of their own public repository (phazite-sounds), pinned in Phazite by address, size and SHA-256. Phazite asks once, in a welcome window that will grow into first-run setup with more pages; the browser offers them until they are installed, and a zip downloaded by hand installs too |
 
 ## Appendix A. Research summary
 
