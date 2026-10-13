@@ -9,14 +9,6 @@ namespace
     constexpr int nameHeight = 16;   // the strip with the clip's name, in clips tall enough for one
     constexpr float corner = 3.0f;   // rounded corners
     constexpr int minNoteRange = 12; // semitones: a note preview spans at least an octave
-
-    // Black or white, whichever reads better on a color.
-    juce::Colour getInkFor (juce::Colour background)
-    {
-        return getContrastRatio (juce::Colours::black, background) >= getContrastRatio (juce::Colours::white, background)
-                   ? juce::Colours::black
-                   : juce::Colours::white;
-    }
 } // namespace
 
 ClipComponent::ClipComponent (te::Clip& c)

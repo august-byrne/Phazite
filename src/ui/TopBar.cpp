@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TopBar.h"
+#include "CommandUI.h"
 #include "LookAndFeel.h"
 
 namespace phazite::ui
@@ -49,8 +50,8 @@ TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyb
 
 void TopBar::refreshTooltips()
 {
-    setTooltipWithShortcut (playButton, "Play or stop", "transport.playStop");
-    setTooltipWithShortcut (searchButton, "Find and run any command by typing part of its name", "view.commandPalette");
+    playButton.setTooltip (withShortcut (commands, "Play or stop", "transport.playStop"));
+    searchButton.setTooltip (withShortcut (commands, "Find and run any command by typing part of its name", "view.commandPalette"));
 
     shownKeyboardState = -1; // its tooltip names a shortcut too
     updateKeyboardButton();
@@ -70,18 +71,14 @@ void TopBar::updateKeyboardButton()
 
     keyboardButton.setToggleState (on, juce::dontSendNotification);
     keyboardButton.setButtonText (on ? from : juce::String ("Off"));
-    setTooltipWithShortcut (keyboardButton,
-                            on ? "The computer keyboard plays notes: A S D F G H J K L ; from " + from
-                                     + ", and W E T Y U O P the black keys. Z and X change the octave, C and V the velocity (now "
-                                     + juce::String (velocity) + "). Hold Shift for single-key shortcuts. Click to turn it off"
-                               : juce::String ("Click to play notes with the computer keyboard"),
-                            "input.computerKeyboard");
-}
-
-void TopBar::setTooltipWithShortcut (juce::SettableTooltipClient& client, const juce::String& text, const juce::String& commandID)
-{
-    const auto shortcuts = commands.getShortcutDescriptions (commandID);
-    client.setTooltip (shortcuts.isEmpty() ? text : text + " (" + shortcuts[0] + ")");
+    keyboardButton.setTooltip (withShortcut (commands,
+                                             on ? "The computer keyboard plays notes: A S D F G H J K L ; from " + from
+                                                      + ", and W E T Y U O P the black keys. Z and X change the octave, C and V the "
+                                                        "velocity (now "
+                                                      + juce::String (velocity)
+                                                      + "). Hold Shift for single-key shortcuts. Click to turn it off"
+                                                : juce::String ("Click to play notes with the computer keyboard"),
+                                             "input.computerKeyboard"));
 }
 
 void TopBar::paint (juce::Graphics& g)

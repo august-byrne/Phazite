@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Project.h"
+#include "LoudnessMeterPlugin.h"
 
 namespace phazite
 {
@@ -17,6 +18,18 @@ namespace
             return te::ProjectItemID (root->getStringAttribute (te::IDs::projectID));
 
         return {};
+    }
+
+    // What every project has, added before the project watches for changes: the master's loudness meter. It
+    // isn't the user's change, so it is neither an undo step nor an unsaved change.
+    void addPhaziteParts (te::Edit& edit)
+    {
+        const auto wasChanged = edit.hasChangedSinceSaved();
+        ensureLoudnessMeter (edit);
+        edit.getUndoManager().clearUndoHistory();
+
+        if (! wasChanged)
+            edit.resetChangedStatus();
     }
 
     // Creates an Edit from a saved state, with projectFile as the file it saves to.
@@ -77,6 +90,7 @@ std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& 
         return {};
     }
 
+    addPhaziteParts (*edit);
     std::unique_ptr<Project> project (new Project (std::move (edit), file));
 
     for (const auto& subfolder :
@@ -116,6 +130,7 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
         return {};
     }
 
+    addPhaziteParts (*edit);
     std::unique_ptr<Project> project (new Project (std::move (edit), projectFile));
 
     if (useAutosave)

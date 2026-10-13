@@ -4,12 +4,15 @@
 
 #include <PhaziteData.h>
 
+#include <algorithm>
+
 namespace phazite
 {
 namespace
 {
     constexpr const char* keymapSettingKey = "phaziteKeymap";
     constexpr const char* defaultKeymapName = "Phazite";
+    constexpr const char* keyChangesTag = "PHAZITEKEYCHANGES";
 
     juce::String getKeyChangesSettingKey (const juce::String& keymapName)
     {
@@ -157,11 +160,16 @@ juce::Array<const Command*> CommandRegistry::getAll() const
     return all;
 }
 
+bool CommandRegistry::isEnabled (const Command& command)
+{
+    return command.isEnabled == nullptr || command.isEnabled();
+}
+
 bool CommandRegistry::invoke (const juce::String& id)
 {
     const auto* command = find (id);
 
-    if (command == nullptr || (command->isEnabled != nullptr && ! command->isEnabled()))
+    if (command == nullptr || ! isEnabled (*command))
         return false;
 
     if (command->undoTarget != nullptr)
@@ -172,6 +180,33 @@ bool CommandRegistry::invoke (const juce::String& id)
     return true;
 }
 
+const Command* CommandRegistry::findCommandForKey (const juce::KeyPress& key) const
+{
+    const auto& mappings = *commandManager.getKeyMappings();
+    const Command* found = nullptr;
+
+    for (size_t i = 0; i < commands.size(); ++i)
+    {
+        const auto& command = *commands[i];
+
+        if (found != nullptr && command.keyPriority <= found->keyPriority)
+            continue;
+
+        if (mappings.getKeyPressesAssignedToCommand (firstCommandID + (juce::CommandID) i).contains (key) && isEnabled (command))
+            found = &command;
+    }
+
+    return found;
+}
+
+bool CommandRegistry::keyPressed (const juce::KeyPress& key, juce::Component*)
+{
+    if (const auto* command = findCommandForKey (key))
+        return invoke (command->id);
+
+    return false;
+}
+
 bool CommandRegistry::invokeWithoutShift (const juce::KeyPress& key)
 {
     const auto modifiers = key.getModifiers();
@@ -179,12 +214,10 @@ bool CommandRegistry::invokeWithoutShift (const juce::KeyPress& key)
     if (! modifiers.isShiftDown() || modifiers.isCommandDown() || modifiers.isCtrlDown() || modifiers.isAltDown())
         return false;
 
-    const auto& mappings = *commandManager.getKeyMappings();
-
-    if (mappings.findCommandForKeyPress (key) != 0)
+    if (commandManager.getKeyMappings()->findCommandForKeyPress (key) != 0)
         return false; // Shift and the key have a command of their own
 
-    if (const auto* command = find (mappings.findCommandForKeyPress (juce::KeyPress (key.getKeyCode()))))
+    if (const auto* command = findCommandForKey (juce::KeyPress (key.getKeyCode())))
         return invoke (command->id);
 
     return false;
@@ -192,7 +225,7 @@ bool CommandRegistry::invokeWithoutShift (const juce::KeyPress& key)
 
 void CommandRegistry::runWithoutUndoStep (const Command& command)
 {
-    if (command.isEnabled == nullptr || command.isEnabled())
+    if (isEnabled (command))
         command.perform();
 }
 
@@ -242,16 +275,61 @@ void CommandRegistry::setKeymap (const Keymap& newKeymap)
 
 juce::String CommandRegistry::getKeyChanges() const
 {
-    if (auto xml = commandManager.getKeyMappings()->createXml (true))
-        return xml->toString();
+    // By command id: JUCE's own format names commands by number, and the numbers change when commands are added.
+    juce::XmlElement changes (keyChangesTag);
+    const auto& mappings = *commandManager.getKeyMappings();
 
-    return {};
+    for (size_t i = 0; i < commands.size(); ++i)
+    {
+        const auto keys = mappings.getKeyPressesAssignedToCommand (firstCommandID + (juce::CommandID) i);
+        juce::Array<juce::KeyPress> defaults;
+
+        if (const auto found = keymap.keys.find (commands[i]->id); found != keymap.keys.end())
+            for (const auto& description : found->second)
+                if (const auto key = juce::KeyPress::createFromDescription (description); key.isValid())
+                    defaults.add (key);
+
+        const auto same =
+            keys.size() == defaults.size()
+            && std::all_of (keys.begin(), keys.end(), [&defaults] (const juce::KeyPress& key) { return defaults.contains (key); });
+
+        if (same)
+            continue;
+
+        auto* change = changes.createNewChildElement ("COMMAND");
+        change->setAttribute ("id", commands[i]->id);
+
+        for (const auto& key : keys)
+            change->createNewChildElement ("KEY")->setAttribute ("key", key.getTextDescription());
+    }
+
+    return changes.getNumChildElements() > 0 ? changes.toString() : juce::String();
 }
 
 void CommandRegistry::restoreKeyChanges (const juce::String& xml)
 {
-    if (auto parsed = juce::parseXML (xml))
-        commandManager.getKeyMappings()->restoreFromXml (*parsed);
+    // Changes that earlier versions saved in JUCE's numbered format can't be matched to commands reliably, so they
+    // are left out.
+    const auto parsed = juce::parseXML (xml);
+
+    if (parsed == nullptr || ! parsed->hasTagName (keyChangesTag))
+        return;
+
+    auto& mappings = *commandManager.getKeyMappings();
+
+    for (auto* change : parsed->getChildWithTagNameIterator ("COMMAND"))
+    {
+        const auto commandID = getCommandID (change->getStringAttribute ("id"));
+
+        if (commandID == 0)
+            continue;
+
+        mappings.clearAllKeyPresses (commandID);
+
+        for (auto* key : change->getChildWithTagNameIterator ("KEY"))
+            if (const auto press = juce::KeyPress::createFromDescription (key->getStringAttribute ("key")); press.isValid())
+                mappings.addKeyPress (commandID, press);
+    }
 }
 
 void CommandRegistry::loadKeySettings (juce::PropertiesFile& settings)
@@ -295,7 +373,7 @@ void CommandRegistry::getCommandInfo (juce::CommandID commandID, juce::Applicati
         return;
 
     info.setInfo (getCurrentName (*command), command->description, command->category, 0);
-    info.setActive (command->isEnabled == nullptr || command->isEnabled());
+    info.setActive (isEnabled (*command));
     info.setTicked (command->isTicked != nullptr && command->isTicked());
 
     if (const auto keys = keymap.keys.find (command->id); keys != keymap.keys.end())

@@ -8,7 +8,7 @@ namespace phazite
 {
 namespace te = tracktion;
 
-// The selected clips, top to bottom by track, then left to right.
+// The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).
 juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager&);
 
 // The color a clip shows: its own, if it was given one, otherwise its track's.
@@ -57,9 +57,7 @@ void nudgeClips (const juce::Array<te::Clip*>&, te::BeatDuration);
 void deleteClips (const juce::Array<te::Clip*>&, bool closeGap);
 
 // Deletes what lies in a time range on some tracks: clips inside it go, and clips across its edges are
-// trimmed or split. With closeGap, what comes after on those tracks moves back to fill the gap.
+// trimmed or split. With closeGap, what comes after on those tracks moves back to fill the gap. (Removing
+// time from the whole song, sections and automation too, is Arrangement.h's removeTime().)
 void deleteTimeRange (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&, bool closeGap);
-
-// Inserts empty time at the start of a range, as long as the range, on every track.
-void insertTime (te::Edit&, te::BeatRange);
 } // namespace phazite

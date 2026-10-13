@@ -32,6 +32,12 @@ struct Command
     std::function<bool()> isTicked {}; // optional: for on/off settings, shown with a tick in menus
     // Optional: the name as it is now, which menus and the palette show, such as "Undo Change Volume".
     std::function<juce::String()> currentName {};
+    // Optional: when commands share a key, the enabled one with the highest priority runs. Commands for
+    // selected notes use notePriority, so the arrow keys move notes while notes are selected and select
+    // tracks otherwise.
+    int keyPriority {};
+
+    static constexpr int notePriority = 1;
 };
 
 // The command's name as menus and the palette show it now (its currentName, if it has one).
@@ -54,7 +60,8 @@ struct Keymap
 };
 
 //==============================================================================
-class CommandRegistry : public juce::ApplicationCommandTarget
+class CommandRegistry : public juce::ApplicationCommandTarget,
+                        public juce::KeyListener
 {
 public:
     CommandRegistry();
@@ -72,6 +79,14 @@ public:
 
     // Runs a command if it exists and is enabled.
     bool invoke (const juce::String& id);
+
+    // The command a key runs: of the enabled commands it is a shortcut of, the one with the highest
+    // keyPriority (the one registered first, if several have it). nullptr if there is none.
+    const Command* findCommandForKey (const juce::KeyPress&) const;
+
+    // Runs the key's command (findCommandForKey()). Windows add the registry as a key listener, so the
+    // shortcuts work in them.
+    bool keyPressed (const juce::KeyPress&, juce::Component*) override;
 
     // While the computer keyboard plays notes, single-key shortcuts are typed with Shift held, as in
     // Ableton Live: for Shift and a key, this runs the command of the key alone, unless Shift and the
@@ -115,6 +130,7 @@ private:
 
     const Command* find (juce::CommandID) const;
     void runWithoutUndoStep (const Command&);
+    static bool isEnabled (const Command&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CommandRegistry)
 };

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EngineSetup.h"
+#include "LoudnessMeterPlugin.h"
 
 // ThreadSanitizer builds (linux-tsan preset): GCC defines __SANITIZE_THREAD__, Clang has a feature check.
 #if defined(__SANITIZE_THREAD__)
@@ -128,6 +129,30 @@ void UIBehaviour::runTaskWithProgressBar (te::ThreadPoolJobWithProgress& task)
     }
 }
 
+std::unique_ptr<juce::Component> UIBehaviour::createPluginWindow (te::PluginWindowState& state)
+{
+    return createPluginWindowFunction != nullptr ? createPluginWindowFunction (state) : nullptr;
+}
+
+void UIBehaviour::recreatePluginWindowContentAsync (te::Plugin& plugin)
+{
+    // Once the plug-in has settled, as Tracktion's own default waits.
+    juce::Component::SafePointer<juce::Component> window (plugin.windowState != nullptr ? plugin.windowState->pluginWindow.get() : nullptr);
+
+    if (recreatePluginWindowFunction == nullptr || window == nullptr)
+    {
+        te::UIBehaviour::recreatePluginWindowContentAsync (plugin);
+        return;
+    }
+
+    juce::MessageManager::callAsync (
+        [recreate = recreatePluginWindowFunction, window, safePlugin = te::Plugin::Ptr (&plugin)]
+        {
+            if (window != nullptr)
+                recreate (*safePlugin);
+        });
+}
+
 //==============================================================================
 std::unique_ptr<te::Engine> createEngine (EngineOptions o)
 {
@@ -138,6 +163,9 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
     const bool openDevices = o.behaviour.openAudioDevice;
 
     auto engine = std::make_unique<te::Engine> (std::move (storage), std::move (ui), std::make_unique<EngineBehaviour> (o.behaviour));
+
+    // Phazite's own plug-in types, which projects can hold.
+    engine->getPluginManager().createBuiltInType<LoudnessMeterPlugin>();
 
     // Tracktion's DeviceManager::initialise() asks for a MIDI device scan in 5 ms, but then restarts the
     // same timer with the 4-second hot-plug check, so MIDI inputs (and the computer keyboard, which

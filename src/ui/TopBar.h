@@ -43,6 +43,5 @@ private:
 
     void timerCallback() override; // updates the readouts a few times a second; only changes repaint
     void updateKeyboardButton();
-    void setTooltipWithShortcut (juce::SettableTooltipClient&, const juce::String& text, const juce::String& commandID);
 };
 } // namespace phazite::ui

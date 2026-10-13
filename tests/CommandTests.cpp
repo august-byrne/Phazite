@@ -184,9 +184,11 @@ TEST_CASE ("Keymaps load, switch, and keep the user's own changes")
     juce::PropertiesFile settings (settingsFile.getFile(), options);
     registry.saveKeySettings (settings);
 
+    // Changes are kept by command id, so they survive commands being added before them.
     phazite::CommandRegistry reloaded;
-    reloaded.add (makeCommand ("transport.playStop", "Play / Stop"));
+    reloaded.add (makeCommand ("test.newer", "A command added in a later version"));
     reloaded.add (makeCommand ("edit.undo", "Undo"));
+    reloaded.add (makeCommand ("transport.playStop", "Play / Stop"));
     reloaded.add (makeCommand ("edit.undoOrRedo", "Undo or Redo"));
     reloaded.loadKeySettings (settings);
 
@@ -194,6 +196,8 @@ TEST_CASE ("Keymaps load, switch, and keep the user's own changes")
     const auto playKeys = reloaded.getShortcutDescriptions ("transport.playStop");
     CHECK (playKeys.contains (describe ("spacebar")));
     CHECK (playKeys.contains (describe ("F2")));
+    CHECK_FALSE (reloaded.getShortcutDescriptions ("edit.undo").contains (describe ("F2")));
+    CHECK (reloaded.getShortcutDescriptions ("test.newer").isEmpty());
 }
 
 TEST_CASE ("Shift and a letter run that letter's shortcut, unless they have their own")
@@ -228,22 +232,60 @@ TEST_CASE ("Shift and a letter run that letter's shortcut, unless they have thei
     CHECK (tool == 1);
 }
 
-TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap")
+TEST_CASE ("When commands share a key, the enabled one with the highest priority runs")
 {
+    int tracks = 0, notes = 0;
+    bool notesSelected = false;
+
+    phazite::Keymap keymap;
+    keymap.name = "Test";
+    keymap.keys["test.selectTrack"] = { "cursor up" };
+    keymap.keys["test.transpose"] = { "cursor up" };
+
+    phazite::CommandRegistry registry;
+    registry.setKeymap (keymap);
+    registry.add (makeCommand ("test.selectTrack", "Select Track Above", [&tracks] { ++tracks; }));
+
+    auto transpose = makeCommand ("test.transpose", "Transpose Up", [&notes] { ++notes; });
+    transpose.isEnabled = [&notesSelected] { return notesSelected; };
+    transpose.keyPriority = phazite::Command::notePriority;
+    registry.add (std::move (transpose));
+
+    // Registered later, but it comes first while it is enabled.
+    const juce::KeyPress up (juce::KeyPress::upKey);
+    CHECK (registry.keyPressed (up, nullptr));
+    CHECK (tracks == 1);
+    CHECK (notes == 0);
+
+    notesSelected = true;
+    CHECK (registry.findCommandForKey (up)->id == juce::String ("test.transpose"));
+    CHECK (registry.keyPressed (up, nullptr));
+    CHECK (notes == 1);
+    CHECK (tracks == 1);
+
+    CHECK_FALSE (registry.keyPressed (juce::KeyPress (juce::KeyPress::downKey), nullptr)); // no command at all
+}
+
+TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap, or once more by a note command")
+{
+    // A note command can share a key with a command of another kind: it takes the key while notes are
+    // selected (Command::notePriority).
     for (const auto& keymap : phazite::Keymap::getBuiltIn())
     {
         CAPTURE (keymap.name.toStdString());
-        juce::Array<juce::KeyPress> used;
+        juce::Array<juce::KeyPress> used, usedByNotes;
 
         for (const auto& entry : keymap.keys)
         {
+            auto& keys = entry.first.startsWith ("note.") ? usedByNotes : used;
+
             for (const auto& description : entry.second)
             {
                 CAPTURE (description.toStdString());
                 const auto key = juce::KeyPress::createFromDescription (description);
                 CHECK (key.isValid());
-                CHECK_FALSE (used.contains (key));
-                used.add (key);
+                CHECK_FALSE (keys.contains (key));
+                keys.add (key);
             }
         }
     }

@@ -6,9 +6,12 @@
 #include "ProjectSession.h"
 #include "model/Commands.h"
 #include "model/EngineSetup.h"
+#include "model/Mixer.h"
+#include "model/Sections.h"
 #include "model/Selection.h"
 #include "model/Tracks.h"
 #include "ui/LookAndFeel.h"
+#include "ui/PluginWindow.h"
 
 namespace phazite
 {
@@ -45,6 +48,9 @@ public:
         juce::LookAndFeel::setDefaultLookAndFeel (lookAndFeel.get()); // dialogs and menus use it too
 
         auto& uiBehaviour = getUIBehaviour (*engine);
+        uiBehaviour.createPluginWindowFunction = ui::createPluginWindow;
+        uiBehaviour.recreatePluginWindowFunction = ui::recreatePluginWindowContent;
+
         commands = std::make_unique<CommandRegistry>();
         session = std::make_unique<ProjectSession> (*engine, uiBehaviour);
         mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel);
@@ -52,6 +58,8 @@ public:
         addEditCommands (*commands, uiBehaviour);
         addSelectionCommands (*commands, session->getSelection(), session->getRangeSelection());
         addTrackCommands (*commands, session->getSelection());
+        addSectionCommands (*commands, session->getSelection());
+        addMixerCommands (*commands, session->getSelection());
         session->addCommands (*commands);
         mainWindow->addCommands();
 

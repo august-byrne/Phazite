@@ -61,6 +61,8 @@ add_library(phazite_core STATIC)
 target_sources(phazite_core PRIVATE
     src/model/AppInfo.cpp
     src/model/AppInfo.h
+    src/model/Arrangement.cpp
+    src/model/Arrangement.h
     src/model/Clips.cpp
     src/model/Clips.h
     src/model/Commands.cpp
@@ -73,8 +75,18 @@ target_sources(phazite_core PRIVATE
     src/model/Import.h
     src/model/LiveInput.cpp
     src/model/LiveInput.h
+    src/model/LoudnessMeterPlugin.cpp
+    src/model/LoudnessMeterPlugin.h
+    src/model/Mixer.cpp
+    src/model/Mixer.h
+    src/model/Notes.cpp
+    src/model/Notes.h
+    src/model/Outlines.cpp
+    src/model/Outlines.h
     src/model/Project.cpp
     src/model/Project.h
+    src/model/Sections.cpp
+    src/model/Sections.h
     src/model/Selection.cpp
     src/model/Selection.h
     src/model/SmartTool.cpp
@@ -96,6 +108,11 @@ juce_add_binary_data(phazite_data
     SOURCES
         resources/keymaps/phazite.json
         resources/keymaps/fl_studio.json
+        # Song outlines: every file named *.outline.json here is one (src/model/Outlines.h)
+        resources/outlines/pop.outline.json
+        resources/outlines/rock.outline.json
+        resources/outlines/electronic.outline.json
+        resources/outlines/hip_hop.outline.json
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
         resources/icons/lucide/eraser.svg
@@ -199,6 +216,8 @@ target_sources(Phazite PRIVATE
     src/ui/ClipComponent.h
     src/ui/CommandPalette.cpp
     src/ui/CommandPalette.h
+    src/ui/CommandUI.cpp
+    src/ui/CommandUI.h
     src/ui/Controls.cpp
     src/ui/Controls.h
     src/ui/DesignTokens.h
@@ -208,12 +227,25 @@ target_sources(Phazite PRIVATE
     src/ui/Icons.h
     src/ui/LookAndFeel.cpp
     src/ui/LookAndFeel.h
+    src/ui/Mixer.cpp
+    src/ui/Mixer.h
     src/ui/Panels.cpp
     src/ui/Panels.h
+    src/ui/PianoRoll.cpp
+    src/ui/PianoRoll.h
+    src/ui/PianoRollLanes.cpp
+    src/ui/PianoRollNotes.cpp
+    src/ui/PianoRollParts.h
     src/ui/Playlist.cpp
     src/ui/Playlist.h
+    src/ui/PluginWindow.cpp
+    src/ui/PluginWindow.h
+    src/ui/SectionsStrip.cpp
+    src/ui/SectionsStrip.h
     src/ui/SettingsPanel.cpp
     src/ui/SettingsPanel.h
+    src/ui/TimelineEditor.cpp
+    src/ui/TimelineEditor.h
     src/ui/TopBar.cpp
     src/ui/TopBar.h
     src/ui/TrackHeader.cpp
@@ -261,8 +293,11 @@ if(PHAZITE_BUILD_TESTS)
         tests/IconTests.cpp
         tests/ImportTests.cpp
         tests/LiveInputTests.cpp
+        tests/MixerTests.cpp
+        tests/NoteTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp
+        tests/SectionTests.cpp
         tests/TimelineTests.cpp
         tests/TrackTests.cpp
         tests/ValueTextTests.cpp

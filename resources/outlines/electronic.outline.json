@@ -1,0 +1,15 @@
+{
+  "id": "electronic",
+  "name": "Electronic (house, EDM)",
+  "order": 3,
+  "description": "A house or EDM track: long intro and outro for DJs to mix, and two build-ups into drops around a breakdown. 96 bars.",
+  "sections": [
+    { "name": "Intro", "role": "intro", "bars": 16, "energy": 0.3, "tip": "Drums and a few elements, simple enough for a DJ to mix in." },
+    { "name": "Build-up", "role": "buildUp", "bars": 8, "energy": 0.6, "tip": "Raise the energy: risers, a snare roll, open a filter." },
+    { "name": "Drop", "role": "drop", "bars": 16, "energy": 1.0, "tip": "Everything hits on the first beat: full drums, bass and the main lead." },
+    { "name": "Breakdown", "role": "breakdown", "bars": 16, "energy": 0.35, "tip": "Strip back to pads, chords or a vocal, and let the ear rest before the next build." },
+    { "name": "Build-up", "role": "buildUp", "bars": 8, "energy": 0.7, "tip": "Build again, bigger than the first time: risers, rolls, a rising filter." },
+    { "name": "Drop", "role": "drop", "bars": 16, "energy": 1.0, "tip": "The second drop: the same energy, with a change to keep it fresh." },
+    { "name": "Outro", "role": "outro", "bars": 16, "energy": 0.3, "tip": "Take parts out until the drums are left, so a DJ can mix out." }
+  ]
+}

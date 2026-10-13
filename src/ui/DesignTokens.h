@@ -91,4 +91,12 @@ inline double getContrastRatio (juce::Colour a, juce::Colour b)
     const auto la = luminance (a), lb = luminance (b);
     return (std::max (la, lb) + 0.05) / (std::min (la, lb) + 0.05);
 }
+
+// Black or white, whichever reads better on a color: for text on track, clip and section colors.
+inline juce::Colour getInkFor (juce::Colour background)
+{
+    return getContrastRatio (juce::Colours::black, background) >= getContrastRatio (juce::Colours::white, background)
+               ? juce::Colours::black
+               : juce::Colours::white;
+}
 } // namespace phazite::ui

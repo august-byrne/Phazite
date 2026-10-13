@@ -12,6 +12,9 @@
 
 #include "AudioThreadMonitor.h"
 #include "TestHelpers.h"
+#include "model/LoudnessMeterPlugin.h"
+#include "model/Mixer.h"
+#include "model/Tracks.h"
 
 #include <chrono>
 #include <thread>
@@ -72,6 +75,18 @@ te::Plugin& addPlugin (te::Track& track, const juce::String& type)
 void addSineClip (te::AudioTrack& track, const SineFile& sine)
 {
     track.insertWaveClip ("Sine", sine.getFile(), { te::TimeRange (0_tp, 2_tp) }, false);
+}
+
+// Tracktion's tone generator, a sound that reads no files. Tracktion doesn't register it with the others.
+te::Plugin::Ptr createToneGenerator (te::Edit& edit)
+{
+    [[maybe_unused]] static const bool registered = [&edit]
+    {
+        edit.engine.getPluginManager().createBuiltInType<te::ToneGeneratorPlugin>();
+        return true;
+    }();
+
+    return edit.getPluginCache().createNewPlugin (te::ToneGeneratorPlugin::xmlTypeName, {});
 }
 
 //==============================================================================
@@ -194,7 +209,7 @@ void checkSteadyPlaybackDoesNotAllocate (const Measurement& m)
 //==============================================================================
 TEST_SUITE ("realtime-audit")
 {
-    // These three read no files, so their steady playback is deterministic: it must not allocate.
+    // These read no files, so their steady playback is deterministic: it must not allocate.
 
     TEST_CASE ("Real-time audit: one empty track")
     {
@@ -241,6 +256,36 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playAndMeasure (*edit);
         report ("Volume automation and an LFO on pan", m);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: a mix with a bus, a reverb return and the loudness meter")
+    {
+        // Built with the functions the mixer uses (roadmap step 1.4), with a tone generator in place of a recording.
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& tone = getTrack (*edit, 0);
+        REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
+
+        auto* folder = phazite::insertFolder (*edit, &tone, nullptr); // a plain folder, until it becomes a bus
+        REQUIRE (folder != nullptr);
+        edit->moveTrack (&tone, te::TrackInsertPoint (folder, nullptr));
+        phazite::makeBus (*folder);
+        REQUIRE (phazite::isBus (*folder));
+
+        auto* reverbReturn = phazite::addReturnTrack (*edit, "Reverb", nullptr);
+        REQUIRE (reverbReturn != nullptr);
+        REQUIRE (phazite::insertDevice (*reverbReturn, edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}))
+                 != nullptr);
+        REQUIRE (phazite::addSend (tone, phazite::getReturnBus (*reverbReturn), false) != nullptr);
+
+        auto* meter = phazite::ensureLoudnessMeter (*edit);
+        REQUIRE (meter != nullptr);
+
+        const auto m = playAndMeasure (*edit);
+        report ("A tone through a bus, with a send to a reverb return, into the loudness meter", m);
+        CHECK (m.peakLevel > 0.01f);
+        CHECK (meter->getReadings().momentaryValid); // it ran in the playback graph
+        CHECK (meter->getReadings().momentaryLufs > -40.0f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

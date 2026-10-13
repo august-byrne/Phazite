@@ -241,10 +241,10 @@ TEST_CASE ("Split, mute and nudge act on the selected clips")
     CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-8.00"));
 
     e.selection.selectOnly (clip);
-    REQUIRE (e.registry.invoke ("clip.mute"));
+    REQUIRE (e.registry.invoke ("edit.mute"));
     CHECK (clip.isMuted());
-    CHECK (e.registry.find ("clip.mute")->isTicked());
-    REQUIRE (e.registry.invoke ("clip.mute"));
+    CHECK (e.registry.find ("edit.mute")->isTicked());
+    REQUIRE (e.registry.invoke ("edit.mute"));
     CHECK_FALSE (clip.isMuted());
 
     phazite::nudgeClips ({ &clip }, te::BeatDuration::fromBeats (-1.0)); // not before the start of the song

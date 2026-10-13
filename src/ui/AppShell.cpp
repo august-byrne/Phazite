@@ -69,13 +69,25 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 
 //==============================================================================
 AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard, std::function<te::Edit*()> getEdit,
-                    te::SelectionManager& selection, RangeSelection& range)
+                    te::SelectionManager& selectionManager, RangeSelection& range)
     : commands (registry),
+      selection (selectionManager),
       topBar (engine, registry, computerKeyboard, getEdit),
-      playlist (registry, selection, range),
-      inspector (std::move (getEdit), selection)
+      playlist (registry, selectionManager, range),
+      inspector (engine, registry, std::move (getEdit), selectionManager),
+      pianoRoll (registry, selectionManager),
+      mixer (engine, registry, selectionManager)
 {
     setTitle ("Phazite");
+
+    // Double-clicking a MIDI clip opens it in the piano roll, which then has the keys.
+    playlist.onOpenClip = [this] (te::MidiClip& clip)
+    {
+        pianoRoll.showClips ({ &clip });
+        revealEditor (EditorDock::pianoRoll);
+        pianoRoll.grabKeyboardFocus();
+        setActiveEditor (&pianoRoll);
+    };
 
     for (auto* c : std::initializer_list<juce::Component*> { &topBar, &browser, &browserDivider, &centre, &inspectorDivider, &inspector,
                                                              &hintBar, &browserDetachButton, &inspectorDetachButton })
@@ -98,14 +110,46 @@ AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeybo
         button.onClick = [this, which] { setDetached (which, true); };
     }
 
+    // Clicking in an editor makes it the one the time line's commands act on; so does the keyboard focus
+    // moving into it.
+    playlist.onUsed = [this] { setActiveEditor (&playlist); };
+    pianoRoll.onUsed = [this] { setActiveEditor (&pianoRoll); };
+    setActiveEditor (&playlist);
+    juce::Desktop::getInstance().addFocusChangeListener (this);
     setLayout (Layout::full);
 }
 
-AppShell::~AppShell() = default; // here, where PanelWindow is complete
+AppShell::~AppShell() // here, where PanelWindow is complete
+{
+    juce::Desktop::getInstance().removeFocusChangeListener (this);
+}
+
+void AppShell::globalFocusChanged (juce::Component* focused)
+{
+    // Focus that moves elsewhere (to the mixer, say) leaves the last editor active.
+    for (auto* c = focused; c != nullptr; c = c->getParentComponent())
+    {
+        if (auto* editor = dynamic_cast<TimelineEditor*> (c))
+        {
+            setActiveEditor (editor);
+            return;
+        }
+    }
+}
+
+void AppShell::setActiveEditor (TimelineEditor* editor)
+{
+    activeEditor = editor;
+
+    for (auto* each : std::initializer_list<TimelineEditor*> { &playlist, &pianoRoll })
+        each->setActive (each == editor);
+}
 
 void AppShell::setEdit (te::Edit* edit)
 {
     playlist.setEdit (edit);
+    pianoRoll.setEdit (edit);
+    mixer.setEdit (edit);
 }
 
 void AppShell::setLayout (Layout layout)
@@ -142,6 +186,20 @@ void AppShell::showEditor (EditorDock::Tab tab)
     updateLayout();
 }
 
+void AppShell::revealEditor (EditorDock::Tab tab)
+{
+    editorDock.showTab (tab);
+
+    if (editorWindow != nullptr)
+    {
+        editorWindow->toFront (true);
+        return;
+    }
+
+    editorShown = true;
+    updateLayout();
+}
+
 void AppShell::showCommandPalette()
 {
     CommandPalette::show (commands, topBar.getSearchButton());
@@ -166,18 +224,17 @@ void AppShell::setDetached (DetachablePanel which, bool detached)
     {
         const juce::Point<int> size (juce::jmax (panel.getWidth(), 360), juce::jmax (panel.getHeight(), 400));
 
-        window =
-            std::make_unique<PanelWindow> (panel, choosePanelWindowBounds (*this, size), *commands.getCommandManager().getKeyMappings(),
-                                           [safeThis = juce::Component::SafePointer<AppShell> (this), which]
-                                           {
-                                               // Closing deletes the window, so dock the panel once the click is over.
-                                               juce::MessageManager::callAsync (
-                                                   [safeThis, which]
-                                                   {
-                                                       if (safeThis != nullptr)
-                                                           safeThis->setDetached (which, false);
-                                                   });
-                                           });
+        window = std::make_unique<PanelWindow> (panel, choosePanelWindowBounds (*this, size), commands,
+                                                [safeThis = juce::Component::SafePointer<AppShell> (this), which]
+                                                {
+                                                    // Closing deletes the window, so dock the panel once the click is over.
+                                                    juce::MessageManager::callAsync (
+                                                        [safeThis, which]
+                                                        {
+                                                            if (safeThis != nullptr)
+                                                                safeThis->setDetached (which, false);
+                                                        });
+                                                });
         panel.setVisible (true);
     }
     else
@@ -400,7 +457,14 @@ void AppShell::addCommands (CommandRegistry& registry)
                         .isTicked = [this, which] { return isDetached (which); } });
     }
 
+    // The editor used last, or the playlist while that one is hidden.
+    addTimelineCommands (registry, [this]() -> TimelineEditor*
+                         { return activeEditor != nullptr && activeEditor->isActive() ? activeEditor : &playlist; });
     playlist.addCommands (registry);
+
+    // The note commands use the piano roll's grid.
+    addNoteCommands (registry, selection, [this] { return pianoRoll.getGridStepInBeats(); });
+    pianoRoll.addCommands (registry);
     refreshShortcutTexts();
 }
 
@@ -408,6 +472,7 @@ void AppShell::refreshShortcutTexts()
 {
     topBar.refreshTooltips();
     playlist.refreshShortcutTexts();
+    pianoRoll.refreshShortcutTexts();
 
     const auto paletteKeys = commands.getShortcutDescriptions ("view.commandPalette");
     hintBar.setDefaultHint (paletteKeys.isEmpty() ? juce::String ("Search for any command with \"Search commands\" at the top right.")

@@ -1,29 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist: the song's tracks and clips on a timeline, with a ruler, the grid, the playhead and a
-// header for each track (roadmap step 1.1). Its tools edit the clips (model/SmartTool.h): by default the
-// Smart Tool, where the spot a drag starts on a clip decides what it does. Folders come in the step's last part.
+// The playlist: the song's tracks and clips on a time line, with a header for each track (roadmap step 1.1).
+// Its tools edit the clips (model/SmartTool.h): by default the Smart Tool, where the spot a drag starts on
+// a clip decides what it does. The time line, the grid and the tools come from TimelineEditor.
 #pragma once
 
 #include "ClipComponent.h"
-#include "Icons.h"
+#include "SectionsStrip.h"
+#include "TimelineEditor.h"
 #include "TrackHeader.h"
-#include "model/Commands.h"
 #include "model/Selection.h"
-#include "model/SmartTool.h"
-#include "model/Timeline.h"
 
 #include <optional>
 
 namespace phazite::ui
 {
-class Playlist : public juce::Component,
+class Playlist : public TimelineEditor,
                  public juce::FileDragAndDropTarget,
                  private TrackHeader::Owner,
                  private juce::ChangeListener,
                  private juce::ValueTree::Listener,
-                 private juce::AsyncUpdater,
-                 private juce::ScrollBar::Listener,
-                 private juce::Timer
+                 private juce::AsyncUpdater
 {
 public:
     Playlist (CommandRegistry&, te::SelectionManager&, RangeSelection&);
@@ -32,12 +28,20 @@ public:
     // The open project's Edit, or nullptr while none is open.
     void setEdit (te::Edit*);
 
-    // Adds the playlist's commands: renaming and coloring tracks, zooming, following playback, the grid,
-    // the tools, and nudging and quantizing clips.
-    void addCommands (CommandRegistry&);
+    // Called when a MIDI clip is double-clicked, to open it in the piano roll.
+    std::function<void (te::MidiClip&)> onOpenClip;
 
-    // Puts the current shortcuts into the tooltips; call after the keymap changed.
-    void refreshShortcutTexts();
+    // Adds the playlist's own commands: renaming and coloring tracks, and focus mode. The time line's
+    // commands are addTimelineCommands()'s.
+    void addCommands (CommandRegistry&);
+    void refreshShortcutTexts() override;
+
+    // TimelineEditor
+    bool canUseTool (Tool) const override { return true; }
+    bool canNudgeSelection() const override;
+    void nudgeSelection (int direction) override; // the selected clips, or the range
+    bool canQuantizeSelection() const override;
+    void quantizeSelection() override; // the selected clips' starts
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override; // where a dragged track would go
@@ -45,9 +49,7 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
-    struct Ruler;
     struct Lanes;
-    struct Playhead;
     struct Gesture;
 
     // A track shown in the playlist. Pinned tracks stay in a band at the top; the rest scroll under it.
@@ -68,32 +70,22 @@ private:
         te::TimePosition boundary;
     };
 
-    CommandRegistry& commands;
     te::SelectionManager& selection;
-    RangeSelection& range; // a time range across tracks
-    te::SafeSelectable<te::Edit> edit;
+    RangeSelection& range;     // a time range across tracks
     juce::ValueTree editState; // listened to for changes to the tracks and the tempo
-
-    TimelineView view;
-    GridSettings grid;
     int scrollY = 0;
-    bool followPlayback = true, wasPlaying = false;
-    double songEnd = 0.0; // in beats, as the scroll bar knows it
 
-    IconButton addTrackButton { "Add track", Icon::plus }, snapButton { "Snap to grid", Icon::magnet };
-    juce::TextButton gridButton;
-    juce::OwnedArray<IconButton> toolButtons; // one for each of allTools, in order
-    Tool tool = Tool::smart;
+    SectionsStrip sectionsStrip { *this, selection, range }; // under the ruler
+    juce::TextButton outlineButton { "Song outline" };       // beside it, over the track headers
+
+    IconButton addTrackButton { "Add track", Icon::plus };
     te::SafeSelectable<te::Clip> lastClip; // the clip the Draw and Paint tools place copies of
-    std::unique_ptr<Ruler> ruler;
 
     // The header column holds the pinned headers in a band at the top, and below it the scrolling
     // headers, inside headerContent; the lanes hold the clips in two layers the same way.
     juce::Component headerColumn, pinnedHeaders, scrollingHeaders, headerContent;
     std::unique_ptr<Lanes> lanes;
     juce::Component pinnedClips, scrollingClips;
-    std::unique_ptr<Playhead> playhead;
-    juce::ScrollBar verticalScrollBar { true }, horizontalScrollBar { false };
 
     std::vector<Row> rows;
     juce::OwnedArray<TrackHeader> headers; // headers[i] shows rows[i]
@@ -119,7 +111,7 @@ private:
     TrackHeader* getHeaderFor (const te::Track*) const;
     void setScrollY (int);
     void scrollToShow (int row);
-    void updateScrollBars();
+    void updateVerticalScrollBar();
 
     // The clips.
     void rebuildClips();
@@ -134,7 +126,6 @@ private:
     void showClipMenu();
 
     // The tools: the mouse in the lanes.
-    void setTool (Tool);
     void lanesMouseMove (const juce::MouseEvent&);
     void lanesMouseDown (const juce::MouseEvent&);
     void lanesMouseDrag (const juce::MouseEvent&);
@@ -147,8 +138,6 @@ private:
     te::Clip* placeClip (int row, te::BeatPosition, bool snapStart); // a copy of lastClip, for Draw and Paint
     void muteOrDeleteClipAt (juce::Point<int>, bool deleteIt);       // once per gesture for each clip
     void selectClipsIn (juce::Rectangle<int>, bool addToSelection);
-    void nudge (int direction); // the selected clips, or the range, by a step of the grid
-    void quantizeSelectedClips();
 
     // Audio and MIDI files dropped from Explorer: onto a track that suits them, or onto new tracks.
     void importFiles (const juce::StringArray& paths, juce::Point<int> position);
@@ -156,22 +145,18 @@ private:
     void fileDragMove (const juce::StringArray&, int x, int y) override;
     void fileDragExit (const juce::StringArray&) override;
     void filesDropped (const juce::StringArray&, int x, int y) override;
+    te::BeatPosition getFileDropBeat (int x) const; // at the grid line at or before x, unless Alt is held
 
-    // Time and the grid.
-    te::TimecodeSnapType getSnapType() const;
-    te::BeatPosition snap (te::BeatPosition, juce::ModifierKeys) const; // Alt places freely
-    double getSongEndInBeats() const;
-    void setViewStart (te::BeatPosition);
-    void zoomAround (double x, double factor);
-    void zoom (double factor); // around the playhead if it is in view, otherwise the middle
-    void zoomToFit();
-    void centreOnPlayhead();
-    void movePlayheadTo (te::BeatPosition);
-    void updatePlayhead();
-    void setGrid (const GridSettings&); // and keeps it in the project
-    void updateGridControls();
-    void showGridMenu();
     void setColourOfSelectedTracks (juce::Colour);
+    void showOutlineMenu();
+
+    // TimelineEditor
+    juce::Rectangle<int> getTimelineArea() const override;
+    te::BeatRange getContentRange() const override;
+    void timelineChanged() override;
+    void toolChanged() override;
+    void gridChanged() override;
+    void verticalScrollBarMoved (double newRangeStart) override;
 
     // TrackHeader::Owner
     void trackClicked (te::Track&, const juce::ModifierKeys&) override;
@@ -187,8 +172,6 @@ private:
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
     void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override;
     void handleAsyncUpdate() override { rebuild(); }
-    void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
-    void timerCallback() override; // moves the playhead, and follows it while playing
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Playlist)
 };

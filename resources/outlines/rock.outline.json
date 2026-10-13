@@ -1,0 +1,17 @@
+{
+  "id": "rock",
+  "name": "Rock",
+  "order": 2,
+  "description": "A rock song: verses and choruses, a solo and a bridge, and a final double chorus. 96 bars.",
+  "sections": [
+    { "name": "Intro", "role": "intro", "bars": 8, "energy": 0.45, "tip": "Open with the main riff or a drum fill, to set the tempo and the sound." },
+    { "name": "Verse", "role": "verse", "bars": 16, "energy": 0.5, "tip": "Riff and rhythm section, with room for the vocal to tell the story." },
+    { "name": "Chorus", "role": "chorus", "bars": 8, "energy": 0.85, "tip": "Open up: bigger chords, crash cymbals and the line everyone sings." },
+    { "name": "Verse", "role": "verse", "bars": 16, "energy": 0.55, "tip": "The same groove with something new: another guitar part, or heavier drums." },
+    { "name": "Chorus", "role": "chorus", "bars": 8, "energy": 0.9, "tip": "The chorus again, at least as big as the first." },
+    { "name": "Solo", "role": "solo", "bars": 8, "energy": 0.8, "tip": "Let the lead guitar, or another instrument, take over the melody." },
+    { "name": "Bridge", "role": "bridge", "bars": 8, "energy": 0.6, "tip": "A change of chords or feel that builds the tension for the last chorus." },
+    { "name": "Chorus", "role": "chorus", "bars": 16, "energy": 1.0, "tip": "The last chorus, twice through: everything in, maybe up a key." },
+    { "name": "Outro", "role": "outro", "bars": 8, "energy": 0.45, "tip": "End on the riff, on one big final chord, or with a fade." }
+  ]
+}

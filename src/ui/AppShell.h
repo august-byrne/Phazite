@@ -5,13 +5,16 @@
 #include "ChannelStrip.h"
 #include "HintBar.h"
 #include "Icons.h"
+#include "Mixer.h"
 #include "Panels.h"
+#include "PianoRoll.h"
 #include "Playlist.h"
 #include "TopBar.h"
 
 namespace phazite::ui
 {
-class AppShell : public juce::Component
+class AppShell : public juce::Component,
+                 private juce::FocusChangeListener
 {
 public:
     AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&, RangeSelection&);
@@ -54,14 +57,20 @@ public:
 
 private:
     CommandRegistry& commands;
+    te::SelectionManager& selection;
 
     TopBar topBar;
     Panel browser { "Browser",
                     "Instruments, effects, plug-ins, samples and projects, by folder or by search. Coming in roadmap step 1.5." };
     Playlist playlist;
     Inspector inspector;
-    EditorDock editorDock;
+    PianoRoll pianoRoll;
+    Mixer mixer;
+    EditorDock editorDock { pianoRoll, mixer };
     HintBar hintBar;
+
+    // The editor used last, which the time line's commands (zoom, grid, tools, nudge) act on.
+    TimelineEditor* activeEditor = nullptr;
 
     bool browserShown = true, inspectorShown = true, editorShown = true;
     double editorShare = 0.4; // of the space below the top bar
@@ -93,8 +102,11 @@ private:
     std::unique_ptr<PanelWindow> browserWindow, inspectorWindow, editorWindow; // null while docked
 
     void updateLayout();
-    void showEditor (EditorDock::Tab);
+    void showEditor (EditorDock::Tab);   // or hides it if it is showing, as FL Studio's F7 and F9 do
+    void revealEditor (EditorDock::Tab); // shows it, even if it is showing already
     void placeDetachButtons();
+    void setActiveEditor (TimelineEditor*);
+    void globalFocusChanged (juce::Component*) override; // makes the editor that has the focus the active one
 
     juce::Component& getPanel (DetachablePanel);
     IconButton& getDetachButton (DetachablePanel);

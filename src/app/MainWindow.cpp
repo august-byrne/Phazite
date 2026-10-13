@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MainWindow.h"
 #include "model/LiveInput.h"
+#include "model/Outlines.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
@@ -97,7 +98,7 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
 
     // Shortcuts work anywhere in the window. Key listeners added later are asked first, so the computer
     // keyboard gets its letters before shortcuts do; it leaves alone keys pressed with Ctrl, Alt or Cmd.
-    addKeyListener (commands.getCommandManager().getKeyMappings());
+    addKeyListener (&commands);
     addKeyListener (&computerKeyboard);
     commands.getCommandManager().getKeyMappings()->addChangeListener (this);
 
@@ -130,7 +131,7 @@ MainWindow::~MainWindow()
 
     commands.getCommandManager().getKeyMappings()->removeChangeListener (this);
     removeKeyListener (&computerKeyboard);
-    removeKeyListener (commands.getCommandManager().getKeyMappings());
+    removeKeyListener (&commands);
     computerKeyboard.onChange = nullptr;
     setMenuBar (nullptr);
     clearContentComponent();
@@ -444,7 +445,7 @@ void MainWindow::updateTitle()
 //==============================================================================
 juce::StringArray MainWindow::getMenuBarNames()
 {
-    return { "File", "Edit", "Track", "Transport", "View", "Options" };
+    return { "File", "Edit", "Track", "Song", "Transport", "View", "Options" };
 }
 
 juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
@@ -481,22 +482,45 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
         }
 
         case 1:
+        {
             add (menu, "edit.undo");
             add (menu, "edit.redo");
             add (menu, "edit.undoOrRedo");
             menu.addSeparator();
 
-            for (const auto* id : { "edit.delete", "edit.duplicate", "edit.rename" })
+            for (const auto* id : { "edit.delete", "edit.duplicate", "edit.duplicateAsAlias", "edit.rename" })
                 add (menu, id);
 
+            menu.addSeparator();
+            add (menu, "edit.quantize");
+
+            // The piano roll's edits, which act on the selected notes.
+            juce::PopupMenu notes;
+
+            for (const auto* id : { "note.transposeUp", "note.transposeDown", "note.octaveUp", "note.octaveDown" })
+                add (notes, id);
+
+            notes.addSeparator();
+
+            for (const auto* id : { "note.lengthen", "note.shorten", "note.legato", "note.chop" })
+                add (notes, id);
+
+            notes.addSeparator();
+
+            for (const auto* id : { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings" })
+                add (notes, id);
+
+            menu.addSubMenu ("Notes", notes);
             menu.addSeparator();
             add (menu, "edit.selectAll");
             add (menu, "edit.deselectAll");
             break;
+        }
 
         case 2:
             add (menu, "track.add");
             add (menu, "track.addFolder");
+            add (menu, "track.addReturn");
             add (menu, "track.color");
             menu.addSeparator();
 
@@ -519,12 +543,28 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             break;
 
         case 3:
+        {
+            add (menu, "section.add");
+
+            juce::PopupMenu outlines;
+
+            for (const auto& outline : getBuiltInOutlines())
+                add (outlines, "section.outline." + outline.id);
+
+            menu.addSubMenu ("Apply Song Outline", outlines);
+            menu.addSeparator();
+            add (menu, "edit.insertTime");
+            add (menu, "edit.removeTime");
+            break;
+        }
+
+        case 4:
             for (const auto* id : { "transport.playStop", "transport.goToStart", "transport.goToEnd" })
                 add (menu, id);
 
             break;
 
-        case 4:
+        case 5:
         {
             add (menu, "view.commandPalette");
             menu.addSeparator();
@@ -566,7 +606,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             break;
         }
 
-        case 5:
+        case 6:
         {
             add (menu, "options.settings");
             add (menu, "options.audioSettings");

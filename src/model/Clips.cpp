@@ -19,6 +19,9 @@ juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager& selection)
     if (edit == nullptr)
         return {};
 
+    // Sections are arranger clips, with edits of their own (Sections.h).
+    clips.removeIf ([] (te::Clip* clip) { return dynamic_cast<te::ArrangerClip*> (clip) != nullptr; });
+
     const auto tracks = getPlaylistTracks (*edit);
     std::stable_sort (clips.begin(), clips.end(),
                       [&tracks] (te::Clip* a, te::Clip* b)
@@ -232,10 +235,5 @@ void deleteTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te:
                 if (clip->getPosition().getStart() >= time.getEnd())
                     clip->setStart (clip->getPosition().getStart() - time.getLength(), false, true);
     }
-}
-
-void insertTime (te::Edit& edit, te::BeatRange range)
-{
-    te::insertSpaceIntoEditFromBeatRange (edit, range);
 }
 } // namespace phazite

@@ -1,0 +1,15 @@
+{
+  "id": "hipHop",
+  "name": "Hip-hop and trap",
+  "order": 4,
+  "description": "A hip-hop or trap song: hooks around two 16-bar verses. 64 bars.",
+  "sections": [
+    { "name": "Intro", "role": "intro", "bars": 4, "energy": 0.35, "tip": "A few bars of the melody or the beat, before the drums come in." },
+    { "name": "Hook", "role": "hook", "bars": 8, "energy": 0.85, "tip": "The part everyone remembers: short and repeatable, over the full beat." },
+    { "name": "Verse", "role": "verse", "bars": 16, "energy": 0.6, "tip": "Room for the rapper: a steady beat with space in the mix for the voice." },
+    { "name": "Hook", "role": "hook", "bars": 8, "energy": 0.85, "tip": "The hook again." },
+    { "name": "Verse", "role": "verse", "bars": 16, "energy": 0.65, "tip": "Switch up the drums, or drop the beat out for a bar, to keep the second verse moving." },
+    { "name": "Hook", "role": "hook", "bars": 8, "energy": 0.9, "tip": "The last hook, maybe with an extra layer or ad-libs." },
+    { "name": "Outro", "role": "outro", "bars": 4, "energy": 0.4, "tip": "End on the melody, or let the beat ride out." }
+  ]
+}

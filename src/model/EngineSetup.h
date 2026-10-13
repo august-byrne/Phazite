@@ -68,6 +68,13 @@ public:
     // can't stay responsive meanwhile; Phazite's own long jobs use Tracktion's asynchronous renderers.
     void runTaskWithProgressBar (te::ThreadPoolJobWithProgress&) override;
 
+    // Devices' windows, which the app's UI makes (ui/PluginWindow.h). Without these, devices have none.
+    std::function<std::unique_ptr<juce::Component> (te::PluginWindowState&)> createPluginWindowFunction;
+    std::function<void (te::Plugin&)> recreatePluginWindowFunction;
+
+    std::unique_ptr<juce::Component> createPluginWindow (te::PluginWindowState&) override;
+    void recreatePluginWindowContentAsync (te::Plugin&) override;
+
 private:
     te::SafeSelectable<te::Edit> focusedEdit;
     juce::WeakReference<te::SelectionManager> selectionManager;

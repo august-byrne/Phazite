@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectSession.h"
 #include "model/LiveInput.h"
+#include "model/Outlines.h"
 #include "model/StarterProject.h"
 
 namespace phazite
@@ -79,9 +80,17 @@ void ProjectSession::newProject()
 
             const auto folder = getDefaultProjectsFolder();
             auto* window = new juce::AlertWindow ("New project",
-                                                  "Name the project. Phazite makes a folder for it in " + folder.getFullPathName() + ".",
+                                                  "Name the project. Phazite makes a folder for it in " + folder.getFullPathName()
+                                                      + ". A song outline lays out its sections, which you can change later.",
                                                   juce::MessageBoxIconType::NoIcon, dialogParent);
             window->addTextEditor ("name", "Untitled");
+
+            juce::StringArray outlineNames { "No outline" };
+
+            for (const auto& outline : getBuiltInOutlines())
+                outlineNames.add (outline.name);
+
+            window->addComboBox ("outline", outlineNames, "Song outline");
             window->addButton ("Create", 1, juce::KeyPress (juce::KeyPress::returnKey));
             window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
@@ -94,12 +103,27 @@ void ProjectSession::newProject()
 
                                              folder.createDirectory();
                                              juce::String error;
+                                             auto created = Project::create (engine, folder, window->getTextEditorContents ("name"), error);
 
-                                             if (auto created =
-                                                     Project::create (engine, folder, window->getTextEditorContents ("name"), error))
-                                                 setProject (std::move (created));
-                                             else
+                                             if (created == nullptr)
+                                             {
                                                  showError ("Phazite couldn't create the project", error);
+                                                 return;
+                                             }
+
+                                             // The outline is part of the new project, not a change to undo.
+                                             const auto choice = window->getComboBoxComponent ("outline")->getSelectedItemIndex() - 1;
+
+                                             if (juce::isPositiveAndBelow (choice, (int) getBuiltInOutlines().size()))
+                                             {
+                                                 applyOutline (created->getEdit(), getBuiltInOutlines()[(size_t) choice]);
+                                                 created->getEdit().getUndoManager().clearUndoHistory();
+
+                                                 if (const auto saved = created->save(); saved.failed())
+                                                     showError ("Phazite couldn't save the project", saved.getErrorMessage());
+                                             }
+
+                                             setProject (std::move (created));
                                          }),
                                      true);
         });

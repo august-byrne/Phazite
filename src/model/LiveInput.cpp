@@ -34,6 +34,11 @@ te::AudioTrack* getSelectedAudioTrack (const te::SelectionManager& selection)
     if (auto* clip = selection.getFirstItemOfType<te::Clip>())
         return dynamic_cast<te::AudioTrack*> (clip->getTrack());
 
+    // Notes selected in the piano roll: their clip's track.
+    if (auto* notes = selection.getFirstItemOfType<te::SelectedMidiEvents>())
+        if (auto* clip = notes->getClips().getFirst())
+            return dynamic_cast<te::AudioTrack*> (clip->getTrack());
+
     return nullptr;
 }
 

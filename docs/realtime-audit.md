@@ -25,7 +25,7 @@ The policy is decision 4 in the [design](design.md#24-open-questions):
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** three scenarios read no files and use none of the code Phazite is replacing: one empty track, built-in effects with a send, and automation with an LFO. Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
+- **Guards:** four scenarios read no files and use none of the code Phazite is replacing: one empty track, built-in effects with a send, automation with an LFO, and the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
 
 ## Results (Windows Debug)
 
@@ -36,6 +36,7 @@ The first column covers the first 0.25 s after playback starts; the second cover
 | One empty track | 3 allocations | 0 |
 | Built-in EQ, compressor, and a send to a reverb return | 4 allocations | 0 |
 | Volume automation and an LFO on pan | 2 allocations | 0 |
+| A tone through a bus, with a send to a reverb return, into the loudness meter | 6 allocations | 0 |
 | An audio clip | 2 allocations (more if the file cache misses) | 0 |
 | Two tracks in a folder bus with a compressor | 7 allocations, 1 free | 0 |
 | MIDI into Tracktion's 4OSC synth | 29 allocations, 3 frees | 10 allocations, 8 frees |
@@ -119,7 +120,7 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
   - chorus and delay;
   - the patch bays and the channel mapper;
   - the Airwindows wrapper.
-- **Action:** Phazite ships its own devices (steps 1.6 and 2.8), and Tracktion's stay out of Phazite's device list.
+- **Action:** Phazite ships its own devices (steps 1.6 and 2.8), and Tracktion's stay out of Phazite's device list. Until step 1.6, the list (`phazite::getDeviceTypes()`) offers two of them: the reverb, which reads its parameters atomically and allocates nothing (measured), and the 4OSC synth, which the starter project uses. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stay out too.
 
 ## Reporting upstream
 

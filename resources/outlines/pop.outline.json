@@ -1,0 +1,18 @@
+{
+  "id": "pop",
+  "name": "Pop",
+  "order": 1,
+  "description": "A pop song: verses that build through pre-choruses into choruses, then a bridge and a final double chorus. 72 bars.",
+  "sections": [
+    { "name": "Intro", "role": "intro", "bars": 4, "energy": 0.3, "tip": "Set the mood with a hint of the chorus's melody or chords, then get out of the way." },
+    { "name": "Verse", "role": "verse", "bars": 8, "energy": 0.45, "tip": "Tell the story over a lighter groove, so the chorus has somewhere to lift to." },
+    { "name": "Pre-chorus", "role": "preChorus", "bars": 4, "energy": 0.6, "tip": "Build toward the chorus: rising chords or melody, and fewer drums just before it hits." },
+    { "name": "Chorus", "role": "chorus", "bars": 8, "energy": 0.85, "tip": "The hook: the fullest part, with the catchiest melody, repeated." },
+    { "name": "Verse", "role": "verse", "bars": 8, "energy": 0.5, "tip": "New words over the same chords. Add a part or two so it doesn't sound like a repeat." },
+    { "name": "Pre-chorus", "role": "preChorus", "bars": 4, "energy": 0.65, "tip": "Build up again, a little bigger than the first time." },
+    { "name": "Chorus", "role": "chorus", "bars": 8, "energy": 0.9, "tip": "The hook again, with a new layer: harmonies, a counter-melody or more drums." },
+    { "name": "Bridge", "role": "bridge", "bars": 8, "energy": 0.55, "tip": "Change something: new chords, a breakdown or another rhythm, so the last chorus feels fresh." },
+    { "name": "Chorus", "role": "chorus", "bars": 16, "energy": 1.0, "tip": "The final chorus, often twice through: the biggest moment of the song." },
+    { "name": "Outro", "role": "outro", "bars": 4, "energy": 0.35, "tip": "Wind down: end on the hook, fade out, or take the parts out one by one." }
+  ]
+}

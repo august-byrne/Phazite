@@ -29,7 +29,7 @@ void Panel::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-EditorDock::EditorDock()
+EditorDock::EditorDock (juce::Component& pianoRollPanel, juce::Component& mixerPanel)
     : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop)
 {
     setTitle ("Editor");
@@ -38,9 +38,9 @@ EditorDock::EditorDock()
 
     const auto background = juce::Colours::transparentBlack; // each panel paints its own
 
-    addTab ("Piano roll", background, new Panel ("Piano roll", "Notes of the selected MIDI clip. Coming in roadmap step 1.3."), true);
-    addTab ("Audio", background, new Panel ("Audio editor", "The selected audio clip. Coming in roadmap step 1.1."), true);
+    addTab ("Piano roll", background, &pianoRollPanel, false);
+    addTab ("Audio", background, new Panel ("Audio editor", "The selected audio clip, in detail. Coming in a later roadmap step."), true);
     addTab ("Automation", background, new Panel ("Automation", "Automation lanes and clips. Coming in roadmap step 2.1."), true);
-    addTab ("Mixer", background, new Panel ("Mixer", "A channel for every track. Coming in roadmap step 1.4."), true);
+    addTab ("Mixer", background, &mixerPanel, false);
 }
 } // namespace phazite::ui

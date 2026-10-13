@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Selection.h"
+#include "Arrangement.h"
 #include "Clips.h"
+#include "Notes.h"
+#include "Sections.h"
 #include "Tracks.h"
+
+#include <algorithm>
 
 namespace phazite
 {
@@ -46,6 +51,17 @@ juce::Array<te::Track*> RangeSelection::getTracks() const
 //==============================================================================
 namespace
 {
+    // Sections, the last first, held so that one deleted by an edit of another is skipped.
+    std::vector<te::SafeSelectable<te::ArrangerClip>> toSafeLatestFirst (const juce::Array<te::ArrangerClip*>& sections)
+    {
+        std::vector<te::SafeSelectable<te::ArrangerClip>> safe;
+
+        for (int i = sections.size(); --i >= 0;)
+            safe.emplace_back (sections[i]);
+
+        return safe;
+    }
+
     void deleteSelection (te::SelectionManager& selection, const RangeSelection& range, bool closeGap)
     {
         auto* edit = selection.getEdit();
@@ -53,9 +69,26 @@ namespace
         if (edit == nullptr)
             return;
 
+        if (const auto notes = getSelectedNotes (selection); ! notes.empty())
+        {
+            deleteNotes (notes);
+            return;
+        }
+
         if (! range.isEmpty())
         {
             deleteTimeRange (*edit, range.getRange(), range.getTracks(), closeGap);
+            return;
+        }
+
+        // Sections go with what is in them, and the rest of the song closes up; latest first, so that
+        // deleting one doesn't move another still to be deleted. Deleting one can delete another inside it.
+        if (const auto sections = getSelectedSections (selection); ! sections.isEmpty())
+        {
+            for (const auto& section : toSafeLatestFirst (sections))
+                if (auto* s = section.get())
+                    deleteSection (*s);
+
             return;
         }
 
@@ -87,6 +120,32 @@ namespace
 
         if (edit == nullptr)
             return;
+
+        // Notes: the copies go right after them, and are selected instead.
+        if (const auto notes = getSelectedNotes (selection); ! notes.empty() && ! asAliases)
+        {
+            auto* events = getSelectedMidiEvents (selection);
+            juce::Array<te::MidiNote*> copies;
+
+            for (const auto& copy : duplicateNotes (notes))
+                copies.add (copy.note);
+
+            events->setSelected (selection, copies, false);
+            return;
+        }
+
+        // Sections: each copy goes right after its original, with what is in it, latest first.
+        if (const auto sections = getSelectedSections (selection); ! sections.isEmpty())
+        {
+            selection.deselectAll();
+
+            for (const auto& section : toSafeLatestFirst (sections))
+                if (auto* s = section.get())
+                    if (auto* copy = duplicateSection (*s, asAliases))
+                        selection.addToSelection (copy);
+
+            return;
+        }
 
         // Clips: the copies go right after the selection, as FL Studio's Ctrl+B does.
         if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
@@ -187,8 +246,14 @@ juce::String describeSelection (const te::SelectionManager& selection, const Ran
     const auto describe = [&verb] (int count, const char* noun)
     { return verb + " " + (count == 1 ? juce::String (noun) : juce::String (count) + " " + noun + "s"); };
 
+    if (const auto notes = getSelectedNotes (selection).size(); notes > 0)
+        return describe ((int) notes, "Note");
+
     if (! range.isEmpty())
         return verb + " Range";
+
+    if (const auto sections = getSelectedSections (selection).size(); sections > 0)
+        return describe (sections, "Section");
 
     if (const auto clips = getSelectedClips (selection).size(); clips > 0)
         return describe (clips, "Clip");
@@ -206,13 +271,18 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
     const auto hasClips = [&selection] { return ! getSelectedClips (selection).isEmpty(); };
     const auto hasRange = [&range] { return ! range.isEmpty(); };
     const auto hasRangeOrClips = [&selection, &range] { return ! range.isEmpty() || ! getSelectedClips (selection).isEmpty(); };
-    const auto hasAnything = [&selection, &range]
-    { return ! range.isEmpty() || ! getSelectedClips (selection).isEmpty() || ! getSelectedTracks (selection).isEmpty(); };
+    const auto hasSections = [&selection] { return ! getSelectedSections (selection).isEmpty(); };
+    const auto hasNotes = [&selection] { return ! getSelectedNotes (selection).empty(); };
+    const auto hasAnything = [&selection, &range, hasSections, hasNotes]
+    {
+        return hasNotes() || ! range.isEmpty() || hasSections() || ! getSelectedClips (selection).isEmpty()
+               || ! getSelectedTracks (selection).isEmpty();
+    };
 
     registry.add ({ .id = "edit.delete",
                     .name = "Delete",
                     .category = "Edit",
-                    .description = "Deletes the selected time range, clips or tracks.",
+                    .description = "Deletes the selected notes, time range, sections, clips or tracks. A section goes with what is in it.",
                     .synonyms = { "remove", "erase" },
                     .perform = [&selection, &range] { deleteSelection (selection, range, false); },
                     .isEnabled = hasAnything,
@@ -232,21 +302,25 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
         { .id = "edit.duplicate",
           .name = "Duplicate",
           .category = "Edit",
-          .description = "Duplicates the selected clips, right after them, or the selected tracks, each below its original.",
+          .description = "Duplicates the selected sections or clips, right after them, or the selected tracks, each below its original.",
           .synonyms = { "copy", "clone", "repeat" },
           .perform = [&selection] { duplicateSelection (selection, false); },
-          .isEnabled = [&selection] { return ! getSelectedClips (selection).isEmpty() || ! getSelectedTracks (selection).isEmpty(); },
+          .isEnabled = [&selection, hasNotes, hasSections]
+          { return hasNotes() || hasSections() || ! getSelectedClips (selection).isEmpty() || ! getSelectedTracks (selection).isEmpty(); },
           .undoTarget = getEdit,
           .currentName = [&selection, &range] { return describeSelection (selection, range, "Duplicate"); } });
 
-    registry.add ({ .id = "clip.duplicateAsAlias",
-                    .name = "Duplicate as Alias",
-                    .category = "Clip",
-                    .description = "Duplicates the selected clips right after them, as aliases: editing the notes of one edits them all.",
-                    .synonyms = { "linked copy", "ghost", "pattern", "clone" },
-                    .perform = [&selection] { duplicateSelection (selection, true); },
-                    .isEnabled = hasClips,
-                    .undoTarget = getEdit });
+    registry.add (
+        { .id = "edit.duplicateAsAlias",
+          .name = "Duplicate as Alias",
+          .category = "Edit",
+          .description = "Duplicates the selected sections or clips right after them, as aliases: editing the notes of one edits "
+                         "them all. A section is copied with what is in it.",
+          .synonyms = { "linked copy", "ghost", "pattern", "clone", "repeat section" },
+          .perform = [&selection] { duplicateSelection (selection, true); },
+          .isEnabled = [hasClips, hasSections] { return hasClips() || hasSections(); },
+          .undoTarget = getEdit,
+          .currentName = [hasSections] { return hasSections() ? juce::String ("Duplicate Section as Aliases") : juce::String(); } });
 
     registry.add ({ .id = "clip.makeUnique",
                     .name = "Make Unique",
@@ -262,15 +336,29 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     },
                     .undoTarget = getEdit });
 
-    registry.add ({ .id = "clip.mute",
-                    .name = "Mute Clips",
-                    .category = "Clip",
-                    .description = "Silences the selected clips, or unmutes them.",
+    registry.add ({ .id = "edit.mute",
+                    .name = "Mute",
+                    .category = "Edit",
+                    .description = "Silences the selected notes or clips, or unmutes them.",
                     .synonyms = { "deactivate", "disable", "silence" },
-                    .perform = [&selection] { toggleClipsMuted (getSelectedClips (selection)); },
-                    .isEnabled = hasClips,
+                    .perform =
+                        [&selection]
+                    {
+                        if (const auto notes = getSelectedNotes (selection); ! notes.empty())
+                            toggleNotesMuted (notes);
+                        else
+                            toggleClipsMuted (getSelectedClips (selection));
+                    },
+                    .isEnabled = [hasNotes, hasClips] { return hasNotes() || hasClips(); },
                     .undoTarget = getEdit,
-                    .isTicked = [&selection] { return areAllClipsMuted (getSelectedClips (selection)); } });
+                    .isTicked =
+                        [&selection]
+                    {
+                        if (const auto notes = getSelectedNotes (selection); ! notes.empty())
+                            return areAllNotesMuted (notes);
+
+                        return areAllClipsMuted (getSelectedClips (selection));
+                    } });
 
     // Fade shapes, for the selected audio clips' fade-ins and fade-outs.
     struct FadeShape
@@ -334,33 +422,37 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .isEnabled = hasRangeOrClips,
                     .undoTarget = getEdit });
 
-    registry.add ({ .id = "edit.insertTime",
-                    .name = "Insert Time",
-                    .category = "Edit",
-                    .description = "Inserts empty time, as long as the selected time range, at its start, on every track.",
-                    .synonyms = { "insert silence", "add bars", "make room" },
-                    .perform =
-                        [&selection, &range]
-                    {
-                        if (auto* edit = selection.getEdit())
-                            insertTime (*edit, range.getRange());
-                    },
-                    .isEnabled = hasRange,
-                    .undoTarget = getEdit });
+    registry.add (
+        { .id = "edit.insertTime",
+          .name = "Insert Time",
+          .category = "Edit",
+          .description =
+              "Inserts empty time, as long as the selected time range, at its start, on every track. A section it falls inside gets longer.",
+          .synonyms = { "insert silence", "add bars", "make room" },
+          .perform =
+              [&selection, &range]
+          {
+              if (auto* edit = selection.getEdit())
+                  insertTime (*edit, range.getRange().getStart(), range.getRange().getLength());
+          },
+          .isEnabled = hasRange,
+          .undoTarget = getEdit });
 
-    registry.add ({ .id = "edit.removeTime",
-                    .name = "Remove Time",
-                    .category = "Edit",
-                    .description = "Removes the selected time range from every track, and moves what comes after it back.",
-                    .synonyms = { "delete time", "remove bars", "cut time" },
-                    .perform =
-                        [&selection, &range]
-                    {
-                        if (auto* edit = selection.getEdit())
-                            deleteTimeRange (*edit, range.getRange(), getPlaylistTracks (*edit), true);
-                    },
-                    .isEnabled = hasRange,
-                    .undoTarget = getEdit });
+    registry.add (
+        { .id = "edit.removeTime",
+          .name = "Remove Time",
+          .category = "Edit",
+          .description =
+              "Removes the selected time range from every track, and moves what comes after it back. Sections that reach into it get shorter.",
+          .synonyms = { "delete time", "remove bars", "cut time" },
+          .perform =
+              [&selection, &range]
+          {
+              if (auto* edit = selection.getEdit())
+                  removeTime (*edit, range.getRange());
+          },
+          .isEnabled = hasRange,
+          .undoTarget = getEdit });
 
     registry.add ({ .id = "edit.selectAll",
                     .name = "Select All",
