@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The project the command script leaves (every model command run where it does something), saved: tests/CommandGoldenTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
+<EDIT appVersion="(varies)"
+      creationTime="(varies)"
+      modifiedBy=""
+      projectID="(varies)">
+  <AUXBUSNAMES>
+    <NAME bus="0"
+          name="Return 1"/>
+  </AUXBUSNAMES>
+  <CLICKTRACK level="0.6"/>
+  <MASTERPLUGINS>
+    <PLUGIN enabled="1"
+            id="1010"
+            remapOnTempoChange="1"
+            type="phaziteLoudnessMeter"/>
+  </MASTERPLUGINS>
+  <MASTERVOLUME>
+    <PLUGIN enabled="1"
+            id="1001"
+            type="volume"
+            volume="0.6376281">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </MASTERVOLUME>
+  <PHAZITE loopFollowsSong="1"
+           outline="rock"/>
+  <PITCHSEQUENCE>
+    <PITCH pitch="60"
+           startBeat="0"/>
+  </PITCHSEQUENCE>
+  <RACKS/>
+  <SCENES/>
+  <TEMPOSEQUENCE>
+    <TEMPO bpm="120"
+           curve="1"
+           startBeat="0"/>
+    <TIMESIG denominator="4"
+             numerator="4"
+             startBeat="0"/>
+  </TEMPOSEQUENCE>
+  <ARRANGERTRACK id="1006"
+                 name="Arranger">
+    <ARRANGERCLIP colour="ff999999"
+                  id="1038"
+                  length="16"
+                  name="Intro"
+                  offset="0"
+                  phaziteEnergy="0.45"
+                  phaziteRole="intro"
+                  phaziteTip="Open with the main riff or a drum fill, to set the tempo and the sound."
+                  start="0"/>
+    <ARRANGERCLIP colour="ff0072b2"
+                  id="1039"
+                  length="32"
+                  name="Verse"
+                  offset="0"
+                  phaziteEnergy="0.5"
+                  phaziteRole="verse"
+                  phaziteTip="Riff and rhythm section, with room for the vocal to tell the story."
+                  start="16"/>
+    <ARRANGERCLIP colour="ffd55e00"
+                  id="1040"
+                  length="16"
+                  name="Chorus"
+                  offset="0"
+                  phaziteEnergy="0.85"
+                  phaziteRole="chorus"
+                  phaziteTip="Open up: bigger chords, crash cymbals and the line everyone sings."
+                  start="48"/>
+    <ARRANGERCLIP colour="ff0072b2"
+                  id="1041"
+                  length="32"
+                  name="Verse"
+                  offset="0"
+                  phaziteEnergy="0.55"
+                  phaziteRole="verse"
+                  phaziteTip="The same groove with something new: another guitar part, or heavier drums."
+                  start="64"/>
+    <ARRANGERCLIP colour="ffd55e00"
+                  id="1042"
+                  length="16"
+                  name="Chorus"
+                  offset="0"
+                  phaziteEnergy="0.9"
+                  phaziteRole="chorus"
+                  phaziteTip="The chorus again, at least as big as the first."
+                  start="96"/>
+    <ARRANGERCLIP colour="ff009e73"
+                  id="1043"
+                  length="16"
+                  name="Solo"
+                  offset="0"
+                  phaziteEnergy="0.8"
+                  phaziteRole="solo"
+                  phaziteTip="Let the lead guitar, or another instrument, take over the melody."
+                  start="112"/>
+    <ARRANGERCLIP colour="ffcc79a7"
+                  id="1044"
+                  length="16"
+                  name="Bridge"
+                  offset="0"
+                  phaziteEnergy="0.6"
+                  phaziteRole="bridge"
+                  phaziteTip="A change of chords or feel that builds the tension for the last chorus."
+                  start="128"/>
+    <ARRANGERCLIP colour="ffd55e00"
+                  id="1045"
+                  length="32"
+                  name="Chorus"
+                  offset="0"
+                  phaziteEnergy="1"
+                  phaziteRole="chorus"
+                  phaziteTip="The last chorus, twice through: everything in, maybe up a key."
+                  start="144"/>
+    <ARRANGERCLIP colour="ff999999"
+                  id="1046"
+                  length="16"
+                  name="Outro"
+                  offset="0"
+                  phaziteEnergy="0.45"
+                  phaziteRole="outro"
+                  phaziteTip="End on the riff, on one big final chord, or with a fade."
+                  start="176"/>
+  </ARRANGERTRACK>
+  <CHORDTRACK id="1008"
+              name="Chord"/>
+  <MARKERTRACK id="1002"
+               name="Marker"/>
+  <TEMPOTRACK id="1007"
+              name="Global">
+    <MODIFIERS/>
+  </TEMPOTRACK>
+  <MASTERTRACK id="1009"
+               name="Master">
+    <MODIFIERS/>
+  </MASTERTRACK>
+  <FOLDERTRACK colour="ffe69f00"
+               id="1016"
+               mute="0"
+               name="Group">
+    <MODIFIERS/>
+    <PLUGIN enabled="1"
+            id="1017"
+            remapOnTempoChange="1"
+            type="vca">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <TRACK id="1003"
+           mute="0"
+           name="One"
+           phaziteCollapsed="0"
+           phaziteHeight="80"
+           phazitePinned="1"
+           solo="0">
+      <MIDICLIP colour="ff00ff00"
+                currentTake="0"
+                id="1047"
+                length="1"
+                linkID=""
+                mute="0"
+                name="One"
+                offset="0"
+                speed="1"
+                start="0"
+                sync="0">
+        <AUTOMATIONCURVES/>
+        <GROOVE/>
+        <QUANTISATION/>
+        <SEQUENCE channelNumber="1"
+                  ver="1">
+          <NOTE b="0"
+                c="0"
+                l="0.25"
+                m="0"
+                p="60"
+                v="100"/>
+          <NOTE b="0.25"
+                c="0"
+                l="0.25"
+                m="0"
+                p="60"
+                v="100"/>
+          <NOTE b="0.5"
+                c="0"
+                l="0.25"
+                m="0"
+                p="60"
+                v="100"/>
+          <NOTE b="0.75"
+                c="0"
+                l="0.25"
+                m="0"
+                p="60"
+                v="100"/>
+          <NOTE b="1"
+                c="0"
+                l="0.25"
+                m="0"
+                p="64"
+                v="100"/>
+          <NOTE b="1.25"
+                c="0"
+                l="0.25"
+                m="0"
+                p="64"
+                v="100"/>
+        </SEQUENCE>
+      </MIDICLIP>
+      <MIDICLIP colour="ff00ff00"
+                currentTake="0"
+                id="1054"
+                length="1"
+                linkID=""
+                mute="0"
+                name="One"
+                offset="1"
+                speed="1"
+                start="3"
+                sync="0">
+        <AUTOMATIONCURVES/>
+        <GROOVE/>
+        <QUANTISATION/>
+        <SEQUENCE channelNumber="1"
+                  ver="1">
+          <NOTE b="0"
+                c="0"
+                l="0.5"
+                p="60"
+                v="100"/>
+          <NOTE b="1"
+                c="0"
+                l="0.5"
+                p="64"
+                v="100"/>
+        </SEQUENCE>
+      </MIDICLIP>
+      <CLIPSLOTS/>
+      <MODIFIERS/>
+      <OUTPUTDEVICES>
+        <DEVICE name="(default audio output)"/>
+      </OUTPUTDEVICES>
+      <PLUGIN enabled="1"
+              id="1004"
+              remapOnTempoChange="1"
+              type="volume">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+      <PLUGIN enabled="1"
+              id="1005"
+              type="level"/>
+    </TRACK>
+    <TRACK colour="ff56b4e9"
+           id="1011"
+           name="Two"
+           phaziteCollapsed="0"
+           phaziteHeight="80">
+      <CLIPSLOTS/>
+      <MODIFIERS/>
+      <OUTPUTDEVICES>
+        <DEVICE name="(default audio output)"/>
+      </OUTPUTDEVICES>
+      <PLUGIN enabled="1"
+              id="1012"
+              remapOnTempoChange="1"
+              type="volume">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+      <PLUGIN enabled="1"
+              id="1013"
+              type="level"/>
+    </TRACK>
+  </FOLDERTRACK>
+  <TRACK colour="ff009e73"
+         id="1018"
+         name="Return 1"
+         soloIsolate="1">
+    <CLIPSLOTS/>
+    <MODIFIERS/>
+    <OUTPUTDEVICES>
+      <DEVICE name="(default audio output)"/>
+    </OUTPUTDEVICES>
+    <PLUGIN busNum="0"
+            enabled="1"
+            id="1021"
+            remapOnTempoChange="1"
+            type="auxreturn"/>
+    <PLUGIN enabled="1"
+            id="1019"
+            remapOnTempoChange="1"
+            type="volume">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1020"
+            type="level"/>
+  </TRACK>
+  <TRACKCOMPS/>
+  <TRANSPORT loopPoint1="0"
+             loopPoint2="4"
+             looping="1"
+             position="1"
+             start="1"/>
+  <VIDEO/>
+</EDIT>

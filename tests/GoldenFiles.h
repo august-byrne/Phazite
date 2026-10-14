@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden files: what Phazite makes (saved projects, and the levels of renders), compared with files committed in
-// tests/golden, so that a change to what Phazite saves or plays, or to how it opens projects saved by earlier versions,
-// fails a test that lists each difference. A refactoring must leave them as they are. A change meant to alter them
-// regenerates them: run the golden tests (--test-suite=golden) with the environment variable PHAZITE_UPDATE_GOLDEN=1,
-// never in CI, and read git diff tests/golden in full (CLAUDE.md).
+// Golden files: what Phazite makes (saved projects, the levels of renders, and what the model's commands are and do),
+// compared with files committed in tests/golden, so that a change to what Phazite saves or plays, to its commands, or to
+// how it opens projects saved by earlier versions, fails a test that lists each difference. A refactoring must leave
+// them as they are. A change meant to alter them regenerates them: run the golden tests (--test-suite=golden) with the
+// environment variable PHAZITE_UPDATE_GOLDEN=1, never in CI, and read git diff tests/golden in full (CLAUDE.md).
 //
 // Saved projects are compared after normaliseProject(), which leaves out only what changes from run to run or from one
 // machine to another:

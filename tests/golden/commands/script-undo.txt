@@ -1,0 +1,74 @@
+# The command script (tests/CommandGoldenTests.cpp): each command it runs, and the undo step the Edit menu offers after it (the one before, if the command made none). Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
+track.add: Add Track
+track.addFolder: Add Folder
+track.ungroup: Ungroup Folder
+track.taller: Ungroup Folder
+track.shorter: Ungroup Folder
+track.taller: Ungroup Folder
+track.pin: Ungroup Folder
+track.collapse: Ungroup Folder
+track.collapse: Ungroup Folder
+track.groupIntoFolder: Group into Folder
+track.mute: Script: name the new folder Group
+track.mute: Script: name the new folder Group
+track.mute: Script: name the new folder Group
+track.solo: Script: name the new folder Group
+track.solo: Script: name the new folder Group
+track.mute: Script: name the new folder Group
+track.moveUp: Move Track Up
+track.moveDown: Move Track Down
+track.selectNext: Move Track Down
+track.selectPrevious: Move Track Down
+track.addReturn: Add Return Track
+edit.duplicate: Duplicate Track
+edit.delete: Delete Track
+section.add: Add Section
+edit.duplicate: Duplicate Section
+edit.duplicateAsAlias: Duplicate Section as Aliases
+section.loop: Duplicate Section as Aliases
+edit.delete: Delete Section
+section.outline.pop: Apply Outline: Pop
+section.outline.rock: Apply Outline: Rock
+edit.mute: Mute
+edit.mute: Mute
+edit.duplicate: Duplicate Clip
+edit.delete: Delete Clip
+edit.duplicateAsAlias: Duplicate as Alias
+clip.makeUnique: Make Unique
+transport.goToEnd: Make Unique
+transport.goToStart: Make Unique
+edit.split: Split
+note.transposeUp: Transpose Up
+note.transposeDown: Transpose Down
+note.octaveUp: Octave Up
+note.octaveDown: Octave Down
+note.lengthen: Lengthen Notes
+note.shorten: Shorten Notes
+note.legato: Legato
+note.chop: Chop
+edit.mute: Mute
+edit.mute: Mute
+edit.duplicate: Duplicate 6 Notes
+edit.delete: Delete 6 Notes
+clip.fadeConvex: Convex Fades
+clip.fadeConcave: Concave Fades
+clip.fadeSCurve: S-Curve Fades
+clip.fadeLinear: Linear Fades
+edit.deleteAndCloseGap: Delete and Close Gap
+edit.insertTime: Insert Time
+edit.removeTime: Remove Time
+transport.loopSelection: Remove Time
+edit.split: Split
+edit.delete: Delete Range
+transport.loop: Delete Range
+transport.loop: Delete Range
+transport.loopSong: Delete Range
+transport.loop: Delete Range
+transport.loopSelection: Delete Range
+edit.selectAll: Delete Range
+edit.selectAll: Delete Range
+edit.deselectAll: Delete Range
+edit.undo: Split
+edit.redo: Delete Range
+edit.undoOrRedo: Split
+edit.undoOrRedo: Delete Range

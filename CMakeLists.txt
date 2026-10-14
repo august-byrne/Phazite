@@ -341,6 +341,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AudioThreadMonitor.h
         tests/BrowserTests.cpp
         tests/ClipTests.cpp
+        tests/CommandGoldenTests.cpp
         tests/CommandTests.cpp
         tests/ComputerKeyboardTests.cpp
         tests/ControlsTests.cpp

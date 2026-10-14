@@ -1,0 +1,608 @@
+# The command script (tests/CommandGoldenTests.cpp): after each step, every command whose state changed (on, or off when greyed out; ticked; the name menus show), and what is selected, where the playhead is and the loop's range (in beats), each if it changed. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
+after start:
+  edit.undo: off "Undo"
+  edit.redo: off "Redo"
+  edit.undoOrRedo: off "Undo"
+  transport.playStop: on "Play / Stop"
+  transport.playPause: on "Play / Pause"
+  transport.goToStart: on "Go to Start"
+  transport.goToEnd: on "Go to End"
+  edit.delete: off "Delete"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: off "Duplicate"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  clip.makeUnique: off "Make Unique"
+  edit.mute: off "Mute"
+  clip.fadeLinear: off "Linear Fades"
+  clip.fadeConvex: off "Convex Fades"
+  clip.fadeConcave: off "Concave Fades"
+  clip.fadeSCurve: off "S-Curve Fades"
+  edit.split: off "Split"
+  edit.insertTime: off "Insert Time"
+  edit.removeTime: off "Remove Time"
+  edit.selectAll: on "Select All"
+  edit.deselectAll: off "Deselect All"
+  track.add: on "Add Track"
+  track.addFolder: on "Add Folder"
+  track.groupIntoFolder: off "Group into Folder"
+  track.ungroup: off "Ungroup Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.selectPrevious: on "Select Track Above"
+  track.selectNext: on "Select Track Below"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  track.taller: on "Taller Tracks"
+  track.shorter: on "Shorter Tracks"
+  section.add: on "Add Section"
+  section.outline.pop: on "Apply Outline: Pop"
+  section.outline.rock: on "Apply Outline: Rock"
+  section.outline.electronic: on "Apply Outline: Electronic (house, EDM)"
+  section.outline.hipHop: on "Apply Outline: Hip-hop and trap"
+  section.outline.lofi: on "Apply Outline: Lo-fi beat"
+  section.outline.rnb: on "Apply Outline: R&B"
+  section.outline.drumAndBass: on "Apply Outline: Drum and bass"
+  section.outline.techno: on "Apply Outline: Techno"
+  track.addReturn: on "Add Return Track"
+  transport.loop: on "Loop"
+  transport.loopSelection: on "Loop Selection"
+  section.loop: off "Loop Section"
+  transport.loopSong: on "Loop the Song"
+  note.transposeUp: off "Transpose Up"
+  note.transposeDown: off "Transpose Down"
+  note.octaveUp: off "Octave Up"
+  note.octaveDown: off "Octave Down"
+  note.lengthen: off "Lengthen Notes"
+  note.shorten: off "Shorten Notes"
+  note.legato: off "Legato"
+  note.chop: off "Chop"
+  selected: nothing
+  playhead at 0.000
+  loop 0.000-4.000 beats
+after select One:
+  edit.delete: on "Delete Track"
+  edit.duplicate: on "Duplicate Track"
+  edit.deselectAll: on "Deselect All"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  selected: track One
+after track.add:
+  edit.undo: on "Undo Add Track"
+  edit.undoOrRedo: on "Undo Add Track"
+  selected: track Track 2
+after name the new track Two:
+  edit.undo: on "Undo Script: name the new track Two"
+  edit.undoOrRedo: on "Undo Script: name the new track Two"
+  selected: track Two
+after track.addFolder:
+  edit.undo: on "Undo Add Folder"
+  edit.undoOrRedo: on "Undo Add Folder"
+  track.ungroup: on "Ungroup Folder"
+  selected: track Folder
+after name the new folder Empty:
+  edit.undo: on "Undo Script: name the new folder Empty"
+  edit.undoOrRedo: on "Undo Script: name the new folder Empty"
+  selected: track Empty
+after track.ungroup:
+  edit.undo: on "Undo Ungroup Folder"
+  edit.undoOrRedo: on "Undo Ungroup Folder"
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.deselectAll: off "Deselect All"
+  track.groupIntoFolder: off "Group into Folder"
+  track.ungroup: off "Ungroup Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  selected: nothing
+after select One:
+  edit.delete: on "Delete Track"
+  edit.duplicate: on "Duplicate Track"
+  edit.deselectAll: on "Deselect All"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  selected: track One
+after track.taller:
+after track.shorter:
+after select nothing:
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.deselectAll: off "Deselect All"
+  track.groupIntoFolder: off "Group into Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  selected: nothing
+after track.taller:
+after select One:
+  edit.delete: on "Delete Track"
+  edit.duplicate: on "Duplicate Track"
+  edit.deselectAll: on "Deselect All"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  selected: track One
+after track.pin:
+  track.pin: on, ticked "Pin Track"
+after track.collapse:
+  track.collapse: on, ticked "Collapse Track"
+after track.collapse:
+  track.collapse: on "Collapse Track"
+after select One and Two:
+  edit.delete: on "Delete 2 Tracks"
+  edit.duplicate: on "Duplicate 2 Tracks"
+  track.pin: on "Pin Track"
+  selected: track One, track Two
+after track.groupIntoFolder:
+  edit.undo: on "Undo Group into Folder"
+  edit.undoOrRedo: on "Undo Group into Folder"
+  edit.delete: on "Delete Track"
+  edit.duplicate: on "Duplicate Track"
+  track.ungroup: on "Ungroup Folder"
+  selected: track Folder
+after name the new folder Group:
+  edit.undo: on "Undo Script: name the new folder Group"
+  edit.undoOrRedo: on "Undo Script: name the new folder Group"
+  selected: track Group
+after track.mute:
+  track.mute: on, ticked "Mute Track"
+after select One:
+  track.ungroup: off "Ungroup Folder"
+  track.pin: on, ticked "Pin Track"
+  track.mute: on "Mute Track"
+  selected: track One
+after track.mute:
+  track.mute: on, ticked "Mute Track"
+after track.mute:
+  track.mute: on "Mute Track"
+after track.solo:
+  track.solo: on, ticked "Solo Track"
+after track.solo:
+  track.solo: on "Solo Track"
+after select Group:
+  track.ungroup: on "Ungroup Folder"
+  track.pin: on "Pin Track"
+  track.mute: on, ticked "Mute Track"
+  selected: track Group
+after track.mute:
+  track.mute: on "Mute Track"
+after select Two:
+  track.ungroup: off "Ungroup Folder"
+  selected: track Two
+after track.moveUp:
+  edit.undo: on "Undo Move Track Up"
+  edit.undoOrRedo: on "Undo Move Track Up"
+after track.moveDown:
+  edit.undo: on "Undo Move Track Down"
+  edit.undoOrRedo: on "Undo Move Track Down"
+after select nothing:
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.deselectAll: off "Deselect All"
+  track.groupIntoFolder: off "Group into Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  selected: nothing
+after track.selectNext:
+  edit.delete: on "Delete Track"
+  edit.duplicate: on "Duplicate Track"
+  edit.deselectAll: on "Deselect All"
+  track.groupIntoFolder: on "Group into Folder"
+  track.ungroup: on "Ungroup Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  selected: track Group
+after select nothing:
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.deselectAll: off "Deselect All"
+  track.groupIntoFolder: off "Group into Folder"
+  track.ungroup: off "Ungroup Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  selected: nothing
+after track.selectPrevious:
+  edit.delete: on "Delete Track"
+  edit.duplicate: on "Duplicate Track"
+  edit.deselectAll: on "Deselect All"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  selected: track Two
+after select One:
+  track.pin: on, ticked "Pin Track"
+  selected: track One
+after track.addReturn:
+  edit.undo: on "Undo Add Return Track"
+  edit.undoOrRedo: on "Undo Add Return Track"
+  track.pin: on "Pin Track"
+  selected: track Return 1
+after select One:
+  track.pin: on, ticked "Pin Track"
+  selected: track One
+after edit.duplicate:
+  edit.undo: on "Undo Duplicate Track"
+  edit.undoOrRedo: on "Undo Duplicate Track"
+after edit.delete:
+  edit.undo: on "Undo Delete Track"
+  edit.undoOrRedo: on "Undo Delete Track"
+  track.pin: on "Pin Track"
+  selected: track Two
+after select nothing:
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.deselectAll: off "Deselect All"
+  track.groupIntoFolder: off "Group into Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  selected: nothing
+after section.add:
+  edit.undo: on "Undo Add Section"
+  edit.undoOrRedo: on "Undo Add Section"
+  edit.delete: on "Delete Section"
+  edit.duplicate: on "Duplicate Section"
+  edit.duplicateAsAlias: on "Duplicate Section as Aliases"
+  edit.deselectAll: on "Deselect All"
+  section.loop: on "Loop Section"
+  selected: section Section 1
+after edit.duplicate:
+  edit.undo: on "Undo Duplicate Section"
+  edit.undoOrRedo: on "Undo Duplicate Section"
+after edit.duplicateAsAlias:
+  edit.undo: on "Undo Duplicate Section as Aliases"
+  edit.undoOrRedo: on "Undo Duplicate Section as Aliases"
+after section.loop:
+  transport.loop: on, ticked "Loop"
+  loop 64.000-96.000 beats
+after edit.delete:
+  edit.undo: on "Undo Delete Section"
+  edit.undoOrRedo: on "Undo Delete Section"
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.deselectAll: off "Deselect All"
+  section.loop: off "Loop Section"
+  selected: nothing
+after section.outline.pop:
+  edit.undo: on "Undo Apply Outline: Pop"
+  edit.undoOrRedo: on "Undo Apply Outline: Pop"
+  section.outline.pop: on, ticked "Apply Outline: Pop"
+after section.outline.rock:
+  edit.undo: on "Undo Apply Outline: Rock"
+  edit.undoOrRedo: on "Undo Apply Outline: Rock"
+  section.outline.pop: on "Apply Outline: Pop"
+  section.outline.rock: on, ticked "Apply Outline: Rock"
+after add a MIDI clip on One, with two notes:
+  edit.undo: on "Undo Script: add a MIDI clip on One, with two notes"
+  edit.undoOrRedo: on "Undo Script: add a MIDI clip on One, with two notes"
+  edit.delete: on "Delete Clip"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Clip"
+  edit.duplicateAsAlias: on "Duplicate as Alias"
+  edit.mute: on "Mute"
+  edit.split: on "Split"
+  edit.deselectAll: on "Deselect All"
+  selected: clip on One at 0.000
+after edit.mute:
+  edit.undo: on "Undo Mute"
+  edit.undoOrRedo: on "Undo Mute"
+  edit.mute: on, ticked "Mute"
+after edit.mute:
+  edit.mute: on "Mute"
+after edit.duplicate:
+  edit.undo: on "Undo Duplicate Clip"
+  edit.undoOrRedo: on "Undo Duplicate Clip"
+  selected: clip on One at 4.000
+after edit.delete:
+  edit.undo: on "Undo Delete Clip"
+  edit.undoOrRedo: on "Undo Delete Clip"
+  edit.delete: off "Delete"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: off "Duplicate"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.mute: off "Mute"
+  edit.split: off "Split"
+  edit.deselectAll: off "Deselect All"
+  selected: nothing
+after select the clip:
+  edit.delete: on "Delete Clip"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Clip"
+  edit.duplicateAsAlias: on "Duplicate as Alias"
+  edit.mute: on "Mute"
+  edit.split: on "Split"
+  edit.deselectAll: on "Deselect All"
+  selected: clip on One at 0.000
+after edit.duplicateAsAlias:
+  edit.undo: on "Undo Duplicate as Alias"
+  edit.undoOrRedo: on "Undo Duplicate as Alias"
+  clip.makeUnique: on "Make Unique"
+  selected: clip on One at 4.000
+after clip.makeUnique:
+  edit.undo: on "Undo Make Unique"
+  edit.undoOrRedo: on "Undo Make Unique"
+  clip.makeUnique: off "Make Unique"
+after select the clip:
+  selected: clip on One at 0.000
+after transport.goToEnd:
+  playhead at 384.000
+after transport.goToStart:
+  playhead at 0.000
+after put the playhead at 1 s:
+  playhead at 2.000
+after edit.split:
+  edit.undo: on "Undo Split"
+  edit.undoOrRedo: on "Undo Split"
+after select the clip's notes:
+  edit.delete: on "Delete 2 Notes"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: on "Duplicate 2 Notes"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.split: off "Split"
+  note.transposeUp: on "Transpose Up"
+  note.transposeDown: on "Transpose Down"
+  note.octaveUp: on "Octave Up"
+  note.octaveDown: on "Octave Down"
+  note.lengthen: on "Lengthen Notes"
+  note.shorten: on "Shorten Notes"
+  note.legato: on "Legato"
+  note.chop: on "Chop"
+  selected: 2 notes (60 at 0.000 for 0.500, 64 at 1.000 for 0.500)
+after note.transposeUp:
+  edit.undo: on "Undo Transpose Up"
+  edit.undoOrRedo: on "Undo Transpose Up"
+  selected: 2 notes (61 at 0.000 for 0.500, 65 at 1.000 for 0.500)
+after note.transposeDown:
+  edit.undo: on "Undo Transpose Down"
+  edit.undoOrRedo: on "Undo Transpose Down"
+  selected: 2 notes (60 at 0.000 for 0.500, 64 at 1.000 for 0.500)
+after note.octaveUp:
+  edit.undo: on "Undo Octave Up"
+  edit.undoOrRedo: on "Undo Octave Up"
+  selected: 2 notes (72 at 0.000 for 0.500, 76 at 1.000 for 0.500)
+after note.octaveDown:
+  edit.undo: on "Undo Octave Down"
+  edit.undoOrRedo: on "Undo Octave Down"
+  selected: 2 notes (60 at 0.000 for 0.500, 64 at 1.000 for 0.500)
+after note.lengthen:
+  edit.undo: on "Undo Lengthen Notes"
+  edit.undoOrRedo: on "Undo Lengthen Notes"
+  selected: 2 notes (60 at 0.000 for 0.750, 64 at 1.000 for 0.750)
+after note.shorten:
+  edit.undo: on "Undo Shorten Notes"
+  edit.undoOrRedo: on "Undo Shorten Notes"
+  selected: 2 notes (60 at 0.000 for 0.500, 64 at 1.000 for 0.500)
+after note.legato:
+  edit.undo: on "Undo Legato"
+  edit.undoOrRedo: on "Undo Legato"
+  selected: 2 notes (60 at 0.000 for 1.000, 64 at 1.000 for 0.500)
+after note.chop:
+  edit.undo: on "Undo Chop"
+  edit.undoOrRedo: on "Undo Chop"
+  edit.delete: on "Delete 6 Notes"
+  edit.duplicate: on "Duplicate 6 Notes"
+  selected: 6 notes (60 at 0.000 for 0.250, 60 at 0.250 for 0.250, 60 at 0.500 for 0.250, 60 at 0.750 for 0.250, 64 at 1.000 for 0.250, 64 at 1.250 for 0.250)
+after edit.mute:
+  edit.undo: on "Undo Mute"
+  edit.undoOrRedo: on "Undo Mute"
+  edit.mute: on, ticked "Mute"
+after edit.mute:
+  edit.mute: on "Mute"
+after edit.duplicate:
+  edit.undo: on "Undo Duplicate 6 Notes"
+  edit.undoOrRedo: on "Undo Duplicate 6 Notes"
+  selected: 6 notes (60 at 1.500 for 0.250, 60 at 1.750 for 0.250, 60 at 2.000 for 0.250, 60 at 2.250 for 0.250, 64 at 2.500 for 0.250, 64 at 2.750 for 0.250)
+after edit.delete:
+  edit.undo: on "Undo Delete 6 Notes"
+  edit.undoOrRedo: on "Undo Delete 6 Notes"
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.mute: off "Mute"
+  edit.deselectAll: off "Deselect All"
+  note.transposeUp: off "Transpose Up"
+  note.transposeDown: off "Transpose Down"
+  note.octaveUp: off "Octave Up"
+  note.octaveDown: off "Octave Down"
+  note.lengthen: off "Lengthen Notes"
+  note.shorten: off "Shorten Notes"
+  note.legato: off "Legato"
+  note.chop: off "Chop"
+  selected: nothing
+after select nothing, and drop the notes' selection:
+after import a tone onto Two at beat 8, and select it:
+  edit.undo: on "Undo Script: import a tone onto Two at beat 8, and select it"
+  edit.undoOrRedo: on "Undo Script: import a tone onto Two at beat 8, and select it"
+  edit.delete: on "Delete Clip"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Clip"
+  edit.duplicateAsAlias: on "Duplicate as Alias"
+  edit.mute: on "Mute"
+  clip.fadeLinear: on, ticked "Linear Fades"
+  clip.fadeConvex: on "Convex Fades"
+  clip.fadeConcave: on "Concave Fades"
+  clip.fadeSCurve: on "S-Curve Fades"
+  edit.split: on "Split"
+  edit.deselectAll: on "Deselect All"
+  selected: clip on Two at 8.000
+after clip.fadeConvex:
+  edit.undo: on "Undo Convex Fades"
+  edit.undoOrRedo: on "Undo Convex Fades"
+  clip.fadeLinear: on "Linear Fades"
+  clip.fadeConvex: on, ticked "Convex Fades"
+after clip.fadeConcave:
+  edit.undo: on "Undo Concave Fades"
+  edit.undoOrRedo: on "Undo Concave Fades"
+  clip.fadeConvex: on "Convex Fades"
+  clip.fadeConcave: on, ticked "Concave Fades"
+after clip.fadeSCurve:
+  edit.undo: on "Undo S-Curve Fades"
+  edit.undoOrRedo: on "Undo S-Curve Fades"
+  clip.fadeConcave: on "Concave Fades"
+  clip.fadeSCurve: on, ticked "S-Curve Fades"
+after clip.fadeLinear:
+  edit.undo: on "Undo Linear Fades"
+  edit.undoOrRedo: on "Undo Linear Fades"
+  clip.fadeLinear: on, ticked "Linear Fades"
+  clip.fadeSCurve: on "S-Curve Fades"
+after edit.deleteAndCloseGap:
+  edit.undo: on "Undo Delete and Close Gap"
+  edit.undoOrRedo: on "Undo Delete and Close Gap"
+  edit.delete: off "Delete"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: off "Duplicate"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.mute: off "Mute"
+  clip.fadeLinear: off "Linear Fades"
+  clip.fadeConvex: off "Convex Fades"
+  clip.fadeConcave: off "Concave Fades"
+  clip.fadeSCurve: off "S-Curve Fades"
+  edit.split: off "Split"
+  edit.deselectAll: off "Deselect All"
+  selected: nothing
+after select beats 2 to 6 on One:
+  edit.delete: on "Delete Range"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: off "Duplicate Range"
+  edit.split: on "Split"
+  edit.insertTime: on "Insert Time"
+  edit.removeTime: on "Remove Time"
+  edit.deselectAll: on "Deselect All"
+  selected: range 2.000-6.000 beats on One
+after edit.insertTime:
+  edit.undo: on "Undo Insert Time"
+  edit.undoOrRedo: on "Undo Insert Time"
+after edit.removeTime:
+  edit.undo: on "Undo Remove Time"
+  edit.undoOrRedo: on "Undo Remove Time"
+after transport.loopSelection:
+  loop 2.000-6.000 beats
+after edit.split:
+  edit.undo: on "Undo Split"
+  edit.undoOrRedo: on "Undo Split"
+after edit.delete:
+  edit.undo: on "Undo Delete Range"
+  edit.undoOrRedo: on "Undo Delete Range"
+after clear the range:
+  edit.delete: off "Delete"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: off "Duplicate"
+  edit.split: off "Split"
+  edit.insertTime: off "Insert Time"
+  edit.removeTime: off "Remove Time"
+  edit.deselectAll: off "Deselect All"
+  selected: nothing
+after transport.loop:
+  transport.loop: on "Loop"
+after transport.loop:
+  transport.loop: on, ticked "Loop"
+after transport.loopSong:
+  transport.loopSong: on, ticked "Loop the Song"
+  loop 0.000-8.000 beats
+after transport.loop:
+  transport.loop: on "Loop"
+  transport.loopSong: on "Loop the Song"
+after transport.loopSelection:
+  transport.loop: on, ticked "Loop"
+  transport.loopSong: on, ticked "Loop the Song"
+after select nothing:
+after edit.selectAll:
+  edit.delete: on "Delete 2 Clips"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: on "Duplicate 2 Clips"
+  edit.duplicateAsAlias: on "Duplicate as Alias"
+  edit.mute: on "Mute"
+  edit.split: on "Split"
+  edit.deselectAll: on "Deselect All"
+  selected: clip on One at 0.000, clip on One at 6.000
+after select One:
+  edit.delete: on "Delete Track"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Track"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.mute: off "Mute"
+  edit.split: off "Split"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on, ticked "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  selected: track One
+after edit.selectAll:
+  edit.delete: on "Delete 4 Tracks"
+  edit.duplicate: on "Duplicate 4 Tracks"
+  track.ungroup: on "Ungroup Folder"
+  track.pin: on "Pin Track"
+  selected: track Group, track One, track Two, track Return 1
+after edit.deselectAll:
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.deselectAll: off "Deselect All"
+  track.groupIntoFolder: off "Group into Folder"
+  track.ungroup: off "Ungroup Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  selected: nothing
+after edit.undo:
+  edit.undo: on "Undo Split"
+  edit.redo: on "Redo Delete Range"
+  edit.undoOrRedo: on "Redo Delete Range"
+after edit.redo:
+  edit.undo: on "Undo Delete Range"
+  edit.redo: off "Redo"
+  edit.undoOrRedo: on "Undo Delete Range"
+after edit.undoOrRedo:
+  edit.undo: on "Undo Split"
+  edit.redo: on "Redo Delete Range"
+  edit.undoOrRedo: on "Redo Delete Range"
+after edit.undoOrRedo:
+  edit.undo: on "Undo Delete Range"
+  edit.redo: off "Redo"
+  edit.undoOrRedo: on "Undo Delete Range"
