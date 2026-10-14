@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The browser's model: sounds by folder and by search, tags from names, favorites and recent items, and previews.
 #include "TestHelpers.h"
-#include "model/Library.h"
-#include "model/Preview.h"
+#include "model/engine/Preview.h"
+#include "services/Library.h"
 
 using phazite::test::TemporaryFolder;
 using phazite::test::writeSound;

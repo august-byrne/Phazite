@@ -5,7 +5,7 @@
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "TestHelpers.h"
-#include "model/EngineSetup.h"
+#include "model/engine/EngineSetup.h"
 
 namespace
 {

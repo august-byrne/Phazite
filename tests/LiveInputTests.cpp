@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/LiveInput.h"
-#include "model/Project.h"
+#include "model/engine/LiveInput.h"
+#include "model/project/Project.h"
 
 namespace
 {

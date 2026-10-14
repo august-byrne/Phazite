@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/ComputerKeyboard.h"
+#include "ui/input/ComputerKeyboard.h"
 
 #include <set>
 

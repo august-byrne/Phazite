@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/ValueText.h"
+#include "ui/components/ValueText.h"
 
 TEST_CASE ("Decibels read as people write them")
 {

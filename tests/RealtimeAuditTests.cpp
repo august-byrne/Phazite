@@ -13,10 +13,10 @@
 #include "AudioThreadMonitor.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
-#include "model/Import.h"
-#include "model/LoudnessMeterPlugin.h"
-#include "model/Mixer.h"
-#include "model/Tracks.h"
+#include "model/arrangement/Import.h"
+#include "model/arrangement/Tracks.h"
+#include "model/engine/LoudnessMeterPlugin.h"
+#include "model/mixer/Mixer.h"
 
 #include <chrono>
 #include <thread>
@@ -337,7 +337,7 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: a loop previewed in time")
     {
-        // The browser's preview (src/model/Preview.h): Tracktion stretches the loop as it plays, without a proxy.
+        // The browser's preview (src/model/engine/Preview.h): Tracktion stretches the loop as it plays, without a proxy.
         SineFile sine;
         phazite::test::TemporaryFolder temp;
         const auto loop = temp.folder.getChildFile ("Loop 120 BPM.wav");

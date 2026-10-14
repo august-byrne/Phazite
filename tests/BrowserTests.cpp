@@ -3,13 +3,13 @@
 // putting items into the song with Enter, a drop or the picker (roadmap step 1.5).
 #include "SoundPackTestHelpers.h"
 #include "UiTestHelpers.h"
-#include "model/Library.h"
-#include "model/Mixer.h"
-#include "model/Playback.h"
-#include "model/Preview.h"
-#include "ui/Browser.h"
-#include "ui/Playlist.h"
-#include "ui/PluginPicker.h"
+#include "model/engine/Preview.h"
+#include "model/mixer/Mixer.h"
+#include "model/transport/Playback.h"
+#include "services/Library.h"
+#include "ui/browser/Browser.h"
+#include "ui/browser/PluginPicker.h"
+#include "ui/playlist/Playlist.h"
 
 namespace
 {

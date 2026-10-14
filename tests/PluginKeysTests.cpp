@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Keys over plug-in windows: play and stop, and the computer keyboard, while a plug-in's editor has the keyboard focus.
 #include "UiTestHelpers.h"
-#include "model/Commands.h"
-#include "model/ComputerKeyboard.h"
-#include "ui/PluginKeys.h"
+#include "model/commands/CommandRegistry.h"
+#include "ui/input/ComputerKeyboard.h"
+#include "ui/input/PluginKeys.h"
 
 namespace
 {

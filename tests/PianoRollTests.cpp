@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll, driven with the mouse and the selection as the user would.
 #include "UiTestHelpers.h"
-#include "model/Clips.h"
-#include "model/Mixer.h"
-#include "model/Notes.h"
-#include "model/Selection.h"
-#include "model/Tracks.h"
-#include "ui/PianoRoll.h"
+#include "model/arrangement/Clips.h"
+#include "model/arrangement/Selection.h"
+#include "model/arrangement/Tracks.h"
+#include "model/mixer/Mixer.h"
+#include "model/notes/Notes.h"
+#include "ui/pianoroll/PianoRoll.h"
 
 namespace
 {

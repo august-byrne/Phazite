@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/Timeline.h"
+#include "model/arrangement/Grid.h"
 
 using namespace tracktion::literals; // 4_bp: beat positions
 

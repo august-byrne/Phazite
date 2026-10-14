@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectSession.h"
-#include "model/LiveInput.h"
-#include "model/Outlines.h"
-#include "model/StarterProject.h"
+#include "model/arrangement/Outlines.h"
+#include "model/engine/LiveInput.h"
+#include "model/project/StarterProject.h"
 
 namespace phazite
 {

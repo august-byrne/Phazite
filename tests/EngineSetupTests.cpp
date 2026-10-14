@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/EngineSetup.h"
+#include "model/engine/EngineSetup.h"
 
 using namespace tracktion::literals;
 

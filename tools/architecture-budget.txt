@@ -9,8 +9,8 @@
 # (it only lowers budgets: to the merged code's counts).
 
 upward-includes                0
-model-window-includes          3
-model-window-references       81
+model-window-includes          2
+model-window-references       66
 model-tracktion-includes      12
 model-undo-steps               2
 model-include-loops           10
@@ -18,6 +18,6 @@ ui-tracktion-includes          7
 ui-tracktion-references      545
 ui-tracktion-aliases           0
 ui-undo-steps                 46
-flat-files                   100
+flat-files                     0
 unresolved-includes            0
 cmake-sources                  0

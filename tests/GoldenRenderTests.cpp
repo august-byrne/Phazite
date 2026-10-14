@@ -9,10 +9,10 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
-#include "model/Import.h"
-#include "model/Mixer.h"
-#include "model/Project.h"
-#include "model/Tracks.h"
+#include "model/arrangement/Import.h"
+#include "model/arrangement/Tracks.h"
+#include "model/mixer/Mixer.h"
+#include "model/project/Project.h"
 
 #include <algorithm>
 #include <array>

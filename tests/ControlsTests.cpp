@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "ui/Controls.h"
+#include "ui/components/Controls.h"
 
 TEST_CASE ("A slider linked to a track's volume sets it, one undo step per change")
 {

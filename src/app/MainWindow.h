@@ -2,12 +2,12 @@
 #pragma once
 
 #include "ProjectSession.h"
-#include "model/ComputerKeyboard.h"
-#include "ui/AppShell.h"
-#include "ui/LookAndFeel.h"
-#include "ui/PluginKeys.h"
-#include "ui/SettingsPanel.h"
-#include "ui/Welcome.h"
+#include "ui/input/ComputerKeyboard.h"
+#include "ui/input/PluginKeys.h"
+#include "ui/shell/AppShell.h"
+#include "ui/shell/SettingsPanel.h"
+#include "ui/shell/Welcome.h"
+#include "ui/theme/LookAndFeel.h"
 
 #include <optional>
 

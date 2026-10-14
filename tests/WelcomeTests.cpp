@@ -2,7 +2,7 @@
 // The welcome window, which offers Phazite Sounds when Phazite first opens (docs/design.md, section 13).
 #include "SoundPackTestHelpers.h"
 #include "UiTestHelpers.h"
-#include "ui/Welcome.h"
+#include "ui/shell/Welcome.h"
 
 TEST_CASE ("The welcome window offers Phazite Sounds, shows the download, and then says where they went")
 {

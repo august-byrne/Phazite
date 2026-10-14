@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist, driven with the mouse and the keys as the user would.
 #include "UiTestHelpers.h"
-#include "model/Clips.h"
-#include "model/Outlines.h"
-#include "model/Playback.h"
-#include "model/Selection.h"
-#include "model/Tracks.h"
-#include "ui/Playlist.h"
-#include "ui/TrackHeader.h"
+#include "model/arrangement/Clips.h"
+#include "model/arrangement/Outlines.h"
+#include "model/arrangement/Selection.h"
+#include "model/arrangement/Tracks.h"
+#include "model/transport/Playback.h"
+#include "ui/playlist/Playlist.h"
+#include "ui/playlist/TrackHeader.h"
 
 namespace
 {

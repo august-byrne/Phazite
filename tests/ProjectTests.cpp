@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/Playback.h"
-#include "model/Project.h"
+#include "model/project/Project.h"
+#include "model/transport/Playback.h"
 
 namespace
 {

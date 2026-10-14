@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/LoudnessMeterPlugin.h"
-#include "model/Mixer.h"
-#include "model/Tracks.h"
+#include "model/arrangement/Tracks.h"
+#include "model/engine/LoudnessMeterPlugin.h"
+#include "model/mixer/Mixer.h"
 
 using namespace tracktion::literals;
 

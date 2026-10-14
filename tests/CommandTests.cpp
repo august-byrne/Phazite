@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/Commands.h"
-#include "model/EngineSetup.h"
+#include "model/commands/CommandRegistry.h"
+#include "model/engine/EngineSetup.h"
 
 namespace
 {

@@ -50,7 +50,7 @@ add_subdirectory(external/tracktion_engine EXCLUDE_FROM_ALL)   # keeps their ins
 
 phazite_check_juceaide_toolchain("${_phazite_juceaide_dir}")
 
-# --- phazite_core: Tracktion Engine, JUCE and Phazite's model code, compiled once ---
+# --- phazite_core: Tracktion Engine, JUCE and Phazite's model and services code, compiled once ---
 # A static library that the app and the tests both link. JUCE's modules are INTERFACE libraries that
 # add their .cpp files to whichever target links them, so only this library links them (PRIVATE, which
 # for a static library still passes their system libraries on to the executables). The executables get
@@ -59,54 +59,49 @@ phazite_check_juceaide_toolchain("${_phazite_juceaide_dir}")
 add_library(phazite_core STATIC)
 
 target_sources(phazite_core PRIVATE
-    src/model/AppInfo.cpp
-    src/model/AppInfo.h
-    src/model/Arrangement.cpp
-    src/model/Arrangement.h
-    src/model/Clips.cpp
-    src/model/Clips.h
-    src/model/Commands.cpp
-    src/model/Commands.h
-    src/model/ComputerKeyboard.cpp
-    src/model/ComputerKeyboard.h
-    src/model/EngineSetup.cpp
-    src/model/EngineSetup.h
-    src/model/Import.cpp
-    src/model/Import.h
-    src/model/Library.cpp
-    src/model/Library.h
-    src/model/LiveInput.cpp
-    src/model/LiveInput.h
-    src/model/LoudnessMeterPlugin.cpp
-    src/model/LoudnessMeterPlugin.h
-    src/model/Mixer.cpp
-    src/model/Mixer.h
-    src/model/Notes.cpp
-    src/model/Notes.h
-    src/model/Outlines.cpp
-    src/model/Outlines.h
-    src/model/Playback.cpp
-    src/model/Playback.h
-    src/model/Preview.cpp
-    src/model/Preview.h
-    src/model/Project.cpp
-    src/model/Project.h
-    src/model/Sections.cpp
-    src/model/Sections.h
-    src/model/Selection.cpp
-    src/model/Selection.h
-    src/model/SmartTool.cpp
-    src/model/SmartTool.h
-    src/model/SoundPack.cpp
-    src/model/SoundPack.h
-    src/model/StarterProject.cpp
-    src/model/StarterProject.h
-    src/model/Timeline.cpp
-    src/model/Timeline.h
-    src/model/Tracks.cpp
-    src/model/Tracks.h
-    src/model/ValueText.cpp
-    src/model/ValueText.h)
+    src/model/arrangement/Arrangement.cpp
+    src/model/arrangement/Arrangement.h
+    src/model/arrangement/Clips.cpp
+    src/model/arrangement/Clips.h
+    src/model/arrangement/Grid.cpp
+    src/model/arrangement/Grid.h
+    src/model/arrangement/Import.cpp
+    src/model/arrangement/Import.h
+    src/model/arrangement/Outlines.cpp
+    src/model/arrangement/Outlines.h
+    src/model/arrangement/Sections.cpp
+    src/model/arrangement/Sections.h
+    src/model/arrangement/Selection.cpp
+    src/model/arrangement/Selection.h
+    src/model/arrangement/Tracks.cpp
+    src/model/arrangement/Tracks.h
+    src/model/commands/CommandRegistry.cpp
+    src/model/commands/CommandRegistry.h
+    src/model/engine/AppInfo.cpp
+    src/model/engine/AppInfo.h
+    src/model/engine/EngineSetup.cpp
+    src/model/engine/EngineSetup.h
+    src/model/engine/LiveInput.cpp
+    src/model/engine/LiveInput.h
+    src/model/engine/LoudnessMeterPlugin.cpp
+    src/model/engine/LoudnessMeterPlugin.h
+    src/model/engine/Preview.cpp
+    src/model/engine/Preview.h
+    src/model/mixer/Mixer.cpp
+    src/model/mixer/Mixer.h
+    src/model/notes/Notes.cpp
+    src/model/notes/Notes.h
+    src/model/project/Project.cpp
+    src/model/project/Project.h
+    src/model/project/StarterProject.cpp
+    src/model/project/StarterProject.h
+    src/model/transport/Playback.cpp
+    src/model/transport/Playback.h
+    # services: what the whole app shares (they use the model; the model never uses them)
+    src/services/Library.cpp
+    src/services/Library.h
+    src/services/SoundPack.cpp
+    src/services/SoundPack.h)
 
 # Small data files compiled into the program (PhaziteData.h, namespace PhaziteData). Fonts don't go
 # here: CLAUDE.md requires them as separate files next to the app.
@@ -116,7 +111,7 @@ juce_add_binary_data(phazite_data
     SOURCES
         resources/keymaps/phazite.json
         resources/keymaps/fl_studio.json
-        # Song outlines: every file named *.outline.json here is one (src/model/Outlines.h)
+        # Song outlines: every file named *.outline.json here is one (src/model/arrangement/Outlines.h)
         resources/outlines/pop.outline.json
         resources/outlines/rock.outline.json
         resources/outlines/electronic.outline.json
@@ -226,58 +221,64 @@ endfunction()
 add_library(phazite_ui STATIC)
 
 target_sources(phazite_ui PRIVATE
-    src/ui/AppShell.cpp
-    src/ui/AppShell.h
-    src/ui/Browser.cpp
-    src/ui/Browser.h
-    src/ui/ChannelStrip.cpp
-    src/ui/ChannelStrip.h
-    src/ui/ClipComponent.cpp
-    src/ui/ClipComponent.h
-    src/ui/CommandPalette.cpp
-    src/ui/CommandPalette.h
-    src/ui/CommandUI.cpp
-    src/ui/CommandUI.h
-    src/ui/Controls.cpp
-    src/ui/Controls.h
-    src/ui/DeviceMenus.cpp
-    src/ui/DeviceMenus.h
-    src/ui/DesignTokens.h
-    src/ui/HintBar.cpp
-    src/ui/HintBar.h
-    src/ui/Icons.cpp
-    src/ui/Icons.h
-    src/ui/LookAndFeel.cpp
-    src/ui/LookAndFeel.h
-    src/ui/Mixer.cpp
-    src/ui/Mixer.h
-    src/ui/Panels.cpp
-    src/ui/Panels.h
-    src/ui/PianoRoll.cpp
-    src/ui/PianoRoll.h
-    src/ui/PianoRollLanes.cpp
-    src/ui/PianoRollNotes.cpp
-    src/ui/PianoRollParts.h
-    src/ui/Playlist.cpp
-    src/ui/Playlist.h
-    src/ui/PluginKeys.cpp
-    src/ui/PluginKeys.h
-    src/ui/PluginPicker.cpp
-    src/ui/PluginPicker.h
-    src/ui/PluginWindow.cpp
-    src/ui/PluginWindow.h
-    src/ui/SectionsStrip.cpp
-    src/ui/SectionsStrip.h
-    src/ui/SettingsPanel.cpp
-    src/ui/SettingsPanel.h
-    src/ui/TimelineEditor.cpp
-    src/ui/TimelineEditor.h
-    src/ui/TopBar.cpp
-    src/ui/TopBar.h
-    src/ui/TrackHeader.cpp
-    src/ui/TrackHeader.h
-    src/ui/Welcome.cpp
-    src/ui/Welcome.h)
+    src/ui/browser/Browser.cpp
+    src/ui/browser/Browser.h
+    src/ui/browser/PluginPicker.cpp
+    src/ui/browser/PluginPicker.h
+    src/ui/components/Controls.cpp
+    src/ui/components/Controls.h
+    src/ui/components/ValueText.cpp
+    src/ui/components/ValueText.h
+    src/ui/devices/DeviceMenus.cpp
+    src/ui/devices/DeviceMenus.h
+    src/ui/devices/PluginWindow.cpp
+    src/ui/devices/PluginWindow.h
+    src/ui/input/CommandUI.cpp
+    src/ui/input/CommandUI.h
+    src/ui/input/ComputerKeyboard.cpp
+    src/ui/input/ComputerKeyboard.h
+    src/ui/input/PluginKeys.cpp
+    src/ui/input/PluginKeys.h
+    src/ui/mixer/ChannelStrip.cpp
+    src/ui/mixer/ChannelStrip.h
+    src/ui/mixer/MixerView.cpp
+    src/ui/mixer/MixerView.h
+    src/ui/pianoroll/PianoRoll.cpp
+    src/ui/pianoroll/PianoRoll.h
+    src/ui/pianoroll/PianoRollLanes.cpp
+    src/ui/pianoroll/PianoRollNotes.cpp
+    src/ui/pianoroll/PianoRollParts.h
+    src/ui/playlist/ClipComponent.cpp
+    src/ui/playlist/ClipComponent.h
+    src/ui/playlist/Playlist.cpp
+    src/ui/playlist/Playlist.h
+    src/ui/playlist/SectionsStrip.cpp
+    src/ui/playlist/SectionsStrip.h
+    src/ui/playlist/TrackHeader.cpp
+    src/ui/playlist/TrackHeader.h
+    src/ui/shell/AppShell.cpp
+    src/ui/shell/AppShell.h
+    src/ui/shell/CommandPalette.cpp
+    src/ui/shell/CommandPalette.h
+    src/ui/shell/HintBar.cpp
+    src/ui/shell/HintBar.h
+    src/ui/shell/Panels.cpp
+    src/ui/shell/Panels.h
+    src/ui/shell/SettingsPanel.cpp
+    src/ui/shell/SettingsPanel.h
+    src/ui/shell/TopBar.cpp
+    src/ui/shell/TopBar.h
+    src/ui/shell/Welcome.cpp
+    src/ui/shell/Welcome.h
+    src/ui/theme/DesignTokens.h
+    src/ui/theme/Icons.cpp
+    src/ui/theme/Icons.h
+    src/ui/theme/LookAndFeel.cpp
+    src/ui/theme/LookAndFeel.h
+    src/ui/timeline/SmartTool.cpp
+    src/ui/timeline/SmartTool.h
+    src/ui/timeline/TimelineEditor.cpp
+    src/ui/timeline/TimelineEditor.h)
 
 phazite_use_core(phazite_ui)
 

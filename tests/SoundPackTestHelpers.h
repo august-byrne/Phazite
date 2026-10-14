@@ -3,7 +3,7 @@
 #pragma once
 
 #include "TestHelpers.h"
-#include "model/SoundPack.h"
+#include "services/SoundPack.h"
 
 #include <juce_cryptography/juce_cryptography.h>
 

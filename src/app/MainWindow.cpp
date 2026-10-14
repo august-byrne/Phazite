@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MainWindow.h"
-#include "model/LiveInput.h"
-#include "model/Outlines.h"
+#include "model/arrangement/Outlines.h"
+#include "model/engine/LiveInput.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 

@@ -4,10 +4,10 @@
 // frozen by GoldenProjectTests.cpp) must open and save as its golden file says.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
-#include "model/Notes.h"
-#include "model/Project.h"
-#include "model/Timeline.h"
-#include "model/Tracks.h"
+#include "model/arrangement/Grid.h"
+#include "model/arrangement/Tracks.h"
+#include "model/notes/Notes.h"
+#include "model/project/Project.h"
 
 namespace
 {

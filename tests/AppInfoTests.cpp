@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/AppInfo.h"
+#include "model/engine/AppInfo.h"
 
 TEST_CASE ("The version string comes from CMake's project version")
 {

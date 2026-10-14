@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
-#include "model/Mixer.h"
+#include "model/mixer/Mixer.h"
 
 #include <algorithm>
 #include <charconv>

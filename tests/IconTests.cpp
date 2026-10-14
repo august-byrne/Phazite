@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "ui/Icons.h"
+#include "ui/theme/Icons.h"
 
 TEST_CASE ("Every icon reads as a drawing that can be recolored")
 {

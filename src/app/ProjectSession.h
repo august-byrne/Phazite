@@ -3,10 +3,10 @@
 // restoring an autosave after a crash.
 #pragma once
 
-#include "model/Commands.h"
-#include "model/EngineSetup.h"
-#include "model/Project.h"
-#include "model/Selection.h"
+#include "model/arrangement/Selection.h"
+#include "model/commands/CommandRegistry.h"
+#include "model/engine/EngineSetup.h"
+#include "model/project/Project.h"
 
 namespace phazite
 {

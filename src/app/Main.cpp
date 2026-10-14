@@ -4,15 +4,15 @@
 
 #include "MainWindow.h"
 #include "ProjectSession.h"
-#include "model/Commands.h"
-#include "model/EngineSetup.h"
-#include "model/Mixer.h"
-#include "model/Playback.h"
-#include "model/Sections.h"
-#include "model/Selection.h"
-#include "model/Tracks.h"
-#include "ui/LookAndFeel.h"
-#include "ui/PluginWindow.h"
+#include "model/arrangement/Sections.h"
+#include "model/arrangement/Selection.h"
+#include "model/arrangement/Tracks.h"
+#include "model/commands/CommandRegistry.h"
+#include "model/engine/EngineSetup.h"
+#include "model/mixer/Mixer.h"
+#include "model/transport/Playback.h"
+#include "ui/devices/PluginWindow.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace phazite
 {

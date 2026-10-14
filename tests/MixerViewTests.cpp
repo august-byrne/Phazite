@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer and the inspector, as they lay out in the window.
 #include "UiTestHelpers.h"
-#include "model/Mixer.h"
-#include "ui/ChannelStrip.h"
-#include "ui/DesignTokens.h"
-#include "ui/Mixer.h"
+#include "model/mixer/Mixer.h"
+#include "ui/mixer/ChannelStrip.h"
+#include "ui/mixer/MixerView.h"
+#include "ui/theme/DesignTokens.h"
 
 TEST_CASE ("The mixer's strips keep their parts apart, however short the window is")
 {
