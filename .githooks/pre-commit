@@ -8,8 +8,11 @@
 #  5. gitleaks finds no API keys, tokens, private keys or other secrets in the staged changes. It can't
 #     see inside binary files (UTF-16 text counts as binary) or commit messages.
 #  6. Staged C/C++ files follow .clang-format (checked by tools/format.sh).
-# To skip check 1, 2 or 3 on purpose for one commit, add -c phazite.allowPublicEmail=true,
-# -c phazite.allowSubmoduleBump=true or -c phazite.allowLargeFiles=true after "git".
+#  7. The staged code keeps to the architecture budgets in tools/architecture-budget.txt (checked by
+#     tools/check-architecture.sh), and the commit raises no budget.
+# To skip check 1, 2 or 3, or to raise an architecture budget in check 7, on purpose for one commit, add
+# -c phazite.allowPublicEmail=true, -c phazite.allowSubmoduleBump=true, -c phazite.allowLargeFiles=true or
+# -c phazite.allowBudgetIncrease=true after "git".
 # Turned on per clone with "git config core.hooksPath .githooks" (tools\setup-windows.cmd does this on
 # Windows); git merge and git pull run it through pre-merge-commit. Commits made by rebase,
 # cherry-pick, revert and am skip it, as does "git commit --no-verify"; pre-push checks emails and
@@ -132,5 +135,21 @@ $report
 Format them, stage them again and commit. In VS Code, saving a file formats it; from a shell:
     sh tools/format.sh" ;;
     *) stop "the staged C/C++ files couldn't be checked against .clang-format:
+$report" ;;
+esac
+
+# 7. Architecture budgets of the staged code
+report=$(sh tools/check-architecture.sh --staged 2>&1)
+case $? in
+    0) ;;
+    1) stop "the staged code doesn't keep to the architecture budgets (tools/architecture-budget.txt):
+$report" ;;
+    3) allowed allowBudgetIncrease || stop "this commit raises architecture budgets (tools/architecture-budget.txt):
+$report
+Budgets only go down. If this commit moves code between layers on purpose, add a line
+    Architecture-Budget-Raise: <rule> <old> -> <new>: <reason>
+for each to the commit message (CI and pre-push check it), and commit with:
+    git -c phazite.allowBudgetIncrease=true commit -F <file>" ;;
+    *) stop "the staged code couldn't be checked against the architecture budgets:
 $report" ;;
 esac

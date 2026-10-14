@@ -225,6 +225,10 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). Th
 | `pre-commit: this commit changes the pinned dependencies` | A submodule pointer moved by accident (for example through `git commit -a`): follow the message to unstage it. A deliberate bump is described in [CLAUDE.md](CLAUDE.md#submodules-and-third-party-code). |
 | `pre-commit: these staged files are larger than 5 MiB` | Unstage them (`git restore --staged <file>`); audio files, builds and dumps don't belong in git. |
 | `pre-commit: the staged changes have trailing whitespace or a leftover conflict marker` | Fix the lines it lists, stage the files again and commit. |
+| `pre-commit: the staged code doesn't keep to the architecture budgets` | If a count went down, run `sh tools/check-architecture.sh --update`, stage `tools/architecture-budget.txt` and commit; if it went up, follow the advice printed for that rule. |
+| `pre-commit: this commit raises architecture budgets` | Budgets only go down; for a deliberate move between layers, add the `Architecture-Budget-Raise:` line it prints to the message and use `git -c phazite.allowBudgetIncrease=true commit`. |
+| `pre-push: ... has commits that raise architecture budgets without saying why` | Reword those commits (`git rebase -i`) to add the `Architecture-Budget-Raise:` line, or lower the counts instead. |
+| `pre-commit: the staged code couldn't be checked against the architecture budgets` | Usually a malformed line or a missing rule in `tools/architecture-budget.txt`. |
 | Anything else | The first line containing `error`, `fatal` or `FAILED` usually names the cause. If you're stuck, open an issue at https://github.com/august-byrne/Phazite/issues with that line and the command you ran. |
 
 ## Building on Linux and WSL2
@@ -310,7 +314,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 | `CMakeLists.txt`, `CMakePresets.json`, `cmake/` | Build definition, presets, Windows toolchain wrapper and CMake helpers |
 | `external/tracktion_engine/` | Submodule: Tracktion Engine, with JUCE as its own submodule in `modules/juce` |
 | `external/WindowsToolchain/` | Submodule (MIT) that finds MSVC; used at build time on Windows only |
-| `tools/` | Machine setup (`setup-windows.cmd` runs [tools/setup-windows.ps1](tools/setup-windows.ps1)), [tools/format.sh](tools/format.sh), which formats the C/C++ files, and `soundkit/`, the tool that makes Phazite Sounds from the recipes in the [phazite-sounds](https://github.com/august-byrne/phazite-sounds) repository |
+| `tools/` | Machine setup (`setup-windows.cmd` runs [tools/setup-windows.ps1](tools/setup-windows.ps1)), [tools/format.sh](tools/format.sh), which formats the C/C++ files, [tools/check-architecture.sh](tools/check-architecture.sh), which checks that the code keeps to its layers (budgets in `tools/architecture-budget.txt`), and `soundkit/`, the tool that makes Phazite Sounds from the recipes in the [phazite-sounds](https://github.com/august-byrne/phazite-sounds) repository |
 | `.clang-format` | The C/C++ formatting rules (JUCE style) |
 | `.githooks/` | Git hooks, turned on per clone with `git config core.hooksPath .githooks`: checks before every commit, merge and push |
 | `.github/workflows/` | Continuous integration: GitHub Actions checks and builds every push and pull request |
@@ -337,6 +341,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 - Create and destroy Tracktion objects (`te::Engine`, `te::Edit`) on the message thread, and destroy every `Edit` before the `Engine`.
 - Keep the build warning-free under JUCE's recommended warning flags (`/W4` on MSVC). Never silence a warning without saying why, as [CMakeLists.txt](CMakeLists.txt) does for `/wd4702` and the `linux-tsan` preset in [CMakePresets.json](CMakePresets.json) does for `-Wno-tsan`.
 - Formatting follows [.clang-format](.clang-format): JUCE's coding standards as a clang-format configuration (braces on their own lines, `foo (x)` but `foo()`, `if (! ready)`, `Type* p`, 4-space indents, lines up to 140 characters). VS Code formats a C/C++ file when you save it; `sh tools/format.sh` formats every file from a shell (Git Bash on Windows), and the pre-commit hook refuses unformatted files. To keep a hand-made layout, wrap that code in `// clang-format off` and `// clang-format on`.
+- Keep to the layers described in [the design](docs/design.md#24-code-structure): the app uses the UI, the UI the services and the model, the services may use the model, never the other way round; the model has no window code; UI code runs commands and calls model functions rather than changing the project, starting undo steps or using Tracktion itself. `sh tools/check-architecture.sh` checks this in CI and before every commit; the full rules are in [CLAUDE.md](CLAUDE.md#architecture-rules).
 
 ### Real-time rules (audio thread)
 
@@ -351,15 +356,15 @@ Threads share data only through lock-free FIFOs and `std::atomic` values, and pa
 
 ### Working with Claude Code
 
-- [CLAUDE.md](CLAUDE.md) holds the project instructions that Claude Code loads automatically. Its sections on submodules, real-time rules and code conventions apply to human contributors too; the rest is written for Claude Code.
+- [CLAUDE.md](CLAUDE.md) holds the project instructions that Claude Code loads automatically. Its sections on submodules, architecture rules, real-time rules and code conventions apply to human contributors too; the rest is written for Claude Code.
 - [.claude/settings.json](.claude/settings.json) is the shared Claude Code configuration: it pre-approves the configure and build commands, read-only git commands, `Get-Process`, `tools\setup-windows.cmd -CheckOnly` and `sh tools/format.sh`, and keeps Tracktion's own CLAUDE.md files (written for Tracktion's contributors) out of Claude's context.
 - Put personal notes in `CLAUDE.local.md` and personal settings in `.claude/settings.local.json`; git ignores both.
 
 ## Contributing
 
-**Builds.** Before you send a change, format it and build `windows-debug` (and `windows-release` for performance-related work) with zero warnings.
+**Builds.** Before you send a change, format it, run `sh tools/check-architecture.sh`, and build `windows-debug` (and `windows-release` for performance-related work) with zero warnings.
 
-**Continuous integration.** Every push and pull request runs [.github/workflows/ci.yml](.github/workflows/ci.yml) on GitHub's machines. It scans the whole history for secrets with gitleaks, checks formatting with clang-format 23.1.3 and checks whitespace. It also builds both Windows presets with Visual Studio 2026 and all four Linux presets on Ubuntu 24.04, with warnings counting as errors. The results are on the repository's Actions tab, and compiler messages appear there as annotations.
+**Continuous integration.** Every push and pull request runs [.github/workflows/ci.yml](.github/workflows/ci.yml) on GitHub's machines. It scans the whole history for secrets with gitleaks, checks formatting with clang-format 23.1.3, checks whitespace, and checks the code's layers against the budgets in `tools/architecture-budget.txt` (a raise needs an `Architecture-Budget-Raise:` line in its commit message). It also builds both Windows presets with Visual Studio 2026 and all four Linux presets on Ubuntu 24.04, with warnings counting as errors. The results are on the repository's Actions tab, and compiler messages appear there as annotations.
 
 **Licenses.** Only add code under licenses compatible with the AGPL-3.0: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license). Never enable Tracktion's proprietary options (Elastique, ReWire, REX).
 
@@ -375,11 +380,12 @@ Before every commit, check `git status` and read `git diff --cached` in full; if
   3. no staged file is larger than 5 MiB;
   4. the staged changes have no trailing whitespace or leftover conflict markers;
   5. gitleaks finds nothing that looks like a secret in them;
-  6. staged C/C++ files follow `.clang-format`.
+  6. staged C/C++ files follow `.clang-format`;
+  7. the staged code keeps to the architecture budgets in `tools/architecture-budget.txt`, and no budget goes up.
 - `pre-merge-commit` runs the same checks for `git merge` and `git pull`.
-- `pre-push` runs before `git push` and checks the emails and secrets of every commit the remote doesn't have yet, including their commit messages and any tag you push. It catches what the other two can't see: commits made by `git cherry-pick`, `git revert`, `git rebase` or `git am`, and commits made with `--no-verify`.
+- `pre-push` runs before `git push` and checks the emails and secrets of every commit the remote doesn't have yet, including their commit messages and any tag you push, and that every commit raising an architecture budget says why in its message. It catches what the other two can't see: commits made by `git cherry-pick`, `git revert`, `git rebase` or `git am`, and commits made with `--no-verify`.
 
-To make an exception on purpose, for one command, add `-c phazite.allowSubmoduleBump=true` (a dependency bump) or `-c phazite.allowLargeFiles=true` after `git`, for example `git -c phazite.allowLargeFiles=true commit`.
+To make an exception on purpose, for one command, add `-c phazite.allowSubmoduleBump=true` (a dependency bump), `-c phazite.allowLargeFiles=true` or `-c phazite.allowBudgetIncrease=true` (raising an architecture budget on purpose, with an `Architecture-Budget-Raise: <rule> <old> -> <new>: <reason>` line in the message) after `git`, for example `git -c phazite.allowLargeFiles=true commit`.
 
 On Windows, `tools\setup-windows.cmd` installs gitleaks and turns the hooks on in its clone. On Linux and WSL, install gitleaks 8.19 or newer from its GitHub releases (Ubuntu's own package, 8.16, lacks the `gitleaks git` command the hooks use), then turn the hooks on once in each clone:
 

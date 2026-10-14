@@ -3,6 +3,7 @@
 # pre-commit can't see: commits made by rebase, cherry-pick, revert, am or "commit --no-verify",
 # tags, and commit messages. Every commit not yet on the remote must use GitHub noreply addresses,
 # and gitleaks scans their changes and messages. "git push --no-verify" skips it.
+# It also checks that every commit raising an architecture budget says why in its message.
 
 stop() {
     printf '\npre-push: %s\n\n' "$*" >&2
@@ -57,6 +58,14 @@ Remove it from those commits (git rebase -i) before pushing. If it was a real ke
 $report" ;;
         *) stop "gitleaks failed, so the commits of $local_ref were not checked for secrets:
 
+$report" ;;
+    esac
+    report=$(sh tools/check-architecture.sh --range "$new" 2>&1 </dev/null)
+    case $? in
+        0) ;;
+        3) stop "$local_ref has commits that raise architecture budgets without saying why:
+$report" ;;
+        *) stop "the architecture budgets of $local_ref couldn't be checked:
 $report" ;;
     esac
 done

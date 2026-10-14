@@ -5,6 +5,8 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.sh  text eol=lf
+# tools/check-architecture.sh --update rewrites the budget file with LF endings.
+tools/architecture-budget.txt text eol=lf
 # Git hooks are shell scripts without an extension (git runs them with sh, on Windows too).
 .githooks/* text eol=lf
 

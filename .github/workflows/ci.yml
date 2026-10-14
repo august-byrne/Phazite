@@ -1,9 +1,9 @@
 # Phazite's continuous integration: on every push and pull request, check the repository (secrets,
-# formatting, whitespace), build every preset on Windows and Linux with warnings as errors, and run
-# the tests (phazite_tests, through CTest). The problem matchers in .github/problem-matchers turn
-# compiler messages into annotations on the run. Builds keep going after a failure (ninja -k 0) to
-# report every problem at once. Actions are pinned to full commit hashes, so a moved tag can't change
-# what runs.
+# formatting, whitespace, architecture budgets), build every preset on Windows and Linux with warnings
+# as errors, and run the tests (phazite_tests, through CTest). The problem matchers in
+# .github/problem-matchers turn compiler messages into annotations on the run. Builds keep going after
+# a failure (ninja -k 0) to report every problem at once. Actions are pinned to full commit hashes, so a
+# moved tag can't change what runs.
 name: CI
 
 on:
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # gitleaks scans the whole history
+          fetch-depth: 0 # gitleaks scans the whole history; the architecture check compares with earlier commits
 
       - name: Secrets (gitleaks 8.30.1, whole history)
         run: |
@@ -41,6 +41,13 @@ jobs:
 
       - name: Whitespace and conflict markers
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+
+      - name: Architecture budgets
+        env:
+          PHAZITE_CI_BASES: ${{ github.event.pull_request.base.sha }} ${{ github.event.before }}
+        run: |
+          dash -n tools/check-architecture.sh
+          AWK=mawk dash tools/check-architecture.sh --ci
 
   windows:
     name: Windows (${{ matrix.preset }})

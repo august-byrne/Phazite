@@ -1,0 +1,23 @@
+# Architecture budgets: how many matches of each rule the code may have. tools/check-architecture.sh counts them
+# (sh tools/check-architecture.sh --help lists the rules; CLAUDE.md, "Architecture rules", says why).
+# CI's Checks job and pre-commit check 7 require every count to equal its budget:
+# - a change that removes matches lowers the budget in the same commit: sh tools/check-architecture.sh --update
+# - a budget goes up only when a plan step moves code between layers on purpose: that commit's message has a line
+#   Architecture-Budget-Raise: <rule> <old> -> <new>: <reason>
+#   (CI and pre-push check it), and it is committed with git -c phazite.allowBudgetIncrease=true commit.
+# On a merge conflict here, keep the higher number of each rule, then run sh tools/check-architecture.sh --update
+# (it only lowers budgets: to the merged code's counts).
+
+upward-includes                0
+model-window-includes          3
+model-window-references       81
+model-tracktion-includes      12
+model-undo-steps               2
+model-include-loops           10
+ui-tracktion-includes          7
+ui-tracktion-references      545
+ui-tracktion-aliases           0
+ui-undo-steps                 46
+flat-files                   100
+unresolved-includes            0
+cmake-sources                  0
