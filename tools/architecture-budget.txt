@@ -11,7 +11,7 @@
 upward-includes                0
 model-window-includes          2
 model-window-references       66
-model-tracktion-includes      12
+model-tracktion-includes       0
 model-undo-steps               2
 model-include-loops           10
 ui-tracktion-includes          7

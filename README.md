@@ -338,7 +338,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 ### Coding guidelines
 
 - Start every C/C++ file with `// SPDX-License-Identifier: AGPL-3.0-or-later`.
-- C++20. Include module headers directly (`<juce_gui_basics/juce_gui_basics.h>`, `<tracktion_engine/tracktion_engine.h>`), not `JuceHeader.h`. Qualify `juce::` names, and use `namespace te = tracktion;`.
+- C++20. Include JUCE's module headers directly (`<juce_gui_basics/juce_gui_basics.h>`), not `JuceHeader.h`. Model and services code gets Tracktion from `src/model/base/Tracktion.h`, which includes `<tracktion_engine/tracktion_engine.h>` and declares `namespace te = tracktion;`. Qualify `juce::`.
 - Create and destroy Tracktion objects (`te::Engine`, `te::Edit`) on the message thread, and destroy every `Edit` before the `Engine`.
 - Keep the build warning-free under JUCE's recommended warning flags (`/W4` on MSVC). Never silence a warning without saying why, as [CMakeLists.txt](CMakeLists.txt) does for `/wd4702` and the `linux-tsan` preset in [CMakePresets.json](CMakePresets.json) does for `-Wno-tsan`.
 - Formatting follows [.clang-format](.clang-format): JUCE's coding standards as a clang-format configuration (braces on their own lines, `foo (x)` but `foo()`, `if (! ready)`, `Type* p`, 4-space indents, lines up to 140 characters). VS Code formats a C/C++ file when you save it; `sh tools/format.sh` formats every file from a shell (Git Bash on Windows), and the pre-commit hook refuses unformatted files. To keep a hand-made layout, wrap that code in `// clang-format off` and `// clang-format on`.

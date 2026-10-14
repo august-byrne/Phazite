@@ -8,12 +8,10 @@
 // moved or copied.
 #pragma once
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 namespace phazite
 {
-namespace te = tracktion;
-
 // Inserts empty time: everything at or after a beat moves later. A section the beat falls inside gets longer.
 void insertTime (te::Edit&, te::BeatPosition at, te::BeatDuration);
 

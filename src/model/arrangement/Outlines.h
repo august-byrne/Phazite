@@ -5,15 +5,13 @@
 // CMakeLists.txt.
 #pragma once
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 #include <optional>
 #include <vector>
 
 namespace phazite
 {
-namespace te = tracktion;
-
 struct Outline
 {
     struct Section

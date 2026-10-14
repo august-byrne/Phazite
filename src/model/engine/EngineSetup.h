@@ -3,13 +3,10 @@
 #pragma once
 
 #include "AppInfo.h"
-
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 namespace phazite
 {
-namespace te = tracktion;
-
 //==============================================================================
 // Tracktion's settings storage (Settings.xml in the app's settings folder) without personal data.
 // Tracktion writes getUserName() into every saved project ("modifiedBy"); by default that is the

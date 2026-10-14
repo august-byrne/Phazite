@@ -5,13 +5,15 @@
 // show what one would do before it is applied with replaceNotes().
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
+#include "model/base/Tracktion.h"
 
 #include <optional>
 #include <vector>
 
 namespace phazite
 {
+class CommandRegistry;
+
 // A note as the piano roll shows it and the transforms change it.
 struct NoteData
 {

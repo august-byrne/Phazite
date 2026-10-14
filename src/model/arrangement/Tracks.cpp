@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Tracks.h"
+#include "model/commands/CommandRegistry.h"
 #include "model/notes/Notes.h"
 
 #include <algorithm>

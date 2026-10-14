@@ -4,14 +4,12 @@
 // when the original moves, and Save As takes it along. A loop that knows its tempo follows the song's.
 #pragma once
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 #include <optional>
 
 namespace phazite
 {
-namespace te = tracktion;
-
 enum class FileKind
 {
     audio,

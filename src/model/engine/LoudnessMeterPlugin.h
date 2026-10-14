@@ -4,12 +4,10 @@
 // the master's devices put out, before the master volume.
 #pragma once
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 namespace phazite
 {
-namespace te = tracktion;
-
 class LoudnessMeterPlugin : public te::Plugin
 {
 public:

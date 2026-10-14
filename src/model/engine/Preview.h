@@ -7,12 +7,10 @@
 // time, as a loop.
 #pragma once
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 namespace phazite
 {
-namespace te = tracktion;
-
 class Previewer
 {
 public:

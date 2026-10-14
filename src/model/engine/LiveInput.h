@@ -2,12 +2,10 @@
 // Live MIDI input: what is played on a MIDI keyboard or the computer keyboard goes to one track.
 #pragma once
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 namespace phazite
 {
-namespace te = tracktion;
-
 // Tracktion's "All MIDI Ins" input: every enabled MIDI device merged, plus the notes the computer
 // keyboard plays into it. It is always monitored, so the track it goes to plays what comes in.
 // nullptr until Tracktion has scanned the MIDI devices, which it does just after the Engine starts.

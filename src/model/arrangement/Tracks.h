@@ -2,12 +2,14 @@
 // The playlist's tracks: which ones it shows, their colors and heights, and the track commands.
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
+#include "model/base/Tracktion.h"
 
 #include <array>
 
 namespace phazite
 {
+class CommandRegistry;
+
 //==============================================================================
 // The colors tracks get, in turn: Okabe and Ito's palette (2008), which color-blind users can tell
 // apart, with grey instead of black so it shows on dark backgrounds.

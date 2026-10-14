@@ -3,10 +3,12 @@
 // commands that act on whatever is selected: delete, duplicate, select all and deselect all.
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
+#include "model/base/Tracktion.h"
 
 namespace phazite
 {
+class CommandRegistry;
+
 //==============================================================================
 // A time range across some tracks, as dragging empty space or a clip's upper half selects it in the
 // playlist, like REAPER's razor edits. Delete, Split and the time commands act on it. It tells its

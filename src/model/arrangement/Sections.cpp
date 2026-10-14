@@ -3,6 +3,7 @@
 #include "Arrangement.h"
 #include "Outlines.h"
 #include "Tracks.h"
+#include "model/commands/CommandRegistry.h"
 
 #include <algorithm>
 

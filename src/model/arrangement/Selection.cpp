@@ -4,6 +4,7 @@
 #include "Clips.h"
 #include "Sections.h"
 #include "Tracks.h"
+#include "model/commands/CommandRegistry.h"
 #include "model/notes/Notes.h"
 
 #include <algorithm>

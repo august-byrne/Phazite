@@ -3,15 +3,15 @@
 // palette and macros run (and, later, scripts and an assistant).
 #pragma once
 
+#include "model/base/Tracktion.h"
+
 #include <juce_gui_basics/juce_gui_basics.h>
-#include <tracktion_engine/tracktion_engine.h>
 
 #include <map>
 #include <optional>
 
 namespace phazite
 {
-namespace te = tracktion;
 class UIBehaviour;
 
 //==============================================================================

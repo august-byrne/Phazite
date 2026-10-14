@@ -5,12 +5,14 @@
 // (Arrangement.h): move, copy, delete and resize.
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
+#include "model/base/Tracktion.h"
 
 #include <optional>
 
 namespace phazite
 {
+class CommandRegistry;
+
 // What a new section is.
 struct SectionInfo
 {

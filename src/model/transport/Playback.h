@@ -6,12 +6,14 @@
 #pragma once
 
 #include "model/arrangement/Selection.h"
-#include "model/commands/CommandRegistry.h"
+#include "model/base/Tracktion.h"
 
 #include <optional>
 
 namespace phazite
 {
+class CommandRegistry;
+
 // The song as a loop: from its start to the end of the bar its last clip ends in, and at least a bar long.
 // Sections don't count: an outline can be longer than what is in it so far.
 te::TimeRange getSongLoopRange (const te::Edit&);

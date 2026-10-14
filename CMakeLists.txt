@@ -75,6 +75,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Selection.h
     src/model/arrangement/Tracks.cpp
     src/model/arrangement/Tracks.h
+    src/model/base/Tracktion.h
     src/model/commands/CommandRegistry.cpp
     src/model/commands/CommandRegistry.h
     src/model/engine/AppInfo.cpp

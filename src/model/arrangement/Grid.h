@@ -4,14 +4,12 @@
 // move the grid; Tracktion's TempoSequence converts beats to and from seconds.
 #pragma once
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 #include <functional>
 
 namespace phazite
 {
-namespace te = tracktion;
-
 //==============================================================================
 // The visible part of the timeline: the beat at the left edge, and the zoom in pixels per beat.
 struct TimelineView

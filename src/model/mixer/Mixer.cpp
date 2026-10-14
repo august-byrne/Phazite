@@ -2,6 +2,7 @@
 #include "Mixer.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
+#include "model/commands/CommandRegistry.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 
 #include <optional>

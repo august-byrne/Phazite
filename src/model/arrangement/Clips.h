@@ -2,12 +2,10 @@
 // Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes.
 #pragma once
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "model/base/Tracktion.h"
 
 namespace phazite
 {
-namespace te = tracktion;
-
 // The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).
 juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager&);
 

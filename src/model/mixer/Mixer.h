@@ -4,12 +4,14 @@
 // from any track, before or after its fader.
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
+#include "model/base/Tracktion.h"
 
 #include <vector>
 
 namespace phazite
 {
+class CommandRegistry;
+
 //==============================================================================
 // Devices: the plug-ins a channel shows in its slots. A channel's volume, meter and sends are controls of its
 // own, a return track's input shows in its header, and the master's loudness meter is the mixer's, so none of

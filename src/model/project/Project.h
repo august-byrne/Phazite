@@ -2,13 +2,12 @@
 // A Phazite project: a folder that holds the project file and everything the project uses.
 #pragma once
 
+#include "model/base/Tracktion.h"
+
 #include <juce_gui_extra/juce_gui_extra.h>
-#include <tracktion_engine/tracktion_engine.h>
 
 namespace phazite
 {
-namespace te = tracktion;
-
 class SongFollower;
 
 //==============================================================================
