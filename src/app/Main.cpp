@@ -2,15 +2,12 @@
 // Phazite: application entry point.
 // Written against tracktion_engine develop @bb386171 (module 3.5.0) and the JUCE it pins (37c894f8).
 
+#include "AppCommands.h"
 #include "MainWindow.h"
 #include "ProjectSession.h"
-#include "model/arrangement/Sections.h"
 #include "model/arrangement/Selection.h"
-#include "model/arrangement/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
-#include "model/mixer/Mixer.h"
-#include "model/transport/Playback.h"
 #include "ui/devices/PluginWindow.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -56,12 +53,7 @@ public:
         session = std::make_unique<ProjectSession> (*engine, uiBehaviour);
         mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel);
 
-        addEditCommands (*commands, uiBehaviour);
-        addSelectionCommands (*commands, session->getSelection(), session->getRangeSelection());
-        addTrackCommands (*commands, session->getSelection());
-        addSectionCommands (*commands, session->getSelection());
-        addMixerCommands (*commands, session->getSelection());
-        addLoopCommands (*commands, session->getSelection(), session->getRangeSelection());
+        addSongCommands (*commands, session->getSelection(), session->getRangeSelection(), uiBehaviour);
         session->addCommands (*commands);
         mainWindow->addCommands();
 

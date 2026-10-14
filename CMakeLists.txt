@@ -206,8 +206,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(phazite_core PUBLIC atomic)
 endif()
 
-# Links a target (an executable, or phazite_ui) to phazite_core and gives it the module headers and
-# phazite_core's definitions (including JUCE's JUCE_MODULE_AVAILABLE_* ones), without compiling the
+# Links a target (an executable, phazite_ui or phazite_app) to phazite_core and gives it the module headers
+# and phazite_core's definitions (including JUCE's JUCE_MODULE_AVAILABLE_* ones), without compiling the
 # modules a second time.
 function(phazite_use_core target)
     target_include_directories(${target} PRIVATE $<TARGET_PROPERTY:phazite_core,INCLUDE_DIRECTORIES>)
@@ -282,6 +282,21 @@ target_sources(phazite_ui PRIVATE
 
 phazite_use_core(phazite_ui)
 
+# --- phazite_app: the app's parts (the main window, the open project, the song's commands), in a library the tests
+# link, so the app's logic can be tested without a window. The Phazite executable is Main.cpp. ---
+add_library(phazite_app STATIC)
+
+target_sources(phazite_app PRIVATE
+    src/app/AppCommands.cpp
+    src/app/AppCommands.h
+    src/app/MainWindow.cpp
+    src/app/MainWindow.h
+    src/app/ProjectSession.cpp
+    src/app/ProjectSession.h)
+
+phazite_use_core(phazite_app)
+target_link_libraries(phazite_app PRIVATE phazite_ui)
+
 # --- The app ---
 juce_add_gui_app(Phazite
     PRODUCT_NAME "Phazite"
@@ -292,19 +307,14 @@ juce_add_gui_app(Phazite
     NEEDS_WEB_BROWSER FALSE
     PLUGINHOST_AU TRUE)
 
-target_sources(Phazite PRIVATE
-    src/app/Main.cpp
-    src/app/MainWindow.cpp
-    src/app/MainWindow.h
-    src/app/ProjectSession.cpp
-    src/app/ProjectSession.h)
+target_sources(Phazite PRIVATE src/app/Main.cpp)
 
 target_compile_definitions(Phazite PRIVATE
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Phazite,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Phazite,JUCE_VERSION>")
 
 phazite_use_core(Phazite)
-target_link_libraries(Phazite PRIVATE phazite_ui)
+target_link_libraries(Phazite PRIVATE phazite_app phazite_ui)
 
 # The UI font, Inter (SIL Open Font License 1.1), goes next to the app as separate files with its licence
 # text (fonts/Inter), as CLAUDE.md asks of fonts. ui::LookAndFeel loads it from there.
@@ -377,7 +387,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/WelcomeTests.cpp)
 
     phazite_use_core(phazite_tests)
-    target_link_libraries(phazite_tests PRIVATE phazite_ui)
+    target_link_libraries(phazite_tests PRIVATE phazite_app phazite_ui)
 
     add_test(NAME phazite_tests COMMAND phazite_tests)
 endif()

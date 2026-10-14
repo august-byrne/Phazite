@@ -9,14 +9,13 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "app/AppCommands.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Import.h"
-#include "model/arrangement/Sections.h"
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
-#include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
 #include "model/transport/Playback.h"
@@ -53,18 +52,12 @@ te::BeatPosition beats (double b)
     return te::BeatPosition::fromBeats (b);
 }
 
-// The model's commands, registered as the app registers them: Main.cpp's order, then the note commands as AppShell adds
-// them, with a grid of a quarter beat. Main.cpp's order: keep the two in step until the app registers these through a
-// function of its own, which this test then calls.
+// The model's commands, registered as the app registers them: addSongCommands(), which Main.cpp calls, then the note
+// commands as AppShell adds them, with a grid of a quarter beat.
 void addModelCommands (phazite::CommandRegistry& registry, te::SelectionManager& selection, phazite::RangeSelection& range,
                        phazite::UIBehaviour& ui)
 {
-    phazite::addEditCommands (registry, ui);
-    phazite::addSelectionCommands (registry, selection, range);
-    phazite::addTrackCommands (registry, selection);
-    phazite::addSectionCommands (registry, selection);
-    phazite::addMixerCommands (registry, selection);
-    phazite::addLoopCommands (registry, selection, range);
+    phazite::addSongCommands (registry, selection, range, ui);
     phazite::addNoteCommands (registry, selection, [] { return 0.25; });
 }
 
