@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <string_view>
 
-namespace phazite
+namespace phazite::ui
 {
 ComputerKeyboard::ComputerKeyboard (std::function<void (const juce::MidiMessage&)> send)
     : sendMessage (std::move (send))
@@ -144,4 +144,4 @@ void ComputerKeyboard::changed()
     if (onChange != nullptr)
         onChange();
 }
-} // namespace phazite
+} // namespace phazite::ui

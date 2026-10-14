@@ -14,7 +14,7 @@ TEST_CASE ("The mixer's strips keep their parts apart, however short the window 
     te::SelectionManager selection { phazite::test::getEngine() };
     selection.edit = edit.get();
     phazite::CommandRegistry registry;
-    phazite::ui::Mixer mixer { phazite::test::getEngine(), registry, selection };
+    phazite::ui::MixerView mixer { phazite::test::getEngine(), registry, selection };
     phazite::test::TestWindow window { mixer, 900, 600 };
     mixer.setEdit (edit.get());
     phazite::test::dispatchPendingMessages();
@@ -99,7 +99,7 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
     te::SelectionManager selection { phazite::test::getEngine() };
     selection.edit = edit.get();
     phazite::CommandRegistry registry;
-    phazite::ui::Mixer mixer { phazite::test::getEngine(), registry, selection };
+    phazite::ui::MixerView mixer { phazite::test::getEngine(), registry, selection };
     phazite::test::TestWindow window { mixer, 900, 600 };
     mixer.setEdit (edit.get());
     phazite::test::dispatchPendingMessages();

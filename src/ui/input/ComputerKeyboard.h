@@ -7,7 +7,7 @@
 
 #include <array>
 
-namespace phazite
+namespace phazite::ui
 {
 // Plays notes from the computer keyboard, laid out as in Ableton Live and Logic Pro: the middle row
 // of letters plays the white keys from C (A S D F G H J K L ;) and the row above the black keys
@@ -67,4 +67,4 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ComputerKeyboard)
 };
-} // namespace phazite
+} // namespace phazite::ui

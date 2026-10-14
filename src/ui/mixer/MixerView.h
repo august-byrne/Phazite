@@ -9,15 +9,15 @@
 
 namespace phazite::ui
 {
-class Mixer : public juce::Component,
-              private juce::ValueTree::Listener,
-              private juce::ChangeListener,
-              private juce::AsyncUpdater,
-              private juce::Timer
+class MixerView : public juce::Component,
+                  private juce::ValueTree::Listener,
+                  private juce::ChangeListener,
+                  private juce::AsyncUpdater,
+                  private juce::Timer
 {
 public:
-    Mixer (te::Engine&, CommandRegistry&, te::SelectionManager&);
-    ~Mixer() override;
+    MixerView (te::Engine&, CommandRegistry&, te::SelectionManager&);
+    ~MixerView() override;
 
     // The open project's Edit, or nullptr while none is open.
     void setEdit (te::Edit*);
@@ -52,6 +52,6 @@ private:
     void handleAsyncUpdate() override { rebuild(); }
     void timerCallback() override { updateSelection(); } // sends added or removed change what is related
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Mixer)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerView)
 };
 } // namespace phazite::ui

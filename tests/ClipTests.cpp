@@ -60,9 +60,9 @@ struct SilentFile
 
 TEST_CASE ("The Smart Tool picks what a drag does from where it starts on a clip")
 {
-    using phazite::ClipZone;
+    using phazite::ui::ClipZone;
     const juce::Rectangle<float> clip (100.0f, 50.0f, 200.0f, 60.0f);
-    const auto zoneAt = [&clip] (float x, float y, bool hasFades = true) { return phazite::getClipZone (clip, { x, y }, hasFades); };
+    const auto zoneAt = [&clip] (float x, float y, bool hasFades = true) { return phazite::ui::getClipZone (clip, { x, y }, hasFades); };
 
     CHECK (zoneAt (102.0f, 80.0f) == ClipZone::trimStart); // the edges
     CHECK (zoneAt (298.0f, 80.0f) == ClipZone::trimEnd);
@@ -74,13 +74,13 @@ TEST_CASE ("The Smart Tool picks what a drag does from where it starts on a clip
 
     // A narrow clip keeps most of its width for moving, and a short one (on a short track) moves from anywhere
     // but its edges.
-    CHECK (phazite::getClipZone ({ 0.0f, 0.0f, 12.0f, 40.0f }, { 6.0f, 30.0f }, true) == ClipZone::move);
-    CHECK (phazite::getClipZone ({ 0.0f, 0.0f, 200.0f, 29.0f }, { 100.0f, 5.0f }, false) == ClipZone::move);
-    CHECK (phazite::getClipZone ({ 0.0f, 0.0f, 200.0f, 29.0f }, { 4.0f, 20.0f }, false) == ClipZone::trimStart);
+    CHECK (phazite::ui::getClipZone ({ 0.0f, 0.0f, 12.0f, 40.0f }, { 6.0f, 30.0f }, true) == ClipZone::move);
+    CHECK (phazite::ui::getClipZone ({ 0.0f, 0.0f, 200.0f, 29.0f }, { 100.0f, 5.0f }, false) == ClipZone::move);
+    CHECK (phazite::ui::getClipZone ({ 0.0f, 0.0f, 200.0f, 29.0f }, { 4.0f, 20.0f }, false) == ClipZone::trimStart);
 
     for (const auto zone :
          { ClipZone::trimStart, ClipZone::trimEnd, ClipZone::fadeIn, ClipZone::fadeOut, ClipZone::selectRange, ClipZone::move })
-        CHECK (phazite::describeClipZone (zone).isNotEmpty());
+        CHECK (phazite::ui::describeClipZone (zone).isNotEmpty());
 }
 
 TEST_CASE ("A new MIDI clip is named after its track, and selected")
@@ -322,12 +322,12 @@ TEST_CASE ("Each tool has a name, a command and a hint")
 {
     juce::StringArray ids;
 
-    for (const auto tool : phazite::allTools)
+    for (const auto tool : phazite::ui::allTools)
     {
-        CHECK (phazite::getToolName (tool).isNotEmpty());
-        CHECK (phazite::describeTool (tool).isNotEmpty());
-        CHECK_FALSE (ids.contains (phazite::getToolCommandID (tool)));
-        ids.add (phazite::getToolCommandID (tool));
+        CHECK (phazite::ui::getToolName (tool).isNotEmpty());
+        CHECK (phazite::ui::describeTool (tool).isNotEmpty());
+        CHECK_FALSE (ids.contains (phazite::ui::getToolCommandID (tool)));
+        ids.add (phazite::ui::getToolCommandID (tool));
     }
 }
 

@@ -72,7 +72,7 @@ private:
     Playlist playlist;
     Inspector inspector;
     PianoRoll pianoRoll;
-    Mixer mixer;
+    MixerView mixer;
     EditorDock editorDock { pianoRoll, mixer };
     HintBar hintBar;
 

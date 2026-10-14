@@ -16,11 +16,12 @@
 namespace phazite
 {
 class CommandRegistry;
-class ComputerKeyboard;
 } // namespace phazite
 
 namespace phazite::ui
 {
+class ComputerKeyboard;
+
 class PluginKeys : public juce::KeyListener
 {
 public:

@@ -34,7 +34,7 @@ namespace
     }
 } // namespace
 
-Mixer::Mixer (te::Engine& e, CommandRegistry& registry, te::SelectionManager& selectionManager)
+MixerView::MixerView (te::Engine& e, CommandRegistry& registry, te::SelectionManager& selectionManager)
     : engine (e),
       commands (registry),
       selection (selectionManager)
@@ -59,7 +59,7 @@ Mixer::Mixer (te::Engine& e, CommandRegistry& registry, te::SelectionManager& se
     startTimerHz (4);
 }
 
-Mixer::~Mixer()
+MixerView::~MixerView()
 {
     stopTimer();
     selection.removeChangeListener (this);
@@ -67,7 +67,7 @@ Mixer::~Mixer()
     strips.clear(); // before stripHolder, which holds them
 }
 
-void Mixer::setEdit (te::Edit* newEdit)
+void MixerView::setEdit (te::Edit* newEdit)
 {
     if (newEdit == edit.get() && editState.isValid() == (newEdit != nullptr))
         return;
@@ -86,7 +86,7 @@ void Mixer::setEdit (te::Edit* newEdit)
     rebuild();
 }
 
-void Mixer::rebuild()
+void MixerView::rebuild()
 {
     // The tracks in the playlist's order, then the returns, together next to the master.
     auto* e = edit.get();
@@ -131,7 +131,7 @@ void Mixer::rebuild()
     resized();
 }
 
-void Mixer::updateSelection()
+void MixerView::updateSelection()
 {
     const auto selected = getSelectedTracks (selection);
 
@@ -146,7 +146,7 @@ void Mixer::updateSelection()
     }
 }
 
-void Mixer::paint (juce::Graphics& g)
+void MixerView::paint (juce::Graphics& g)
 {
     const auto& p = getPalette (*this);
     g.fillAll (p.background);
@@ -160,7 +160,7 @@ void Mixer::paint (juce::Graphics& g)
     }
 }
 
-void Mixer::resized()
+void MixerView::resized()
 {
     auto area = getLocalBounds();
     auto toolbar = area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs);
@@ -185,19 +185,19 @@ void Mixer::resized()
         strips[i]->setBounds (i * ChannelStrip::width + (i >= firstReturn ? gap : 0), 0, ChannelStrip::width, height);
 }
 
-void Mixer::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
+void MixerView::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
 {
     if (isTrackState (child))
         triggerAsyncUpdate();
 }
 
-void Mixer::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int)
+void MixerView::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int)
 {
     if (isTrackState (child))
         triggerAsyncUpdate();
 }
 
-void Mixer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
+void MixerView::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
 {
     if (parent == editState || isTrackState (parent))
         triggerAsyncUpdate();

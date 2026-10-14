@@ -13,7 +13,7 @@ struct Keyboard
     std::set<int> down;
     juce::ModifierKeys modifiers;
 
-    phazite::ComputerKeyboard keyboard { [this] (const juce::MidiMessage& m) { sent.push_back (m); } };
+    phazite::ui::ComputerKeyboard keyboard { [this] (const juce::MidiMessage& m) { sent.push_back (m); } };
 
     bool press (char key)
     {

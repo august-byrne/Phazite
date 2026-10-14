@@ -37,7 +37,7 @@ TEST_CASE ("Play and stop, and the computer keyboard, work over a plug-in's edit
     keymap.keys["tool.paint"] = { "B" };
     registry.setKeymap (keymap);
 
-    phazite::ComputerKeyboard computerKeyboard ([] (const juce::MidiMessage&) {});
+    phazite::ui::ComputerKeyboard computerKeyboard ([] (const juce::MidiMessage&) {});
     phazite::ui::PluginKeys keys (registry, computerKeyboard);
 
     GreedyEditor editor;

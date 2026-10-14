@@ -6,7 +6,7 @@
 
 #include <optional>
 
-namespace phazite
+namespace phazite::ui
 {
 // Levels at or below this many decibels are silence.
 inline constexpr double silenceDb = -96.0;
@@ -22,4 +22,4 @@ juce::String formatPan (double pan);
 
 // Reads a pan position as formatPan() writes it, or as a number from -100 (left) to 100 (right).
 std::optional<double> parsePan (const juce::String&);
-} // namespace phazite
+} // namespace phazite::ui

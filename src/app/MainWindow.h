@@ -41,7 +41,7 @@ private:
     CommandRegistry& commands;
     ProjectSession& session;
     ui::LookAndFeel& lookAndFeel;
-    ComputerKeyboard computerKeyboard;
+    ui::ComputerKeyboard computerKeyboard;
     std::unique_ptr<ui::PluginKeys> pluginKeys; // play, stop and the computer keyboard over plug-in windows
     ui::AppShell* shell = nullptr;              // owned by the window as its content
 

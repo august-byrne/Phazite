@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ValueText.h"
 
-namespace phazite
+namespace phazite::ui
 {
 namespace
 {
@@ -69,4 +69,4 @@ std::optional<double> parsePan (const juce::String& text)
 
     return {};
 }
-} // namespace phazite
+} // namespace phazite::ui

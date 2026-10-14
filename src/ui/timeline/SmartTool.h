@@ -6,7 +6,7 @@
 
 #include <juce_graphics/juce_graphics.h>
 
-namespace phazite
+namespace phazite::ui
 {
 enum class Tool
 {
@@ -45,4 +45,4 @@ ClipZone getClipZone (juce::Rectangle<float> clipBounds, juce::Point<float>, boo
 
 // What dragging from a zone does, for the hint bar.
 juce::String describeClipZone (ClipZone);
-} // namespace phazite
+} // namespace phazite::ui

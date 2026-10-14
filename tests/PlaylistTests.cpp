@@ -121,24 +121,24 @@ TEST_CASE ("A tool's key springs back when it was held while the mouse was used"
     // A tap keeps the tool.
     screen.window.pressKey (keyB);
     screen.window.releaseKeys();
-    CHECK (screen.playlist.getTool() == phazite::Tool::paint);
+    CHECK (screen.playlist.getTool() == phazite::ui::Tool::paint);
 
     // A hold while clicking goes back to the tool before when the key is let go.
     REQUIRE (screen.registry.invoke ("tool.smart"));
     screen.window.pressKey (keyB);
     mouse.click (screen.at (20.0, 2));
-    CHECK (screen.playlist.getTool() == phazite::Tool::paint);
+    CHECK (screen.playlist.getTool() == phazite::ui::Tool::paint);
     screen.window.releaseKeys();
-    CHECK (screen.playlist.getTool() == phazite::Tool::smart);
+    CHECK (screen.playlist.getTool() == phazite::ui::Tool::smart);
 
     // Let go during a drag: the drag ends with the tool it began with.
     screen.window.pressKey (juce::KeyPress ('8', 0, '8')); // the Select tool, by its digit
     mouse.press (screen.at (20.0, 2));
     mouse.dragTo (screen.at (24.0, 1));
     screen.window.releaseKeys();
-    CHECK (screen.playlist.getTool() == phazite::Tool::select);
+    CHECK (screen.playlist.getTool() == phazite::ui::Tool::select);
     mouse.release();
-    CHECK (screen.playlist.getTool() == phazite::Tool::smart);
+    CHECK (screen.playlist.getTool() == phazite::ui::Tool::smart);
 }
 
 TEST_CASE ("Dragging a clip past the edge of the playlist scrolls it")

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SmartTool.h"
 
-namespace phazite
+namespace phazite::ui
 {
 namespace
 {
@@ -135,4 +135,4 @@ juce::String describeClipZone (ClipZone zone)
                    "Hold Alt to place it freely.";
     }
 }
-} // namespace phazite
+} // namespace phazite::ui
