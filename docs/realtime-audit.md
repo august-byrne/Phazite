@@ -128,12 +128,19 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 **17. Previews** (measured, step 1.5): the browser's preview plays a loop in an Edit of its own, mixed on the same audio thread as the song, and stretches it as it plays (Tracktion's preview Edit uses no proxy). In its first blocks, SoundTouch grows its buffers (`FIFOSampleBuffer::ensureCapacity`, 10 allocations), and a file cache miss logs in Debug builds; then it allocates nothing. A preview started while the song plays could therefore make it glitch.
 - **Action:** accept it for now: previews are short, and are mostly started while the song is stopped. Later, prime the stretcher on the message thread before the preview starts, or render the preview ahead as the clips do. Report SoundTouch's growing buffers upstream with finding 11.
 
+### Data races
+
+**18. The audio file cache** (measured by ThreadSanitizer in CI, 2026-10-14).
+- **What:** each time Tracktion's cache maps an audio file again, its background thread (`CacheMapper`) replaces the file's whole `AudioFileInfo` under the file's lock (`AudioFileCache::CachedFile::createNewReader`). Preparing playback on the message thread reads the sample rate and channel count, and the audio thread reads the length, without that lock. The audit's scenario that plays a dropped loop from a file shows it.
+- **Why it is mostly harmless:** for a file that hasn't changed, the values written are the ones already there.
+- **Action:** `tools/tsan-suppressions.txt` suppresses it, so that the `linux-tsan` tests still catch new races. Report upstream.
+
 ## Reporting upstream
 
-Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12 and 14. Posting is the owner's call.
+Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14 and 18. Posting is the owner's call.
 
 ## Next
 
-- **CI:** check the ThreadSanitizer and AddressSanitizer results after the next push.
+- **CI:** the first ThreadSanitizer run with a clip playing from a file found finding 18 (2026-10-14); AddressSanitizer found nothing. Check both after every push that touches playback.
 - **Locks:** a RealtimeSanitizer job (Clang 20 or newer, Linux) would measure locks and system calls, not just allocations.
 - **Re-run:** run this audit whenever a step touches playback, and after every Tracktion Engine update. The guards in the test suite catch regressions in the basic paths.

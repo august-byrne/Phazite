@@ -265,10 +265,10 @@ The first `git config` line is the Linux version of the setup script's HTTPS rul
 | `linux-asan` | Debug with AddressSanitizer and UndefinedBehaviorSanitizer (memory errors, undefined behavior) | `build/linux-asan/Phazite_artefacts/Debug/Phazite` |
 | `linux-tsan` | RelWithDebInfo with ThreadSanitizer (data races) | `build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite` |
 
-Run the ThreadSanitizer build under `setarch -R`, which turns off address-space randomization for that one process. Ubuntu 24.04 and WSL2 kernels use 32 bits of randomization (`vm.mmap_rnd_bits=32`), which can stop the ThreadSanitizer in GCC 13 and 14 from starting:
+Run the ThreadSanitizer build under `setarch -R`, which turns off address-space randomization for that one process. Ubuntu 24.04 and WSL2 kernels use 32 bits of randomization (`vm.mmap_rnd_bits=32`), which can stop the ThreadSanitizer in GCC 13 and 14 from starting. `TSAN_OPTIONS` passes it the known races in Tracktion Engine to leave out ([tools/tsan-suppressions.txt](tools/tsan-suppressions.txt)), as the `linux-tsan` tests do:
 
 ```bash
-setarch $(uname -m) -R build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite
+TSAN_OPTIONS=suppressions=tools/tsan-suppressions.txt setarch $(uname -m) -R build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite
 ```
 
 Under WSL2, the window should appear on the Windows desktop through WSLg (WSL's built-in GUI support). JUCE has no PulseAudio backend, so for sound install `libasound2-plugins` and pick the ALSA device "Pulseaudio output" in **Audio Settings**. Expect no MIDI ports, and don't measure audio performance under WSL.
