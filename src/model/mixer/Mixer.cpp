@@ -2,6 +2,7 @@
 #include "Mixer.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
+#include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 
@@ -12,7 +13,6 @@ namespace phazite
 namespace
 {
     constexpr float newSendDb = -6.0f;
-    const juce::Identifier busSwitchProperty { "phaziteBus" }; // a folder made a bus with the bus switch
 
     // A device's dry and wet levels, and the value of each at which it passes its sound at full level: 1 for Tracktion's
     // plug-ins, and a half (dry) and a third (wet) for its reverb, which scales them up.
@@ -180,7 +180,7 @@ void removeDevice (te::Plugin& device)
     auto* folder = dynamic_cast<te::FolderTrack*> (device.getOwnerTrack());
     device.deleteFromParent();
 
-    if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty() && ! folder->state.getProperty (busSwitchProperty, false))
+    if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty() && ! folder->state.getProperty (schema::phaziteBus, false))
         makePlainFolder (*folder);
 }
 
@@ -369,11 +369,11 @@ void setMixedAsBus (te::FolderTrack& folder, bool bus)
     if (bus)
     {
         makeBus (folder);
-        folder.state.setProperty (busSwitchProperty, true, undoManager);
+        folder.state.setProperty (schema::phaziteBus, true, undoManager);
     }
     else if (getDevices (folder).isEmpty())
     {
-        folder.state.removeProperty (busSwitchProperty, undoManager);
+        folder.state.removeProperty (schema::phaziteBus, undoManager);
         makePlainFolder (folder);
     }
 }

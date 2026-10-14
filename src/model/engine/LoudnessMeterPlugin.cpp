@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "LoudnessMeterPlugin.h"
+#include "model/base/Schema.h"
 
 #include <array>
 
 namespace phazite
 {
-const char* LoudnessMeterPlugin::xmlTypeName = "phaziteLoudnessMeter";
+const char* LoudnessMeterPlugin::xmlTypeName = schema::phaziteLoudnessMeter;
 
 LoudnessMeterPlugin::LoudnessMeterPlugin (te::PluginCreationInfo info)
     : te::Plugin (info)

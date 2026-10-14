@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/Grid.h"
 #include "model/arrangement/Tracks.h"
+#include "model/base/Schema.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
 
@@ -75,7 +76,7 @@ void checkOldProject (const phazite::Project& project)
     CHECK (describeFixedGrid (playlistGrid, edit.tempoSequence) == juce::String ("8 bars"));
 
     // The piano roll's: a 1/4 beat in triplets.
-    const auto pianoRollGrid = phazite::GridSettings::load (phazite::findPhaziteState (edit).getChildWithName ("PIANOROLL"));
+    const auto pianoRollGrid = phazite::GridSettings::load (phazite::findPhaziteState (edit).getChildWithName (phazite::schema::PIANOROLL));
     CHECK (pianoRollGrid.snap);
     CHECK_FALSE (pianoRollGrid.adaptive);
     CHECK (pianoRollGrid.triplets);

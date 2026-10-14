@@ -3,6 +3,7 @@
 #include "Arrangement.h"
 #include "Outlines.h"
 #include "Tracks.h"
+#include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
 
 #include <algorithm>
@@ -11,7 +12,6 @@ namespace phazite
 {
 namespace
 {
-    const juce::Identifier roleProperty { "phaziteRole" }, tipProperty { "phaziteTip" }, energyProperty { "phaziteEnergy" };
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
 
     te::BeatRange getRange (const te::Clip& section)
@@ -77,17 +77,17 @@ juce::Array<te::ArrangerClip*> getSelectedSections (const te::SelectionManager& 
 
 juce::String getSectionRole (const te::Clip& section)
 {
-    return section.state[roleProperty].toString();
+    return section.state[schema::phaziteRole].toString();
 }
 
 juce::String getSectionTip (const te::Clip& section)
 {
-    return section.state[tipProperty].toString();
+    return section.state[schema::phaziteTip].toString();
 }
 
 float getSectionEnergy (const te::Clip& section)
 {
-    return juce::jlimit (0.0f, 1.0f, (float) static_cast<double> (section.state.getProperty (energyProperty, 0.5)));
+    return juce::jlimit (0.0f, 1.0f, (float) static_cast<double> (section.state.getProperty (schema::phaziteEnergy, 0.5)));
 }
 
 juce::Colour getSectionColour (const te::Clip& section)
@@ -138,9 +138,9 @@ te::ArrangerClip* insertSection (te::Edit& edit, te::BeatPosition start, const S
 
     auto* undoManager = &edit.getUndoManager();
     section->setColour (info.colour.value_or (getRoleColour (info.role)));
-    section->state.setProperty (roleProperty, info.role, undoManager);
-    section->state.setProperty (tipProperty, info.tip, undoManager);
-    section->state.setProperty (energyProperty, juce::jlimit (0.0f, 1.0f, info.energy), undoManager);
+    section->state.setProperty (schema::phaziteRole, info.role, undoManager);
+    section->state.setProperty (schema::phaziteTip, info.tip, undoManager);
+    section->state.setProperty (schema::phaziteEnergy, juce::jlimit (0.0f, 1.0f, info.energy), undoManager);
     return section;
 }
 

@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Grid.h"
+#include "model/base/Schema.h"
 
 namespace phazite
 {
 namespace
 {
     constexpr int beatLevel = 9, barLevel = 10; // see te::TimecodeSnapType
-
-    const juce::Identifier snapProperty { "gridSnap" }, adaptiveProperty { "gridAdaptive" }, offsetProperty { "gridOffset" },
-        levelProperty { "gridLevel" }, tripletsProperty { "gridTriplets" };
 
     te::TimecodeSnapType barsBeats (int level)
     {
@@ -59,21 +57,21 @@ void GridSettings::makeCoarser()
 GridSettings GridSettings::load (const juce::ValueTree& state)
 {
     GridSettings grid;
-    grid.snap = state.getProperty (snapProperty, grid.snap);
-    grid.adaptive = state.getProperty (adaptiveProperty, grid.adaptive);
-    grid.adaptiveOffset = juce::jlimit (-maxAdaptiveOffset, maxAdaptiveOffset, (int) state.getProperty (offsetProperty, 0));
-    grid.fixedLevel = juce::jlimit (minFixedLevel, maxFixedLevel, (int) state.getProperty (levelProperty, grid.fixedLevel));
-    grid.triplets = state.getProperty (tripletsProperty, grid.triplets);
+    grid.snap = state.getProperty (schema::gridSnap, grid.snap);
+    grid.adaptive = state.getProperty (schema::gridAdaptive, grid.adaptive);
+    grid.adaptiveOffset = juce::jlimit (-maxAdaptiveOffset, maxAdaptiveOffset, (int) state.getProperty (schema::gridOffset, 0));
+    grid.fixedLevel = juce::jlimit (minFixedLevel, maxFixedLevel, (int) state.getProperty (schema::gridLevel, grid.fixedLevel));
+    grid.triplets = state.getProperty (schema::gridTriplets, grid.triplets);
     return grid;
 }
 
 void GridSettings::save (juce::ValueTree& state) const
 {
-    state.setProperty (snapProperty, snap, nullptr);
-    state.setProperty (adaptiveProperty, adaptive, nullptr);
-    state.setProperty (offsetProperty, adaptiveOffset, nullptr);
-    state.setProperty (levelProperty, fixedLevel, nullptr);
-    state.setProperty (tripletsProperty, triplets, nullptr);
+    state.setProperty (schema::gridSnap, snap, nullptr);
+    state.setProperty (schema::gridAdaptive, adaptive, nullptr);
+    state.setProperty (schema::gridOffset, adaptiveOffset, nullptr);
+    state.setProperty (schema::gridLevel, fixedLevel, nullptr);
+    state.setProperty (schema::gridTriplets, triplets, nullptr);
 }
 
 //==============================================================================

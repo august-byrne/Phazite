@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Tracks.h"
+#include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/notes/Notes.h"
 
@@ -9,8 +10,6 @@ namespace phazite
 {
 namespace
 {
-    const juce::Identifier heightProperty { "phaziteHeight" }, collapsedProperty { "phaziteCollapsed" }, pinnedProperty { "phazitePinned" };
-
     // The palette's next color after the track a new one goes below (the last track if that is nullptr),
     // so that neighbours differ.
     juce::Colour getNextColour (te::Edit& edit, te::Track* after)
@@ -217,12 +216,13 @@ te::TrackInsertPoint getInsertPointAfter (te::Track& track)
 //==============================================================================
 int getTrackHeight (const te::Track& track)
 {
-    return juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, (int) track.state.getProperty (heightProperty, TrackHeight::standard));
+    return juce::jlimit (TrackHeight::minimum, TrackHeight::maximum,
+                         (int) track.state.getProperty (schema::phaziteHeight, TrackHeight::standard));
 }
 
 void setTrackHeight (te::Track& track, int height)
 {
-    track.state.setProperty (heightProperty, juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, height), nullptr);
+    track.state.setProperty (schema::phaziteHeight, juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, height), nullptr);
 }
 
 int getShownTrackHeight (const te::Track& track)
@@ -254,22 +254,22 @@ void resizeTrack (te::Track& track, int change)
 
 bool isCollapsed (const te::Track& track)
 {
-    return track.state.getProperty (collapsedProperty, false);
+    return track.state.getProperty (schema::phaziteCollapsed, false);
 }
 
 void setCollapsed (te::Track& track, bool collapsed)
 {
-    track.state.setProperty (collapsedProperty, collapsed, nullptr);
+    track.state.setProperty (schema::phaziteCollapsed, collapsed, nullptr);
 }
 
 bool isPinned (const te::Track& track)
 {
-    return track.state.getProperty (pinnedProperty, false);
+    return track.state.getProperty (schema::phazitePinned, false);
 }
 
 void setPinned (te::Track& track, bool pinned)
 {
-    track.state.setProperty (pinnedProperty, pinned, nullptr);
+    track.state.setProperty (schema::phazitePinned, pinned, nullptr);
 }
 
 bool isHiddenInCollapsedFolder (const te::Track& track)

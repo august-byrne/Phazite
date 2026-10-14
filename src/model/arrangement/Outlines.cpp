@@ -2,7 +2,7 @@
 #include "Outlines.h"
 #include "Sections.h"
 #include "Tracks.h"
-#include "model/project/Project.h"
+#include "model/base/Schema.h"
 
 #include <PhaziteData.h>
 
@@ -12,7 +12,6 @@ namespace phazite
 {
 namespace
 {
-    const juce::Identifier outlineProperty { "outline" };
     constexpr const char* outlineFileSuffix = ".outline.json";
 
     std::optional<juce::Colour> findPaletteColour (const juce::String& name)
@@ -125,11 +124,11 @@ void applyOutline (te::Edit& edit, const Outline& outline)
         bar += section.bars;
     }
 
-    getPhaziteState (edit).setProperty (outlineProperty, outline.id, &edit.getUndoManager());
+    getPhaziteState (edit).setProperty (schema::outline, outline.id, &edit.getUndoManager());
 }
 
 juce::String getAppliedOutline (const te::Edit& edit)
 {
-    return findPhaziteState (edit)[outlineProperty].toString();
+    return findPhaziteState (edit)[schema::outline].toString();
 }
 } // namespace phazite

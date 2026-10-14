@@ -2,6 +2,7 @@
 #include "PianoRollParts.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Tracks.h"
+#include "model/base/Schema.h"
 #include "model/engine/LiveInput.h"
 #include "model/mixer/Mixer.h"
 #include "ui/devices/DeviceMenus.h"
@@ -20,8 +21,6 @@ namespace
     constexpr double scrollPerNotch = 48.0;
     constexpr int velocityPerNotch = 4; // Alt+wheel
 
-    const juce::Identifier pianoRollStateType { "PIANOROLL" };
-
     bool isClipStateOfType (const juce::ValueTree& state)
     {
         return state.hasType (te::IDs::MIDICLIP);
@@ -30,7 +29,7 @@ namespace
 
 //==============================================================================
 PianoRoll::PianoRoll (CommandRegistry& registry, te::SelectionManager& selectionManager)
-    : TimelineEditor (registry, pianoRollStateType),
+    : TimelineEditor (registry, schema::PIANOROLL),
       selection (selectionManager),
       keys (std::make_unique<Keys> (*this)),
       grid (std::make_unique<NoteGrid> (*this)),

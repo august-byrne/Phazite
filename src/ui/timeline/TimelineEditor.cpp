@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TimelineEditor.h"
-#include "model/project/Project.h"
+#include "model/base/Schema.h"
 #include "model/transport/Playback.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"

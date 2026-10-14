@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
 #include "model/arrangement/Grid.h"
+#include "model/base/Schema.h"
 
 using namespace tracktion::literals; // 4_bp: beat positions
 
@@ -145,7 +146,7 @@ TEST_CASE ("Grid settings are kept in the project")
     grid.fixedLevel = 10;
     grid.triplets = true;
 
-    juce::ValueTree state ("PHAZITE");
+    juce::ValueTree state (phazite::schema::PHAZITE);
     grid.save (state);
     CHECK (phazite::GridSettings::load (state) == grid);
 

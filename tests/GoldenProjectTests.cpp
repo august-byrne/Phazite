@@ -12,6 +12,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Tracks.h"
+#include "model/base/Schema.h"
 #include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
@@ -203,7 +204,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     const phazite::GridSettings playlistGrid { .snap = false, .adaptiveOffset = 1 };
     playlistGrid.save (state);
 
-    auto pianoRollState = state.getOrCreateChildWithName ("PIANOROLL", nullptr);
+    auto pianoRollState = state.getOrCreateChildWithName (phazite::schema::PIANOROLL, nullptr);
     const phazite::GridSettings pianoRollGrid { .adaptive = false, .fixedLevel = 8, .triplets = true };
     pianoRollGrid.save (pianoRollState);
 

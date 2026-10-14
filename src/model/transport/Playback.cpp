@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Playback.h"
 #include "model/arrangement/Sections.h"
+#include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/project/Project.h"
 
 namespace phazite
 {
 namespace
 {
-    const juce::Identifier loopFollowsSongProperty { "loopFollowsSong" };
-
     // Written only when it changes, so a project that never looped anything else has nothing new to save.
     void setLoopFollowsSong (te::Edit& edit, bool follows)
     {
         if (doesLoopFollowSong (edit) != follows)
-            getPhaziteState (edit).setProperty (loopFollowsSongProperty, follows, nullptr);
+            getPhaziteState (edit).setProperty (schema::loopFollowsSong, follows, nullptr);
     }
 
     bool isNear (te::TimePosition a, te::TimePosition b)
@@ -40,7 +38,7 @@ te::TimeRange getSongLoopRange (const te::Edit& edit)
 
 bool doesLoopFollowSong (const te::Edit& edit)
 {
-    return findPhaziteState (edit).getProperty (loopFollowsSongProperty, true);
+    return findPhaziteState (edit).getProperty (schema::loopFollowsSong, true);
 }
 
 void loopSong (te::Edit& edit)

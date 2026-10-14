@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Notes.h"
+#include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/project/Project.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,34 +12,28 @@ namespace phazite
 {
 namespace
 {
-    const juce::Identifier drumModeProperty { "phaziteDrumMode" }, drumOrderProperty { "phaziteDrumOrder" },
-        drumHiddenProperty { "phaziteDrumHidden" };
-
-    // A key, on a track's state or in the song's Phazite state: the root, and the scale as Tracktion's number
-    // for it (Tracktion stores scales that way too; their names are translated).
-    const juce::Identifier keyRootProperty { "phaziteKeyRoot" }, keyScaleProperty { "phaziteKeyScale" }, lastKeyType { "LASTKEY" };
-
+    // A key, on a track's state or on LASTKEY in the song's Phazite state (model/base/Schema.h).
     std::optional<Key> readKey (const juce::ValueTree& state)
     {
-        if (! state.hasProperty (keyRootProperty))
+        if (! state.hasProperty (schema::phaziteKeyRoot))
             return std::nullopt;
 
-        return Key { juce::jlimit (0, 11, (int) state[keyRootProperty]),
+        return Key { juce::jlimit (0, 11, (int) state[schema::phaziteKeyRoot]),
                      (te::Scale::ScaleType) juce::jlimit ((int) te::Scale::major, (int) te::Scale::harmonicMinor,
-                                                          (int) state[keyScaleProperty]) };
+                                                          (int) state[schema::phaziteKeyScale]) };
     }
 
     void writeKey (juce::ValueTree state, const std::optional<Key>& key, juce::UndoManager* undo)
     {
         if (! key.has_value())
         {
-            state.removeProperty (keyRootProperty, undo);
-            state.removeProperty (keyScaleProperty, undo);
+            state.removeProperty (schema::phaziteKeyRoot, undo);
+            state.removeProperty (schema::phaziteKeyScale, undo);
             return;
         }
 
-        state.setProperty (keyRootProperty, key->root, undo);
-        state.setProperty (keyScaleProperty, (int) key->scale, undo);
+        state.setProperty (schema::phaziteKeyRoot, key->root, undo);
+        state.setProperty (schema::phaziteKeyScale, (int) key->scale, undo);
     }
 
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
@@ -412,12 +406,12 @@ void setTrackKey (te::Track& track, const std::optional<Key>& key)
 
     // What new tracks get; not an edit to undo.
     if (key.has_value())
-        writeKey (getPhaziteState (track.edit).getOrCreateChildWithName (lastKeyType, nullptr), key, nullptr);
+        writeKey (getPhaziteState (track.edit).getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
 }
 
 void applyLastKey (te::Track& track)
 {
-    if (const auto last = readKey (findPhaziteState (track.edit).getChildWithName (lastKeyType)))
+    if (const auto last = readKey (findPhaziteState (track.edit).getChildWithName (schema::LASTKEY)))
         writeKey (track.state, last, nullptr);
 }
 
@@ -510,8 +504,8 @@ juce::String getDrumName (int note)
 
 bool isDrumTrack (const te::AudioTrack& track)
 {
-    if (track.state.hasProperty (drumModeProperty))
-        return track.state[drumModeProperty];
+    if (track.state.hasProperty (schema::phaziteDrumMode))
+        return track.state[schema::phaziteDrumMode];
 
     for (auto* plugin : track.pluginList)
         if (plugin->isSynth())
@@ -522,7 +516,7 @@ bool isDrumTrack (const te::AudioTrack& track)
 
 void setDrumTrack (te::AudioTrack& track, bool isDrums)
 {
-    track.state.setProperty (drumModeProperty, isDrums, nullptr);
+    track.state.setProperty (schema::phaziteDrumMode, isDrums, nullptr);
 }
 
 std::vector<DrumRow> getDrumRows (const te::AudioTrack& track, const juce::Array<te::MidiClip*>& clips)
@@ -556,7 +550,7 @@ std::vector<DrumRow> getDrumRows (const te::AudioTrack& track, const juce::Array
             rows.push_back ({ note, getDrumName (note) });
 
     // The track's order first; rows it doesn't mention keep theirs, after them.
-    const auto order = parseNotes (track.state[drumOrderProperty]);
+    const auto order = parseNotes (track.state[schema::phaziteDrumOrder]);
     const auto rank = [&order] (int note)
     {
         const auto found = std::find (order.begin(), order.end(), note);
@@ -565,7 +559,7 @@ std::vector<DrumRow> getDrumRows (const te::AudioTrack& track, const juce::Array
 
     std::stable_sort (rows.begin(), rows.end(), [&rank] (const DrumRow& a, const DrumRow& b) { return rank (a.note) < rank (b.note); });
 
-    const auto hidden = parseNotes (track.state[drumHiddenProperty]);
+    const auto hidden = parseNotes (track.state[schema::phaziteDrumHidden]);
     rows.erase (std::remove_if (rows.begin(), rows.end(), [&hidden] (const DrumRow& row)
                                 { return std::find (hidden.begin(), hidden.end(), row.note) != hidden.end(); }),
                 rows.end());
@@ -581,22 +575,22 @@ void moveDrumRow (te::AudioTrack& track, const std::vector<DrumRow>& shown, int 
             order.push_back (row.note);
 
     order.insert (order.begin() + juce::jlimit (0, (int) order.size(), newIndex), note);
-    track.state.setProperty (drumOrderProperty, joinNotes (order), nullptr);
+    track.state.setProperty (schema::phaziteDrumOrder, joinNotes (order), nullptr);
 }
 
 void hideDrumRow (te::AudioTrack& track, int note)
 {
-    auto hidden = parseNotes (track.state[drumHiddenProperty]);
+    auto hidden = parseNotes (track.state[schema::phaziteDrumHidden]);
 
     if (std::find (hidden.begin(), hidden.end(), note) == hidden.end())
         hidden.push_back (note);
 
-    track.state.setProperty (drumHiddenProperty, joinNotes (hidden), nullptr);
+    track.state.setProperty (schema::phaziteDrumHidden, joinNotes (hidden), nullptr);
 }
 
 void showAllDrumRows (te::AudioTrack& track)
 {
-    track.state.removeProperty (drumHiddenProperty, nullptr);
+    track.state.removeProperty (schema::phaziteDrumHidden, nullptr);
 }
 
 //==============================================================================

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Project.h"
+#include "model/base/Schema.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/transport/Playback.h"
 
@@ -7,7 +8,6 @@ namespace phazite
 {
 namespace
 {
-    const juce::Identifier phaziteStateType { "PHAZITE" };
     constexpr const char* recentProjectsKey = "phaziteRecentProjects";
 
     // The ID saved in a project file. The Edit names its temporary folder (freeze files, comp renders)
@@ -177,16 +177,6 @@ Project::~Project()
 juce::ValueTree Project::getPhaziteState()
 {
     return phazite::getPhaziteState (*edit);
-}
-
-juce::ValueTree getPhaziteState (te::Edit& edit)
-{
-    return edit.state.getOrCreateChildWithName (phaziteStateType, nullptr);
-}
-
-juce::ValueTree findPhaziteState (const te::Edit& edit)
-{
-    return edit.state.getChildWithName (phaziteStateType);
 }
 
 bool Project::hasUnsavedChanges() const

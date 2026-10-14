@@ -50,7 +50,7 @@ public:
     juce::File getRendersFolder() const { return getFolder().getChildFile ("Renders"); }
     juce::File getBackupsFolder() const { return getFolder().getChildFile ("Backups"); }
 
-    // Phazite's own data in the project file (sections, chords, layout), next to the engine's.
+    // Phazite's own data in the project file, next to the engine's (phazite::getPhaziteState(), model/base/Schema.h).
     juce::ValueTree getPhaziteState();
 
     bool hasUnsavedChanges() const;
@@ -92,13 +92,6 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Project)
 };
-
-// An Edit's Phazite state (Project::getPhaziteState()), for code that has the Edit but not the Project.
-juce::ValueTree getPhaziteState (te::Edit&);
-
-// The same, but without adding it if the Edit has none yet (adding it would count as an unsaved
-// change): then the result is invalid, and reading a property from it gives the default.
-juce::ValueTree findPhaziteState (const te::Edit&);
 
 //==============================================================================
 // Autosaves a project every few minutes while it has unsaved changes.
