@@ -333,8 +333,8 @@ std::unique_ptr<juce::AccessibilityHandler> LevelMeter::createAccessibilityHandl
 // buttons report as clicks too) from a click by the keys it passes on. Half lit is a state between off and on.
 struct MuteSoloButtons::Button : public juce::TextButton
 {
-    Button (const juce::String& text, const juce::String& title)
-        : juce::TextButton (text)
+    Button (const juce::String& buttonText, const juce::String& title)
+        : juce::TextButton (buttonText)
     {
         setTitle (title);
     }

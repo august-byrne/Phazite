@@ -50,6 +50,10 @@ namespace
         void setTitle (const juce::String&) override {}
         void setBounds (const juce::Rectangle<int>& newBounds, bool) override { bounds = newBounds; }
         juce::Rectangle<int> getBounds() const override { return bounds; }
+
+        // Keeps the base class's other overloads visible, as JUCE's own peers do (GCC's -Woverloaded-virtual).
+        using juce::ComponentPeer::globalToLocal;
+        using juce::ComponentPeer::localToGlobal;
         juce::Point<float> localToGlobal (juce::Point<float> p) override { return p + bounds.getPosition().toFloat(); }
         juce::Point<float> globalToLocal (juce::Point<float> p) override { return p - bounds.getPosition().toFloat(); }
         void setMinimised (bool) override {}
