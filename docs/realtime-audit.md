@@ -5,10 +5,12 @@
 - what Tracktion Engine's code does on the audio thread today;
 - what Phazite does about each finding.
 
-The policy is decision 4 in the [design](design.md#24-open-questions):
+The policy is decision 4 in the [design](design.md#25-open-questions):
 - try simple workarounds first;
 - keep a fork of Tracktion Engine if the workarounds get awkward, or if upstream issues block us;
 - report every problem upstream either way.
+
+Replacing a part of the engine outright is a separate decision, made one capability at a time ([design section 23](design.md#23-tracktion-engine-what-it-gives-and-what-we-build)).
 
 ## How it is measured
 

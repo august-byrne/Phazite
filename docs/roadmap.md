@@ -7,9 +7,10 @@
 ## How each step is done
 
 1. **Plan:** confirm the step's scope. If a decision changes, update [design.md](design.md).
-2. **Build:** follow `CLAUDE.md`: real-time rules, formatting, SPDX headers, licences.
+2. **Build:** follow `CLAUDE.md`: architecture rules, real-time rules, formatting, SPDX headers, licences. Move the code the step touches toward the [architecture track](#architecture-track)'s structure.
 3. **Test:**
    - unit tests for model logic and DSP tests for devices;
+   - the architecture check passes (`sh tools/check-architecture.sh`), and the golden tests pass, or their files change on purpose and the commit says why;
    - a `windows-debug` build with zero warnings, plus `windows-release` for performance work;
    - CI green on Windows and Linux.
 4. **Try:** a short manual check that says what to click and listen for.
@@ -27,17 +28,95 @@ Done before this plan (progress since then is under [Status](#status)):
 
 ## Decisions and when they're needed
 
-| Open question ([design section 24](design.md#24-open-questions)) | Needed before |
+| Open question ([design section 25](design.md#25-open-questions)) | Needed before |
 |---|---|
 | 1. Algorithmic AI engines in v1 | **Decided:** yes, trained models later |
 | 2. First outline styles | **Decided:** pop, rock, electronic, hip-hop/trap |
 | 3. UI font and its licence | **Decided:** Inter, bundled, SIL OFL 1.1 |
-| 4. Engine fixes: workarounds or a fork | **Decided:** simple workarounds first, a fork if they get awkward |
+| 4. Engine fixes: workarounds or a fork | **Decided:** simple workarounds first, a fork if they get awkward; replacing a part of the engine is a separate decision for each part (A5) |
 | 5. MP3 export | Step 1.8 |
 | 6. Airwindows effects | Step 2.8 |
 | 7. Sandboxing before or after v1 | Phase 3 |
 | 8. Ableton Live keymap in v1 | Step 3.7 |
 | 9. Single-key tools and the computer keyboard | **Decided:** Ableton's way, Shift and a letter for the shortcut while the keyboard plays notes |
+
+## Architecture track
+
+*Added 2026-10-14* ([design section 24](design.md#24-code-structure)). This track moves the code toward the structure in the design without a rewrite. Its phases are called A0 to A5 (phases 0 to 5 of the architecture review), so they aren't confused with the phases below.
+- **Small steps:** after each one the app builds, behaves the same and passes its tests, golden tests included, and each is its own commit.
+- **Alongside the features:** only A0 and A1 pause feature work. Later phases move each area of the code when a step touches it.
+
+| Phase | Goal | When |
+|---|---|---|
+| A0. Safety net and limits | Make restructuring safe, and stop new breaks of the rules | Now, before step 1.6 |
+| A1. Untangle the model | One job per folder, and no UI code in the model | Now, before step 1.6 |
+| A2. One path for every edit | The UI decides nothing about the project | Alongside steps 1.6 to 1.9 |
+| A3. Phazite's types at the UI boundary | The UI knows nothing about Tracktion | One view at a time; the playlist and the mixer before step 2.1 |
+| A4. A UI a designer can work on | A designer changes how Phazite looks without editing C++ | When the designer joins; any time after A1 |
+| A5. Engine parts replaced one at a time | Replace a part of Tracktion only where Phazite gains something | Only after a dated decision for each part ([design section 23](design.md#23-tracktion-engine-what-it-gives-and-what-we-build)) |
+
+**A0. Safety net and limits (M)**
+- **Golden tests**, which bring forward the render comparisons under [Cross-cutting work](#cross-cutting-work):
+  - representative projects saved, reopened and saved again, and compared with committed files, leaving out what changes on every save;
+  - a project saved by today's version, kept to check that older projects still open as the same song;
+  - a short offline render compared with a committed level fingerprint, within a tolerance;
+  - the model's commands, their order, and a script running each of them, with the undo step it makes and every command's state, compared with committed files.
+- **The architecture check:** `tools/check-architecture.sh` in CI's Checks job, as pre-commit check 7 and in pre-push, counting what breaks the rules against limits that can only go down. A raise needs a reason in its commit message, which CI and pre-push check. It also checks that every quoted include and every source path in `CMakeLists.txt` names a file exactly, as Linux needs. The counts at the start:
+  - model includes of `ui/` or `app/`: 0;
+  - JUCE window includes in the model: 3 (0 after A1);
+  - Tracktion includes in `ui/`: 7, and Tracktion references: about 545;
+  - undo steps started in `ui/`: 46;
+  - model files on include loops: 10 (0 after A1).
+- **Docs:** the structure and decisions in [design.md](design.md#24-code-structure), the rules in `CLAUDE.md`, and this track. CLAUDE.md's advice to link controls to Tracktion parameters becomes a stopgap until A3, and step 2.1 no longer builds on Tracktion's `CurveEditor`.
+- *Done when:* CI fails as soon as a count goes over its limit or a limit rises without a reason, and the golden tests pass on Windows and Linux.
+
+**A1. Untangle the model, without changing behavior (L)**
+- **Folders by area:** `model/<area>/` with `base/` and `commands/` at the bottom, `services/`, `ui/<area>/` with `theme/`, `components/` and `input/`, and `app/`, which becomes a library the tests link.
+- **Headers:** the model gets Tracktion from one small header instead of through the command registry's, and has no include loops. Today Project and Playback, Sections and Outlines, and the commands and Playback include each other.
+- **Project data:**
+  - one schema file with every property Phazite saves, a schema version and migrations;
+  - the grid's fixed size and a key's scale, saved as Tracktion enum numbers, become Phazite's own values, and older projects are converted when they open;
+  - projects from a newer Phazite are handled as [design question 17](design.md#25-open-questions) proposes until it is decided;
+  - view state stops counting as an unsaved change.
+- **Commands:** the registry splits. The model keeps the commands, running one inside a named undo step, enabled and ticked state, and search; key handling, the bridge to JUCE's menus and keymap storage move to `ui/input/`. One undo convention, `phazite::UndoStep`, and one way to find the open project, `ProjectContext`.
+- **Input and view code leaves the model:** the computer keyboard and how the main window's keys reach it, the Smart Tool and its hit zones, the time line's zoom and the grid's spacing in pixels (where grid lines fall is beat arithmetic on the tempo map, and stays in the model), track heights in pixels, the drum rows' display order, drag-and-drop payloads, the texts for decibels and pan, and the playlist's mouse options in the keymap. Tracktion's hook for devices' windows moves to the app.
+- **Commands become tables:** the logic in command registration becomes named model functions with tests.
+- **Services and the app:** a typed settings service with one list of keys (today 14 keys are read and written in 5 files, in 3 ways); the sound pack, the library and the previewer belong to the app, not to the main window's content.
+- *Done when:*
+  - the architecture check's counts of JUCE window includes and window classes in the model, Tracktion includes in the model outside its prelude, model undo steps outside the undo code, model files on include loops and files outside an area folder are all 0;
+  - every command's logic can be called and tested without the registry;
+  - the app behaves as before, except for the two changes decided on 2026-10-14 (view state no longer marks the project as changed; older projects' grid sizes and key scales are converted) and question 17's handling of projects from a newer Phazite, and the golden files change only for that conversion.
+
+**A2. One path for every edit (L, alongside steps 1.6 to 1.9)**
+- Model functions open their own named undo steps.
+- A drag is a gesture session that begins, updates, then commits or rolls back as one step.
+- The UI's direct edits (about 20) and the editing rules in UI files (where dropped files go, what Draw places, that sections never overlap, and others) move into model functions with tests.
+- The big files split: the playlist into layout, clip tools, drop target, commands and view; the piano roll into session, note layout, note tools and commands; the channel strip into one file per class. The browser gets a model, and the playlist and the piano roll share one set of gesture code.
+- *Done when:* the UI starts no undo steps and makes no direct edits, and no source file is much over 1,000 lines.
+
+**A3. Phazite's types at the UI boundary (XL, one view at a time)**
+- IDs for tracks, clips and devices, built on Tracktion's `EditItemID`; stable note IDs saved in the project; selections held as IDs.
+- A view model per view (playlist, piano roll, mixer, transport), with plain values and grouped change signals.
+- Meters and the playhead read through small polled sources, ending each mixer strip's own polling.
+- Parameter handles for knobs and faders, replacing `ui::ParameterAttachment`, and a waveform source for clips.
+- One view at a time; then `ui/` loses Tracktion's include path, and the model's Tracktion-using headers move into `model/<area>/internal/`.
+- Tests build songs with shared helpers.
+- *Done when:* `src/ui/` has no Tracktion references and can't include Tracktion, and the model's public headers are free of Tracktion types.
+
+**A4. A UI a designer can work on (L, any time after A1)**
+- `resources/design/tokens.json`, in the DTCG format, becomes the one source of the tokens, and a small build step generates `DesignTokens.h`.
+- New tokens for transparency, sizes, corner radii and fonts.
+- A gallery app shows every control and view in all three themes, with sample data.
+- Debug builds get the Melatonin Inspector (MIT).
+- User-facing text moves into a strings table, with one helper for key names.
+- A one-page guide for the designer.
+- *Done when:* any color, size or font can be changed in `tokens.json` and seen in the gallery without editing C++.
+
+**A5. Engine parts replaced one at a time (only after a dated decision)**
+- Step 1.6's devices start it: engine-neutral DSP in `src/devices/`, each in a thin Tracktion plug-in.
+- For a bigger part: an interface in front of it, the replacement behind it, a switch-over, then the old code deleted.
+- Tracktion's Edit stays the project store until something replaces it; the schema and its migrations make a converter manageable.
+- *Done when,* for each part: the golden tests pass on the new code, and the old code is gone.
 
 ## Phase 0: Foundations
 
@@ -45,12 +124,11 @@ Done before this plan (progress since then is under [Status](#status)):
 - Split `src/` into:
   - `app/`: startup and the main window;
   - `model/`: Phazite's project model on top of Tracktion (commands, sections, chords, outlines);
-  - `ui/`: components and look-and-feel;
-  - `devices/`: built-in DSP;
-  - `gen/`: the sound generator and chord engine.
+  - `ui/`: components and look-and-feel.
 - A static library target, `phazite_core`, holds everything testable without a window. The app links it.
 - A test runner using doctest (MIT, bundled with Tracktion Engine), run by CTest locally and in CI. On Linux it runs headless.
 - *Done when:* CI runs the tests on Windows and Linux.
+- *Status:* done for `app/`, `model/` and `ui/`. Since 2026-10-14 the [architecture track](#architecture-track) organizes them by area, adds `services/`, and makes `app/` a library the tests link. Built-in DSP goes in `devices/` from step 1.6; the chord engine and the sound generator (steps 2.5, 2.6 and 3.1) follow the same rules: no Tracktion or window code in their logic.
 
 **0.2 Engine hooks (S)**
 - A `PropertyStorage` subclass: a neutral user name (no personal data), the app version and the settings folder.
@@ -154,7 +232,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Done when:* a mix with a reverb return and a bus works and matches the playlist's tracks.
 - *Status:* done, pending a check by hand. The mixer (`src/ui/Mixer.h`) has a strip for every track, in the playlist's order and colors (`src/ui/ChannelStrip.h`): the track's name and output, its devices (an on/off switch and two key controls each; click to open its window, right-click to turn it off, move or remove it), its sends with a level and a Pre/Post switch, pan, mute, solo, fader and meter. A folder becomes a bus with its first device and turns plain again without one; return tracks take an aux bus (`src/model/Mixer.h`, with tests in `tests/MixerTests.cpp`). The master's strip has its devices, fader and meter, and the loudness meter: a plug-in at the end of the master's devices that wraps Tracktion's real-time-safe EBU R128 meter (`src/model/LoudnessMeterPlugin.h`). Devices open in windows of their own (`src/ui/PluginWindow.h`), with a knob for each parameter of a built-in device. Until step 1.6 the device list offers Tracktion's reverb and 4OSC synth, besides scanned plug-ins ([real-time audit](realtime-audit.md), finding 16). A guarded real-time audit scenario plays the "done when" mix: a bus, a send to a reverb return and the loudness meter.
 
-**First feedback round on steps 1.1 to 1.4 (2026-10-13)**, after the owner tried them ([design decision log](design.md#25-decision-log)):
+**First feedback round on steps 1.1 to 1.4 (2026-10-13)**, after the owner tried them ([design decision log](design.md#26-decision-log)):
 - **Fixes:** dismissing the track color menu crashed the app (two other menus had the same mistake); a held key repeated its command, so holding a tool's key ended a drag after a copy or two and holding Space started and stopped playing; every mouse-wheel step was handled twice in the playlist and the piano roll.
 - **Playlist:** track colors run through their rows; dragging past an edge scrolls; "+ Track" moved over the track headers, with a row after the last track that adds one; the sections became a band in the time bar and ghosts behind the tracks; four more outlines.
 - **Piano roll:** bar 1 is the clip's start; a selected track shows its clip nearest the playhead, and on a track without clips the first note starts one; a key is a track's, off until chosen; no Drums button.
@@ -178,6 +256,8 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Status:* done, pending a check by hand. The browser (`src/ui/Browser.h`) is a tree of places, as FL Studio's: Favorites, Recent, Sounds by Type, Phazite Sounds, Instruments, Effects, the user's folders and **Add Folder...**; search finds sounds and devices by their names and tags as you type (`src/model/Library.h`, which indexes the sounds on a background thread). Clicking a sound or moving to it with the arrow keys previews it (`src/model/Preview.h`): loops in time with the project, stretched by SoundTouch, and on its bars while it plays. Dragging puts sounds and devices onto the playlist (a track, or below the tracks for a new one) and devices onto mixer channels; Enter puts the selected item on the selected track at the play start. The plug-in picker (F8, `src/ui/PluginPicker.h`) adds a device by name. Tests: `tests/LibraryTests.cpp` and `tests/BrowserTests.cpp` (finding and placing a kick, and the loop previewing in time, are both there). Phazite Sounds: 85 CC0 sounds for a new user to start with (9.3 MB): drums, 808s, loops, effects and foley from CC0 libraries and Phazite's own synthesis. They are an optional download from their own repository, [phazite-sounds](https://github.com/august-byrne/phazite-sounds), whose CI checks that each is listed as CC0 with its source; `tools/soundkit/` renders and zips them. Phazite offers them once, in a welcome window (`src/ui/Welcome.h`), and in the browser until they are installed; `src/model/SoundPack.h` downloads the pinned release, checks its SHA-256 and unpacks it into `Documents/Phazite/Packs` (tests: `tests/SoundPackTests.cpp`, `tests/WelcomeTests.cpp`). Still to come in later steps: drops onto device slots and drum pads (step 1.6), loops in key once songs have a key, previews through the track's devices, tempo detection for loops whose names don't give one, and collections.
 - **Fixes from the third round of feedback (2026-10-13):** Space stops back at the play start (the last click in a ruler, or the song's start in a project just opened), and Shift+Space (Ctrl+Space in FL Studio's keymap) pauses; play, stop and the computer keyboard work while a plug-in window has the focus (`src/ui/PluginKeys.h`); each effect has a Mix knob; the inspector's channel strip fills its height.
 
+**Architecture phases A0 and A1 (from 2026-10-14)**, before step 1.6: golden tests, the architecture check, and untangling the model, with no new features ([architecture track](#architecture-track)).
+
 **1.6 First built-in devices (XL)**
 - The first devices:
   - drum sampler: pads, choke groups, tuning and envelope;
@@ -187,6 +267,7 @@ Done before this plan (progress since then is under [Status](#status)):
   - reverb;
   - limiter.
 - Each is real-time safe and has an editor and DSP tests.
+- Each device's DSP goes in `src/devices/` without Tracktion types, in a thin Tracktion plug-in, so that it could run on another engine later ([architecture track](#architecture-track), A5). Devices render the same twice in a row offline (seeded randomness), so the golden render tests can cover them.
 - These devices replace Tracktion's 4OSC in the starter project.
 - *Done when:* a beat can be made and mixed with built-ins only, and every device passes the real-time checks from step 0.3.
 
@@ -213,7 +294,7 @@ Done before this plan (progress since then is under [Status](#status)):
 ## Phase 2: Finish a track (milestone 2)
 
 **2.1 Automation lanes (L)**
-- The lane editor, based on Tracktion's `CurveEditor`.
+- The lane editor, drawn by Phazite over the model's automation data: it reads points as plain values and changes them through model functions and commands, one named undo step per gesture. Not Tracktion's `CurveEditor`, a component that edits Tracktion's objects directly, in its own style. It comes after architecture phase A3 for the playlist and the mixer.
 - Right-click → Automate, the write modes and shapes, keyboard editing, and the last-touched hotkey.
 - *Done when:* any built-in or plug-in parameter can be automated in two clicks, and the four write modes behave as described.
 
@@ -353,8 +434,9 @@ Roughly in order of value:
 - **Testing:**
   - unit tests for model operations;
   - DSP tests: frequency responses, gain curves, null tests;
-  - headless engine tests in CI that compare renders with reference files, within a tolerance;
+  - golden tests (architecture phase A0): saved projects compared with committed files, and short offline renders with committed fingerprints, within a tolerance;
   - usability tests at each milestone.
+- **Architecture:** keep to the rules in `CLAUDE.md`, which `tools/check-architecture.sh` checks; each step moves the area it touches toward the [architecture track](#architecture-track)'s structure.
 - **Performance:** benchmarks for audio CPU and UI frame time, tracked from phase 1 onward.
 - **Documentation:** keep [design.md](design.md) and this roadmap current, and update the status table after each step.
 - **Licences:** check every new dependency, model or dataset against the list in `CLAUDE.md` before using it.
@@ -368,15 +450,19 @@ Roughly in order of value:
 | Built-in effects fall short of FL Studio's | Listening and A/B tests against references, plus DSP tests |
 | Sandboxing and CLAP are complex | Scheduled after v1; v1 gets the stability basics |
 | Scope creep | v1 scope is fixed in [design section 1](design.md#1-vision-and-scope); new ideas go under "After v1" |
+| Restructuring changes behavior by accident | Golden tests of saved projects, renders and commands (A0); every step builds and passes the tests, one commit each |
+| The architecture work holds up features | Only A0 and A1 pause features; A2 to A4 move each area when a feature touches it; A5 only after a dated decision |
+| The layers erode over time | `tools/check-architecture.sh` in CI and before every commit, with limits that can only go down |
 
 ## Status
 
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; next, step 1.6 |
+| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; next, architecture phases A0 and A1, then step 1.6 |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
+| Architecture track | In progress: A0 and A1, from 2026-10-14, before step 1.6 |
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.

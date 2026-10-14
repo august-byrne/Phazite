@@ -1,6 +1,6 @@
 # Phazite design
 
-*Status: draft for review, October 2026.* This document describes the product Phazite is aiming for, and why. The plan for building it is in [roadmap.md](roadmap.md). **Decided** marks choices the project owner has made; **Open** marks questions that still need a decision ([section 24](#24-open-questions)). The research behind the design is summarized in [appendix A](#appendix-a-research-summary), with sources in [appendix B](#appendix-b-sources).
+*Status: draft for review, October 2026.* This document describes the product Phazite is aiming for, and why. The plan for building it is in [roadmap.md](roadmap.md). **Decided** marks choices the project owner has made; **Open** marks questions that still need a decision ([section 25](#25-open-questions)). The research behind the design is summarized in [appendix A](#appendix-a-research-summary), with sources in [appendix B](#appendix-b-sources). How the code is structured is in [section 24](#24-code-structure).
 
 ## Contents
 
@@ -27,8 +27,9 @@
 21. [Accessibility](#21-accessibility)
 22. [Privacy, licences and trademarks](#22-privacy-licences-and-trademarks)
 23. [Tracktion Engine: what it gives and what we build](#23-tracktion-engine-what-it-gives-and-what-we-build)
-24. [Open questions](#24-open-questions)
-25. [Decision log](#25-decision-log)
+24. [Code structure](#24-code-structure)
+25. [Open questions](#25-open-questions)
+26. [Decision log](#26-decision-log)
 
 ## 1. Vision and scope
 
@@ -50,7 +51,7 @@ In one line: **FL Studio's speed without FL Studio's split.** Phazite keeps the 
 - chord suggestions and a drum sound generator;
 - VST®3 hosting on Windows.
 
-[Section 24](#24-open-questions) and the [roadmap](roadmap.md#after-v1) list what waits until after v1.
+[Section 25](#25-open-questions) and the [roadmap](roadmap.md#after-v1) list what waits until after v1.
 
 ## 2. Who Phazite is for
 
@@ -141,6 +142,7 @@ Phazite's look should be as clean and consistent as its workflow. Its design lan
 - **Spacing and sizing:** a 4-pixel grid, standard control heights and consistent padding.
 - **Icons (decided in step 0.6): [Lucide](https://lucide.dev)** ([B42](#appendix-b-sources)), line icons under the ISC licence (those taken from Feather: MIT), drawn in the theme's colors, plus custom icons drawn to match. Phazite copies in only the icons it uses (`resources/icons/lucide/`).
 - **Motion:** short, purposeful animation (around 100–150 ms). None in places that redraw constantly, and the system's reduced-motion setting is respected.
+- **Tokens a designer can edit (decided 2026-10-14):** the tokens move out of C++ into a file in the Design Tokens Community Group's format (DTCG 2025.10, [B56](#appendix-b-sources)), which a designer edits directly or exports from Figma, Penpot or Tokens Studio, and which the build turns into C++. A gallery app shows every control and view in all three themes, so a change can be seen without opening a project. A declarative layout tool (JIVE or foleys_gui_magic) comes only if dialogs become a bottleneck; the playlist, piano roll and meters stay painted in code. This is phase A4 of the [roadmap's architecture track](roadmap.md#architecture-track).
 
 ## 5. Building blocks
 
@@ -298,7 +300,7 @@ This is the editor the target users spend most time in, and FL Studio's is its m
 - **Routing view (later):** a diagram of every track, bus, send and sidechain, like Reason's back panel, with wires only for the selected or hovered track. Drag a wire to reroute it.
 - **Master:** its effects, fader and meter, ending with a loudness meter (LUFS and true peak), built on Tracktion's real-time-safe EBU R128 meter.
 - **One output per track:** FL Studio's "route one insert to several inserts" is done with sends.
-- **Open:** see [section 24](#24-open-questions), questions 11 to 15.
+- **Open:** see [section 25](#25-open-questions), questions 11 to 15.
 
 ## 9. Devices, containers and presets
 
@@ -320,7 +322,7 @@ This is the editor the target users spend most time in, and FL Studio's is its m
 
 **Plug-in windows:** each opens in its own window, kept above the main window, and its position is remembered.
 
-**Keys over plug-in windows (2026-10-13):** play and stop (and pause), and the computer keyboard while it plays notes, work while a plug-in's window has the keyboard focus, so a sound can be played while it is tweaked (`src/ui/PluginKeys.h`; commands opt in with `Command::overPlugins`). Every other key goes to the plug-in. DAWs differ here: Bitwig gives a focused plug-in every key, REAPER and FL Studio have a per-plug-in switch, and Ableton Live keeps Space on Windows. On Windows, a plug-in's native window gets keys before JUCE sees them, so a message hook on the message thread catches these keys on their way to it. The hook is installed at startup, before any plug-in window: Windows calls the hook installed last first, and a plug-in built with JUCE installs its own hook, which offers each key to its focused control (a preset name being typed) and passes on the keys it doesn't use. A key typed into a native text field goes to the plug-in too. **Open:** a per-plug-in "send all keys to the plug-in" switch, as REAPER and FL Studio have, for plug-ins whose own text fields Phazite can't see ([question 16](#24-open-questions)).
+**Keys over plug-in windows (2026-10-13):** play and stop (and pause), and the computer keyboard while it plays notes, work while a plug-in's window has the keyboard focus, so a sound can be played while it is tweaked (`src/ui/PluginKeys.h`; commands opt in with `Command::overPlugins`). Every other key goes to the plug-in. DAWs differ here: Bitwig gives a focused plug-in every key, REAPER and FL Studio have a per-plug-in switch, and Ableton Live keeps Space on Windows. On Windows, a plug-in's native window gets keys before JUCE sees them, so a message hook on the message thread catches these keys on their way to it. The hook is installed at startup, before any plug-in window: Windows calls the hook installed last first, and a plug-in built with JUCE installs its own hook, which offers each key to its focused control (a preset name being typed) and passes on the keys it doesn't use. A key typed into a native text field goes to the plug-in too. **Open:** a per-plug-in "send all keys to the plug-in" switch, as REAPER and FL Studio have, for plug-ins whose own text fields Phazite can't see ([question 16](#25-open-questions)).
 
 **Track limit:** Tracktion's default of 16 devices per track is raised. FL Studio's 10 effect slots per mixer track is a known complaint ([B12](#appendix-b-sources)).
 
@@ -383,7 +385,8 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 
 **Command registry:**
 - every action has an ID, a name, a description, search synonyms (searching "cut" finds Split), a category and a default key;
-- it is built on JUCE's `ApplicationCommandManager`, which Tracktion's `UIBehaviour` already expects.
+- the registry itself has no UI code (2026-10-14): it lists the commands, runs each inside its named undo step, says whether one is enabled or ticked, and searches them. The UI connects it to keys and menus through JUCE's `ApplicationCommandManager`, which Tracktion's `UIBehaviour` expects ([section 24](#24-code-structure));
+- later, commands take parameters and return results, so that scripts and the assistant can run them, as MuseScore's newest commands do ([B46](#appendix-b-sources)).
 
 **Command palette (Ctrl+K):** a fuzzy search over every command, showing each one's shortcut. Enter runs the selected command.
 
@@ -418,7 +421,7 @@ A hotkey automates the last-touched control (FL Studio's "last tweaked", Cubase 
 
 **Named undo:**
 - every command is one named undo step ("Split clip", "Apply outline"), and an undo history panel lists them;
-- Tracktion groups changes on a timer and doesn't name them, so Phazite starts a named transaction for each command.
+- Tracktion groups changes on a timer and doesn't name them, so Phazite starts a named transaction for each command, and for each edit the UI asks the model for. From architecture phase A2, the UI never starts one itself, and a drag is one step, opened when it starts and kept or rolled back when it ends ([section 24](#24-code-structure)).
 
 **Help:**
 - the hint bar is always there;
@@ -627,7 +630,8 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - Saves use the engine's safe save, which writes a temporary file and then renames it, and keep a rolling set of backups.
 - **Autosave** writes a separate file every few minutes. If Phazite crashed, the next launch offers to restore it.
 - Project files contain no personal data, and media paths are relative to the project folder ([section 22](#22-privacy-licences-and-trademarks)).
-- Phazite-specific data is stored in the project file alongside the engine's: sections, the chord lane's source, the outline style and the window layout.
+- Phazite's own data is stored in the project file alongside the engine's: sections and the outline style, track keys, and later the chord lane's source and the window layout. One schema file lists all of it with a schema version; a project saved by an older Phazite is converted when it opens, and Phazite saves its own values, never Tracktion's enum numbers (2026-10-14, [section 24](#24-code-structure)). What happens to a project saved by a newer Phazite is [open question 17](#25-open-questions).
+- **View state** (track heights, collapsed and pinned tracks, drum mode and drum rows, the grids' settings) is saved with the project, so it reopens as it was left. Changing it isn't an undo step and doesn't count as an unsaved change: no `*` in the title bar and no question when closing, as with the playhead's position (2026-10-14).
 
 **Export:**
 - WAV and FLAC. MP3 needs an encoder (**Open**).
@@ -735,6 +739,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 
 **What Phazite builds:**
 - All of the UI. This is by far the largest piece of work: Waveform, on the same engine, shows that the interface is where DAWs differ ([B9](#appendix-b-sources)).
+- The model between the UI and the engine: an API for each area of the project, with Phazite's own IDs and values, and the schema of what a project saves ([section 24](#24-code-structure)).
 - Commands and keymaps, selection and copy/paste handlers, and named undo.
 - Section editing, the chord format, the song outlines and the progression library.
 - Built-in devices with editors, the drum synth and the sound generator.
@@ -760,12 +765,63 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - **Plug-in parameters:** hosted plug-in parameters are identified by index ([section 19](#19-plug-in-hosting-and-stability)).
 - **Real-time rules:** several engine paths break them ([section 20](#20-performance)).
 
-## 24. Open questions
+**How Phazite depends on it (decided 2026-10-14): an engine of Phazite's own is a hedge, not a goal.** Phazite stays on Tracktion Engine.
+- *Why:* Tracktion is about 244,000 lines and Phazite about 25,000. A rewrite leaves features behind for a long time (Audacity 4.0 shipped without MIDI tracks or the mixer, [B49](#appendix-b-sources)), and Tracktion's lead developer explains the cost of writing an engine in "Why you shouldn't write a DAW" ([B55](#appendix-b-sources)).
+- The code is structured so that a part could be replaced: after architecture phase A3, only the model uses Tracktion, behind Phazite's own functions, IDs and values ([section 24](#24-code-structure)).
+- A part is replaced only where Phazite gains something, one capability at a time (the tempo model, the playback graph or plug-in hosting, say), each after a decision dated in the [decision log](#26-decision-log). An interface goes in front of that part, the replacement is built behind it, and the old code is deleted after the switch ([B54](#appendix-b-sources)). The golden tests, which compare saved projects and short renders with committed files, are the safety net.
+- Phazite's own devices are engine-neutral from step 1.6: DSP with a thin Tracktion plug-in around it.
+- Engine problems are still fixed with workarounds first, and a fork if those get awkward ([question 4](#25-open-questions)).
+
+## 24. Code structure
+
+*Decided 2026-10-14*, after a review of Phazite's code and of how other open-source DAWs keep their layers apart ([appendix A](#appendix-a-research-summary)). The structure aims for three things:
+- the UI can be redesigned without touching the rules of editing;
+- every edit can be tested without a window, and later run by scripts and the assistant, through commands;
+- a part of the engine could be replaced without rewriting the UI ([section 23](#23-tracktion-engine-what-it-gives-and-what-we-build)).
+
+The roadmap's [architecture track](roadmap.md#architecture-track) gets there in phases A0 to A5. After each step the app builds, behaves the same and passes its tests.
+
+**Layers.** Each row uses only the rows below it:
+
+| Folder | What it holds | Built into |
+|---|---|---|
+| `src/app/` | Creates everything and connects it: startup, the main window with its menus and dialogs, and the open project. It owns the services and hands them to what needs them | `phazite_app`, a library the tests link, and `Main.cpp`, the program |
+| `src/ui/` | What the user sees and touches: `theme/` (design tokens, look and feel, icons), `components/` (the base controls), `input/` (keys, keymaps, the computer keyboard, keys over plug-in windows, drag and drop), `devices/` (device menus and windows), and a folder for each view: the time line, the playlist, the piano roll, the mixer, the browser and the window's shell | `phazite_ui` |
+| `src/services/` | What the app keeps outside any project: settings (every key in one list), recent projects, the Phazite Sounds download and the browser's library index | `phazite_core` |
+| `src/model/` | The project model: a folder for each area (`arrangement/` for tracks, clips, sections and the grid, `notes/`, `mixer/`, `transport/`, `project/`, `engine/`), each with the functions the UI calls; `commands/`, the command registry without UI code, with undo; and `base/`, which every area builds on: the one header that brings in Tracktion, and the schema of what a project saves, with its migrations | `phazite_core` |
+| `src/devices/` | From step 1.6: Phazite's own instruments and effects, as DSP that doesn't depend on Tracktion, each in a thin Tracktion plug-in | `phazite_core` |
+| Tracktion Engine and JUCE | The project store (Tracktion's Edit) and the audio engine; JUCE for windows, audio devices and plug-in hosting | `phazite_core` |
+
+**Rules.** From phase A0, `tools/check-architecture.sh` counts what breaks rules 1 to 4 and 7 in CI and before every commit. Where code still breaks a rule, the count has a limit that can only go down, so nothing new breaks it while the old cases are fixed; a commit that raises a limit on purpose says why in its message, and CI checks that it does.
+
+1. **Dependencies point down only:** the app uses the UI, the UI uses the services and the model, and the services may use the model; never the other way round.
+2. **No window code in the model:** the model and the services include none of JUCE's window modules (`juce_gui_basics`, `juce_gui_extra`) and name no window class; key and mouse handling, pixel sizes and how values are shown belong in the UI. For now the model may still use `juce_graphics`, for color values. *Three model files include window modules today, and the model's hook for devices' windows names window classes; none will after phase A1.*
+3. **The UI decides nothing about the project:** it never changes the project or starts an undo step; it runs a command or calls a model function. *The UI starts 46 undo steps and changes the project directly in about 20 places today; none after phase A2.*
+4. **Phazite's own types across boundaries:** objects pass between layers as IDs and plain values, never as Tracktion pointers. The UI doesn't use Tracktion; in the model, only the code behind each area's functions does. *The UI uses Tracktion in about 545 places today; none after phase A3.*
+5. **Tokens and strings:** every color, size, corner radius and font in the UI comes from a design token, and every text the user reads from a strings table (phase A4).
+6. **Fast data is polled:** meters, the playhead and other values that change many times a second are read from small read-only sources on a timer, never stored in the project or sent as change messages (phase A3).
+7. **One named undo step per change:** every change to the project happens inside one named undo step, owned by a command or by the model function the UI called; from phase A2, a drag is a gesture session that opens one step and keeps or rolls it back when the drag ends. Changes that are deliberately not undo steps (mute and solo, the loop, view state) go through model functions too.
+
+**What stays the same, on purpose:**
+- Tracktion's Edit stays the single store of project data, as Tracktion's developers advise ([B53](#appendix-b-sources)) and as Audacity 4 kept its old storage ([B48](#appendix-b-sources)).
+- One library, `phazite_core`, compiles JUCE and Tracktion once for every program.
+- Commands stay the public API: menus, shortcuts, the palette, macros and named undo use them, and later scripts and the assistant will ([section 12](#12-commands-keys-and-help)).
+- The app passes each object the services it needs; at Phazite's size that is simpler than a dependency-injection framework.
+- The busiest views (the playlist, the piano roll, the meters) stay painted in C++; a designer works through the tokens and the gallery app ([design language](#design-language)).
+- The real-time rules in `CLAUDE.md` don't change.
+
+**Project data (decided 2026-10-14):**
+- Tracktion's Edit stays the project store: a `.phazite` file is the Edit saved as XML, with Phazite's own properties on Tracktion's nodes and in a `PHAZITE` branch of its own.
+- One schema file names every property Phazite saves, marks which are view state ([section 18](#18-projects-saving-and-export)), and carries a schema version. A project saved by an older version is converted when it opens, by migrations kept next to the schema, each with a test. What happens to a project saved by a newer Phazite is [open question 17](#25-open-questions); until it is decided, Phazite doesn't open one, so nothing it holds is lost.
+- Phazite saves its own values, never Tracktion's enum numbers, so a Tracktion update can't change what a saved project means. The two it saved that way before (the grid's fixed size, and the scale of a track's key and of the key chosen last) are converted.
+- Notes will get stable IDs saved in the project (phase A3), so that selections, undo and scripts can refer to one note reliably.
+
+## 25. Open questions
 
 1. ~~AI engines in v1~~ **Decided:** algorithmic in v1, trained models later ([section 16](#16-ai-and-generative-features)).
 2. ~~Outline styles first~~ **Decided:** pop, rock, electronic, and hip-hop/trap ([section 13](#13-getting-started-and-song-outlines)).
 3. ~~UI font~~ **Decided:** Inter, bundled, under the SIL Open Font License; `CLAUDE.md` now allows the OFL for fonts ([design language](#design-language)).
-4. ~~Engine fixes~~ **Decided:** try simple workarounds first. If they make Phazite's code too awkward, or upstream issues block us, keep a fork of Tracktion Engine. Problems are reported upstream either way ([roadmap](roadmap.md), step 0.3).
+4. ~~Engine fixes~~ **Decided:** try simple workarounds first. If they make Phazite's code too awkward, or upstream issues block us, keep a fork of Tracktion Engine. Problems are reported upstream either way ([roadmap](roadmap.md), step 0.3). Replacing a part of the engine outright is a separate choice, made one capability at a time after a dated decision ([section 23](#23-tracktion-engine-what-it-gives-and-what-we-build), 2026-10-14).
 5. **MP3 export:** it needs an encoder such as LAME (LGPL). Include it or not?
 6. **Airwindows:** ship its 186 MIT-licensed effects as extra devices? They also lock on the audio thread today.
 7. **Plug-in sandboxing:** first update after v1 (proposed), or before v1?
@@ -785,7 +841,12 @@ Raised by the third round of feedback (2026-10-13):
 
 16. **Keys over plug-in windows:** add a per-plug-in "send all keys to the plug-in" switch, as REAPER and FL Studio have, for plug-ins that draw their own text fields without JUCE, where Phazite can't tell that a name is being typed? Proposed: yes, in each plug-in window's menu, off by default ([section 9](#9-devices-containers-and-presets)).
 
-## 25. Decision log
+Raised by the architecture review (2026-10-14):
+
+17. **Projects from a newer Phazite:** with a schema version in every project (architecture phase A1), Phazite can tell that a newer version saved a project, whose data it might misread or drop when saving. Proposed: don't open it, say that a newer Phazite saved it, keep it in Open Recent, and at startup open the next recent project instead. The alternatives are opening it read-only, or after a warning. Until this is decided, Phazite does as proposed.
+18. **Choosing what loops:** where the loop is doesn't count as an unsaved change, but turning looping on or off, or switching between looping the song and a range, still does: the view state of [section 18](#18-projects-saving-and-export) doesn't include them. Proposed: treat them like the loop's position.
+
+## 26. Decision log
 
 | Date | Decision |
 |---|---|
@@ -817,6 +878,13 @@ Raised by the third round of feedback (2026-10-13):
 | 2026-10-13 | Third round, after the owner tried the mixer: Space stops back at the play start, which a click in a time ruler sets and which is the song's start in a project just opened, as in FL Studio, Ableton Live, REAPER and Waveform; Shift+Space pauses (Ctrl+Space in FL Studio's keymap). Play, stop and the computer keyboard work while a plug-in window has the keyboard focus, through a message hook installed before any plug-in's. Each effect has a Mix knob, as FL Studio's mixer slots have, with its limits documented (no latency compensation or ramping yet). The inspector's channel strip fills its height |
 | 2026-10-13 | Step 1.5 defaults, after research into the browsers people praise: one tree of places, as in FL Studio, where one click opens a folder; clicking a sound or moving to it with the arrow keys previews it (on by default), Esc stops it, and Shift+Enter or Right plays it again; loops preview at the song's tempo and start on its bar while it plays, and keep their own pitch until Phazite has a song key to match; Enter or a double-click puts the item on the selected track at the play start; a dropped loop follows the song's tempo, as it previewed; F8 is the plug-in picker in both keymaps, Phazite's keymap moves the browser to Ctrl+Alt+B and adds Ctrl+F for its search; favorites by a star; Recent keeps the last 50 items put into the song; "Sounds by Type" lists every library's sounds by tag. Phazite's own sounds are CC0 only: CC0 libraries plus Phazite's own synthesis, each recorded with its source |
 | 2026-10-13 | Phazite Sounds become an optional download, kept out of Phazite's repository and installer: the releases of their own public repository (phazite-sounds), pinned in Phazite by address, size and SHA-256. Phazite asks once, in a welcome window that will grow into first-run setup with more pages; the browser offers them until they are installed, and a zip downloaded by hand installs too |
+| 2026-10-14 | Code structure, after a review of Phazite's code and of how Ardour, MuseScore, Audacity, Zrythm, ossia score and LMMS keep their layers apart: the layers, folders and seven rules of [section 24](#24-code-structure). The app uses the UI, the UI the services and the model; the model has no window code; the UI runs commands and calls model functions rather than changing the project or starting undo steps, and in time sees only Phazite's own types. `tools/check-architecture.sh` checks the rules in CI and before every commit, with limits that can only go down. The roadmap's architecture track (phases A0 to A5) does the work |
+| 2026-10-14 | An engine of Phazite's own is a hedge, not a goal: Phazite stays on Tracktion Engine and replaces a part only where it gains something, one capability at a time, each after a decision dated in this log, behind an interface and with the golden tests as the safety net. Phazite's own devices are engine-neutral from step 1.6 either way. Engine problems are still fixed with workarounds first and a fork if those get awkward (2026-10-12) |
+| 2026-10-14 | Projects: Tracktion's Edit stays the project store. Phazite adds a schema version, keeps the list of what it saves and the migrations of older projects in one place, and saves its own values rather than Tracktion's enum numbers; the two saved that way so far (the grid's fixed size and the scale of a key) are converted when an older project opens |
+| 2026-10-14 | Notes get stable IDs saved in the project, so that selections, undo and scripts can refer to a note reliably (architecture phase A3) |
+| 2026-10-14 | View state (track heights, collapsed and pinned tracks, drum mode and drum rows, grid settings) stays saved in the project, but changing it no longer counts as an unsaved change, as with the playhead's position |
+| 2026-10-14 | Architecture phases A0 and A1 (golden tests and the architecture check, then untangling the model without changing what the app does) come now, before step 1.6, so that the new devices start on the new structure |
+| 2026-10-14 | Designer workflow: the design tokens move into a file in the DTCG format, which a designer edits or exports from Figma, Penpot or Tokens Studio, and a gallery app shows every control and view in all three themes (architecture phase A4). A declarative layout tool (JIVE or foleys_gui_magic) only if dialogs become a bottleneck |
 
 ## Appendix A. Research summary
 
@@ -846,6 +914,15 @@ In October 2026, research agents reviewed about 20 DAWs, and the Tracktion Engin
 - **Folders that are buses** are where the field converges (Live, Pro Tools routing folders, Cubase 15, Logic's summing stacks).
 - **Routing diagrams** get mixed reviews; showing routing on the selected strip (Logic, REAPER's route button) works without clutter.
 - **Solo:** every other DAW keeps solo apart from the mute switches; FL Studio's solo changes them, a complaint on its forum since 2007.
+
+**Code structure (researched 2026-10-13, for [section 24](#24-code-structure)):** Ardour, MuseScore and its shared framework, Audacity 3 and 4, LMMS, Zrythm 2, ossia score, the JUCE hosts Element and Helio, and apps built on Tracktion, from their developer documentation and source.
+- **Boundaries hold only where a build rule or a check enforces them.** Ardour's core library builds without its UI toolkit ([B43](#appendix-b-sources)), and MuseScore makes each module a CMake project of its own ([B44](#appendix-b-sources)). LMMS, with folders only, let its core grow UI code: its core track class declares how to make its own view ([B52](#appendix-b-sources)).
+- **In the newer designs, the UI never changes the project directly.** It sends a command or calls an operation that owns the undo step: MuseScore's view models send commands to controllers ([B45](#appendix-b-sources)), Zrythm writes down "zero direct model mutation" ([B50](#appendix-b-sources)), and ossia's presenters submit commands, a drag sending updates and then one commit or rollback ([B51](#appendix-b-sources)).
+- **Commands are becoming the public API.** MuseScore's 2026 decision records turn them into typed calls with parameters and results, and say which ones shortcuts, scripts or an assistant may use ([B46](#appendix-b-sources), [B47](#appendix-b-sources)).
+- **Objects cross boundaries as stable IDs, never pointers:** Tracktion's `EditItemID`, Ardour's `PBD::ID`, ossia's paths and Zrythm's UUIDs. Tracktion's developers advise apps to look items up by ID and to keep the Edit as the one store of project data ([B53](#appendix-b-sources)).
+- **Engines were wrapped only when something was really being replaced, one piece at a time.** Audacity 4 rebuilt its UI over its old engine through adapters ([B48](#appendix-b-sources)) and shipped 4.0 without MIDI tracks or the mixer ([B49](#appendix-b-sources)). Replacing one capability behind an interface ("branch by abstraction", [B54](#appendix-b-sources)) avoids a rewrite, whose cost Tracktion's lead developer describes ([B55](#appendix-b-sources)).
+- **Designers work through named theme values, and the busiest views stay painted in code.** Design tokens have a shared format, DTCG 2025.10 ([B56](#appendix-b-sources)); the Melatonin Inspector shows a running JUCE app's sizes, colors and fonts ([B57](#appendix-b-sources)).
+- **Fast-changing data stays out of the project:** meters and the playhead are read from small sources, not stored in the project or sent as change messages.
 
 **Where the field is converging:**
 - Each track is a row, a chain and a channel.
@@ -904,3 +981,18 @@ In October 2026, research agents reviewed about 20 DAWs, and the Tracktion Engin
 - **B40** Ableton Live 12 manual, MIDI and Key Remote Control (playing MIDI with the computer keyboard): <https://www.ableton.com/en/manual/midi-and-key-remote-control/>
 - **B41** FL Studio manual, keyboard and mouse shortcuts (Ctrl+T typing keyboard to piano, F10 MIDI settings): <https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/basics_shortcuts.htm>
 - **B42** Lucide icons and licence (ISC; MIT for the icons from Feather): <https://github.com/lucide-icons/lucide/blob/main/LICENSE>
+- **B43** Ardour developer documentation: <https://ardour.org/files/doxygen/>
+- **B44** MuseScore framework, decision record 00001 (modules): <https://raw.githubusercontent.com/musescore/muse_framework/main/docs/adr/00001-CoreArch-Modularity.md>
+- **B45** MuseScore framework, decision record 00005 (interaction workflow): <https://raw.githubusercontent.com/musescore/muse_framework/main/docs/adr/00005-CoreArch-Interact-workflow.md>
+- **B46** MuseScore framework, decision record 00101 (commands replace actions): <https://raw.githubusercontent.com/musescore/muse_framework/main/docs/adr/00101-Commands-Replacing-actions-with-commands.md>
+- **B47** MuseScore framework, decision record 00107 (where commands may be used): <https://raw.githubusercontent.com/musescore/muse_framework/main/docs/adr/00107-Commands-Availability.md>
+- **B48** Audacity 4, track-editing interfaces and their Audacity 3 adapters: <https://github.com/audacity/audacity/tree/master/src/trackedit>
+- **B49** Audacity 4.0.0 release notes: <https://www.audacityteam.org/changelog/4.0.0/>
+- **B50** Zrythm, undo system: <https://raw.githubusercontent.com/zrythm/zrythm/master/doc/dev/undo_system.md>
+- **B51** ossia score, commands: <https://ossia.io/score-api-docs/_commands.html>
+- **B52** LMMS, Track.h: <https://raw.githubusercontent.com/LMMS/lmms/master/include/Track.h>
+- **B53** JUCE forum, structuring an app on Tracktion's Edit (2020): <https://forum.juce.com/t/questions-about-app-structure-state-valuetree-using-tracktion-engine/38483>
+- **B54** Martin Fowler, Branch by Abstraction: <https://martinfowler.com/bliki/BranchByAbstraction.html>
+- **B55** Dave Rowland, "Why you shouldn't write a DAW" (ADC 2023): <https://youtu.be/GMlnh6_9aTc>
+- **B56** Design Tokens Community Group, format 2025.10: <https://www.designtokens.org/TR/2025.10/>
+- **B57** Melatonin Inspector (MIT): <https://github.com/sudara/melatonin_inspector>
