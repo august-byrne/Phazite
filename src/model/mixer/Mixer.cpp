@@ -4,6 +4,7 @@
 #include "model/arrangement/Tracks.h"
 #include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 
 #include <optional>
@@ -282,7 +283,7 @@ te::Plugin::Ptr createDevice (te::Edit& edit, const DeviceType& type)
 
 te::Plugin* addDeviceTo (te::Edit& edit, te::Track* track, const DeviceType& type, te::SelectionManager* selection)
 {
-    edit.getUndoManager().beginNewTransaction ("Add " + type.name);
+    const UndoStep step (edit, "Add " + type.name);
     auto device = createDevice (edit, type);
 
     if (device == nullptr)

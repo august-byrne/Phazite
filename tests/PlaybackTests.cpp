@@ -228,3 +228,36 @@ TEST_CASE ("Playback starts where the playhead was last put, and stopping goes b
     CHECK (transport.getPosition().inSeconds() == doctest::Approx (4.0));
     CHECK_FALSE (transport.isPlaying());
 }
+
+TEST_CASE ("Go to start and end")
+{
+    Song song;
+    phazite::addTransportCommands (song.registry, song.selection);
+    song.addClip (0, 2.0, 6.0); // ends 3 seconds in
+    auto& transport = song.edit->getTransport();
+
+    // Home and End put the playhead at the song's start or where its last clip ends, and playback starts there.
+    phazite::goToEnd (*song.edit);
+    CHECK (transport.getPosition().inSeconds() == doctest::Approx (3.0));
+    CHECK (phazite::getPlayStart (*song.edit).inSeconds() == doctest::Approx (3.0));
+
+    phazite::goToStart (*song.edit);
+    CHECK (transport.getPosition().inSeconds() == doctest::Approx (0.0));
+    CHECK (phazite::getPlayStart (*song.edit).inSeconds() == doctest::Approx (0.0));
+
+    // Their commands act on the selection manager's Edit.
+    REQUIRE (song.registry.invoke ("transport.goToEnd"));
+    CHECK (transport.getPosition().inSeconds() == doctest::Approx (3.0));
+    REQUIRE (song.registry.invoke ("transport.goToStart"));
+    CHECK (transport.getPosition().inSeconds() == doctest::Approx (0.0));
+
+    // Without one, every transport command is greyed out.
+    song.selection.edit = nullptr;
+
+    for (const auto* id : { "transport.playStop", "transport.playPause", "transport.goToStart", "transport.goToEnd" })
+    {
+        CAPTURE (id);
+        CHECK_FALSE (song.registry.find (id)->isEnabled());
+        CHECK_FALSE (song.registry.invoke (id));
+    }
+}

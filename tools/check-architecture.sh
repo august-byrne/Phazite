@@ -58,9 +58,9 @@ cd "$(git rev-parse --show-toplevel)" || exit 2
 # may not include.
 tracktion_preludes='src/model/base/Tracktion.h'
 # The calls that begin an undo step (an extended regular expression), counted in src/ui and src/app.
-undo_functions='beginNewTransaction'
+undo_functions='beginNewTransaction|UndoStep'
 # The undo code: the model files that may call beginNewTransaction.
-undo_implementation=''
+undo_implementation='src/model/commands/Undo.cpp'
 
 budget_file=tools/architecture-budget.txt
 awk=${AWK:-awk}

@@ -83,6 +83,16 @@ void movePlayhead (te::Edit& edit, te::TimePosition position)
     transport.setPosition (position);
 }
 
+void goToStart (te::Edit& edit)
+{
+    movePlayhead (edit, te::TimePosition());
+}
+
+void goToEnd (te::Edit& edit)
+{
+    movePlayhead (edit, te::toPosition (edit.getLength()));
+}
+
 void playOrStop (te::Edit& edit)
 {
     auto& transport = edit.getTransport();
@@ -174,6 +184,47 @@ void SongFollower::changed (const juce::ValueTree& tree)
 }
 
 //==============================================================================
+void addTransportCommands (CommandRegistry& registry, te::SelectionManager& selection)
+{
+    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+
+    // As in FL Studio and Ableton Live, stopping goes back to where playback started, so that a part can be heard
+    // again and again while it is tweaked; Play / Pause goes on from where it stopped. Both work over plug-in windows.
+    registry.add ({ .id = "transport.playStop",
+                    .name = "Play / Stop",
+                    .category = "Transport",
+                    .description = "Plays from where you last put the playhead, or stops and goes back there.",
+                    .synonyms = { "start", "playback", "return to start" },
+                    .perform = withEdit (selection, playOrStop),
+                    .isEnabled = hasEdit,
+                    .overPlugins = true });
+
+    registry.add ({ .id = "transport.playPause",
+                    .name = "Play / Pause",
+                    .category = "Transport",
+                    .description = "Plays from where the playhead is, or stops it there, so that playback goes on from there.",
+                    .synonyms = { "pause", "continue", "resume" },
+                    .perform = withEdit (selection, playOrPause),
+                    .isEnabled = hasEdit,
+                    .overPlugins = true });
+
+    registry.add ({ .id = "transport.goToStart",
+                    .name = "Go to Start",
+                    .category = "Transport",
+                    .description = "Moves the playhead to the start of the song.",
+                    .synonyms = { "home", "beginning", "rewind", "return" },
+                    .perform = withEdit (selection, goToStart),
+                    .isEnabled = hasEdit });
+
+    registry.add ({ .id = "transport.goToEnd",
+                    .name = "Go to End",
+                    .category = "Transport",
+                    .description = "Moves the playhead to the end of the song, where its last clip ends.",
+                    .synonyms = { "end", "last", "fast forward" },
+                    .perform = withEdit (selection, goToEnd),
+                    .isEnabled = hasEdit });
+}
+
 void addLoopCommands (CommandRegistry& registry, te::SelectionManager& selection, RangeSelection& range)
 {
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };

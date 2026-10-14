@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "CommandRegistry.h"
-#include "model/engine/EngineSetup.h"
-#include "model/transport/Playback.h"
+#include "Undo.h"
 
 #include <PhaziteData.h>
 
@@ -175,10 +174,15 @@ bool CommandRegistry::invoke (const juce::String& id)
     if (command == nullptr || ! isEnabled (*command))
         return false;
 
-    if (command->undoTarget != nullptr)
-        if (auto* edit = command->undoTarget())
-            edit->getUndoManager().beginNewTransaction (getCurrentName (*command)); // e.g. "Delete 2 Tracks"
+    auto* edit = command->undoTarget != nullptr ? command->undoTarget() : nullptr;
 
+    if (edit == nullptr)
+    {
+        command->perform();
+        return true;
+    }
+
+    const UndoStep step (*edit, getCurrentName (*command)); // e.g. "Delete 2 Tracks"
     command->perform();
     return true;
 }
@@ -464,6 +468,24 @@ juce::String getCurrentName (const Command& command)
     return command.name;
 }
 
+std::function<void()> withEdit (const te::SelectionManager& selection, std::function<void (te::Edit&)> action)
+{
+    return [&selection, action]
+    {
+        if (auto* edit = selection.getEdit())
+            action (*edit);
+    };
+}
+
+std::function<bool()> ifEdit (const te::SelectionManager& selection, std::function<bool (te::Edit&)> test)
+{
+    return [&selection, test]
+    {
+        auto* edit = selection.getEdit();
+        return edit != nullptr && test (*edit);
+    };
+}
+
 //==============================================================================
 int getMatchScore (const juce::String& query, const juce::String& text)
 {
@@ -512,179 +534,5 @@ int getMatchScore (const juce::String& query, const juce::String& text)
         score += 10;
 
     return score;
-}
-
-//==============================================================================
-namespace
-{
-    // AutomatableParameter::valueTreePropertyChanged() updates a parameter's CachedValue when undo
-    // changes it, but not its currentValue, which the audio thread reads. Automated parameters
-    // follow their curves instead, so they are left alone.
-    void playStoredParameterValues (te::Edit& edit)
-    {
-        for (auto* parameter : edit.getAllAutomatableParams (true))
-            if (parameter->getCurve().getNumPoints() == 0)
-                parameter->updateFromAttachedValue();
-    }
-} // namespace
-
-void undo (te::Edit& edit)
-{
-    edit.undo();
-    playStoredParameterValues (edit);
-}
-
-void redo (te::Edit& edit)
-{
-    edit.redo();
-    playStoredParameterValues (edit);
-}
-
-//==============================================================================
-void addEditCommands (CommandRegistry& registry, UIBehaviour& ui)
-{
-    const auto focusedEdit = [&ui] { return ui.getLastFocusedEdit(); };
-
-    // "Undo Change Volume": the name of the step, when it has one.
-    const auto nameWithStep = [focusedEdit] (bool isUndo)
-    {
-        const juce::String verb (isUndo ? "Undo" : "Redo");
-
-        if (auto* edit = focusedEdit())
-        {
-            auto& undoManager = edit->getUndoManager();
-            const auto step = isUndo ? undoManager.getUndoDescription() : undoManager.getRedoDescription();
-
-            if ((isUndo ? undoManager.canUndo() : undoManager.canRedo()) && step.isNotEmpty())
-                return verb + " " + step;
-        }
-
-        return verb;
-    };
-
-    registry.add ({ .id = "edit.undo",
-                    .name = "Undo",
-                    .category = "Edit",
-                    .description = "Undoes the last change.",
-                    .synonyms = { "back", "revert" },
-                    .perform =
-                        [focusedEdit]
-                    {
-                        if (auto* edit = focusedEdit())
-                            undo (*edit);
-                    },
-                    .isEnabled =
-                        [focusedEdit]
-                    {
-                        auto* edit = focusedEdit();
-                        return edit != nullptr && edit->getUndoManager().canUndo();
-                    },
-                    .currentName = [nameWithStep] { return nameWithStep (true); },
-                    .repeatsWhileHeld = true });
-
-    registry.add ({ .id = "edit.redo",
-                    .name = "Redo",
-                    .category = "Edit",
-                    .description = "Redoes the change you last undid.",
-                    .synonyms = { "again" },
-                    .perform =
-                        [focusedEdit]
-                    {
-                        if (auto* edit = focusedEdit())
-                            redo (*edit);
-                    },
-                    .isEnabled =
-                        [focusedEdit]
-                    {
-                        auto* edit = focusedEdit();
-                        return edit != nullptr && edit->getUndoManager().canRedo();
-                    },
-                    .currentName = [nameWithStep] { return nameWithStep (false); },
-                    .repeatsWhileHeld = true });
-
-    registry.add ({ .id = "edit.undoOrRedo",
-                    .name = "Undo or Redo",
-                    .category = "Edit",
-                    .description = "Undoes the last change, or redoes it if you just undid it, like Ctrl+Z in FL Studio.",
-                    .synonyms = { "undo", "redo", "toggle" },
-                    .perform =
-                        [focusedEdit]
-                    {
-                        if (auto* edit = focusedEdit())
-                        {
-                            if (edit->getUndoManager().canRedo())
-                                redo (*edit);
-                            else
-                                undo (*edit);
-                        }
-                    },
-                    .isEnabled =
-                        [focusedEdit]
-                    {
-                        auto* edit = focusedEdit();
-                        return edit != nullptr && (edit->getUndoManager().canUndo() || edit->getUndoManager().canRedo());
-                    },
-                    .currentName =
-                        [focusedEdit, nameWithStep]
-                    {
-                        auto* edit = focusedEdit();
-                        return nameWithStep (! (edit != nullptr && edit->getUndoManager().canRedo()));
-                    } });
-
-    // As in FL Studio and Ableton Live, stopping goes back to where playback started, so that a part can be heard
-    // again and again while it is tweaked; Play / Pause goes on from where it stopped. Both work over plug-in windows.
-    registry.add ({ .id = "transport.playStop",
-                    .name = "Play / Stop",
-                    .category = "Transport",
-                    .description = "Plays from where you last put the playhead, or stops and goes back there.",
-                    .synonyms = { "start", "playback", "return to start" },
-                    .perform =
-                        [focusedEdit]
-                    {
-                        if (auto* edit = focusedEdit())
-                            playOrStop (*edit);
-                    },
-                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; },
-                    .overPlugins = true });
-
-    registry.add ({ .id = "transport.playPause",
-                    .name = "Play / Pause",
-                    .category = "Transport",
-                    .description = "Plays from where the playhead is, or stops it there, so that playback goes on from there.",
-                    .synonyms = { "pause", "continue", "resume" },
-                    .perform =
-                        [focusedEdit]
-                    {
-                        if (auto* edit = focusedEdit())
-                            playOrPause (*edit);
-                    },
-                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; },
-                    .overPlugins = true });
-
-    registry.add ({ .id = "transport.goToStart",
-                    .name = "Go to Start",
-                    .category = "Transport",
-                    .description = "Moves the playhead to the start of the song.",
-                    .synonyms = { "home", "beginning", "rewind", "return" },
-                    .perform =
-                        [focusedEdit]
-                    {
-                        if (auto* edit = focusedEdit())
-                            movePlayhead (*edit, te::TimePosition());
-                    },
-                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; } });
-
-    registry.add ({ .id = "transport.goToEnd",
-                    .name = "Go to End",
-                    .category = "Transport",
-                    .description = "Moves the playhead to the end of the song, where its last clip ends.",
-                    .synonyms = { "end", "last", "fast forward" },
-                    .perform =
-                        [focusedEdit]
-                    {
-                        if (auto* edit = focusedEdit())
-                            movePlayhead (*edit, te::toPosition (edit->getLength()));
-                    },
-                    .isEnabled = [focusedEdit] { return focusedEdit() != nullptr; } });
 }
 } // namespace phazite

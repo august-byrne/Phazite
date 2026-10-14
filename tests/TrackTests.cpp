@@ -3,6 +3,7 @@
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 
 namespace
 {

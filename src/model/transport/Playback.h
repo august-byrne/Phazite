@@ -38,6 +38,10 @@ te::TimePosition getPlayStart (const te::Edit&);
 // if it is playing).
 void movePlayhead (te::Edit&, te::TimePosition);
 
+// Home and End: put the playhead at the song's start, or at its end, where its last clip ends (movePlayhead()).
+void goToStart (te::Edit&);
+void goToEnd (te::Edit&);
+
 // Space: plays from where playback starts, or stops and goes back there.
 void playOrStop (te::Edit&);
 
@@ -76,6 +80,9 @@ private:
 };
 
 //==============================================================================
+// The transport's commands, for the selection manager's Edit: Play / Stop, Play / Pause, Go to Start and Go to End.
+void addTransportCommands (CommandRegistry&, te::SelectionManager&);
+
 // The loop's commands: Loop (on or off), Loop Selection (the time range selected in the playlist), Loop
 // Section (the selected sections) and Loop the Song.
 void addLoopCommands (CommandRegistry&, te::SelectionManager&, RangeSelection&);

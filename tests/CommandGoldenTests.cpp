@@ -15,7 +15,6 @@
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/engine/EngineSetup.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
 #include "model/transport/Playback.h"
@@ -54,10 +53,9 @@ te::BeatPosition beats (double b)
 
 // The model's commands, registered as the app registers them: addSongCommands(), which Main.cpp calls, then the note
 // commands as AppShell adds them, with a grid of a quarter beat.
-void addModelCommands (phazite::CommandRegistry& registry, te::SelectionManager& selection, phazite::RangeSelection& range,
-                       phazite::UIBehaviour& ui)
+void addModelCommands (phazite::CommandRegistry& registry, te::SelectionManager& selection, phazite::RangeSelection& range)
 {
-    phazite::addSongCommands (registry, selection, range, ui);
+    phazite::addSongCommands (registry, selection, range);
     phazite::addNoteCommands (registry, selection, [] { return 0.25; });
 }
 
@@ -239,15 +237,8 @@ struct Script
         edit.getUndoManager().clearUndoHistory();
 
         selection.edit = &edit;
-        ui.setFocusedEdit (&edit); // the undo and transport commands act on the focused Edit
-        addModelCommands (registry, selection, range, ui);
+        addModelCommands (registry, selection, range);
         snapshot ("start");
-    }
-
-    ~Script()
-    {
-        // The Engine is shared by every test: its UIBehaviour must not keep this project's Edit, even after a failure.
-        ui.setFocusedEdit (nullptr);
     }
 
     // Runs commands, each of which must be enabled where the script runs it, recording the undo step and the states each
@@ -343,7 +334,6 @@ struct Script
     }
 
     // Destroyed in the reverse order: the notes' selection first, then the commands, the selection and the project.
-    phazite::UIBehaviour& ui = phazite::getUIBehaviour (phazite::test::getEngine());
     phazite::test::TemporaryFolder temp;
     std::unique_ptr<phazite::Project> project = createProject (temp.folder);
     te::Edit& edit = project->getEdit();
@@ -364,11 +354,10 @@ TEST_SUITE ("golden")
 {
     TEST_CASE ("Golden commands: the model's commands keep their ids, texts, switches and order")
     {
-        auto& ui = phazite::getUIBehaviour (phazite::test::getEngine());
         te::SelectionManager selection { phazite::test::getEngine() };
         phazite::RangeSelection range;
         phazite::CommandRegistry registry;
-        addModelCommands (registry, selection, range, ui);
+        addModelCommands (registry, selection, range);
 
         juce::StringArray lines;
 
@@ -521,7 +510,6 @@ TEST_SUITE ("golden")
         s.range.clear();
         s.selection.deselectAll();
         s.events = nullptr;
-        s.ui.setFocusedEdit (nullptr);
         phazite::test::settle();
 
         REQUIRE (s.project->save().wasOk());

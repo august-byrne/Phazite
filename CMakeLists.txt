@@ -80,6 +80,10 @@ target_sources(phazite_core PRIVATE
     src/model/base/Tracktion.h
     src/model/commands/CommandRegistry.cpp
     src/model/commands/CommandRegistry.h
+    src/model/commands/Undo.cpp
+    src/model/commands/Undo.h
+    src/model/commands/UndoCommands.cpp
+    src/model/commands/UndoCommands.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
     src/model/engine/EngineSetup.cpp
@@ -387,6 +391,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TrackTests.cpp
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h
+        tests/UndoTests.cpp
         tests/ValueTextTests.cpp
         tests/WelcomeTests.cpp)
 

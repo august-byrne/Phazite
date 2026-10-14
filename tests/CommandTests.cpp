@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/engine/EngineSetup.h"
+#include "model/commands/Undo.h"
+#include "model/commands/UndoCommands.h"
 
 namespace
 {
@@ -26,6 +27,13 @@ phazite::Command makeEditChange (const juce::String& id, const juce::String& nam
     auto command = makeCommand (id, name, [&edit, value] { edit.state.setProperty ("testValue", value, &edit.getUndoManager()); });
     command.undoTarget = [&edit] { return &edit; };
     return command;
+}
+
+// A model function that is a change of its own, so it begins its own undo step.
+void setValueInOwnStep (te::Edit& edit, int value)
+{
+    const phazite::UndoStep step (edit, "Set Value");
+    edit.state.setProperty ("testValue", value, &edit.getUndoManager());
 }
 } // namespace
 
@@ -88,6 +96,8 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     auto& undo = edit->getUndoManager();
 
+    // Before the registry, whose undo commands keep a reference to it.
+    te::SelectionManager selection { phazite::test::getEngine() };
     phazite::CommandRegistry registry;
     registry.add (makeEditChange ("test.one", "Set to One", *edit, 1));
     registry.add (makeEditChange ("test.two", "Set to Two", *edit, 2));
@@ -109,9 +119,8 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
 
     SUBCASE ("FL Studio's undo-or-redo toggles the last change")
     {
-        auto& ui = phazite::getUIBehaviour (phazite::test::getEngine());
-        ui.setFocusedEdit (edit.get());
-        phazite::addEditCommands (registry, ui);
+        selection.edit = edit.get();
+        phazite::addUndoCommands (registry, selection);
 
         REQUIRE (registry.invoke ("test.two"));
         REQUIRE (registry.invoke ("edit.undoOrRedo"));
@@ -121,15 +130,14 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
         REQUIRE (registry.invoke ("edit.undo"));
         CHECK ((int) edit->state["testValue"] == 1);
 
-        ui.setFocusedEdit (nullptr);
-        CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without a focused Edit
+        selection.edit = nullptr;
+        CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without an Edit
     }
 
     SUBCASE ("Undo and redo show the name of the step, in the menus too")
     {
-        auto& ui = phazite::getUIBehaviour (phazite::test::getEngine());
-        ui.setFocusedEdit (edit.get());
-        phazite::addEditCommands (registry, ui);
+        selection.edit = edit.get();
+        phazite::addUndoCommands (registry, selection);
 
         const auto nameOf = [&registry] (const char* id) { return phazite::getCurrentName (*registry.find (id)); };
         CHECK (nameOf ("edit.undo") == juce::String ("Undo Set to One"));
@@ -142,9 +150,77 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
         CHECK (nameOf ("edit.redo") == juce::String ("Redo Set to One"));
         CHECK (nameOf ("edit.undoOrRedo") == juce::String ("Redo Set to One"));
 
-        ui.setFocusedEdit (nullptr);
+        selection.edit = nullptr;
         CHECK (nameOf ("edit.undo") == juce::String ("Undo"));
     }
+}
+
+TEST_CASE ("A model function that begins its own undo step is part of the step of the command that runs it")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto& undo = edit->getUndoManager();
+    undo.clearUndoHistory();
+
+    phazite::CommandRegistry registry;
+    auto command = makeCommand ("test.setTwice", "Set Twice",
+                                [&edit]
+                                {
+                                    setValueInOwnStep (*edit, 1);
+                                    setValueInOwnStep (*edit, 2);
+                                });
+    command.undoTarget = [&edit] { return edit.get(); };
+    registry.add (std::move (command));
+
+    // Run by the command, both changes are the command's one step.
+    REQUIRE (registry.invoke ("test.setTwice"));
+    CHECK ((int) edit->state["testValue"] == 2);
+    CHECK (undo.getUndoDescription() == juce::String ("Set Twice"));
+
+    phazite::undo (*edit);
+    CHECK_FALSE (edit->state.hasProperty ("testValue"));
+    CHECK_FALSE (undo.canUndo());
+
+    // Called on its own, the function is a step of its own.
+    setValueInOwnStep (*edit, 3);
+    CHECK (undo.getUndoDescription() == juce::String ("Set Value"));
+    phazite::undo (*edit);
+    CHECK_FALSE (edit->state.hasProperty ("testValue"));
+}
+
+TEST_CASE ("withEdit and ifEdit act only with an Edit")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    te::SelectionManager selection { phazite::test::getEngine() };
+
+    int runs = 0;
+    te::Edit* actedOn = nullptr;
+    const auto action = phazite::withEdit (selection,
+                                           [&runs, &actedOn] (te::Edit& e)
+                                           {
+                                               ++runs;
+                                               actedOn = &e;
+                                           });
+    const auto isTrue = phazite::ifEdit (selection, [] (te::Edit&) { return true; });
+    const auto isFalse = phazite::ifEdit (selection, [] (te::Edit&) { return false; });
+
+    // Without an Edit, the action does nothing and every test is false.
+    action();
+    CHECK (runs == 0);
+    CHECK_FALSE (isTrue());
+    CHECK_FALSE (isFalse());
+
+    // With one, the action runs with it and the tests answer for it.
+    selection.edit = edit.get();
+    action();
+    CHECK (runs == 1);
+    CHECK (actedOn == edit.get());
+    CHECK (isTrue());
+    CHECK_FALSE (isFalse());
+
+    selection.edit = nullptr;
+    action();
+    CHECK (runs == 1);
+    CHECK_FALSE (isTrue());
 }
 
 TEST_CASE ("Keymaps load, switch, and keep the user's own changes")

@@ -3,6 +3,7 @@
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Selection.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 #include "ui/timeline/SmartTool.h"
 
 namespace

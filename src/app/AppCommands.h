@@ -2,7 +2,6 @@
 #pragma once
 
 #include "model/arrangement/Selection.h"
-#include "model/engine/EngineSetup.h"
 
 namespace phazite
 {
@@ -12,5 +11,5 @@ class CommandRegistry;
 // which of two commands on the same key runs, the order of the palette's equal matches and of the shortcuts list:
 // undo, redo and the transport, then the selection's, the tracks', the sections', the mixer's and the loop's. The
 // project's own commands are ProjectSession's; the panels' are the UI's.
-void addSongCommands (CommandRegistry&, te::SelectionManager&, RangeSelection&, UIBehaviour&);
+void addSongCommands (CommandRegistry&, te::SelectionManager&, RangeSelection&);
 } // namespace phazite

@@ -53,7 +53,7 @@ public:
         session = std::make_unique<ProjectSession> (*engine, uiBehaviour);
         mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel);
 
-        addSongCommands (*commands, session->getSelection(), session->getRangeSelection(), uiBehaviour);
+        addSongCommands (*commands, session->getSelection(), session->getRangeSelection());
         session->addCommands (*commands);
         mainWindow->addCommands();
 
