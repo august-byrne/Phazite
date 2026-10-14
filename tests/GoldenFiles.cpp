@@ -18,14 +18,6 @@ namespace
 {
     constexpr const char* moreDifferences = "(more differences not listed)";
 
-    // Where the golden tests write what Phazite made, to compare with a golden file that doesn't match it. Other users
-    // may own it (on Linux, every user shares the temporary folder), so a copy that can't be written there is reported
-    // instead of failing the test.
-    juce::File getActualFolder()
-    {
-        return juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("PhaziteGoldenActual");
-    }
-
     //==============================================================================
     // N5: values that are never rounded, though they may look like numbers.
     bool isNeverRounded (const juce::String& attribute)
@@ -433,6 +425,11 @@ bool isUpdatingGoldenFiles()
     return true;
 }
 
+juce::File getActualFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("PhaziteGoldenActual");
+}
+
 void settle (int milliseconds)
 {
     const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) milliseconds;
@@ -496,14 +493,19 @@ juce::StringArray findDifferences (const juce::XmlElement& expected, const juce:
 
     juce::StringArray differences;
     compareElements (expected, actual, getTag (expected), comparison, differences);
+    limitDifferences (differences, comparison.maxDifferences);
+    return differences;
+}
 
-    if (differences.size() > comparison.maxDifferences)
+void limitDifferences (juce::StringArray& differences, int maxDifferences)
+{
+    maxDifferences = std::max (1, maxDifferences);
+
+    if (differences.size() > maxDifferences)
     {
-        differences.removeRange (comparison.maxDifferences - 1, differences.size());
+        differences.removeRange (maxDifferences - 1, differences.size());
         differences.add (moreDifferences);
     }
-
-    return differences;
 }
 
 juce::String toGoldenText (const juce::XmlElement& normalised, const juce::String& about)

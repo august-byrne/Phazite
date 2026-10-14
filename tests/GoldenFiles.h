@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden files: what Phazite makes (saved projects, for now), compared with files committed in tests/golden, so that a
-// change to what Phazite saves, or to how it opens projects saved by earlier versions, fails a test that lists each
-// difference. A refactoring must leave them as they are. A change meant to alter them regenerates them: run the golden
-// tests (--test-suite=golden) with the environment variable PHAZITE_UPDATE_GOLDEN=1, never in CI, and read
-// git diff tests/golden in full (CLAUDE.md).
+// Golden files: what Phazite makes (saved projects, and the levels of renders), compared with files committed in
+// tests/golden, so that a change to what Phazite saves or plays, or to how it opens projects saved by earlier versions,
+// fails a test that lists each difference. A refactoring must leave them as they are. A change meant to alter them
+// regenerates them: run the golden tests (--test-suite=golden) with the environment variable PHAZITE_UPDATE_GOLDEN=1,
+// never in CI, and read git diff tests/golden in full (CLAUDE.md).
 //
 // Saved projects are compared after normaliseProject(), which leaves out only what changes from run to run or from one
 // machine to another:
@@ -37,6 +37,11 @@ juce::File getGoldenFolder();
 // True if the environment variable PHAZITE_UPDATE_GOLDEN is 1: golden files that don't match are rewritten instead
 // of failing. Fails the test if the environment variable CI is set too: golden files are never updated in CI.
 bool isUpdatingGoldenFiles();
+
+// <temp>/PhaziteGoldenActual: where the golden tests write what Phazite made, to compare with a golden file that
+// doesn't match it. Other users may own it (on Linux, every user shares the temporary folder), so a copy that can't be
+// written there is reported instead of failing the test.
+juce::File getActualFolder();
 
 // Delivers the messages and runs the timers that are due for some milliseconds, as the app's message loop would, so
 // that what Tracktion and Phazite do asynchronously is done.
@@ -72,6 +77,10 @@ struct XmlComparison
 // just TAG if it is the only one. Children are matched by those keys; two values are the same if their texts are, or
 // if both are decimal numbers (N5) that differ by at most a millionth of the larger.
 juce::StringArray findDifferences (const juce::XmlElement& expected, const juce::XmlElement& actual, XmlComparison = {});
+
+// Shortens a list of more than maxDifferences differences (at least one) to that many lines: the first ones, and a line
+// saying that more weren't listed, which a failure report counts as "more than ... differences".
+void limitDifferences (juce::StringArray& differences, int maxDifferences);
 
 // A normalised project as a golden file: an XML header, a comment saying what it is and how to regenerate it, and each
 // attribute on a line of its own, with "\n" line ends and one at the end.

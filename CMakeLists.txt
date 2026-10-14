@@ -349,6 +349,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
         tests/GoldenProjectTests.cpp
+        tests/GoldenRenderTests.cpp
         tests/IconTests.cpp
         tests/ImportTests.cpp
         tests/LibraryTests.cpp
