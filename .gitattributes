@@ -9,6 +9,8 @@
 tools/architecture-budget.txt text eol=lf
 # Git hooks are shell scripts without an extension (git runs them with sh, on Windows too).
 .githooks/* text eol=lf
+# Golden files: LF on every OS, so the tests and diffs see the same bytes.
+tests/golden/** text eol=lf
 
 # Fonts, sounds and other binary data: never convert line endings.
 *.ttf binary

@@ -346,10 +346,14 @@ if(PHAZITE_BUILD_TESTS)
         tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
         tests/EngineSetupTests.cpp
+        tests/GoldenFiles.cpp
+        tests/GoldenFiles.h
+        tests/GoldenProjectTests.cpp
         tests/IconTests.cpp
         tests/ImportTests.cpp
         tests/LibraryTests.cpp
         tests/LiveInputTests.cpp
+        tests/MigrationTests.cpp
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
         tests/NoteTests.cpp

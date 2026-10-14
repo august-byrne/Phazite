@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A new, empty project (Project::create), saved, reopened and saved again: tests/GoldenProjectTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
+<EDIT appVersion="(varies)"
+      creationTime="(varies)"
+      modifiedBy=""
+      projectID="(varies)">
+  <CLICKTRACK level="0.6"/>
+  <MASTERPLUGINS>
+    <PLUGIN enabled="1"
+            id="1010"
+            remapOnTempoChange="1"
+            type="phaziteLoudnessMeter">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </MASTERPLUGINS>
+  <MASTERVOLUME>
+    <PLUGIN enabled="1"
+            id="1001"
+            type="volume"
+            volume="0.6376281">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </MASTERVOLUME>
+  <PITCHSEQUENCE>
+    <PITCH pitch="60"
+           startBeat="0"/>
+  </PITCHSEQUENCE>
+  <RACKS/>
+  <TEMPOSEQUENCE>
+    <TEMPO bpm="120"
+           curve="1"
+           startBeat="0"/>
+    <TIMESIG denominator="4"
+             numerator="4"
+             startBeat="0"/>
+  </TEMPOSEQUENCE>
+  <ARRANGERTRACK id="1006"
+                 name="Arranger"/>
+  <CHORDTRACK id="1008"
+              name="Chord"/>
+  <MARKERTRACK id="1002"
+               name="Marker"/>
+  <TEMPOTRACK id="1007"
+              name="Global">
+    <MODIFIERS/>
+  </TEMPOTRACK>
+  <MASTERTRACK id="1009"
+               name="Master">
+    <MODIFIERS/>
+  </MASTERTRACK>
+  <TRACK id="1003">
+    <CLIPSLOTS/>
+    <MODIFIERS/>
+    <OUTPUTDEVICES>
+      <DEVICE name="(default audio output)"/>
+    </OUTPUTDEVICES>
+    <PLUGIN enabled="1"
+            id="1004"
+            remapOnTempoChange="1"
+            type="volume">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1005"
+            type="level">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </TRACK>
+  <TRACKCOMPS/>
+  <TRANSPORT loopPoint1="0"
+             loopPoint2="2"
+             position="0"
+             start="0"/>
+  <VIDEO/>
+</EDIT>

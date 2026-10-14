@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The starter project (addStarterContent), saved, reopened and saved again: tests/GoldenProjectTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
+<EDIT appVersion="(varies)"
+      creationTime="(varies)"
+      modifiedBy=""
+      projectID="(varies)">
+  <CLICKTRACK level="0.6"/>
+  <MASTERPLUGINS>
+    <PLUGIN enabled="1"
+            id="1010"
+            remapOnTempoChange="1"
+            type="phaziteLoudnessMeter">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </MASTERPLUGINS>
+  <MASTERVOLUME>
+    <PLUGIN enabled="1"
+            id="1001"
+            type="volume"
+            volume="0.6376281">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </MASTERVOLUME>
+  <PITCHSEQUENCE>
+    <PITCH pitch="60"
+           startBeat="0"/>
+  </PITCHSEQUENCE>
+  <RACKS/>
+  <TEMPOSEQUENCE>
+    <TEMPO bpm="120"
+           curve="1"
+           startBeat="0"/>
+    <TIMESIG denominator="4"
+             numerator="4"
+             startBeat="0"/>
+  </TEMPOSEQUENCE>
+  <ARRANGERTRACK id="1006"
+                 name="Arranger"/>
+  <CHORDTRACK id="1008"
+              name="Chord"/>
+  <MARKERTRACK id="1002"
+               name="Marker"/>
+  <TEMPOTRACK id="1007"
+              name="Global">
+    <MODIFIERS/>
+  </TEMPOTRACK>
+  <MASTERTRACK id="1009"
+               name="Master">
+    <MODIFIERS/>
+  </MASTERTRACK>
+  <TRACK colour="ffe69f00"
+         id="1003"
+         name="Synth">
+    <MIDICLIP colour="ffffb000"
+              currentTake="0"
+              id="1012"
+              length="8"
+              name="Arpeggio"
+              offset="0"
+              speed="1"
+              start="0"
+              sync="0">
+      <AUTOMATIONCURVES/>
+      <GROOVE/>
+      <QUANTISATION/>
+      <SEQUENCE channelNumber="1"
+                ver="1">
+        <NOTE b="0"
+              c="0"
+              l="0.45"
+              p="60"
+              v="100"/>
+        <NOTE b="0.5"
+              c="0"
+              l="0.45"
+              p="64"
+              v="100"/>
+        <NOTE b="1"
+              c="0"
+              l="0.45"
+              p="67"
+              v="100"/>
+        <NOTE b="1.5"
+              c="0"
+              l="0.45"
+              p="72"
+              v="100"/>
+        <NOTE b="2"
+              c="0"
+              l="0.45"
+              p="67"
+              v="100"/>
+        <NOTE b="2.5"
+              c="0"
+              l="0.45"
+              p="64"
+              v="100"/>
+        <NOTE b="3"
+              c="0"
+              l="0.45"
+              p="60"
+              v="100"/>
+        <NOTE b="3.5"
+              c="0"
+              l="0.45"
+              p="64"
+              v="100"/>
+        <NOTE b="4"
+              c="0"
+              l="0.45"
+              p="57"
+              v="100"/>
+        <NOTE b="4.5"
+              c="0"
+              l="0.45"
+              p="60"
+              v="100"/>
+        <NOTE b="5"
+              c="0"
+              l="0.45"
+              p="64"
+              v="100"/>
+        <NOTE b="5.5"
+              c="0"
+              l="0.45"
+              p="69"
+              v="100"/>
+        <NOTE b="6"
+              c="0"
+              l="0.45"
+              p="64"
+              v="100"/>
+        <NOTE b="6.5"
+              c="0"
+              l="0.45"
+              p="60"
+              v="100"/>
+        <NOTE b="7"
+              c="0"
+              l="0.45"
+              p="57"
+              v="100"/>
+        <NOTE b="7.5"
+              c="0"
+              l="0.45"
+              p="60"
+              v="100"/>
+        <NOTE b="8"
+              c="0"
+              l="0.45"
+              p="53"
+              v="100"/>
+        <NOTE b="8.5"
+              c="0"
+              l="0.45"
+              p="57"
+              v="100"/>
+        <NOTE b="9"
+              c="0"
+              l="0.45"
+              p="60"
+              v="100"/>
+        <NOTE b="9.5"
+              c="0"
+              l="0.45"
+              p="65"
+              v="100"/>
+        <NOTE b="10"
+              c="0"
+              l="0.45"
+              p="60"
+              v="100"/>
+        <NOTE b="10.5"
+              c="0"
+              l="0.45"
+              p="57"
+              v="100"/>
+        <NOTE b="11"
+              c="0"
+              l="0.45"
+              p="53"
+              v="100"/>
+        <NOTE b="11.5"
+              c="0"
+              l="0.45"
+              p="57"
+              v="100"/>
+        <NOTE b="12"
+              c="0"
+              l="0.45"
+              p="55"
+              v="100"/>
+        <NOTE b="12.5"
+              c="0"
+              l="0.45"
+              p="59"
+              v="100"/>
+        <NOTE b="13"
+              c="0"
+              l="0.45"
+              p="62"
+              v="100"/>
+        <NOTE b="13.5"
+              c="0"
+              l="0.45"
+              p="67"
+              v="100"/>
+        <NOTE b="14"
+              c="0"
+              l="0.45"
+              p="62"
+              v="100"/>
+        <NOTE b="14.5"
+              c="0"
+              l="0.45"
+              p="59"
+              v="100"/>
+        <NOTE b="15"
+              c="0"
+              l="0.45"
+              p="55"
+              v="100"/>
+        <NOTE b="15.5"
+              c="0"
+              l="0.45"
+              p="59"
+              v="100"/>
+      </SEQUENCE>
+    </MIDICLIP>
+    <CLIPSLOTS/>
+    <MODIFIERS/>
+    <OUTPUTDEVICES>
+      <DEVICE name="(default audio output)"/>
+    </OUTPUTDEVICES>
+    <PLUGIN enabled="1"
+            filterFreq="100"
+            filterType="1"
+            id="1011"
+            remapOnTempoChange="1"
+            type="4osc"
+            waveShape1="3">
+      <MODIFIERASSIGNMENTS/>
+      <MODMATRIX/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1004"
+            remapOnTempoChange="1"
+            type="volume">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1005"
+            type="level">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </TRACK>
+  <TRACKCOMPS/>
+  <TRANSPORT loopPoint1="0"
+             loopPoint2="8"
+             looping="1"
+             position="0"
+             start="0"/>
+  <VIDEO/>
+</EDIT>

@@ -1,0 +1,451 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- tests/golden/legacy/0.1.0-representative.phazite, saved by Phazite 0.1.0, opened and saved by this version: tests/MigrationTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
+<EDIT appVersion="(varies)"
+      creationTime="(varies)"
+      modifiedBy=""
+      projectID="(varies)">
+  <AUXBUSNAMES>
+    <NAME bus="0"
+          name="Reverb"/>
+  </AUXBUSNAMES>
+  <CLICKTRACK level="0.6"/>
+  <MASTERPLUGINS>
+    <PLUGIN enabled="1"
+            id="1043"
+            remapOnTempoChange="1"
+            type="reverb">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1010"
+            remapOnTempoChange="1"
+            type="phaziteLoudnessMeter">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </MASTERPLUGINS>
+  <MASTERVOLUME>
+    <PLUGIN enabled="1"
+            id="1001"
+            type="volume"
+            volume="0.6376281">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </MASTERVOLUME>
+  <PHAZITE gridAdaptive="1"
+           gridLevel="7"
+           gridOffset="1"
+           gridSnap="0"
+           gridTriplets="0"
+           loopFollowsSong="0"
+           outline="golden">
+    <LASTKEY phaziteKeyRoot="2"
+             phaziteKeyScale="1"/>
+    <PIANOROLL gridAdaptive="0"
+               gridLevel="8"
+               gridOffset="0"
+               gridSnap="1"
+               gridTriplets="1"/>
+  </PHAZITE>
+  <PITCHSEQUENCE>
+    <PITCH pitch="60"
+           startBeat="0"/>
+  </PITCHSEQUENCE>
+  <RACKS/>
+  <SCENES/>
+  <TEMPOSEQUENCE>
+    <TEMPO bpm="120"
+           curve="1"
+           startBeat="0"/>
+    <TIMESIG denominator="4"
+             numerator="4"
+             startBeat="0"/>
+  </TEMPOSEQUENCE>
+  <ARRANGERTRACK id="1006"
+                 name="Arranger">
+    <ARRANGERCLIP colour="ff999999"
+                  id="1011"
+                  length="4"
+                  name="Intro"
+                  offset="0"
+                  phaziteEnergy="0.25"
+                  phaziteRole="intro"
+                  phaziteTip="Set the mood."
+                  start="0"/>
+    <ARRANGERCLIP colour="fff0e442"
+                  id="1012"
+                  length="8"
+                  name="Drop"
+                  offset="0"
+                  phaziteEnergy="0.9"
+                  phaziteRole="drop"
+                  phaziteTip="Everything at once."
+                  start="4"/>
+    <ARRANGERCLIP colour="ff999999"
+                  id="1013"
+                  length="4"
+                  name="Outro"
+                  offset="0"
+                  phaziteEnergy="0.1"
+                  phaziteRole="outro"
+                  phaziteTip="Let it fade."
+                  start="12"/>
+  </ARRANGERTRACK>
+  <CHORDTRACK id="1008"
+              name="Chord"/>
+  <MARKERTRACK id="1002"
+               name="Marker"/>
+  <TEMPOTRACK id="1007"
+              name="Global">
+    <MODIFIERS/>
+  </TEMPOTRACK>
+  <MASTERTRACK id="1009"
+               name="Master">
+    <MODIFIERS/>
+  </MASTERTRACK>
+  <TRACK id="1003"
+         mute="1"
+         name="Drums"
+         phaziteDrumHidden="49"
+         phaziteDrumMode="1"
+         phaziteDrumOrder="38,36,37,39,42,46,41,45,48,49,51"
+         phazitePinned="1">
+    <MIDICLIP colour="ff55ff00"
+              currentTake="0"
+              id="1014"
+              length="2"
+              name="Drums"
+              offset="0"
+              speed="1"
+              start="0"
+              sync="0">
+      <AUTOMATIONCURVES/>
+      <GROOVE/>
+      <QUANTISATION/>
+      <SEQUENCE channelNumber="1"
+                ver="1">
+        <NOTE b="0"
+              c="0"
+              l="0.25"
+              p="36"
+              v="110"/>
+        <NOTE b="2"
+              c="0"
+              l="0.25"
+              p="36"
+              v="110"/>
+        <NOTE b="1"
+              c="0"
+              l="0.25"
+              p="38"
+              v="110"/>
+        <NOTE b="3"
+              c="0"
+              l="0.25"
+              p="38"
+              v="110"/>
+      </SEQUENCE>
+    </MIDICLIP>
+    <CLIPSLOTS/>
+    <MODIFIERS/>
+    <OUTPUTDEVICES>
+      <DEVICE name="(default audio output)"/>
+    </OUTPUTDEVICES>
+    <PLUGIN enabled="1"
+            id="1004"
+            remapOnTempoChange="1"
+            type="volume">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1005"
+            type="level">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </TRACK>
+  <FOLDERTRACK colour="ff56b4e9"
+               id="1030"
+               name="Group"
+               phaziteCollapsed="1">
+    <MODIFIERS/>
+    <PLUGIN enabled="1"
+            id="1031"
+            remapOnTempoChange="1"
+            type="vca">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <TRACK colour="ff56b4e9"
+           id="1015"
+           name="Keys"
+           phaziteHeight="96"
+           phaziteKeyRoot="2"
+           phaziteKeyScale="1">
+      <MIDICLIP colour="ff00a3ff"
+                currentTake="0"
+                grooveStrength="0.1"
+                id="1020"
+                length="4"
+                linkID="link-1"
+                mpeMode="0"
+                mute="0"
+                name="Keys"
+                offset="0"
+                originalLength="0"
+                sendBankChange="1"
+                sendProgramChange="1"
+                showingTakes="0"
+                source=""
+                speed="1"
+                start="0"
+                sync="0"
+                volDb="0">
+        <AUTOMATIONCURVES/>
+        <GROOVE current=""/>
+        <QUANTISATION amount="1"
+                      type="(none)"/>
+        <SEQUENCE channelNumber="1"
+                  ver="1">
+          <NOTE b="0"
+                c="0"
+                l="2"
+                p="62"
+                v="90"/>
+          <NOTE b="2"
+                c="0"
+                l="1.5"
+                m="1"
+                p="65"
+                v="70"/>
+        </SEQUENCE>
+      </MIDICLIP>
+      <MIDICLIP colour="ff00a3ff"
+                currentTake="0"
+                grooveStrength="0.1"
+                id="1021"
+                length="4"
+                linkID="link-1"
+                mpeMode="0"
+                mute="0"
+                name="Keys"
+                offset="0"
+                originalLength="0"
+                sendBankChange="1"
+                sendProgramChange="1"
+                showingTakes="0"
+                source=""
+                speed="1"
+                start="4"
+                sync="0"
+                volDb="0">
+        <AUTOMATIONCURVES/>
+        <GROOVE current=""/>
+        <QUANTISATION amount="1"
+                      type="(none)"/>
+        <SEQUENCE channelNumber="1"
+                  ver="1">
+          <NOTE b="0"
+                c="0"
+                l="2"
+                p="62"
+                v="90"/>
+          <NOTE b="2"
+                c="0"
+                l="1.5"
+                m="1"
+                p="65"
+                v="70"/>
+        </SEQUENCE>
+      </MIDICLIP>
+      <CLIPSLOTS/>
+      <MODIFIERS/>
+      <OUTPUTDEVICES>
+        <DEVICE name="(default audio output)"/>
+      </OUTPUTDEVICES>
+      <PLUGIN enabled="1"
+              id="1018"
+              remapOnTempoChange="1"
+              type="4osc">
+        <MODIFIERASSIGNMENTS/>
+        <MODMATRIX/>
+      </PLUGIN>
+      <PLUGIN dry="0.375"
+              enabled="1"
+              id="1019"
+              remapOnTempoChange="1"
+              type="reverb"
+              wet="0.08333334">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+      <PLUGIN auxSendSliderPos="0.5488116"
+              busNum="0"
+              enabled="1"
+              id="1042"
+              quickParamName="send level"
+              remapOnTempoChange="1"
+              type="auxsend">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+      <PLUGIN enabled="1"
+              id="1016"
+              remapOnTempoChange="1"
+              type="volume">
+        <AUTOMATIONCURVE paramID="volume">
+          <POINT c="0"
+                 t="0"
+                 v="0.7408182"/>
+          <POINT c="0"
+                 t="4"
+                 v="0.5488116"/>
+        </AUTOMATIONCURVE>
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+      <PLUGIN enabled="1"
+              id="1017"
+              type="level">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+    </TRACK>
+    <TRACK colour="ff009e73"
+           id="1022"
+           name="Pad"
+           phaziteKeyRoot="2"
+           phaziteKeyScale="1">
+      <CLIPSLOTS/>
+      <MODIFIERS/>
+      <OUTPUTDEVICES>
+        <DEVICE name="(default audio output)"/>
+      </OUTPUTDEVICES>
+      <PLUGIN enabled="1"
+              id="1023"
+              remapOnTempoChange="1"
+              type="volume">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+      <PLUGIN enabled="1"
+              id="1024"
+              type="level">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+    </TRACK>
+  </FOLDERTRACK>
+  <FOLDERTRACK colour="fff0e442"
+               id="1032"
+               name="Bus"
+               phaziteBus="1">
+    <MODIFIERS/>
+    <PLUGIN enabled="1"
+            id="1034"
+            remapOnTempoChange="1"
+            type="volume"
+            volume="0.6376281">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1035"
+            remapOnTempoChange="1"
+            type="level">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <TRACK colour="fff0e442"
+           id="1025"
+           name="Tone"
+           phaziteKeyRoot="2"
+           phaziteKeyScale="1">
+      <AUDIOCLIP colour="ff0072b2"
+                 elastiqueMode="0"
+                 fadeIn="0.25"
+                 fadeInType="2"
+                 fadeOut="0.5"
+                 fadeOutType="2"
+                 id="1029"
+                 length="2"
+                 name="Tone"
+                 offset="0"
+                 pan="0"
+                 proxyAllowed="1"
+                 resamplingQuality="lagrange"
+                 source="Audio/Tone.wav"
+                 start="2"
+                 sync="0">
+        <AUTOMATIONCURVES/>
+        <LOOPINFO bpm="0"
+                  denominator="4"
+                  inMarker="0"
+                  numBeats="4"
+                  numerator="4"
+                  oneShot="0"
+                  outMarker="-1"
+                  rootNote="-1"/>
+      </AUDIOCLIP>
+      <CLIPSLOTS/>
+      <MODIFIERS/>
+      <OUTPUTDEVICES>
+        <DEVICE name="(default audio output)"/>
+      </OUTPUTDEVICES>
+      <PLUGIN enabled="1"
+              id="1026"
+              pan="-0.5"
+              remapOnTempoChange="1"
+              type="volume">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+      <PLUGIN auxSendSliderPos="0.5488116"
+              busNum="0"
+              enabled="1"
+              id="1041"
+              quickParamName="send level"
+              remapOnTempoChange="1"
+              type="auxsend">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+      <PLUGIN enabled="1"
+              id="1027"
+              type="level">
+        <MODIFIERASSIGNMENTS/>
+      </PLUGIN>
+    </TRACK>
+  </FOLDERTRACK>
+  <TRACK colour="ff0072b2"
+         id="1037"
+         name="Reverb"
+         phaziteKeyRoot="2"
+         phaziteKeyScale="1"
+         soloIsolate="1">
+    <CLIPSLOTS/>
+    <MODIFIERS/>
+    <OUTPUTDEVICES>
+      <DEVICE name="(default audio output)"/>
+    </OUTPUTDEVICES>
+    <PLUGIN busNum="0"
+            enabled="1"
+            id="1040"
+            remapOnTempoChange="1"
+            type="auxreturn">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN dry="0"
+            enabled="1"
+            id="1036"
+            remapOnTempoChange="1"
+            type="reverb">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1038"
+            remapOnTempoChange="1"
+            type="volume">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1039"
+            type="level">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+  </TRACK>
+  <TRACKCOMPS/>
+  <TRANSPORT loopPoint1="2"
+             loopPoint2="6"
+             looping="1"
+             position="0"
+             start="0"/>
+  <VIDEO/>
+</EDIT>

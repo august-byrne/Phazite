@@ -31,14 +31,15 @@ struct TemporaryFolder
         juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("PhaziteTests", {}, false);
 };
 
-// Writes a WAV file (and the folders it is in) of a quiet sine, some seconds long, and returns it.
-inline juce::File writeSound (const juce::File& file, double seconds)
+// Writes a WAV file (and the folders it is in) of a sine, some seconds long, and returns it: by default a quiet A
+// (220 Hz, at a quarter of full scale).
+inline juce::File writeSound (const juce::File& file, double seconds, double frequency = 220.0, float amplitude = 0.25f)
 {
     constexpr double sampleRate = 44100.0;
     juce::AudioBuffer<float> buffer (1, (int) (seconds * sampleRate));
 
     for (int i = 0; i < buffer.getNumSamples(); ++i)
-        buffer.setSample (0, i, 0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / sampleRate));
+        buffer.setSample (0, i, amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * frequency * i / sampleRate));
 
     file.getParentDirectory().createDirectory();
     file.deleteFile();

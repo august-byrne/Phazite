@@ -309,7 +309,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 | `src/ui/` | Components and the look: the window's panels, top bar, hint bar, command palette, themes and design tokens |
 | `src/model/` | Code without a UI, compiled with Tracktion Engine and JUCE into the `phazite_core` library that the app and the tests share |
 | `resources/` | Keymaps and icons (compiled into the app), and the Inter font (copied next to the app, into `fonts/`) |
-| `tests/` | Unit tests (`phazite_tests`, doctest); `ctest --preset <preset>` runs them |
+| `tests/` | Unit tests (`phazite_tests`, doctest), including golden tests that compare saved projects with committed files; `ctest --preset <preset>` runs them |
 | `docs/` | [The design](docs/design.md) and [the roadmap](docs/roadmap.md) |
 | `CMakeLists.txt`, `CMakePresets.json`, `cmake/` | Build definition, presets, Windows toolchain wrapper and CMake helpers |
 | `external/tracktion_engine/` | Submodule: Tracktion Engine, with JUCE as its own submodule in `modules/juce` |
