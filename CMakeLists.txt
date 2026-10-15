@@ -61,6 +61,7 @@ add_library(phazite_core STATIC)
 target_sources(phazite_core PRIVATE
     src/devices/core/DeviceInfo.cpp
     src/devices/core/DeviceInfo.h
+    src/devices/core/Processor.h
     src/devices/dsp/DelayLine.h
     src/devices/dsp/Envelopes.h
     src/devices/dsp/Filters.cpp
@@ -98,6 +99,8 @@ target_sources(phazite_core PRIVATE
     src/model/commands/Undo.h
     src/model/commands/UndoCommands.cpp
     src/model/commands/UndoCommands.h
+    src/model/devices/DevicePlugin.cpp
+    src/model/devices/DevicePlugin.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
     src/model/engine/EngineSetup.cpp
@@ -409,6 +412,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
         tests/DeviceInfoTests.cpp
+        tests/DevicePluginTests.cpp
         tests/DrumRowTests.cpp
         tests/DspTests.cpp
         tests/EngineSetupTests.cpp
