@@ -62,11 +62,7 @@ void showInstrumentMenu (te::AudioTrack& track, juce::Component& target)
           [safeTrack = te::SafeSelectable<te::AudioTrack> (&track)] (const DeviceType& type)
           {
               if (auto* t = safeTrack.get())
-              {
-                  t->edit.getUndoManager().beginNewTransaction ((getInstrument (*t) != nullptr ? "Replace Instrument with " : "Add ")
-                                                                + type.name);
-                  setInstrument (*t, createDevice (t->edit, type));
-              }
+                  chooseInstrument (*t, type);
           });
 }
 
@@ -103,13 +99,7 @@ void showEffectMenu (te::Edit& edit, te::Track* track, juce::Component& target)
               if (e == nullptr || (t == nullptr && ! forMaster)) // the track was deleted meanwhile
                   return;
 
-              e->getUndoManager().beginNewTransaction ("Add " + type.name);
-              auto device = createDevice (*e, type);
-
-              if (forMaster)
-                  insertMasterDevice (*e, device);
-              else
-                  insertDevice (*t, device);
+              addEffect (*e, forMaster ? nullptr : t, type);
           });
 }
 
@@ -122,10 +112,7 @@ void showNewReturnMenu (te::Track& sender, juce::Component& target)
           [safeSender = te::SafeSelectable<te::Track> (&sender)] (const DeviceType& type)
           {
               if (auto* t = safeSender.get())
-              {
-                  t->edit.getUndoManager().beginNewTransaction ("Add " + type.name + " Return");
-                  addReturnWithEffect (*t, createDevice (t->edit, type));
-              }
+                  addReturnWith (*t, type);
           });
 }
 } // namespace phazite::ui

@@ -34,11 +34,8 @@ TrackHeader::TrackHeader (Owner& o, te::Track& trackToShow)
     nameLabel.setInterceptsMouseClicks (false, true);
     nameLabel.onTextChange = [this]
     {
-        if (auto* t = track.get(); t != nullptr && nameLabel.getText().trim() != t->getName())
-        {
-            t->edit.getUndoManager().beginNewTransaction ("Rename Track");
-            t->setName (nameLabel.getText().trim()); // an empty name gives the track its number back
-        }
+        if (auto* t = track.get())
+            renameTrack (*t, nameLabel.getText()); // an empty name gives the track its number back
     };
 
     muteSolo.setTrack (&trackToShow);

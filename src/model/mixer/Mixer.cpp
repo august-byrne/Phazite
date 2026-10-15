@@ -199,6 +199,7 @@ te::Plugin* insertMasterDevice (te::Edit& edit, const te::Plugin::Ptr& plugin, i
 
 void removeDevice (te::Plugin& device)
 {
+    const UndoStep step (device.edit, "Remove " + device.getName());
     auto* folder = dynamic_cast<te::FolderTrack*> (device.getOwnerTrack());
     device.deleteFromParent();
 
@@ -208,6 +209,7 @@ void removeDevice (te::Plugin& device)
 
 void moveDevice (te::Plugin& device, int newIndex)
 {
+    const UndoStep step (device.edit, "Move Device");
     auto* list = device.getOwnerList();
 
     if (list == nullptr)
@@ -301,6 +303,77 @@ te::AutomatableParameter::Array getMixParameters (te::Plugin& device)
 }
 
 //==============================================================================
+namespace
+{
+    // As ParameterHandle does, the levels are stored first, without an undo step, so that undoing the first change plays
+    // the mix there was.
+    void storeMixWithoutUndo (te::Plugin& device)
+    {
+        for (auto* parameter : getMixParameters (device))
+            parameter->setParameter (parameter->getCurrentValue(), juce::sendNotification);
+    }
+} // namespace
+
+MixHandle::MixHandle (te::Plugin& device)
+    : plugin (&device)
+{
+}
+
+MixHandle::~MixHandle()
+{
+    endGesture();
+}
+
+bool MixHandle::isValid() const
+{
+    return plugin.get() != nullptr;
+}
+
+float MixHandle::getValue() const
+{
+    auto* device = plugin.get();
+    return device != nullptr ? getMix (*device) : 1.0f;
+}
+
+void MixHandle::beginGesture()
+{
+    auto* device = plugin.get();
+
+    if (device == nullptr || gesture != nullptr)
+        return;
+
+    storeMixWithoutUndo (*device);
+    gesture = std::make_unique<Gesture> (device->edit, "Change Mix");
+}
+
+void MixHandle::setValue (float mix)
+{
+    auto* device = plugin.get();
+
+    if (device == nullptr)
+        return;
+
+    if (gesture != nullptr)
+    {
+        setMix (*device, mix);
+        return;
+    }
+
+    storeMixWithoutUndo (*device);
+    const UndoStep step (device->edit, "Change Mix");
+    setMix (*device, mix);
+}
+
+void MixHandle::endGesture()
+{
+    if (gesture != nullptr)
+    {
+        gesture->commit();
+        gesture.reset();
+    }
+}
+
+//==============================================================================
 DeviceType makeDeviceType (const juce::PluginDescription& description)
 {
     return { description.name, description.isInstrument ? "Instrument" : "Effect", description, description.isInstrument };
@@ -327,6 +400,25 @@ te::Plugin::Ptr createDevice (te::Edit& edit, const DeviceType& type)
         return edit.getPluginCache().createNewPlugin (type.description.fileOrIdentifier, type.description);
 
     return edit.getPluginCache().createNewPlugin (te::ExternalPlugin::xmlTypeName, type.description);
+}
+
+te::Plugin* chooseInstrument (te::AudioTrack& track, const DeviceType& type)
+{
+    const UndoStep step (track.edit, (getInstrument (track) != nullptr ? "Replace Instrument with " : "Add ") + type.name);
+    return setInstrument (track, createDevice (track.edit, type));
+}
+
+te::Plugin* addEffect (te::Edit& edit, te::Track* track, const DeviceType& type)
+{
+    const UndoStep step (edit, "Add " + type.name);
+    auto device = createDevice (edit, type);
+    return track != nullptr ? insertDevice (*track, device) : insertMasterDevice (edit, device);
+}
+
+te::AudioTrack* addReturnWith (te::Track& sender, const DeviceType& type)
+{
+    const UndoStep step (sender.edit, "Add " + type.name + " Return");
+    return addReturnWithEffect (sender, createDevice (sender.edit, type));
 }
 
 te::Plugin* addDeviceTo (te::Edit& edit, te::Track* track, const DeviceType& type, te::SelectionManager* selection)
@@ -413,6 +505,7 @@ void makePlainFolder (te::FolderTrack& folder)
 
 void setMixedAsBus (te::FolderTrack& folder, bool bus)
 {
+    const UndoStep step (folder.edit, bus ? "Mix Folder as Bus" : "Make Folder Plain");
     auto* undoManager = &folder.edit.getUndoManager();
 
     if (bus)
@@ -586,6 +679,34 @@ bool isPreFader (const te::AuxSendPlugin& send)
     return volume != nullptr && track->pluginList.indexOf (&send) < track->pluginList.indexOf (volume);
 }
 
+void setDeviceOn (te::Plugin& device, bool on)
+{
+    if (device.isEnabled() == on)
+        return;
+
+    const UndoStep step (device.edit, on ? "Turn Device On" : "Turn Device Off");
+    device.setEnabled (on);
+}
+
+te::AuxSendPlugin* addSendTo (te::Track& track, int bus)
+{
+    const UndoStep step (track.edit, "Add Send");
+    return addSend (track, bus, false);
+}
+
+te::AuxSendPlugin* addSendToNewReturn (te::Track& track)
+{
+    const UndoStep step (track.edit, "Add Send");
+    auto* created = addNewReturnTrack (track.edit, nullptr);
+    return created != nullptr ? addSend (track, getReturnBus (*created), false) : nullptr;
+}
+
+void removeSend (te::AuxSendPlugin& send)
+{
+    const UndoStep step (send.edit, "Remove Send");
+    send.deleteFromParent();
+}
+
 void setPreFader (te::AuxSendPlugin& send, bool preFader)
 {
     auto* track = send.getOwnerTrack();
@@ -593,6 +714,8 @@ void setPreFader (te::AuxSendPlugin& send, bool preFader)
 
     if (volume == nullptr || isPreFader (send) == preFader)
         return;
+
+    const UndoStep step (send.edit, "Change Send");
 
     // Moving it to the fader's place puts it just before the fader when it comes from after, and just after
     // it when it comes from before.

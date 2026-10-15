@@ -6,11 +6,13 @@
 
 #include "model/base/Tracktion.h"
 
+#include <memory>
 #include <vector>
 
 namespace phazite
 {
 class CommandRegistry;
+class Gesture;
 
 //==============================================================================
 // Devices: the plug-ins a channel shows in its slots. A channel's volume, meter and sends are controls of its
@@ -38,11 +40,14 @@ te::Plugin* insertDevice (te::Track&, const te::Plugin::Ptr&, int index = -1);
 // Adds a device to the master, before its loudness meter.
 te::Plugin* insertMasterDevice (te::Edit&, const te::Plugin::Ptr&, int index = -1);
 
-// Removes a device. A bus left without devices becomes a plain folder again.
+// Removes a device, as one undo step named after it. A bus left without devices becomes a plain folder again.
 void removeDevice (te::Plugin&);
 
-// Moves a device to another place among its channel's devices.
+// Moves a device to another place among its channel's devices, as one undo step.
 void moveDevice (te::Plugin&, int newIndex);
+
+// Turns a device on or off, as one undo step.
+void setDeviceOn (te::Plugin&, bool on);
 
 // The parameters a device's slot shows as small knobs, by ID: its quick control, then the first others (not the dry
 // and wet levels, which its mix sets).
@@ -56,6 +61,29 @@ bool hasMix (te::Plugin&);
 float getMix (te::Plugin&); // 1 for a device without a mix
 void setMix (te::Plugin&, float mix);
 te::AutomatableParameter::Array getMixParameters (te::Plugin&); // the dry and wet levels, or none
+
+// An effect's mix as a knob changes it: a drag is one undo step, "Change Mix", from its first move to its last (a
+// Gesture, model/commands/Undo.h), and a change outside a drag, such as a key press, is one of its own. It forgets a
+// device that is deleted.
+class MixHandle
+{
+public:
+    explicit MixHandle (te::Plugin&);
+    ~MixHandle();
+
+    bool isValid() const;
+    float getValue() const; // 1 without a device
+
+    void beginGesture();
+    void setValue (float mix);
+    void endGesture();
+
+private:
+    te::SafeSelectable<te::Plugin> plugin;
+    std::unique_ptr<Gesture> gesture;
+
+    JUCE_DECLARE_NON_COPYABLE (MixHandle)
+};
 
 //==============================================================================
 // The devices that can be added: Phazite's own (model/devices/Devices.h) and the plug-ins found by scanning.
@@ -79,6 +107,14 @@ te::Plugin::Ptr createDevice (te::Edit&, const DeviceType&);
 // instrument would silence. An effect goes after the track's effects, or with no track on the master. Returns the
 // device, or nullptr.
 te::Plugin* addDeviceTo (te::Edit&, te::Track*, const DeviceType&, te::SelectionManager*);
+
+// The device menus' choices (ui/devices/DeviceMenus.h), each one undo step named after the device: an instrument for a
+// track, in place of the one it had ("Add Synth", or "Replace Instrument with Synth"); an effect after a track's
+// effects, or with no track on the master ("Add Reverb"); and a return track holding an effect, with a send to it from
+// a track (addReturnWithEffect(): "Add Reverb Return"). Each returns what it added, or nullptr.
+te::Plugin* chooseInstrument (te::AudioTrack&, const DeviceType&);
+te::Plugin* addEffect (te::Edit&, te::Track*, const DeviceType&);
+te::AudioTrack* addReturnWith (te::Track& sender, const DeviceType&);
 
 //==============================================================================
 // Folders. A plain folder's volume scales its tracks' volumes, as a VCA does; a bus mixes its tracks
@@ -121,7 +157,13 @@ juce::Array<te::AuxSendPlugin*> getSends (const te::Track&);
 // -6 dB. Returns nullptr if the track can't hold it.
 te::AuxSendPlugin* addSend (te::Track&, int bus, bool preFader);
 bool isPreFader (const te::AuxSendPlugin&);
-void setPreFader (te::AuxSendPlugin&, bool);
+void setPreFader (te::AuxSendPlugin&, bool); // as one undo step, "Change Send"
+
+// The send menus' choices, each one undo step named "Add Send": a send after the fader to a return's bus, or to a new,
+// empty return. Each returns the send, or nullptr. And removing one, "Remove Send".
+te::AuxSendPlugin* addSendTo (te::Track&, int bus);
+te::AuxSendPlugin* addSendToNewReturn (te::Track&);
+void removeSend (te::AuxSendPlugin&);
 
 // The mixer's commands: add a return track.
 void addMixerCommands (CommandRegistry&, te::SelectionManager&);

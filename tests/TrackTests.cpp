@@ -607,3 +607,22 @@ TEST_CASE ("Palette colours are found by name, whatever the case")
     CHECK_FALSE (phazite::findTrackColour ("Magenta").has_value());
     CHECK_FALSE (phazite::findTrackColour ("").has_value());
 }
+
+TEST_CASE ("Renaming a track is an undo step, and an empty name gives it its number back")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto* track = te::getAudioTracks (*edit)[0];
+    edit->getUndoManager().clearUndoHistory();
+
+    phazite::renameTrack (*track, "  Bass ");
+    CHECK (track->getName() == juce::String ("Bass"));
+    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Rename Track"));
+
+    edit->getUndoManager().clearUndoHistory();
+    phazite::renameTrack (*track, "Bass");
+    CHECK_FALSE (edit->getUndoManager().canUndo());
+
+    phazite::renameTrack (*track, "");
+    CHECK (track->getName() != juce::String ("Bass"));
+    CHECK (track->getName().isNotEmpty());
+}

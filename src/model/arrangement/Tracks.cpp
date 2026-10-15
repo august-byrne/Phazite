@@ -3,6 +3,7 @@
 #include "model/base/Schema.h"
 #include "model/base/Toggles.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 #include "model/mixer/Sidechain.h"
 #include "model/notes/Notes.h"
 
@@ -421,6 +422,17 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
     }
 
     return copies;
+}
+
+void renameTrack (te::Track& track, const juce::String& name)
+{
+    const auto trimmed = name.trim();
+
+    if (trimmed == track.getName())
+        return;
+
+    const UndoStep step (track.edit, "Rename Track");
+    track.setName (trimmed);
 }
 
 void deleteTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* selection)

@@ -116,6 +116,9 @@ void toggleTracksPinned (const juce::Array<te::Track*>&);
 // manager of the Edit has selected; with a selection manager given, the copies are selected instead of what was.
 juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>&, te::SelectionManager*);
 
+// Renames a track, as one undo step; an empty name gives it its number back. The same name changes nothing.
+void renameTrack (te::Track&, const juce::String& name);
+
 // Deletes tracks; a folder goes with the tracks inside it, and devices whose sidechain listened to one of them listen
 // to their own sound again. With a selection manager, the track that takes the first one's place is selected, as in
 // Ableton Live, so the keyboard can carry on from there.

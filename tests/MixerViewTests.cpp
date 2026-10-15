@@ -4,6 +4,8 @@
 #include "model/mixer/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "ui/mixer/ChannelStrip.h"
+#include "ui/mixer/Inspector.h"
+#include "ui/mixer/MasterStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/theme/DesignTokens.h"
 

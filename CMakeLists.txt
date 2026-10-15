@@ -327,8 +327,16 @@ target_sources(phazite_ui PRIVATE
     src/ui/input/WindowKeys.h
     src/ui/mixer/ChannelStrip.cpp
     src/ui/mixer/ChannelStrip.h
+    src/ui/mixer/DeviceSlots.cpp
+    src/ui/mixer/DeviceSlots.h
+    src/ui/mixer/Inspector.cpp
+    src/ui/mixer/Inspector.h
+    src/ui/mixer/MasterStrip.cpp
+    src/ui/mixer/MasterStrip.h
     src/ui/mixer/MixerView.cpp
     src/ui/mixer/MixerView.h
+    src/ui/mixer/StripParts.cpp
+    src/ui/mixer/StripParts.h
     src/ui/pianoroll/DrumRows.cpp
     src/ui/pianoroll/DrumRows.h
     src/ui/pianoroll/PianoRoll.cpp

@@ -6,6 +6,7 @@
 #pragma once
 
 #include "ChannelStrip.h"
+#include "MasterStrip.h"
 
 namespace phazite::ui
 {

@@ -7,7 +7,7 @@
 #include "TopBar.h"
 #include "ui/browser/Browser.h"
 #include "ui/input/KeyDispatcher.h"
-#include "ui/mixer/ChannelStrip.h"
+#include "ui/mixer/Inspector.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/playlist/Playlist.h"

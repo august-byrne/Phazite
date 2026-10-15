@@ -16,9 +16,9 @@ model-undo-steps               0
 model-include-loops            0
 devices-tracktion              0
 ui-tracktion-includes          7
-ui-tracktion-references      541
+ui-tracktion-references      538
 ui-tracktion-aliases           0
-ui-undo-steps                 44
+ui-undo-steps                 26
 flat-files                     0
 unresolved-includes            0
 cmake-sources                  0

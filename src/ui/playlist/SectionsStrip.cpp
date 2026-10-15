@@ -333,15 +333,11 @@ void SectionsStrip::mouseUp (const juce::MouseEvent& e)
         return;
 
     const auto target = *finished.target;
-    auto& undo = ed->getUndoManager();
 
     if (finished.kind == Drag::Kind::resize)
     {
         if (! isNear (target, section->getEndBeat()))
-        {
-            undo.beginNewTransaction ("Resize Section");
             resizeSection (*section, target - section->getStartBeat(), ! e.mods.isShiftDown());
-        }
 
         return;
     }
@@ -351,14 +347,11 @@ void SectionsStrip::mouseUp (const juce::MouseEvent& e)
 
     if (copy)
     {
-        undo.beginNewTransaction (alias ? "Copy Section as Aliases" : "Copy Section");
-
         if (auto* copied = copySection (*section, target, alias))
             selection.selectOnly (copied);
     }
     else if (! isNear (target, section->getStartBeat()) && ! isNear (target, section->getEndBeat()))
     {
-        undo.beginNewTransaction ("Move Section");
         moveSection (*section, target);
     }
 }
@@ -377,37 +370,8 @@ void SectionsStrip::mouseDoubleClick (const juce::MouseEvent& e)
 //==============================================================================
 void SectionsStrip::addSectionAt (te::BeatPosition beat)
 {
-    auto* e = edit.get();
-
-    if (e == nullptr)
-        return;
-
-    // From the start of the bar (or the end of the section before, if that ends later), for 8 bars or up to the
-    // next section: sections never overlap, which the section edits rely on.
-    const auto& tempo = e->tempoSequence;
-    const auto bar = std::max (0, tempo.toBarsAndBeats (tempo.toTime (beat)).bars);
-    auto start = tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 });
-    auto end = tempo.toBeats (te::tempo::BarsAndBeats { bar + barsPerNewSection, {}, 0 });
-    const auto sections = getSections (*e);
-
-    for (auto* other : sections)
-        if (other->getStartBeat() <= beat && other->getEndBeat() > start)
-            start = other->getEndBeat();
-
-    for (auto* other : sections)
-        if (other->getStartBeat() > beat)
-            end = std::min (end, other->getStartBeat());
-
-    if (end <= start)
-        return;
-
-    e->getUndoManager().beginNewTransaction ("Add Section");
-
-    if (auto* section = insertSection (*e, start, { getNewSectionName (*e), end - start }))
-    {
+    if (auto* e = edit.get(); e != nullptr && phazite::addSectionAt (*e, beat, &selection) != nullptr)
         range.clear();
-        selection.selectOnly (section);
-    }
 }
 
 void SectionsStrip::startRenaming (te::ArrangerClip& section)
@@ -427,11 +391,8 @@ void SectionsStrip::renamed()
 {
     const auto name = nameLabel.getText().trim();
 
-    if (auto* section = renaming.get(); section != nullptr && name.isNotEmpty() && name != section->getName())
-    {
-        section->edit.getUndoManager().beginNewTransaction ("Rename Section");
-        section->setName (name);
-    }
+    if (auto* section = renaming.get())
+        renameSection (*section, name);
 
     renaming = nullptr;
     repaint();
@@ -462,10 +423,7 @@ void SectionsStrip::showMenu (te::ArrangerClip* section, te::BeatPosition where)
                                               [target] (juce::Colour colour)
                                               {
                                                   if (auto* chosen = target.get())
-                                                  {
-                                                      chosen->edit.getUndoManager().beginNewTransaction ("Change Section Color");
-                                                      chosen->setColour (colour);
-                                                  }
+                                                      setSectionColour (*chosen, colour);
                                               });
                       });
 

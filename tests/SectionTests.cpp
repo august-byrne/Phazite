@@ -504,3 +504,59 @@ TEST_CASE ("Each role has its palette colour")
     CHECK (phazite::getRoleColour ("solo") == colourOf ("Bluish green"));
     CHECK (phazite::getRoleColour ("something else") == colourOf ("Sky blue"));
 }
+
+TEST_CASE ("Section edits made with the mouse are undo steps of their own, and new sections don't overlap")
+{
+    Song song;
+    auto& undo = song.edit->getUndoManager();
+
+    // Moving, copying and resizing, each named for Undo.
+    phazite::moveSection (song.section (2), beats (0.0));
+    CHECK (undo.getUndoDescription() == juce::String ("Move Section"));
+    phazite::undo (*song.edit);
+
+    phazite::copySection (song.section (2), beats (0.0), true);
+    CHECK (undo.getUndoDescription() == juce::String ("Copy Section as Aliases"));
+    phazite::undo (*song.edit);
+
+    phazite::resizeSection (song.section (0), te::BeatDuration::fromBeats (32.0), true);
+    CHECK (undo.getUndoDescription() == juce::String ("Resize Section"));
+    phazite::undo (*song.edit);
+
+    // Renaming, but not to nothing or to the same name, and a color.
+    phazite::renameSection (song.section (0), "  Opening  ");
+    CHECK (song.section (0).getName() == juce::String ("Opening"));
+    CHECK (undo.getUndoDescription() == juce::String ("Rename Section"));
+    undo.clearUndoHistory();
+    phazite::renameSection (song.section (0), " ");
+    phazite::renameSection (song.section (0), "Opening");
+    CHECK_FALSE (undo.canUndo());
+
+    phazite::setSectionColour (song.section (0), juce::Colours::orange);
+    CHECK (phazite::getSectionColour (song.section (0)) == juce::Colours::orange);
+    CHECK (undo.getUndoDescription() == juce::String ("Change Section Color"));
+
+    // Every beat of the song is in a section, so there is no room for a new one in it; after it, a new one starts at the
+    // bar and lasts 8 bars.
+    CHECK (phazite::addSectionAt (*song.edit, beats (100.0), &song.selection) == nullptr);
+    auto* added = phazite::addSectionAt (*song.edit, beats (390.0), &song.selection);
+    REQUIRE (added != nullptr);
+    CHECK (added->getStartBeat().inBeats() == doctest::Approx (388.0));
+    CHECK (added->getEndBeat().inBeats() == doctest::Approx (388.0 + 32.0));
+    CHECK (song.selection.isSelected (added));
+    CHECK (undo.getUndoDescription() == juce::String ("Add Section"));
+
+    // In a song without sections: from the bar the beat is in, and a new one before another stops at it.
+    auto empty = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto* atStart = phazite::addSectionAt (*empty, beats (2.0), nullptr);
+    auto* later = phazite::addSectionAt (*empty, beats (41.0), nullptr);
+    auto* between = phazite::addSectionAt (*empty, beats (37.0), nullptr);
+    REQUIRE (atStart != nullptr);
+    REQUIRE (later != nullptr);
+    REQUIRE (between != nullptr);
+    CHECK (atStart->getStartBeat().inBeats() == doctest::Approx (0.0));
+    CHECK (atStart->getEndBeat().inBeats() == doctest::Approx (32.0));
+    CHECK (later->getStartBeat().inBeats() == doctest::Approx (40.0));
+    CHECK (between->getStartBeat().inBeats() == doctest::Approx (36.0));
+    CHECK (between->getEndBeat().inBeats() == doctest::Approx (40.0));
+}

@@ -484,6 +484,6 @@ Roughly in order of value:
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
-| Architecture track | A0 (2026-10-14) and A1 (2026-10-15) done; A2 in progress alongside steps 1.6 to 1.9: drags have a gesture session in the model, and knobs and faders change parameters through it (the UI's undo steps 46 to 44) |
+| Architecture track | A0 (2026-10-14) and A1 (2026-10-15) done; A2 in progress alongside steps 1.6 to 1.9: drags have a gesture session in the model, knobs and faders change parameters through it, the sections strip, the track header, the device menus and the mixer strip (now split into a file per part) edit through model functions that are undo steps of their own, and the mix knob has a gesture of its own (the UI's undo steps 46 to 26) |
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.

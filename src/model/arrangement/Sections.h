@@ -53,6 +53,17 @@ juce::String getNewSectionName (const te::Edit&);
 // selection manager is given. Returns nullptr if the Edit can't hold more clips.
 te::ArrangerClip* appendSection (te::Edit&, te::SelectionManager*);
 
+// Adds a new section where the user asks for one, as one undo step: from the start of the bar the beat is in (or the
+// end of the section there, if that ends later) for barsPerNewSection bars, or up to the next section, since sections
+// never overlap. Selects it alone if a selection manager is given. Returns nullptr if there is no room.
+te::ArrangerClip* addSectionAt (te::Edit&, te::BeatPosition, te::SelectionManager*);
+
+// Renames a section, as one undo step; an empty name or the same one changes nothing.
+void renameSection (te::ArrangerClip&, const juce::String& name);
+
+// Gives a section another color, as one undo step.
+void setSectionColour (te::ArrangerClip&, juce::Colour);
+
 // The time from the earliest section's start to the latest one's end.
 te::TimeRange getSectionsTimeRange (const juce::Array<te::ArrangerClip*>&);
 
@@ -60,10 +71,10 @@ te::TimeRange getSectionsTimeRange (const juce::Array<te::ArrangerClip*>&);
 // Edits of a section and everything in it, on every track. The destinations are section boundaries
 // (getSectionBoundaries()): positions in the song as it is before the edit.
 
-// Moves the section there; the sections between make room.
+// Moves the section there, as one undo step; the sections between make room.
 void moveSection (te::ArrangerClip&, te::BeatPosition destination);
 
-// Copies the section there, after making room; with asAliases, its clips are copied as aliases.
+// Copies the section there, after making room, as one undo step; with asAliases, its clips are copied as aliases.
 te::ArrangerClip* copySection (te::ArrangerClip&, te::BeatPosition destination, bool asAliases);
 
 // Copies the section right after itself.
@@ -80,7 +91,7 @@ void deleteSections (const juce::Array<te::ArrangerClip*>&);
 // copies are selected instead of what was.
 juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::ArrangerClip*>&, bool asAliases, te::SelectionManager*);
 
-// Makes the section longer or shorter at its end, at least a beat long. With moveRest, what comes after
+// Makes the section longer or shorter at its end, at least a beat long, as one undo step. With moveRest, what comes after
 // it moves along: time is inserted at its end, or removed from it with what lies there. Otherwise only the
 // section changes, and it doesn't grow into the next one.
 void resizeSection (te::ArrangerClip&, te::BeatDuration newLength, bool moveRest);

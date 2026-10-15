@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
 #include "model/arrangement/Tracks.h"
+#include "model/commands/Undo.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/mixer/Mixer.h"
 
@@ -356,4 +357,102 @@ TEST_CASE ("New return tracks are numbered in turn")
     CHECK (selection.isSelected (first));
     CHECK (phazite::getReturnBus (*second) != phazite::getReturnBus (*first));
     selection.deselectAll();
+}
+
+TEST_CASE ("The device menus' choices are undo steps named after the device")
+{
+    Mix mix;
+    auto& undo = mix.edit->getUndoManager();
+    const auto types = phazite::getDeviceTypes (phazite::test::getEngine());
+    const auto find = [&types] (const char* type)
+    {
+        for (const auto& each : types)
+            if (each.description.fileOrIdentifier == juce::String (type))
+                return each;
+
+        FAIL ("no such device");
+        return phazite::DeviceType {};
+    };
+
+    REQUIRE (phazite::chooseInstrument (*mix.a, find ("phaziteSynth")) != nullptr);
+    CHECK (undo.getUndoDescription() == juce::String ("Add Synth"));
+    REQUIRE (phazite::chooseInstrument (*mix.a, find ("phaziteDrums")) != nullptr);
+    CHECK (undo.getUndoDescription() == juce::String ("Replace Instrument with Drum Sampler"));
+
+    REQUIRE (phazite::addEffect (*mix.edit, mix.a, find ("phaziteEq")) != nullptr);
+    CHECK (undo.getUndoDescription() == juce::String ("Add EQ"));
+    REQUIRE (phazite::addEffect (*mix.edit, nullptr, find ("phaziteLimiter")) != nullptr);
+    CHECK (phazite::getMasterDevices (*mix.edit).getLast()->getName() == juce::String ("Limiter"));
+
+    auto* reverbReturn = phazite::addReturnWith (*mix.b, find ("phaziteReverb"));
+    REQUIRE (reverbReturn != nullptr);
+    CHECK (undo.getUndoDescription() == juce::String ("Add Reverb Return"));
+    CHECK (phazite::getMix (*phazite::getEffects (*reverbReturn).getFirst()) == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("The mixer strip's edits are undo steps of their own, and a mix drag is one")
+{
+    Mix mix;
+    auto& undo = mix.edit->getUndoManager();
+    auto* eq = phazite::insertDevice (*mix.a, mix.create ("phaziteEq"));
+    auto* compressor = phazite::insertDevice (*mix.a, mix.create ("phaziteCompressor"));
+    REQUIRE (eq != nullptr);
+    REQUIRE (compressor != nullptr);
+    undo.clearUndoHistory();
+
+    phazite::setDeviceOn (*eq, false);
+    CHECK_FALSE (eq->isEnabled());
+    CHECK (undo.getUndoDescription() == juce::String ("Turn Device Off"));
+
+    phazite::moveDevice (*compressor, 0);
+    CHECK (phazite::getEffects (*mix.a).getFirst() == compressor);
+    CHECK (undo.getUndoDescription() == juce::String ("Move Device"));
+
+    // A drag of the mix knob is one step from its first move to its last; a key press is a step of its own.
+    {
+        phazite::MixHandle handle (*eq);
+        handle.beginGesture();
+        handle.setValue (0.8f);
+        handle.setValue (0.5f);
+        handle.endGesture();
+        CHECK (handle.getValue() == doctest::Approx (0.5f));
+        CHECK (undo.getUndoDescription() == juce::String ("Change Mix"));
+        phazite::undo (*mix.edit);
+        CHECK (phazite::getMix (*eq) == doctest::Approx (1.0f));
+
+        handle.setValue (0.25f);
+        CHECK (undo.getUndoDescription() == juce::String ("Change Mix"));
+    }
+
+    phazite::removeDevice (*compressor);
+    CHECK (undo.getUndoDescription() == juce::String ("Remove Compressor"));
+
+    // Sends.
+    auto* reverbReturn = phazite::addReturnTrack (*mix.edit, "Reverb", nullptr);
+    REQUIRE (reverbReturn != nullptr);
+    auto* send = phazite::addSendTo (*mix.a, phazite::getReturnBus (*reverbReturn));
+    REQUIRE (send != nullptr);
+    CHECK (undo.getUndoDescription() == juce::String ("Add Send"));
+    CHECK_FALSE (phazite::isPreFader (*send));
+
+    phazite::setPreFader (*send, true);
+    CHECK (phazite::isPreFader (*send));
+    CHECK (undo.getUndoDescription() == juce::String ("Change Send"));
+
+    phazite::removeSend (*send);
+    CHECK (phazite::getSends (*mix.a).isEmpty());
+    CHECK (undo.getUndoDescription() == juce::String ("Remove Send"));
+
+    const auto returnsBefore = phazite::getReturnTracks (*mix.edit).size();
+    REQUIRE (phazite::addSendToNewReturn (*mix.b) != nullptr);
+    CHECK (phazite::getReturnTracks (*mix.edit).size() == returnsBefore + 1);
+    CHECK (undo.getUndoDescription() == juce::String ("Add Send"));
+
+    // The bus switch.
+    auto* folder = phazite::groupIntoFolder ({ mix.b }, nullptr);
+    REQUIRE (folder != nullptr);
+    phazite::setMixedAsBus (*folder, true);
+    CHECK (undo.getUndoDescription() == juce::String ("Mix Folder as Bus"));
+    phazite::setMixedAsBus (*folder, false);
+    CHECK (undo.getUndoDescription() == juce::String ("Make Folder Plain"));
 }

@@ -4,6 +4,7 @@
 #include "Tracks.h"
 #include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 
 #include <algorithm>
 #include <vector>
@@ -173,6 +174,53 @@ te::ArrangerClip* appendSection (te::Edit& edit, te::SelectionManager* selection
     return section;
 }
 
+te::ArrangerClip* addSectionAt (te::Edit& edit, te::BeatPosition beat, te::SelectionManager* selection)
+{
+    // From the start of the bar (or the end of the section before, if that ends later), for barsPerNewSection bars or
+    // up to the next section: sections never overlap, which the section edits rely on.
+    const auto& tempo = edit.tempoSequence;
+    const auto bar = std::max (0, tempo.toBarsAndBeats (tempo.toTime (beat)).bars);
+    auto start = tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 });
+    auto end = tempo.toBeats (te::tempo::BarsAndBeats { bar + barsPerNewSection, {}, 0 });
+    const auto sections = getSections (edit);
+
+    for (auto* other : sections)
+        if (other->getStartBeat() <= beat && other->getEndBeat() > start)
+            start = other->getEndBeat();
+
+    for (auto* other : sections)
+        if (other->getStartBeat() > beat)
+            end = std::min (end, other->getStartBeat());
+
+    if (end <= start)
+        return nullptr;
+
+    const UndoStep step (edit, "Add Section");
+    auto* section = insertSection (edit, start, { getNewSectionName (edit), end - start });
+
+    if (section != nullptr && selection != nullptr)
+        selection->selectOnly (section);
+
+    return section;
+}
+
+void renameSection (te::ArrangerClip& section, const juce::String& name)
+{
+    const auto trimmed = name.trim();
+
+    if (trimmed.isEmpty() || trimmed == section.getName())
+        return;
+
+    const UndoStep step (section.edit, "Rename Section");
+    section.setName (trimmed);
+}
+
+void setSectionColour (te::ArrangerClip& section, juce::Colour colour)
+{
+    const UndoStep step (section.edit, "Change Section Color");
+    section.setColour (colour);
+}
+
 te::TimeRange getSectionsTimeRange (const juce::Array<te::ArrangerClip*>& sections)
 {
     if (sections.isEmpty())
@@ -189,12 +237,14 @@ te::TimeRange getSectionsTimeRange (const juce::Array<te::ArrangerClip*>& sectio
 //==============================================================================
 void moveSection (te::ArrangerClip& section, te::BeatPosition destination)
 {
+    const UndoStep step (section.edit, "Move Section");
     moveTime (section.edit, getRange (section), destination);
 }
 
 te::ArrangerClip* copySection (te::ArrangerClip& section, te::BeatPosition destination, bool asAliases)
 {
     auto& edit = section.edit;
+    const UndoStep step (edit, asAliases ? "Copy Section as Aliases" : "Copy Section");
     copyTime (edit, getRange (section), destination, asAliases);
     return findSectionStartingAt (edit, destination, &section);
 }
@@ -247,6 +297,7 @@ juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::Arranger
 void resizeSection (te::ArrangerClip& section, te::BeatDuration newLength, bool moveRest)
 {
     auto& edit = section.edit;
+    const UndoStep step (edit, "Resize Section");
     const auto range = getRange (section);
     newLength = std::max (newLength, te::BeatDuration::fromBeats (1.0));
 
