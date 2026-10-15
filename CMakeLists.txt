@@ -341,9 +341,12 @@ target_sources(phazite_ui PRIVATE
     src/ui/pianoroll/DrumRows.h
     src/ui/pianoroll/PianoRoll.cpp
     src/ui/pianoroll/PianoRoll.h
+    src/ui/pianoroll/PianoRollCommands.cpp
     src/ui/pianoroll/PianoRollLanes.cpp
+    src/ui/pianoroll/PianoRollNoteTools.cpp
     src/ui/pianoroll/PianoRollNotes.cpp
     src/ui/pianoroll/PianoRollParts.h
+    src/ui/pianoroll/PianoRollRows.cpp
     src/ui/playlist/ClipComponent.cpp
     src/ui/playlist/ClipComponent.h
     src/ui/playlist/Playlist.cpp

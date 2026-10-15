@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The piano roll's parts, for its own .cpp files: PianoRoll.cpp lays them out, PianoRollNotes.cpp is the note
-// grid and PianoRollLanes.cpp the keys, the velocity lane and the transform bar.
+// The piano roll's parts, for its own .cpp files: PianoRoll.cpp is the view and what it shows, PianoRollRows.cpp
+// lays out the rows, PianoRollCommands.cpp holds the transforms, the toolbar's menus and the commands, PianoRollNotes.cpp
+// is the note grid and PianoRollNoteTools.cpp what the mouse does in it, and PianoRollLanes.cpp the keys, the velocity
+// lane and the transform bar.
 #pragma once
 
 #include "PianoRoll.h"
@@ -72,6 +74,74 @@ struct PianoRoll::NoteGrid : public juce::Component
     void showMenu();
     void updateHint (juce::Point<float>);
     void cancelGesture(); // when the tool changes mid-drag
+};
+
+//==============================================================================
+// What the mouse is doing in the grid, from the moment it goes down until it goes up.
+struct PianoRoll::NoteGrid::Gesture
+{
+    enum class Kind
+    {
+        pending, // not dragging yet
+        move,
+        resizeStart,
+        resizeEnd,
+        select, // a rectangle
+        paint,
+        erase,
+        mute,
+        zoom
+    };
+
+    // A note as it was when the drag began, found again by its state (it may be moved, not replaced).
+    struct Original
+    {
+        te::SafeSelectable<te::MidiClip> clip;
+        juce::ValueTree state;
+        te::BeatPosition start;
+        te::BeatDuration length;
+        int pitch = 60;
+    };
+
+    // Which ways the grid scrolls when this drags past its edges, if at all.
+    std::optional<TimelineEditor::ScrollDirections> getAutoScrollDirections() const
+    {
+        switch (kind)
+        {
+            case Kind::move:
+            case Kind::select:
+            case Kind::erase:
+            case Kind::mute:
+                return TimelineEditor::ScrollDirections::both;
+            case Kind::resizeStart:
+            case Kind::resizeEnd:
+            case Kind::paint:
+            case Kind::zoom:
+                return TimelineEditor::ScrollDirections::sideways;
+            case Kind::pending:
+            default:
+                return std::nullopt;
+        }
+    }
+
+    Kind kind = Kind::pending;
+    Zone zone = Zone::body;
+    te::SafeSelectable<te::MidiClip> clip; // the note the mouse went down on, if any
+    juce::ValueTree noteState;
+    te::BeatPosition startBeat;
+    juce::Point<int> startPosition;
+    int startScrollY = 0;                   // how far the rows had scrolled then
+    bool clickOnMouseUp = false;            // a click on a selected note selects it alone, unless it becomes a drag
+    bool added = false;                     // the note was added by this click: a drag that follows is the same undo step
+    std::unique_ptr<phazite::Gesture> step; // the drag's undo step, from its first change until it ends
+
+    std::vector<Original> originals;
+    Original anchor;                             // the note the mouse went down on, as it was
+    std::vector<juce::ValueTree> done;           // Delete and Mute: the notes already done
+    std::vector<juce::ValueTree> selectedBefore; // a rectangle with Ctrl adds to these
+    te::BeatPosition nextPaintStart;
+    int paintPitch = -1;
+    int auditionedPitch = -1;
 };
 
 //==============================================================================

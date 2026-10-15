@@ -54,6 +54,9 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
+    static constexpr double scrollPerNotch = 48.0;
+
+    // Its parts (PianoRollParts.h).
     struct Keys;         // the piano keys, or the drums' names, down the left
     struct NoteGrid;     // the rows of notes
     struct VelocityLane; // the velocity of each note, under them
