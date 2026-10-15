@@ -54,18 +54,13 @@ void ProjectSession::createFirstProject()
         name = "My First Song " + juce::String (n);
 
     juce::String error;
-    auto created = Project::create (engine, folder, name, error);
+    auto created = Project::create (engine, folder, name, error, addStarterContent);
 
     if (created == nullptr)
     {
         showError ("Phazite couldn't create a project", error);
         return;
     }
-
-    addStarterContent (created->getEdit());
-
-    if (const auto result = created->save(); result.failed())
-        showError ("Phazite couldn't save the project", result.getErrorMessage());
 
     setProject (std::move (created));
 }
@@ -94,38 +89,35 @@ void ProjectSession::newProject()
             window->addButton ("Create", 1, juce::KeyPress (juce::KeyPress::returnKey));
             window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
-            window->enterModalState (true,
-                                     juce::ModalCallbackFunction::create (
-                                         [this, window, folder] (int result)
-                                         {
-                                             if (result != 1)
-                                                 return;
+            window->enterModalState (
+                true,
+                juce::ModalCallbackFunction::create (
+                    [this, window, folder] (int result)
+                    {
+                        if (result != 1)
+                            return;
 
-                                             folder.createDirectory();
-                                             juce::String error;
-                                             auto created = Project::create (engine, folder, window->getTextEditorContents ("name"), error);
+                        folder.createDirectory();
 
-                                             if (created == nullptr)
-                                             {
-                                                 showError ("Phazite couldn't create the project", error);
-                                                 return;
-                                             }
+                        // The outline is part of the new project: in its first save, not an undo step.
+                        const auto choice = window->getComboBoxComponent ("outline")->getSelectedItemIndex() - 1;
+                        std::function<void (te::Edit&)> addOutline;
 
-                                             // The outline is part of the new project, not a change to undo.
-                                             const auto choice = window->getComboBoxComponent ("outline")->getSelectedItemIndex() - 1;
+                        if (juce::isPositiveAndBelow (choice, (int) getBuiltInOutlines().size()))
+                            addOutline = [chosen = getBuiltInOutlines()[(size_t) choice]] (te::Edit& e) { applyOutline (e, chosen); };
 
-                                             if (juce::isPositiveAndBelow (choice, (int) getBuiltInOutlines().size()))
-                                             {
-                                                 applyOutline (created->getEdit(), getBuiltInOutlines()[(size_t) choice]);
-                                                 created->getEdit().getUndoManager().clearUndoHistory();
+                        juce::String error;
+                        auto created = Project::create (engine, folder, window->getTextEditorContents ("name"), error, addOutline);
 
-                                                 if (const auto saved = created->save(); saved.failed())
-                                                     showError ("Phazite couldn't save the project", saved.getErrorMessage());
-                                             }
+                        if (created == nullptr)
+                        {
+                            showError ("Phazite couldn't create the project", error);
+                            return;
+                        }
 
-                                             setProject (std::move (created));
-                                         }),
-                                     true);
+                        setProject (std::move (created));
+                    }),
+                true);
         });
 }
 

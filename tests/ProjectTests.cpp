@@ -2,9 +2,12 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "model/arrangement/Clips.h"
+#include "model/arrangement/Outlines.h"
+#include "model/arrangement/Sections.h"
 #include "model/base/Schema.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
+#include "model/project/StarterProject.h"
 #include "model/transport/Playback.h"
 
 namespace
@@ -224,6 +227,42 @@ TEST_CASE ("A project opens with the playhead at the song's start, where playbac
     auto reopened = openProject (file);
     CHECK (reopened->getEdit().getTransport().getPosition().inSeconds() == doctest::Approx (0.0));
     CHECK (phazite::getPlayStart (reopened->getEdit()).inSeconds() == doctest::Approx (0.0));
+}
+
+TEST_CASE ("A new project opens from its first save with what it starts with, without undo steps or unsaved changes")
+{
+    TemporaryFolder temp;
+    juce::String error;
+    std::unique_ptr<phazite::Project> project;
+
+    SUBCASE ("The starter song, as the first start makes it")
+    {
+        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "First", error, phazite::addStarterContent);
+        INFO (error.toStdString());
+        REQUIRE (project != nullptr);
+        const auto tracks = te::getAudioTracks (project->getEdit());
+        REQUIRE (tracks.size() == 1);
+        CHECK (tracks[0]->getName() == juce::String ("Synth"));
+        CHECK (tracks[0]->getClips().size() == 1);
+    }
+
+    SUBCASE ("An outline's sections, as New Project lays them out")
+    {
+        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Outlined", error,
+                                            [] (te::Edit& e) { phazite::applyOutline (e, *phazite::findOutline ("pop")); });
+        INFO (error.toStdString());
+        REQUIRE (project != nullptr);
+        CHECK (phazite::getAppliedOutline (project->getEdit()) == juce::String ("pop"));
+        CHECK_FALSE (phazite::getSections (project->getEdit()).isEmpty());
+    }
+
+    // It is opened from its save: Tracktion put what was added in order while loading, and nothing of it is an undo step
+    // or, once Tracktion's updates arrive, an unsaved change.
+    CHECK (project->getFile().existsAsFile());
+    CHECK_FALSE (project->getEdit().getUndoManager().canUndo());
+    phazite::test::settle();
+    CHECK_FALSE (project->hasUnsavedChanges());
+    CHECK_FALSE (project->getEdit().getUndoManager().canUndo());
 }
 
 TEST_CASE ("A project with MIDI clips and an alias opens without unsaved changes")

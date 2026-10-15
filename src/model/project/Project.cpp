@@ -64,7 +64,8 @@ namespace
 } // namespace
 
 //==============================================================================
-std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& parentFolder, const juce::String& name, juce::String& error)
+std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& parentFolder, const juce::String& name, juce::String& error,
+                                          const std::function<void (te::Edit&)>& addContent)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -100,6 +101,10 @@ std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& 
     }
 
     addPhaziteParts (*edit);
+
+    if (addContent != nullptr)
+        addContent (*edit);
+
     std::unique_ptr<Project> project (new Project (std::move (edit), file));
 
     for (const auto& subfolder :
@@ -112,7 +117,12 @@ std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& 
         return {};
     }
 
-    return project;
+    if (addContent == nullptr)
+        return project;
+
+    // Opened again from that save, which Tracktion puts in order while it loads.
+    project = nullptr;
+    return open (engine, file, false, error);
 }
 
 std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& projectFile, bool restoreAutosave, juce::String& error)

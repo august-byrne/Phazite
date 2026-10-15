@@ -262,6 +262,7 @@ Done before this plan (progress since then is under [Status](#status)):
   - Go to End goes to the end of the song, the end of the bar its last clip ends in, not to the end of its sections.
   - A note edit makes its clip longer only into the empty space after it, never over the next clip on its track.
   - Opening a project with MIDI clips no longer counts as an unsaved change: Phazite compares the project with how it was opened or last saved, since Tracktion sends notifications that change nothing.
+  - A new project's starting content (the starter song, an outline's sections) is part of its first save: no `*` right after it is made, and Undo doesn't remove it.
 
 **1.6 First built-in devices (XL)**
 - The first devices:

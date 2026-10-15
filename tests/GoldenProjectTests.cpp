@@ -388,10 +388,15 @@ TEST_SUITE ("golden")
     {
         // As ProjectSession::createFirstProject makes Phazite's first project.
         phazite::test::TemporaryFolder temp;
-        auto project = createProject (temp.folder, "Starter");
-        phazite::addStarterContent (project->getEdit());
-        REQUIRE (project->save().wasOk());
+        juce::String error;
+        auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Starter", error, phazite::addStarterContent);
+        INFO (error.toStdString());
+        REQUIRE (project != nullptr);
         phazite::test::settle();
+
+        // The first start shows no unsaved changes, and nothing to undo.
+        CHECK_FALSE (project->hasUnsavedChanges());
+        CHECK_FALSE (project->getEdit().getUndoManager().canUndo());
 
         saveReopenAndSaveAgain (std::move (project), "starter",
                                 "The starter project (addStarterContent), saved, reopened and saved again: tests/GoldenProjectTests.cpp");

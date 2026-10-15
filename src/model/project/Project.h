@@ -4,6 +4,7 @@
 
 #include "model/base/Tracktion.h"
 
+#include <functional>
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace phazite
@@ -25,9 +26,13 @@ public:
     static constexpr const char* fileExtension = ".phazite";
     static constexpr int numBackupsToKeep = 10;
 
-    // Creates the folder <parentFolder>/<name> with a new project in it, and saves it. Returns nullptr
-    // and sets error if that folder already exists or can't be written.
-    static std::unique_ptr<Project> create (te::Engine&, const juce::File& parentFolder, const juce::String& name, juce::String& error);
+    // Creates the folder <parentFolder>/<name> with a new project in it, and saves it. addContent, if given, adds what the
+    // project starts with (the starter song, an outline's sections): it goes into that first save, and the project is
+    // then opened from it, so it starts without undo steps or unsaved changes (Tracktion puts clips added in code in
+    // order only after this returns, as an undo step, but does so while it loads a project). Returns nullptr and sets
+    // error if that folder already exists or can't be written, or the saved project can't be opened.
+    static std::unique_ptr<Project> create (te::Engine&, const juce::File& parentFolder, const juce::String& name, juce::String& error,
+                                            const std::function<void (te::Edit&)>& addContent = {});
 
     // Opens a saved project. With restoreAutosave it opens the autosaved changes instead (see
     // hasNewerAutosave()); saving then still writes to the project file.
