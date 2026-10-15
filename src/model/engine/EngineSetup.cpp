@@ -129,30 +129,6 @@ void UIBehaviour::runTaskWithProgressBar (te::ThreadPoolJobWithProgress& task)
     }
 }
 
-std::unique_ptr<juce::Component> UIBehaviour::createPluginWindow (te::PluginWindowState& state)
-{
-    return createPluginWindowFunction != nullptr ? createPluginWindowFunction (state) : nullptr;
-}
-
-void UIBehaviour::recreatePluginWindowContentAsync (te::Plugin& plugin)
-{
-    // Once the plug-in has settled, as Tracktion's own default waits.
-    juce::Component::SafePointer<juce::Component> window (plugin.windowState != nullptr ? plugin.windowState->pluginWindow.get() : nullptr);
-
-    if (recreatePluginWindowFunction == nullptr || window == nullptr)
-    {
-        te::UIBehaviour::recreatePluginWindowContentAsync (plugin);
-        return;
-    }
-
-    juce::MessageManager::callAsync (
-        [recreate = recreatePluginWindowFunction, window, safePlugin = te::Plugin::Ptr (&plugin)]
-        {
-            if (window != nullptr)
-                recreate (*safePlugin);
-        });
-}
-
 //==============================================================================
 std::unique_ptr<te::Engine> createEngine (EngineOptions o)
 {

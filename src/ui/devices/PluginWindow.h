@@ -2,8 +2,8 @@
 // A device's own window (docs/design.md, section 9): a plug-in's editor, or a knob for each parameter of
 // Tracktion's built-in devices, which have no editor of their own. The windows stay above the main window and
 // remember where they were, and play and stop, and the computer keyboard, work in them (ui/input/PluginKeys.h). Tracktion
-// opens and closes them (te::PluginWindowState) and asks phazite::UIBehaviour for them, which calls
-// createPluginWindow().
+// opens and closes them (te::PluginWindowState) and asks the app's AppUIBehaviour (src/app/AppUIBehaviour.h) for them,
+// which calls createPluginWindow().
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>

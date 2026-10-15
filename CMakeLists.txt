@@ -312,6 +312,8 @@ target_sources(phazite_app PRIVATE
     src/app/AppCommands.h
     src/app/AppServices.cpp
     src/app/AppServices.h
+    src/app/AppUIBehaviour.cpp
+    src/app/AppUIBehaviour.h
     src/app/MainWindow.cpp
     src/app/MainWindow.h
     src/app/ProjectSession.cpp

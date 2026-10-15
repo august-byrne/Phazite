@@ -45,7 +45,8 @@ private:
 };
 
 //==============================================================================
-// Tracktion's UI callbacks that need no window. The app extends this with plug-in windows and dialogs.
+// Tracktion's UI callbacks that need no window. The app extends this with devices' windows (AppUIBehaviour,
+// src/app/AppUIBehaviour.h) and passes it to createEngine(); without it, as in the tests, devices have no windows.
 class UIBehaviour : public te::UIBehaviour
 {
 public:
@@ -64,13 +65,6 @@ public:
     // freezing a track or rendering to a file. Phazite doesn't enable JUCE's modal loops, so the UI
     // can't stay responsive meanwhile; Phazite's own long jobs use Tracktion's asynchronous renderers.
     void runTaskWithProgressBar (te::ThreadPoolJobWithProgress&) override;
-
-    // Devices' windows, which the app's UI makes (ui/devices/PluginWindow.h). Without these, devices have none.
-    std::function<std::unique_ptr<juce::Component> (te::PluginWindowState&)> createPluginWindowFunction;
-    std::function<void (te::Plugin&)> recreatePluginWindowFunction;
-
-    std::unique_ptr<juce::Component> createPluginWindow (te::PluginWindowState&) override;
-    void recreatePluginWindowContentAsync (te::Plugin&) override;
 
 private:
     te::SafeSelectable<te::Edit> focusedEdit;

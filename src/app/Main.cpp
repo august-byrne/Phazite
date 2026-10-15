@@ -4,13 +4,13 @@
 
 #include "AppCommands.h"
 #include "AppServices.h"
+#include "AppUIBehaviour.h"
 #include "MainWindow.h"
 #include "ProjectSession.h"
 #include "model/arrangement/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
 #include "model/project/StarterProject.h"
-#include "ui/devices/PluginWindow.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/theme/LookAndFeel.h"
@@ -44,19 +44,16 @@ public:
 
         // The Engine opens the default audio device and loads the saved plug-in list (settings live in
         // %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in a child copy of this exe (see above).
-        engine = createEngine ({});
+        engine = createEngine ({ .uiBehaviour = std::make_unique<AppUIBehaviour>() });
         services = std::make_unique<AppServices> (*engine);
 
         lookAndFeel = std::make_unique<ui::LookAndFeel>();
         juce::LookAndFeel::setDefaultLookAndFeel (lookAndFeel.get()); // dialogs and menus use it too
 
-        auto& uiBehaviour = getUIBehaviour (*engine);
-        uiBehaviour.createPluginWindowFunction = ui::createPluginWindow;
-        uiBehaviour.recreatePluginWindowFunction = ui::recreatePluginWindowContent;
-
         commands = std::make_unique<CommandRegistry>();
         commandBridge = std::make_unique<ui::CommandBridge> (*commands); // the commands' keys and menus, from here on
-        session = std::make_unique<ProjectSession> (*engine, uiBehaviour, services->recentProjects, getDefaultProjectsFolder());
+        session =
+            std::make_unique<ProjectSession> (*engine, getUIBehaviour (*engine), services->recentProjects, getDefaultProjectsFolder());
         mainWindow = std::make_unique<MainWindow> (*engine, *commandBridge, *session, *lookAndFeel, *services);
 
         addSongCommands (*commands, session->getSelection(), session->getRangeSelection());

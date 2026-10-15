@@ -10,7 +10,7 @@
 
 upward-includes                0
 model-window-includes          0
-model-window-references        5
+model-window-references        0
 model-tracktion-includes       0
 model-undo-steps               0
 model-include-loops            0
