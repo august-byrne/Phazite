@@ -333,6 +333,52 @@ namespace
                                  comparison, differences);
     }
 
+    //==============================================================================
+    // findValuesNaming(): adds the values of an element, and of every element below it, that hold one of the names as
+    // a whole word.
+    void addValuesNaming (const juce::XmlElement& element, const juce::String& path, const juce::StringArray& names,
+                          juce::StringArray& found)
+    {
+        const auto holdsName = [&names] (const juce::String& value)
+        {
+            for (const auto& name : names)
+                if (value.containsWholeWordIgnoreCase (name))
+                    return true;
+
+            return false;
+        };
+
+        if (element.isTextElement())
+        {
+            if (holdsName (element.getText()))
+                found.add (path + ": " + quoted (element.getText()));
+
+            return;
+        }
+
+        for (const auto& attribute : element.getAttributeIterator())
+            if (holdsName (attribute.value))
+                found.add (path + "@" + attribute.name.toString() + ": " + quoted (attribute.value));
+
+        const auto children = getKeyedChildren (element);
+
+        for (const auto& child : children)
+            addValuesNaming (*child.element, path + "/" + getPathName (child, children, children), names, found);
+    }
+
+    // checkNoUserName(): the names of the person running the tests, each once (JUCE gives the login name as the full
+    // name too, except on macOS), trimmed, of 3 or more characters.
+    juce::StringArray getUserNames()
+    {
+        juce::StringArray names;
+
+        for (const auto& name : { juce::SystemStats::getFullUserName().trim(), juce::SystemStats::getLogonName().trim() })
+            if (name.length() >= 3)
+                names.addIfNotAlreadyThere (name, true);
+
+        return names;
+    }
+
     juce::String describeCount (const juce::StringArray& differences)
     {
         if (differences.size() > 0 && differences[differences.size() - 1] == moreDifferences)
@@ -573,6 +619,28 @@ void freezeLegacyInput (const juce::String& relativePath, const juce::XmlElement
     REQUIRE (file.getParentDirectory().createDirectory().wasOk());
     REQUIRE (frozen.writeTo (file, format));
     MESSAGE (("Updated tests/golden/" + relativePath).toStdString());
+}
+
+//==============================================================================
+juce::StringArray findValuesNaming (const juce::XmlElement& xml, const juce::StringArray& names)
+{
+    juce::StringArray found;
+    addValuesNaming (xml, getTag (xml), names, found);
+    return found;
+}
+
+void checkNoUserName (const juce::String& what, const juce::XmlElement& save)
+{
+    const auto found = findValuesNaming (save, getUserNames());
+
+    juce::String report;
+    report << what << " names the person running the tests in " << found.size() << (found.size() == 1 ? " value:" : " values:");
+
+    for (const auto& line : found)
+        report << "\n  " << line;
+
+    INFO (report.toStdString());
+    CHECK (found.isEmpty());
 }
 
 //==============================================================================

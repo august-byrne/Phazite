@@ -67,25 +67,6 @@ juce::String getChildTags (const juce::XmlElement& element)
     return tags.joinIntoString (" ");
 }
 
-// Every value in a saved project, one per line: its attributes' values and its text. Only these could name the person
-// who saved it (tags and attribute names are Tracktion's and Phazite's own). They are read from the XML, so a letter
-// that JUCE writes as a character reference (every letter outside ASCII, such as &#233;) is here as itself.
-juce::String getAllValues (const juce::XmlElement& element)
-{
-    if (element.isTextElement())
-        return element.getText() + "\n";
-
-    juce::String values;
-
-    for (const auto& attribute : element.getAttributeIterator())
-        values << attribute.value << "\n";
-
-    for (const auto* child : element.getChildIterator())
-        values << getAllValues (*child);
-
-    return values;
-}
-
 //==============================================================================
 // Every kind of track and every piece of Phazite's data that a project keeps, so that its golden file covers them all.
 void addRepresentativeContent (phazite::Project& project, const juce::File& scratch)
@@ -368,6 +349,44 @@ TEST_SUITE ("golden")
         CHECK (phazite::test::findDifferences (*expected, *added, { .actualMayAdd = true }).isEmpty());
     }
 
+    TEST_CASE ("Golden files: a name counts in a save only as a whole word in a value, ignoring case")
+    {
+        const auto save = juce::parseXML (R"(<EDIT appVersion="0.1.0" creationTime="1791863965976" modifiedBy="Tim Smith">
+  <TEMPOSEQUENCE>
+    <TIMESIG numerator="4" denominator="4" startBeat="0.0"/>
+  </TEMPOSEQUENCE>
+  <INPUTDEVICES/>
+  <TRACK id="1003" name="Timeline">
+    <AUDIOCLIP id="1010" name="Tim's take" source="C:\Users\tim\Music\Tone.wav"/>
+    <NOTES>written by TIM</NOTES>
+  </TRACK>
+  <TRACK id="1004" name="Jos&#233;"/>
+  <TRACK id="1005" name="/home/dev/Sounds"/>
+</EDIT>)");
+        REQUIRE (save != nullptr);
+
+        // In values, at every depth, as a whole word whatever its case; not in tags or attribute names (TIMESIG,
+        // creationTime), nor inside a longer word (Timeline).
+        const auto tim = phazite::test::findValuesNaming (*save, { "tim" });
+        REQUIRE (tim.size() == 4);
+        CHECK (tim[0] == juce::String (R"(EDIT@modifiedBy: "Tim Smith")"));
+        CHECK (tim[1] == juce::String (R"(EDIT/TRACK#1003/AUDIOCLIP#1010@name: "Tim's take")"));
+        CHECK (tim[2] == juce::String (R"(EDIT/TRACK#1003/AUDIOCLIP#1010@source: "C:\Users\tim\Music\Tone.wav")"));
+        CHECK (tim[3] == juce::String (R"(EDIT/TRACK#1003/NOTES/#text: "written by TIM")"));
+
+        CHECK (phazite::test::findValuesNaming (*save, { "Tim Smith" }).joinIntoString ("\n")
+               == juce::String (R"(EDIT@modifiedBy: "Tim Smith")"));
+        CHECK (phazite::test::findValuesNaming (*save, { "dev" }).joinIntoString ("\n")
+               == juce::String (R"(EDIT/TRACK#1005@name: "/home/dev/Sounds")"));
+
+        // A letter written as a character reference counts as itself.
+        const auto jose = juce::String (juce::CharPointer_UTF8 ("Jos\xc3\xa9"));
+        CHECK (phazite::test::findValuesNaming (*save, juce::StringArray { jose }).joinIntoString ("\n")
+               == "EDIT/TRACK#1004@name: \"" + jose + "\"");
+
+        CHECK (phazite::test::findValuesNaming (*save, { "TIMESIG", "creationTime", "devices", "line", "Smit" }).isEmpty());
+    }
+
     TEST_CASE ("Golden project: a new, empty project")
     {
         phazite::test::TemporaryFolder temp;
@@ -415,19 +434,8 @@ TEST_SUITE ("golden")
                                                    "A project with one of each kind of track and every piece of Phazite's data, saved, "
                                                    "reopened and saved again: addRepresentativeContent in tests/GoldenProjectTests.cpp");
 
-        // Nothing in it names the person who made it (Tracktion would write their full name: EngineSetup.h). A name
-        // counts as a whole word in a value, so that a short one isn't found in a tag or a longer word, such as "root"
-        // in phaziteKeyRoot or "tim" in TIMESIG.
-        const auto values = getAllValues (*saves.rawFirst);
-
-        for (const auto& name : { juce::SystemStats::getFullUserName().trim(), juce::SystemStats::getLogonName().trim() })
-        {
-            if (name.length() >= 3)
-            {
-                INFO (("The first save names the user: " + name).toStdString());
-                CHECK_FALSE (values.containsWholeWordIgnoreCase (name));
-            }
-        }
+        // Nothing in it names the person who made it (Tracktion would write their full name: EngineSetup.h).
+        phazite::test::checkNoUserName ("The first save", *saves.rawFirst);
 
         phazite::test::checkSameProject ("in the autosave", *saves.first, *autosave);
         phazite::test::checkSameProject ("saved as a copy", *saves.first, *copy);

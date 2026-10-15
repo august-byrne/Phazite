@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "model/engine/EngineSetup.h"
 
@@ -39,19 +40,22 @@ TEST_CASE ("Saved projects contain no personal data")
         saveEdit (*edit);
     }
 
-    const auto text = file.getFile().loadFileAsString();
-    const auto xml = juce::parseXML (text);
-    REQUIRE (xml != nullptr);
+    const auto xml = phazite::test::readXml (file.getFile());
 
     // Tracktion writes these two attributes on every save.
     CHECK (xml->hasAttribute ("modifiedBy"));
     CHECK (xml->getStringAttribute ("modifiedBy").isEmpty());
     CHECK (xml->getStringAttribute ("appVersion") == phazite::getVersionString());
 
-    // Neither the user's full name nor their login name (part of their home folder's path) appears.
-    for (const auto& name : { juce::SystemStats::getFullUserName(), juce::SystemStats::getLogonName() })
-        if (name.length() >= 3)
-            CHECK_FALSE (text.containsIgnoreCase (name));
+    // No value holds the user's full name or login name (part of their home folder's path).
+    phazite::test::checkNoUserName ("The save", *xml);
+
+    // Short names that every save holds in its tags and attribute names (creationTime, TIMESIG, INPUTDEVICES, start,
+    // length, channelNumber) don't count: a user called Tim, Art, Len or Ann, or logged in as dev, isn't reported. This
+    // reads the save without the machine's inputs (normaliseProject()'s N2): their names are the machine's, and an input
+    // called "Dev Board" would fail it there.
+    const auto withoutInputs = phazite::test::normaliseProject (*xml, file.getFile().getParentDirectory());
+    CHECK (phazite::test::findValuesNaming (*withoutInputs, { "tim", "dev", "art", "len", "ann" }).joinIntoString ("\n") == juce::String());
 }
 
 TEST_CASE ("Rendering and freezing run their tasks without a modal loop")

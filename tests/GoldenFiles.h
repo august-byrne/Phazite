@@ -109,6 +109,26 @@ void checkGoldenText (const juce::String& relativePath, const juce::String& actu
 void freezeLegacyInput (const juce::String& relativePath, const juce::XmlElement& rawSave, const juce::String& requiredAppVersion);
 
 //==============================================================================
+// No personal data in saved projects (docs/design.md, section 22).
+
+// The values in an XML document (attribute values and text, at every depth) that hold one of the names as a whole
+// word, ignoring case, in document order, each with its path as findDifferences() writes it:
+//   EDIT@modifiedBy: "Tim Smith"
+//   EDIT/TRACK#1003/AUDIOCLIP#1010@source: "C:\Users\tim\Music\Tone.wav"
+// Values are read from the XML, so a letter that JUCE writes as a character reference (every letter outside ASCII,
+// such as &#233;) counts as itself. Tags and attribute names aren't searched: they are Tracktion's and Phazite's own.
+// A whole word has no letter or digit just before or after it, so "tim" counts between path separators and before an
+// apostrophe, but not in TIMESIG, creationTime or "Timeline".
+juce::StringArray findValuesNaming (const juce::XmlElement&, const juce::StringArray& names);
+
+// Checks (one CHECK) that no value in a save names the person running the tests, listing each value that does (as
+// findValuesNaming() finds them). The names are their full name and their login name (part of their home folder's
+// path), trimmed, of 3 or more characters: a shorter one is too likely to be a word of the project itself, such as
+// "it" in a section's tip. "what" says which save it is: "The first save". Pass the save as written, not normalised:
+// normaliseProject() replaces the project folder's path, which can hold the login name.
+void checkNoUserName (const juce::String& what, const juce::XmlElement& save);
+
+//==============================================================================
 // One of Tracktion's devices that the device list offers (phazite::getDeviceTypes()), such as
 // te::ReverbPlugin::xmlTypeName, made as the browser makes it.
 te::Plugin::Ptr createBuiltInDevice (te::Edit&, const char* xmlTypeName);
