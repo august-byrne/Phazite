@@ -58,8 +58,8 @@ void setMix (te::Plugin&, float mix);
 te::AutomatableParameter::Array getMixParameters (te::Plugin&); // the dry and wet levels, or none
 
 //==============================================================================
-// The devices that can be added: Phazite's own (model/devices/Devices.h), two of Tracktion's until Phazite has its own
-// synth and reverb, and the plug-ins found by scanning.
+// The devices that can be added: Phazite's own (model/devices/Devices.h), Tracktion's 4OSC synth until Phazite has its own,
+// and the plug-ins found by scanning.
 struct DeviceType
 {
     juce::String name;
@@ -111,7 +111,8 @@ te::AudioTrack* addReturnTrack (te::Edit&, const juce::String& name, te::Selecti
 te::AudioTrack* addNewReturnTrack (te::Edit&, te::SelectionManager*);
 
 // In one step, as Studio One does: a return track holding an effect, named after it, and a send to it from a track,
-// after the track's fader. A built-in reverb drops its dry sound, which reaches the master through the track itself.
+// after the track's fader. The effect plays only its effect, at a mix of 100 % (Tracktion's reverb without its dry level):
+// the dry sound reaches the master through the track itself.
 // Returns the return track, or nullptr if there was no room for it.
 te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& effect);
 

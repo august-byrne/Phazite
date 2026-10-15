@@ -27,7 +27,7 @@ Replacing a part of the engine outright is a separate decision, made one capabil
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** seven scenarios read no files and use none of the code Phazite is replacing: one empty track, built-in effects with a send, automation with an LFO, the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), and one for each of Phazite's own devices so far (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, and the limiter on the master). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
+- **Guards:** eight scenarios read no files and use none of the code Phazite is replacing: one empty track, built-in effects with a send, automation with an LFO, the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), and one for each of Phazite's own devices so far (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, and the reverb on a return). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
 
 ## Results (Windows Debug)
 
@@ -42,6 +42,7 @@ The first column covers the first 0.25 s after playback starts; the second cover
 | Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |
 | Phazite's compressor, ducked by another track at 70 % mix, with its meters read | 4 allocations | 0 |
 | Phazite's limiter on the master, pushed 12 dB, with its meters read | 2 allocations | 0 |
+| Phazite's reverb on a return, with an 8-second decay | 5 allocations | 0 |
 | An audio clip | 2 allocations (more if the file cache misses) | 0 |
 | Two tracks in a folder bus with a compressor | 7 allocations, 1 free | 0 |
 | MIDI into Tracktion's 4OSC synth | 29 allocations, 3 frees | 10 allocations, 8 frees |
@@ -128,7 +129,7 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
   - chorus and delay;
   - the patch bays and the channel mapper;
   - the Airwindows wrapper.
-- **Action:** Phazite ships its own devices (steps 1.6 and 2.8), and Tracktion's stay out of Phazite's device list. Until step 1.6, the list (`phazite::getDeviceTypes()`) offers two of them: the reverb, which reads its parameters atomically and allocates nothing (measured), and the 4OSC synth, which the starter project uses. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stay out too.
+- **Action:** Phazite ships its own devices (steps 1.6 and 2.8), and Tracktion's stay out of Phazite's device list. The list (`phazite::getDeviceTypes()`) offers Phazite's own and, until Phazite's synth comes in step 1.6, the 4OSC synth, which the starter project uses. Tracktion's reverb, which reads its parameters atomically and allocates nothing (measured), was offered until Phazite's own reverb replaced it (2026-10-15); projects that hold it still play it. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stay out too.
 
 **17. Previews** (measured, step 1.5): the browser's preview plays a loop in an Edit of its own, mixed on the same audio thread as the song, and stretches it as it plays (Tracktion's preview Edit uses no proxy). In its first blocks, SoundTouch grows its buffers (`FIFOSampleBuffer::ensureCapacity`, 10 allocations), and a file cache miss logs in Debug builds; then it allocates nothing. A preview started while the song plays could therefore make it glitch.
 - **Action:** accept it for now: previews are short, and are mostly started while the song is stopped. Later, prime the stretcher on the message thread before the preview starts, or render the preview ahead as the clips do. Report SoundTouch's growing buffers upstream with finding 11.

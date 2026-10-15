@@ -200,10 +200,10 @@ TEST_CASE ("The master's loudness meter reads a stereo sine at its level")
     CHECK (readings.truePeakDb == doctest::Approx (-20.0f).epsilon (0.02));
 }
 
-TEST_CASE ("The device list offers Phazite's own devices, and two of Tracktion's until Phazite has its own")
+TEST_CASE ("The device list offers Phazite's own devices, and Tracktion's 4OSC until Phazite has its own synth")
 {
-    // Phazite's instruments, Tracktion's 4OSC synth, which the starter project uses, Phazite's effects, and Tracktion's
-    // reverb, which follows the real-time rules (docs/realtime-audit.md, finding 16). Roadmap step 1.6 replaces both.
+    // Phazite's instruments, Tracktion's 4OSC synth, which the starter project uses, and Phazite's effects. Tracktion's other
+    // devices break the real-time rules (docs/realtime-audit.md, finding 16), and its reverb gave way to Phazite's.
     Mix mix;
     juce::StringArray builtIn;
 
@@ -220,8 +220,7 @@ TEST_CASE ("The device list offers Phazite's own devices, and two of Tracktion's
     }
 
     CHECK (builtIn
-           == juce::StringArray { te::FourOscPlugin::xmlTypeName, "phaziteEq", "phaziteCompressor", "phaziteLimiter",
-                                  te::ReverbPlugin::xmlTypeName });
+           == juce::StringArray { te::FourOscPlugin::xmlTypeName, "phaziteEq", "phaziteCompressor", "phaziteLimiter", "phaziteReverb" });
 }
 
 TEST_CASE ("Phazite's effects have a mix of their own, and name their key controls")
@@ -295,10 +294,13 @@ TEST_CASE ("A return with an effect comes in one step, named after the effect, w
     CHECK (sends[0]->getBusNumber() == phazite::getReturnBus (*reverbReturn));
     CHECK_FALSE (phazite::isPreFader (*sends[0]));
 
-    // Another one gets a name of its own.
-    auto* second = phazite::addReturnWithEffect (*mix.b, mix.create (te::ReverbPlugin::xmlTypeName));
+    // Another one gets a name of its own. Phazite's own reverb, at 25 % on a track, plays only its effect on a return.
+    const auto own = mix.create ("phaziteReverb");
+    REQUIRE (phazite::getMix (*own) == doctest::Approx (0.25f));
+    auto* second = phazite::addReturnWithEffect (*mix.b, own);
     REQUIRE (second != nullptr);
     CHECK (second->getName() == juce::String ("Reverb 2"));
+    CHECK (phazite::getMix (*own) == doctest::Approx (1.0f));
 
     // Instruments don't go on returns.
     CHECK (phazite::addReturnWithEffect (*mix.a, mix.create (te::FourOscPlugin::xmlTypeName)) == nullptr);

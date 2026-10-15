@@ -9,6 +9,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/reverb/Reverb.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
 #include "model/mixer/Mixer.h"
@@ -246,7 +247,7 @@ void addMix (te::Edit& edit, const juce::File& scratch)
     REQUIRE (busVolume != nullptr);
     busVolume->setVolumeDb (-3.0f);
 
-    REQUIRE (phazite::addReturnWithEffect (*high, phazite::test::createBuiltInDevice (edit, te::ReverbPlugin::xmlTypeName)) != nullptr);
+    REQUIRE (phazite::addReturnWithEffect (*high, phazite::test::createBuiltInDevice (edit, phazite::devices::Reverb::typeID)) != nullptr);
 }
 
 // Renders the first 4 seconds of an Edit to a WAV file, always in the same way: at 44.1 kHz, in blocks of 512 samples,

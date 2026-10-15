@@ -308,15 +308,14 @@ DeviceType makeDeviceType (const juce::PluginDescription& description)
 
 std::vector<DeviceType> getDeviceTypes (te::Engine& engine)
 {
-    // Phazite's own devices (roadmap step 1.6), instruments first, and until it has its own synth and reverb, two of
-    // Tracktion's: the 4OSC synth, which the starter project uses, and the reverb, which follows the real-time rules.
-    // Tracktion's other devices lock, allocate or read message-thread state on the audio thread, so they aren't offered
-    // (docs/realtime-audit.md, finding 16).
+    // Phazite's own devices (roadmap step 1.6), instruments first, and until it has its own synth, Tracktion's 4OSC synth,
+    // which the starter project uses. Tracktion's other devices lock, allocate or read message-thread state on the audio
+    // thread, so they aren't offered (docs/realtime-audit.md, finding 16); projects that hold its reverb, which was
+    // offered until Phazite had its own, still open and play it.
     std::vector<DeviceType> types;
     addOwnDevices (types, devices::DeviceKind::instrument);
     types.push_back (makeBuiltIn ("4OSC synth", te::FourOscPlugin::xmlTypeName, true, "Tracktion"));
     addOwnDevices (types, devices::DeviceKind::effect);
-    types.push_back (makeBuiltIn ("Reverb", te::ReverbPlugin::xmlTypeName, false, "Tracktion"));
 
     for (const auto& description : engine.getPluginManager().knownPluginList.getTypes())
         types.push_back (makeDeviceType (description));
@@ -549,8 +548,11 @@ te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& e
 
     insertDevice (*created, effect);
 
+    // The dry sound reaches the master through the track itself, so a return plays only its effect.
     if (auto* reverb = dynamic_cast<te::ReverbPlugin*> (effect.get()))
         reverb->setDry (0.0f);
+    else if (findOwnMix (*effect) != nullptr)
+        setMix (*effect, 1.0f);
 
     addSend (sender, getReturnBus (*created), false);
     return created;

@@ -79,6 +79,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dynamics/Limiter.h
     src/devices/eq/Equalizer.cpp
     src/devices/eq/Equalizer.h
+    src/devices/reverb/Reverb.cpp
+    src/devices/reverb/Reverb.h
     src/model/arrangement/Arrangement.cpp
     src/model/arrangement/Arrangement.h
     src/model/arrangement/Clips.cpp
@@ -289,6 +291,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/LimiterEditor.h
     src/ui/devices/PluginWindow.cpp
     src/ui/devices/PluginWindow.h
+    src/ui/devices/ReverbEditor.cpp
+    src/ui/devices/ReverbEditor.h
     src/ui/input/CommandBridge.cpp
     src/ui/input/CommandBridge.h
     src/ui/input/CommandUI.cpp
@@ -470,6 +474,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp
+        tests/ReverbEditorTests.cpp
+        tests/ReverbTests.cpp
         tests/SchemaTests.cpp
         tests/SectionTests.cpp
         tests/SelectionTests.cpp

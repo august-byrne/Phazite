@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's base controls: knob, fader and level meter, and the link between a slider and a Tracktion
-// parameter. ui::LookAndFeel draws them. They work from the keyboard (Tab moves the focus, the arrow
+// Phazite's base controls: knob, fader, level meter and a meter of a device's value, and the link between a slider
+// and a Tracktion parameter. ui::LookAndFeel draws them. They work from the keyboard (Tab moves the focus, the arrow
 // keys change the value) and tell screen readers their name and value.
 #pragma once
 

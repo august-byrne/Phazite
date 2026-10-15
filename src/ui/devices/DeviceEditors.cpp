@@ -3,9 +3,11 @@
 #include "CompressorEditor.h"
 #include "EqEditor.h"
 #include "LimiterEditor.h"
+#include "ReverbEditor.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/reverb/Reverb.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -35,6 +37,9 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Limiter::typeID)
         return std::make_unique<LimiterEditor> (device);
+
+    if (info->typeID == devices::Reverb::typeID)
+        return std::make_unique<ReverbEditor> (device);
 
     return std::make_unique<DeviceKnobs> (device);
 }

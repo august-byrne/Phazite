@@ -13,7 +13,7 @@
     <PLUGIN enabled="1"
             id="1043"
             remapOnTempoChange="1"
-            type="reverb">
+            type="phaziteReverb">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"
@@ -268,12 +268,11 @@
         <MODIFIERASSIGNMENTS/>
         <MODMATRIX/>
       </PLUGIN>
-      <PLUGIN dry="0.375"
-              enabled="1"
+      <PLUGIN enabled="1"
               id="1019"
+              mix="0.25"
               remapOnTempoChange="1"
-              type="reverb"
-              wet="0.08333334">
+              type="phaziteReverb">
         <MODIFIERASSIGNMENTS/>
       </PLUGIN>
       <PLUGIN auxSendSliderPos="0.5488116"
@@ -423,11 +422,11 @@
             type="auxreturn">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
-    <PLUGIN dry="0"
-            enabled="1"
+    <PLUGIN enabled="1"
             id="1036"
+            mix="1"
             remapOnTempoChange="1"
-            type="reverb">
+            type="phaziteReverb">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"

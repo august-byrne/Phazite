@@ -6,6 +6,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/reverb/Reverb.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Grid.h"
 #include "model/arrangement/Import.h"
@@ -120,7 +121,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     REQUIRE (keys != nullptr);
     keys->setName ("Keys");
     REQUIRE (phazite::setInstrument (*keys, createBuiltInDevice (edit, te::FourOscPlugin::xmlTypeName)) != nullptr);
-    auto* reverb = phazite::insertDevice (*keys, createBuiltInDevice (edit, te::ReverbPlugin::xmlTypeName));
+    auto* reverb = phazite::insertDevice (*keys, createBuiltInDevice (edit, phazite::devices::Reverb::typeID));
     REQUIRE (reverb != nullptr);
     phazite::setMix (*reverb, 0.25f);
     phazite::setTrackKey (*keys, phazite::Key { 2, te::Scale::minor });
@@ -179,10 +180,10 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     busVolume->setVolumeDb (-3.0f);
 
     // Returns: a reverb return that Tone sends to after its fader and Keys before its fader; and a reverb on the master.
-    auto* reverbReturn = phazite::addReturnWithEffect (*tone, createBuiltInDevice (edit, te::ReverbPlugin::xmlTypeName));
+    auto* reverbReturn = phazite::addReturnWithEffect (*tone, createBuiltInDevice (edit, phazite::devices::Reverb::typeID));
     REQUIRE (reverbReturn != nullptr);
     REQUIRE (phazite::addSend (*keys, phazite::getReturnBus (*reverbReturn), true) != nullptr);
-    REQUIRE (phazite::insertMasterDevice (edit, createBuiltInDevice (edit, te::ReverbPlugin::xmlTypeName)) != nullptr);
+    REQUIRE (phazite::insertMasterDevice (edit, createBuiltInDevice (edit, phazite::devices::Reverb::typeID)) != nullptr);
 
     // View settings: the playlist's grid and the piano roll's, and a range looped on purpose.
     phazite::saveGridSettings (edit, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 1 });

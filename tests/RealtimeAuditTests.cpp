@@ -16,6 +16,7 @@
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/reverb/Reverb.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
 #include "model/devices/DevicePlugin.h"
@@ -382,6 +383,24 @@ TEST_SUITE ("realtime-audit")
         CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // its ceiling
         checkSteadyPlaybackDoesNotAllocate (m);
         CHECK (limiter.getReductionMeter().take() > 1.0f);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's reverb on a return, with an 8-second decay")
+    {
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+
+        const auto plugin = edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::addReturnWithEffect (track, plugin) != nullptr);
+        device->findParameter ("decay")->setParameter (8.0f, juce::sendNotification);
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's reverb on a return, with an 8-second decay", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
     }
 
     // These read audio files or use code Phazite is replacing, so they only report.
