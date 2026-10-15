@@ -17,6 +17,7 @@
 #include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
 #include "model/devices/DevicePlugin.h"
@@ -383,6 +384,33 @@ TEST_SUITE ("realtime-audit")
         CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // its ceiling
         checkSteadyPlaybackDoesNotAllocate (m);
         CHECK (limiter.getReductionMeter().take() > 1.0f);
+    }
+
+    TEST_CASE ("Real-time audit: MIDI into Phazite's synth, notes overlapping, with noise and its LFO")
+    {
+        using phazite::devices::Synth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
+        device->findParameter ("noiseLevel")->setParameter (0.2f, juce::sendNotification);
+        device->findParameter ("lfoDepth")->setParameter (0.5f, juce::sendNotification);
+        device->findParameter ("release")->setParameter (400.0f, juce::sendNotification);
+
+        // More notes than voices, so some are stolen.
+        auto clip = track.insertMIDIClip ("Notes", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        REQUIRE (clip != nullptr);
+
+        for (int i = 0; i < 32; ++i)
+            clip->getSequence().addNote (36 + i, te::BeatPosition::fromBeats (i * 0.125), te::BeatDuration::fromBeats (1.0), 100, 0,
+                                         nullptr);
+
+        const auto m = playAndMeasure (*edit);
+        report ("MIDI into Phazite's synth, notes overlapping, with noise and its LFO", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
     }
 
     TEST_CASE ("Real-time audit: Phazite's reverb on a return, with an 8-second decay")

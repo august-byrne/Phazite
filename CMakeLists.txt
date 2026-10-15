@@ -81,6 +81,8 @@ target_sources(phazite_core PRIVATE
     src/devices/eq/Equalizer.h
     src/devices/reverb/Reverb.cpp
     src/devices/reverb/Reverb.h
+    src/devices/synth/Synth.cpp
+    src/devices/synth/Synth.h
     src/model/arrangement/Arrangement.cpp
     src/model/arrangement/Arrangement.h
     src/model/arrangement/Clips.cpp
@@ -285,6 +287,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DeviceEditors.h
     src/ui/devices/DeviceMenus.cpp
     src/ui/devices/DeviceMenus.h
+    src/ui/devices/DevicePanel.cpp
+    src/ui/devices/DevicePanel.h
     src/ui/devices/EqEditor.cpp
     src/ui/devices/EqEditor.h
     src/ui/devices/LimiterEditor.cpp
@@ -445,6 +449,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DesignTokenTests.cpp
         tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp
+        tests/DevicePanelTests.cpp
         tests/DevicePluginTests.cpp
         tests/DrumRowTests.cpp
         tests/DspTests.cpp
@@ -484,6 +489,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SidechainTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
+        tests/SynthTests.cpp
         tests/TestDevices.h
         tests/TimelineTests.cpp
         tests/TimelineViewTests.cpp

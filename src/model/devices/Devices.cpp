@@ -5,6 +5,7 @@
 #include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/synth/Synth.h"
 
 namespace phazite
 {
@@ -15,12 +16,13 @@ void registerDevices (te::Engine& engine)
     plugins.createBuiltInType<DevicePluginOf<devices::Compressor>>();
     plugins.createBuiltInType<DevicePluginOf<devices::Limiter>>();
     plugins.createBuiltInType<DevicePluginOf<devices::Reverb>>();
+    plugins.createBuiltInType<DevicePluginOf<devices::Synth>>();
 }
 
 std::span<const devices::DeviceInfo* const> getOwnDevices()
 {
-    static const devices::DeviceInfo* const own[] = { &devices::Equalizer::info, &devices::Compressor::info, &devices::Limiter::info,
-                                                      &devices::Reverb::info };
+    static const devices::DeviceInfo* const own[] = { &devices::Synth::info, &devices::Equalizer::info, &devices::Compressor::info,
+                                                      &devices::Limiter::info, &devices::Reverb::info };
     return own;
 }
 } // namespace phazite

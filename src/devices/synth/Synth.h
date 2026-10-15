@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Phazite's synth (roadmap step 1.6): a subtractive synth with up to 16 voices. Each voice mixes two band-limited
+// oscillators (the second tuned and detuned against the first), a sine an octave down and noise, through a resonant
+// filter that has an envelope of its own and follows the keys, then an amp envelope. One LFO moves the pitch, the
+// cutoff or the level; the mod wheel adds to it. In mono mode one voice plays, legato, gliding between the keys held,
+// as a bassline does. Pitch bend and the sustain pedal work as on a keyboard. Its noise comes from fixed seeds, so it
+// renders the same every time.
+#pragma once
+
+#include "devices/core/DeviceInfo.h"
+#include "devices/core/Processor.h"
+#include "devices/dsp/Envelopes.h"
+#include "devices/dsp/Filters.h"
+#include "devices/dsp/Oscillators.h"
+#include "devices/dsp/Random.h"
+
+#include <array>
+#include <atomic>
+#include <cstdint>
+
+namespace phazite::devices
+{
+class Synth final : public Processor
+{
+public:
+    static constexpr const char* typeID = "phaziteSynth";
+    static constexpr int maxVoices = 16;
+
+    enum Parameter
+    {
+        osc1Wave,
+        osc2Wave,
+        osc2Pitch,
+        osc2Detune,
+        oscMix,
+        pulseWidth,
+        subLevel,
+        noiseLevel,
+        filterType,
+        cutoff,
+        resonance,
+        filterEnvelope,
+        keyTracking,
+        filterAttack,
+        filterDecay,
+        filterSustain,
+        filterRelease,
+        attack,
+        decay,
+        sustain,
+        release,
+        velocity,
+        lfoShape,
+        lfoRate,
+        lfoTarget,
+        lfoDepth,
+        voiceMode,
+        glide,
+        bendRange,
+        level
+    };
+
+    enum class FilterType
+    {
+        lowPass,
+        bandPass,
+        highPass
+    };
+
+    enum class LfoTarget
+    {
+        pitch,  // up to a semitone either way
+        cutoff, // up to two octaves either way
+        level   // tremolo
+    };
+
+    static const DeviceInfo info;
+
+    // How many voices are sounding, for tests and meters. Any thread.
+    int getActiveVoices() const noexcept { return activeVoices.load (std::memory_order_relaxed); }
+
+    void prepare (double sampleRate, int maximumBlockSize) override;
+    void reset() override;
+    void process (const ProcessContext&) override;
+    double getTailSeconds() const override;
+
+private:
+    static constexpr int controlStep = 16; // samples between updates of pitch, filter and LFO
+    static constexpr int maxHeld = 16;     // keys mono mode remembers, to go back to
+
+    struct Voice
+    {
+        int note = -1;
+        bool held = false;      // its key is down
+        bool sustained = false; // its key is up but the sustain pedal holds it
+        float velocityGain = 1.0f;
+        float pitch = 60.0f, target = 60.0f; // in semitones, gliding to the target
+        std::uint64_t started = 0;           // when it began, so that the oldest is taken first
+        dsp::Oscillator osc1, osc2, sub;
+        dsp::Random noise;
+        dsp::Adsr amp, filterEnvelope;
+        dsp::Filter filter;
+        dsp::FilterCoefficients coefficients;
+        float filterEnvelopeLevel = 0.0f;
+    };
+
+    double sampleRate = 44100.0;
+    std::array<Voice, maxVoices> voices;
+    std::array<int, maxHeld> heldKeys {}; // mono mode's keys down, oldest first
+    int numHeld = 0;
+    std::uint64_t notesPlayed = 0;
+    float lastNote = -1.0f; // where a new note glides from
+    float bend = 0.0f, modWheel = 0.0f;
+    bool pedalDown = false;
+    int shownMode = -1; // poly (0) or mono (1) as the last block played
+    dsp::Lfo lfo;
+    std::atomic<float> tailSeconds { 0.2f };
+    std::atomic<int> activeVoices { 0 };
+
+    void handle (const NoteEvent&, std::span<const float> parameters);
+    void startNote (int note, float velocity, std::span<const float> parameters);
+    void stopNote (int note, std::span<const float> parameters);
+    void releaseVoice (Voice&);
+    Voice& findVoiceFor (int note);
+    void render (float* left, float* right, int numSamples, std::span<const float> parameters);
+};
+} // namespace phazite::devices

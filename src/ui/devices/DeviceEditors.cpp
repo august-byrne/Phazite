@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceEditors.h"
 #include "CompressorEditor.h"
+#include "DevicePanel.h"
 #include "EqEditor.h"
 #include "LimiterEditor.h"
 #include "ReverbEditor.h"
@@ -8,6 +9,7 @@
 #include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/synth/Synth.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -19,6 +21,18 @@ namespace
     juce::String toString (std::string_view text)
     {
         return juce::String (text.data(), text.size());
+    }
+
+    // The synth's controls, in the order the sound goes through them.
+    std::vector<std::vector<DevicePanel::Group>> getSynthLayout()
+    {
+        return { { { "Oscillators",
+                     { "osc1Wave", "osc2Wave", "osc2Pitch", "osc2Detune", "oscMix", "pulseWidth", "subLevel", "noiseLevel" } } },
+                 { { "Filter", { "filterType", "cutoff", "resonance", "filterEnvelope", "keyTracking" } },
+                   { "Filter Envelope", { "filterAttack", "filterDecay", "filterSustain", "filterRelease" } } },
+                 { { "Amp Envelope", { "attack", "decay", "sustain", "release" } },
+                   { "LFO", { "lfoShape", "lfoTarget", "lfoRate", "lfoDepth" } } },
+                 { { "Play", { "voiceMode", "glide", "bendRange", "velocity", "level" } } } };
     }
 } // namespace
 
@@ -40,6 +54,9 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Reverb::typeID)
         return std::make_unique<ReverbEditor> (device);
+
+    if (info->typeID == devices::Synth::typeID)
+        return std::make_unique<DevicePanel> (device, getSynthLayout());
 
     return std::make_unique<DeviceKnobs> (device);
 }
