@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Undo.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace phazite
 {
 namespace
@@ -13,6 +16,19 @@ namespace
         for (auto* parameter : edit.getAllAutomatableParams (true))
             if (parameter->getCurve().getNumPoints() == 0)
                 parameter->updateFromAttachedValue();
+    }
+
+    // The undo managers of the Edits with a gesture in progress (message thread only).
+    std::vector<juce::UndoManager*>& getOpenGestures()
+    {
+        static std::vector<juce::UndoManager*> open;
+        return open;
+    }
+
+    bool isInGesture (juce::UndoManager& undoManager)
+    {
+        const auto& open = getOpenGestures();
+        return std::find (open.begin(), open.end(), &undoManager) != open.end();
     }
 
     // "Undo Change Volume": the verb with the name of the step, when there is a step and it is named.
@@ -80,7 +96,8 @@ UndoStep::UndoStep (te::Edit& edit, const juce::String& name)
     : undoManager (edit.getUndoManager()),
       outer (current)
 {
-    auto joinsOuterStep = false;
+    // Within a gesture, or another step for the same Edit, it joins that one.
+    auto joinsOuterStep = isInGesture (undoManager);
 
     for (auto* step = outer; step != nullptr && ! joinsOuterStep; step = step->outer)
         joinsOuterStep = &step->undoManager == &undoManager;
@@ -95,5 +112,40 @@ UndoStep::~UndoStep()
 {
     jassert (current == this); // steps end in the reverse order of their beginning, on the message thread
     current = outer;
+}
+
+//==============================================================================
+Gesture::Gesture (te::Edit& e, const juce::String& name)
+    : edit (e),
+      inhibitor (std::make_unique<te::Edit::UndoTransactionInhibitor> (e))
+{
+    jassert (! isInGesture (edit.getUndoManager())); // one at a time for an Edit
+    edit.getUndoManager().beginNewTransaction (name);
+    getOpenGestures().push_back (&edit.getUndoManager());
+}
+
+Gesture::~Gesture()
+{
+    commit();
+}
+
+void Gesture::commit()
+{
+    if (inhibitor == nullptr)
+        return;
+
+    auto& open = getOpenGestures();
+    open.erase (std::remove (open.begin(), open.end(), &edit.getUndoManager()), open.end());
+    inhibitor.reset();
+}
+
+void Gesture::rollBack()
+{
+    if (inhibitor == nullptr)
+        return;
+
+    edit.getUndoManager().undoCurrentTransactionOnly();
+    playStoredParameterValues (edit);
+    commit();
 }
 } // namespace phazite

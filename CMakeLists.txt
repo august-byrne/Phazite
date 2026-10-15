@@ -101,6 +101,8 @@ target_sources(phazite_core PRIVATE
     src/model/commands/UndoCommands.h
     src/model/devices/DevicePlugin.cpp
     src/model/devices/DevicePlugin.h
+    src/model/devices/ParameterHandle.cpp
+    src/model/devices/ParameterHandle.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
     src/model/engine/EngineSetup.cpp
@@ -429,6 +431,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
         tests/NoteTests.cpp
+        tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp
         tests/PluginKeysTests.cpp
@@ -443,6 +446,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ShortcutTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
+        tests/TestDevices.h
         tests/TimelineTests.cpp
         tests/TimelineViewTests.cpp
         tests/ToggleTests.cpp

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Undo, redo and the undo convention (src/model/commands/Undo.h): a change of its own begins a named UndoStep, which
-// joins a step already in progress for the same Edit.
+// joins a step already in progress for the same Edit, and a drag is a Gesture.
+#include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "model/commands/Undo.h"
 
@@ -147,4 +148,61 @@ TEST_CASE ("Undo and redo say what they would undo")
     CHECK (phazite::canUndo (*edit));
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo"));
     CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Undo"));
+}
+
+TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back leaves nothing to undo or redo")
+{
+    auto edit = createEdit();
+    auto& undo = edit->getUndoManager();
+    phazite::test::settle(); // Tracktion's listener for undo steps is in place once messages are delivered
+
+    {
+        phazite::Gesture gesture (*edit, "Drag");
+        CHECK (gesture.isOpen());
+        change (*edit, "a", 1);
+
+        // Tracktion begins a new step about 350 ms after a change; a gesture keeps its step whole however long it lasts.
+        phazite::test::settle (500);
+        change (*edit, "a", 2);
+
+        {
+            const phazite::UndoStep inside (*edit, "Inside"); // a model function's step, which joins the gesture
+            change (*edit, "b", 3);
+        }
+
+        change (*edit, "a", 4);
+        gesture.commit();
+        CHECK_FALSE (gesture.isOpen());
+    }
+
+    CHECK (undo.getUndoDescription() == juce::String ("Drag"));
+    phazite::undo (*edit);
+    CHECK_FALSE (edit->state.hasProperty ("a"));
+    CHECK_FALSE (edit->state.hasProperty ("b"));
+    phazite::redo (*edit);
+    CHECK ((int) edit->state["a"] == 4);
+    CHECK ((int) edit->state["b"] == 3);
+
+    // Rolled back, as Escape during a drag: as if it never happened, with nothing to redo.
+    {
+        phazite::Gesture gesture (*edit, "Cancelled");
+        change (*edit, "a", 5);
+        change (*edit, "c", 6);
+        gesture.rollBack();
+        CHECK_FALSE (gesture.isOpen());
+    }
+
+    CHECK ((int) edit->state["a"] == 4);
+    CHECK_FALSE (edit->state.hasProperty ("c"));
+    CHECK (undo.getUndoDescription() == juce::String ("Drag"));
+    CHECK_FALSE (phazite::canRedo (*edit));
+
+    // Ended without either, it keeps its changes.
+    {
+        const phazite::Gesture gesture (*edit, "Kept");
+        change (*edit, "d", 7);
+    }
+
+    CHECK (undo.getUndoDescription() == juce::String ("Kept"));
+    CHECK ((int) edit->state["d"] == 7);
 }

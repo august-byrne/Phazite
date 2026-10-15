@@ -5,6 +5,8 @@
 
 #include "model/base/Tracktion.h"
 
+#include <memory>
+
 namespace phazite
 {
 // Undo and redo for an Edit. Use these, not Edit::undo() and redo(): Tracktion's undo puts back a
@@ -31,8 +33,8 @@ juce::String describeUndoOrRedo (te::Edit*);
 // Begins a named undo step: it holds every change made through the Edit's undo manager until the next step begins
 // (Tracktion also begins an unnamed one about 350 ms after a change, unless a mouse button is down). Make one on the
 // stack, first thing, in a model function that is a change of its own. Made while another one for the same Edit is in
-// progress, it begins nothing: the outer step holds everything. Message thread only; a drag across events needs a
-// gesture session (phase A2).
+// progress, it begins nothing: the outer step holds everything. Message thread only; a drag across events is a
+// Gesture.
 class UndoStep
 {
 public:
@@ -45,5 +47,28 @@ private:
     static inline UndoStep* current = nullptr; // the innermost step in progress
 
     JUCE_DECLARE_NON_COPYABLE (UndoStep)
+};
+
+//==============================================================================
+// The undo step of a drag, or of any change that spans several events (roadmap phase A2): begun when it starts, it
+// holds every change made through the Edit's undo manager as one named step until commit(), and Tracktion doesn't
+// split it meanwhile (it otherwise begins a new step about 350 ms after a change). rollBack() undoes its changes
+// instead and leaves nothing to redo, as Escape during a drag should. Destroyed without either, it commits. Message
+// thread only, one at a time for an Edit.
+class Gesture
+{
+public:
+    Gesture (te::Edit&, const juce::String& name);
+    ~Gesture();
+
+    void commit();
+    void rollBack();
+    bool isOpen() const noexcept { return inhibitor != nullptr; }
+
+private:
+    te::Edit& edit;
+    std::unique_ptr<te::Edit::UndoTransactionInhibitor> inhibitor;
+
+    JUCE_DECLARE_NON_COPYABLE (Gesture)
 };
 } // namespace phazite

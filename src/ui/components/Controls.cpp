@@ -19,15 +19,6 @@ namespace
         return silencedBySolo ? "Silent while other tracks are soloed. Click to mute it anyway, or right-click to solo it alone"
                               : "Mute: silences this track. Right-click to solo it alone, as in FL Studio";
     }
-
-    // Tracktion stores a parameter's value in the project only once it changes, and undoing that
-    // first change removes it again. phazite::undo() then couldn't play the old value without an undo
-    // step of its own, which would cost the redo history. So the value is stored first, without an
-    // undo step: with the value unchanged, setParameter() only writes it, past the undo manager.
-    void storeValueWithoutUndo (te::AutomatableParameter& parameter)
-    {
-        parameter.setParameter (parameter.getCurrentValue(), juce::sendNotification);
-    }
 } // namespace
 
 //==============================================================================
@@ -107,78 +98,46 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s, juce::String name)
       undoName (std::move (name))
 {
     slider.setEnabled (false);
+    slider.onDragStart = [this] { handle.beginGesture(); };
+    slider.onDragEnd = [this] { handle.endGesture(); };
 
-    slider.onDragStart = [this]
-    {
-        if (auto parameter = getParameter())
-        {
-            dragging = true;
-            storeValueWithoutUndo (*parameter);
-            parameter->getEdit().getUndoManager().beginNewTransaction (undoName);
-            parameter->parameterChangeGestureBegin(); // for automation recording
-        }
-    };
-
-    slider.onDragEnd = [this]
-    {
-        if (auto parameter = getParameter(); parameter != nullptr && dragging)
-            parameter->parameterChangeGestureEnd();
-
-        dragging = false;
-    };
-
-    slider.onValueChange = [this]
-    {
-        if (auto parameter = getParameter())
-        {
-            if (! dragging) // a key press or a double-click: one undo step each
-            {
-                storeValueWithoutUndo (*parameter);
-                parameter->getEdit().getUndoManager().beginNewTransaction (undoName);
-            }
-
-            parameter->setParameter ((float) slider.getValue(), juce::sendNotification);
-        }
-    };
+    // During a drag it moves the gesture's value; a key press or a double-click is a step of its own.
+    slider.onValueChange = [this] { handle.setValue ((float) slider.getValue()); };
 }
 
 void ParameterAttachment::setParameter (te::Plugin* newPlugin, const juce::String& newParameterID)
 {
-    if (plugin == newPlugin && parameterID == newParameterID)
+    if (! handle.refersTo (newPlugin, newParameterID))
+        setParameter (ParameterHandle (newPlugin, newParameterID, undoName));
+}
+
+void ParameterAttachment::setParameter (ParameterHandle newHandle)
+{
+    // Without a parameter while the range changes, so that a value the slider clamps reaches none.
+    handle = ParameterHandle();
+    showRange (newHandle);
+    handle = std::move (newHandle);
+    update();
+}
+
+void ParameterAttachment::showRange (const ParameterHandle& shown)
+{
+    if (! shown.isValid())
         return;
 
-    plugin = nullptr; // so that setting the range below can't change the parameter
-    dragging = false;
+    const auto range = shown.getRange();
+    slider.setNormalisableRange ({ range.start, range.end, range.interval, range.skew });
 
-    if (auto parameter = newPlugin != nullptr ? newPlugin->getAutomatableParameterByID (newParameterID) : nullptr)
-    {
-        const auto range = parameter->getValueRange();
-        slider.setRange (range.getStart(), range.getEnd());
-
-        if (const auto defaultValue = parameter->getDefaultValue())
-            slider.setDoubleClickReturnValue (true, *defaultValue);
-    }
-
-    plugin = newPlugin;
-    parameterID = newParameterID;
-    update();
+    if (const auto defaultValue = shown.getDefaultValue())
+        slider.setDoubleClickReturnValue (true, *defaultValue);
 }
 
 void ParameterAttachment::update()
 {
-    const auto parameter = getParameter();
-    slider.setEnabled (parameter != nullptr);
+    slider.setEnabled (handle.isValid());
 
-    if (parameter != nullptr && ! dragging)
-        slider.setValue (parameter->getCurrentValue(), juce::dontSendNotification);
-}
-
-te::AutomatableParameter::Ptr ParameterAttachment::getParameter() const
-{
-    if (auto* p = plugin.get())
-        return p->getAutomatableParameterByID (parameterID);
-
-    return {};
+    if (handle.isValid() && ! handle.isInGesture())
+        slider.setValue (handle.getValue(), juce::dontSendNotification);
 }
 
 //==============================================================================

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "model/commands/CommandRegistry.h"
+#include "model/devices/ParameterHandle.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
@@ -60,10 +61,10 @@ void showAsDecibels (juce::Slider&);
 void showAsPan (juce::Slider&);
 
 //==============================================================================
-// Links a slider to a parameter of a Tracktion plug-in, such as a track's volume. Moving the slider
-// sets the parameter, as one named undo step per drag or key press; update() shows changes made
-// elsewhere, such as undo or automation. The plug-in may be deleted at any time (when a project
-// closes, for example): the slider then turns off.
+// Links a slider to a parameter of a plug-in, such as a track's volume. Moving the slider sets the
+// parameter, as one named undo step per drag or key press, which the model's ParameterHandle owns;
+// update() shows changes made elsewhere, such as undo or automation. The plug-in may be deleted at any
+// time (when a project closes, for example): the slider then turns off.
 class ParameterAttachment
 {
 public:
@@ -73,17 +74,18 @@ public:
     // a VolumeAndPanPlugin's volParam->paramID: the master's differs from a track's); nullptr for none.
     void setParameter (te::Plugin*, const juce::String& parameterID);
 
+    // The parameter to control, as the model hands it out. Its undo steps keep the name the handle has.
+    void setParameter (ParameterHandle);
+
     // Shows the parameter's value. Call it regularly, from a timer.
     void update();
 
 private:
     juce::Slider& slider;
     const juce::String undoName;
-    te::SafeSelectable<te::Plugin> plugin;
-    juce::String parameterID;
-    bool dragging = false;
+    ParameterHandle handle; // owns the undo steps: the slider only reports its drags and values
 
-    te::AutomatableParameter::Ptr getParameter() const;
+    void showRange (const ParameterHandle&);
 };
 
 //==============================================================================
