@@ -10,6 +10,7 @@
 #include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/playlist/TrackHeader.h"
+#include "ui/playlist/TrackHeights.h"
 
 namespace
 {
@@ -52,9 +53,9 @@ struct PlaylistScreen
         auto y = 0;
 
         for (int i = 0; i < track; ++i)
-            y += phazite::getTrackHeight (*tracks[i]);
+            y += phazite::ui::getTrackHeight (*tracks[i]);
 
-        return { juce::roundToInt (playlist.getView().beatToX (beats (beat))), y + phazite::getTrackHeight (*tracks[track]) / 2 };
+        return { juce::roundToInt (playlist.getView().beatToX (beats (beat))), y + phazite::ui::getTrackHeight (*tracks[track]) / 2 };
     }
 
     std::vector<double> getClipStarts (int track) const
@@ -155,7 +156,7 @@ TEST_CASE ("Dragging a clip past the edge of the playlist scrolls it")
     // The lower half of a clip moves it (the Smart Tool). The pointer stays past the right edge while the
     // lanes scroll. (In the app JUCE keeps sending drags while the mouse is still; here it moves a pixel
     // each time, since JUCE skips a drag that doesn't move.)
-    const auto start = screen.at (1.0, 0).translated (0, phazite::TrackHeight::standard / 4);
+    const auto start = screen.at (1.0, 0).translated (0, phazite::ui::TrackHeight::standard / 4);
     mouse.press (start);
 
     for (int i = 0; i < 20; ++i)
@@ -202,7 +203,7 @@ TEST_CASE ("The row after the last track, and a double-click under it, add track
 
     // The lanes are taller than four tracks.
     phazite::test::Mouse mouse (*screen.lanes);
-    mouse.doubleClick ({ 100, 4 * phazite::TrackHeight::standard + 40 });
+    mouse.doubleClick ({ 100, 4 * phazite::ui::TrackHeight::standard + 40 });
     CHECK (te::getAudioTracks (*screen.edit).size() == 5);
 
     // Each is an undo step.
@@ -233,7 +234,7 @@ TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge
 
     phazite::test::Mouse mouse (screen.playlist);
     const auto inPlaylist = [&screen, &header] (juce::Point<int> p) { return screen.playlist.getLocalPoint (&header, p); };
-    const auto down = juce::Point<int> (0, 2 * phazite::TrackHeight::standard + 40); // near the boundary under the third track
+    const auto down = juce::Point<int> (0, 2 * phazite::ui::TrackHeight::standard + 40); // near the boundary under the third track
 
     // Dragging the middle of the header moves nothing: it selects the tracks the mouse passes.
     const auto middle = inPlaylist (header.getLocalBounds().getCentre());
@@ -261,7 +262,7 @@ TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge
     mouse.click (inPlaylist (collapse->getBounds().getCentre()));
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::isCollapsed (*screen.tracks[0]));
-    CHECK (header.getHeight() == phazite::TrackHeight::collapsed);
+    CHECK (header.getHeight() == phazite::ui::TrackHeight::collapsed);
     CHECK (phazite::test::findComponentWithTitle (header, "Expand track") != nullptr);
 
     // Dragging its bottom edge down expands it to where the edge is let go.
@@ -271,7 +272,7 @@ TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge
     mouse.release();
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (phazite::isCollapsed (*screen.tracks[0]));
-    CHECK (header.getHeight() == phazite::TrackHeight::collapsed + 30);
+    CHECK (header.getHeight() == phazite::ui::TrackHeight::collapsed + 30);
 }
 
 TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip used, and right-click deletes it")

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Playlist.h"
+#include "TrackHeights.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Outlines.h"

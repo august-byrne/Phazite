@@ -279,6 +279,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/playlist/SectionsStrip.h
     src/ui/playlist/TrackHeader.cpp
     src/ui/playlist/TrackHeader.h
+    src/ui/playlist/TrackHeights.cpp
+    src/ui/playlist/TrackHeights.h
     src/ui/shell/AppShell.cpp
     src/ui/shell/AppShell.h
     src/ui/shell/CommandPalette.cpp

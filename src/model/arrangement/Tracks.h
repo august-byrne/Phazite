@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist's tracks: which ones it shows, their colors and heights, and the track commands.
+// The playlist's tracks: which ones it shows, their colors, and the track commands.
 #pragma once
 
 #include "model/base/Tracktion.h"
 
 #include <array>
+#include <optional>
 
 namespace phazite
 {
@@ -40,27 +41,10 @@ juce::Array<te::Track*> getSelectedOutermostTracks (const te::SelectionManager&)
 te::TrackInsertPoint getInsertPointAfter (te::Track&);
 
 //==============================================================================
-// Track heights in the playlist, at the normal interface size. Projects keep them, without undo steps,
-// as they keep other view settings.
-namespace TrackHeight
-{
-    inline constexpr int minimum = 32, standard = 64, maximum = 320, step = 16;
-    inline constexpr int collapsed = 24; // a collapsed track's row, which shows its name
-} // namespace TrackHeight
-
-int getTrackHeight (const te::Track&);
-void setTrackHeight (te::Track&, int height); // kept between the minimum and the maximum
-
-// How tall the playlist shows a track: its height, or TrackHeight::collapsed while it is collapsed. A collapsed
-// folder keeps its height, as collapsing it hides its tracks instead.
-int getShownTrackHeight (const te::Track&);
-
-// Sets how tall the playlist shows a track, as dragging its bottom edge does: well below the minimum, a track
-// collapses, and above it, a collapsed track expands again. (A folder stops at the minimum.)
-void setShownTrackHeight (te::Track&, int height);
-
-// Makes a track taller or shorter by some pixels, as the height commands do, collapsing or expanding it the same way.
-void resizeTrack (te::Track&, int change);
+// View settings the project keeps for each track, without undo steps; their on-screen meaning is the playlist's
+// (ui/playlist/TrackHeights.h).
+std::optional<int> getSavedTrackHeight (const te::Track&); // schema::phaziteHeight as saved, nothing if never set
+void setSavedTrackHeight (te::Track&, int height);         // as given: the playlist clamps
 
 //==============================================================================
 // Inserts an empty track after another one (at the end if that is nullptr), in the palette's next
@@ -101,8 +85,8 @@ void toggleSoloAlone (te::Track&);
 // True if a track is silent because other tracks are soloed, though it isn't muted itself.
 bool isSilencedBySolo (const te::Track&);
 
-// The track commands that need no window: add, select the track above or below, move, mute, solo and
-// height. They act on the tracks selected in the selection manager's Edit. Delete and duplicate are
-// selection commands (Selection.h); the playlist adds rename and color.
+// The track commands that need no window: add, select the track above or below, move, mute and solo. They act
+// on the tracks selected in the selection manager's Edit. Delete and duplicate are selection commands
+// (Selection.h); the playlist adds rename and color, and the taller and shorter commands (TrackHeights.h).
 void addTrackCommands (CommandRegistry&, te::SelectionManager&);
 } // namespace phazite

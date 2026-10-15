@@ -122,19 +122,6 @@ namespace
                && std::all_of (tracks.begin(), tracks.end(),
                                [mute] (te::Track* track) { return mute ? track->isMuted (false) : track->isSolo (false); });
     }
-
-    // Makes the selected tracks, or all tracks if none is selected, taller or shorter.
-    void resizeTracks (te::SelectionManager& selection, int change)
-    {
-        auto tracks = getSelectedTracks (selection);
-
-        if (tracks.isEmpty())
-            if (auto* edit = selection.getEdit())
-                tracks = getPlaylistTracks (*edit);
-
-        for (auto* track : tracks)
-            resizeTrack (*track, change);
-    }
 } // namespace
 
 //==============================================================================
@@ -214,42 +201,17 @@ te::TrackInsertPoint getInsertPointAfter (te::Track& track)
 }
 
 //==============================================================================
-int getTrackHeight (const te::Track& track)
+std::optional<int> getSavedTrackHeight (const te::Track& track)
 {
-    return juce::jlimit (TrackHeight::minimum, TrackHeight::maximum,
-                         (int) track.state.getProperty (schema::phaziteHeight, TrackHeight::standard));
+    if (const auto* height = track.state.getPropertyPointer (schema::phaziteHeight))
+        return (int) *height;
+
+    return std::nullopt;
 }
 
-void setTrackHeight (te::Track& track, int height)
+void setSavedTrackHeight (te::Track& track, int height)
 {
-    track.state.setProperty (schema::phaziteHeight, juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, height), nullptr);
-}
-
-int getShownTrackHeight (const te::Track& track)
-{
-    return isCollapsed (track) && ! track.isFolderTrack() ? TrackHeight::collapsed : getTrackHeight (track);
-}
-
-void setShownTrackHeight (te::Track& track, int height)
-{
-    if (track.isFolderTrack())
-    {
-        setTrackHeight (track, height);
-        return;
-    }
-
-    // Halfway between the collapsed height and the minimum, the track snaps to one or the other.
-    const auto collapse = height < (TrackHeight::collapsed + TrackHeight::minimum) / 2;
-
-    if (! collapse)
-        setTrackHeight (track, height);
-
-    setCollapsed (track, collapse);
-}
-
-void resizeTrack (te::Track& track, int change)
-{
-    setShownTrackHeight (track, getShownTrackHeight (track) + change);
+    track.state.setProperty (schema::phaziteHeight, height, nullptr);
 }
 
 bool isCollapsed (const te::Track& track)
@@ -563,25 +525,5 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .perform = [&selection] { toggleMuteOrSolo (selection, false); },
                     .isEnabled = hasSelectedTracks,
                     .isTicked = [&selection] { return areAllSelectedOn (selection, false); } });
-
-    registry.add ({ .id = "track.taller",
-                    .name = "Taller Tracks",
-                    .category = "Track",
-                    .description = "Makes the selected tracks taller, or all tracks if none is selected.",
-                    .synonyms = { "height", "bigger", "vertical zoom", "expand" },
-                    .perform = [&selection] { resizeTracks (selection, TrackHeight::step); },
-                    .isEnabled = hasEdit,
-                    .repeatsWhileHeld = true });
-
-    registry.add (
-        { .id = "track.shorter",
-          .name = "Shorter Tracks",
-          .category = "Track",
-          .description =
-              "Makes the selected tracks shorter, or all tracks if none is selected. Past the shortest, a track collapses to its name.",
-          .synonyms = { "height", "smaller", "vertical zoom", "compact" },
-          .perform = [&selection] { resizeTracks (selection, -TrackHeight::step); },
-          .isEnabled = hasEdit,
-          .repeatsWhileHeld = true });
 }
 } // namespace phazite
