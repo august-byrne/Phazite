@@ -131,6 +131,17 @@ inline constexpr const char* phaziteLoudnessMeter = "phaziteLoudnessMeter";
 // (src/devices/<area>/: "phaziteEq" for the EQ), and its parameters' values are properties of the PLUGIN named by their
 // IDs in that description, as are its automation curves' paramIDs. Those IDs are part of the format: they never
 // change, and changing what one holds needs a new version and a migration, as anything here does.
+
+// Phazite's drum sampler (devices/drums/DrumSampler.h) also keeps, on its PLUGIN, the sound file each pad plays: a path
+// relative to the project's folder ("Audio/Kick 01.wav"), or none (no property) for the default kit's sound. These are
+// "pad1Sound" for its first pad up to "pad16Sound"; pad counts from 0.
+inline const juce::Identifier& getPadSound (int pad)
+{
+    static const juce::Identifier names[] = { "pad1Sound",  "pad2Sound",  "pad3Sound",  "pad4Sound",  "pad5Sound",  "pad6Sound",
+                                              "pad7Sound",  "pad8Sound",  "pad9Sound",  "pad10Sound", "pad11Sound", "pad12Sound",
+                                              "pad13Sound", "pad14Sound", "pad15Sound", "pad16Sound" };
+    return names[juce::jlimit (0, 15, pad)];
+}
 } // namespace phazite::schema
 
 namespace phazite

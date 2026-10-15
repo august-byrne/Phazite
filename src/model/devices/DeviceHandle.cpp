@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceHandle.h"
 #include "DevicePlugin.h"
+#include "DrumKit.h"
 #include "model/mixer/Sidechain.h"
 
 namespace phazite
@@ -58,6 +59,30 @@ void DeviceHandle::setSidechainSource (std::uint64_t trackID) const
         auto* track = trackID != 0 ? te::findTrackForID (device->edit, te::EditItemID::fromRawID (trackID)) : nullptr;
         phazite::setSidechainSource (*device, dynamic_cast<te::AudioTrack*> (track));
     }
+}
+
+juce::String DeviceHandle::getPadName (int pad) const
+{
+    auto* device = plugin.get();
+    return device != nullptr ? phazite::getPadName (*device, pad) : juce::String();
+}
+
+bool DeviceHandle::hasPadSound (int pad) const
+{
+    auto* device = plugin.get();
+    return device != nullptr && phazite::hasPadSound (*device, pad);
+}
+
+bool DeviceHandle::setPadSound (int pad, const juce::File& file) const
+{
+    auto* device = plugin.get();
+    return device != nullptr && phazite::setPadSound (*device, pad, file);
+}
+
+void DeviceHandle::clearPadSound (int pad) const
+{
+    if (auto* device = plugin.get())
+        phazite::clearPadSound (*device, pad);
 }
 
 devices::Processor* DeviceHandle::getProcessorBase() const

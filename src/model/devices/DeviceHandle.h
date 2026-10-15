@@ -41,6 +41,13 @@ public:
     SidechainChoice getSidechainSource() const;
     void setSidechainSource (std::uint64_t trackID) const; // one of the choices, or 0; as one undo step
 
+    // The drum sampler's pads (model/devices/DrumKit.h): what each plays, and putting a sound file on one, or the kit's
+    // sound back, as undo steps. setPadSound() returns false for a file that isn't a sound.
+    juce::String getPadName (int pad) const;
+    bool hasPadSound (int pad) const;
+    bool setPadSound (int pad, const juce::File&) const;
+    void clearPadSound (int pad) const;
+
     // The device's DSP as its own type, for an editor's lock-free reads; nullptr once the device is gone, or for another
     // type. Ask each time: never keep the pointer.
     template <typename DeviceProcessor>

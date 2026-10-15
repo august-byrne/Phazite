@@ -2,9 +2,11 @@
 #include "DeviceEditors.h"
 #include "CompressorEditor.h"
 #include "DevicePanel.h"
+#include "DrumSamplerEditor.h"
 #include "EqEditor.h"
 #include "LimiterEditor.h"
 #include "ReverbEditor.h"
+#include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
@@ -57,6 +59,9 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Synth::typeID)
         return std::make_unique<DevicePanel> (device, getSynthLayout());
+
+    if (info->typeID == devices::DrumSampler::typeID)
+        return std::make_unique<DrumSamplerEditor> (device);
 
     return std::make_unique<DeviceKnobs> (device);
 }

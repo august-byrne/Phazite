@@ -66,6 +66,10 @@ target_sources(phazite_core PRIVATE
     src/devices/core/SampleTap.h
     src/devices/core/Spectrum.cpp
     src/devices/core/Spectrum.h
+    src/devices/drums/DrumSampler.cpp
+    src/devices/drums/DrumSampler.h
+    src/devices/drums/DrumSynthesis.cpp
+    src/devices/drums/DrumSynthesis.h
     src/devices/dsp/DelayLine.h
     src/devices/dsp/Envelopes.h
     src/devices/dsp/Filters.cpp
@@ -117,6 +121,10 @@ target_sources(phazite_core PRIVATE
     src/model/devices/DeviceHandle.h
     src/model/devices/DevicePlugin.cpp
     src/model/devices/DevicePlugin.h
+    src/model/devices/DrumKit.cpp
+    src/model/devices/DrumKit.h
+    src/model/devices/DrumSamplerPlugin.cpp
+    src/model/devices/DrumSamplerPlugin.h
     src/model/devices/Devices.cpp
     src/model/devices/Devices.h
     src/model/devices/ParameterHandle.cpp
@@ -289,6 +297,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DeviceMenus.h
     src/ui/devices/DevicePanel.cpp
     src/ui/devices/DevicePanel.h
+    src/ui/devices/DrumSamplerEditor.cpp
+    src/ui/devices/DrumSamplerEditor.h
     src/ui/devices/EqEditor.cpp
     src/ui/devices/EqEditor.h
     src/ui/devices/LimiterEditor.cpp
@@ -452,6 +462,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/DevicePanelTests.cpp
         tests/DevicePluginTests.cpp
         tests/DrumRowTests.cpp
+        tests/DrumSamplerEditorTests.cpp
+        tests/DrumSamplerTests.cpp
         tests/DspTests.cpp
         tests/EngineSetupTests.cpp
         tests/EqEditorTests.cpp

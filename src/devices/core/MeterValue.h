@@ -11,7 +11,7 @@ namespace phazite::devices
 class MeterValue
 {
 public:
-    explicit MeterValue (float lowestValue) noexcept
+    explicit MeterValue (float lowestValue = 0.0f) noexcept
         : lowest (lowestValue),
           most (lowestValue)
     {

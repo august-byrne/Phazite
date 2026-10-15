@@ -21,6 +21,7 @@
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
 #include "model/devices/DevicePlugin.h"
+#include "model/devices/DrumSamplerPlugin.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/mixer/Mixer.h"
 #include "model/mixer/Sidechain.h"
@@ -409,6 +410,38 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playAndMeasure (*edit);
         report ("MIDI into Phazite's synth, notes overlapping, with noise and its LFO", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: a beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor")
+    {
+        using phazite::devices::DrumSampler;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
+        auto* device = dynamic_cast<phazite::DrumSamplerPlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
+
+        // Kick and snare, closed hats on the eighths and an open hat the next one chokes.
+        auto clip = track.insertMIDIClip ("Beat", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        REQUIRE (clip != nullptr);
+
+        for (int eighth = 0; eighth < 16; ++eighth)
+        {
+            const auto at = te::BeatPosition::fromBeats (eighth * 0.5);
+            const auto note = eighth % 4 == 3 ? 46 : 42;
+            clip->getSequence().addNote (note, at, te::BeatDuration::fromBeats (0.25), 90, 0, nullptr);
+
+            if (eighth % 4 == 0)
+                clip->getSequence().addNote (eighth % 8 == 0 ? 36 : 38, at, te::BeatDuration::fromBeats (0.25), 110, 0, nullptr);
+        }
+
+        device->getSampler().audition (3, 1.0f); // the clap, as a click on its pad plays it
+
+        const auto m = playAndMeasure (*edit);
+        report ("A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }

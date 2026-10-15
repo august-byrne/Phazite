@@ -145,6 +145,9 @@ juce::String formatParameterValue (const devices::ParameterInfo& parameter, floa
         case Unit::ratio:
             return juce::String (value, 1) + ":1";
 
+        case Unit::pan:
+            return formatPan (value);
+
         case Unit::choice:
         {
             const auto index = juce::roundToInt (value - parameter.minimum);
@@ -254,6 +257,10 @@ std::optional<float> parseParameterValue (const devices::ParameterInfo& paramete
         case Unit::ratio:
             removeEnding (t, { ":1" });
             value = parseNumber (t);
+            break;
+
+        case Unit::pan:
+            value = parsePan (text);
             break;
 
         case Unit::none:

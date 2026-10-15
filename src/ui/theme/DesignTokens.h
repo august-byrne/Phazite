@@ -99,6 +99,7 @@ namespace GraphTint
     inline constexpr int height = 280;
     inline constexpr float levelDotRadius = 5.0f; // the dot that rides a compressor's curve at the level it hears
     inline constexpr int meterWidth = 12;         // a meter beside a graph, such as how far a compressor turns down
+    inline constexpr float padLit = 0.85f;        // how far a drum pad's colour fills it as it plays (partCurve when it doesn't)
 } // namespace GraphTint
 
 // How far a button that needs attention, such as one asking for the instrument a track's notes need, is mixed with the

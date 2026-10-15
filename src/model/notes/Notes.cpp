@@ -3,6 +3,7 @@
 #include "model/base/Schema.h"
 #include "model/base/Toggles.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/devices/DrumSamplerPlugin.h"
 
 #include <algorithm>
 #include <cmath>
@@ -622,7 +623,7 @@ bool isDrumTrack (const te::AudioTrack& track)
 
     for (auto* plugin : track.pluginList)
         if (plugin->isSynth())
-            return dynamic_cast<te::SamplerPlugin*> (plugin) != nullptr;
+            return dynamic_cast<te::SamplerPlugin*> (plugin) != nullptr || dynamic_cast<DrumSamplerPlugin*> (plugin) != nullptr;
 
     return false;
 }
@@ -634,6 +635,20 @@ void setDrumTrack (te::AudioTrack& track, bool isDrums)
 
 std::optional<std::vector<DrumRow>> getSamplerSounds (const te::AudioTrack& track)
 {
+    // Phazite's drum sampler: a row for each pad.
+    for (auto* plugin : track.pluginList)
+    {
+        if (const auto* drums = dynamic_cast<const DrumSamplerPlugin*> (plugin))
+        {
+            std::vector<DrumRow> pads;
+
+            for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+                pads.push_back ({ devices::DrumSampler::firstNote + pad, drums->getPadName (pad) });
+
+            return pads;
+        }
+    }
+
     auto* sampler = findSampler (track);
 
     if (sampler == nullptr)
