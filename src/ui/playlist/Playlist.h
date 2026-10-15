@@ -54,6 +54,10 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
+    static constexpr int headerWidth = 200;
+    static constexpr double scrollPerNotch = 48.0;
+
+    // Its parts (PlaylistParts.h).
     struct Lanes;
     struct Gesture;
     struct AddTrackRow;

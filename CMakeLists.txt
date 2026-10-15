@@ -348,6 +348,11 @@ target_sources(phazite_ui PRIVATE
     src/ui/playlist/ClipComponent.h
     src/ui/playlist/Playlist.cpp
     src/ui/playlist/Playlist.h
+    src/ui/playlist/PlaylistDrops.cpp
+    src/ui/playlist/PlaylistParts.h
+    src/ui/playlist/PlaylistRows.cpp
+    src/ui/playlist/PlaylistTools.cpp
+    src/ui/playlist/PlaylistTracks.cpp
     src/ui/playlist/SectionsStrip.cpp
     src/ui/playlist/SectionsStrip.h
     src/ui/playlist/TrackHeader.cpp
