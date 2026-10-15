@@ -138,9 +138,8 @@ TEST_CASE ("Golden legacy: a whole project saved by Phazite 0.1.0 opens and save
     REQUIRE (legacy.copyFileTo (file));
     phazite::test::writeSound (file.getSiblingFile ("Audio").getChildFile ("Tone.wav"), 2.0);
 
-    // (Not checked yet: that it opens without unsaved changes. Its MIDI clips give it some; GoldenProjectTests.cpp, above
-    // saveReopenAndSaveAgain(), says why.)
     auto project = openProject (file);
+    CHECK_FALSE (project->hasUnsavedChanges()); // opening isn't a change
     REQUIRE (project->save().wasOk());
     project = nullptr;
 

@@ -21,6 +21,14 @@ namespace
         return {};
     }
 
+    // The same value as the file holds it. Values read from a file are text, and Tracktion may write one back as a number
+    // or a bool, which notifies a change though nothing changed. JUCE compares values of different types one way round
+    // only (4.0 == "4" holds, "4" == 4.0 doesn't: saving would write "4.0"), so both ways must hold.
+    bool isSameValue (const juce::var& a, const juce::var& b)
+    {
+        return a == b && b == a;
+    }
+
     // What every project has, added before the project watches for changes: the master's loudness meter. It
     // isn't the user's change, so it is neither an undo step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
@@ -162,6 +170,7 @@ Project::Project (std::unique_ptr<te::Edit> e, const juce::File& f)
 {
     // A project opens with the playhead at the song's start, where playback starts.
     movePlayhead (*edit, te::TimePosition());
+    rememberSavedState(); // what opening made of it, Phazite's parts included, isn't a change
     edit->state.addListener (this);
 }
 
@@ -179,8 +188,10 @@ juce::ValueTree Project::getPhaziteState()
     return phazite::getPhaziteState (*edit);
 }
 
-bool Project::hasUnsavedChanges() const
+bool Project::hasUnsavedChanges()
 {
+    JUCE_ASSERT_MESSAGE_THREAD
+    compareWithSavedState();
     return changedSinceSave || edit->hasChangedSinceSaved();
 }
 
@@ -206,6 +217,7 @@ juce::Result Project::save()
 
     changedSinceSave = false;
     changedSinceAutosave = false;
+    rememberSavedState(); // what the file holds now
     getAutosaveFile (file).deleteFile();
     return juce::Result::ok();
 }
@@ -213,6 +225,7 @@ juce::Result Project::save()
 juce::Result Project::autosave()
 {
     JUCE_ASSERT_MESSAGE_THREAD
+    compareWithSavedState();
 
     if (! changedSinceAutosave)
         return juce::Result::ok();
@@ -326,27 +339,112 @@ void Project::backUpProjectFile()
         versions.getReference (i).deleteFile();
 }
 
-void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& property)
+void Project::rememberSavedState()
 {
-    if (! isWriting && ! isPlaybackState (tree, property))
+    savedState = edit->state.createCopy();
+    mayHaveChanged = false;
+}
+
+void Project::compareWithSavedState()
+{
+    if (! mayHaveChanged)
+        return;
+
+    mayHaveChanged = false;
+
+    if (! holdTheSameProject (edit->state, savedState))
     {
         changedSinceSave = true;
         changedSinceAutosave = true;
     }
 }
 
-bool Project::isPlaybackState (const juce::ValueTree& tree, const juce::Identifier& property)
+void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (tree.hasType (te::IDs::TRANSPORT)
-        && (property == te::IDs::position || property == te::IDs::start || property == te::IDs::loopPoint1
-            || property == te::IDs::loopPoint2))
-        return true;
+    if (isWriting || ! isCounted (tree, property))
+        return;
 
-    for (auto t = tree; t.isValid(); t = t.getParent())
-        if (t.hasType (te::IDs::INPUTDEVICES))
-            return true;
+    if (changedSinceSave)
+        changedSinceAutosave = true;
+    else
+        mayHaveChanged = true; // perhaps nothing changed: compared with savedState when asked
+}
 
-    return false;
+void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
+{
+    if (! isUncountedElement (parent, child))
+        markChanged (parent);
+}
+
+bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Identifier& property)
+{
+    return tree.hasType (te::IDs::TRANSPORT)
+           && (property == te::IDs::position || property == te::IDs::start || property == te::IDs::loopPoint1
+               || property == te::IDs::loopPoint2);
+}
+
+bool Project::isUncountedElement (const juce::ValueTree&, const juce::ValueTree& element)
+{
+    return element.hasType (te::IDs::INPUTDEVICES);
+}
+
+bool Project::isCounted (const juce::ValueTree& tree, const juce::Identifier& property)
+{
+    if (isUncountedProperty (tree, property))
+        return false;
+
+    for (auto element = tree; element.isValid(); element = element.getParent())
+        if (isUncountedElement (element.getParent(), element))
+            return false;
+
+    return true;
+}
+
+bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTree& b)
+{
+    if (a.getType() != b.getType())
+        return false;
+
+    // Each of a's counted properties is in b with the same value, and b has no others.
+    int numCounted = 0;
+
+    for (int i = 0; i < a.getNumProperties(); ++i)
+    {
+        const auto name = a.getPropertyName (i);
+
+        if (isUncountedProperty (a, name))
+            continue;
+
+        const auto* other = b.getPropertyPointer (name);
+
+        if (other == nullptr || ! isSameValue (a[name], *other))
+            return false;
+
+        ++numCounted;
+    }
+
+    for (int i = 0; i < b.getNumProperties(); ++i)
+        if (! isUncountedProperty (b, b.getPropertyName (i)))
+            --numCounted;
+
+    if (numCounted != 0)
+        return false;
+
+    // The counted elements, in the same order, holding the same.
+    for (int i = 0, j = 0;; ++i, ++j)
+    {
+        while (i < a.getNumChildren() && isUncountedElement (a, a.getChild (i)))
+            ++i;
+
+        while (j < b.getNumChildren() && isUncountedElement (b, b.getChild (j)))
+            ++j;
+
+        if (i == a.getNumChildren() || j == b.getNumChildren())
+            return i == a.getNumChildren() && j == b.getNumChildren();
+
+        if (! holdTheSameProject (a.getChild (i), b.getChild (j)))
+            return false;
+    }
 }
 
 //==============================================================================

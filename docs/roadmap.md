@@ -153,7 +153,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Done when:*
   - after the app is killed mid-session, restarting it offers the autosaved state;
   - tests cover save/load round trips.
-- *Status:* done (`src/model/project/Project.h` with tests, and the app's `src/app/ProjectSession.h`): new, open, open recent and save; an autosave every 2 minutes; the restore question at startup. Still to try by hand: end Phazite in Task Manager mid-session, then start it again.
+- *Status:* done (`src/model/project/Project.h` with tests, and the app's `src/app/ProjectSession.h`): new, open, open recent and save; an autosave every 2 minutes; the restore question at startup. Still to try by hand: end Phazite in Task Manager mid-session, then start it again. Since 2026-10-14 a project counts as changed only when it differs from how it was opened or last saved.
 
 **0.5 Commands, keymaps and undo (M)**
 - A command registry with names, descriptions, search synonyms and categories.
@@ -261,6 +261,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - **Fixes the golden tests found (2026-10-14),** where they showed wrong behavior; the golden files change only where a fix says so:
   - Go to End goes to the end of the song, the end of the bar its last clip ends in, not to the end of its sections.
   - A note edit makes its clip longer only into the empty space after it, never over the next clip on its track.
+  - Opening a project with MIDI clips no longer counts as an unsaved change: Phazite compares the project with how it was opened or last saved, since Tracktion sends notifications that change nothing.
 
 **1.6 First built-in devices (XL)**
 - The first devices:

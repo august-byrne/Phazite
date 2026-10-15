@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "model/arrangement/Clips.h"
+#include "model/base/Schema.h"
+#include "model/notes/Notes.h"
 #include "model/project/Project.h"
 #include "model/transport/Playback.h"
 
 namespace
 {
+te::BeatPosition beats (double b)
+{
+    return te::BeatPosition::fromBeats (b);
+}
+
 // A folder in the temp directory that is deleted again at the end of the test.
 struct TemporaryFolder
 {
@@ -215,4 +224,132 @@ TEST_CASE ("A project opens with the playhead at the song's start, where playbac
     auto reopened = openProject (file);
     CHECK (reopened->getEdit().getTransport().getPosition().inSeconds() == doctest::Approx (0.0));
     CHECK (phazite::getPlayStart (reopened->getEdit()).inSeconds() == doctest::Approx (0.0));
+}
+
+TEST_CASE ("A project with MIDI clips and an alias opens without unsaved changes")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Notes");
+    auto* track = te::getAudioTracks (project->getEdit())[0];
+    REQUIRE (track != nullptr);
+    auto* clip = phazite::insertMidiClip (*track, { beats (0.0), beats (4.0) }, nullptr);
+    REQUIRE (clip != nullptr);
+    REQUIRE (phazite::addNote (*clip, 60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
+    REQUIRE (phazite::addNote (*clip, 64, beats (2.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
+    const auto aliases = phazite::copyClips ({ clip }, true);
+    REQUIRE (aliases.size() == 1);
+    phazite::moveClip (*aliases[0], beats (4.0), *track);
+
+    // As the app's message loop does between edits: Tracktion sorts the track's clips, and the alias copies the notes.
+    phazite::test::settle();
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+
+    // Once Tracktion's updates after loading arrive (each MIDI clip notifies its mute switch, and the alias copies its
+    // notes again), nothing has changed.
+    project = openProject (file);
+    phazite::test::settle();
+    CHECK_FALSE (project->hasUnsavedChanges());
+    REQUIRE (project->autosave().wasOk());
+    CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
+}
+
+TEST_CASE ("Only a change to what the project holds is an unsaved change, made with an undo step or not")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Changes");
+
+    {
+        auto* track = te::getAudioTracks (project->getEdit())[0];
+        REQUIRE (track != nullptr);
+        auto* clip = phazite::insertMidiClip (*track, { beats (0.0), beats (4.0) }, nullptr);
+        REQUIRE (clip != nullptr);
+        REQUIRE (phazite::addNote (*clip, 60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
+        REQUIRE (phazite::addNote (*clip, 64, beats (2.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
+        const auto aliases = phazite::copyClips ({ clip }, true);
+        REQUIRE (aliases.size() == 1);
+        phazite::moveClip (*aliases[0], beats (4.0), *track);
+        phazite::setTrackKey (*track, phazite::Key { 2, te::Scale::minor });
+        phazite::test::settle();
+        REQUIRE (project->save().wasOk());
+    }
+
+    const auto file = project->getFile();
+    project = nullptr;
+    project = openProject (file);
+    phazite::test::settle();
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    auto& edit = project->getEdit();
+    auto* track = te::getAudioTracks (edit)[0];
+    REQUIRE (track != nullptr);
+    auto* clip = dynamic_cast<te::MidiClip*> (track->getClips().getFirst()); // the original, at beat 0
+    REQUIRE (clip != nullptr);
+
+    // Notifications that change nothing.
+    clip->state.sendPropertyChangeMessage (te::IDs::mute);
+    track->state.sendPropertyChangeMessage (te::IDs::name);
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    // The same value written as another type (the file holds text).
+    REQUIRE (track->state[phazite::schema::phaziteKeyRoot].isString());
+    track->state.setProperty (phazite::schema::phaziteKeyRoot, 2, nullptr);
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    // A note taken out and put back as it was.
+    auto sequence = clip->getSequence().state;
+    const auto note = sequence.getChild (0);
+    sequence.removeChild (note, nullptr);
+    sequence.addChild (note.createCopy(), 0, nullptr);
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    // Where the playhead is.
+    phazite::movePlayhead (edit, te::TimePosition::fromSeconds (2.0));
+    track->state.sendPropertyChangeMessage (te::IDs::name);
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    // A change taken back before anything asked.
+    track->state.setProperty (phazite::schema::phaziteKeyRoot, 5, nullptr);
+    track->state.setProperty (phazite::schema::phaziteKeyRoot, 2, nullptr);
+    CHECK_FALSE (project->hasUnsavedChanges());
+    REQUIRE (project->autosave().wasOk());
+    CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
+
+    // Real changes count, made without an undo step or with one; saving clears them.
+    project->getPhaziteState().setProperty (phazite::schema::outline, "pop", nullptr);
+    CHECK (project->hasUnsavedChanges());
+    REQUIRE (project->autosave().wasOk());
+    CHECK (phazite::Project::getAutosaveFile (file).existsAsFile());
+    REQUIRE (project->save().wasOk());
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    REQUIRE (clip->getSequence().addNote (67, beats (3.0), te::BeatDuration::fromBeats (0.5), 100, 0, nullptr) != nullptr);
+    CHECK (project->hasUnsavedChanges());
+    phazite::test::settle(); // the alias copies the note
+    REQUIRE (project->save().wasOk());
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    // With an undo step, as the editors make changes: Tracktion's listener for undo steps then marks the Edit changed
+    // too, with its flag and its time stamp, lastSignificantChange.
+    REQUIRE (phazite::addNote (*clip, 69, beats (3.5), te::BeatDuration::fromBeats (0.25), 100) != nullptr);
+    CHECK (project->hasUnsavedChanges());
+    phazite::test::settle();
+    CHECK (edit.hasChangedSinceSaved());
+    REQUIRE (project->save().wasOk());
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    // A change Tracktion notices outside the project's values, such as a plug-in's own settings, reaches Phazite only as
+    // that time stamp once Tracktion's flag is reset (as it is 200 ms after loading): it counts, and autosave writes it.
+    // (The stamp is in milliseconds; the settle() above makes this one new.)
+    edit.markAsChanged();
+    edit.resetChangedStatus();
+    CHECK (project->hasUnsavedChanges());
+    REQUIRE (project->autosave().wasOk());
+    CHECK (phazite::Project::getAutosaveFile (file).existsAsFile());
+    REQUIRE (project->save().wasOk());
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    track->state.setProperty (phazite::schema::phaziteKeyRoot, 3, nullptr);
+    CHECK (project->hasUnsavedChanges());
 }

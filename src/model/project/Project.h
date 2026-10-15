@@ -53,7 +53,10 @@ public:
     // Phazite's own data in the project file, next to the engine's (phazite::getPhaziteState(), model/base/Schema.h).
     juce::ValueTree getPhaziteState();
 
-    bool hasUnsavedChanges() const;
+    // Whether the project holds anything it didn't hold when it was opened (with Phazite's parts added) or last saved,
+    // leaving out what isn't a change (isUncountedProperty()). Compares the project with a copy at most once after each
+    // change. Message thread only.
+    bool hasUnsavedChanges();
 
     // Saves to the project file. A copy of the previous version goes into Backups/ first, and the
     // new file only replaces the old one once it has been written completely.
@@ -76,18 +79,35 @@ private:
     std::unique_ptr<SongFollower> songFollower; // keeps the loop around the song, and stops at its end (model/transport/Playback.h)
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
 
-    void backUpProjectFile();
-    void markChanged (const juce::ValueTree&, const juce::Identifier& property = {});
+    // The project as it was when it was opened, with Phazite's parts added, or last saved. Tracktion sends notifications
+    // that change nothing: after a tempo update, which opening or making an Edit causes too, each MIDI clip notifies its
+    // mute switch so that editors redraw, and aliases copy their notes to each other again; and JUCE notifies a value
+    // written again as another type. So while the project has no unsaved changes, a notification only sets
+    // mayHaveChanged, and hasUnsavedChanges() and autosave() compare the project with this copy, once. Never listen to it
+    // or change it.
+    juce::ValueTree savedState;
+    bool mayHaveChanged = false;
 
-    // Tracktion writes these while it plays, without anyone changing the song, so they don't count
-    // as changes: the playhead position, and the Edit's input-device states (the inputs it knows,
-    // and which track live input goes to). Nor does where the loop is, which follows the song, or
-    // where playback starts.
-    static bool isPlaybackState (const juce::ValueTree&, const juce::Identifier& property);
+    void backUpProjectFile();
+    void rememberSavedState();
+    void compareWithSavedState();
+    void markChanged (const juce::ValueTree&, const juce::Identifier& property = {});
+    void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
+
+    // Tracktion writes these while it plays, without anyone changing the song, so they don't count as changes: the
+    // playhead position, and the Edit's input-device states (the inputs it knows, and which track live input goes to).
+    // Nor does where the loop is, which follows the song, or where playback starts. A property (isUncountedProperty()),
+    // or an element with everything in it (isUncountedElement()): notifications and the comparison with savedState leave
+    // out the same. Never leave out lastSignificantChange: Tracktion's time stamp is how a change it notices outside the
+    // Edit's values (a plug-in's own settings) reaches autosave.
+    static bool isUncountedProperty (const juce::ValueTree&, const juce::Identifier& property);
+    static bool isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element);
+    static bool isCounted (const juce::ValueTree&, const juce::Identifier& property);
+    static bool holdTheSameProject (const juce::ValueTree&, const juce::ValueTree&);
 
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override { markChanged (parent); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&, int) override { markChanged (parent); }
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markChildChanged (parent, child); }
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { markChanged (parent); }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Project)

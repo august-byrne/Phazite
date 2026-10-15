@@ -204,16 +204,9 @@ struct Saves
 
 // Saves a project (S1), reopens and saves it (S2), and does that again (S3). S2 holds everything S1 does (Tracktion may
 // add values it fills in on loading), S3 is S2, and S2 matches the golden file tests/golden/projects/<goldenName>.xml.
-// If opensUnchanged, each reopened project has no unsaved changes.
-//
-// opensUnchanged is false for a project with a MIDI clip: it has unsaved changes as soon as its messages are delivered,
-// so that isn't checked for it yet. Loading the Edit triggers its tempo sequence's async update, which calls every
-// clip's pitchTempoTrackChanged(); a MIDI clip's sends a property-change message for "mute" without changing it
-// (Tracktion's MIDI editor redraws on it), and Project::markChanged counts that as a change. The same message makes
-// aliases copy each other's notes again (Clip::changed), removing and re-adding them. Tracktion's own flag
-// (te::Edit::hasChangedSinceSaved) stays clear. Once that is fixed, every project here opens unchanged.
-Saves saveReopenAndSaveAgain (std::unique_ptr<phazite::Project> project, const juce::String& goldenName, bool opensUnchanged,
-                              const juce::String& about)
+// Each reopened project has no unsaved changes once Tracktion's updates after loading have arrived (openProject() lets
+// them): they change nothing.
+Saves saveReopenAndSaveAgain (std::unique_ptr<phazite::Project> project, const juce::String& goldenName, const juce::String& about)
 {
     const auto file = project->getFile();
     Saves saves;
@@ -224,20 +217,14 @@ Saves saveReopenAndSaveAgain (std::unique_ptr<phazite::Project> project, const j
     project = nullptr;
 
     project = openProject (file);
-
-    if (opensUnchanged)
-        CHECK_FALSE (project->hasUnsavedChanges());
-
+    CHECK_FALSE (project->hasUnsavedChanges());
     REQUIRE (project->save().wasOk());
     saves.rawSecond = phazite::test::readXml (file);
     const auto second = phazite::test::normaliseProject (*saves.rawSecond, file.getParentDirectory());
     project = nullptr;
 
     project = openProject (file);
-
-    if (opensUnchanged)
-        CHECK_FALSE (project->hasUnsavedChanges());
-
+    CHECK_FALSE (project->hasUnsavedChanges());
     REQUIRE (project->save().wasOk());
     const auto third = phazite::test::readNormalisedProject (file);
     project = nullptr;
@@ -393,8 +380,7 @@ TEST_SUITE ("golden")
         auto project = createProject (temp.folder, "Empty");
         phazite::test::settle();
 
-        // Without a MIDI clip, it opens without unsaved changes.
-        saveReopenAndSaveAgain (std::move (project), "empty", true,
+        saveReopenAndSaveAgain (std::move (project), "empty",
                                 "A new, empty project (Project::create), saved, reopened and saved again: tests/GoldenProjectTests.cpp");
     }
 
@@ -407,8 +393,7 @@ TEST_SUITE ("golden")
         REQUIRE (project->save().wasOk());
         phazite::test::settle();
 
-        // Its MIDI clips give it unsaved changes when it is reopened (saveReopenAndSaveAgain() says why).
-        saveReopenAndSaveAgain (std::move (project), "starter", false,
+        saveReopenAndSaveAgain (std::move (project), "starter",
                                 "The starter project (addStarterContent), saved, reopened and saved again: tests/GoldenProjectTests.cpp");
     }
 
@@ -429,8 +414,7 @@ TEST_SUITE ("golden")
         REQUIRE_MESSAGE (copyFile.existsAsFile(), error.toStdString());
         const auto copy = phazite::test::readNormalisedProject (copyFile);
 
-        // Its MIDI clips give it unsaved changes when it is reopened (saveReopenAndSaveAgain() says why).
-        const auto saves = saveReopenAndSaveAgain (std::move (project), "representative", false,
+        const auto saves = saveReopenAndSaveAgain (std::move (project), "representative",
                                                    "A project with one of each kind of track and every piece of Phazite's data, saved, "
                                                    "reopened and saved again: addRepresentativeContent in tests/GoldenProjectTests.cpp");
 
