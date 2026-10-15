@@ -129,6 +129,11 @@ bool isInKey (int pitch, const Key&);
 // The scales offered for a key, without Tracktion's duplicates (ionian is major, aeolian minor).
 juce::Array<te::Scale::ScaleType> getKeyScales();
 
+// A scale as projects save it ("major", "dorian", "harmonicMinor"...; ionian as "major" and aeolian as "minor", which
+// have the same notes), and back: nothing for a name that isn't one of them.
+juce::String getSavedScaleName (te::Scale::ScaleType);
+std::optional<te::Scale::ScaleType> findScale (const juce::String& savedName);
+
 // A track's key, which the piano roll shades its rows by and can snap notes to. A track has none until one
 // is chosen: Phazite keeps it per track, since Tracktion's pitch sequence is one key for the whole song.
 std::optional<Key> getTrackKey (const te::Track&);

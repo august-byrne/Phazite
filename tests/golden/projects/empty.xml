@@ -21,6 +21,7 @@
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
   </MASTERVOLUME>
+  <PHAZITE schemaVersion="1"/>
   <PITCHSEQUENCE>
     <PITCH pitch="60"
            startBeat="0"/>

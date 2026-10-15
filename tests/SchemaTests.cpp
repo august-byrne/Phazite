@@ -13,12 +13,13 @@ TEST_CASE ("The names Phazite writes into project files stay the same")
 
     const std::pair<juce::Identifier, const char*> names[] = {
         { schema::PHAZITE, "PHAZITE" },
+        { schema::schemaVersion, "schemaVersion" },
         { schema::loopFollowsSong, "loopFollowsSong" },
         { schema::outline, "outline" },
         { schema::gridSnap, "gridSnap" },
         { schema::gridAdaptive, "gridAdaptive" },
         { schema::gridOffset, "gridOffset" },
-        { schema::gridLevel, "gridLevel" },
+        { schema::gridStep, "gridStep" },
         { schema::gridTriplets, "gridTriplets" },
         { schema::PIANOROLL, "PIANOROLL" },
         { schema::LASTKEY, "LASTKEY" },
@@ -42,6 +43,9 @@ TEST_CASE ("The names Phazite writes into project files stay the same")
     // The loudness meter's plug-in type, which every project's master has.
     CHECK (juce::String (schema::phaziteLoudnessMeter) == juce::String ("phaziteLoudnessMeter"));
     CHECK (juce::String (phazite::LoudnessMeterPlugin::xmlTypeName) == juce::String ("phaziteLoudnessMeter"));
+
+    // The format version projects are saved in now (Migrations.h upgrades older ones).
+    CHECK (schema::currentVersion == 1);
 }
 
 TEST_CASE ("Reading Phazite's state doesn't add it")

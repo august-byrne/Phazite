@@ -31,6 +31,7 @@ public:
     std::function<void()> onProjectClosing;  // the open project is about to close: let go of its Edit
     std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
     juce::Component* dialogParent = nullptr; // dialogs appear over this
+    std::function<void (const juce::String& title, const juce::String& message)> onError; // shows an error; unset, a dialog
 
     // Opens the most recent project (offering to restore its autosave), or makes a first project.
     void openAtStartup();
@@ -63,6 +64,10 @@ private:
     void openWithRestoreQuestion (const juce::File&);
     void open (const juce::File&, bool restoreAutosave);
     void createFirstProject();
+
+    // Opens the first of the recent projects after one that failed to open that this Phazite can open, or else makes a
+    // first project.
+    void openNextRecentProject (const juce::File& failed);
     void showError (const juce::String& title, const juce::String& message);
 
     // The selection changed, so live MIDI follows it; or the audio or MIDI devices changed, so live

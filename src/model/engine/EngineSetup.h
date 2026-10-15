@@ -91,6 +91,11 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions);
 UIBehaviour& getUIBehaviour (te::Engine&);
 
 // Loads a saved Edit on the message thread, as Phazite's rules require (Tracktion's EditLoader builds
-// Edits on a background thread). Returns nullptr if the file can't be loaded.
+// Edits on a background thread), upgraded to the current project format (model/base/Migrations.h). Returns nullptr if
+// the file can't be loaded, or was saved by a newer Phazite.
 std::unique_ptr<te::Edit> loadEdit (te::Engine&, const juce::File&);
+
+// Creates an Edit for editing from a saved state, already upgraded, that saves to a file. It keeps the state's saved
+// ID, or makes a new one.
+std::unique_ptr<te::Edit> createEditFromState (te::Engine&, const juce::ValueTree& state, const juce::File& file);
 } // namespace phazite

@@ -16,10 +16,19 @@
 namespace phazite::schema
 {
 //==============================================================================
+// The project format's version (src/model/base/Migrations.h). Files without schemaVersion are version 0 (saved up to
+// 2026-10-14).
+inline constexpr int currentVersion = 1;
+
+//==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
 
 // Child of EDIT, added when something is first written to it.
 inline const juce::Identifier PHAZITE { "PHAZITE" };
+
+// On PHAZITE. int: the project format's version (currentVersion) when the project was saved. (Not 'version': tests write
+// that name.) state
+inline const juce::Identifier schemaVersion { "schemaVersion" };
 
 // On PHAZITE. bool, default true: the loop follows the song (getSongLoopRange()); false while a range is looped on
 // purpose. Written only when it changes. state
@@ -43,9 +52,9 @@ inline const juce::Identifier gridAdaptive { "gridAdaptive" };
 // int -3..3, default 0: how many levels coarser (above 0) or finer than the zoom suggests an adaptive grid is.
 inline const juce::Identifier gridOffset { "gridOffset" };
 
-// int 5..13, default 7 (a 1/4 beat): the size of a fixed grid, as a level of Tracktion's bars-and-beats snap types
-// (te::TimecodeSnapType), to be replaced by Phazite's own value.
-inline const juce::Identifier gridLevel { "gridLevel" };
+// The size of a fixed grid, used while gridAdaptive is off: "1/16 beat", "1/8 beat", "1/4 beat" (the default), "1/2 beat",
+// "1 beat", "1 bar", "2 bars", "4 bars" or "8 bars". (Version 0 saved a Tracktion snap level instead: Migrations.cpp.)
+inline const juce::Identifier gridStep { "gridStep" };
 
 // bool, default false: the grid divides beats into triplets.
 inline const juce::Identifier gridTriplets { "gridTriplets" };
@@ -67,9 +76,9 @@ inline const juce::Identifier phaziteCollapsed { "phaziteCollapsed" };
 // On TRACK and FOLDERTRACK. bool, default false: the track stays in view while the others scroll. view
 inline const juce::Identifier phazitePinned { "phazitePinned" };
 
-// A key, on a TRACK (song) and on LASTKEY (state): the root, int 0..11 (0 is C), none = no key; and the scale as
-// Tracktion's number for it (te::Scale::ScaleType; Tracktion stores scales that way too, since their names are
-// translated), to be replaced by Phazite's own value.
+// A key, on a TRACK (song) and on LASTKEY (state): the root, int 0..11 (0 is C), none = no key; and the scale: "major",
+// "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor". (Version 0 saved
+// Tracktion's scale numbers instead.)
 inline const juce::Identifier phaziteKeyRoot { "phaziteKeyRoot" };
 inline const juce::Identifier phaziteKeyScale { "phaziteKeyScale" };
 

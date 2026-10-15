@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "model/base/Migrations.h"
+#include "model/base/Schema.h"
 #include "model/engine/EngineSetup.h"
 
 using namespace tracktion::literals;
@@ -135,4 +137,37 @@ TEST_CASE ("Edit limits leave room for one-shot-heavy projects")
     CHECK (limits.maxPluginsOnTrack >= 64);
     CHECK (limits.maxClipsInTrack >= 5000);
     CHECK (limits.maxNumTracks >= 1000);
+}
+
+TEST_CASE ("loadEdit upgrades old projects and refuses newer ones")
+{
+    auto& engine = phazite::test::getEngine();
+    phazite::test::TemporaryFolder temp;
+
+    // Format version 0: a fixed grid as Tracktion's level, and a key's scale as Tracktion's number.
+    const auto oldFile = temp.folder.getChildFile ("Old.tracktionedit");
+    REQUIRE (oldFile.replaceWithText (R"(<?xml version="1.0" encoding="UTF-8"?>
+<EDIT appVersion="0.1.0" projectID="0/5eed0b3">
+  <PHAZITE gridAdaptive="0" gridLevel="11"/>
+  <TRACK id="1003" name="Bass" phaziteKeyRoot="2" phaziteKeyScale="1"/>
+</EDIT>
+)"));
+
+    auto edit = phazite::loadEdit (engine, oldFile);
+    REQUIRE (edit != nullptr);
+    CHECK (phazite::getSchemaVersion (edit->state) == phazite::schema::currentVersion);
+    CHECK (phazite::findPhaziteState (*edit)[phazite::schema::gridStep].toString() == juce::String ("2 bars"));
+    const auto tracks = te::getAudioTracks (*edit);
+    REQUIRE (! tracks.isEmpty());
+    CHECK (tracks.getFirst()->state[phazite::schema::phaziteKeyScale].toString() == juce::String ("minor"));
+    edit = nullptr;
+
+    // A newer Phazite's file isn't loaded.
+    const auto newerFile = temp.folder.getChildFile ("Newer.tracktionedit");
+    REQUIRE (newerFile.replaceWithText (R"(<?xml version="1.0" encoding="UTF-8"?>
+<EDIT appVersion="9.0.0" projectID="0/5eed0b4">
+  <PHAZITE schemaVersion="2"/>
+</EDIT>
+)"));
+    CHECK (phazite::loadEdit (engine, newerFile) == nullptr);
 }

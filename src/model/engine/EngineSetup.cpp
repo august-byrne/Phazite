@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EngineSetup.h"
 #include "LoudnessMeterPlugin.h"
+#include "model/base/Migrations.h"
 
 // ThreadSanitizer builds (linux-tsan preset): GCC defines __SANITIZE_THREAD__, Clang has a feature check.
 #if defined(__SANITIZE_THREAD__)
@@ -165,6 +166,25 @@ std::unique_ptr<te::Edit> loadEdit (te::Engine& engine, const juce::File& file)
     if (! file.existsAsFile())
         return {};
 
-    return te::loadEditFromFile (engine, file);
+    auto state = te::loadEditFromFile (engine, file, te::ProjectItemID {});
+
+    if (! state.isValid() || ! migrateToCurrentSchema (state))
+        return {};
+
+    return createEditFromState (engine, state, file);
+}
+
+std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& file)
+{
+    if (! state.isValid())
+        return {};
+
+    auto id = te::ProjectItemID::fromProperty (state, te::IDs::projectID);
+
+    if (! id.isValid())
+        id = te::ProjectItemID::createNewID (te::ProjectID {});
+
+    return te::Edit::createEdit (
+        { engine, state, id, te::Edit::forEditing, nullptr, te::Edit::getDefaultNumUndoLevels(), [file] { return file; }, {} });
 }
 } // namespace phazite

@@ -24,7 +24,8 @@
     </PLUGIN>
   </MASTERVOLUME>
   <PHAZITE loopFollowsSong="1"
-           outline="rock"/>
+           outline="rock"
+           schemaVersion="1"/>
   <PITCHSEQUENCE>
     <PITCH pitch="60"
            startBeat="0"/>

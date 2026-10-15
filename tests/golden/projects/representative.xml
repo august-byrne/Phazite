@@ -32,18 +32,19 @@
     </PLUGIN>
   </MASTERVOLUME>
   <PHAZITE gridAdaptive="1"
-           gridLevel="7"
            gridOffset="1"
            gridSnap="0"
+           gridStep="1/4 beat"
            gridTriplets="0"
            loopFollowsSong="0"
-           outline="golden">
+           outline="golden"
+           schemaVersion="1">
     <LASTKEY phaziteKeyRoot="2"
-             phaziteKeyScale="1"/>
+             phaziteKeyScale="minor"/>
     <PIANOROLL gridAdaptive="0"
-               gridLevel="8"
                gridOffset="0"
                gridSnap="1"
+               gridStep="1/2 beat"
                gridTriplets="1"/>
   </PHAZITE>
   <PITCHSEQUENCE>
@@ -178,7 +179,7 @@
            name="Keys"
            phaziteHeight="96"
            phaziteKeyRoot="2"
-           phaziteKeyScale="1">
+           phaziteKeyScale="minor">
       <MIDICLIP colour="ff00a3ff"
                 currentTake="0"
                 grooveStrength="0.1"
@@ -308,7 +309,7 @@
            id="1022"
            name="Pad"
            phaziteKeyRoot="2"
-           phaziteKeyScale="1">
+           phaziteKeyScale="minor">
       <CLIPSLOTS/>
       <MODIFIERS/>
       <OUTPUTDEVICES>
@@ -349,7 +350,7 @@
            id="1025"
            name="Tone"
            phaziteKeyRoot="2"
-           phaziteKeyScale="1">
+           phaziteKeyScale="minor">
       <AUDIOCLIP colour="ff0072b2"
                  elastiqueMode="0"
                  fadeIn="0.25"
@@ -408,7 +409,7 @@
          id="1037"
          name="Reverb"
          phaziteKeyRoot="2"
-         phaziteKeyScale="1"
+         phaziteKeyScale="minor"
          soloIsolate="1">
     <CLIPSLOTS/>
     <MODIFIERS/>

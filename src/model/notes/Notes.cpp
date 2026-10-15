@@ -13,15 +13,32 @@ namespace phazite
 {
 namespace
 {
-    // A key, on a track's state or on LASTKEY in the song's Phazite state (model/base/Schema.h).
+    // The scales Phazite offers, in the order its menus show them, with the names projects save them by.
+    struct SavedScale
+    {
+        te::Scale::ScaleType type;
+        const char* name;
+    };
+
+    constexpr SavedScale savedScales[] = { { te::Scale::major, "major" },
+                                           { te::Scale::minor, "minor" },
+                                           { te::Scale::dorian, "dorian" },
+                                           { te::Scale::phrygian, "phrygian" },
+                                           { te::Scale::lydian, "lydian" },
+                                           { te::Scale::mixolydian, "mixolydian" },
+                                           { te::Scale::locrian, "locrian" },
+                                           { te::Scale::harmonicMinor, "harmonicMinor" },
+                                           { te::Scale::melodicMinor, "melodicMinor" } };
+
+    // A key, on a track's state or on LASTKEY in the song's Phazite state (model/base/Schema.h). A key exists exactly when
+    // its root does.
     std::optional<Key> readKey (const juce::ValueTree& state)
     {
         if (! state.hasProperty (schema::phaziteKeyRoot))
             return std::nullopt;
 
         return Key { juce::jlimit (0, 11, (int) state[schema::phaziteKeyRoot]),
-                     (te::Scale::ScaleType) juce::jlimit ((int) te::Scale::major, (int) te::Scale::harmonicMinor,
-                                                          (int) state[schema::phaziteKeyScale]) };
+                     findScale (state[schema::phaziteKeyScale].toString()).value_or (te::Scale::major) };
     }
 
     void writeKey (juce::ValueTree state, const std::optional<Key>& key, juce::UndoManager* undo)
@@ -34,7 +51,7 @@ namespace
         }
 
         state.setProperty (schema::phaziteKeyRoot, key->root, undo);
-        state.setProperty (schema::phaziteKeyScale, (int) key->scale, undo);
+        state.setProperty (schema::phaziteKeyScale, getSavedScaleName (key->scale), undo);
     }
 
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
@@ -454,8 +471,35 @@ bool isInKey (int pitch, const Key& key)
 
 juce::Array<te::Scale::ScaleType> getKeyScales()
 {
-    return { te::Scale::major,      te::Scale::minor,   te::Scale::dorian,        te::Scale::phrygian,    te::Scale::lydian,
-             te::Scale::mixolydian, te::Scale::locrian, te::Scale::harmonicMinor, te::Scale::melodicMinor };
+    juce::Array<te::Scale::ScaleType> types;
+
+    for (const auto& scale : savedScales)
+        types.add (scale.type);
+
+    return types;
+}
+
+juce::String getSavedScaleName (te::Scale::ScaleType type)
+{
+    if (type == te::Scale::ionian)
+        type = te::Scale::major; // the same notes
+    else if (type == te::Scale::aeolian)
+        type = te::Scale::minor;
+
+    for (const auto& scale : savedScales)
+        if (scale.type == type)
+            return scale.name;
+
+    return savedScales[0].name;
+}
+
+std::optional<te::Scale::ScaleType> findScale (const juce::String& savedName)
+{
+    for (const auto& scale : savedScales)
+        if (savedName == scale.name)
+            return scale.type;
+
+    return std::nullopt;
 }
 
 std::optional<Key> getTrackKey (const te::Track& track)

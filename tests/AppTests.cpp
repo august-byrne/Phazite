@@ -134,3 +134,41 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     // The library indexes on its own thread; it is done before the services go.
     CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 10000));
 }
+
+TEST_CASE ("A project from a newer Phazite stays in Open Recent, and startup opens the next one")
+{
+    auto& engine = phazite::test::getEngine();
+    phazite::test::TemporaryFolder temp;
+    const auto projects = temp.folder.getChildFile ("Projects");
+    REQUIRE (projects.createDirectory().wasOk());
+    const auto a = createClosedProject (projects, "A");
+
+    // B: a copy of A, saved by a newer Phazite.
+    const auto folderB = projects.getChildFile ("B");
+    REQUIRE (a.getParentDirectory().copyDirectoryTo (folderB));
+    const auto b = folderB.getChildFile (juce::String ("B") + phazite::Project::fileExtension);
+    REQUIRE (folderB.getChildFile (a.getFileName()).moveFileTo (b));
+    auto xml = phazite::test::readXml (b);
+    REQUIRE (xml->getChildByName ("PHAZITE") != nullptr);
+    xml->getChildByName ("PHAZITE")->setAttribute ("schemaVersion", phazite::schema::currentVersion + 1);
+    REQUIRE (xml->writeTo (b));
+
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    recent.add (a);
+    recent.add (b); // the most recent
+
+    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, projects);
+    juce::StringArray errors;
+    session.onError = [&errors] (const juce::String&, const juce::String& message) { errors.add (message); };
+    session.openAtStartup();
+
+    // A opens instead, after an error that says why B didn't, and B stays in Open Recent for the version that opens it.
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.getProject()->getFile() == a);
+    REQUIRE (errors.size() == 1);
+    CHECK (errors[0].contains ("newer"));
+    CHECK (recent.getProjects().contains (a));
+    CHECK (recent.getProjects().contains (b));
+    CHECK_FALSE (projects.getChildFile ("My First Song").exists()); // no first project was made
+}

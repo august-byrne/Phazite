@@ -4,6 +4,7 @@
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
+#include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
 #include "model/notes/Notes.h"
@@ -310,6 +311,7 @@ TEST_CASE ("A track has no key until one is chosen, and new tracks get the key c
     const auto key = phazite::getTrackKey (*track);
     REQUIRE (key.has_value());
     CHECK (phazite::describeKey (*key) == juce::String ("A minor"));
+    CHECK (track->state[phazite::schema::phaziteKeyScale].toString() == juce::String ("minor")); // saved by name
 
     // A new track gets it.
     auto* added = phazite::insertTrack (*edit, track, nullptr);
@@ -460,4 +462,24 @@ TEST_CASE ("Every track can get the same key")
 
     phazite::setTrackKeys (tracks, std::nullopt);
     CHECK (std::none_of (tracks.begin(), tracks.end(), [] (te::Track* track) { return phazite::getTrackKey (*track).has_value(); }));
+}
+
+TEST_CASE ("Scales are saved by name")
+{
+    // Every scale offered goes to its name and back.
+    CHECK (phazite::getKeyScales().size() == 9);
+
+    for (const auto type : phazite::getKeyScales())
+        CHECK (phazite::findScale (phazite::getSavedScaleName (type)) == type);
+
+    CHECK (phazite::getSavedScaleName (te::Scale::harmonicMinor) == juce::String ("harmonicMinor"));
+
+    // Tracktion's ionian and aeolian, which Phazite doesn't offer, as the scales with their notes.
+    CHECK (phazite::getSavedScaleName (te::Scale::ionian) == juce::String ("major"));
+    CHECK (phazite::getSavedScaleName (te::Scale::aeolian) == juce::String ("minor"));
+
+    // Names are exact: no numbers, no other spelling.
+    CHECK_FALSE (phazite::findScale ("3").has_value());
+    CHECK_FALSE (phazite::findScale ("Dorian").has_value());
+    CHECK_FALSE (phazite::findScale ("").has_value());
 }

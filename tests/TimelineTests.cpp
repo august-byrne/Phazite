@@ -124,7 +124,18 @@ TEST_CASE ("Grid settings are kept in the project")
     grid.save (state);
     CHECK (phazite::GridSettings::load (state) == grid);
 
-    // A project that has none uses the defaults.
+    // The fixed size is saved by name, not as Tracktion's level.
+    CHECK (state[phazite::schema::gridStep].toString() == juce::String ("1 bar"));
+    CHECK_FALSE (state.hasProperty ("gridLevel"));
+
+    for (int level = phazite::GridSettings::minFixedLevel; level <= phazite::GridSettings::maxFixedLevel; ++level)
+        CHECK (phazite::findFixedGridLevel (phazite::getSavedGridStep (level)) == level);
+
+    CHECK (phazite::getSavedGridStep (3) == juce::String ("1/16 beat")); // the nearest fixed size
+
+    // A name that isn't a size reads the default, and so does a project that has none.
+    state.setProperty (phazite::schema::gridStep, "1/5 beat", nullptr);
+    CHECK (phazite::GridSettings::load (state).fixedLevel == 7);
     CHECK (phazite::GridSettings::load (juce::ValueTree()) == phazite::GridSettings());
 }
 

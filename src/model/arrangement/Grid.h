@@ -6,6 +6,7 @@
 #include "model/base/Tracktion.h"
 
 #include <functional>
+#include <optional>
 
 namespace phazite
 {
@@ -13,9 +14,9 @@ namespace phazite
 // The grid: how fine it is, and whether positions snap to it. Each project keeps its own.
 struct GridSettings
 {
-    // Grid sizes are levels of Tracktion's bars-and-beats snap types (te::TimecodeSnapType): 7 is
-    // 1/4 beat, 9 a beat, 10 a bar and 13 eight bars.
-    static constexpr int minLevel = 3, maxLevel = 18;           // 1/64 beat to 65,536 bars
+    // Grid sizes are levels of Tracktion's bars-and-beats snap types (te::TimecodeSnapType): 7 is 1/4 beat, 9 a beat,
+    // 10 a bar and 13 eight bars. Projects save a fixed size by name (getSavedGridStep()), not as a level.
+    static constexpr int minLevel = 3, maxLevel = 18;           // 1/64 beat to 1,024 bars
     static constexpr int minFixedLevel = 5, maxFixedLevel = 13; // 1/16 beat to 8 bars
     static constexpr int maxAdaptiveOffset = 3;
 
@@ -35,6 +36,11 @@ struct GridSettings
 
     bool operator== (const GridSettings&) const = default;
 };
+
+// A fixed grid size as projects save it ("1/4 beat", "1 bar", "8 bars"...), for a level 5..13 (the nearest of those
+// for another level), and back: nothing for a name that isn't one of them.
+juce::String getSavedGridStep (int fixedLevel);
+std::optional<int> findFixedGridLevel (const juce::String& savedStep);
 
 // The editors that keep a grid of their own in the project: the playlist's on the Phazite state, the piano roll's on its
 // PIANOROLL child. View settings, without undo steps.

@@ -2,6 +2,8 @@
 #include "Grid.h"
 #include "model/base/Schema.h"
 
+#include <iterator>
+
 namespace phazite
 {
 namespace
@@ -12,6 +14,11 @@ namespace
     {
         return { te::TimecodeType::barsBeats, juce::jlimit (GridSettings::minLevel, GridSettings::maxLevel, level) };
     }
+
+    // The fixed grid sizes by name, from level 5 (GridSettings::minFixedLevel) to 13.
+    constexpr const char* fixedGridSteps[] = { "1/16 beat", "1/8 beat", "1/4 beat", "1/2 beat", "1 beat",
+                                               "1 bar",     "2 bars",   "4 bars",   "8 bars" };
+    static_assert (std::size (fixedGridSteps) == (size_t) (GridSettings::maxFixedLevel - GridSettings::minFixedLevel + 1));
 } // namespace
 
 //==============================================================================
@@ -37,7 +44,7 @@ GridSettings GridSettings::load (const juce::ValueTree& state)
     grid.snap = state.getProperty (schema::gridSnap, grid.snap);
     grid.adaptive = state.getProperty (schema::gridAdaptive, grid.adaptive);
     grid.adaptiveOffset = juce::jlimit (-maxAdaptiveOffset, maxAdaptiveOffset, (int) state.getProperty (schema::gridOffset, 0));
-    grid.fixedLevel = juce::jlimit (minFixedLevel, maxFixedLevel, (int) state.getProperty (schema::gridLevel, grid.fixedLevel));
+    grid.fixedLevel = findFixedGridLevel (state[schema::gridStep].toString()).value_or (grid.fixedLevel);
     grid.triplets = state.getProperty (schema::gridTriplets, grid.triplets);
     return grid;
 }
@@ -47,8 +54,23 @@ void GridSettings::save (juce::ValueTree& state) const
     state.setProperty (schema::gridSnap, snap, nullptr);
     state.setProperty (schema::gridAdaptive, adaptive, nullptr);
     state.setProperty (schema::gridOffset, adaptiveOffset, nullptr);
-    state.setProperty (schema::gridLevel, fixedLevel, nullptr);
+    state.setProperty (schema::gridStep, getSavedGridStep (fixedLevel), nullptr);
     state.setProperty (schema::gridTriplets, triplets, nullptr);
+}
+
+juce::String getSavedGridStep (int fixedLevel)
+{
+    const auto level = juce::jlimit (GridSettings::minFixedLevel, GridSettings::maxFixedLevel, fixedLevel);
+    return fixedGridSteps[(size_t) (level - GridSettings::minFixedLevel)];
+}
+
+std::optional<int> findFixedGridLevel (const juce::String& savedStep)
+{
+    for (size_t i = 0; i < std::size (fixedGridSteps); ++i)
+        if (savedStep == fixedGridSteps[i])
+            return GridSettings::minFixedLevel + (int) i;
+
+    return std::nullopt;
 }
 
 GridSettings loadGridSettings (const te::Edit& edit, GridOwner owner)

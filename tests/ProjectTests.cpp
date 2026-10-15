@@ -4,6 +4,7 @@
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
+#include "model/base/Migrations.h"
 #include "model/base/Schema.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
@@ -67,6 +68,12 @@ TEST_CASE ("A new project creates its folder, subfolders and file")
         CHECK (folder.isDirectory());
 
     CHECK_FALSE (project->hasUnsavedChanges());
+
+    // In the current format, in memory and in the file.
+    CHECK (phazite::getSchemaVersion (project->getEdit().state) == phazite::schema::currentVersion);
+    const auto saved = phazite::test::readXml (project->getFile());
+    REQUIRE (saved->getChildByName ("PHAZITE") != nullptr);
+    CHECK (saved->getChildByName ("PHAZITE")->getIntAttribute ("schemaVersion") == phazite::schema::currentVersion);
 
     // A second project with the same name would overwrite the first, so it is refused.
     juce::String error;

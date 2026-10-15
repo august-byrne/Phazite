@@ -1,0 +1,107 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#include "Migrations.h"
+#include "Schema.h"
+
+#include <algorithm>
+#include <iterator>
+
+namespace phazite
+{
+namespace
+{
+    //==========================================================================
+    // Version 0 to 1. The tables are frozen: they say what version 0 meant, whatever later versions do.
+
+    // gridLevel, a Tracktion snap level 5..13, exists only here.
+    const juce::Identifier legacyGridLevel { "gridLevel" };
+    constexpr const char* v1GridSteps[] = {
+        "1/16 beat", "1/8 beat", "1/4 beat", "1/2 beat", "1 beat", "1 bar", "2 bars", "4 bars", "8 bars"
+    };
+
+    // By Tracktion's scale number 0..10: ionian and aeolian, which Phazite never offered, have the notes of major and minor.
+    constexpr const char* v1Scales[] = { "major",      "minor", "major",   "dorian",       "phrygian",     "lydian",
+                                         "mixolydian", "minor", "locrian", "melodicMinor", "harmonicMinor" };
+
+    bool isV1ScaleName (const juce::String& value)
+    {
+        return std::any_of (std::begin (v1Scales), std::end (v1Scales), [&value] (const char* name) { return value == name; });
+    }
+
+    // The size of a fixed grid, as version 0 read it: levels outside 5..13 as the nearest.
+    void upgradeGridStep (juce::ValueTree grid)
+    {
+        if (! grid.hasProperty (legacyGridLevel))
+            return;
+
+        const auto level = juce::jlimit (5, 13, (int) grid[legacyGridLevel]);
+        grid.setProperty (schema::gridStep, v1GridSteps[(size_t) (level - 5)], nullptr);
+        grid.removeProperty (legacyGridLevel, nullptr);
+    }
+
+    // Every key's scale, on tracks and LASTKEY alike, as version 0 read it: numbers outside 0..10 as the nearest.
+    void upgradeScales (juce::ValueTree tree)
+    {
+        if (tree.hasProperty (schema::phaziteKeyScale) && ! isV1ScaleName (tree[schema::phaziteKeyScale].toString()))
+            tree.setProperty (schema::phaziteKeyScale, v1Scales[(size_t) juce::jlimit (0, 10, (int) tree[schema::phaziteKeyScale])],
+                              nullptr);
+
+        for (auto child : tree)
+            upgradeScales (child);
+    }
+
+    void upgrade0To1 (juce::ValueTree& editState)
+    {
+        // The playlist's grid is on the Phazite state, and the piano roll's on its child.
+        if (auto phaziteState = editState.getChildWithName (schema::PHAZITE); phaziteState.isValid())
+        {
+            upgradeGridStep (phaziteState);
+
+            for (auto child : phaziteState)
+                upgradeGridStep (child);
+        }
+
+        upgradeScales (editState);
+    }
+
+    //==========================================================================
+    // Each version's upgrade to the next: steps[n] upgrades version n.
+    using Step = void (*) (juce::ValueTree&);
+    constexpr Step steps[] = { upgrade0To1 };
+    static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
+} // namespace
+
+int getSchemaVersion (const juce::ValueTree& editState)
+{
+    const auto text = editState.getChildWithName (schema::PHAZITE)[schema::schemaVersion].toString().trim();
+
+    if (text.isEmpty() || ! text.containsOnly ("0123456789"))
+        return 0;
+
+    return text.getIntValue();
+}
+
+void writeCurrentSchemaVersion (juce::ValueTree& editState)
+{
+    if (! editState.isValid() || getSchemaVersion (editState) == schema::currentVersion)
+        return;
+
+    editState.getOrCreateChildWithName (schema::PHAZITE, nullptr).setProperty (schema::schemaVersion, schema::currentVersion, nullptr);
+}
+
+bool migrateToCurrentSchema (juce::ValueTree& editState)
+{
+    if (! editState.isValid())
+        return true;
+
+    const auto version = getSchemaVersion (editState);
+
+    if (version > schema::currentVersion)
+        return false;
+
+    for (auto from = version; from < schema::currentVersion; ++from)
+        steps[(size_t) from](editState);
+
+    writeCurrentSchemaVersion (editState);
+    return true;
+}
+} // namespace phazite

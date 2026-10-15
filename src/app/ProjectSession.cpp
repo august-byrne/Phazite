@@ -290,11 +290,37 @@ void ProjectSession::open (const juce::File& file, bool restoreAutosave)
         return;
     }
 
-    recent.remove (file);
+    // A newer Phazite's project stays in Open Recent, for the version that opens it (design question 17's proposal).
+    const auto tooNew = Project::isFromNewerPhazite (engine, file);
+
+    if (! tooNew)
+        recent.remove (file);
+
     showError ("Phazite couldn't open the project", error);
 
     if (project == nullptr)
-        createFirstProject();
+    {
+        if (tooNew)
+            openNextRecentProject (file);
+        else
+            createFirstProject();
+    }
+}
+
+void ProjectSession::openNextRecentProject (const juce::File& failed)
+{
+    const auto projects = recent.getProjects();
+
+    for (auto i = projects.indexOf (failed) + 1; i < projects.size(); ++i)
+    {
+        if (! Project::isFromNewerPhazite (engine, projects[i]))
+        {
+            openWithRestoreQuestion (projects[i]);
+            return;
+        }
+    }
+
+    createFirstProject();
 }
 
 void ProjectSession::setProject (std::unique_ptr<Project> newProject)
@@ -321,6 +347,12 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject)
 
 void ProjectSession::showError (const juce::String& title, const juce::String& message)
 {
+    if (onError != nullptr)
+    {
+        onError (title, message);
+        return;
+    }
+
     juce::AlertWindow::showAsync (juce::MessageBoxOptions()
                                       .withIconType (juce::MessageBoxIconType::WarningIcon)
                                       .withTitle (title)
