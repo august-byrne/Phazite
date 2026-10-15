@@ -3,6 +3,8 @@
 #include "DevicePlugin.h"
 #include "model/commands/Undo.h"
 
+#include <utility>
+
 namespace phazite
 {
 namespace
@@ -30,7 +32,8 @@ ParameterHandle::ParameterHandle (ParameterHandle&& other) noexcept
     : plugin (std::move (other.plugin)),
       parameterID (std::move (other.parameterID)),
       undoName (std::move (other.undoName)),
-      gesture (std::move (other.gesture))
+      gesture (std::move (other.gesture)),
+      joined (std::exchange (other.joined, false))
 {
 }
 
@@ -43,6 +46,7 @@ ParameterHandle& ParameterHandle::operator= (ParameterHandle&& other) noexcept
         parameterID = std::move (other.parameterID);
         undoName = std::move (other.undoName);
         gesture = std::move (other.gesture);
+        joined = std::exchange (other.joined, false);
     }
 
     return *this;
@@ -129,12 +133,18 @@ void ParameterHandle::beginGesture()
 {
     const auto parameter = find();
 
-    if (parameter == nullptr || gesture != nullptr)
+    if (parameter == nullptr || isInGesture())
         return;
 
     storeValueWithoutUndo (*parameter);
-    gesture =
-        std::make_unique<Gesture> (parameter->getEdit(), undoName.isNotEmpty() ? undoName : "Change " + parameter->getParameterName());
+
+    // Within another change's gesture (a drag that moves two parameters), it joins that gesture's step.
+    if (Gesture::isInProgress (parameter->getEdit()))
+        joined = true;
+    else
+        gesture =
+            std::make_unique<Gesture> (parameter->getEdit(), undoName.isNotEmpty() ? undoName : "Change " + parameter->getParameterName());
+
     parameter->parameterChangeGestureBegin(); // for automation recording
 }
 
@@ -145,7 +155,7 @@ void ParameterHandle::setValue (float value)
     if (parameter == nullptr)
         return;
 
-    if (gesture != nullptr)
+    if (isInGesture())
     {
         parameter->setParameter (value, juce::sendNotification);
         return;
@@ -158,18 +168,23 @@ void ParameterHandle::setValue (float value)
 
 void ParameterHandle::endGesture()
 {
-    if (gesture == nullptr)
+    if (! isInGesture())
         return;
 
     if (const auto parameter = find())
         parameter->parameterChangeGestureEnd();
 
-    gesture->commit();
-    gesture.reset();
+    if (gesture != nullptr)
+    {
+        gesture->commit();
+        gesture.reset();
+    }
+
+    joined = false;
 }
 
 bool ParameterHandle::isInGesture() const
 {
-    return gesture != nullptr;
+    return gesture != nullptr || joined;
 }
 } // namespace phazite

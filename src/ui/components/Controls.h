@@ -91,6 +91,36 @@ private:
     void showRange (const ParameterHandle&);
 };
 
+// Links a combo box to a parameter of one of Phazite's devices whose value picks one of its choices: the box lists
+// them, and picking one is an undo step that the handle owns. update() shows changes made elsewhere.
+class ChoiceAttachment
+{
+public:
+    explicit ChoiceAttachment (juce::ComboBox&);
+
+    void setParameter (ParameterHandle);
+    void update();
+
+private:
+    juce::ComboBox& box;
+    ParameterHandle handle;
+    float minimum = 0.0f;
+};
+
+// Links a toggle button to a parameter that is on or off, in the same way.
+class ToggleAttachment
+{
+public:
+    explicit ToggleAttachment (juce::Button&);
+
+    void setParameter (ParameterHandle);
+    void update();
+
+private:
+    juce::Button& button;
+    ParameterHandle handle;
+};
+
 //==============================================================================
 // A level meter: each channel's peak level from -60 to +6 dB, the highest peak of the last second as
 // a line, and red above 0 dB, where the sound clips. It reads a Tracktion LevelMeasurer 30 times a

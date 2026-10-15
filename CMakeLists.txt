@@ -63,6 +63,8 @@ target_sources(phazite_core PRIVATE
     src/devices/core/DeviceInfo.h
     src/devices/core/Processor.h
     src/devices/core/SampleTap.h
+    src/devices/core/Spectrum.cpp
+    src/devices/core/Spectrum.h
     src/devices/dsp/DelayLine.h
     src/devices/dsp/Envelopes.h
     src/devices/dsp/Filters.cpp
@@ -272,6 +274,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DeviceEditors.h
     src/ui/devices/DeviceMenus.cpp
     src/ui/devices/DeviceMenus.h
+    src/ui/devices/EqEditor.cpp
+    src/ui/devices/EqEditor.h
     src/ui/devices/PluginWindow.cpp
     src/ui/devices/PluginWindow.h
     src/ui/input/CommandBridge.cpp
@@ -428,6 +432,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DrumRowTests.cpp
         tests/DspTests.cpp
         tests/EngineSetupTests.cpp
+        tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h

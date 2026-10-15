@@ -75,6 +75,29 @@ namespace Space
 inline constexpr int controlHeight = 28;
 inline constexpr float cornerRadius = 4.0f;
 
+// The knobs of devices' editors, square.
+inline constexpr int knobSize = 64;
+
+// Colours that tell apart the parts of a device's editor, such as the EQ's bands. Each part also shows its number,
+// with an outline in the theme's text colour, so that colour is never the only sign.
+inline constexpr juce::uint32 partColours[] = { 0xffe5534b, 0xfff0883e, 0xffd4a72c, 0xff57ab5a,
+                                                0xff39c5cf, 0xff539bf5, 0xff986ee2, 0xffe275ad };
+
+// A device editor's graph, such as the EQ's: the analyzer's fill and line, the grid, the line at 0 dB and a selected
+// part's own curve (alphas), then the curve's width, the dots' radius and the graph's height.
+namespace GraphTint
+{
+    inline constexpr float spectrumFill = 0.14f;
+    inline constexpr float spectrumLine = 0.35f;
+    inline constexpr float grid = 0.1f;
+    inline constexpr float zeroLine = 0.25f;
+    inline constexpr float partCurve = 0.25f;
+    inline constexpr float partOff = 0.5f; // a part that is off, such as an EQ band's button
+    inline constexpr float curveWidth = 2.0f;
+    inline constexpr float dotRadius = 8.0f;
+    inline constexpr int height = 280;
+} // namespace GraphTint
+
 // How far a button that needs attention, such as one asking for the instrument a track's notes need, is mixed with the
 // warning color.
 inline constexpr float attentionTint = 0.35f;

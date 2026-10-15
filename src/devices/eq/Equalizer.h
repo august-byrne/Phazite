@@ -51,8 +51,9 @@ public:
     static double getMagnitude (std::span<const float> parameters, double frequency, double sampleRate);
     static double getBandMagnitude (std::span<const float> parameters, int band, double frequency, double sampleRate);
 
-    // What it played, for its editor's analyzer (devices/core/SampleTap.h).
+    // What it played, for its editor's analyzer (devices/core/SampleTap.h), and the rate it plays at (message thread).
     SampleTap& getOutputTap() noexcept { return outputTap; }
+    double getSampleRate() const noexcept { return sampleRate; }
 
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;

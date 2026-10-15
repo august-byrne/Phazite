@@ -49,8 +49,9 @@ public:
     std::optional<devices::ParameterInfo> getInfo() const;
 
     // Changing it. A drag is a gesture: beginGesture() starts its undo step, setValue() moves the value as often as
-    // needed, and endGesture() keeps the change, all of it one step. setValue() outside a gesture (a key press, a
-    // double-click) is a step of its own.
+    // needed, and endGesture() keeps the change, all of it one step. A gesture begun while another is in progress for
+    // the same project joins it, so a drag that moves two parameters at once (an EQ band's frequency and gain) is one
+    // step, named after the first. setValue() outside a gesture (a key press, a double-click) is a step of its own.
     void beginGesture();
     void setValue (float);
     void endGesture();
@@ -59,7 +60,8 @@ public:
 private:
     te::SafeSelectable<te::Plugin> plugin;
     juce::String parameterID, undoName;
-    std::unique_ptr<Gesture> gesture;
+    std::unique_ptr<Gesture> gesture; // the gesture it began,
+    bool joined = false;              // or whether it joined another change's
 
     te::AutomatableParameter::Ptr find() const;
 };

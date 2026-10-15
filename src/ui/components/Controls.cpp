@@ -148,6 +148,71 @@ void ParameterAttachment::update()
 }
 
 //==============================================================================
+ChoiceAttachment::ChoiceAttachment (juce::ComboBox& b)
+    : box (b)
+{
+    box.setEnabled (false);
+    box.onChange = [this]
+    {
+        if (handle.isValid() && box.getSelectedItemIndex() >= 0)
+            handle.setValue (minimum + (float) box.getSelectedItemIndex());
+    };
+}
+
+void ChoiceAttachment::setParameter (ParameterHandle newHandle)
+{
+    handle = ParameterHandle(); // without a parameter while the items change
+    box.clear (juce::dontSendNotification);
+    minimum = 0.0f;
+
+    if (const auto info = newHandle.getInfo())
+    {
+        minimum = info->minimum;
+
+        for (size_t i = 0; i < info->choices.size(); ++i)
+            box.addItem (juce::String (info->choices[i].data(), info->choices[i].size()), (int) i + 1);
+    }
+
+    handle = std::move (newHandle);
+    update();
+}
+
+void ChoiceAttachment::update()
+{
+    box.setEnabled (handle.isValid());
+
+    if (handle.isValid())
+        box.setSelectedItemIndex (juce::roundToInt (handle.getValue() - minimum), juce::dontSendNotification);
+}
+
+//==============================================================================
+ToggleAttachment::ToggleAttachment (juce::Button& b)
+    : button (b)
+{
+    button.setEnabled (false);
+    button.setClickingTogglesState (true);
+    button.onClick = [this]
+    {
+        if (handle.isValid())
+            handle.setValue (button.getToggleState() ? 1.0f : 0.0f);
+    };
+}
+
+void ToggleAttachment::setParameter (ParameterHandle newHandle)
+{
+    handle = std::move (newHandle);
+    update();
+}
+
+void ToggleAttachment::update()
+{
+    button.setEnabled (handle.isValid());
+
+    if (handle.isValid())
+        button.setToggleState (handle.getValue() > 0.5f, juce::dontSendNotification);
+}
+
+//==============================================================================
 LevelMeter::LevelMeter (const juce::String& title)
 {
     setTitle (title);

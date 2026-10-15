@@ -139,6 +139,11 @@ void Gesture::commit()
     inhibitor.reset();
 }
 
+bool Gesture::isInProgress (te::Edit& edit)
+{
+    return isInGesture (edit.getUndoManager());
+}
+
 void Gesture::rollBack()
 {
     if (inhibitor == nullptr)

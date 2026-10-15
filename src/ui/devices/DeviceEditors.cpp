@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceEditors.h"
+#include "EqEditor.h"
+#include "devices/eq/Equalizer.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
 {
 namespace
 {
-    constexpr int knobSize = 64, labelHeight = 18;
+    constexpr int labelHeight = 18;
 
     juce::String toString (std::string_view text)
     {
@@ -16,8 +18,13 @@ namespace
 
 std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 {
-    if (! device.isValid())
+    const auto* info = device.getInfo();
+
+    if (info == nullptr)
         return {};
+
+    if (info->typeID == devices::Equalizer::typeID)
+        return std::make_unique<EqEditor> (device);
 
     return std::make_unique<DeviceKnobs> (device);
 }

@@ -115,3 +115,27 @@ TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices
     CHECK (gain.getRange().start == doctest::Approx (-60.0f));
     CHECK (gain.getInfo()->unit == phazite::devices::Unit::decibels);
 }
+
+TEST_CASE ("A gesture begun during another for the same project joins it: a drag that moves two parameters is one step")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto reverb = addReverb (*edit);
+    phazite::test::settle();
+    edit->getUndoManager().clearUndoHistory();
+
+    phazite::ParameterHandle room (reverb.get(), "room size", "Move Both"), damping (reverb.get(), "damping");
+    room.beginGesture();
+    damping.beginGesture();
+    CHECK (room.isInGesture());
+    CHECK (damping.isInGesture());
+    room.setValue (0.9f);
+    damping.setValue (0.1f);
+    damping.endGesture();
+    room.endGesture();
+    CHECK_FALSE (damping.isInGesture());
+
+    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Move Both"));
+    phazite::undo (*edit);
+    CHECK (room.getValue() == doctest::Approx (0.3f));
+    CHECK (damping.getValue() == doctest::Approx (0.5f));
+}

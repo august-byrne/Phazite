@@ -65,6 +65,9 @@ public:
     void rollBack();
     bool isOpen() const noexcept { return inhibitor != nullptr; }
 
+    // Whether a gesture is in progress for the Edit, which a change that starts meanwhile can join.
+    static bool isInProgress (te::Edit&);
+
 private:
     te::Edit& edit;
     std::unique_ptr<te::Edit::UndoTransactionInhibitor> inhibitor;

@@ -92,6 +92,10 @@ public:
     void moveTo (juce::Point<int>);
     void wheel (juce::Point<int>, float deltaY, juce::ModifierKeys = {}); // deltaY: as JUCE reports it
 
+    // Lets time pass, long enough that the next click isn't part of a double-click with the last press (clicks and
+    // double-clicks pause after themselves; a drag doesn't).
+    void pause();
+
 private:
     juce::Component& relativeTo;
     juce::ModifierKeys keys, button; // the modifier keys held, and the mouse button
@@ -99,6 +103,5 @@ private:
     juce::int64 time = juce::Time::currentTimeMillis();
 
     void send (juce::Point<int>, juce::ModifierKeys);
-    void pause(); // long enough that the next click isn't part of a double-click
 };
 } // namespace phazite::test
