@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginWindow.h"
+#include "DeviceEditors.h"
 #include "ui/components/Controls.h"
 #include "ui/input/PluginKeys.h"
 #include "ui/theme/LookAndFeel.h"
@@ -21,8 +22,8 @@ namespace
             for (auto* parameter : plugin.getAutomatableParameters())
             {
                 auto* knob = knobs.add (new Knob (parameter->getParameterName(), parameter->getDefaultValue().value_or (0.0f)));
-                const te::AutomatableParameter::Ptr shown (parameter);
-                knob->textFromValueFunction = [shown] (double value) { return shown->valueToString ((float) value); };
+                knob->textFromValueFunction = [shown = std::make_shared<ParameterHandle> (&plugin, parameter->paramID)] (double value)
+                { return shown->getText ((float) value); };
 
                 auto* attachment = attachments.add (new ParameterAttachment (*knob, "Change " + parameter->getParameterName()));
                 attachment->setParameter (&plugin, parameter->paramID);
@@ -70,6 +71,26 @@ namespace
     };
 
     //==============================================================================
+    // One of Phazite's devices' editors (DeviceEditors.h), as Tracktion's windows take editors.
+    class DeviceEditor : public te::Plugin::EditorComponent
+    {
+    public:
+        explicit DeviceEditor (std::unique_ptr<juce::Component> editor)
+            : content (std::move (editor))
+        {
+            addAndMakeVisible (*content);
+            setSize (content->getWidth(), content->getHeight());
+        }
+
+        bool allowWindowResizing() override { return false; }
+        juce::ComponentBoundsConstrainer* getBoundsConstrainer() override { return nullptr; }
+        void resized() override { content->setBounds (getLocalBounds()); }
+
+    private:
+        std::unique_ptr<juce::Component> content;
+    };
+
+    //==============================================================================
     class PluginWindow : public juce::DocumentWindow,
                          private juce::Timer
     {
@@ -109,8 +130,13 @@ namespace
             setEditor (nullptr);
             auto newEditor = plugin.createEditor();
 
-            if (newEditor == nullptr && dynamic_cast<te::ExternalPlugin*> (&plugin) == nullptr)
-                newEditor = std::make_unique<GenericEditor> (plugin);
+            if (newEditor == nullptr)
+            {
+                if (auto deviceEditor = createDeviceEditor (DeviceHandle (plugin))) // one of Phazite's own devices
+                    newEditor = std::make_unique<DeviceEditor> (std::move (deviceEditor));
+                else if (dynamic_cast<te::ExternalPlugin*> (&plugin) == nullptr)
+                    newEditor = std::make_unique<GenericEditor> (plugin);
+            }
 
             setEditor (std::move (newEditor));
         }

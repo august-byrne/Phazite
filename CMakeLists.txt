@@ -102,6 +102,8 @@ target_sources(phazite_core PRIVATE
     src/model/commands/Undo.h
     src/model/commands/UndoCommands.cpp
     src/model/commands/UndoCommands.h
+    src/model/devices/DeviceHandle.cpp
+    src/model/devices/DeviceHandle.h
     src/model/devices/DevicePlugin.cpp
     src/model/devices/DevicePlugin.h
     src/model/devices/Devices.cpp
@@ -266,6 +268,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/Controls.h
     src/ui/components/ValueText.cpp
     src/ui/components/ValueText.h
+    src/ui/devices/DeviceEditors.cpp
+    src/ui/devices/DeviceEditors.h
     src/ui/devices/DeviceMenus.cpp
     src/ui/devices/DeviceMenus.h
     src/ui/devices/PluginWindow.cpp
@@ -418,6 +422,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ComputerKeyboardTests.cpp
         tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
+        tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp
         tests/DevicePluginTests.cpp
         tests/DrumRowTests.cpp

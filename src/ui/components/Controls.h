@@ -60,6 +60,9 @@ void showAsDecibels (juce::Slider&);
 // Shows and reads a slider's value, from -1 (left) to 1 (right), as a pan position ("30% left").
 void showAsPan (juce::Slider&);
 
+// Shows and reads a slider's value as a value of one of Phazite's devices' parameters, by its unit ("1.20 kHz").
+void showAsParameter (juce::Slider&, const devices::ParameterInfo&);
+
 //==============================================================================
 // Links a slider to a parameter of a plug-in, such as a track's volume. Moving the slider sets the
 // parameter, as one named undo step per drag or key press, which the model's ParameterHandle owns;

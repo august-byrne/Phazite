@@ -2,6 +2,8 @@
 // The text that controls show, and screen readers read out, for common kinds of values.
 #pragma once
 
+#include "devices/core/DeviceInfo.h"
+
 #include <juce_core/juce_core.h>
 
 #include <optional>
@@ -22,4 +24,13 @@ juce::String formatPan (double pan);
 
 // Reads a pan position as formatPan() writes it, or as a number from -100 (left) to 100 (right).
 std::optional<double> parsePan (const juce::String&);
+
+// A value of one of Phazite's devices' parameters, as its unit says: "120 Hz", "1.20 kHz", "+3.0 dB", "35%", "12.5 ms",
+// "1.20 s", "+7 st", "-15 ct", "4.0:1", a choice's name, "On" or "Off", or a plain number ("0.71").
+juce::String formatParameterValue (const devices::ParameterInfo&, float value);
+
+// Reads a value as formatParameterValue() writes it, or as someone might type it: a plain number in the unit, "1.2k"
+// for 1.2 kHz, "250ms" for a quarter of a second, a choice's name or number, "on" or "off". Kept to the parameter's
+// range; nothing if it can't be read.
+std::optional<float> parseParameterValue (const devices::ParameterInfo&, const juce::String&);
 } // namespace phazite::ui

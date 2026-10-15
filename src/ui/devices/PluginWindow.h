@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A device's own window (docs/design.md, section 9): a plug-in's editor, or a knob for each parameter of
-// Tracktion's built-in devices, which have no editor of their own. The windows stay above the main window and
+// A device's own window (docs/design.md, section 9): a plug-in's editor, the editor of one of Phazite's own devices
+// (DeviceEditors.h), or a knob for each parameter of Tracktion's built-in devices, which have no editor of their own.
+// The windows stay above the main window and
 // remember where they were, and play and stop, and the computer keyboard, work in them (ui/input/PluginKeys.h). Tracktion
 // opens and closes them (te::PluginWindowState) and asks the app's AppUIBehaviour (src/app/AppUIBehaviour.h) for them,
 // which calls createPluginWindow().

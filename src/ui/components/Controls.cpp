@@ -92,6 +92,13 @@ void showAsPan (juce::Slider& slider)
     slider.valueFromTextFunction = [&slider] (const juce::String& text) { return parsePan (text).value_or (slider.getValue()); };
 }
 
+void showAsParameter (juce::Slider& slider, const devices::ParameterInfo& parameter)
+{
+    slider.textFromValueFunction = [parameter] (double value) { return formatParameterValue (parameter, (float) value); };
+    slider.valueFromTextFunction = [parameter, &slider] (const juce::String& text)
+    { return (double) parseParameterValue (parameter, text).value_or ((float) slider.getValue()); };
+}
+
 //==============================================================================
 ParameterAttachment::ParameterAttachment (juce::Slider& s, juce::String name)
     : slider (s),
