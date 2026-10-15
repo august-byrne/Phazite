@@ -13,19 +13,15 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-namespace phazite
-{
-class CommandRegistry;
-} // namespace phazite
-
 namespace phazite::ui
 {
 class ComputerKeyboard;
+class KeyDispatcher;
 
 class PluginKeys : public juce::KeyListener
 {
 public:
-    PluginKeys (CommandRegistry&, ComputerKeyboard&);
+    PluginKeys (KeyDispatcher&, ComputerKeyboard&);
     ~PluginKeys() override;
 
     // Whether a key goes to Phazite rather than to the plug-in.
@@ -42,7 +38,7 @@ public:
 private:
     struct NativeHook;
 
-    CommandRegistry& commands;
+    KeyDispatcher& shortcuts;
     ComputerKeyboard& computerKeyboard;
     juce::Array<juce::Component::SafePointer<juce::Component>> windows;
     std::unique_ptr<NativeHook> nativeHook; // Windows only

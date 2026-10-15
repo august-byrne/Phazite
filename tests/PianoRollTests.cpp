@@ -63,7 +63,8 @@ struct PianoRollScreen
     juce::Array<te::AudioTrack*> tracks;
     te::SelectionManager selection { phazite::test::getEngine() };
     phazite::CommandRegistry registry;
-    phazite::ui::PianoRoll pianoRoll { registry, selection };
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::PianoRoll pianoRoll { commands, selection };
     phazite::test::TestWindow window { pianoRoll, 1000, 600 };
     juce::Component* notes = nullptr;
 };

@@ -6,6 +6,7 @@
 #pragma once
 
 #include "ui/components/Controls.h"
+#include "ui/input/CommandBridge.h"
 
 #include <vector>
 
@@ -78,7 +79,7 @@ public:
     // How tall the strip must be for its parts not to overlap; the mixer scrolls when it is shorter.
     static int getMinimumHeight();
 
-    ChannelStrip (te::Engine&, CommandRegistry&, te::SelectionManager&);
+    ChannelStrip (te::Engine&, CommandBridge&, te::SelectionManager&);
     ~ChannelStrip() override;
 
     // The track to show: an audio track, a folder (a bus or a plain one) or a return; nullptr for none. The
@@ -104,7 +105,7 @@ private:
     struct SendSlot;
 
     te::Engine& engine;
-    CommandRegistry& commands;
+    CommandBridge& commands;
     te::SelectionManager& selection;
     te::SafeSelectable<te::Track> track;
     bool selected = false, related = false, dropping = false;
@@ -182,7 +183,7 @@ class Inspector : public juce::Component,
                   private juce::Timer
 {
 public:
-    Inspector (te::Engine&, CommandRegistry&, std::function<te::Edit*()> getEdit, te::SelectionManager&);
+    Inspector (te::Engine&, CommandBridge&, std::function<te::Edit*()> getEdit, te::SelectionManager&);
     ~Inspector() override;
 
     void paint (juce::Graphics&) override;

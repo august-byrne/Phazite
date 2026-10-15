@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
 #include "ui/components/Controls.h"
+#include "ui/input/CommandBridge.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -15,15 +15,15 @@ class CommandPalette : public juce::Component,
                        private juce::ListBoxModel
 {
 public:
-    explicit CommandPalette (CommandRegistry&);
+    explicit CommandPalette (CommandBridge&);
 
     // Opens a palette in a call-out pointing at `anchor`.
-    static void show (CommandRegistry&, juce::Component& anchor);
+    static void show (CommandBridge&, juce::Component& anchor);
 
     void resized() override;
 
 private:
-    CommandRegistry& registry;
+    CommandBridge& commands;
     SearchField searchField;
     juce::ListBox list;
     juce::Array<const Command*> results;

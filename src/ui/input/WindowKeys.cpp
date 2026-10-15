@@ -3,7 +3,7 @@
 
 namespace phazite::ui
 {
-WindowKeys::WindowKeys (juce::Component& w, CommandRegistry& s, ComputerKeyboard& keyboard)
+WindowKeys::WindowKeys (juce::Component& w, KeyDispatcher& s, ComputerKeyboard& keyboard)
     : window (w),
       shortcuts (s),
       computerKeyboard (keyboard)

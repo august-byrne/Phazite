@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginKeys.h"
 #include "ComputerKeyboard.h"
-#include "model/commands/CommandRegistry.h"
+#include "KeyDispatcher.h"
 
 // Last, so that its macros can't change the headers above.
 #if JUCE_WINDOWS
@@ -128,8 +128,8 @@ struct PluginKeys::NativeHook
 #endif
 
 //==============================================================================
-PluginKeys::PluginKeys (CommandRegistry& registry, ComputerKeyboard& keyboard)
-    : commands (registry),
+PluginKeys::PluginKeys (KeyDispatcher& dispatcher, ComputerKeyboard& keyboard)
+    : shortcuts (dispatcher),
       computerKeyboard (keyboard),
       nativeHook (std::make_unique<NativeHook> (*this))
 {
@@ -146,7 +146,7 @@ PluginKeys::~PluginKeys()
 
 bool PluginKeys::wants (const juce::KeyPress& key) const
 {
-    return commands.runsOverPlugins (key) || computerKeyboard.takesKey (key);
+    return shortcuts.runsOverPlugins (key) || computerKeyboard.takesKey (key);
 }
 
 void PluginKeys::watch (juce::Component& window)
@@ -179,13 +179,13 @@ bool PluginKeys::keyPressed (const juce::KeyPress& key, juce::Component* compone
     if (! wants (key))
         return false;
 
-    return commands.keyPressedOverPlugin (key) || computerKeyboard.keyPressed (key, component);
+    return shortcuts.keyPressedOverPlugin (key) || computerKeyboard.keyPressed (key, component);
 }
 
 bool PluginKeys::keyStateChanged (bool isKeyDown, juce::Component* component)
 {
     // Keys let go release the commands they ran, and the computer keyboard starts and ends its notes.
-    commands.keyStateChanged (isKeyDown, component);
+    shortcuts.keyStateChanged (isKeyDown, component);
     return computerKeyboard.keyStateChanged (isKeyDown, component);
 }
 

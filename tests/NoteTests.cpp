@@ -7,6 +7,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
 #include "model/notes/Notes.h"
+#include "ui/input/KeyDispatcher.h"
 
 namespace
 {
@@ -386,14 +387,16 @@ TEST_CASE ("The note commands act on the selected notes, and take the arrow keys
     CHECK (n.clip->getSequence().getNumNotes() == 4 + 5); // 1 beat in 4 pieces, 1.25 beats in 5
     CHECK (phazite::getSelectedNotes (n.selection).size() == 9);
 
-    // The up arrow runs the note command while notes are selected, and nothing once none are. (CommandTests checks
+    // The up arrow runs the note command while notes are selected, and nothing once none are. (ShortcutTests checks
     // that a note command wins over a track command on the same key.)
-    phazite::Keymap keymap;
+    phazite::ui::Keymap keymap;
     keymap.name = "Test";
     keymap.keys["note.transposeUp"] = { "cursor up" };
-    n.registry.setKeymap (keymap);
-    CHECK (n.registry.findCommandForKey (juce::KeyPress (juce::KeyPress::upKey))->id == juce::String ("note.transposeUp"));
+    phazite::ui::CommandBridge commands { n.registry };
+    commands.setKeymap (keymap);
+    const phazite::ui::KeyDispatcher keys { commands };
+    CHECK (keys.findCommandForKey (juce::KeyPress (juce::KeyPress::upKey))->id == juce::String ("note.transposeUp"));
 
     n.selection.deselectAll();
-    CHECK (n.registry.findCommandForKey (juce::KeyPress (juce::KeyPress::upKey)) == nullptr);
+    CHECK (keys.findCommandForKey (juce::KeyPress (juce::KeyPress::upKey)) == nullptr);
 }

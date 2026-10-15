@@ -9,8 +9,8 @@
 # (it only lowers budgets: to the merged code's counts).
 
 upward-includes                0
-model-window-includes          1
-model-window-references       61
+model-window-includes          0
+model-window-references        5
 model-tracktion-includes       0
 model-undo-steps               0
 model-include-loops            0

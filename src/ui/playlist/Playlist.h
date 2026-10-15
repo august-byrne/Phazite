@@ -23,7 +23,7 @@ class Playlist : public TimelineEditor,
                  private juce::AsyncUpdater
 {
 public:
-    Playlist (CommandRegistry&, te::SelectionManager&, RangeSelection&);
+    Playlist (CommandBridge&, te::SelectionManager&, RangeSelection&);
     ~Playlist() override;
 
     // The open project's Edit, or nullptr while none is open.

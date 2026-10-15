@@ -2,7 +2,7 @@
 // The settings window's content: the Audio, MIDI and Shortcuts tabs.
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
+#include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
@@ -41,7 +41,7 @@ private:
 class ShortcutSettings : public juce::Component
 {
 public:
-    ShortcutSettings (CommandRegistry&, std::function<void (const juce::String& keymapName)> chooseKeymap);
+    ShortcutSettings (CommandBridge&, std::function<void (const juce::String& keymapName)> chooseKeymap);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -63,7 +63,7 @@ public:
         shortcuts
     };
 
-    SettingsPanel (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit,
+    SettingsPanel (te::Engine&, CommandBridge&, ComputerKeyboard&, std::function<te::Edit*()> getEdit,
                    std::function<void (const juce::String& keymapName)> chooseKeymap);
 
     void showTab (Tab tab) { setCurrentTabIndex (tab); }

@@ -280,8 +280,8 @@ struct TimelineEditor::UseListener : public juce::MouseListener
 };
 
 //==============================================================================
-TimelineEditor::TimelineEditor (CommandRegistry& registry, const juce::Identifier& stateType)
-    : commands (registry),
+TimelineEditor::TimelineEditor (CommandBridge& bridge, const juce::Identifier& stateType)
+    : commands (bridge),
       gridStateType (stateType),
       playhead (std::make_unique<Playhead>()),
       useListener (std::make_unique<UseListener> (*this))

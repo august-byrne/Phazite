@@ -10,8 +10,8 @@ namespace
     constexpr int numVisibleRows = 10;
 } // namespace
 
-CommandPalette::CommandPalette (CommandRegistry& r)
-    : registry (r),
+CommandPalette::CommandPalette (CommandBridge& bridge)
+    : commands (bridge),
       list ("Commands", this)
 {
     setTitle ("Command palette");
@@ -33,9 +33,9 @@ CommandPalette::CommandPalette (CommandRegistry& r)
     setSize (520, controlHeight + Space::s + rowHeight * numVisibleRows + Space::s * 2);
 }
 
-void CommandPalette::show (CommandRegistry& registry, juce::Component& anchor)
+void CommandPalette::show (CommandBridge& bridge, juce::Component& anchor)
 {
-    auto palette = std::make_unique<CommandPalette> (registry);
+    auto palette = std::make_unique<CommandPalette> (bridge);
     auto* searchField = &palette->searchField;
 
     auto* topLevel = anchor.getTopLevelComponent();
@@ -80,7 +80,7 @@ bool CommandPalette::moveSelection (const juce::KeyPress& key)
 
 void CommandPalette::updateResults()
 {
-    results = registry.search (searchField.getText(), 50);
+    results = commands.getRegistry().search (searchField.getText(), 50);
     list.updateContent();
     list.selectRow (0);
     list.repaint();
@@ -96,9 +96,9 @@ void CommandPalette::runSelected()
     // Closing deletes this palette, so take what is needed first, then run the command once the
     // palette has gone (focus and keyboard then go back to the window).
     const auto id = results[row]->id;
-    auto& commands = registry;
+    auto& bridge = commands;
     close();
-    juce::MessageManager::callAsync ([&commands, id] { commands.invoke (id); });
+    juce::MessageManager::callAsync ([&bridge, id] { bridge.invoke (id); });
 }
 
 void CommandPalette::close()
@@ -129,7 +129,7 @@ void CommandPalette::paintListBoxItem (int row, juce::Graphics& g, int width, in
     area.reduce (Space::s, 0);
 
     // The shortcut on the right, then the name, then the category in what's left.
-    const auto shortcuts = registry.getShortcutDescriptions (command->id);
+    const auto shortcuts = commands.getShortcutDescriptions (command->id);
 
     if (! shortcuts.isEmpty())
     {
@@ -162,7 +162,7 @@ juce::String CommandPalette::getNameForRow (int row)
         return {};
 
     const auto* command = results[row];
-    const auto shortcuts = registry.getShortcutDescriptions (command->id);
+    const auto shortcuts = commands.getShortcutDescriptions (command->id);
     return getCurrentName (*command) + (shortcuts.isEmpty() ? juce::String() : ", " + shortcuts[0]);
 }
 } // namespace phazite::ui

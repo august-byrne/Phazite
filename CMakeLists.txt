@@ -244,10 +244,18 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DeviceMenus.h
     src/ui/devices/PluginWindow.cpp
     src/ui/devices/PluginWindow.h
+    src/ui/input/CommandBridge.cpp
+    src/ui/input/CommandBridge.h
     src/ui/input/CommandUI.cpp
     src/ui/input/CommandUI.h
     src/ui/input/ComputerKeyboard.cpp
     src/ui/input/ComputerKeyboard.h
+    src/ui/input/KeyDispatcher.cpp
+    src/ui/input/KeyDispatcher.h
+    src/ui/input/Keymap.cpp
+    src/ui/input/Keymap.h
+    src/ui/input/KeymapStore.cpp
+    src/ui/input/KeymapStore.h
     src/ui/input/PluginKeys.cpp
     src/ui/input/PluginKeys.h
     src/ui/input/WindowKeys.cpp
@@ -397,6 +405,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SchemaTests.cpp
         tests/SectionTests.cpp
         tests/SettingsTests.cpp
+        tests/ShortcutTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
         tests/TimelineTests.cpp

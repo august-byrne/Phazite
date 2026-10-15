@@ -29,7 +29,7 @@ struct Keys
             registry.add (
                 { .id = id, .name = id, .perform = [this, id] { ran.add (id); }, .keyReleased = [this, id] { released.add (id); } });
 
-        windowKeys = std::make_unique<phazite::ui::WindowKeys> (window, registry, keyboard);
+        windowKeys = std::make_unique<phazite::ui::WindowKeys> (window, shortcutKeys, keyboard);
         window.keys = windowKeys.get();
     }
 
@@ -42,7 +42,9 @@ struct Keys
     void press (const char* description) { window.pressKey (juce::KeyPress::createFromDescription (description)); }
 
     juce::StringArray ran, released;
-    phazite::CommandRegistry registry; // with Phazite's keymap
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry }; // with Phazite's keymap
+    phazite::ui::KeyDispatcher shortcutKeys { commands };
     phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
     juce::Component content;
     KeysWindow window { content };

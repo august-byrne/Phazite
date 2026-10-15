@@ -6,6 +6,7 @@
 #include "Panels.h"
 #include "TopBar.h"
 #include "ui/browser/Browser.h"
+#include "ui/input/KeyDispatcher.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/pianoroll/PianoRoll.h"
@@ -18,10 +19,10 @@ class AppShell : public juce::Component,
                  private juce::FocusChangeListener
 {
 public:
-    // The services (settings, Phazite Sounds, the library and the previewer) are the app's (app/AppServices.h), and
-    // outlive this.
-    AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&, RangeSelection&,
-              Settings&, SoundPack&, Library&, Previewer&);
+    // The commands, as menus and keys see them, and the services (settings, Phazite Sounds, the library and the previewer:
+    // app/AppServices.h) are the app's, and outlive this. Detached panels' windows run shortcuts through the dispatcher.
+    AppShell (te::Engine&, CommandBridge&, KeyDispatcher&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&,
+              RangeSelection&, Settings&, SoundPack&, Library&, Previewer&);
     ~AppShell() override;
 
     // The open project's Edit, or nullptr while none is open (call this before it closes, too).
@@ -61,7 +62,8 @@ public:
     void resized() override;
 
 private:
-    CommandRegistry& commands;
+    CommandBridge& commands;
+    KeyDispatcher& shortcutKeys; // for the windows of detached panels
     te::SelectionManager& selection;
     std::function<te::Edit*()> getEdit;
     Library& library;     // what the browser and the plug-in picker show

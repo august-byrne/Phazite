@@ -71,20 +71,21 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 };
 
 //==============================================================================
-AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard,
+AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& keys, ComputerKeyboard& computerKeyboard,
                     std::function<te::Edit*()> editGetter, te::SelectionManager& selectionManager, RangeSelection& range, Settings& s,
                     SoundPack& pack, Library& l, Previewer& p)
-    : commands (registry),
+    : commands (bridge),
+      shortcutKeys (keys),
       selection (selectionManager),
       getEdit (std::move (editGetter)),
       library (l),
       previewer (p),
-      topBar (engine, registry, computerKeyboard, getEdit),
+      topBar (engine, bridge, computerKeyboard, getEdit),
       browser (library, previewer, pack, s, getEdit),
-      playlist (registry, selectionManager, range),
-      inspector (engine, registry, getEdit, selectionManager),
-      pianoRoll (registry, selectionManager),
-      mixer (engine, registry, selectionManager)
+      playlist (bridge, selectionManager, range),
+      inspector (engine, bridge, getEdit, selectionManager),
+      pianoRoll (bridge, selectionManager),
+      mixer (engine, bridge, selectionManager)
 {
     setTitle ("Phazite");
 
@@ -261,7 +262,7 @@ void AppShell::setDetached (DetachablePanel which, bool detached)
     {
         const juce::Point<int> size (juce::jmax (panel.getWidth(), 360), juce::jmax (panel.getHeight(), 400));
 
-        window = std::make_unique<PanelWindow> (panel, choosePanelWindowBounds (*this, size), commands,
+        window = std::make_unique<PanelWindow> (panel, choosePanelWindowBounds (*this, size), shortcutKeys,
                                                 [safeThis = juce::Component::SafePointer<AppShell> (this), which]
                                                 {
                                                     // Closing deletes the window, so dock the panel once the click is over.

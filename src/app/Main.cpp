@@ -11,6 +11,8 @@
 #include "model/engine/EngineSetup.h"
 #include "model/project/StarterProject.h"
 #include "ui/devices/PluginWindow.h"
+#include "ui/input/CommandBridge.h"
+#include "ui/input/KeymapStore.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite
@@ -53,15 +55,16 @@ public:
         uiBehaviour.recreatePluginWindowFunction = ui::recreatePluginWindowContent;
 
         commands = std::make_unique<CommandRegistry>();
+        commandBridge = std::make_unique<ui::CommandBridge> (*commands); // the commands' keys and menus, from here on
         session = std::make_unique<ProjectSession> (*engine, uiBehaviour, services->recentProjects, getDefaultProjectsFolder());
-        mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel, *services);
+        mainWindow = std::make_unique<MainWindow> (*engine, *commandBridge, *session, *lookAndFeel, *services);
 
         addSongCommands (*commands, session->getSelection(), session->getRangeSelection());
         session->addCommands (*commands);
         mainWindow->addCommands();
 
         // The keymap the user chose, with their own changes to it.
-        commands->loadKeySettings (engine->getPropertyStorage().getPropertiesFile());
+        ui::loadKeySettings (*commandBridge, services->settings);
         mainWindow->getShell().refreshShortcutTexts();
 
         session->openAtStartup();
@@ -70,14 +73,15 @@ public:
 
     void shutdown() override
     {
-        if (engine != nullptr && commands != nullptr)
-            commands->saveKeySettings (engine->getPropertyStorage().getPropertiesFile());
+        if (services != nullptr && commandBridge != nullptr)
+            ui::saveKeySettings (*commandBridge, services->settings);
 
         // Reverse order of creation: the window uses the session and the commands, the session holds
         // the Edit, and every Edit must go before the Engine. The services keep their settings in the
         // Engine's settings file.
         mainWindow = nullptr;
         session = nullptr;
+        commandBridge = nullptr;
         commands = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         lookAndFeel = nullptr;
@@ -115,6 +119,7 @@ private:
     std::unique_ptr<AppServices> services;
     std::unique_ptr<ui::LookAndFeel> lookAndFeel;
     std::unique_ptr<CommandRegistry> commands;
+    std::unique_ptr<ui::CommandBridge> commandBridge; // uses the commands
     std::unique_ptr<ProjectSession> session;
     std::unique_ptr<MainWindow> mainWindow;
 };

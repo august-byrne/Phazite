@@ -23,7 +23,7 @@ class MainWindow : public juce::DocumentWindow,
                    private juce::Timer
 {
 public:
-    MainWindow (te::Engine&, CommandRegistry&, ProjectSession&, ui::LookAndFeel&, AppServices&);
+    MainWindow (te::Engine&, ui::CommandBridge&, ProjectSession&, ui::LookAndFeel&, AppServices&);
     ~MainWindow() override;
 
     ui::AppShell& getShell() noexcept { return *shell; }
@@ -40,11 +40,12 @@ public:
 
 private:
     te::Engine& engine;
-    CommandRegistry& commands;
+    ui::CommandBridge& commands;
     ProjectSession& session;
     ui::LookAndFeel& lookAndFeel;
     AppServices& services;
     ui::ComputerKeyboard computerKeyboard;
+    ui::KeyDispatcher shortcutKeys;             // runs commands from keys, in this window and over plug-in windows
     std::unique_ptr<ui::WindowKeys> windowKeys; // the window's shortcuts and the computer keyboard, in the order they get keys
     std::unique_ptr<ui::PluginKeys> pluginKeys; // play, stop and the computer keyboard over plug-in windows
     ui::AppShell* shell = nullptr;              // owned by the window as its content

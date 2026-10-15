@@ -3,7 +3,7 @@
 // share.
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
+#include "CommandBridge.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -11,11 +11,11 @@ namespace phazite::ui
 {
 // The text with the command's shortcuts after it (the first two), such as "Play or stop (Space)" or
 // "Paint tool: ... (B or 3)".
-juce::String withShortcut (const CommandRegistry&, const juce::String& text, const juce::String& commandID);
+juce::String withShortcut (const CommandBridge&, const juce::String& text, const juce::String& commandID);
 
 // Adds commands to a menu, by id, with their shortcuts; ids that aren't registered are left out.
-void addCommandItem (juce::PopupMenu&, CommandRegistry&, const juce::String& id);
-void addCommandItems (juce::PopupMenu&, CommandRegistry&, std::initializer_list<const char*> ids);
+void addCommandItem (juce::PopupMenu&, CommandBridge&, const juce::String& id);
+void addCommandItems (juce::PopupMenu&, CommandBridge&, std::initializer_list<const char*> ids);
 
 // A menu of the track palette's colors (phazite::getTrackColours()), with the current one ticked. Calls back
 // with the color chosen, unless the menu is dismissed or the target has been deleted by then.

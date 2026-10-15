@@ -534,9 +534,9 @@ struct ChannelStrip::SendSlot : public juce::Component
 };
 
 //==============================================================================
-ChannelStrip::ChannelStrip (te::Engine& e, CommandRegistry& registry, te::SelectionManager& selectionManager)
+ChannelStrip::ChannelStrip (te::Engine& e, CommandBridge& bridge, te::SelectionManager& selectionManager)
     : engine (e),
-      commands (registry),
+      commands (bridge),
       selection (selectionManager)
 {
     setTitle ("Channel");
@@ -1076,11 +1076,11 @@ int MasterStrip::getMinimumHeight()
 }
 
 //==============================================================================
-Inspector::Inspector (te::Engine& engine, CommandRegistry& registry, std::function<te::Edit*()> editGetter,
+Inspector::Inspector (te::Engine& engine, CommandBridge& bridge, std::function<te::Edit*()> editGetter,
                       te::SelectionManager& selectionManager)
     : getEdit (std::move (editGetter)),
       selection (selectionManager),
-      strip (engine, registry, selectionManager)
+      strip (engine, bridge, selectionManager)
 {
     setTitle ("Inspector");
     setDescription ("The channel of the selected track.");

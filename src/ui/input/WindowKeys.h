@@ -2,7 +2,7 @@
 #pragma once
 
 #include "ComputerKeyboard.h"
-#include "model/commands/CommandRegistry.h"
+#include "KeyDispatcher.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -15,7 +15,7 @@ public:
     // Adds the shortcuts and then the computer keyboard as the window's key listeners. JUCE asks the listener added last
     // first (ComponentPeer::handleKeyPress), so the computer keyboard gets its letters before the shortcuts do; it leaves
     // alone keys pressed with Shift, Ctrl, Alt or Cmd.
-    WindowKeys (juce::Component& window, CommandRegistry& shortcuts, ComputerKeyboard&);
+    WindowKeys (juce::Component& window, KeyDispatcher& shortcuts, ComputerKeyboard&);
     ~WindowKeys(); // removes them, the computer keyboard first
 
     // For the window's keyPressed(), which JUCE calls when no key listener took the key: while the computer keyboard
@@ -28,7 +28,7 @@ public:
 
 private:
     juce::Component& window;
-    CommandRegistry& shortcuts;
+    KeyDispatcher& shortcuts;
     ComputerKeyboard& computerKeyboard;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WindowKeys)

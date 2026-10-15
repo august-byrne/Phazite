@@ -16,11 +16,6 @@ phazite::Command makeCommand (const juce::String& id, const juce::String& name, 
     return command;
 }
 
-juce::String describe (const char* keyDescription)
-{
-    return juce::KeyPress::createFromDescription (keyDescription).getTextDescription();
-}
-
 // A change to the Edit that goes through its undo manager.
 phazite::Command makeEditChange (const juce::String& id, const juce::String& name, te::Edit& edit, int value)
 {
@@ -45,10 +40,8 @@ TEST_CASE ("Commands are found, run, and greyed out when disabled")
 
     auto command = makeCommand ("test.count", "Count", [&runs] { ++runs; });
     command.isEnabled = [&enabled] { return enabled; };
-    const auto commandID = registry.add (std::move (command));
-
-    CHECK (commandID != 0);
-    CHECK (registry.getCommandID ("test.count") == commandID);
+    CHECK (registry.add (std::move (command)));
+    CHECK (registry.indexOf ("test.count") == 0);
     REQUIRE (registry.find ("test.count") != nullptr);
 
     CHECK_FALSE (registry.invoke ("test.count"));
@@ -56,8 +49,7 @@ TEST_CASE ("Commands are found, run, and greyed out when disabled")
 
     enabled = true;
     CHECK (registry.invoke ("test.count"));
-    CHECK (registry.getCommandManager().invokeDirectly (commandID, false)); // as a key or menu would
-    CHECK (runs == 2);
+    CHECK (runs == 1);
 
     CHECK_FALSE (registry.invoke ("test.unknown"));
 }
@@ -107,7 +99,7 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
 
     SUBCASE ("A macro runs its commands in order, as one undo step")
     {
-        REQUIRE (registry.addMacro ("test.both", "Set Twice", { "test.two", "test.one" }) != 0);
+        REQUIRE (registry.addMacro ("test.both", "Set Twice", { "test.two", "test.one" }));
         REQUIRE (registry.invoke ("test.both"));
         CHECK ((int) edit->state["testValue"] == 1);
         CHECK (undo.getUndoDescription() == juce::String ("Set Twice"));
@@ -134,17 +126,13 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
         CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without an Edit
     }
 
-    SUBCASE ("Undo and redo show the name of the step, in the menus too")
+    SUBCASE ("Undo and redo show the name of the step")
     {
         selection.edit = edit.get();
         phazite::addUndoCommands (registry, selection);
 
         const auto nameOf = [&registry] (const char* id) { return phazite::getCurrentName (*registry.find (id)); };
         CHECK (nameOf ("edit.undo") == juce::String ("Undo Set to One"));
-
-        juce::ApplicationCommandInfo info (registry.getCommandID ("edit.undo"));
-        registry.getCommandInfo (info.commandID, info);
-        CHECK (info.shortName == juce::String ("Undo Set to One"));
 
         REQUIRE (registry.invoke ("edit.undo"));
         CHECK (nameOf ("edit.redo") == juce::String ("Redo Set to One"));
@@ -223,198 +211,33 @@ TEST_CASE ("withEdit and ifEdit act only with an Edit")
     CHECK_FALSE (isTrue());
 }
 
-TEST_CASE ("Keymaps load, switch, and keep the user's own changes")
+TEST_CASE ("The registry tells its listeners about each command it adds, in order")
 {
-    const auto builtIn = phazite::Keymap::getBuiltIn();
-    REQUIRE (builtIn.size() == 2);
-    REQUIRE (phazite::Keymap::findBuiltIn ("Phazite").has_value());
-    const auto flStudio = phazite::Keymap::findBuiltIn ("FL Studio");
-    REQUIRE (flStudio.has_value());
-
-    // In FL Studio's keymap, right-click deletes clips and a click on empty space places one, as in FL Studio;
-    // otherwise right-click opens a menu and a click selects.
-    CHECK (flStudio->rightClickDeletes);
-    CHECK (flStudio->clickPlacesClips);
-    CHECK_FALSE (phazite::Keymap::findBuiltIn ("Phazite")->rightClickDeletes);
-    CHECK_FALSE (phazite::Keymap::findBuiltIn ("Phazite")->clickPlacesClips);
-
-    phazite::CommandRegistry registry;
-    registry.add (makeCommand ("transport.playStop", "Play / Stop"));
-    registry.add (makeCommand ("edit.undo", "Undo"));
-    registry.add (makeCommand ("edit.undoOrRedo", "Undo or Redo"));
-
-    // The default keymap, "Phazite".
-    CHECK (registry.getKeymap().name == juce::String ("Phazite"));
-    CHECK (registry.getShortcutDescriptions ("transport.playStop").contains (describe ("spacebar")));
-    CHECK (registry.getShortcutDescriptions ("edit.undo").contains (describe ("command + Z")));
-    CHECK (registry.getShortcutDescriptions ("edit.undoOrRedo").isEmpty());
-
-    // FL Studio's: Ctrl+Z undoes or redoes, Ctrl+Alt+Z undoes.
-    registry.setKeymap (*flStudio);
-    CHECK (registry.getShortcutDescriptions ("edit.undoOrRedo").contains (describe ("command + Z")));
-    CHECK (registry.getShortcutDescriptions ("edit.undo") == juce::StringArray { describe ("command + alt + Z") });
-
-    // A change of the user's own survives saving and loading the settings.
-    registry.getCommandManager().getKeyMappings()->addKeyPress (registry.getCommandID ("transport.playStop"),
-                                                                juce::KeyPress::createFromDescription ("F2"));
-
-    juce::TemporaryFile settingsFile (".settings");
-    juce::PropertiesFile::Options options;
-    juce::PropertiesFile settings (settingsFile.getFile(), options);
-    registry.saveKeySettings (settings);
-
-    // Changes are kept by command id, so they survive commands being added before them.
-    phazite::CommandRegistry reloaded;
-    reloaded.add (makeCommand ("test.newer", "A command added in a later version"));
-    reloaded.add (makeCommand ("edit.undo", "Undo"));
-    reloaded.add (makeCommand ("transport.playStop", "Play / Stop"));
-    reloaded.add (makeCommand ("edit.undoOrRedo", "Undo or Redo"));
-    reloaded.loadKeySettings (settings);
-
-    CHECK (reloaded.getKeymap().name == juce::String ("FL Studio"));
-    const auto playKeys = reloaded.getShortcutDescriptions ("transport.playStop");
-    CHECK (playKeys.contains (describe ("spacebar")));
-    CHECK (playKeys.contains (describe ("F2")));
-    CHECK_FALSE (reloaded.getShortcutDescriptions ("edit.undo").contains (describe ("F2")));
-    CHECK (reloaded.getShortcutDescriptions ("test.newer").isEmpty());
-}
-
-TEST_CASE ("Shift and a letter run that letter's shortcut, unless they have their own")
-{
-    int tool = 0, shifted = 0;
-
-    phazite::Keymap keymap;
-    keymap.name = "Test";
-    keymap.keys["test.tool"] = { "B" };
-    keymap.keys["test.n"] = { "N" };
-    keymap.keys["test.shiftN"] = { "shift + N" };
-
-    phazite::CommandRegistry registry;
-    registry.setKeymap (keymap);
-    registry.add (makeCommand ("test.tool", "Tool", [&tool] { ++tool; }));
-    registry.add (makeCommand ("test.n", "N"));
-    registry.add (makeCommand ("test.shiftN", "Shift N", [&shifted] { ++shifted; }));
-
-    const auto shift = juce::ModifierKeys (juce::ModifierKeys::shiftModifier);
-    CHECK (registry.invokeWithoutShift (juce::KeyPress ('B', shift, 0)));
-    CHECK (tool == 1);
-
-    // Shift+N has its own command, which the shortcuts run as usual; this leaves it alone.
-    CHECK_FALSE (registry.invokeWithoutShift (juce::KeyPress ('N', shift, 0)));
-    CHECK (shifted == 0);
-
-    // Only Shift: not with Ctrl too, and not without it.
-    CHECK_FALSE (
-        registry.invokeWithoutShift (juce::KeyPress ('B', juce::ModifierKeys::shiftModifier | juce::ModifierKeys::ctrlModifier, 0)));
-    CHECK_FALSE (registry.invokeWithoutShift (juce::KeyPress ('B')));
-    CHECK_FALSE (registry.invokeWithoutShift (juce::KeyPress ('Q', shift, 0))); // no shortcut at all
-    CHECK (tool == 1);
-}
-
-TEST_CASE ("When commands share a key, the enabled one with the highest priority runs")
-{
-    int tracks = 0, notes = 0;
-    bool notesSelected = false;
-
-    phazite::Keymap keymap;
-    keymap.name = "Test";
-    keymap.keys["test.selectTrack"] = { "cursor up" };
-    keymap.keys["test.transpose"] = { "cursor up" };
-
-    phazite::CommandRegistry registry;
-    registry.setKeymap (keymap);
-    registry.add (makeCommand ("test.selectTrack", "Select Track Above", [&tracks] { ++tracks; }));
-
-    auto transpose = makeCommand ("test.transpose", "Transpose Up", [&notes] { ++notes; });
-    transpose.isEnabled = [&notesSelected] { return notesSelected; };
-    transpose.keyPriority = phazite::Command::notePriority;
-    registry.add (std::move (transpose));
-
-    // Registered later, but it comes first while it is enabled.
-    const juce::KeyPress up (juce::KeyPress::upKey);
-    CHECK (registry.keyPressed (up, nullptr));
-    CHECK (tracks == 1);
-    CHECK (notes == 0);
-
-    notesSelected = true;
-    CHECK (registry.findCommandForKey (up)->id == juce::String ("test.transpose"));
-    CHECK (registry.keyPressed (up, nullptr));
-    CHECK (notes == 1);
-    CHECK (tracks == 1);
-
-    CHECK_FALSE (registry.keyPressed (juce::KeyPress (juce::KeyPress::downKey), nullptr)); // no command at all
-}
-
-TEST_CASE ("A held key runs its command once, unless the command takes a step")
-{
-    // Holding Space used to start and stop playing over and over as the key repeated.
-    int toggles = 0, steps = 0, releases = 0;
-
-    phazite::Keymap keymap;
-    keymap.name = "Test";
-    keymap.keys["test.toggle"] = { "spacebar" };
-    keymap.keys["test.step"] = { "cursor right" };
-
-    phazite::CommandRegistry registry;
-    registry.setKeymap (keymap);
-
-    auto toggle = makeCommand ("test.toggle", "Toggle", [&toggles] { ++toggles; });
-    toggle.keyReleased = [&releases] { ++releases; };
-    registry.add (std::move (toggle));
-
-    auto step = makeCommand ("test.step", "Step", [&steps] { ++steps; });
-    step.repeatsWhileHeld = true;
-    registry.add (std::move (step));
-
-    // A held key repeats: the same key again before it is let go. The repeat is used up either way.
-    const juce::KeyPress space (juce::KeyPress::spaceKey), right (juce::KeyPress::rightKey);
-
-    for (int i = 0; i < 3; ++i)
+    struct Recorder final : phazite::CommandRegistry::Listener
     {
-        CHECK (registry.keyPressed (space, nullptr));
-        CHECK (registry.keyPressed (right, nullptr));
-    }
+        juce::StringArray ids;
+        void commandAdded (const phazite::Command& command) override { ids.add (command.id); }
+    };
 
-    CHECK (toggles == 1);
-    CHECK (steps == 3);
-    CHECK (releases == 0);
+    phazite::CommandRegistry registry;
+    REQUIRE (registry.add (makeCommand ("test.before", "Added before the listener")));
 
-    // Let go (no key is really down while the tests run), and pressed again.
-    CHECK_FALSE (registry.keyStateChanged (false, nullptr));
-    CHECK (releases == 1);
-    CHECK (registry.keyPressed (space, nullptr));
-    CHECK (toggles == 2);
+    Recorder recorder;
+    registry.addListener (&recorder);
+    REQUIRE (registry.add (makeCommand ("test.first", "First")));
+    REQUIRE (registry.addMacro ("test.both", "Both", { "test.before", "test.first" }));
+    CHECK (recorder.ids == juce::StringArray { "test.first", "test.both" });
 
-    // A window that loses the keyboard lets go of its keys too.
-    registry.releaseHeldKeys();
-    CHECK (releases == 2);
-}
+    // In the order they were added.
+    CHECK (registry.getNumCommands() == 3);
+    REQUIRE (registry.getCommand (1) != nullptr);
+    CHECK (registry.getCommand (1)->id == juce::String ("test.first"));
+    CHECK (registry.indexOf ("test.both") == 2);
+    CHECK (registry.indexOf ("test.unknown") == -1);
+    CHECK (registry.getCommand (3) == nullptr);
+    CHECK (registry.getCommand (-1) == nullptr);
 
-TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap, or once more by a note command")
-{
-    // A note command can share a key with a command of another kind: it takes the key while notes are
-    // selected (Command::notePriority).
-    for (const auto& keymap : phazite::Keymap::getBuiltIn())
-    {
-        CAPTURE (keymap.name.toStdString());
-        juce::Array<juce::KeyPress> used, usedByNotes;
-
-        for (const auto& entry : keymap.keys)
-        {
-            auto& keys = entry.first.startsWith ("note.") ? usedByNotes : used;
-
-            for (const auto& description : entry.second)
-            {
-                CAPTURE (description.toStdString());
-                const auto key = juce::KeyPress::createFromDescription (description);
-                CHECK (key.isValid());
-                CHECK_FALSE (keys.contains (key));
-                keys.add (key);
-            }
-        }
-    }
-
-    // Number-pad keys are read as such, not as the character they type.
-    CHECK (juce::KeyPress::createFromDescription ("command + numpad +")
-           == juce::KeyPress (juce::KeyPress::numberPadAdd, juce::ModifierKeys::commandModifier, 0));
+    registry.removeListener (&recorder);
+    REQUIRE (registry.add (makeCommand ("test.after", "Added after the listener left")));
+    CHECK (recorder.ids.size() == 2);
 }

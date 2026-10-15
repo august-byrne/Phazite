@@ -84,7 +84,7 @@ public:
     void set (const TextSetting&, const juce::String&);
     void set (const ListSetting&, const juce::StringArray&); // stored as lines
 
-    // The user's changes to a keymap's keys, as XML (CommandRegistry), saved at once.
+    // The user's changes to a keymap's keys, as XML (the UI's KeymapStore writes them), saved at once.
     juce::String getKeyChanges (const juce::String& keymapName) const;
     void setKeyChanges (const juce::String& keymapName, const juce::String& xml);
 

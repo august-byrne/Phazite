@@ -440,7 +440,7 @@ void SectionsStrip::renamed()
 
 void SectionsStrip::showMenu (te::ArrangerClip* section, te::BeatPosition where)
 {
-    auto& registry = editor.getCommands();
+    auto& bridge = editor.getCommands();
     const juce::Component::SafePointer<SectionsStrip> safeThis (this);
     juce::PopupMenu menu;
 
@@ -471,9 +471,9 @@ void SectionsStrip::showMenu (te::ArrangerClip* section, te::BeatPosition where)
                       });
 
         menu.addSeparator();
-        addCommandItem (menu, registry, "section.loop");
+        addCommandItem (menu, bridge, "section.loop");
         menu.addSeparator();
-        addCommandItems (menu, registry, { "edit.duplicate", "edit.duplicateAsAlias", "edit.delete" });
+        addCommandItems (menu, bridge, { "edit.duplicate", "edit.duplicateAsAlias", "edit.delete" });
         menu.addSeparator();
     }
 
@@ -488,13 +488,13 @@ void SectionsStrip::showMenu (te::ArrangerClip* section, te::BeatPosition where)
     juce::PopupMenu outlines;
 
     for (const auto& outline : getBuiltInOutlines())
-        addCommandItem (outlines, registry, getOutlineCommandID (outline.id));
+        addCommandItem (outlines, bridge, getOutlineCommandID (outline.id));
 
     menu.addSubMenu ("Song Outline", outlines);
 
     // Where playback loops: the whole song, unless something else is looped on purpose.
     menu.addSeparator();
-    addCommandItems (menu, registry, { "transport.loop", "transport.loopSong", "transport.loopSelection" });
+    addCommandItems (menu, bridge, { "transport.loop", "transport.loopSong", "transport.loopSelection" });
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 

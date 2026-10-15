@@ -3,6 +3,7 @@
 #include "UiTestHelpers.h"
 #include "model/commands/CommandRegistry.h"
 #include "ui/input/ComputerKeyboard.h"
+#include "ui/input/KeyDispatcher.h"
 #include "ui/input/PluginKeys.h"
 
 namespace
@@ -31,14 +32,16 @@ TEST_CASE ("Play and stop, and the computer keyboard, work over a plug-in's edit
     registry.add ({ .id = "transport.playStop", .name = "Play / Stop", .perform = [&plays] { ++plays; }, .overPlugins = true });
     registry.add ({ .id = "tool.paint", .name = "Paint", .perform = [&paints] { ++paints; } });
 
-    phazite::Keymap keymap;
+    phazite::ui::Keymap keymap;
     keymap.name = "Test";
     keymap.keys["transport.playStop"] = { "spacebar" };
     keymap.keys["tool.paint"] = { "B" };
-    registry.setKeymap (keymap);
+    phazite::ui::CommandBridge commands { registry };
+    commands.setKeymap (keymap);
+    phazite::ui::KeyDispatcher shortcutKeys { commands };
 
     phazite::ui::ComputerKeyboard computerKeyboard ([] (const juce::MidiMessage&) {});
-    phazite::ui::PluginKeys keys (registry, computerKeyboard);
+    phazite::ui::PluginKeys keys (shortcutKeys, computerKeyboard);
 
     GreedyEditor editor;
     phazite::test::TestWindow window { editor, 300, 200 };

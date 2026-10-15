@@ -7,6 +7,7 @@
 #include "model/arrangement/Tracks.h"
 #include "model/commands/Undo.h"
 #include "model/transport/Playback.h"
+#include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/playlist/TrackHeader.h"
 
@@ -31,7 +32,7 @@ struct PlaylistScreen
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
         playlist.addCommands (registry);
         playlist.setEdit (edit.get());
-        window.addKeyListener (&registry); // as the main window does
+        window.addKeyListener (&shortcutKeys); // as the main window does
         phazite::test::dispatchPendingMessages();
 
         lanes = phazite::test::findComponentWithTitle (playlist, "Tracks");
@@ -40,7 +41,7 @@ struct PlaylistScreen
 
     ~PlaylistScreen()
     {
-        window.removeKeyListener (&registry);
+        window.removeKeyListener (&shortcutKeys);
         playlist.setEdit (nullptr);
         selection.deselectAll();
     }
@@ -78,8 +79,10 @@ struct PlaylistScreen
     juce::Array<te::AudioTrack*> tracks;
     te::SelectionManager selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
-    phazite::CommandRegistry registry; // with the default keymap
-    phazite::ui::Playlist playlist { registry, selection, range };
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry }; // with the default keymap
+    phazite::ui::KeyDispatcher shortcutKeys { commands };
+    phazite::ui::Playlist playlist { commands, selection, range };
     phazite::test::TestWindow window { playlist, 1000, 600 };
     juce::Component* lanes = nullptr;
 };
@@ -274,7 +277,7 @@ TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge
 TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip used, and right-click deletes it")
 {
     PlaylistScreen screen;
-    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("FL Studio"));
+    screen.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("FL Studio"));
     auto& clip = screen.addClip (0, 0.0, 4.0);
     phazite::test::dispatchPendingMessages();
     screen.selection.selectOnly (clip); // the clip used last
@@ -291,7 +294,7 @@ TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip
     CHECK (screen.getClipStarts (1).empty());
 
     // In Phazite's own keymap, a click on empty space selects the track, and places nothing.
-    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("Phazite"));
+    screen.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("Phazite"));
     mouse.click (screen.at (8.05, 1));
     phazite::test::dispatchPendingMessages();
     CHECK (screen.getClipStarts (1).empty());
@@ -304,7 +307,7 @@ TEST_CASE ("With FL Studio's keymap, a click places the clip selected just befor
     // As CI once saw: the selection's change message, which tells the playlist which clip was used last, queued behind
     // another thread's message whose wake-up wasn't posted yet, so it got none of its own, and the click came first.
     PlaylistScreen screen;
-    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("FL Studio"));
+    screen.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("FL Studio"));
     auto& clip = screen.addClip (0, 0.0, 4.0);
     auto lateWakeUp = phazite::test::queueWithoutWakeUp (100); // delivers what is waiting first
     screen.selection.selectOnly (clip);
@@ -322,7 +325,7 @@ TEST_CASE ("With FL Studio's keymap, a click places the clip selected just befor
 TEST_CASE ("With FL Studio's keymap, a selected time range loops while it is selected")
 {
     PlaylistScreen screen;
-    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("FL Studio"));
+    screen.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("FL Studio"));
     screen.addClip (0, 0.0, 16.0);
     phazite::test::dispatchPendingMessages();
     auto& transport = screen.edit->getTransport();
@@ -352,7 +355,7 @@ TEST_CASE ("With FL Studio's keymap, Ctrl+B repeats a selected time range, and t
 {
     PlaylistScreen screen;
     phazite::addSelectionCommands (screen.registry, screen.selection, screen.range);
-    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("FL Studio"));
+    screen.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("FL Studio"));
     screen.addClip (0, 0.0, 4.0);
     phazite::test::dispatchPendingMessages();
 

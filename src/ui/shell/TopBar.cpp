@@ -5,9 +5,9 @@
 
 namespace phazite::ui
 {
-TopBar::TopBar (te::Engine& e, CommandRegistry& registry, ComputerKeyboard& keyboard, std::function<te::Edit*()> editGetter)
+TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard, std::function<te::Edit*()> editGetter)
     : engine (e),
-      commands (registry),
+      commands (bridge),
       computerKeyboard (keyboard),
       getEdit (std::move (editGetter))
 {

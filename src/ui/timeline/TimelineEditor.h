@@ -6,7 +6,7 @@
 
 #include "SmartTool.h"
 #include "model/arrangement/Grid.h"
-#include "model/commands/CommandRegistry.h"
+#include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
 
 namespace phazite::ui
@@ -41,11 +41,11 @@ public:
 
     // The editor keeps its grid in the project's Phazite state, in a child of type gridStateType, or in
     // the state itself if that is invalid.
-    TimelineEditor (CommandRegistry&, const juce::Identifier& gridStateType);
+    TimelineEditor (CommandBridge&, const juce::Identifier& gridStateType);
     ~TimelineEditor() override;
 
     te::Edit* getEdit() const noexcept { return edit.get(); }
-    CommandRegistry& getCommands() const noexcept { return commands; }
+    CommandBridge& getCommands() const noexcept { return commands; }
 
     //==============================================================================
     // The time line. Positions are song beats, but the ruler and the grid count from the time origin: the
@@ -174,7 +174,7 @@ private:
     struct Playhead;
     struct UseListener;
 
-    CommandRegistry& commands;
+    CommandBridge& commands;
     const juce::Identifier gridStateType;
     te::SafeSelectable<te::Edit> edit;
     TimelineView view;

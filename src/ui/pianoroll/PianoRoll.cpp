@@ -28,8 +28,8 @@ namespace
 } // namespace
 
 //==============================================================================
-PianoRoll::PianoRoll (CommandRegistry& registry, te::SelectionManager& selectionManager)
-    : TimelineEditor (registry, schema::PIANOROLL),
+PianoRoll::PianoRoll (CommandBridge& bridge, te::SelectionManager& selectionManager)
+    : TimelineEditor (bridge, schema::PIANOROLL),
       selection (selectionManager),
       keys (std::make_unique<Keys> (*this)),
       grid (std::make_unique<NoteGrid> (*this)),

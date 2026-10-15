@@ -16,7 +16,7 @@ class MixerView : public juce::Component,
                   private juce::Timer
 {
 public:
-    MixerView (te::Engine&, CommandRegistry&, te::SelectionManager&);
+    MixerView (te::Engine&, CommandBridge&, te::SelectionManager&);
     ~MixerView() override;
 
     // The open project's Edit, or nullptr while none is open.
@@ -27,7 +27,7 @@ public:
 
 private:
     te::Engine& engine;
-    CommandRegistry& commands;
+    CommandBridge& commands;
     te::SelectionManager& selection;
     te::SafeSelectable<te::Edit> edit;
     juce::ValueTree editState; // listened to for tracks being added, deleted and moved

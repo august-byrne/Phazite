@@ -415,8 +415,8 @@ struct Playlist::Gesture
 };
 
 //==============================================================================
-Playlist::Playlist (CommandRegistry& registry, te::SelectionManager& selectionManager, RangeSelection& rangeSelection)
-    : TimelineEditor (registry, {}),
+Playlist::Playlist (CommandBridge& bridge, te::SelectionManager& selectionManager, RangeSelection& rangeSelection)
+    : TimelineEditor (bridge, {}),
       selection (selectionManager),
       range (rangeSelection),
       addTrackRow (std::make_unique<AddTrackRow> (*this)),
@@ -813,18 +813,18 @@ void Playlist::clipClicked (te::Clip& clip, const juce::ModifierKeys& mods)
 
 void Playlist::showClipMenu()
 {
-    auto& registry = getCommands();
+    auto& bridge = getCommands();
     juce::PopupMenu menu;
-    addCommandItems (menu, registry, { "edit.split", "edit.duplicate", "edit.duplicateAsAlias", "clip.makeUnique" });
+    addCommandItems (menu, bridge, { "edit.split", "edit.duplicate", "edit.duplicateAsAlias", "clip.makeUnique" });
     menu.addSeparator();
-    addCommandItems (menu, registry, { "edit.mute", "edit.quantize" });
+    addCommandItems (menu, bridge, { "edit.mute", "edit.quantize" });
 
     juce::PopupMenu fadeShapes;
-    addCommandItems (fadeShapes, registry, { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" });
+    addCommandItems (fadeShapes, bridge, { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" });
     menu.addSubMenu ("Fade Shape", fadeShapes);
 
     menu.addSeparator();
-    addCommandItems (menu, registry, { "edit.delete", "edit.deleteAndCloseGap" });
+    addCommandItems (menu, bridge, { "edit.delete", "edit.deleteAndCloseGap" });
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 
@@ -1916,19 +1916,19 @@ void Playlist::trackClicked (te::Track& track, const juce::ModifierKeys& mods)
 
 void Playlist::showTrackMenu (te::Track&)
 {
-    auto& registry = getCommands();
+    auto& bridge = getCommands();
     juce::PopupMenu menu;
-    addCommandItems (menu, registry, { "edit.rename", "track.color" });
+    addCommandItems (menu, bridge, { "edit.rename", "track.color" });
     menu.addSeparator();
-    addCommandItems (menu, registry, { "track.mute", "track.solo", "track.pin" });
+    addCommandItems (menu, bridge, { "track.mute", "track.solo", "track.pin" });
     menu.addSeparator();
-    addCommandItems (menu, registry, { "track.moveUp", "track.moveDown" });
+    addCommandItems (menu, bridge, { "track.moveUp", "track.moveDown" });
     menu.addSeparator();
-    addCommandItems (menu, registry, { "track.groupIntoFolder", "track.ungroup", "track.collapse" });
+    addCommandItems (menu, bridge, { "track.groupIntoFolder", "track.ungroup", "track.collapse" });
     menu.addSeparator();
-    addCommandItems (menu, registry, { "edit.duplicate", "edit.delete" });
+    addCommandItems (menu, bridge, { "edit.duplicate", "edit.delete" });
     menu.addSeparator();
-    addCommandItems (menu, registry, { "track.add", "track.addFolder" });
+    addCommandItems (menu, bridge, { "track.add", "track.addFolder" });
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 

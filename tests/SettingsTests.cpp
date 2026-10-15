@@ -3,6 +3,7 @@
 #include "TestHelpers.h"
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
+#include "ui/input/Keymap.h"
 
 #include <juce_gui_extra/juce_gui_extra.h> // RecentlyOpenedFilesList, whose format the recent projects keep
 
@@ -62,6 +63,8 @@ TEST_CASE ("Settings have their defaults, and are stored as before")
     CHECK (settings.get (Settings::interfaceScale) == doctest::Approx (1.0));
     CHECK_FALSE (settings.get (Settings::welcomeShown));
     CHECK (settings.get (Settings::keymap) == "Phazite");
+    CHECK (juce::String (Settings::keymap.defaultValue)
+           == juce::String (phazite::ui::Keymap::defaultName)); // the keymap the UI loads first
     CHECK (settings.get (Settings::recentProjects).isEmpty());
     CHECK (settings.get (Settings::browserFolders).isEmpty());
     CHECK (settings.get (Settings::browserPreview));

@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "model/arrangement/Outlines.h"
 #include "model/engine/LiveInput.h"
+#include "ui/input/KeymapStore.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
@@ -13,7 +14,6 @@ namespace
 {
     // Interface sizes, on top of the operating system's display scaling.
     constexpr std::array<float, 8> interfaceScales { 0.75f, 0.9f, 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f };
-    constexpr const char* keymapSettingKey = "phaziteKeymap"; // also read by CommandRegistry::loadKeySettings
     constexpr int firstRecentItemID = 100;
 
     juce::String toString (ui::ThemeName theme)
@@ -55,21 +55,22 @@ namespace
     }
 } // namespace
 
-MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices)
+MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices)
     : juce::DocumentWindow ("Phazite", lf.getPalette().background, juce::DocumentWindow::allButtons),
       engine (e),
-      commands (r),
+      commands (bridge),
       session (s),
       lookAndFeel (lf),
       services (appServices),
-      computerKeyboard ([&e] (const juce::MidiMessage& m) { playIntoAllMidiInputs (e, m); })
+      computerKeyboard ([&e] (const juce::MidiMessage& m) { playIntoAllMidiInputs (e, m); }),
+      shortcutKeys (bridge)
 {
     setUsingNativeTitleBar (true);
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
     auto content = std::make_unique<ui::AppShell> (
-        engine, commands, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection(), s.getRangeSelection(), services.settings,
-        services.soundPack, services.library, services.previewer);
+        engine, commands, shortcutKeys, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection(), s.getRangeSelection(),
+        services.settings, services.soundPack, services.library, services.previewer);
     shell = content.get();
     setContentOwned (content.release(), false);
 
@@ -91,11 +92,11 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     setApplicationCommandManagerToWatch (&commands.getCommandManager());
 
     // Shortcuts work anywhere in the window, and the computer keyboard gets its letters before they do.
-    windowKeys = std::make_unique<ui::WindowKeys> (*this, commands, computerKeyboard);
+    windowKeys = std::make_unique<ui::WindowKeys> (*this, shortcutKeys, computerKeyboard);
     commands.getCommandManager().getKeyMappings()->addChangeListener (this);
 
     // Play and stop, and the computer keyboard, work over plug-in windows too.
-    pluginKeys = std::make_unique<ui::PluginKeys> (commands, computerKeyboard);
+    pluginKeys = std::make_unique<ui::PluginKeys> (shortcutKeys, computerKeyboard);
     ui::setPluginKeys (pluginKeys.get());
 
     session.dialogParent = this;
@@ -159,37 +160,38 @@ bool MainWindow::keyPressed (const juce::KeyPress& key)
 
 void MainWindow::addCommands()
 {
-    shell->addCommands (commands);
+    auto& registry = commands.getRegistry();
+    shell->addCommands (registry);
 
-    commands.add ({ .id = "app.quit",
+    registry.add ({ .id = "app.quit",
                     .name = "Quit Phazite",
                     .category = "App",
                     .description = "Closes Phazite. It asks first if the project has unsaved changes.",
                     .synonyms = { "exit", "close", "leave" },
                     .perform = [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); } });
 
-    commands.add ({ .id = "options.settings",
+    registry.add ({ .id = "options.settings",
                     .name = "Settings",
                     .category = "Options",
                     .description = "The audio device, MIDI inputs and keyboard shortcuts.",
                     .synonyms = { "preferences", "options", "setup" },
                     .perform = [this] { showSettings (std::nullopt); } });
 
-    commands.add ({ .id = "options.audioSettings",
+    registry.add ({ .id = "options.audioSettings",
                     .name = "Audio Settings",
                     .category = "Options",
                     .description = "Chooses the audio device (ASIO on Windows, for an audio interface), sample rate and buffer size.",
                     .synonyms = { "device", "asio", "latency", "buffer", "sound card", "interface", "output" },
                     .perform = [this] { showSettings (ui::SettingsPanel::audio); } });
 
-    commands.add ({ .id = "options.midiSettings",
+    registry.add ({ .id = "options.midiSettings",
                     .name = "MIDI Settings",
                     .category = "Options",
                     .description = "Turns MIDI inputs and the computer keyboard on or off.",
                     .synonyms = { "midi keyboard", "controller", "inputs", "devices" },
                     .perform = [this] { showSettings (ui::SettingsPanel::midi); } });
 
-    commands.add ({ .id = "input.computerKeyboard",
+    registry.add ({ .id = "input.computerKeyboard",
                     .name = "Play Notes with the Computer Keyboard",
                     .category = "Input",
                     .description = "A S D F G H J K L ; play the white keys, W E T Y U O P the black keys; Z and X change "
@@ -198,7 +200,7 @@ void MainWindow::addCommands()
                     .perform = [this] { computerKeyboard.setEnabled (! computerKeyboard.isEnabled()); },
                     .isTicked = [this] { return computerKeyboard.isEnabled(); } });
 
-    commands.add (
+    registry.add (
         { .id = "options.scanPlugins",
           .name = "Scan for Plug-ins",
           .category = "Options",
@@ -206,17 +208,17 @@ void MainWindow::addCommands()
           .synonyms = { "vst", "vst3", "plugins", "instruments", "effects" },
           .perform = [this] { showPluginList(); } });
 
-    commands.add ({ .id = "options.keyboardShortcuts",
+    registry.add ({ .id = "options.keyboardShortcuts",
                     .name = "Keyboard Shortcuts",
                     .category = "Options",
                     .description = "Changes the keys of any command. Each keymap keeps its own changes.",
                     .synonyms = { "keys", "hotkeys", "keymap", "bindings", "rebind" },
                     .perform = [this] { showSettings (ui::SettingsPanel::shortcuts); } });
 
-    for (const auto& keymap : Keymap::getBuiltIn())
+    for (const auto& keymap : ui::Keymap::getBuiltIn())
     {
         const auto name = keymap.name;
-        commands.add ({ .id = "options.keymap." + name.removeCharacters (" ").toLowerCase(),
+        registry.add ({ .id = "options.keymap." + name.removeCharacters (" ").toLowerCase(),
                         .name = "Keymap: " + name,
                         .category = "Options",
                         .description = keymap.description,
@@ -238,7 +240,7 @@ void MainWindow::addCommands()
            ThemeChoice { ui::ThemeName::highContrast, "High Contrast", "White and yellow on black, for the most contrast." } })
     {
         const auto theme = choice.theme;
-        commands.add ({ .id = "options.theme." + juce::String (choice.name).removeCharacters (" ").toLowerCase(),
+        registry.add ({ .id = "options.theme." + juce::String (choice.name).removeCharacters (" ").toLowerCase(),
                         .name = "Theme: " + juce::String (choice.name),
                         .category = "Options",
                         .description = choice.description,
@@ -247,7 +249,7 @@ void MainWindow::addCommands()
                         .isTicked = [this, theme] { return lookAndFeel.getTheme() == theme; } });
     }
 
-    commands.add ({ .id = "view.interfaceLarger",
+    registry.add ({ .id = "view.interfaceLarger",
                     .name = "Larger Interface",
                     .category = "View",
                     .description = "Makes everything in Phazite's windows bigger, up to twice the normal size.",
@@ -255,7 +257,7 @@ void MainWindow::addCommands()
                     .perform = [this] { stepInterfaceScale (1); },
                     .isEnabled = [] { return juce::Desktop::getInstance().getGlobalScaleFactor() < interfaceScales.back() - 0.01f; } });
 
-    commands.add ({ .id = "view.interfaceSmaller",
+    registry.add ({ .id = "view.interfaceSmaller",
                     .name = "Smaller Interface",
                     .category = "View",
                     .description = "Makes everything in Phazite's windows smaller, down to three quarters of the normal size.",
@@ -263,14 +265,14 @@ void MainWindow::addCommands()
                     .perform = [this] { stepInterfaceScale (-1); },
                     .isEnabled = [] { return juce::Desktop::getInstance().getGlobalScaleFactor() > interfaceScales.front() + 0.01f; } });
 
-    commands.add ({ .id = "view.interfaceNormal",
+    registry.add ({ .id = "view.interfaceNormal",
                     .name = "Normal Interface Size",
                     .category = "View",
                     .description = "Shows Phazite at its normal size again.",
                     .synonyms = { "zoom", "reset", "100%", "scale" },
                     .perform = [this] { setInterfaceScale (1.0f); } });
 
-    commands.add ({ .id = "view.hoverHelp",
+    registry.add ({ .id = "view.hoverHelp",
                     .name = "Hover Help",
                     .category = "View",
                     .description = "Shows what a control does when the pointer rests on it. The hint bar always shows it.",
@@ -278,14 +280,14 @@ void MainWindow::addCommands()
                     .perform = [this] { setHoverHelp (tooltipWindow == nullptr); },
                     .isTicked = [this] { return tooltipWindow != nullptr; } });
 
-    commands.add ({ .id = "help.welcome",
+    registry.add ({ .id = "help.welcome",
                     .name = "Welcome",
                     .category = "Help",
                     .description = "Opens the welcome window, which sets Phazite up. For now, it offers Phazite Sounds.",
                     .synonyms = { "getting started", "onboarding", "setup", "first run", "start" },
                     .perform = [this] { showWelcome (ui::WelcomePanel::sounds); } });
 
-    commands.add (
+    registry.add (
         { .id = "help.phaziteSounds",
           .name = "Phazite Sounds",
           .category = "Help",
@@ -411,7 +413,7 @@ void MainWindow::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     // Keys changed, in the shortcuts editor or with another keymap: keep them, and update the
     // tooltips and hints that show them.
-    commands.saveKeySettings (engine.getPropertyStorage().getPropertiesFile());
+    ui::saveKeySettings (commands, services.settings);
     shell->refreshShortcutTexts();
 }
 
@@ -470,11 +472,7 @@ void MainWindow::stepInterfaceScale (int direction)
 
 void MainWindow::setKeymap (const juce::String& name)
 {
-    auto& settings = engine.getPropertyStorage().getPropertiesFile();
-    commands.saveKeySettings (settings); // keeps the user's changes to the old keymap
-    settings.setValue (keymapSettingKey, name);
-    commands.loadKeySettings (settings); // the new keymap, with the user's changes to it
-    commands.saveKeySettings (settings);
+    ui::switchKeymap (commands, name, services.settings);
 
     shell->refreshShortcutTexts();
     menuItemsChanged();
@@ -625,7 +623,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
             juce::PopupMenu keymaps, themes;
 
-            for (const auto* command : commands.getAll())
+            for (const auto* command : commands.getRegistry().getAll())
             {
                 if (command->id.startsWith ("options.keymap."))
                     addOne (keymaps, command->id);

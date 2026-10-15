@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
 #include "ui/components/Controls.h"
+#include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/theme/Icons.h"
 
@@ -17,7 +17,7 @@ class TopBar : public juce::Component,
                private juce::Timer
 {
 public:
-    TopBar (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit);
+    TopBar (te::Engine&, CommandBridge&, ComputerKeyboard&, std::function<te::Edit*()> getEdit);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -29,7 +29,7 @@ public:
 
 private:
     te::Engine& engine;
-    CommandRegistry& commands;
+    CommandBridge& commands;
     ComputerKeyboard& computerKeyboard;
     std::function<te::Edit*()> getEdit;
 

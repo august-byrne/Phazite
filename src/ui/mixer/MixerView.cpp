@@ -34,9 +34,9 @@ namespace
     }
 } // namespace
 
-MixerView::MixerView (te::Engine& e, CommandRegistry& registry, te::SelectionManager& selectionManager)
+MixerView::MixerView (te::Engine& e, CommandBridge& bridge, te::SelectionManager& selectionManager)
     : engine (e),
-      commands (registry),
+      commands (bridge),
       selection (selectionManager)
 {
     setTitle ("Mixer");

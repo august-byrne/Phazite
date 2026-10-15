@@ -14,7 +14,8 @@ TEST_CASE ("The mixer's strips keep their parts apart, however short the window 
     te::SelectionManager selection { phazite::test::getEngine() };
     selection.edit = edit.get();
     phazite::CommandRegistry registry;
-    phazite::ui::MixerView mixer { phazite::test::getEngine(), registry, selection };
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::MixerView mixer { phazite::test::getEngine(), commands, selection };
     phazite::test::TestWindow window { mixer, 900, 600 };
     mixer.setEdit (edit.get());
     phazite::test::dispatchPendingMessages();
@@ -50,7 +51,8 @@ TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks 
     te::SelectionManager selection { phazite::test::getEngine() };
     selection.edit = edit.get();
     phazite::CommandRegistry registry;
-    phazite::ui::ChannelStrip strip { phazite::test::getEngine(), registry, selection };
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::ChannelStrip strip { phazite::test::getEngine(), commands, selection };
     phazite::test::TestWindow window { strip, phazite::ui::ChannelStrip::width, 700 };
     strip.setTrack (track);
 
@@ -99,7 +101,8 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
     te::SelectionManager selection { phazite::test::getEngine() };
     selection.edit = edit.get();
     phazite::CommandRegistry registry;
-    phazite::ui::MixerView mixer { phazite::test::getEngine(), registry, selection };
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::MixerView mixer { phazite::test::getEngine(), commands, selection };
     phazite::test::TestWindow window { mixer, 900, 600 };
     mixer.setEdit (edit.get());
     phazite::test::dispatchPendingMessages();
@@ -133,7 +136,8 @@ TEST_CASE ("The inspector's channel fills the panel, and scrolls only when the p
     te::SelectionManager selection { phazite::test::getEngine() };
     selection.edit = edit.get();
     phazite::CommandRegistry registry;
-    phazite::ui::Inspector inspector { phazite::test::getEngine(), registry, [&edit] { return edit.get(); }, selection };
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::Inspector inspector { phazite::test::getEngine(), commands, [&edit] { return edit.get(); }, selection };
     phazite::test::TestWindow window { inspector, 300, 1000 };
     phazite::test::dispatchPendingMessages();
 

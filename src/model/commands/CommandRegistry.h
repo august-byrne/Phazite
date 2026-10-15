@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's commands: every user action as a named command that menus, shortcuts, the command
-// palette and macros run (and, later, scripts and an assistant).
+// palette and macros run (and, later, scripts and an assistant). The registry has no UI code: menus,
+// keys and the shortcuts editor reach it through ui::CommandBridge and ui::KeyDispatcher (src/ui/input).
 #pragma once
 
 #include "model/base/Tracktion.h"
 
-#include <juce_gui_basics/juce_gui_basics.h>
-
 #include <functional>
 #include <map>
-#include <optional>
+#include <memory>
+#include <vector>
 
 namespace phazite
 {
@@ -57,110 +57,50 @@ std::function<void()> withEdit (const te::SelectionManager&, std::function<void 
 std::function<bool()> ifEdit (const te::SelectionManager&, std::function<bool (te::Edit&)> test);
 
 //==============================================================================
-// A set of shortcuts: command id -> key descriptions in JUCE's format ("command + Z", "spacebar",
-// "F5"). "command" is Ctrl on Windows and Linux and Cmd on macOS.
-struct Keymap
-{
-    juce::String name, description;
-    std::map<juce::String, juce::StringArray> keys;
-    bool rightClickDeletes = false; // in the playlist, as in FL Studio; otherwise right-click opens a menu
-    bool clickPlacesClips = false;  // in the playlist's empty space, with the Smart Tool, as FL Studio's Draw tool does
-    bool selectionLoops = false;    // a time range selected in the playlist loops while it is selected, as in FL Studio
-
-    static std::optional<Keymap> fromJSON (const juce::String&);
-
-    // The keymaps that ship with Phazite (resources/keymaps): "Phazite" (the default) and "FL Studio".
-    static juce::Array<Keymap> getBuiltIn();
-    static std::optional<Keymap> findBuiltIn (const juce::String& name);
-};
-
-//==============================================================================
-class CommandRegistry : public juce::ApplicationCommandTarget,
-                        public juce::KeyListener
+class CommandRegistry
 {
 public:
-    CommandRegistry();
-    ~CommandRegistry() override;
+    CommandRegistry() = default;
+    ~CommandRegistry(); // its listeners (a ui::CommandBridge) go first
 
-    // Adds a command; its id must be new. Returns its JUCE CommandID, or 0 if the id was taken.
-    juce::CommandID add (Command);
+    // Adds a command; its id must be new, and it needs a name and an action. False if not.
+    bool add (Command);
 
     // A command that runs other commands in order, as one undo step (named after the macro).
-    juce::CommandID addMacro (const juce::String& id, const juce::String& name, const juce::StringArray& commandIDs);
+    bool addMacro (const juce::String& id, const juce::String& name, const juce::StringArray& commandIDs);
 
     const Command* find (const juce::String& id) const;
-    juce::CommandID getCommandID (const juce::String& id) const; // 0 if unknown
     juce::Array<const Command*> getAll() const;
 
-    // Runs a command if it exists and is enabled.
+    // The commands in the order they were added: JUCE's command numbers and the order in which keys find commands
+    // follow it.
+    int getNumCommands() const noexcept { return (int) commands.size(); }
+    const Command* getCommand (int index) const; // nullptr if there is none
+    int indexOf (const juce::String& id) const;  // -1 if there is none
+
+    // Runs a command if it exists and is enabled, in one undo step named after it if it changes an Edit.
     bool invoke (const juce::String& id);
-
-    // The command a key runs: of the enabled commands it is a shortcut of, the one with the highest
-    // keyPriority (the one registered first, if several have it). nullptr if there is none.
-    const Command* findCommandForKey (const juce::KeyPress&) const;
-
-    // Runs the key's command (findCommandForKey()). Windows add the registry as a key listener, so the
-    // shortcuts work in them. While the key is held, its repeats run the command again only if it
-    // repeatsWhileHeld; keyStateChanged() sees the key let go.
-    bool keyPressed (const juce::KeyPress&, juce::Component*) override;
-    bool keyStateChanged (bool isKeyDown, juce::Component*) override;
-
-    // While a plug-in's window has the keyboard focus: whether a key runs a command that works over plug-ins
-    // (overPlugins), and running it. The plug-in gets the other keys.
-    bool runsOverPlugins (const juce::KeyPress&) const;
-    bool keyPressedOverPlugin (const juce::KeyPress&);
-
-    // Forgets the held keys, as if they were let go: when the window loses the keyboard, their release goes
-    // elsewhere.
-    void releaseHeldKeys();
-
-    // While the computer keyboard plays notes, single-key shortcuts are typed with Shift held, as in
-    // Ableton Live: for Shift and a key, this runs the command of the key alone, unless Shift and the
-    // key have a command of their own. Returns true if it ran a command.
-    bool invokeWithoutShift (const juce::KeyPress&);
+    static bool isEnabled (const Command&);
 
     // The command palette's search: matches on the name, category and synonyms, best first.
     juce::Array<const Command*> search (const juce::String& query, int maxResults = 20) const;
 
-    //==============================================================================
-    // Shortcuts: a keymap, plus the user's own changes to it.
-    void setKeymap (const Keymap&);
-    const Keymap& getKeymap() const noexcept { return keymap; }
+    // Told about each command added from then on. The ones added before are getCommand()'s.
+    struct Listener
+    {
+        virtual ~Listener() = default;
+        virtual void commandAdded (const Command&) = 0;
+    };
 
-    // The user's changes to the current keymap, as XML, and back.
-    juce::String getKeyChanges() const;
-    void restoreKeyChanges (const juce::String& xml);
-
-    // The keymap and the user's changes, kept in Phazite's settings.
-    void loadKeySettings (juce::PropertiesFile&);
-    void saveKeySettings (juce::PropertiesFile&) const;
-
-    // The shortcuts of a command, as shown to the user ("Ctrl + Z").
-    juce::StringArray getShortcutDescriptions (const juce::String& id) const;
-
-    juce::ApplicationCommandManager& getCommandManager() noexcept { return commandManager; }
-
-    //==============================================================================
-    juce::ApplicationCommandTarget* getNextCommandTarget() override { return nullptr; }
-    void getAllCommands (juce::Array<juce::CommandID>&) override;
-    void getCommandInfo (juce::CommandID, juce::ApplicationCommandInfo&) override;
-    bool perform (const InvocationInfo&) override;
+    void addListener (Listener*);
+    void removeListener (Listener*);
 
 private:
-    static constexpr juce::CommandID firstCommandID = 0x1000;
-
-    juce::ApplicationCommandManager commandManager;
-    std::vector<std::unique_ptr<Command>> commands; // commands[i] has CommandID firstCommandID + i
+    std::vector<std::unique_ptr<Command>> commands;
     std::map<juce::String, size_t> indexByID;
-    Keymap keymap;
-    // The keys that ran commands, while they are down, with those commands' ids.
-    std::vector<std::pair<juce::KeyPress, juce::String>> heldKeys;
+    juce::ListenerList<Listener> listeners;
 
-    const Command* find (juce::CommandID) const;
-    bool runForKey (const Command&, const juce::KeyPress&);
-    void releaseHeldKeys (const std::function<bool (const juce::KeyPress&)>& isReleased);
     void runWithoutUndoStep (const Command&);
-    static bool isEnabled (const Command&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CommandRegistry)
 };

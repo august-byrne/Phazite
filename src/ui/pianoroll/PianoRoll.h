@@ -22,7 +22,7 @@ class PianoRoll : public TimelineEditor,
                   private te::SelectableListener
 {
 public:
-    PianoRoll (CommandRegistry&, te::SelectionManager&);
+    PianoRoll (CommandBridge&, te::SelectionManager&);
     ~PianoRoll() override;
 
     // The open project's Edit, or nullptr while none is open.

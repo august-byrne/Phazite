@@ -4,20 +4,20 @@
 
 namespace phazite::ui
 {
-juce::String withShortcut (const CommandRegistry& commands, const juce::String& text, const juce::String& commandID)
+juce::String withShortcut (const CommandBridge& commands, const juce::String& text, const juce::String& commandID)
 {
     // Up to two keys, such as a tool's letter and its digit.
     const auto keys = commands.getShortcutDescriptions (commandID);
     return keys.isEmpty() ? text : text + " (" + keys.joinIntoString (" or ", 0, 2) + ")";
 }
 
-void addCommandItem (juce::PopupMenu& menu, CommandRegistry& commands, const juce::String& id)
+void addCommandItem (juce::PopupMenu& menu, CommandBridge& commands, const juce::String& id)
 {
     if (const auto commandID = commands.getCommandID (id); commandID != 0)
         menu.addCommandItem (&commands.getCommandManager(), commandID);
 }
 
-void addCommandItems (juce::PopupMenu& menu, CommandRegistry& commands, std::initializer_list<const char*> ids)
+void addCommandItems (juce::PopupMenu& menu, CommandBridge& commands, std::initializer_list<const char*> ids)
 {
     for (const auto* id : ids)
         addCommandItem (menu, commands, id);

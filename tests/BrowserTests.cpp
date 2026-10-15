@@ -234,7 +234,8 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     selection.edit = edit.get();
     phazite::RangeSelection range;
     phazite::CommandRegistry registry;
-    phazite::ui::Playlist playlist (registry, selection, range);
+    phazite::ui::CommandBridge commands (registry);
+    phazite::ui::Playlist playlist (commands, selection, range);
     phazite::test::TestWindow window (playlist, 1000, 600);
     playlist.setEdit (edit.get());
     phazite::test::dispatchPendingMessages();

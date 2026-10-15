@@ -7,6 +7,8 @@
 #include "app/AppCommands.h"
 #include "app/AppServices.h"
 #include "app/ProjectSession.h"
+#include "ui/input/CommandBridge.h"
+#include "ui/input/KeyDispatcher.h"
 #include "ui/shell/AppShell.h"
 
 #include <algorithm>
@@ -40,11 +42,14 @@ struct Screen
     phazite::test::TemporaryFolder temp;
     phazite::AppServices services { engine, { .settingsInMemory = true, .packsFolder = temp.folder.getChildFile ("Packs") } };
     phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::KeyDispatcher shortcutKeys { commands };
     phazite::ProjectSession session { engine, phazite::getUIBehaviour (engine), services.recentProjects,
                                       temp.folder.getChildFile ("Projects") };
     phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
     phazite::ui::AppShell shell { engine,
-                                  registry,
+                                  commands,
+                                  shortcutKeys,
                                   keyboard,
                                   [this] { return session.getEdit(); },
                                   session.getSelection(),
@@ -137,7 +142,7 @@ TEST_SUITE ("golden")
         {
             auto line = command->id;
 
-            if (const auto keys = screen.registry.getShortcutDescriptions (command->id); ! keys.isEmpty())
+            if (const auto keys = screen.commands.getShortcutDescriptions (command->id); ! keys.isEmpty())
                 line << " | " << keys.joinIntoString (", ");
 
             lines.add (line);

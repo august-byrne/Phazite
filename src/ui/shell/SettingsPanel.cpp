@@ -117,8 +117,8 @@ void MidiSettings::resized()
 }
 
 //==============================================================================
-ShortcutSettings::ShortcutSettings (CommandRegistry& commands, std::function<void (const juce::String&)> chooseKeymap)
-    : editor (*commands.getCommandManager().getKeyMappings(), true)
+ShortcutSettings::ShortcutSettings (CommandBridge& commands, std::function<void (const juce::String&)> chooseKeymap)
+    : editor (commands.getKeyMappings(), true)
 {
     keymapLabel.setText ("Keymap", juce::dontSendNotification);
     keymapLabel.attachToComponent (&keymapBox, true);
@@ -151,7 +151,7 @@ void ShortcutSettings::resized()
 }
 
 //==============================================================================
-SettingsPanel::SettingsPanel (te::Engine& engine, CommandRegistry& commands, ComputerKeyboard& computerKeyboard,
+SettingsPanel::SettingsPanel (te::Engine& engine, CommandBridge& commands, ComputerKeyboard& computerKeyboard,
                               std::function<te::Edit*()> getEdit, std::function<void (const juce::String&)> chooseKeymap)
     : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop)
 {
