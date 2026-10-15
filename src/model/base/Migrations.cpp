@@ -64,9 +64,16 @@ namespace
     }
 
     //==========================================================================
+    // Version 1 to 2: version 2 can hold Phazite's own devices, which a version 1 project has none of, so nothing
+    // changes; the new version keeps an older Phazite from opening a project with them, and dropping them.
+    void upgrade1To2 (juce::ValueTree&)
+    {
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
-    constexpr Step steps[] = { upgrade0To1 };
+    constexpr Step steps[] = { upgrade0To1, upgrade1To2 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 

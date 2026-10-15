@@ -56,6 +56,10 @@ DevicePlugin::DevicePlugin (te::PluginCreationInfo creation, const devices::Devi
         parameters.push_back (parameter);
         currentValues.push_back (description.defaultValue);
     }
+
+    // An effect's mix, which this applies (an instrument has none).
+    if (info.kind == devices::DeviceKind::effect)
+        mixIndex = devices::findParameter (info, devices::mixParameterID);
 }
 
 DevicePlugin::~DevicePlugin()
@@ -131,14 +135,28 @@ te::Plugin::BusLayout DevicePlugin::getBusses() const
 void DevicePlugin::initialise (const te::PluginInitialisationInfo& info)
 {
     processor->prepare (info.sampleRate, info.blockSizeSamples);
-    stereo.setSize (2, std::max (info.blockSizeSamples, 512));
+    const auto stretch = std::max (info.blockSizeSamples, 512);
+    stereo.setSize (2, stretch);
     tempoPosition.emplace (te::createPosition (edit.tempoSequence));
-    latencySeconds = processor->getLatencySamples() / info.sampleRate;
+    latencySamples = processor->getLatencySamples();
+    latencySeconds = latencySamples / info.sampleRate;
+
+    if (mixIndex >= 0)
+    {
+        dry.setSize (2, stretch);
+        appliedMix = currentValues[(size_t) mixIndex];
+
+        for (auto& delay : dryDelays)
+            delay.prepare (std::max (latencySamples, 1));
+    }
 }
 
 void DevicePlugin::reset()
 {
     processor->reset();
+
+    for (auto& delay : dryDelays)
+        delay.reset();
 }
 
 int DevicePlugin::collectEvents (const te::PluginRenderContext& context)
@@ -192,35 +210,38 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
 
     auto& buffer = *context.destBuffer;
     const auto start = context.bufferStartSample, numSamples = context.bufferNumSamples;
+    const auto isMono = buffer.getNumChannels() < 2;
+    const auto targetMix = mixIndex >= 0 ? currentValues[(size_t) mixIndex] : 1.0f;
 
     if (isSynth())
         buffer.clear (start, numSamples);
 
-    if (buffer.getNumChannels() >= 2)
-    {
-        float* channels[] = { buffer.getWritePointer (0, start), buffer.getWritePointer (1, start) };
-        block.channels = channels;
-        block.numChannels = 2;
-        block.numSamples = numSamples;
-        block.events = { events.data(), (size_t) numEvents };
-        processor->process (block);
-
-        for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
-            buffer.clear (channel, start, numSamples);
-
-        return;
-    }
-
-    // A mono channel: the device plays in stereo, a scratch buffer's length at a time, and the channel gets the
-    // average of its two sides.
-    auto* mono = buffer.getWritePointer (0, start);
+    // A stretch at a time, as long as the scratch buffers prepared beforehand. A mono channel plays in stereo, through
+    // a scratch buffer, and gets the average of the two sides back.
     int nextEvent = 0;
 
     for (int done = 0; done < numSamples;)
     {
         const auto length = std::min (numSamples - done, stereo.getNumSamples());
-        stereo.copyFrom (0, 0, mono + done, length);
-        stereo.copyFrom (1, 0, mono + done, length);
+        float* channels[2];
+
+        if (isMono)
+        {
+            const auto* mono = buffer.getReadPointer (0, start + done);
+            stereo.copyFrom (0, 0, mono, length);
+            stereo.copyFrom (1, 0, mono, length);
+            channels[0] = stereo.getWritePointer (0);
+            channels[1] = stereo.getWritePointer (1);
+        }
+        else
+        {
+            channels[0] = buffer.getWritePointer (0, start + done);
+            channels[1] = buffer.getWritePointer (1, start + done);
+        }
+
+        if (mixIndex >= 0) // what comes in, for the mix
+            for (int channel = 0; channel < 2; ++channel)
+                dry.copyFrom (channel, 0, channels[channel], length);
 
         // This stretch's events, counted from its start.
         const auto firstEvent = nextEvent;
@@ -228,17 +249,64 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
         while (nextEvent < numEvents && events[(size_t) nextEvent].sample < done + length)
             events[(size_t) nextEvent++].sample -= done;
 
-        float* channels[] = { stereo.getWritePointer (0), stereo.getWritePointer (1) };
         block.channels = channels;
         block.numChannels = 2;
         block.numSamples = length;
         block.events = { events.data() + firstEvent, (size_t) (nextEvent - firstEvent) };
         processor->process (block);
 
-        for (int i = 0; i < length; ++i)
-            mono[done + i] = 0.5f * (channels[0][i] + channels[1][i]);
+        if (mixIndex >= 0)
+            mixWithDry (channels, length, targetMix);
+
+        if (isMono)
+        {
+            auto* mono = buffer.getWritePointer (0, start + done);
+
+            for (int i = 0; i < length; ++i)
+                mono[i] = 0.5f * (channels[0][i] + channels[1][i]);
+        }
 
         done += length;
+    }
+
+    for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
+        buffer.clear (channel, start, numSamples);
+}
+
+void DevicePlugin::mixWithDry (float* const* wet, int length, float targetMix)
+{
+    // The dry sound, delayed as much as the effect delays its own, so that the two line up.
+    if (latencySamples > 0)
+    {
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            auto* samples = dry.getWritePointer (channel);
+            auto& delay = dryDelays[(size_t) channel];
+
+            for (int i = 0; i < length; ++i)
+            {
+                delay.push (samples[i]);
+                samples[i] = delay.read (latencySamples);
+            }
+        }
+    }
+
+    // Ramped from the mix the last stretch ended with, so a moving knob doesn't click; nothing to do at 100 %.
+    const auto from = appliedMix;
+    appliedMix = targetMix;
+
+    if (from >= 1.0f && targetMix >= 1.0f)
+        return;
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        const auto* drySamples = dry.getReadPointer (channel);
+
+        for (int i = 0; i < length; ++i)
+        {
+            const auto mix = from + (targetMix - from) * (float) (i + 1) / (float) length;
+            wet[channel][i] = mix * wet[channel][i] + (1.0f - mix) * drySamples[i];
+        }
     }
 }
 

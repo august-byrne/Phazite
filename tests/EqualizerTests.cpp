@@ -94,10 +94,11 @@ double measuredDecibels (const std::vector<float>& values, double frequency)
 TEST_CASE ("The EQ's description holds together, and a new EQ changes nothing")
 {
     REQUIRE (devices::isValid (Eq::info));
-    CHECK (Eq::info.parameters.size() == 49);
+    CHECK (Eq::info.parameters.size() == 50);
     CHECK (devices::findParameter (Eq::info, "band3Gain") == Eq::getParameterIndex (2, Eq::gain));
     CHECK (devices::findParameter (Eq::info, "band8Slope") == Eq::getParameterIndex (7, Eq::slope));
     CHECK (devices::findParameter (Eq::info, "output") == Eq::outputParameter);
+    CHECK (devices::findParameter (Eq::info, "mix") == Eq::mixParameter); // which its thin plug-in applies
 
     const auto values = getDefaults();
 
@@ -249,7 +250,7 @@ TEST_CASE ("The EQ is one of the engine's devices")
     auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
     REQUIRE (device != nullptr);
     CHECK (device->getName() == juce::String ("EQ"));
-    CHECK (device->getAutomatableParameters().size() == 49);
+    CHECK (device->getAutomatableParameters().size() == 50);
     CHECK (device->findParameter ("band1Frequency")->getCurrentValue() == doctest::Approx (30.0f));
     CHECK (dynamic_cast<Eq*> (&device->getProcessor()) != nullptr);
 }

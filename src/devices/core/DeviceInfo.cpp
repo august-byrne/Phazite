@@ -89,6 +89,10 @@ bool isValid (const DeviceInfo& device)
         if (! isValid (device.parameters[i]) || findParameter (device, device.parameters[i].id) != (int) i)
             return false;
 
+    for (const auto id : device.keyControls)
+        if (findParameter (device, id) < 0)
+            return false;
+
     return true;
 }
 } // namespace phazite::devices

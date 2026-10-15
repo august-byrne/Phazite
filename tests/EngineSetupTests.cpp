@@ -164,10 +164,11 @@ TEST_CASE ("loadEdit upgrades old projects and refuses newer ones")
 
     // A newer Phazite's file isn't loaded.
     const auto newerFile = temp.folder.getChildFile ("Newer.tracktionedit");
-    REQUIRE (newerFile.replaceWithText (R"(<?xml version="1.0" encoding="UTF-8"?>
+    REQUIRE (newerFile.replaceWithText (juce::String (R"(<?xml version="1.0" encoding="UTF-8"?>
 <EDIT appVersion="9.0.0" projectID="0/5eed0b4">
-  <PHAZITE schemaVersion="2"/>
+  <PHAZITE schemaVersion="NEWER"/>
 </EDIT>
-)"));
+)")
+                                            .replace ("NEWER", juce::String (phazite::schema::currentVersion + 1))));
     CHECK (phazite::loadEdit (engine, newerFile) == nullptr);
 }

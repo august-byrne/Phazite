@@ -45,7 +45,7 @@ TEST_CASE ("The names Phazite writes into project files stay the same")
     CHECK (juce::String (phazite::LoudnessMeterPlugin::xmlTypeName) == juce::String ("phaziteLoudnessMeter"));
 
     // The format version projects are saved in now (Migrations.h upgrades older ones).
-    CHECK (schema::currentVersion == 1);
+    CHECK (schema::currentVersion == 2);
 }
 
 TEST_CASE ("Reading Phazite's state doesn't add it")

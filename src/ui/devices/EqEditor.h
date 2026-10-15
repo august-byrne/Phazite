@@ -49,13 +49,15 @@ private:
     juce::OwnedArray<juce::TextButton> bandButtons;
     juce::ToggleButton onButton { "On" };
     juce::ComboBox typeBox, slopeBox;
-    Knob frequencyKnob { "Frequency", 1000.0 }, gainKnob { "Gain", 0.0 }, qKnob { "Q", 1.0 }, outputKnob { "Output", 0.0 };
+    static constexpr int numKnobs = 5; // the band's frequency, gain and Q, and the EQ's mix and output
+    Knob frequencyKnob { "Frequency", 1000.0 }, gainKnob { "Gain", 0.0 }, qKnob { "Q", 1.0 }, mixKnob { "Mix", 1.0 },
+        outputKnob { "Output", 0.0 };
     juce::OwnedArray<juce::Label> labels;
 
     ToggleAttachment onAttachment { onButton };
     ChoiceAttachment typeAttachment { typeBox }, slopeAttachment { slopeBox };
     ParameterAttachment frequencyAttachment { frequencyKnob, {} }, gainAttachment { gainKnob, {} }, qAttachment { qKnob, {} },
-        outputAttachment { outputKnob, {} };
+        mixAttachment { mixKnob, {} }, outputAttachment { outputKnob, {} };
 
     devices::Spectrum spectrum;
     std::vector<float> pulled;

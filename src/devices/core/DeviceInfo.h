@@ -69,11 +69,19 @@ struct DeviceInfo
     std::string_view name;   // what menus and the mixer call it, such as "Synth"
     DeviceKind kind = DeviceKind::effect;
     std::span<const ParameterInfo> parameters {};
+
+    // The IDs of the parameters a mixer slot shows as small knobs, the most useful first.
+    std::span<const std::string_view> keyControls {};
 };
+
+// An effect's parameter with this ID is its mix: how much of what it puts out is its effect, from 0 (only what comes
+// in) to 1. Its thin plug-in applies it, so the DSP itself ignores it.
+inline constexpr std::string_view mixParameterID = "mix";
 
 // The index of the parameter with that ID among the device's parameters, or -1.
 int findParameter (const DeviceInfo&, std::string_view id);
 
-// Whether the device has a type ID and a name, and parameters that are valid, with IDs that are unique and not empty.
+// Whether the device has a type ID and a name, parameters that are valid, with IDs that are unique and not empty, and
+// key controls that are among its parameters.
 bool isValid (const DeviceInfo&);
 } // namespace phazite::devices

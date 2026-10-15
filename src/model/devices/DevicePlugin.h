@@ -6,6 +6,7 @@
 
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/DelayLine.h"
 #include "model/base/Tracktion.h"
 
 #include <array>
@@ -63,11 +64,19 @@ private:
     std::vector<float> currentValues; // what the DSP reads, written on the audio thread
     std::array<devices::NoteEvent, maximumEvents> events {};
 
-    juce::AudioBuffer<float> stereo; // for a mono channel: sized in initialise()
+    juce::AudioBuffer<float> stereo; // for a mono channel: sized in initialise(), as long as the stretches played at once
     std::optional<te::tempo::Sequence::Position> tempoPosition;
+    int latencySamples = 0;
     double latencySeconds = 0.0;
 
+    // An effect's mix (DeviceInfo.h, mixParameterID): what came in, delayed as much as the effect delays its sound.
+    int mixIndex = -1;
+    float appliedMix = 1.0f; // where the last stretch's ramp ended
+    juce::AudioBuffer<float> dry;
+    std::array<devices::dsp::DelayLine, 2> dryDelays;
+
     int collectEvents (const te::PluginRenderContext&);
+    void mixWithDry (float* const* wet, int length, float targetMix);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DevicePlugin)
 };

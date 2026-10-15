@@ -173,7 +173,7 @@ TEST_CASE ("A project from before format versions keeps its grids and keys, now 
     CHECK (phazite::getSchemaVersion (state) == 0);
 
     REQUIRE (phazite::migrateToCurrentSchema (state));
-    CHECK (phazite::getSchemaVersion (state) == 1);
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
 
     // The grids' fixed sizes by name, and nothing else of them changed.
     const auto phaziteState = state.getChildWithName (schema::PHAZITE);
@@ -265,8 +265,8 @@ TEST_CASE ("Upgrading again changes nothing")
 TEST_CASE ("A project in the current format is left as it is")
 {
     // Even values that look like the old format's.
-    auto state = juce::ValueTree::fromXml (
-        R"(<EDIT><PHAZITE schemaVersion="1" gridLevel="13"/><TRACK phaziteKeyRoot="0" phaziteKeyScale="3"/></EDIT>)");
+    auto state = juce::ValueTree::fromXml ("<EDIT><PHAZITE schemaVersion=\"" + juce::String (phazite::schema::currentVersion)
+                                           + R"(" gridLevel="13"/><TRACK phaziteKeyRoot="0" phaziteKeyScale="3"/></EDIT>)");
     REQUIRE (state.isValid());
     const auto before = state.createCopy();
 
@@ -279,18 +279,37 @@ TEST_CASE ("A project in the current format is left as it is")
     CHECK_FALSE (invalid.isValid());
 }
 
+TEST_CASE ("A version 1 project becomes version 2 with nothing else changed")
+{
+    // Version 2 only adds Phazite's own devices, which a version 1 project has none of.
+    const auto* version1 =
+        R"(<EDIT><PHAZITE schemaVersion="1" gridStep="1 bar"><LASTKEY phaziteKeyRoot="2" phaziteKeyScale="dorian"/></PHAZITE>
+                              <TRACK id="1003" phaziteKeyRoot="9" phaziteKeyScale="minor"><PLUGIN type="reverb"/></TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version1);
+    REQUIRE (state.isValid());
+    CHECK (phazite::getSchemaVersion (state) == 1);
+
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == 2);
+
+    auto expected = juce::ValueTree::fromXml (version1);
+    expected.getChildWithName (phazite::schema::PHAZITE).setProperty (phazite::schema::schemaVersion, 2, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}
+
 TEST_CASE ("A project from a newer Phazite isn't opened or changed")
 {
-    constexpr const char* newer = R"(<?xml version="1.0" encoding="UTF-8"?>
+    const auto newer = juce::String (R"(<?xml version="1.0" encoding="UTF-8"?>
 <EDIT appVersion="9.0.0" projectID="0/5eed0b2" creationTime="1791863965976" modifiedBy="">
-  <PHAZITE schemaVersion="2" gridStep="something new"/>
+  <PHAZITE schemaVersion="NEWER" gridStep="something new"/>
 </EDIT>
-)";
+)")
+                           .replace ("NEWER", juce::String (phazite::schema::currentVersion + 1));
 
     auto state = juce::ValueTree::fromXml (newer);
     REQUIRE (state.isValid());
     const auto before = state.createCopy();
-    CHECK (phazite::getSchemaVersion (state) == 2);
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion + 1);
     CHECK_FALSE (phazite::migrateToCurrentSchema (state));
     CHECK (state.isEquivalentTo (before));
 
@@ -360,7 +379,7 @@ TEST_CASE ("An old project opens upgraded, without unsaved changes or undo steps
         const auto saved = phazite::test::readXml (file);
         const auto* savedPhazite = saved->getChildByName ("PHAZITE");
         REQUIRE (savedPhazite != nullptr);
-        CHECK (savedPhazite->getIntAttribute ("schemaVersion") == 1);
+        CHECK (savedPhazite->getIntAttribute ("schemaVersion") == phazite::schema::currentVersion);
         CHECK (savedPhazite->getStringAttribute ("gridStep") == juce::String ("4 bars"));
         CHECK_FALSE (savedPhazite->hasAttribute ("gridLevel"));
         CHECK (saved->getChildByName ("TRACK")->getStringAttribute ("phaziteKeyScale") == juce::String ("dorian"));

@@ -200,10 +200,10 @@ TEST_CASE ("The master's loudness meter reads a stereo sine at its level")
     CHECK (readings.truePeakDb == doctest::Approx (-20.0f).epsilon (0.02));
 }
 
-TEST_CASE ("Until Phazite's own devices arrive, the device list offers two of Tracktion's")
+TEST_CASE ("The device list offers Phazite's own devices, and two of Tracktion's until Phazite has its own")
 {
-    // The starter project's 4OSC synth, and the reverb, which follows the real-time rules (docs/realtime-audit.md,
-    // finding 16). Roadmap step 1.6 replaces them.
+    // Phazite's instruments, Tracktion's 4OSC synth, which the starter project uses, Phazite's effects, and Tracktion's
+    // reverb, which follows the real-time rules (docs/realtime-audit.md, finding 16). Roadmap step 1.6 replaces both.
     Mix mix;
     juce::StringArray builtIn;
 
@@ -213,10 +213,32 @@ TEST_CASE ("Until Phazite's own devices arrive, the device list offers two of Tr
         {
             builtIn.add (type.description.fileOrIdentifier);
             CHECK (phazite::createDevice (*mix.edit, type) != nullptr);
+
+            if (type.description.fileOrIdentifier.startsWith ("phazite"))
+                CHECK (type.description.manufacturerName == juce::String ("Phazite"));
         }
     }
 
-    CHECK (builtIn == juce::StringArray { te::FourOscPlugin::xmlTypeName, te::ReverbPlugin::xmlTypeName });
+    CHECK (builtIn == juce::StringArray { te::FourOscPlugin::xmlTypeName, "phaziteEq", te::ReverbPlugin::xmlTypeName });
+}
+
+TEST_CASE ("Phazite's effects have a mix of their own, and name their key controls")
+{
+    Mix mix;
+    auto* eq = phazite::insertDevice (*mix.a, mix.create ("phaziteEq"));
+    REQUIRE (eq != nullptr);
+
+    REQUIRE (phazite::hasMix (*eq));
+    CHECK (phazite::getMix (*eq) == doctest::Approx (1.0f)); // all effect to start with
+    phazite::setMix (*eq, 0.3f);
+    CHECK (phazite::getMix (*eq) == doctest::Approx (0.3f));
+    CHECK (eq->getAutomatableParameterByID ("mix")->getCurrentValue() == doctest::Approx (0.3f));
+    REQUIRE (phazite::getMixParameters (*eq).size() == 1);
+    CHECK (phazite::getMixParameters (*eq)[0]->paramID == juce::String ("mix"));
+
+    // The EQ's slot shows its low and high shelves' gains.
+    CHECK (phazite::getKeyControls (*eq, 2) == juce::StringArray { "band2Gain", "band7Gain" });
+    CHECK (phazite::getKeyControls (*eq, 1) == juce::StringArray { "band2Gain" });
 }
 
 TEST_CASE ("A folder's bus switch makes it a bus that stays one, and plain again while it has no effects")

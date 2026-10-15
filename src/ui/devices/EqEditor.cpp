@@ -368,17 +368,19 @@ EqEditor::EqEditor (const DeviceHandle& handle)
     typeBox.setTitle ("Band Shape");
     slopeBox.setTitle ("Slope");
 
-    for (auto* control :
-         std::initializer_list<juce::Component*> { &onButton, &typeBox, &slopeBox, &frequencyKnob, &gainKnob, &qKnob, &outputKnob })
+    for (auto* control : std::initializer_list<juce::Component*> { &onButton, &typeBox, &slopeBox, &frequencyKnob, &gainKnob, &qKnob,
+                                                                   &mixKnob, &outputKnob })
         addAndMakeVisible (control);
 
     // Each knob's name, then what it is set to.
-    for (const auto* name : { "Frequency", "Gain", "Q", "Output" })
+    for (const auto* name : { "Frequency", "Gain", "Q", "Mix", "Output" })
         addLabel (name);
 
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < numKnobs; ++i)
         addLabel ({}).setColour (juce::Label::textColourId, getPalette (*this).textMuted);
 
+    showAsParameter (mixKnob, getInfo (Eq::mixParameter));
+    mixAttachment.setParameter (device.getParameter (getInfo (Eq::mixParameter).id));
     showAsParameter (outputKnob, getInfo (Eq::outputParameter));
     outputAttachment.setParameter (device.getParameter (getInfo (Eq::outputParameter).id));
 
@@ -456,6 +458,7 @@ void EqEditor::refresh()
     frequencyAttachment.update();
     gainAttachment.update();
     qAttachment.update();
+    mixAttachment.update();
     outputAttachment.update();
 
     // A cut's slope matters, and a shelf's or bell's gain.
@@ -467,11 +470,11 @@ void EqEditor::refresh()
         bandButtons[band]->setAlpha (values[(size_t) indexOf (band, Eq::on)] > 0.5f ? 1.0f : GraphTint::partOff);
 
     // What each knob is set to, under its name (none for a knob that doesn't apply).
-    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &outputKnob };
+    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &mixKnob, &outputKnob };
 
-    for (int i = 0; i < 4; ++i)
-        labels[i + 4]->setText (knobs[i]->isEnabled() ? knobs[i]->getTextFromValue (knobs[i]->getValue()) : juce::String(),
-                                juce::dontSendNotification);
+    for (int i = 0; i < numKnobs; ++i)
+        labels[i + numKnobs]->setText (knobs[i]->isEnabled() ? knobs[i]->getTextFromValue (knobs[i]->getValue()) : juce::String(),
+                                       juce::dontSendNotification);
 
     if (auto* eq = device.getProcessor<Eq>())
     {
@@ -523,10 +526,11 @@ void EqEditor::resized()
     {
         knob.setBounds (cell.removeFromTop (knobSize).withSizeKeepingCentre (knobSize, knobSize));
         labels[index]->setBounds (cell.removeFromTop (labelHeight));
-        labels[index + 4]->setBounds (cell.removeFromTop (labelHeight));
+        labels[index + numKnobs]->setBounds (cell.removeFromTop (labelHeight));
     };
 
-    place (area.removeFromRight (knobSize + Space::l), outputKnob, 3);
+    place (area.removeFromRight (knobSize + Space::l), outputKnob, 4);
+    place (area.removeFromRight (knobSize + Space::l), mixKnob, 3);
     place (area.removeFromLeft (knobSize + Space::l), frequencyKnob, 0);
     place (area.removeFromLeft (knobSize + Space::l), gainKnob, 1);
     place (area.removeFromLeft (knobSize + Space::l), qKnob, 2);

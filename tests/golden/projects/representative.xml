@@ -38,7 +38,7 @@
            gridTriplets="0"
            loopFollowsSong="0"
            outline="golden"
-           schemaVersion="1">
+           schemaVersion="2">
     <LASTKEY phaziteKeyRoot="2"
              phaziteKeyScale="minor"/>
     <PIANOROLL gridAdaptive="0"

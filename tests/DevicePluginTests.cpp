@@ -167,3 +167,46 @@ TEST_CASE ("An instrument gets its notes at their samples, and plays from silenc
 
     device.baseClassDeinitialise();
 }
+
+TEST_CASE ("An effect's mix blends its sound with what came in, lined up with its latency")
+{
+    using phazite::test::TestDelay;
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    te::Plugin::Ptr keep;
+    auto& device = createDevice (*edit, TestDelay::typeID, keep);
+    device.baseClassInitialise ({ 0_tp, testRate, testBlock });
+
+    const auto play = [&device] (float value, float mix, int length)
+    {
+        device.findParameter ("mix")->setParameter (mix, juce::sendNotification);
+        juce::AudioBuffer<float> buffer (2, length);
+
+        for (int channel = 0; channel < 2; ++channel)
+            juce::FloatVectorOperations::fill (buffer.getWritePointer (channel), value, length);
+
+        device.applyToBuffer (makeContext (buffer));
+        return buffer;
+    };
+
+    // At 100 %, only the effect: what came in, upside down.
+    CHECK (play (1.0f, 1.0f, 512).getSample (0, 511) == doctest::Approx (-1.0f));
+
+    // At 0 %, only what came in; half way, the two cancel. (Each first block ramps from the last mix.)
+    play (1.0f, 0.0f, 512);
+    CHECK (play (1.0f, 0.0f, 512).getSample (1, 300) == doctest::Approx (1.0f));
+    play (1.0f, 0.5f, 512);
+    CHECK (std::abs (play (1.0f, 0.5f, 512).getSample (0, 300)) < 1.0e-6f);
+
+    // The sound that came in is delayed as much as the effect's, so a click and its echo come out together.
+    device.reset();
+    play (0.0f, 0.5f, 512);
+    juce::AudioBuffer<float> click (2, 256);
+    click.clear();
+    click.setSample (0, 0, 1.0f);
+    click.setSample (1, 0, 1.0f);
+    device.applyToBuffer (makeContext (click));
+    CHECK (click.getSample (0, 0) == doctest::Approx (0.0f));
+    CHECK (click.getSample (0, TestDelay::latency) == doctest::Approx (0.0f)); // half the click and half of it upside down
+
+    device.baseClassDeinitialise();
+}

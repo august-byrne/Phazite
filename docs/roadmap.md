@@ -290,6 +290,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - Each device's DSP goes in `src/devices/` without Tracktion types, in a thin Tracktion plug-in, so that it could run on another engine later ([architecture track](#architecture-track), A5). Devices render the same twice in a row offline (seeded randomness), so the golden render tests can cover them.
 - These devices replace Tracktion's 4OSC in the starter project.
 - *Done when:* a beat can be made and mixed with built-ins only, and every device passes the real-time checks from step 0.3.
+- *Status:* in progress (2026-10-15). In: the devices' layer (`src/devices/`, a fifth layer in the architecture check, with DSP building blocks and their tests), the thin Tracktion plug-in that runs any of them (`src/model/devices/DevicePlugin.h`, with each effect's latency-aligned mix), handles through which editors reach devices without Tracktion types, and the EQ with its own editor and analyzer, offered in the device menus (projects that hold one are format version 2). Next: the compressor, limiter, reverb, synth and drum sampler, then the starter project.
 
 **1.7 Transport, MIDI recording and Capture (M)**
 - Play, stop and loop; metronome and count-in.
@@ -479,10 +480,10 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; next, step 1.6 |
+| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; step 1.6 in progress (the EQ in) |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
-| Architecture track | A0 (2026-10-14) and A1 (2026-10-15) done; A2 runs alongside steps 1.6 to 1.9 |
+| Architecture track | A0 (2026-10-14) and A1 (2026-10-15) done; A2 in progress alongside steps 1.6 to 1.9: drags have a gesture session in the model, and knobs and faders change parameters through it (the UI's undo steps 46 to 44) |
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.

@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Two devices made for tests, run through the same thin Tracktion plug-in as Phazite's own (model/devices/
-// DevicePlugin.h): an effect (a gain) and an instrument that plays the velocity of the note it holds.
+// Devices made for tests, run through the same thin Tracktion plug-in as Phazite's own (model/devices/
+// DevicePlugin.h): an effect (a gain), an instrument that plays the velocity of the note it holds, and an effect with
+// latency and a mix (a delay).
 #pragma once
 
 #include "TestHelpers.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/DelayLine.h"
 #include "model/devices/DevicePlugin.h"
 
+#include <array>
 #include <vector>
 
 namespace phazite::test
@@ -99,7 +102,50 @@ struct TestTone final : devices::Processor
     std::vector<devices::NoteEvent> received;
 };
 
-// Registers both with the tests' engine, once.
+inline constexpr devices::ParameterInfo testDelayParameters[] = {
+    { .id = devices::mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = devices::Unit::percent },
+};
+
+// Puts out what comes in 64 samples late and upside down, and says so; its plug-in applies its mix.
+struct TestDelay final : devices::Processor
+{
+    static constexpr const char* typeID = "phaziteTestDelay";
+    static constexpr int latency = 64;
+    static constexpr devices::DeviceInfo info { .typeID = typeID,
+                                                .name = "Test Delay",
+                                                .kind = devices::DeviceKind::effect,
+                                                .parameters = testDelayParameters };
+
+    void prepare (double, int) override
+    {
+        for (auto& line : lines)
+            line.prepare (latency);
+    }
+
+    void reset() override
+    {
+        for (auto& line : lines)
+            line.reset();
+    }
+
+    void process (const devices::ProcessContext& block) override
+    {
+        for (int channel = 0; channel < block.numChannels; ++channel)
+        {
+            for (int i = 0; i < block.numSamples; ++i)
+            {
+                lines[(size_t) channel].push (block.channels[channel][i]);
+                block.channels[channel][i] = -lines[(size_t) channel].read (latency);
+            }
+        }
+    }
+
+    int getLatencySamples() const override { return latency; }
+
+    std::array<devices::dsp::DelayLine, 2> lines;
+};
+
+// Registers them with the tests' engine, once.
 inline void registerTestDevices()
 {
     [[maybe_unused]] static const bool registered = []
@@ -107,6 +153,7 @@ inline void registerTestDevices()
         auto& plugins = getEngine().getPluginManager();
         plugins.createBuiltInType<DevicePluginOf<TestGain>>();
         plugins.createBuiltInType<DevicePluginOf<TestTone>>();
+        plugins.createBuiltInType<DevicePluginOf<TestDelay>>();
         return true;
     }();
 }

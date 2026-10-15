@@ -5,6 +5,8 @@
 #include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
+#include "model/devices/DevicePlugin.h"
+#include "model/devices/Devices.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 
 #include <optional>
@@ -43,6 +45,15 @@ namespace
     bool isMixLevel (const te::AutomatableParameter& parameter)
     {
         return parameter.paramID == "dry level" || parameter.paramID == "wet level";
+    }
+
+    // The mix of one of Phazite's own effects: a parameter of its own, which its plug-in applies.
+    te::AutomatableParameter::Ptr findOwnMix (te::Plugin& device)
+    {
+        if (auto* own = dynamic_cast<DevicePlugin*> (&device); own != nullptr && ! own->isSynth())
+            return own->findParameter (devices::mixParameterID);
+
+        return {};
     }
 
     template <typename... Types>
@@ -96,16 +107,26 @@ namespace
         return list.contains (plugin.get()) ? plugin.get() : nullptr;
     }
 
-    DeviceType makeBuiltIn (const char* name, const char* xmlType, bool isInstrument)
+    DeviceType makeBuiltIn (const juce::String& name, const juce::String& xmlType, bool isInstrument, const juce::String& maker)
     {
         juce::PluginDescription description;
         description.name = name;
         description.pluginFormatName = te::PluginManager::builtInPluginFormatName;
         description.category = isInstrument ? "Synth" : "Effect";
-        description.manufacturerName = "Tracktion";
+        description.manufacturerName = maker;
         description.fileOrIdentifier = xmlType;
         description.isInstrument = isInstrument;
         return makeDeviceType (description);
+    }
+
+    // Phazite's own instruments, or its effects.
+    void addOwnDevices (std::vector<DeviceType>& types, devices::DeviceKind kind)
+    {
+        for (const auto* info : getOwnDevices())
+            if (info->kind == kind)
+                types.push_back (makeBuiltIn (juce::String (info->name.data(), info->name.size()),
+                                              juce::String (info->typeID.data(), info->typeID.size()),
+                                              kind == devices::DeviceKind::instrument, "Phazite"));
     }
 } // namespace
 
@@ -208,6 +229,16 @@ juce::StringArray getKeyControls (te::Plugin& device, int maximum)
 {
     juce::StringArray ids;
 
+    // Phazite's own devices name theirs.
+    if (auto* own = dynamic_cast<DevicePlugin*> (&device))
+    {
+        for (const auto id : own->getDeviceInfo().keyControls)
+            if (ids.size() < maximum)
+                ids.add (juce::String (id.data(), id.size()));
+
+        return ids;
+    }
+
     if (auto quick = device.getQuickControlParameter(); quick != nullptr && ! isMixLevel (*quick))
         ids.add (quick->paramID);
 
@@ -220,11 +251,14 @@ juce::StringArray getKeyControls (te::Plugin& device, int maximum)
 
 bool hasMix (te::Plugin& device)
 {
-    return findMixLevels (device).has_value();
+    return findOwnMix (device) != nullptr || findMixLevels (device).has_value();
 }
 
 float getMix (te::Plugin& device)
 {
+    if (const auto own = findOwnMix (device))
+        return own->getCurrentValue();
+
     const auto levels = findMixLevels (device);
 
     if (! levels.has_value())
@@ -237,6 +271,12 @@ float getMix (te::Plugin& device)
 
 void setMix (te::Plugin& device, float mix)
 {
+    if (const auto own = findOwnMix (device))
+    {
+        own->setParameter (juce::jlimit (0.0f, 1.0f, mix), juce::sendNotification);
+        return;
+    }
+
     if (const auto levels = findMixLevels (device))
     {
         const auto wet = juce::jlimit (0.0f, 1.0f, mix);
@@ -249,7 +289,9 @@ te::AutomatableParameter::Array getMixParameters (te::Plugin& device)
 {
     te::AutomatableParameter::Array parameters;
 
-    if (const auto levels = findMixLevels (device))
+    if (const auto own = findOwnMix (device))
+        parameters.add (own);
+    else if (const auto levels = findMixLevels (device))
     {
         parameters.add (levels->dry);
         parameters.add (levels->wet);
@@ -266,11 +308,15 @@ DeviceType makeDeviceType (const juce::PluginDescription& description)
 
 std::vector<DeviceType> getDeviceTypes (te::Engine& engine)
 {
-    // Until Phazite's own devices arrive (roadmap step 1.6), two of Tracktion's: the 4OSC synth, which the starter
-    // project uses, and the reverb, which follows the real-time rules. Tracktion's other devices lock, allocate or
-    // read message-thread state on the audio thread, so they aren't offered (docs/realtime-audit.md, finding 16).
-    std::vector<DeviceType> types { makeBuiltIn ("4OSC synth", te::FourOscPlugin::xmlTypeName, true),
-                                    makeBuiltIn ("Reverb", te::ReverbPlugin::xmlTypeName, false) };
+    // Phazite's own devices (roadmap step 1.6), instruments first, and until it has its own synth and reverb, two of
+    // Tracktion's: the 4OSC synth, which the starter project uses, and the reverb, which follows the real-time rules.
+    // Tracktion's other devices lock, allocate or read message-thread state on the audio thread, so they aren't offered
+    // (docs/realtime-audit.md, finding 16).
+    std::vector<DeviceType> types;
+    addOwnDevices (types, devices::DeviceKind::instrument);
+    types.push_back (makeBuiltIn ("4OSC synth", te::FourOscPlugin::xmlTypeName, true, "Tracktion"));
+    addOwnDevices (types, devices::DeviceKind::effect);
+    types.push_back (makeBuiltIn ("Reverb", te::ReverbPlugin::xmlTypeName, false, "Tracktion"));
 
     for (const auto& description : engine.getPluginManager().knownPluginList.getTypes())
         types.push_back (makeDeviceType (description));

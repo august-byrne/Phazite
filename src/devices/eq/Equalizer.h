@@ -42,6 +42,7 @@ public:
 
     static constexpr int fieldsPerBand = 6;
     static constexpr int outputParameter = numBands * fieldsPerBand;
+    static constexpr int mixParameter = outputParameter + 1; // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
     static constexpr int getParameterIndex (int band, Field field) noexcept { return band * fieldsPerBand + (int) field; }
 
     static const DeviceInfo info;

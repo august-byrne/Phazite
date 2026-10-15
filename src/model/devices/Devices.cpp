@@ -10,4 +10,10 @@ void registerDevices (te::Engine& engine)
     auto& plugins = engine.getPluginManager();
     plugins.createBuiltInType<DevicePluginOf<devices::Equalizer>>();
 }
+
+std::span<const devices::DeviceInfo* const> getOwnDevices()
+{
+    static const devices::DeviceInfo* const own[] = { &devices::Equalizer::info };
+    return own;
+}
 } // namespace phazite

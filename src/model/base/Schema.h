@@ -17,8 +17,9 @@ namespace phazite::schema
 {
 //==============================================================================
 // The project format's version (src/model/base/Migrations.h). Files without schemaVersion are version 0 (saved up to
-// 2026-10-14).
-inline constexpr int currentVersion = 1;
+// 2026-10-14); version 1 saves the grid's size and keys' scales by name; version 2 can hold Phazite's own devices
+// (roadmap step 1.6), which an older Phazite would drop.
+inline constexpr int currentVersion = 2;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
@@ -125,6 +126,11 @@ inline const juce::Identifier phaziteEnergy { "phaziteEnergy" };
 //==============================================================================
 // The type of Phazite's loudness meter (LoudnessMeterPlugin), a PLUGIN that every project has on its master.
 inline constexpr const char* phaziteLoudnessMeter = "phaziteLoudnessMeter";
+
+// Phazite's own devices (model/devices/Devices.h) are PLUGINs too. Each one's type is the typeID of its description
+// (src/devices/<area>/: "phaziteEq" for the EQ), and its parameters' values are properties of the PLUGIN named by their
+// IDs in that description, as are its automation curves' paramIDs. Those IDs are part of the format: they never
+// change, and changing what one holds needs a new version and a migration, as anything here does.
 } // namespace phazite::schema
 
 namespace phazite
