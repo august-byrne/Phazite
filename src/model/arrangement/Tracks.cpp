@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Tracks.h"
 #include "model/base/Schema.h"
+#include "model/base/Toggles.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/notes/Notes.h"
 
@@ -46,81 +47,6 @@ namespace
                 return sibling;
 
         return nullptr;
-    }
-
-    void selectNeighbour (te::SelectionManager& selection, int direction)
-    {
-        auto* edit = selection.getEdit();
-
-        if (edit == nullptr)
-            return;
-
-        const auto tracks = getPlaylistTracks (*edit);
-        const auto selected = getSelectedTracks (selection);
-
-        if (tracks.isEmpty())
-            return;
-
-        if (selected.isEmpty())
-        {
-            selection.selectOnly (direction > 0 ? tracks.getFirst() : tracks.getLast());
-            return;
-        }
-
-        const auto row = tracks.indexOf (direction > 0 ? selected.getLast() : selected.getFirst()) + direction;
-        selection.selectOnly (tracks[juce::jlimit (0, tracks.size() - 1, row)]);
-    }
-
-    // Moves the selected tracks one place up or down within their folders. A track swaps places with its
-    // neighbour, so selected neighbours move together.
-    void moveSelectedTracks (te::SelectionManager& selection, int direction)
-    {
-        auto* edit = selection.getEdit();
-        auto tracks = getSelectedOutermostTracks (selection);
-
-        if (edit == nullptr)
-            return;
-
-        // The track nearest to where they move goes first.
-        if (direction > 0)
-            std::reverse (tracks.begin(), tracks.end());
-
-        for (auto* track : tracks)
-        {
-            auto* neighbour = getSibling (*track, direction);
-
-            if (neighbour == nullptr || selection.isSelected (neighbour))
-                continue;
-
-            if (direction < 0)
-                edit->moveTrack (neighbour, getInsertPointAfter (*track)); // the one above goes below
-            else
-                edit->moveTrack (track, getInsertPointAfter (*neighbour));
-        }
-    }
-
-    // Mutes (or solos) the selected tracks, or unmutes them if they all are muted already.
-    void toggleMuteOrSolo (te::SelectionManager& selection, bool mute)
-    {
-        const auto tracks = getSelectedTracks (selection);
-        const auto isOn = [mute] (te::Track* track) { return mute ? track->isMuted (false) : track->isSolo (false); };
-        const auto turnOn = ! std::all_of (tracks.begin(), tracks.end(), isOn);
-
-        for (auto* track : tracks)
-        {
-            if (mute)
-                track->setMute (turnOn);
-            else
-                track->setSolo (turnOn);
-        }
-    }
-
-    bool areAllSelectedOn (const te::SelectionManager& selection, bool mute)
-    {
-        const auto tracks = getSelectedTracks (selection);
-        return ! tracks.isEmpty()
-               && std::all_of (tracks.begin(), tracks.end(),
-                               [mute] (te::Track* track) { return mute ? track->isMuted (false) : track->isSolo (false); });
     }
 } // namespace
 
@@ -350,51 +276,217 @@ void ungroupFolder (te::FolderTrack& folder)
 }
 
 //==============================================================================
+bool hasSelectedTracks (const te::SelectionManager& selection)
+{
+    return ! getSelectedTracks (selection).isEmpty();
+}
+
+juce::Array<te::FolderTrack*> getSelectedFolders (const te::SelectionManager& selection)
+{
+    juce::Array<te::FolderTrack*> folders;
+
+    for (auto* track : getSelectedTracks (selection))
+        if (auto* folder = dynamic_cast<te::FolderTrack*> (track))
+            folders.add (folder);
+
+    return folders;
+}
+
+bool hasSelectedFolders (const te::SelectionManager& selection)
+{
+    return ! getSelectedFolders (selection).isEmpty();
+}
+
+juce::Array<te::Track*> getSelectedTracksOrAll (const te::SelectionManager& selection)
+{
+    auto tracks = getSelectedTracks (selection);
+
+    if (tracks.isEmpty())
+        if (auto* edit = selection.getEdit())
+            tracks = getPlaylistTracks (*edit);
+
+    return tracks;
+}
+
+te::AudioTrack* insertTrackAfterSelection (te::SelectionManager& selection)
+{
+    auto* edit = selection.getEdit();
+    return edit != nullptr ? insertTrack (*edit, getSelectedTracks (selection).getLast(), &selection) : nullptr;
+}
+
+te::FolderTrack* insertFolderAfterSelection (te::SelectionManager& selection)
+{
+    auto* edit = selection.getEdit();
+    return edit != nullptr ? insertFolder (*edit, getSelectedTracks (selection).getLast(), &selection) : nullptr;
+}
+
+void ungroupFolders (const juce::Array<te::FolderTrack*>& folders)
+{
+    for (auto* folder : folders)
+        ungroupFolder (*folder);
+}
+
+void selectNeighbourTrack (te::SelectionManager& selection, int direction)
+{
+    auto* edit = selection.getEdit();
+
+    if (edit == nullptr)
+        return;
+
+    const auto tracks = getPlaylistTracks (*edit);
+    const auto selected = getSelectedTracks (selection);
+
+    if (tracks.isEmpty())
+        return;
+
+    if (selected.isEmpty())
+    {
+        selection.selectOnly (direction > 0 ? tracks.getFirst() : tracks.getLast());
+        return;
+    }
+
+    const auto row = tracks.indexOf (direction > 0 ? selected.getLast() : selected.getFirst()) + direction;
+    selection.selectOnly (tracks[juce::jlimit (0, tracks.size() - 1, row)]);
+}
+
+void moveSelectedTracks (te::SelectionManager& selection, int direction)
+{
+    auto* edit = selection.getEdit();
+    auto tracks = getSelectedOutermostTracks (selection);
+
+    if (edit == nullptr)
+        return;
+
+    // The track nearest to where they move goes first.
+    if (direction > 0)
+        std::reverse (tracks.begin(), tracks.end());
+
+    for (auto* track : tracks)
+    {
+        auto* neighbour = getSibling (*track, direction);
+
+        if (neighbour == nullptr || selection.isSelected (neighbour))
+            continue;
+
+        if (direction < 0)
+            edit->moveTrack (neighbour, getInsertPointAfter (*track)); // the one above goes below
+        else
+            edit->moveTrack (track, getInsertPointAfter (*neighbour));
+    }
+}
+
+bool areAllTracksMuted (const juce::Array<te::Track*>& tracks)
+{
+    return areAllOn (tracks, [] (te::Track* track) { return track->isMuted (false); });
+}
+
+void toggleTracksMuted (const juce::Array<te::Track*>& tracks)
+{
+    toggleAll (tracks, [] (te::Track* track) { return track->isMuted (false); }, [] (te::Track* track, bool on) { track->setMute (on); });
+}
+
+bool areAllTracksSoloed (const juce::Array<te::Track*>& tracks)
+{
+    return areAllOn (tracks, [] (te::Track* track) { return track->isSolo (false); });
+}
+
+void toggleTracksSoloed (const juce::Array<te::Track*>& tracks)
+{
+    toggleAll (tracks, [] (te::Track* track) { return track->isSolo (false); }, [] (te::Track* track, bool on) { track->setSolo (on); });
+}
+
+bool areAllTracksCollapsed (const juce::Array<te::Track*>& tracks)
+{
+    return areAllOn (tracks, [] (te::Track* track) { return isCollapsed (*track); });
+}
+
+void toggleTracksCollapsed (const juce::Array<te::Track*>& tracks)
+{
+    toggleAll (
+        tracks, [] (te::Track* track) { return isCollapsed (*track); }, [] (te::Track* track, bool on) { setCollapsed (*track, on); });
+}
+
+bool areAllTracksPinned (const juce::Array<te::Track*>& tracks)
+{
+    return areAllOn (tracks, [] (te::Track* track) { return isPinned (*track); });
+}
+
+void toggleTracksPinned (const juce::Array<te::Track*>& tracks)
+{
+    toggleAll (tracks, [] (te::Track* track) { return isPinned (*track); }, [] (te::Track* track, bool on) { setPinned (*track, on); });
+}
+
+juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* selection)
+{
+    juce::Array<te::Track*> copies;
+
+    for (auto* track : tracks)
+        if (auto copy = track->edit.copyTrack (track, getInsertPointAfter (*track)))
+            copies.add (copy.get());
+
+    if (selection != nullptr)
+    {
+        selection->deselectAll();
+
+        for (auto* copy : copies)
+            selection->addToSelection (copy);
+    }
+
+    return copies;
+}
+
+void deleteTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* selection)
+{
+    // A folder takes the tracks inside it along, so those aren't deleted on their own.
+    juce::Array<te::Track*> outermost;
+
+    for (auto* track : tracks)
+    {
+        auto inDeletedFolder = false;
+
+        for (auto* folder = track->getParentFolderTrack(); folder != nullptr && ! inDeletedFolder; folder = folder->getParentFolderTrack())
+            inDeletedFolder = tracks.contains (folder);
+
+        if (! inDeletedFolder)
+            outermost.add (track);
+    }
+
+    if (outermost.isEmpty())
+        return;
+
+    auto& edit = outermost.getFirst()->edit;
+    const auto row = getPlaylistTracks (edit).indexOf (outermost.getFirst());
+
+    for (auto* track : outermost)
+        edit.deleteTrack (track);
+
+    if (selection != nullptr)
+        if (const auto remaining = getPlaylistTracks (edit); ! remaining.isEmpty())
+            selection->selectOnly (remaining[juce::jmin (row, remaining.size() - 1)]);
+}
+
+//==============================================================================
 void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selection)
 {
     const auto getEdit = [&selection] { return selection.getEdit(); };
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
-    const auto hasSelectedTracks = [&selection] { return ! getSelectedTracks (selection).isEmpty(); };
 
     registry.add ({ .id = "track.add",
                     .name = "Add Track",
                     .category = "Track",
                     .description = "Adds an empty track below the selected one, or at the bottom.",
                     .synonyms = { "new track", "insert track", "create" },
-                    .perform =
-                        [&selection]
-                    {
-                        if (auto* edit = selection.getEdit())
-                            insertTrack (*edit, getSelectedTracks (selection).getLast(), &selection);
-                    },
+                    .perform = [&selection] { insertTrackAfterSelection (selection); },
                     .isEnabled = hasEdit,
                     .undoTarget = getEdit });
 
     // Folders.
-    const auto getSelectedFolders = [&selection]
-    {
-        juce::Array<te::FolderTrack*> folders;
-
-        for (auto* track : getSelectedTracks (selection))
-            if (auto* folder = dynamic_cast<te::FolderTrack*> (track))
-                folders.add (folder);
-
-        return folders;
-    };
-
-    const auto hasSelectedFolders = [getSelectedFolders] { return ! getSelectedFolders().isEmpty(); };
-
     registry.add ({ .id = "track.addFolder",
                     .name = "Add Folder",
                     .category = "Track",
                     .description = "Adds an empty folder below the selected track, or at the bottom.",
                     .synonyms = { "new folder", "group", "bus" },
-                    .perform =
-                        [&selection]
-                    {
-                        if (auto* edit = selection.getEdit())
-                            insertFolder (*edit, getSelectedTracks (selection).getLast(), &selection);
-                    },
+                    .perform = [&selection] { insertFolderAfterSelection (selection); },
                     .isEnabled = hasEdit,
                     .undoTarget = getEdit });
 
@@ -404,7 +496,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .description = "Puts the selected tracks into a new folder. A folder becomes a bus when it holds an effect.",
                     .synonyms = { "group", "folder", "bus", "submix" },
                     .perform = [&selection] { groupIntoFolder (getSelectedOutermostTracks (selection), &selection); },
-                    .isEnabled = hasSelectedTracks,
+                    .isEnabled = [&selection] { return hasSelectedTracks (selection); },
                     .undoTarget = getEdit });
 
     registry.add ({ .id = "track.ungroup",
@@ -412,13 +504,8 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .category = "Track",
                     .description = "Takes the tracks out of the selected folders, and deletes the folders.",
                     .synonyms = { "remove folder", "ungroup", "unfolder" },
-                    .perform =
-                        [getSelectedFolders]
-                    {
-                        for (auto* folder : getSelectedFolders())
-                            ungroupFolder (*folder);
-                    },
-                    .isEnabled = hasSelectedFolders,
+                    .perform = [&selection] { ungroupFolders (getSelectedFolders (selection)); },
+                    .isEnabled = [&selection] { return hasSelectedFolders (selection); },
                     .undoTarget = getEdit });
 
     // Collapsing and pinning change the view, so they aren't undo steps.
@@ -428,53 +515,25 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .description = "Makes the selected tracks thin rows that show only their names, or full height again. A "
                                    "collapsed folder hides its tracks.",
                     .synonyms = { "fold", "unfold", "expand", "hide", "minimize", "folder" },
-                    .perform =
-                        [&selection]
-                    {
-                        const auto tracks = getSelectedTracks (selection);
-                        const auto collapse = ! std::all_of (tracks.begin(), tracks.end(), [] (te::Track* t) { return isCollapsed (*t); });
-
-                        for (auto* track : tracks)
-                            setCollapsed (*track, collapse);
-                    },
-                    .isEnabled = hasSelectedTracks,
-                    .isTicked =
-                        [&selection]
-                    {
-                        const auto tracks = getSelectedTracks (selection);
-                        return ! tracks.isEmpty()
-                               && std::all_of (tracks.begin(), tracks.end(), [] (te::Track* t) { return isCollapsed (*t); });
-                    } });
+                    .perform = [&selection] { toggleTracksCollapsed (getSelectedTracks (selection)); },
+                    .isEnabled = [&selection] { return hasSelectedTracks (selection); },
+                    .isTicked = [&selection] { return areAllTracksCollapsed (getSelectedTracks (selection)); } });
 
     registry.add ({ .id = "track.pin",
                     .name = "Pin Track",
                     .category = "Track",
                     .description = "Keeps the selected tracks in view at the top of the playlist while the others scroll.",
                     .synonyms = { "stick", "keep visible", "unpin" },
-                    .perform =
-                        [&selection]
-                    {
-                        const auto tracks = getSelectedTracks (selection);
-                        const auto pin = ! std::all_of (tracks.begin(), tracks.end(), [] (te::Track* t) { return isPinned (*t); });
-
-                        for (auto* track : tracks)
-                            setPinned (*track, pin);
-                    },
-                    .isEnabled = hasSelectedTracks,
-                    .isTicked =
-                        [&selection]
-                    {
-                        const auto tracks = getSelectedTracks (selection);
-                        return ! tracks.isEmpty()
-                               && std::all_of (tracks.begin(), tracks.end(), [] (te::Track* t) { return isPinned (*t); });
-                    } });
+                    .perform = [&selection] { toggleTracksPinned (getSelectedTracks (selection)); },
+                    .isEnabled = [&selection] { return hasSelectedTracks (selection); },
+                    .isTicked = [&selection] { return areAllTracksPinned (getSelectedTracks (selection)); } });
 
     registry.add ({ .id = "track.selectPrevious",
                     .name = "Select Track Above",
                     .category = "Track",
                     .description = "Selects the track above the selected one.",
                     .synonyms = { "previous track", "up" },
-                    .perform = [&selection] { selectNeighbour (selection, -1); },
+                    .perform = [&selection] { selectNeighbourTrack (selection, -1); },
                     .isEnabled = hasEdit,
                     .repeatsWhileHeld = true });
 
@@ -483,7 +542,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .category = "Track",
                     .description = "Selects the track below the selected one.",
                     .synonyms = { "next track", "down" },
-                    .perform = [&selection] { selectNeighbour (selection, 1); },
+                    .perform = [&selection] { selectNeighbourTrack (selection, 1); },
                     .isEnabled = hasEdit,
                     .repeatsWhileHeld = true });
 
@@ -493,7 +552,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .description = "Moves the selected tracks up one place.",
                     .synonyms = { "reorder", "raise" },
                     .perform = [&selection] { moveSelectedTracks (selection, -1); },
-                    .isEnabled = hasSelectedTracks,
+                    .isEnabled = [&selection] { return hasSelectedTracks (selection); },
                     .undoTarget = getEdit,
                     .repeatsWhileHeld = true });
 
@@ -503,7 +562,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .description = "Moves the selected tracks down one place.",
                     .synonyms = { "reorder", "lower" },
                     .perform = [&selection] { moveSelectedTracks (selection, 1); },
-                    .isEnabled = hasSelectedTracks,
+                    .isEnabled = [&selection] { return hasSelectedTracks (selection); },
                     .undoTarget = getEdit,
                     .repeatsWhileHeld = true });
 
@@ -513,17 +572,17 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .category = "Track",
                     .description = "Silences the selected tracks, or unmutes them.",
                     .synonyms = { "silence", "unmute" },
-                    .perform = [&selection] { toggleMuteOrSolo (selection, true); },
-                    .isEnabled = hasSelectedTracks,
-                    .isTicked = [&selection] { return areAllSelectedOn (selection, true); } });
+                    .perform = [&selection] { toggleTracksMuted (getSelectedTracks (selection)); },
+                    .isEnabled = [&selection] { return hasSelectedTracks (selection); },
+                    .isTicked = [&selection] { return areAllTracksMuted (getSelectedTracks (selection)); } });
 
     registry.add ({ .id = "track.solo",
                     .name = "Solo Track",
                     .category = "Track",
                     .description = "Plays only the selected tracks and any others that are soloed, or ends their solo.",
                     .synonyms = { "isolate", "unsolo" },
-                    .perform = [&selection] { toggleMuteOrSolo (selection, false); },
-                    .isEnabled = hasSelectedTracks,
-                    .isTicked = [&selection] { return areAllSelectedOn (selection, false); } });
+                    .perform = [&selection] { toggleTracksSoloed (getSelectedTracks (selection)); },
+                    .isEnabled = [&selection] { return hasSelectedTracks (selection); },
+                    .isTicked = [&selection] { return areAllTracksSoloed (getSelectedTracks (selection)); } });
 }
 } // namespace phazite

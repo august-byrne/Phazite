@@ -85,6 +85,51 @@ void toggleSoloAlone (te::Track&);
 // True if a track is silent because other tracks are soloed, though it isn't muted itself.
 bool isSilencedBySolo (const te::Track&);
 
+//==============================================================================
+// What the track commands do. These don't start an undo step: the command does (Command::undoTarget).
+
+bool hasSelectedTracks (const te::SelectionManager&);
+juce::Array<te::FolderTrack*> getSelectedFolders (const te::SelectionManager&); // top to bottom
+bool hasSelectedFolders (const te::SelectionManager&);
+
+// The selected tracks, or all of the playlist's if none is selected; none without an Edit.
+juce::Array<te::Track*> getSelectedTracksOrAll (const te::SelectionManager&);
+
+// Inserts an empty track or folder after the last selected track, or at the end, and selects it alone. nullptr
+// without an Edit.
+te::AudioTrack* insertTrackAfterSelection (te::SelectionManager&);
+te::FolderTrack* insertFolderAfterSelection (te::SelectionManager&);
+
+// Takes the tracks out of each folder, and deletes the folders.
+void ungroupFolders (const juce::Array<te::FolderTrack*>&);
+
+// Selects the track above (direction -1) or below (1) the selection; with nothing selected, the last or the first track.
+// It stops at the first and the last track.
+void selectNeighbourTrack (te::SelectionManager&, int direction);
+
+// Moves the selected tracks one place up (direction -1) or down (1) within their folders. A track swaps places with its
+// neighbour, so selected neighbours move together.
+void moveSelectedTracks (te::SelectionManager&, int direction);
+
+// Switches for lists of tracks (base/Toggles.h): on for all of them, or off if all are on. Mute and solo are each
+// track's own switch, not a folder's that it is in. Collapsing and pinning change the view: they aren't undo steps.
+bool areAllTracksMuted (const juce::Array<te::Track*>&);
+void toggleTracksMuted (const juce::Array<te::Track*>&);
+bool areAllTracksSoloed (const juce::Array<te::Track*>&);
+void toggleTracksSoloed (const juce::Array<te::Track*>&);
+bool areAllTracksCollapsed (const juce::Array<te::Track*>&);
+void toggleTracksCollapsed (const juce::Array<te::Track*>&);
+bool areAllTracksPinned (const juce::Array<te::Track*>&);
+void toggleTracksPinned (const juce::Array<te::Track*>&);
+
+// Copies each track right after its original, and returns the copies. Tracktion adds each copy to what every selection
+// manager of the Edit has selected; with a selection manager given, the copies are selected instead of what was.
+juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>&, te::SelectionManager*);
+
+// Deletes tracks; a folder goes with the tracks inside it. With a selection manager, the track that takes the first
+// one's place is selected, as in Ableton Live, so the keyboard can carry on from there.
+void deleteTracks (const juce::Array<te::Track*>&, te::SelectionManager*);
+
 // The track commands that need no window: add, select the track above or below, move, mute and solo. They act
 // on the tracks selected in the selection manager's Edit. Delete and duplicate are selection commands
 // (Selection.h); the playlist adds rename and color, and the taller and shorter commands (TrackHeights.h).

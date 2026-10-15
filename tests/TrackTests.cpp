@@ -401,3 +401,199 @@ TEST_CASE ("Solo leaves the mute switches alone, and a track can be soloed alone
     CHECK (c.isMuted (false));
     CHECK_FALSE (phazite::isSilencedBySolo (b));
 }
+
+TEST_CASE ("The track switches work on lists of tracks")
+{
+    Tracks tracks (3);
+    auto* a = tracks["A"];
+    auto* b = tracks["B"];
+    const juce::Array<te::Track*> both { a, b }, none;
+
+    struct Switch
+    {
+        const char* name;
+        bool (*allOn) (const juce::Array<te::Track*>&);
+        void (*toggle) (const juce::Array<te::Track*>&);
+    };
+
+    // Each switch: on for all of them unless all are on, then off; an empty list is never all on.
+    for (const auto& s : { Switch { "mute", phazite::areAllTracksMuted, phazite::toggleTracksMuted },
+                           Switch { "solo", phazite::areAllTracksSoloed, phazite::toggleTracksSoloed },
+                           Switch { "collapse", phazite::areAllTracksCollapsed, phazite::toggleTracksCollapsed },
+                           Switch { "pin", phazite::areAllTracksPinned, phazite::toggleTracksPinned } })
+    {
+        CAPTURE (s.name);
+        CHECK_FALSE (s.allOn (none));
+        s.toggle (none);
+
+        s.toggle ({ a }); // one of the two on
+        CHECK (s.allOn ({ a }));
+        CHECK_FALSE (s.allOn (both));
+        s.toggle (both); // so both go on
+        CHECK (s.allOn (both));
+        s.toggle (both); // and then both off
+        CHECK_FALSE (s.allOn ({ a }));
+        CHECK_FALSE (s.allOn ({ b }));
+    }
+
+    // Collapsing and pinning change the view, so they aren't undo steps.
+    tracks.edit->getUndoManager().clearUndoHistory();
+    phazite::toggleTracksCollapsed (both);
+    phazite::toggleTracksPinned (both);
+    CHECK_FALSE (tracks.edit->getUndoManager().canUndo());
+
+    SUBCASE ("A track in a muted folder isn't muted itself, and Mute switches its own switch")
+    {
+        auto* folder = phazite::groupIntoFolder ({ b }, nullptr);
+        REQUIRE (folder != nullptr);
+        folder->setMute (true);
+        CHECK (b->isMuted (true)); // silent, through its folder
+        CHECK_FALSE (phazite::areAllTracksMuted ({ b }));
+
+        phazite::toggleTracksMuted ({ b });
+        CHECK (b->isMuted (false));
+        phazite::toggleTracksMuted ({ b });
+        CHECK_FALSE (b->isMuted (false));
+        CHECK (folder->isMuted (false)); // the folder's own switch stays
+    }
+}
+
+TEST_CASE ("Tracks and folders go in after the selection")
+{
+    Tracks tracks (3);
+
+    // After the last selected track, and selected alone; at the end while nothing is selected.
+    tracks.select ({ "A", "B" });
+    auto* track = phazite::insertTrackAfterSelection (tracks.selection);
+    REQUIRE (track != nullptr);
+    track->setName ("New");
+    CHECK (tracks.getOrder() == juce::String ("A B New C"));
+    CHECK (tracks.getSelectedNames() == juce::String ("New"));
+
+    tracks.selection.deselectAll();
+    auto* folder = phazite::insertFolderAfterSelection (tracks.selection);
+    REQUIRE (folder != nullptr);
+    CHECK (tracks.getOrder() == juce::String ("A B New C Folder"));
+    CHECK (tracks.getSelectedNames() == juce::String ("Folder"));
+
+    // Without an Edit, nothing goes in.
+    tracks.selection.deselectAll();
+    tracks.selection.edit = nullptr;
+    CHECK (phazite::insertTrackAfterSelection (tracks.selection) == nullptr);
+    CHECK (phazite::insertFolderAfterSelection (tracks.selection) == nullptr);
+    tracks.selection.edit = tracks.edit.get();
+    CHECK (phazite::getPlaylistTracks (*tracks.edit).size() == 5);
+}
+
+TEST_CASE ("Selected folders ungroup together")
+{
+    Tracks tracks (4);
+    auto* first = phazite::groupIntoFolder ({ tracks["A"], tracks["B"] }, nullptr);
+    REQUIRE (first != nullptr);
+    first->setName ("F1");
+    auto* second = phazite::groupIntoFolder ({ tracks["C"] }, nullptr);
+    REQUIRE (second != nullptr);
+    second->setName ("F2");
+    CHECK (tracks.getOrder() == juce::String ("F1 A B F2 C D"));
+
+    tracks.select ({ "F1", "F2", "D" });
+    CHECK (phazite::getSelectedFolders (tracks.selection).size() == 2);
+    CHECK (phazite::hasSelectedFolders (tracks.selection));
+
+    phazite::ungroupFolders (phazite::getSelectedFolders (tracks.selection));
+    CHECK (tracks.getOrder() == juce::String ("A B C D"));
+    CHECK_FALSE (phazite::hasSelectedFolders (tracks.selection));
+}
+
+TEST_CASE ("Neighbour selection starts at either end")
+{
+    Tracks tracks (3);
+
+    // With nothing selected, up starts at the bottom and down at the top; neither goes past the end.
+    phazite::selectNeighbourTrack (tracks.selection, -1);
+    CHECK (tracks.getSelectedNames() == juce::String ("C"));
+    phazite::selectNeighbourTrack (tracks.selection, 1);
+    CHECK (tracks.getSelectedNames() == juce::String ("C"));
+
+    tracks.selection.deselectAll();
+    phazite::selectNeighbourTrack (tracks.selection, 1);
+    CHECK (tracks.getSelectedNames() == juce::String ("A"));
+    phazite::selectNeighbourTrack (tracks.selection, -1);
+    CHECK (tracks.getSelectedNames() == juce::String ("A"));
+
+    // From several selected tracks: down from the last one.
+    tracks.select ({ "A", "B" });
+    phazite::selectNeighbourTrack (tracks.selection, 1);
+    CHECK (tracks.getSelectedNames() == juce::String ("C"));
+}
+
+TEST_CASE ("Tracks move within their folders")
+{
+    Tracks tracks (4);
+    REQUIRE (phazite::groupIntoFolder ({ tracks["B"], tracks["C"] }, nullptr) != nullptr);
+    CHECK (tracks.getOrder() == juce::String ("A Folder B C D"));
+
+    tracks.select ({ "C" });
+    phazite::moveSelectedTracks (tracks.selection, -1);
+    CHECK (tracks.getOrder() == juce::String ("A Folder C B D"));
+    phazite::moveSelectedTracks (tracks.selection, -1); // the first in its folder stays inside it
+    CHECK (tracks.getOrder() == juce::String ("A Folder C B D"));
+
+    // A folder moves with its tracks, past the top-level tracks.
+    tracks.select ({ "Folder" });
+    phazite::moveSelectedTracks (tracks.selection, 1);
+    CHECK (tracks.getOrder() == juce::String ("A D Folder C B"));
+}
+
+TEST_CASE ("Deleting and duplicating tracks directly")
+{
+    Tracks tracks (3);
+
+    // Each copy goes right after its original. Tracktion adds the copies to what is selected.
+    tracks.select ({ "B" });
+    auto copies = phazite::duplicateTracks ({ tracks["A"], tracks["C"] }, nullptr);
+    REQUIRE (copies.size() == 2);
+    CHECK (tracks.getOrder() == juce::String ("A A B C C"));
+    CHECK (tracks.getSelectedNames() == juce::String ("A B C"));
+    CHECK (tracks.selection.isSelected (copies.getFirst()));
+
+    // With one, the copies are selected instead.
+    copies = phazite::duplicateTracks ({ tracks["B"] }, &tracks.selection);
+    REQUIRE (copies.size() == 1);
+    CHECK (tracks.getOrder() == juce::String ("A A B B C C"));
+    CHECK (phazite::getSelectedTracks (tracks.selection).size() == 1);
+    CHECK (phazite::getSelectedTracks (tracks.selection).getFirst() == copies.getFirst());
+
+    phazite::deleteTracks ({ copies.getFirst() }, nullptr);
+    CHECK (tracks.getOrder() == juce::String ("A A B C C"));
+
+    // A folder goes with its tracks; with a selection manager, the track that takes the first one's place is selected.
+    auto* folder = phazite::groupIntoFolder ({ tracks["B"] }, nullptr);
+    REQUIRE (folder != nullptr);
+    CHECK (tracks.getOrder() == juce::String ("A A Folder B C C"));
+    phazite::deleteTracks ({ folder, tracks["B"] }, &tracks.selection);
+    CHECK (tracks.getOrder() == juce::String ("A A C C"));
+    CHECK (tracks.getSelectedNames() == juce::String ("C"));
+
+    phazite::deleteTracks ({}, &tracks.selection); // nothing to delete
+    CHECK (tracks.getOrder() == juce::String ("A A C C"));
+}
+
+TEST_CASE ("The selected tracks, or all of them")
+{
+    Tracks tracks (3);
+    CHECK_FALSE (phazite::hasSelectedTracks (tracks.selection));
+    CHECK (phazite::getSelectedTracksOrAll (tracks.selection).size() == 3);
+
+    tracks.select ({ "B" });
+    CHECK (phazite::hasSelectedTracks (tracks.selection));
+    const auto selected = phazite::getSelectedTracksOrAll (tracks.selection);
+    REQUIRE (selected.size() == 1);
+    CHECK (selected.getFirst() == tracks["B"]);
+
+    // Without an Edit, there are none.
+    tracks.selection.deselectAll();
+    tracks.selection.edit = nullptr;
+    CHECK (phazite::getSelectedTracksOrAll (tracks.selection).isEmpty());
+    tracks.selection.edit = tracks.edit.get();
+}

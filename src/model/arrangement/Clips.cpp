@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Clips.h"
 #include "Tracks.h"
+#include "model/base/Toggles.h"
 
 #include <algorithm>
 #include <vector>
@@ -200,15 +201,12 @@ void makeClipsUnique (const juce::Array<te::Clip*>& clips)
 
 bool areAllClipsMuted (const juce::Array<te::Clip*>& clips)
 {
-    return ! clips.isEmpty() && std::all_of (clips.begin(), clips.end(), [] (te::Clip* clip) { return clip->isMuted(); });
+    return areAllOn (clips, [] (te::Clip* clip) { return clip->isMuted(); });
 }
 
 void toggleClipsMuted (const juce::Array<te::Clip*>& clips)
 {
-    const auto mute = ! areAllClipsMuted (clips);
-
-    for (auto* clip : clips)
-        clip->setMuted (mute);
+    toggleAll (clips, [] (te::Clip* clip) { return clip->isMuted(); }, [] (te::Clip* clip, bool on) { clip->setMuted (on); });
 }
 
 void nudgeClips (const juce::Array<te::Clip*>& clips, te::BeatDuration amount)

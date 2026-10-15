@@ -4,21 +4,6 @@
 
 namespace phazite::ui
 {
-namespace
-{
-    // The selected tracks, or all tracks if none is selected.
-    juce::Array<te::Track*> getTracksToResize (const te::SelectionManager& selection)
-    {
-        auto tracks = getSelectedTracks (selection);
-
-        if (tracks.isEmpty())
-            if (auto* edit = selection.getEdit())
-                tracks = getPlaylistTracks (*edit);
-
-        return tracks;
-    }
-} // namespace
-
 int getTrackHeight (const te::Track& track)
 {
     return juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, getSavedTrackHeight (track).value_or (TrackHeight::standard));
@@ -71,7 +56,7 @@ void addTrackViewCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .category = "Track",
                     .description = "Makes the selected tracks taller, or all tracks if none is selected.",
                     .synonyms = { "height", "bigger", "vertical zoom", "expand" },
-                    .perform = [&selection] { resizeTracks (getTracksToResize (selection), TrackHeight::step); },
+                    .perform = [&selection] { resizeTracks (getSelectedTracksOrAll (selection), TrackHeight::step); },
                     .isEnabled = hasEdit,
                     .repeatsWhileHeld = true });
 
@@ -82,7 +67,7 @@ void addTrackViewCommands (CommandRegistry& registry, te::SelectionManager& sele
           .description =
               "Makes the selected tracks shorter, or all tracks if none is selected. Past the shortest, a track collapses to its name.",
           .synonyms = { "height", "smaller", "vertical zoom", "compact" },
-          .perform = [&selection] { resizeTracks (getTracksToResize (selection), -TrackHeight::step); },
+          .perform = [&selection] { resizeTracks (getSelectedTracksOrAll (selection), -TrackHeight::step); },
           .isEnabled = hasEdit,
           .repeatsWhileHeld = true });
 }

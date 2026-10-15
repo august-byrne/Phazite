@@ -77,6 +77,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Tracks.h
     src/model/base/Schema.cpp
     src/model/base/Schema.h
+    src/model/base/Toggles.h
     src/model/base/Tracktion.h
     src/model/commands/CommandRegistry.cpp
     src/model/commands/CommandRegistry.h
@@ -424,6 +425,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SoundPackTests.cpp
         tests/TimelineTests.cpp
         tests/TimelineViewTests.cpp
+        tests/ToggleTests.cpp
         tests/TrackTests.cpp
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h

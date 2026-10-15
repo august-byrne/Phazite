@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Notes.h"
 #include "model/base/Schema.h"
+#include "model/base/Toggles.h"
 #include "model/commands/CommandRegistry.h"
 
 #include <algorithm>
@@ -261,15 +262,14 @@ void changeNoteLengths (const std::vector<ClipNote>& notes, te::BeatDuration cha
 
 bool areAllNotesMuted (const std::vector<ClipNote>& notes)
 {
-    return ! notes.empty() && std::all_of (notes.begin(), notes.end(), [] (const ClipNote& n) { return n.note->isMute(); });
+    return areAllOn (notes, [] (const ClipNote& n) { return n.note->isMute(); });
 }
 
 void toggleNotesMuted (const std::vector<ClipNote>& notes)
 {
-    const auto mute = ! areAllNotesMuted (notes);
-
-    for (const auto& n : notes)
-        n.note->setMute (mute, getUndoManager (*n.clip));
+    toggleAll (
+        notes, [] (const ClipNote& n) { return n.note->isMute(); },
+        [] (const ClipNote& n, bool on) { n.note->setMute (on, getUndoManager (*n.clip)); });
 }
 
 void setNoteVelocities (const std::vector<ClipNote>& notes, int velocity)
