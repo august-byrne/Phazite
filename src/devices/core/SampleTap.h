@@ -43,7 +43,7 @@ public:
         const auto scope = fifo.write (std::min (numSamples, fifo.getFreeSpace()));
         int done = 0;
 
-        for (const auto [start, size] :
+        for (const auto& [start, size] :
              { std::pair { scope.startIndex1, scope.blockSize1 }, std::pair { scope.startIndex2, scope.blockSize2 } })
         {
             for (int i = 0; i < size; ++i, ++done)
@@ -57,7 +57,7 @@ public:
         const auto scope = fifo.read (std::min (maximum, fifo.getNumReady()));
         int done = 0;
 
-        for (const auto [start, size] :
+        for (const auto& [start, size] :
              { std::pair { scope.startIndex1, scope.blockSize1 }, std::pair { scope.startIndex2, scope.blockSize2 } })
         {
             for (int i = 0; i < size; ++i, ++done)
