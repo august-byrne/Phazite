@@ -154,6 +154,8 @@ target_sources(phazite_core PRIVATE
     src/model/transport/Playback.cpp
     src/model/transport/Playback.h
     # services: what the whole app shares (they use the model; the model never uses them)
+    src/services/BrowserModel.cpp
+    src/services/BrowserModel.h
     src/services/Library.cpp
     src/services/Library.h
     src/services/RecentProjects.cpp
@@ -466,6 +468,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
         tests/ClipTests.cpp
         tests/CommandGoldenTests.cpp

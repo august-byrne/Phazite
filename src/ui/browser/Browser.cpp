@@ -30,29 +30,6 @@ namespace
 
         return Icon::sound;
     }
-
-    // What a row says after an item's name: a loop's tempo, or what a device is.
-    juce::String getDetail (const LibraryItem& item)
-    {
-        if (item.device.has_value())
-            return item.device->category;
-
-        for (const auto& tag : item.tags)
-            if (tag.endsWith (" BPM"))
-                return tag;
-
-        return {};
-    }
-
-    bool canPreview (const LibraryItem& item)
-    {
-        return item.kind == LibraryItem::Kind::sound || item.kind == LibraryItem::Kind::midi;
-    }
-
-    bool canPlace (const LibraryItem& item)
-    {
-        return item.kind != LibraryItem::Kind::folder;
-    }
 } // namespace
 
 //==============================================================================
@@ -134,7 +111,7 @@ struct Browser::Node : public juce::TreeViewItem
 
     juce::var getDragSourceDescription() override
     {
-        if (const auto* item = getItem(); item != nullptr && canPlace (*item))
+        if (const auto* item = getItem(); item != nullptr && BrowserModel::canPlace (*item))
             return toDragDescription (*item);
 
         return {};
@@ -146,7 +123,7 @@ struct Browser::Node : public juce::TreeViewItem
 
         if (const auto* item = getItem())
         {
-            if (const auto detail = getDetail (*item); detail.isNotEmpty())
+            if (const auto detail = BrowserModel::getDetail (*item); detail.isNotEmpty())
                 name << ", " << detail;
 
             if (browser.library.isFavorite (*item))
@@ -199,7 +176,7 @@ struct Browser::Node : public juce::TreeViewItem
                 browser.drawIcon (g, Icon::favorite, star.toFloat().withSizeKeepingCentre (14.0f, 14.0f),
                                   favorite && ! onAccent ? p.warning : mutedColour, favorite);
 
-            if (const auto detail = getDetail (*item); detail.isNotEmpty())
+            if (const auto detail = BrowserModel::getDetail (*item); detail.isNotEmpty())
             {
                 const juce::Font font { juce::FontOptions (TextSize::small) };
                 g.setFont (font);
@@ -241,34 +218,14 @@ struct Browser::SoundPackNode : public Node
 {
     using Node::Node;
 
-    juce::String getText() const override
-    {
-        const auto& pack = browser.soundPack;
-
-        switch (pack.getState())
-        {
-            case SoundPack::State::downloading:
-                return "Downloading... " + juce::String (juce::roundToInt (pack.getProgress() * 100.0)) + "%";
-            case SoundPack::State::installing:
-                return "Installing...";
-            case SoundPack::State::failed:
-                return "The download didn't finish";
-            case SoundPack::State::notInstalled:
-            case SoundPack::State::installed: // but its folder has gone
-                break;
-        }
-
-        const auto size = juce::File::descriptionOfSizeInBytes (pack.getRelease().size);
-        return SoundPack::canDownload() ? "Download (" + size + ")" : "Get Them (" + size + ")...";
-    }
-
+    juce::String getText() const override { return browser.model.getSoundPackText(); }
     std::optional<Icon> getIcon() const override { return Icon::download; }
     juce::String getUniqueName() const override { return "soundPack"; }
 
     // A click downloads them; while they download, or after a download failed, it shows the details.
     void clicked() override
     {
-        if (isIdle() && SoundPack::canDownload())
+        if (browser.model.canStartSoundPackDownload())
             browser.soundPack.download(); // whose change messages repaint the row
         else if (browser.onShowSoundPack != nullptr)
             browser.onShowSoundPack();
@@ -277,39 +234,11 @@ struct Browser::SoundPackNode : public Node
     // Enter, or a double-click, whose first click has started the download.
     void activate() override
     {
-        if (const auto state = browser.soundPack.getState();
-            state != SoundPack::State::downloading && state != SoundPack::State::installing)
+        if (! browser.model.isSoundPackBusy())
             clicked();
     }
 
-    juce::String getTooltip() override
-    {
-        const auto& pack = browser.soundPack;
-
-        switch (pack.getState())
-        {
-            case SoundPack::State::downloading:
-            case SoundPack::State::installing:
-                return "Click to see the download, or to cancel it";
-            case SoundPack::State::failed:
-                return pack.getError() + " Click for more.";
-            case SoundPack::State::notInstalled:
-            case SoundPack::State::installed:
-                break;
-        }
-
-        if (! SoundPack::canDownload())
-            return "Opens a page that tells how to download them in a browser, and install them from the file";
-
-        return "Downloads free drums, loops and effects, all public domain (CC0), into "
-               + pack.getFolder().getParentDirectory().getFullPathName();
-    }
-
-    bool isIdle() const
-    {
-        const auto state = browser.soundPack.getState();
-        return state == SoundPack::State::notInstalled || state == SoundPack::State::installed;
-    }
+    juce::String getTooltip() override { return browser.model.getSoundPackTooltip(); }
 };
 
 //==============================================================================
@@ -327,46 +256,17 @@ struct Browser::ItemNode : public Node
     const LibraryItem* getItem() const override { return &item; }
     bool mightContainSubItems() override { return item.kind == LibraryItem::Kind::folder; }
     juce::String getUniqueName() const override { return item.getKey(); }
-
-    void populate() override
-    {
-        auto items = browser.library.listFolder (item.file);
-
-        for (auto& child : items)
-            addSubItem (new ItemNode (browser, std::move (child)));
-
-        if (items.empty())
-            addSubItem (new MessageNode (browser, "No sounds here"));
-    }
-
+    void populate() override { browser.addRows (*this, browser.model.getContents (item)); }
     void clicked() override { browser.preview (item); }
 
     void activate() override
     {
-        if (canPlace (item))
+        if (BrowserModel::canPlace (item))
             browser.place (item);
     }
 
     void showMenu() override { browser.showMenu (item, false); }
-
-    juce::String getTooltip() override
-    {
-        switch (item.kind)
-        {
-            case LibraryItem::Kind::sound:
-                return "Click to hear it. Drag it onto a track, or below the tracks for a new one; Enter puts it on the selected track";
-            case LibraryItem::Kind::midi:
-                return "Notes: click to hear them on a simple synth. Drag them onto a track, or press Enter for the selected track";
-            case LibraryItem::Kind::instrument:
-                return "Drag it onto a track or a mixer channel, or press Enter to give it to the selected track";
-            case LibraryItem::Kind::effect:
-                return "Drag it onto a track or a mixer channel, or press Enter to add it to the selected track";
-            case LibraryItem::Kind::folder:
-                break;
-        }
-
-        return {};
-    }
+    juce::String getTooltip() override { return BrowserModel::getTooltip (item); }
 
     const LibraryItem item;
 };
@@ -375,132 +275,46 @@ struct Browser::ItemNode : public Node
 // A place in the tree, which lists sounds or devices: at the top, or a type under "Sounds by Type".
 struct Browser::PlaceNode : public Node
 {
-    enum Kind
-    {
-        favorites,
-        recent,
-        types,  // "Sounds by Type", which holds a place for each type
-        type,   // the sounds of a type (its name), from every library
-        sounds, // the ones that come with Phazite
-        instruments,
-        effects,
-        folder, // one of the user's
-        addFolder
-    };
-
-    PlaceNode (Browser& b, Kind k, juce::String placeName, juce::File placeFolder = {})
+    PlaceNode (Browser& b, BrowserPlace p)
         : Node (b),
-          kind (k),
-          name (std::move (placeName)),
-          file (std::move (placeFolder))
+          place (std::move (p))
     {
     }
 
-    juce::String getText() const override
-    {
-        // A type's sounds, as plurals where English has them: Kicks, Hats, Loops; Percussion, Bass, FX, Foley.
-        if (kind == type && ! juce::StringArray { "Percussion", "Bass", "FX", "Foley" }.contains (name))
-            return name + "s";
-
-        return name;
-    }
+    juce::String getText() const override { return place.getTitle(); }
 
     std::optional<Icon> getIcon() const override
     {
-        switch (kind)
+        switch (place.kind)
         {
-            case favorites:
+            case BrowserPlace::Kind::favorites:
                 return Icon::favorite;
-            case recent:
+            case BrowserPlace::Kind::recent:
                 return Icon::recent;
-            case type:
+            case BrowserPlace::Kind::type:
                 return Icon::sound;
-            case instruments:
+            case BrowserPlace::Kind::instruments:
                 return Icon::instrument;
-            case effects:
+            case BrowserPlace::Kind::effects:
                 return Icon::effect;
-            case addFolder:
+            case BrowserPlace::Kind::addFolder:
                 return Icon::addFolder;
-            case types:
-            case sounds:
-            case folder:
+            case BrowserPlace::Kind::types:
+            case BrowserPlace::Kind::sounds:
+            case BrowserPlace::Kind::folder:
                 break;
         }
 
         return Icon::folder;
     }
 
-    bool mightContainSubItems() override { return kind != addFolder; }
-
-    juce::String getUniqueName() const override { return "place:" + juce::String ((int) kind) + ":" + name + ":" + file.getFullPathName(); }
-
-    void populate() override
-    {
-        std::vector<LibraryItem> items;
-        juce::String hint;
-
-        switch (kind)
-        {
-            case favorites:
-                items = browser.library.getFavorites();
-                hint = "Nothing yet: click the star next to a sound or device";
-                break;
-            case recent:
-                items = browser.library.getRecent();
-                hint = "What you put into the song shows here";
-                break;
-            case types:
-                for (const auto& soundType : Library::getSoundTypes())
-                    addSubItem (new PlaceNode (browser, type, soundType));
-
-                return;
-            case type:
-                items = browser.library.listByTag (name);
-                hint = browser.library.isIndexing() ? "Still looking through your sounds..." : "None yet";
-                break;
-            case sounds:
-                if (! browser.soundPack.isInstalled())
-                {
-                    addSubItem (new SoundPackNode (browser));
-                    addSubItem (new MessageNode (browser, "Free drums, loops and effects to start with"));
-                    return;
-                }
-
-                items = browser.library.listFolder (file);
-                hint = "No sounds here";
-                break;
-            case folder:
-                if (file.isDirectory())
-                    items = browser.library.listFolder (file);
-
-                hint = file.isDirectory() ? "No sounds here" : "This folder isn't there any more";
-                break;
-            case instruments:
-            case effects:
-                items = browser.library.listDevices (kind == instruments ? LibraryItem::Kind::instrument : LibraryItem::Kind::effect);
-                hint = "Your plug-ins show here once Options > Scan for Plug-ins has found them";
-                break;
-            case addFolder:
-                break;
-        }
-
-        // Instruments and effects always have the built-in ones; the hint says where the plug-ins are until there are some.
-        const auto showHint =
-            items.empty()
-            || ((kind == instruments || kind == effects)
-                && std::all_of (items.begin(), items.end(), [] (const LibraryItem& i)
-                                { return i.device.has_value() && te::PluginManager::isBuiltInPlugin (i.device->description); }));
-
-        for (auto& item : items)
-            addSubItem (new ItemNode (browser, std::move (item)));
-
-        if (showHint && hint.isNotEmpty())
-            addSubItem (new MessageNode (browser, hint));
-    }
+    bool mightContainSubItems() override { return place.holdsItems(); }
+    juce::String getUniqueName() const override { return "place:" + place.getKey(); }
+    void populate() override { browser.addRows (*this, browser.model.getContents (place)); }
 
     void clicked() override
     {
-        if (kind == addFolder)
+        if (place.kind == BrowserPlace::Kind::addFolder)
             browser.chooseFolderToAdd();
     }
 
@@ -508,40 +322,15 @@ struct Browser::PlaceNode : public Node
 
     void showMenu() override
     {
-        if (kind == folder || (kind == sounds && browser.soundPack.isInstalled()))
-            browser.showMenu (browser.library.makeFileItem (file, file), kind == folder);
+        const auto isFolder = place.kind == BrowserPlace::Kind::folder;
+
+        if (isFolder || (place.kind == BrowserPlace::Kind::sounds && browser.soundPack.isInstalled()))
+            browser.showMenu (browser.library.makeFileItem (place.folder, place.folder), isFolder);
     }
 
-    juce::String getTooltip() override
-    {
-        switch (kind)
-        {
-            case favorites:
-                return "What you starred: click the star next to a sound or device, or right-click it";
-            case recent:
-                return "What you put into the song lately, newest first";
-            case types:
-                return "Every sound, from Phazite's and your folders, by what it is: from the words in its name and folders";
-            case type:
-                return "Every sound tagged " + name + ", from Phazite's and your folders";
-            case sounds:
-                return "Phazite's free sounds: drums, loops, effects and foley, all public domain (CC0)";
-            case instruments:
-                return "Instruments turn a track's notes into sound";
-            case effects:
-                return "Effects change the sound of a track";
-            case folder:
-                return file.getFullPathName();
-            case addFolder:
-                return "Adds a folder of your own sounds to the browser";
-        }
+    juce::String getTooltip() override { return place.getTooltip(); }
 
-        return {};
-    }
-
-    const Kind kind;
-    const juce::String name;
-    const juce::File file;
+    const BrowserPlace place;
 };
 
 //==============================================================================
@@ -622,6 +411,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
       soundPack (pack),
       settings (s),
       projectContext (context),
+      model (l, pack),
       soundPackInstalled (pack.isInstalled()),
       tree (std::make_unique<Tree> (*this)),
       searchRoot (std::make_unique<RootNode> (*this))
@@ -680,7 +470,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
         if (searchField.getText().trim().isNotEmpty())
             updateSearch();
 
-        refreshPlace (PlaceNode::type);
+        refreshPlace (BrowserPlace::Kind::type);
     };
 
     soundPack.addChangeListener (this);
@@ -706,6 +496,21 @@ juce::TreeView& Browser::getTree() noexcept
 }
 
 //==============================================================================
+void Browser::addRows (juce::TreeViewItem& parent, const BrowserContents& contents)
+{
+    if (contents.offersSoundPack)
+        parent.addSubItem (new SoundPackNode (*this));
+
+    for (const auto& place : contents.places)
+        parent.addSubItem (new PlaceNode (*this, place));
+
+    for (const auto& item : contents.items)
+        parent.addSubItem (new ItemNode (*this, item));
+
+    for (const auto& message : contents.messages)
+        parent.addSubItem (new MessageNode (*this, message));
+}
+
 void Browser::rebuildPlaces()
 {
     // Folders open now stay open; at first, those open when Phazite last closed, or else Phazite's sounds.
@@ -717,18 +522,17 @@ void Browser::rebuildPlaces()
         openness = juce::parseXML (settings.get (Settings::browserOpenness));
 
     auto root = std::make_unique<RootNode> (*this);
-    root->addSubItem (new PlaceNode (*this, PlaceNode::favorites, "Favorites"));
-    root->addSubItem (new PlaceNode (*this, PlaceNode::recent, "Recent"));
-    root->addSubItem (new PlaceNode (*this, PlaceNode::types, "Sounds by Type"));
-    auto* sounds = new PlaceNode (*this, PlaceNode::sounds, "Phazite Sounds", library.getFactorySounds());
-    root->addSubItem (sounds);
-    root->addSubItem (new PlaceNode (*this, PlaceNode::instruments, "Instruments"));
-    root->addSubItem (new PlaceNode (*this, PlaceNode::effects, "Effects"));
+    PlaceNode* sounds = nullptr;
 
-    for (const auto& folder : library.getUserFolders())
-        root->addSubItem (new PlaceNode (*this, PlaceNode::folder, folder.getFileName(), folder));
+    for (auto& place : model.getPlaces())
+    {
+        const auto isSounds = place.kind == BrowserPlace::Kind::sounds;
+        auto* node = new PlaceNode (*this, std::move (place));
+        root->addSubItem (node);
 
-    root->addSubItem (new PlaceNode (*this, PlaceNode::addFolder, "Add Folder..."));
+        if (isSounds)
+            sounds = node;
+    }
 
     const auto showing = placesRoot == nullptr || tree->getRootItem() == placesRoot.get();
 
@@ -739,14 +543,14 @@ void Browser::rebuildPlaces()
 
     if (openness != nullptr)
         placesRoot->restoreOpennessState (*openness);
-    else
+    else if (sounds != nullptr)
         sounds->setOpen (true);
 
     if (showing && searchField.getText().trim().isEmpty())
         tree->setRootItem (placesRoot.get());
 }
 
-void Browser::refreshPlace (int kind)
+void Browser::refreshPlace (BrowserPlace::Kind kind)
 {
     // Later: what asked may be one of the rows this replaces, such as a favorite unstarred in Favorites.
     juce::MessageManager::callAsync (
@@ -757,7 +561,7 @@ void Browser::refreshPlace (int kind)
 
             const auto reopen = [kind] (juce::TreeViewItem* item)
             {
-                if (auto* place = dynamic_cast<PlaceNode*> (item); place != nullptr && place->kind == kind && place->isOpen())
+                if (auto* place = dynamic_cast<PlaceNode*> (item); place != nullptr && place->place.kind == kind && place->isOpen())
                 {
                     place->setOpen (false);
                     place->setOpen (true);
@@ -772,7 +576,7 @@ void Browser::refreshPlace (int kind)
                 auto* place = root.getSubItem (i);
                 reopen (place);
 
-                if (auto* types = dynamic_cast<PlaceNode*> (place); types != nullptr && types->kind == PlaceNode::types)
+                if (auto* types = dynamic_cast<PlaceNode*> (place); types != nullptr && types->place.kind == BrowserPlace::Kind::types)
                     for (int j = 0; j < types->getNumSubItems(); ++j)
                         reopen (types->getSubItem (j));
             }
@@ -790,17 +594,7 @@ void Browser::updateSearch()
     }
 
     searchRoot->clearSubItems();
-    auto results = library.search (query);
-
-    for (auto& item : results)
-        searchRoot->addSubItem (new ItemNode (*this, std::move (item)));
-
-    if (results.empty())
-        searchRoot->addSubItem (new MessageNode (*this, library.isIndexing() ? juce::String ("Still looking through your sounds...")
-                                                                             : "Nothing matches \"" + query + "\""));
-
-    if (library.isIndexFull())
-        searchRoot->addSubItem (new MessageNode (*this, "Search covers the first " + juce::String (Library::maxIndexed) + " sounds"));
+    addRows (*searchRoot, model.search (query));
 
     tree->setRootItem (searchRoot.get());
 }
@@ -846,7 +640,7 @@ void Browser::changeListenerCallback (juce::ChangeBroadcaster*)
     {
         soundPackInstalled = installed;
         library.refresh();
-        refreshPlace (PlaceNode::sounds);
+        refreshPlace (BrowserPlace::Kind::sounds);
     }
 
     tree->repaint(); // the download's row
@@ -865,7 +659,7 @@ bool Browser::place (const LibraryItem& item)
 void Browser::noteUsed (const LibraryItem& item)
 {
     library.noteUsed (item);
-    refreshPlace (PlaceNode::recent);
+    refreshPlace (BrowserPlace::Kind::recent);
 }
 
 void Browser::dragOperationEnded (const juce::DragAndDropTarget::SourceDetails& details)
@@ -878,8 +672,8 @@ void Browser::dragOperationEnded (const juce::DragAndDropTarget::SourceDetails& 
 
 void Browser::preview (const LibraryItem& item)
 {
-    if (canPreview (item) && isPreviewOn())
-        previewer.play (item.file, getProject(), item.kind == LibraryItem::Kind::midi || item.tags.contains ("Loop"));
+    if (BrowserModel::canPreview (item) && isPreviewOn())
+        previewer.play (item.file, getProject(), BrowserModel::previewsInTime (item));
     else
         previewer.stop();
 
@@ -901,7 +695,7 @@ bool Browser::isPreviewOn() const
 void Browser::toggleFavorite (const LibraryItem& item)
 {
     library.setFavorite (item, ! library.isFavorite (item));
-    refreshPlace (PlaceNode::favorites);
+    refreshPlace (BrowserPlace::Kind::favorites);
     tree->repaint();
 }
 
@@ -910,7 +704,7 @@ void Browser::showMenu (const LibraryItem& item, bool canRemoveFolder)
     const juce::Component::SafePointer<Browser> safeThis (this);
     juce::PopupMenu menu;
 
-    if (canPlace (item))
+    if (BrowserModel::canPlace (item))
         menu.addItem ("Add to the Song",
                       [safeThis, item]
                       {
@@ -979,18 +773,6 @@ std::optional<LibraryItem> Browser::getSelectedItem() const
     return std::nullopt;
 }
 
-juce::String Browser::getStatus() const
-{
-    if (! isPreviewOn())
-        return "Previews are off";
-
-    if (! previewer.isPlaying())
-        return "Click a sound to hear it, drag it into the song";
-
-    const auto name = previewer.getFile().getFileNameWithoutExtension();
-    return previewer.isInTime() ? name + ", in time with the song" : name;
-}
-
 void Browser::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> area, juce::Colour colour, bool filled)
 {
     auto& drawable = icons[{ icon, filled, colour.getARGB() }];
@@ -1015,7 +797,7 @@ void Browser::paint (juce::Graphics& g)
 
     g.setColour (p.textMuted);
     g.setFont (juce::FontOptions (TextSize::small));
-    g.drawText (getStatus(), statusArea, juce::Justification::centredLeft, true);
+    g.drawText (BrowserModel::getPreviewStatus (isPreviewOn(), previewer), statusArea, juce::Justification::centredLeft, true);
 }
 
 void Browser::resized()

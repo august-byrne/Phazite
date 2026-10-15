@@ -9,8 +9,7 @@
 
 #include "model/engine/Preview.h"
 #include "model/project/ProjectContext.h"
-#include "services/Library.h"
-#include "services/SoundPack.h"
+#include "services/BrowserModel.h"
 #include "ui/components/Controls.h"
 #include "ui/theme/Icons.h"
 
@@ -77,6 +76,7 @@ private:
     SoundPack& soundPack;
     Settings& settings;
     const ProjectContext& projectContext;
+    BrowserModel model;              // what the tree shows
     bool soundPackInstalled = false; // when the tree last showed it
 
     SearchField searchField;
@@ -95,7 +95,8 @@ private:
 
     te::Edit* getProject() const { return projectContext.getEdit(); }
     void rebuildPlaces();
-    void refreshPlace (int kind); // a PlaceNode::Kind, after what it lists changed
+    void refreshPlace (BrowserPlace::Kind); // after what places of that kind list changed
+    void addRows (juce::TreeViewItem& parent, const BrowserContents&);
     void updateSearch();
     void focusTree();
     void showMenu (const LibraryItem&, bool canRemoveFolder);
@@ -103,7 +104,6 @@ private:
     void noteUsed (const LibraryItem&);
     bool isPreviewing (const LibraryItem&) const;
     bool isPreviewOn() const;
-    juce::String getStatus() const;
 
     void textEditorTextChanged (juce::TextEditor&) override { updateSearch(); }
     void textEditorReturnKeyPressed (juce::TextEditor&) override { focusTree(); }
