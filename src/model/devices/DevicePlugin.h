@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // One of Phazite's own devices in Tracktion (docs/design.md, section 24): a thin plug-in around the device's
 // engine-neutral DSP (src/devices/). It turns the device's parameters into automatable parameters, stored in its
-// state under their IDs, and hands the DSP each block's audio (always stereo), notes, parameter values and tempo.
+// state under their IDs, and hands the DSP each block's audio (always stereo), notes, parameter values and tempo,
+// and the sound of its sidechain's source (model/mixer/Sidechain.h) for a device that has one.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -10,6 +11,7 @@
 #include "model/base/Tracktion.h"
 
 #include <array>
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -42,9 +44,11 @@ public:
     double getTailLength() const override;
     double getLatencySeconds() override;
     int getNumOutputChannelsGivenInputs (int) override { return 2; }
+    void getChannelNames (juce::StringArray* ins, juce::StringArray* outs) override;
     BusLayout getBusses() const override;
 
     void initialise (const te::PluginInitialisationInfo&) override;
+    void initialiseWithoutStopping (const te::PluginInitialisationInfo&) override;
     void deinitialise() override {}
     void reset() override;
     void applyToBuffer (const te::PluginRenderContext&) override; // real-time safe: no locks, no allocation
@@ -69,6 +73,10 @@ private:
     int latencySamples = 0;
     double latencySeconds = 0.0;
 
+    // Whether a track feeds the sidechain, set as each playback graph is built: its sound then comes in as the buffer's
+    // third and fourth channels, after the device's own two.
+    std::atomic<bool> sidechainConnected { false };
+
     // An effect's mix (DeviceInfo.h, mixParameterID): what came in, delayed as much as the effect delays its sound.
     int mixIndex = -1;
     float appliedMix = 1.0f; // where the last stretch's ramp ended
@@ -77,6 +85,7 @@ private:
 
     int collectEvents (const te::PluginRenderContext&);
     void mixWithDry (float* const* wet, int length, float targetMix);
+    void updateSidechain();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DevicePlugin)
 };

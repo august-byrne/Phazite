@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Devices made for tests, run through the same thin Tracktion plug-in as Phazite's own (model/devices/
-// DevicePlugin.h): an effect (a gain), an instrument that plays the velocity of the note it holds, and an effect with
-// latency and a mix (a delay).
+// DevicePlugin.h): an effect (a gain), an instrument that plays the velocity of the note it holds, an effect with
+// latency and a mix (a delay), and an effect that plays its sidechain.
 #pragma once
 
 #include "TestHelpers.h"
@@ -145,6 +145,26 @@ struct TestDelay final : devices::Processor
     std::array<devices::dsp::DelayLine, 2> lines;
 };
 
+// Puts out its sidechain's sound in place of what comes in (silence without one), so a render shows what reaches it.
+struct TestSidechain final : devices::Processor
+{
+    static constexpr const char* typeID = "phaziteTestSidechain";
+    static constexpr devices::DeviceInfo info { .typeID = typeID,
+                                                .name = "Test Sidechain",
+                                                .kind = devices::DeviceKind::effect,
+                                                .hasSidechain = true };
+
+    void prepare (double, int) override {}
+    void reset() override {}
+
+    void process (const devices::ProcessContext& block) override
+    {
+        for (int channel = 0; channel < block.numChannels; ++channel)
+            for (int i = 0; i < block.numSamples; ++i)
+                block.channels[channel][i] = channel < block.numSidechainChannels ? block.sidechain[channel][i] : 0.0f;
+    }
+};
+
 // Registers them with the tests' engine, once.
 inline void registerTestDevices()
 {
@@ -154,6 +174,7 @@ inline void registerTestDevices()
         plugins.createBuiltInType<DevicePluginOf<TestGain>>();
         plugins.createBuiltInType<DevicePluginOf<TestTone>>();
         plugins.createBuiltInType<DevicePluginOf<TestDelay>>();
+        plugins.createBuiltInType<DevicePluginOf<TestSidechain>>();
         return true;
     }();
 }

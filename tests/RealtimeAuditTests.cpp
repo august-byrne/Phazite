@@ -13,12 +13,14 @@
 #include "AudioThreadMonitor.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
 #include "model/devices/DevicePlugin.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/mixer/Mixer.h"
+#include "model/mixer/Sidechain.h"
 
 #include <chrono>
 #include <thread>
@@ -327,6 +329,35 @@ TEST_SUITE ("realtime-audit")
 
         std::vector<float> tapped (32768);
         CHECK (tap.pull (tapped.data(), (int) tapped.size()) > 0);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's compressor, ducked by another track at 70 % mix, with its meters read")
+    {
+        using phazite::devices::Compressor;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        auto& source = getTrack (*edit, 1);
+        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+        REQUIRE (phazite::insertDevice (source, createToneGenerator (*edit)) != nullptr);
+        source.setMute (true); // still heard by the sidechain
+
+        const auto plugin = edit->getPluginCache().createNewPlugin (Compressor::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
+        device->findParameter ("threshold")->setParameter (-40.0f, juce::sendNotification);
+        device->findParameter ("mix")->setParameter (0.7f, juce::sendNotification);
+        phazite::setSidechainSource (*device, &source);
+        REQUIRE (phazite::getSidechainSource (*device) == &source);
+
+        auto& compressor = dynamic_cast<Compressor&> (device->getProcessor());
+        compressor.getReductionMeter().take();
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's compressor, ducked by another track at 70 % mix, with its meters read", m);
+        CHECK (m.peakLevel > 0.001f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+        CHECK (compressor.getReductionMeter().take() > 1.0f);
     }
 
     // These read audio files or use code Phazite is replacing, so they only report.

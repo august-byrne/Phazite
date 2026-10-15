@@ -219,7 +219,8 @@ TEST_CASE ("The device list offers Phazite's own devices, and two of Tracktion's
         }
     }
 
-    CHECK (builtIn == juce::StringArray { te::FourOscPlugin::xmlTypeName, "phaziteEq", te::ReverbPlugin::xmlTypeName });
+    CHECK (builtIn
+           == juce::StringArray { te::FourOscPlugin::xmlTypeName, "phaziteEq", "phaziteCompressor", te::ReverbPlugin::xmlTypeName });
 }
 
 TEST_CASE ("Phazite's effects have a mix of their own, and name their key controls")

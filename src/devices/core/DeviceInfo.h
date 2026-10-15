@@ -72,6 +72,10 @@ struct DeviceInfo
 
     // The IDs of the parameters a mixer slot shows as small knobs, the most useful first.
     std::span<const std::string_view> keyControls {};
+
+    // Whether the device listens to a sidechain: another track's sound, such as a kick that a compressor turns a bass
+    // down to. Its thin plug-in hands it the sound of the track picked as the source (ProcessContext::sidechain).
+    bool hasSidechain = false;
 };
 
 // An effect's parameter with this ID is its mix: how much of what it puts out is its effect, from 0 (only what comes

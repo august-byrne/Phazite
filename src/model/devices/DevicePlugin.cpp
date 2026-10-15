@@ -126,6 +126,16 @@ double DevicePlugin::getLatencySeconds()
     return latencySeconds;
 }
 
+void DevicePlugin::getChannelNames (juce::StringArray* ins, juce::StringArray* outs)
+{
+    te::Plugin::getChannelNames (ins, outs);
+
+    // A sidechain comes in as two more inputs, which Tracktion fills from the source track: picking one wires the
+    // source's two channels to them (te::Plugin::guessSidechainRouting()).
+    if (ins != nullptr && deviceInfo.hasSidechain)
+        ins->addArray (juce::StringArray { "Sidechain Left", "Sidechain Right" });
+}
+
 te::Plugin::BusLayout DevicePlugin::getBusses() const
 {
     // An instrument too, as Tracktion's own synths: being a synth keeps the track's audio from coming in.
@@ -149,6 +159,19 @@ void DevicePlugin::initialise (const te::PluginInitialisationInfo& info)
         for (auto& delay : dryDelays)
             delay.prepare (std::max (latencySamples, 1));
     }
+
+    updateSidechain();
+}
+
+void DevicePlugin::initialiseWithoutStopping (const te::PluginInitialisationInfo&)
+{
+    updateSidechain();
+}
+
+void DevicePlugin::updateSidechain()
+{
+    // On the message thread, as a new playback graph is built: Tracktion builds one when the source changes.
+    sidechainConnected.store (deviceInfo.hasSidechain && getSidechainSourceID().isValid() && getNumWires() > 0, std::memory_order_relaxed);
 }
 
 void DevicePlugin::reset()
@@ -213,8 +236,21 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
     const auto isMono = buffer.getNumChannels() < 2;
     const auto targetMix = mixIndex >= 0 ? currentValues[(size_t) mixIndex] : 1.0f;
 
-    if (isSynth())
-        buffer.clear (start, numSamples);
+    // The sidechain's sound, after the device's own two channels. A graph built before the source changed may still
+    // play a block or two without it.
+    const auto hasSidechain = sidechainConnected.load (std::memory_order_relaxed) && buffer.getNumChannels() >= 4;
+
+    if (isSynth()) // its own channels, not a sidechain's
+        for (int channel = 0; channel < std::min (2, buffer.getNumChannels()); ++channel)
+            buffer.clear (channel, start, numSamples);
+
+    const float* sidechain[2] = {};
+
+    if (hasSidechain)
+    {
+        block.sidechain = sidechain;
+        block.numSidechainChannels = 2;
+    }
 
     // A stretch at a time, as long as the scratch buffers prepared beforehand. A mono channel plays in stereo, through
     // a scratch buffer, and gets the average of the two sides back.
@@ -253,6 +289,13 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
         block.numChannels = 2;
         block.numSamples = length;
         block.events = { events.data() + firstEvent, (size_t) (nextEvent - firstEvent) };
+
+        if (hasSidechain)
+        {
+            sidechain[0] = buffer.getReadPointer (2, start + done);
+            sidechain[1] = buffer.getReadPointer (3, start + done);
+        }
+
         processor->process (block);
 
         if (mixIndex >= 0)

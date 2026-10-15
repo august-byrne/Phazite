@@ -61,6 +61,7 @@ add_library(phazite_core STATIC)
 target_sources(phazite_core PRIVATE
     src/devices/core/DeviceInfo.cpp
     src/devices/core/DeviceInfo.h
+    src/devices/core/MeterValue.h
     src/devices/core/Processor.h
     src/devices/core/SampleTap.h
     src/devices/core/Spectrum.cpp
@@ -72,6 +73,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/Math.h
     src/devices/dsp/Oscillators.h
     src/devices/dsp/Random.h
+    src/devices/dynamics/Compressor.cpp
+    src/devices/dynamics/Compressor.h
     src/devices/eq/Equalizer.cpp
     src/devices/eq/Equalizer.h
     src/model/arrangement/Arrangement.cpp
@@ -124,6 +127,8 @@ target_sources(phazite_core PRIVATE
     src/model/engine/Preview.h
     src/model/mixer/Mixer.cpp
     src/model/mixer/Mixer.h
+    src/model/mixer/Sidechain.cpp
+    src/model/mixer/Sidechain.h
     src/model/notes/Notes.cpp
     src/model/notes/Notes.h
     src/model/project/Project.cpp
@@ -423,6 +428,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ClipTests.cpp
         tests/CommandGoldenTests.cpp
         tests/CommandTests.cpp
+        tests/CompressorTests.cpp
         tests/ComputerKeyboardTests.cpp
         tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
@@ -460,6 +466,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SelectionTests.cpp
         tests/SettingsTests.cpp
         tests/ShortcutTests.cpp
+        tests/SidechainTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
         tests/TestDevices.h

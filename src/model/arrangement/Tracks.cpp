@@ -3,6 +3,7 @@
 #include "model/base/Schema.h"
 #include "model/base/Toggles.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/mixer/Sidechain.h"
 #include "model/notes/Notes.h"
 
 #include <algorithm>
@@ -443,6 +444,7 @@ void deleteTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* 
 
     auto& edit = outermost.getFirst()->edit;
     const auto row = getPlaylistTracks (edit).indexOf (outermost.getFirst());
+    forgetSidechainSources (outermost);
 
     for (auto* track : outermost)
         edit.deleteTrack (track);

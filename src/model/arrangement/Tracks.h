@@ -116,8 +116,9 @@ void toggleTracksPinned (const juce::Array<te::Track*>&);
 // manager of the Edit has selected; with a selection manager given, the copies are selected instead of what was.
 juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>&, te::SelectionManager*);
 
-// Deletes tracks; a folder goes with the tracks inside it. With a selection manager, the track that takes the first
-// one's place is selected, as in Ableton Live, so the keyboard can carry on from there.
+// Deletes tracks; a folder goes with the tracks inside it, and devices whose sidechain listened to one of them listen
+// to their own sound again. With a selection manager, the track that takes the first one's place is selected, as in
+// Ableton Live, so the keyboard can carry on from there.
 void deleteTracks (const juce::Array<te::Track*>&, te::SelectionManager*);
 
 // The track commands that need no window: add, select the track above or below, move, mute and solo. They act
