@@ -82,6 +82,11 @@ juce::StringArray findDifferences (const juce::XmlElement& expected, const juce:
 // saying that more weren't listed, which a failure report counts as "more than ... differences".
 void limitDifferences (juce::StringArray& differences, int maxDifferences);
 
+// The lines in which a golden text and Phazite's differ, by number, at most maxDifferences (limitDifferences()):
+//   line 31: expected "track.pin | ...", got "track.collapse | ..."
+// Lines are compared exactly; a line one text has and the other hasn't is missing or unexpected.
+juce::StringArray compareLines (const juce::String& expected, const juce::String& actual, int maxDifferences);
+
 // A normalised project as a golden file: an XML header, a comment saying what it is and how to regenerate it, and each
 // attribute on a line of its own, with "\n" line ends and one at the end.
 juce::String toGoldenText (const juce::XmlElement& normalised, const juce::String& about);

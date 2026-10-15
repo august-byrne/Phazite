@@ -177,34 +177,10 @@ juce::String describeLoop (const te::Edit& edit)
 }
 
 //==============================================================================
-juce::String quoted (const juce::String& text)
-{
-    return "\"" + text + "\"";
-}
-
-// The lines in which a golden text and Phazite's differ, by number, at most maxListedDifferences:
-//   line 31: expected "track.pin | ...", got "track.collapse | ..."
-// Lines are compared exactly; a line one text has and the other hasn't is missing or unexpected.
+// The lines in which a golden text and Phazite's differ (phazite::test::compareLines()), at most maxListedDifferences.
 juce::StringArray compareLines (const juce::String& expected, const juce::String& actual)
 {
-    const auto expectedLines = juce::StringArray::fromLines (expected);
-    const auto actualLines = juce::StringArray::fromLines (actual);
-    juce::StringArray differences;
-
-    for (int i = 0; i < std::max (expectedLines.size(), actualLines.size()); ++i)
-    {
-        const auto where = "line " + juce::String (i + 1) + ": ";
-
-        if (i >= actualLines.size())
-            differences.add (where + "missing (expected " + quoted (expectedLines[i]) + ")");
-        else if (i >= expectedLines.size())
-            differences.add (where + "unexpected " + quoted (actualLines[i]));
-        else if (expectedLines[i] != actualLines[i])
-            differences.add (where + "expected " + quoted (expectedLines[i]) + ", got " + quoted (actualLines[i]));
-    }
-
-    phazite::test::limitDifferences (differences, maxListedDifferences);
-    return differences;
+    return phazite::test::compareLines (expected, actual, maxListedDifferences);
 }
 
 // A golden text file: a line saying what it is, then the lines, each ending in "\n".

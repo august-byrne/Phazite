@@ -1,0 +1,114 @@
+# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps and themes, view.interface*, view.hoverHelp, help.*, which come after these), in order, with their keys as Windows and Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
+edit.undo | ctrl + Z
+edit.redo | ctrl + shift + Z, ctrl + Y
+edit.undoOrRedo
+transport.playStop | spacebar
+transport.playPause | shift + spacebar
+transport.goToStart | home
+transport.goToEnd | end
+edit.delete | delete, backspace
+edit.deleteAndCloseGap
+edit.duplicate | ctrl + D
+edit.duplicateAsAlias
+clip.makeUnique
+edit.mute | 0
+clip.fadeLinear
+clip.fadeConvex
+clip.fadeConcave
+clip.fadeSCurve
+edit.split | ctrl + E
+edit.insertTime | ctrl + I
+edit.removeTime | ctrl + shift + delete
+edit.selectAll | ctrl + A
+edit.deselectAll
+track.add | ctrl + T
+track.addFolder
+track.groupIntoFolder | ctrl + G
+track.ungroup | ctrl + shift + G
+track.collapse | U
+track.pin
+track.selectPrevious | cursor up
+track.selectNext | cursor down
+track.moveUp
+track.moveDown
+track.mute
+track.solo
+track.taller | alt + =
+track.shorter | alt + -
+section.add
+section.outline.pop
+section.outline.rock
+section.outline.electronic
+section.outline.hipHop
+section.outline.lofi
+section.outline.rnb
+section.outline.drumAndBass
+section.outline.techno
+track.addReturn
+transport.loop | L
+transport.loopSelection | ctrl + L
+section.loop
+transport.loopSong
+project.new | ctrl + N
+project.open | ctrl + O
+project.openRecent
+project.saveAs | ctrl + shift + S
+project.save | ctrl + S
+view.commandPalette | ctrl + K
+view.searchBrowser | ctrl + F
+device.add | F8
+view.toggleBrowser | ctrl + alt + B
+view.toggleInspector
+view.toggleEditor
+view.pianoRoll | F7
+view.mixer | F9
+view.layoutBeat
+view.layoutMix
+view.layoutFull
+view.detachBrowser
+view.detachInspector
+view.detachEditor
+view.zoomIn | =, numpad +
+view.zoomOut | -, numpad -
+view.zoomToFit
+view.centreOnPlayhead
+view.followPlayback | ctrl + shift + F
+grid.snap | ctrl + 4
+grid.adaptive | ctrl + 5
+grid.finer | ctrl + 1
+grid.coarser | ctrl + 2
+grid.triplets | ctrl + 3
+tool.smart | escape, 1
+tool.draw | P, 2
+tool.paint | B, 3
+tool.slice | C, 4
+tool.slip | S, 5
+tool.mute | T, 6
+tool.delete | D, 7
+tool.select | E, 8
+tool.zoom | Z, 9
+edit.nudgeLeft | cursor left
+edit.nudgeRight | cursor right
+edit.quantize | ctrl + U
+edit.rename | ctrl + R, F2
+track.color
+view.focusMode
+note.transposeUp | cursor up
+note.transposeDown | cursor down
+note.octaveUp | shift + cursor up
+note.octaveDown | shift + cursor down
+note.lengthen | shift + cursor right
+note.shorten | shift + cursor left
+note.legato | ctrl + L
+note.chop | ctrl + E
+note.selectAll | ctrl + A
+note.quantizeSettings | ctrl + shift + U
+note.legatoSettings
+note.chopSettings
+note.transposeSettings
+note.applyTransform | return
+note.cancelTransform | escape
+pianoRoll.drumMode
+pianoRoll.ghostNotes
+pianoRoll.snapToKey
+pianoRoll.keyForAllTracks

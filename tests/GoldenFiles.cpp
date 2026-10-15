@@ -554,6 +554,28 @@ void limitDifferences (juce::StringArray& differences, int maxDifferences)
     }
 }
 
+juce::StringArray compareLines (const juce::String& expected, const juce::String& actual, int maxDifferences)
+{
+    const auto expectedLines = juce::StringArray::fromLines (expected);
+    const auto actualLines = juce::StringArray::fromLines (actual);
+    juce::StringArray differences;
+
+    for (int i = 0; i < std::max (expectedLines.size(), actualLines.size()); ++i)
+    {
+        const auto where = "line " + juce::String (i + 1) + ": ";
+
+        if (i >= actualLines.size())
+            differences.add (where + "missing (expected " + quoted (expectedLines[i]) + ")");
+        else if (i >= expectedLines.size())
+            differences.add (where + "unexpected " + quoted (actualLines[i]));
+        else if (expectedLines[i] != actualLines[i])
+            differences.add (where + "expected " + quoted (expectedLines[i]) + ", got " + quoted (actualLines[i]));
+    }
+
+    limitDifferences (differences, maxDifferences);
+    return differences;
+}
+
 juce::String toGoldenText (const juce::XmlElement& normalised, const juce::String& about)
 {
     jassert (! about.contains ("--")); // which XML comments can't hold

@@ -363,6 +363,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestMain.cpp
         tests/TestHelpers.h
         tests/AppInfoTests.cpp
+        tests/AppShellTests.cpp
         tests/AppTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
