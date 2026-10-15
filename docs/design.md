@@ -254,6 +254,7 @@ This is the editor the target users spend most time in, and FL Studio's is its m
 
 - **Time counts from the clip (2026-10-13),** as in FL Studio and Live: bar 1 is where the clip's content starts, and a clip opens there. The grid and snapping count from it too; the header says where the clip is in the song, and the playhead shows when the clip plays. With several clips it counts from the first. Later, a switch to song time like Bitwig 6's could edit a whole track.
 - **What it shows:** the MIDI clips selected in the playlist, or, when a track is selected, its clip at the playhead or the nearest one. A track without clips shows from the bar the playhead is in, and the first note drawn starts a clip there.
+- **Clips grow with their notes, into empty space only (2026-10-14):** a note drawn, moved, lengthened or duplicated past its clip's end makes the clip end at the end of that bar, as FL Studio's patterns grow, but never past where the next clip on the track starts; a note that doesn't fit stays in the clip without playing, as outside a trimmed clip, until the clip's end is dragged out. A looped clip doesn't grow.
 - **Mouse model from FL Studio:**
   - left-click adds a note and right-click deletes it;
   - new notes reuse the last length and velocity;
@@ -886,6 +887,7 @@ Raised by the architecture review (2026-10-14):
 | 2026-10-14 | Architecture phases A0 and A1 (golden tests and the architecture check, then untangling the model without changing what the app does) come now, before step 1.6, so that the new devices start on the new structure |
 | 2026-10-14 | Designer workflow: the design tokens move into a file in the DTCG format, which a designer edits or exports from Figma, Penpot or Tokens Studio, and a gallery app shows every control and view in all three themes (architecture phase A4). A declarative layout tool (JIVE or foleys_gui_magic) only if dialogs become a bottleneck |
 | 2026-10-14 | Go to End goes to the song's end, where the loop ends: the end of the bar its last clip ends in, as FL Studio ends a song for export. Sections don't count, even in a song without clips |
+| 2026-10-14 | A note edit makes its clip longer only into the empty space after it, never over the next clip on its track, as Bitwig extends clips and as Studio One can keep events from overlapping; a note that doesn't fit stays in the clip without playing. A looped clip doesn't grow |
 
 ## Appendix A. Research summary
 

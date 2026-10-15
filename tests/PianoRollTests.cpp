@@ -165,3 +165,23 @@ TEST_CASE ("On a track without an instrument, the piano roll asks for one, since
     phazite::test::dispatchPendingMessages();
     CHECK (button->getButtonText() == synth->getName());
 }
+
+TEST_CASE ("A note drawn past its clip, where the next clip on the track starts, doesn't stretch the clip over it")
+{
+    PianoRollScreen screen;
+    auto& first = screen.addClip (0, 0.0, 4.0);
+    auto& next = screen.addClip (0, 4.0, 4.0);
+    screen.select (first);
+
+    phazite::test::Mouse mouse (*screen.notes);
+    mouse.click (screen.at (4.5)); // after the clip shown: the note goes into it
+
+    REQUIRE (first.getSequence().getNumNotes() == 1);
+    CHECK (phazite::getNoteStart (first, *first.getSequence().getNotes().getFirst()).inBeats() > 3.999); // snapped to 4 or 4.5
+    CHECK (first.getEndBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (next.getStartBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (next.getSequence().getNumNotes() == 0);
+
+    screen.edit->getUndoManager().undo(); // one step
+    CHECK (first.getSequence().getNumNotes() == 0);
+}

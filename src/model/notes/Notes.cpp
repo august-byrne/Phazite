@@ -37,6 +37,7 @@ namespace
     }
 
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
+    const auto tinyTime = te::TimeDuration::fromSeconds (1.0e-6);
     constexpr int maxPiecesPerNote = 256; // chopping into tinier pieces than this makes no musical sense
 
     juce::UndoManager* getUndoManager (te::MidiClip& clip)
@@ -50,15 +51,47 @@ namespace
         return te::BeatPosition::fromBeats ((songBeat - clip.getContentStartBeat()).inBeats());
     }
 
-    // Makes the clip end at the end of the bar a song beat is in, if the clip ends before the beat.
+    // Where a clip can grow to without covering another clip on its track: the start of the first clip that reaches past
+    // its end, or its own end if another clip already covers that. Nothing if nothing on the track reaches past its end.
+    std::optional<te::TimePosition> findRoomEnd (const te::Clip& clip)
+    {
+        auto* track = clip.getClipTrack();
+
+        if (track == nullptr)
+            return std::nullopt;
+
+        const auto end = clip.getPosition().getEnd();
+        std::optional<te::TimePosition> roomEnd;
+
+        for (auto* other : track->getClips())
+        {
+            if (other == &clip || other->getPosition().getEnd() <= end + tinyTime)
+                continue;
+
+            const auto covered = std::max (other->getPosition().getStart(), end);
+            roomEnd = roomEnd.has_value() ? std::min (*roomEnd, covered) : covered;
+        }
+
+        return roomEnd;
+    }
+
+    // Makes the clip end at the end of the bar a song beat is in, if the clip ends before the beat, but only into the
+    // empty space after it: never past the start of the next clip on its track, so that a note edit never makes one clip
+    // cover another. A looped clip doesn't grow: more of it would only repeat its loop.
     void growToHold (te::MidiClip& clip, te::BeatPosition end)
     {
-        if (end <= clip.getEndBeat() + tinyBeats)
+        if (clip.isLooping() || end <= clip.getEndBeat() + tinyBeats)
             return;
 
         const auto& tempo = clip.edit.tempoSequence;
         const auto bar = tempo.toBarsAndBeats (tempo.toTime (end - tinyBeats)).bars;
-        clip.setEnd (tempo.toTime (tempo.toBeats (te::tempo::BarsAndBeats { bar + 1, {}, 0 })), true);
+        auto newEnd = tempo.toTime (tempo.toBeats (te::tempo::BarsAndBeats { bar + 1, {}, 0 }));
+
+        if (const auto roomEnd = findRoomEnd (clip))
+            newEnd = std::min (newEnd, *roomEnd);
+
+        if (newEnd > clip.getPosition().getEnd() + tinyTime)
+            clip.setEnd (newEnd, true);
     }
 
     int clampPitch (int pitch)

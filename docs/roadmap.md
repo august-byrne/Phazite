@@ -260,6 +260,7 @@ Done before this plan (progress since then is under [Status](#status)):
 **Architecture phases A0 and A1 (from 2026-10-14)**, before step 1.6: golden tests, the architecture check, and untangling the model, with no new features ([architecture track](#architecture-track)).
 - **Fixes the golden tests found (2026-10-14),** where they showed wrong behavior; the golden files change only where a fix says so:
   - Go to End goes to the end of the song, the end of the bar its last clip ends in, not to the end of its sections.
+  - A note edit makes its clip longer only into the empty space after it, never over the next clip on its track.
 
 **1.6 First built-in devices (XL)**
 - The first devices:

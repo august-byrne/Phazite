@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
 #include "model/arrangement/Clips.h"
+#include "model/arrangement/Sections.h"
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 #include "model/notes/Notes.h"
 
 namespace
@@ -124,6 +126,93 @@ TEST_CASE ("Duplicated notes go right after the selection")
     CHECK (n.startOf (*copies[1].note) == doctest::Approx (6.5));
     CHECK (copies[1].note->getNoteNumber() == 64);
     CHECK (n.clip->getSequence().getNumNotes() == 4);
+}
+
+TEST_CASE ("A clip grows into the empty space after it only: never over the next clip on its track")
+{
+    Notes n; // its clip is beats 4 to 8, on the Edit's only track
+    auto& track = *n.clip->getClipTrack();
+    const auto addClip = [&track] (double start, double end) -> te::MidiClip&
+    {
+        auto* added = phazite::insertMidiClip (track, { beats (start), beats (end) }, nullptr);
+        REQUIRE (added != nullptr);
+        return *added;
+    };
+
+    SUBCASE ("A clip right after it: it doesn't grow, and the note stays in it without playing")
+    {
+        auto& next = addClip (8.0, 12.0);
+        auto& note = n.add (60, 8.5, 1.0);
+        CHECK (n.startOf (note) == doctest::Approx (8.5));
+        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (8.0));
+        CHECK (next.getStartBeat().inBeats() == doctest::Approx (8.0));
+        CHECK (next.getSequence().getNumNotes() == 0);
+    }
+
+    SUBCASE ("A clip before the bar's end: it grows to meet it, not past it")
+    {
+        auto& next = addClip (10.0, 14.0);
+        auto& note = n.add (60, 9.0, 0.5);
+        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (10.0)); // not 12, where the bar ends
+        phazite::moveNote (*n.clip, note, beats (13.0), 60);
+        phazite::setNoteLength (*n.clip, note, length (4.0));
+        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (10.0));
+        CHECK (next.getStartBeat().inBeats() == doctest::Approx (10.0));
+        CHECK (next.getEndBeat().inBeats() == doctest::Approx (14.0));
+    }
+
+    SUBCASE ("A clip that already reaches past its end: it doesn't grow")
+    {
+        addClip (6.0, 10.0);
+        n.add (60, 8.5, 0.5);
+        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (8.0));
+    }
+
+    SUBCASE ("Clips on other tracks and sections don't count")
+    {
+        auto* other = phazite::insertTrack (*n.edit, te::getAudioTracks (*n.edit)[0], nullptr);
+        REQUIRE (other != nullptr);
+        REQUIRE (phazite::insertMidiClip (*other, { beats (8.0), beats (12.0) }, nullptr) != nullptr);
+        phazite::SectionInfo drop;
+        drop.name = "Drop";
+        REQUIRE (phazite::insertSection (*n.edit, beats (8.0), drop) != nullptr);
+        n.add (60, 9.0, 0.5);
+        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (12.0));
+    }
+
+    SUBCASE ("A looped clip doesn't grow")
+    {
+        n.clip->setLoopRangeBeats ({ beats (0.0), beats (4.0) });
+        REQUIRE (n.clip->isLooping());
+        n.add (60, 9.0, 0.5);
+        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (8.0));
+    }
+}
+
+TEST_CASE ("Duplicating notes past their clip grows it only up to the next clip, in one undo step")
+{
+    Notes n;
+    auto* next = phazite::insertMidiClip (*n.clip->getClipTrack(), { beats (10.0), beats (14.0) }, nullptr);
+    REQUIRE (next != nullptr);
+    auto& a = n.add (60, 6.0, 1.0);
+    auto& b = n.add (64, 7.0, 0.5);
+    n.edit->getUndoManager().clearUndoHistory();
+    n.select ({ &a, &b });
+
+    REQUIRE (n.registry.invoke ("edit.duplicate"));
+    CHECK (n.edit->getUndoManager().getUndoDescription() == juce::String ("Duplicate 2 Notes"));
+
+    const auto copies = phazite::getSelectedNotes (n.selection);
+    REQUIRE (copies.size() == 2);
+    CHECK (n.startOf (*copies[0].note) == doctest::Approx (7.5));
+    CHECK (n.startOf (*copies[1].note) == doctest::Approx (8.5));
+    CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (10.0)); // up to the next clip, not to beat 12
+    CHECK (next->getStartBeat().inBeats() == doctest::Approx (10.0));
+
+    n.selection.deselectAll(); // the copies go with the undo
+    phazite::undo (*n.edit);
+    CHECK (n.clip->getSequence().getNumNotes() == 2);
+    CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (8.0));
 }
 
 TEST_CASE ("Quantize moves notes toward the grid, with strength and swing")

@@ -235,7 +235,8 @@ void PianoRoll::updateTimeOrigin (bool scrollToStart)
 
 te::MidiClip* PianoRoll::makeClipForNewNotes()
 {
-    // A bar long from the time origin, on the track shown without clips; notes drawn after it make it longer.
+    // A bar long from the time origin, on the track shown without clips; notes drawn after it make it longer, into the
+    // empty space after it (Notes.h's addNote()).
     auto* track = getTrack();
     auto* e = getEdit();
 

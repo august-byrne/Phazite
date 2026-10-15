@@ -49,14 +49,16 @@ std::vector<ClipNote> getSelectedNotes (const te::SelectionManager&);
 //==============================================================================
 // Edits, with the clip's Edit's undo manager: a command's undo step holds them.
 
-// Adds a note at a song beat. If it ends after the clip, the clip grows to the end of that bar.
+// Adds a note at a song beat. If it ends after the clip, the clip grows to the end of that bar, but only into the empty
+// space after it: never past the start of the next clip on its track. A note beyond that stays in the clip without
+// playing, as outside a trimmed clip. A looped clip never grows.
 te::MidiNote* addNote (te::MidiClip&, int pitch, te::BeatPosition start, te::BeatDuration, int velocity);
 
-// Moves a note to a song beat and a pitch. It can't start before its clip's content does; the clip grows
-// to hold it.
+// Moves a note to a song beat and a pitch. It can't start before its clip's content does; the clip grows to hold it,
+// as addNote() says.
 void moveNote (te::MidiClip&, te::MidiNote&, te::BeatPosition start, int pitch);
 
-// Sets a note's length (at least getMinimumNoteLength()); the clip grows to hold it.
+// Sets a note's length (at least getMinimumNoteLength()); the clip grows to hold it, as addNote() says.
 void setNoteLength (te::MidiClip&, te::MidiNote&, te::BeatDuration);
 
 void deleteNotes (const std::vector<ClipNote>&);
@@ -74,7 +76,8 @@ bool areAllNotesMuted (const std::vector<ClipNote>&);
 void toggleNotesMuted (const std::vector<ClipNote>&); // mutes them, or unmutes them if they all are
 void setNoteVelocities (const std::vector<ClipNote>&, int velocity);
 
-// Copies the notes right after them, as FL Studio's Ctrl+B does. Returns the copies.
+// Copies the notes right after them, as FL Studio's Ctrl+B does, each into its original's clip, which grows as
+// addNote() says. Returns the copies.
 std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>&);
 
 // Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to
