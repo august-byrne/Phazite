@@ -79,7 +79,7 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 - **Why it is mostly harmless:** it stops once their capacity covers the busiest block.
 - **Action:** re-measure with MIDI-heavy projects when MIDI recording lands (step 1.7); reserving capacity up front needs the fork. Report upstream.
 
-**5. 4OSC** (measured and source): allocates for every note (a `juce::MidiBuffer` per block, the MPE note list) and locks on every block. Don't use it: Phazite's own synth replaces it in the starter project (step 1.6).
+**5. 4OSC** (measured and source): allocates for every note (a `juce::MidiBuffer` per block, the MPE note list) and locks on every block. Don't use it: Phazite's own synth replaced it in the starter project and the device list (step 1.6, 2026-10-15).
 
 **6. Audio file reading** (measured and source).
 - **What:**
@@ -131,7 +131,7 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
   - chorus and delay;
   - the patch bays and the channel mapper;
   - the Airwindows wrapper.
-- **Action:** Phazite ships its own devices (steps 1.6 and 2.8), and Tracktion's stay out of Phazite's device list. The list (`phazite::getDeviceTypes()`) offers Phazite's own and, until Phazite's synth comes in step 1.6, the 4OSC synth, which the starter project uses. Tracktion's reverb, which reads its parameters atomically and allocates nothing (measured), was offered until Phazite's own reverb replaced it (2026-10-15); projects that hold it still play it. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stay out too.
+- **Action:** Phazite ships its own devices (steps 1.6 and 2.8), and Tracktion's stay out of Phazite's device list. The list (`phazite::getDeviceTypes()`) offers Phazite's own only. Tracktion's reverb, which reads its parameters atomically and allocates nothing (measured), was offered until Phazite's own reverb replaced it (2026-10-15); projects that hold it still play it. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stay out too.
 
 **17. Previews** (measured, step 1.5): the browser's preview plays a loop in an Edit of its own, mixed on the same audio thread as the song, and stretches it as it plays (Tracktion's preview Edit uses no proxy). In its first blocks, SoundTouch grows its buffers (`FIFOSampleBuffer::ensureCapacity`, 10 allocations), and a file cache miss logs in Debug builds; then it allocates nothing. A preview started while the song plays could therefore make it glitch.
 - **Action:** accept it for now: previews are short, and are mostly started while the song is stopped. Later, prime the stretcher on the message thread before the preview starts, or render the preview ahead as the clips do. Report SoundTouch's growing buffers upstream with finding 11.

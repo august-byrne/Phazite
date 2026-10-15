@@ -14,6 +14,7 @@
 #include "model/arrangement/Tracks.h"
 #include "model/mixer/Mixer.h"
 #include "model/project/Project.h"
+#include "model/project/StarterProject.h"
 
 #include <algorithm>
 #include <array>
@@ -37,6 +38,9 @@ constexpr int maxListedDifferences = 20; // the most lines a comparison lists
 
 constexpr const char* aboutTheMix = "Golden render (tests/GoldenRenderTests.cpp): two tones through a bus, a send to a reverb return, "
                                     "volume automation and pan. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
+constexpr const char* aboutTheStarter = "Golden render (tests/GoldenRenderTests.cpp): the starter project, a beat on Phazite's drum "
+                                        "sampler and an arpeggio on its synth. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
+constexpr int starterSeconds = 8; // its 4 bars at 120 BPM
 
 te::BeatPosition beats (double b)
 {
@@ -101,11 +105,11 @@ juce::String formatLevels (const std::array<float, renderChannels>& levels)
 }
 
 // A fingerprint as its golden file holds it: JSON, with one block on each line.
-juce::String writeFingerprint (const Fingerprint& fingerprint)
+juce::String writeFingerprint (const Fingerprint& fingerprint, const char* about = aboutTheMix)
 {
     juce::String text;
     text << "{\n"
-         << "  \"about\": \"" << juce::JSON::escapeString (aboutTheMix) << "\",\n"
+         << "  \"about\": \"" << juce::JSON::escapeString (about) << "\",\n"
          << "  \"sampleRate\": " << renderSampleRate << ",\n"
          << "  \"blockSamples\": " << fingerprintBlockSamples << ",\n"
          << "  \"channels\": " << renderChannels << ",\n"
@@ -250,10 +254,10 @@ void addMix (te::Edit& edit, const juce::File& scratch)
     REQUIRE (phazite::addReturnWithEffect (*high, phazite::test::createBuiltInDevice (edit, phazite::devices::Reverb::typeID)) != nullptr);
 }
 
-// Renders the first 4 seconds of an Edit to a WAV file, always in the same way: at 44.1 kHz, in blocks of 512 samples,
+// Renders the first seconds of an Edit to a WAV file, always in the same way: at 44.1 kHz, in blocks of 512 samples,
 // as 32-bit floats without dither, in stereo, with the master's devices. Tracktion runs the render with the
 // UIBehaviour's runTaskWithProgressBar(), which Phazite's runs to the end on this thread.
-void renderMix (te::Edit& edit, const juce::File& file)
+void renderSong (te::Edit& edit, const juce::File& file, int seconds)
 {
     te::Renderer::Parameters params (edit);
     params.destFile = file;
@@ -261,7 +265,7 @@ void renderMix (te::Edit& edit, const juce::File& file)
     params.bitDepth = 32;
     params.sampleRateForAudio = renderSampleRate;
     params.blockSizeForAudio = 512;
-    params.time = te::TimeRange (0_tp, 4_tp);
+    params.time = te::TimeRange (0_tp, te::TimePosition::fromSeconds (seconds));
     params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
     params.useMasterPlugins = true;
     params.canRenderInMono = false;
@@ -270,15 +274,15 @@ void renderMix (te::Edit& edit, const juce::File& file)
     REQUIRE (te::Renderer::renderToFile ("Golden render", params) == params.destFile);
 }
 
-// The audio of a render, which must be 4 seconds of stereo.
-juce::AudioBuffer<float> readRender (te::Engine& engine, const juce::File& file)
+// The audio of a render, which must be stereo and as many 100 ms blocks long as given.
+juce::AudioBuffer<float> readRender (te::Engine& engine, const juce::File& file, int blocks)
 {
     const std::unique_ptr<juce::AudioFormatReader> reader (engine.getAudioFileFormatManager().readFormatManager.createReaderFor (file));
     REQUIRE (reader != nullptr);
     REQUIRE (reader->numChannels == (unsigned int) renderChannels);
-    REQUIRE (reader->lengthInSamples == (juce::int64) fingerprintBlocks * fingerprintBlockSamples);
+    REQUIRE (reader->lengthInSamples == (juce::int64) blocks * fingerprintBlockSamples);
 
-    juce::AudioBuffer<float> audio (renderChannels, fingerprintBlocks * fingerprintBlockSamples);
+    juce::AudioBuffer<float> audio (renderChannels, blocks * fingerprintBlockSamples);
     REQUIRE (reader->read (&audio, 0, audio.getNumSamples(), 0, true, true));
     return audio;
 }
@@ -329,11 +333,36 @@ bool checkSoundsLikeTheMix (const Fingerprint& fingerprint)
     return lowInTheMiddle && highOnTheLeft && hasTail && tailFades;
 }
 
-// Keeps a render that doesn't sound as it should, or doesn't match its golden file, as
-// <temp>/PhaziteGoldenActual/renders/mix.wav, to listen to.
-void keepRender (const juce::File& file)
+// Checks that the starter project's render sounds like it before it is compared with its golden file: something in
+// every block of its 8 seconds, the same on each side (the drums and the synth are in the middle), and the kick loud on
+// the first beat. Returns whether it does.
+bool checkSoundsLikeTheStarter (const Fingerprint& fingerprint)
 {
-    const auto copy = phazite::test::getActualFolder().getChildFile ("renders").getChildFile ("mix.wav");
+    REQUIRE (fingerprint.size() == (size_t) starterSeconds * 10);
+    auto everywhere = true, inTheMiddle = true;
+
+    for (const auto& block : fingerprint)
+    {
+        everywhere = everywhere && std::min (block.rms[0], block.rms[1]) > -40.0f;
+        inTheMiddle = inTheMiddle && std::abs (block.rms[0] - block.rms[1]) < 0.01f;
+    }
+
+    CHECK_MESSAGE (everywhere, "every 100 ms of the starter project should be above -40 dBFS on each side");
+    CHECK_MESSAGE (inTheMiddle, "the starter project's drums and synth should be as loud on each side");
+
+    const auto kick = fingerprint.front().peak[0] > -18.0f;
+    CHECK_MESSAGE (kick,
+                   ("0.00-0.10 s: the kick should peak above -18 dBFS; it peaks at " + formatLevel (fingerprint.front().peak[0]) + " dBFS")
+                       .toStdString());
+
+    return everywhere && inTheMiddle && kick;
+}
+
+// Keeps a render that doesn't sound as it should, or doesn't match its golden file, as
+// <temp>/PhaziteGoldenActual/renders/<name>.wav, to listen to.
+void keepRender (const juce::File& file, const juce::String& name)
+{
+    const auto copy = phazite::test::getActualFolder().getChildFile ("renders").getChildFile (name + ".wav");
 
     if (copy.getParentDirectory().createDirectory().wasOk() && file.copyFileTo (copy))
         MESSAGE (("The render is in " + copy.getFullPathName()).toStdString());
@@ -396,13 +425,13 @@ TEST_SUITE ("golden")
 
         // In the temporary folder (never in the repository), and deleted at the end.
         const juce::TemporaryFile wav (".wav");
-        renderMix (edit, wav.getFile());
-        const auto fingerprint = getFingerprint (readRender (edit.engine, wav.getFile()));
+        renderSong (edit, wav.getFile(), 4);
+        const auto fingerprint = getFingerprint (readRender (edit.engine, wav.getFile(), fingerprintBlocks));
 
         const auto soundsLikeTheMix = checkSoundsLikeTheMix (fingerprint);
 
         if (! soundsLikeTheMix)
-            keepRender (wav.getFile());
+            keepRender (wav.getFile(), "mix");
 
         REQUIRE (soundsLikeTheMix); // a broken render never becomes the golden file
 
@@ -416,6 +445,39 @@ TEST_SUITE ("golden")
                                         });
 
         if (differs)
-            keepRender (wav.getFile());
+            keepRender (wav.getFile(), "mix");
+    }
+
+    TEST_CASE ("Golden render: the starter project, a beat on Phazite's drum sampler and an arpeggio on its synth")
+    {
+        phazite::test::TemporaryFolder temp;
+        juce::String error;
+        const auto project =
+            phazite::Project::create (phazite::test::getEngine(), temp.folder, "Starter", error, phazite::addStarterContent);
+        REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+        auto& edit = project->getEdit();
+        phazite::test::settle();
+
+        const juce::TemporaryFile wav (".wav");
+        renderSong (edit, wav.getFile(), starterSeconds);
+        const auto fingerprint = getFingerprint (readRender (edit.engine, wav.getFile(), starterSeconds * 10));
+        const auto soundsLikeIt = checkSoundsLikeTheStarter (fingerprint);
+
+        if (! soundsLikeIt)
+            keepRender (wav.getFile(), "starter");
+
+        REQUIRE (soundsLikeIt);
+
+        auto differs = false;
+        phazite::test::checkGoldenText ("renders/starter.json", writeFingerprint (fingerprint, aboutTheStarter),
+                                        [&differs] (const juce::String& expectedText, const juce::String& actualText)
+                                        {
+                                            const auto found = compareFingerprints (expectedText, actualText);
+                                            differs = ! found.isEmpty();
+                                            return found;
+                                        });
+
+        if (differs)
+            keepRender (wav.getFile(), "starter");
     }
 }

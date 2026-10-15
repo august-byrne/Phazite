@@ -308,13 +308,11 @@ DeviceType makeDeviceType (const juce::PluginDescription& description)
 
 std::vector<DeviceType> getDeviceTypes (te::Engine& engine)
 {
-    // Phazite's own devices (roadmap step 1.6), instruments first, and until it has its own synth, Tracktion's 4OSC synth,
-    // which the starter project uses. Tracktion's other devices lock, allocate or read message-thread state on the audio
-    // thread, so they aren't offered (docs/realtime-audit.md, finding 16); projects that hold its reverb, which was
-    // offered until Phazite had its own, still open and play it.
+    // Phazite's own devices (roadmap step 1.6), instruments first. Tracktion's lock, allocate or read message-thread state
+    // on the audio thread, so they aren't offered (docs/realtime-audit.md, finding 16); projects that hold its 4OSC synth or
+    // its reverb, which were offered until Phazite had its own, still open and play them.
     std::vector<DeviceType> types;
     addOwnDevices (types, devices::DeviceKind::instrument);
-    types.push_back (makeBuiltIn ("4OSC synth", te::FourOscPlugin::xmlTypeName, true, "Tracktion"));
     addOwnDevices (types, devices::DeviceKind::effect);
 
     for (const auto& description : engine.getPluginManager().knownPluginList.getTypes())

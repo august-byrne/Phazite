@@ -8,6 +8,7 @@
 #include "model/arrangement/Tracks.h"
 #include "model/base/Migrations.h"
 #include "model/base/Schema.h"
+#include "model/devices/DevicePlugin.h"
 #include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
@@ -231,9 +232,15 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
         INFO (error.toStdString());
         REQUIRE (project != nullptr);
         const auto tracks = te::getAudioTracks (project->getEdit());
-        REQUIRE (tracks.size() == 1);
-        CHECK (tracks[0]->getName() == juce::String ("Synth"));
-        CHECK (tracks[0]->getClips().size() == 1);
+        REQUIRE (tracks.size() == 2);
+        CHECK (tracks[0]->getName() == juce::String ("Drums"));
+        CHECK (tracks[1]->getName() == juce::String ("Synth"));
+
+        for (auto* track : tracks)
+        {
+            CHECK (track->getClips().size() == 1);
+            CHECK (dynamic_cast<phazite::DevicePlugin*> (phazite::getInstrument (*track)) != nullptr); // the drum sampler, the synth
+        }
     }
 
     SUBCASE ("An outline's sections, as New Project lays them out")

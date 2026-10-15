@@ -200,10 +200,10 @@ TEST_CASE ("The master's loudness meter reads a stereo sine at its level")
     CHECK (readings.truePeakDb == doctest::Approx (-20.0f).epsilon (0.02));
 }
 
-TEST_CASE ("The device list offers Phazite's own devices, and Tracktion's 4OSC until Phazite has its own synth")
+TEST_CASE ("The device list offers Phazite's own devices, instruments first, and none of Tracktion's")
 {
-    // Phazite's instruments, Tracktion's 4OSC synth, which the starter project uses, and Phazite's effects. Tracktion's other
-    // devices break the real-time rules (docs/realtime-audit.md, finding 16), and its reverb gave way to Phazite's.
+    // Tracktion's devices break the real-time rules (docs/realtime-audit.md, finding 16); its 4OSC synth and reverb, offered
+    // until Phazite had its own, gave way to Phazite's.
     Mix mix;
     juce::StringArray builtIn;
 
@@ -220,8 +220,7 @@ TEST_CASE ("The device list offers Phazite's own devices, and Tracktion's 4OSC u
     }
 
     CHECK (builtIn
-           == juce::StringArray { "phaziteSynth", "phaziteDrums", te::FourOscPlugin::xmlTypeName, "phaziteEq", "phaziteCompressor",
-                                  "phaziteLimiter", "phaziteReverb" });
+           == juce::StringArray { "phaziteSynth", "phaziteDrums", "phaziteEq", "phaziteCompressor", "phaziteLimiter", "phaziteReverb" });
 }
 
 TEST_CASE ("Phazite's effects have a mix of their own, and name their key controls")

@@ -85,7 +85,7 @@ TEST_CASE ("The first start makes My First Song")
     CHECK (file
            == temp.folder.getChildFile ("My First Song").getChildFile (juce::String ("My First Song") + phazite::Project::fileExtension));
     CHECK (file.existsAsFile());
-    CHECK (te::getAudioTracks (*session.getContext().getEdit()).size() == 1); // the starter song
+    CHECK (te::getAudioTracks (*session.getContext().getEdit()).size() == 2); // the starter song: drums and a synth
     CHECK (recent.getProjects() == juce::Array<juce::File> { file });
 
     // It is what the project starts with: no unsaved changes, nothing to undo.

@@ -774,7 +774,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - **Sections and time edits:** Tracktion's `insertSpaceIntoEdit()` and `deleteRegionOfTracks()` split and trim arranger clips like any other clip, so inserting time inside a section would cut it in two. Phazite's own time edits (`src/model/arrangement/Arrangement.h`) make a section longer or shorter instead (step 1.2).
 - **Note selections:** Tracktion's `SelectedMidiEvents` keeps plain pointers to the clips whose notes it selects, so the piano roll lets go of it before a clip it shows is deleted (step 1.3).
 - **Guide notes:** a track plays guide notes (the piano roll's audition) only if `EngineBehaviour::shouldPlayMidiGuideNotes()` is true, which it isn't by default, so the piano roll forces them (step 1.3).
-- **Built-in devices:** most of Tracktion's effects lock, allocate or read `juce::CachedValue`s on the audio thread ([real-time audit](realtime-audit.md), finding 16); Phazite offers its own devices instead (step 1.6), and of Tracktion's only the 4OSC synth until its own synth comes; projects that hold Tracktion's reverb, offered until Phazite's own came, still open and play.
+- **Built-in devices:** most of Tracktion's effects lock, allocate or read `juce::CachedValue`s on the audio thread ([real-time audit](realtime-audit.md), finding 16); Phazite offers its own devices instead (step 1.6) and none of Tracktion's; projects that hold Tracktion's 4OSC synth or reverb, offered until Phazite's own came, still open and play.
 - **Plug-in parameters:** hosted plug-in parameters are identified by index ([section 19](#19-plug-in-hosting-and-stability)).
 - **Real-time rules:** several engine paths break them ([section 20](#20-performance)).
 

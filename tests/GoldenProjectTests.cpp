@@ -7,6 +7,7 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Grid.h"
 #include "model/arrangement/Import.h"
@@ -120,7 +121,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     auto* keys = phazite::insertTrack (edit, drums, nullptr);
     REQUIRE (keys != nullptr);
     keys->setName ("Keys");
-    REQUIRE (phazite::setInstrument (*keys, createBuiltInDevice (edit, te::FourOscPlugin::xmlTypeName)) != nullptr);
+    REQUIRE (phazite::setInstrument (*keys, createBuiltInDevice (edit, phazite::devices::Synth::typeID)) != nullptr);
     auto* reverb = phazite::insertDevice (*keys, createBuiltInDevice (edit, phazite::devices::Reverb::typeID));
     REQUIRE (reverb != nullptr);
     phazite::setMix (*reverb, 0.25f);

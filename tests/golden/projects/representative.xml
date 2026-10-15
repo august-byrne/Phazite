@@ -264,9 +264,8 @@
       <PLUGIN enabled="1"
               id="1018"
               remapOnTempoChange="1"
-              type="4osc">
+              type="phaziteSynth">
         <MODIFIERASSIGNMENTS/>
-        <MODMATRIX/>
       </PLUGIN>
       <PLUGIN enabled="1"
               id="1019"

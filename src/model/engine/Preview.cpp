@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Preview.h"
+#include "devices/synth/Synth.h"
 
 namespace phazite
 {
@@ -21,12 +22,12 @@ bool Previewer::play (const juce::File& newFile, te::Edit* project, bool repeat)
     if (! newFile.existsAsFile())
         return false;
 
-    // Made from the last sound's Edit, which Tracktion empties and fills again. A MIDI file plays on the 4OSC synth,
-    // the one built-in instrument for now (it breaks the real-time rules, but only while a preview plays). Loops keep
-    // their own pitch: Tracktion would pull every loop with a known root toward the song's pitch sequence, which is C
-    // in a song without a key, and it ignores major and minor (an A minor loop would go up to C in C major).
+    // Made from the last sound's Edit, which Tracktion empties and fills again. A MIDI file plays on Phazite's synth, at its
+    // defaults. Loops keep their own pitch: Tracktion would pull every loop with a known root toward the song's pitch
+    // sequence, which is C in a song without a key, and it ignores major and minor (an A minor loop would go up to C in
+    // C major).
     auto matched = false;
-    const auto synth = te::createValueTree (te::IDs::PLUGIN, te::IDs::type, te::FourOscPlugin::xmlTypeName);
+    const auto synth = te::createValueTree (te::IDs::PLUGIN, te::IDs::type, devices::Synth::typeID);
     edit = te::Edit::createEditForPreviewingFile (engine, newFile, project, true, false, &matched, synth, {}, false, std::move (edit));
 
     if (edit == nullptr)

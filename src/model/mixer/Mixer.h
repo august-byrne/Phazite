@@ -58,8 +58,7 @@ void setMix (te::Plugin&, float mix);
 te::AutomatableParameter::Array getMixParameters (te::Plugin&); // the dry and wet levels, or none
 
 //==============================================================================
-// The devices that can be added: Phazite's own (model/devices/Devices.h), Tracktion's 4OSC synth until Phazite has its own,
-// and the plug-ins found by scanning.
+// The devices that can be added: Phazite's own (model/devices/Devices.h) and the plug-ins found by scanning.
 struct DeviceType
 {
     juce::String name;

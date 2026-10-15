@@ -134,7 +134,7 @@ juce::StringArray findValuesNaming (const juce::XmlElement&, const juce::StringA
 void checkNoUserName (const juce::String& what, const juce::XmlElement& save);
 
 //==============================================================================
-// One of the built-in devices that the device list offers (phazite::getDeviceTypes()), by its type: Phazite's own, such
-// as phazite::devices::Reverb::typeID, or Tracktion's 4OSC synth, made as the browser makes it.
+// One of the built-in devices that the device list offers (phazite::getDeviceTypes()), by its type, such as
+// phazite::devices::Reverb::typeID, made as the browser makes it.
 te::Plugin::Ptr createBuiltInDevice (te::Edit&, const char* xmlTypeName);
 } // namespace phazite::test
