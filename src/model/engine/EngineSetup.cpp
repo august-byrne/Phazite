@@ -2,6 +2,7 @@
 #include "EngineSetup.h"
 #include "LoudnessMeterPlugin.h"
 #include "model/base/Migrations.h"
+#include "model/devices/Devices.h"
 
 // ThreadSanitizer builds (linux-tsan preset): GCC defines __SANITIZE_THREAD__, Clang has a feature check.
 #if defined(__SANITIZE_THREAD__)
@@ -143,6 +144,7 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
 
     // Phazite's own plug-in types, which projects can hold.
     engine->getPluginManager().createBuiltInType<LoudnessMeterPlugin>();
+    registerDevices (*engine);
 
     // Tracktion's DeviceManager::initialise() asks for a MIDI device scan in 5 ms, but then restarts the
     // same timer with the 4-second hot-plug check, so MIDI inputs (and the computer keyboard, which

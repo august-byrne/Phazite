@@ -62,6 +62,7 @@ target_sources(phazite_core PRIVATE
     src/devices/core/DeviceInfo.cpp
     src/devices/core/DeviceInfo.h
     src/devices/core/Processor.h
+    src/devices/core/SampleTap.h
     src/devices/dsp/DelayLine.h
     src/devices/dsp/Envelopes.h
     src/devices/dsp/Filters.cpp
@@ -69,6 +70,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/Math.h
     src/devices/dsp/Oscillators.h
     src/devices/dsp/Random.h
+    src/devices/eq/Equalizer.cpp
+    src/devices/eq/Equalizer.h
     src/model/arrangement/Arrangement.cpp
     src/model/arrangement/Arrangement.h
     src/model/arrangement/Clips.cpp
@@ -101,6 +104,8 @@ target_sources(phazite_core PRIVATE
     src/model/commands/UndoCommands.h
     src/model/devices/DevicePlugin.cpp
     src/model/devices/DevicePlugin.h
+    src/model/devices/Devices.cpp
+    src/model/devices/Devices.h
     src/model/devices/ParameterHandle.cpp
     src/model/devices/ParameterHandle.h
     src/model/engine/AppInfo.cpp
@@ -418,6 +423,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DrumRowTests.cpp
         tests/DspTests.cpp
         tests/EngineSetupTests.cpp
+        tests/EqualizerTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
         tests/GoldenProjectTests.cpp

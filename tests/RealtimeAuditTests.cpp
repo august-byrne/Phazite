@@ -13,8 +13,10 @@
 #include "AudioThreadMonitor.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/eq/Equalizer.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
+#include "model/devices/DevicePlugin.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/mixer/Mixer.h"
 
@@ -289,6 +291,42 @@ TEST_SUITE ("realtime-audit")
         CHECK (meter->getReadings().momentaryValid); // it ran in the playback graph
         CHECK (meter->getReadings().momentaryLufs > -40.0f);
         checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's EQ, every band on and one automated, with its analyzer listening")
+    {
+        using phazite::devices::Equalizer;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+
+        const auto plugin = edit->getPluginCache().createNewPlugin (Equalizer::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
+
+        for (int band = 0; band < Equalizer::numBands; ++band)
+        {
+            device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::on)]->setParameter (1.0f,
+                                                                                                                  juce::sendNotification);
+            device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::gain)]->setParameter (3.0f,
+                                                                                                                    juce::sendNotification);
+        }
+
+        auto& curve = device->findParameter ("band3Gain")->getCurve();
+        curve.addPoint (0_tp, -12.0f, 0.0f, nullptr);
+        curve.addPoint (1_tp, 12.0f, 0.0f, nullptr);
+
+        auto& tap = dynamic_cast<Equalizer&> (device->getProcessor()).getOutputTap();
+        tap.setListening (true);
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's EQ, every band on and one automated, with its analyzer listening", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+
+        std::vector<float> tapped (32768);
+        CHECK (tap.pull (tapped.data(), (int) tapped.size()) > 0);
     }
 
     // These read audio files or use code Phazite is replacing, so they only report.
