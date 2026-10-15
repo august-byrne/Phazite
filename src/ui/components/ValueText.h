@@ -34,6 +34,28 @@ std::optional<double> parseTempo (const juce::String&);
 // A time signature: "4/4", "6/8".
 juce::String formatTimeSignature (int numerator, int denominator);
 
+// An integrated loudness, to a tenth: "-14.0 LUFS".
+juce::String formatLoudness (double lufs);
+
+// Reads a loudness as someone might type it ("-14", "-14 LUFS", "-23 LKFS"). Nothing if it isn't a number.
+std::optional<double> parseLoudness (const juce::String&);
+
+// A true peak, to a tenth: "-1.0 dBTP".
+juce::String formatTruePeak (double dBTP);
+
+// Reads a true peak as someone might type it ("-1", "-1 dBTP", "-1 dB"). Nothing if it isn't a number.
+std::optional<double> parseTruePeak (const juce::String&);
+
+// How long something lasts, in minutes and whole seconds: "0:04", "2:31", "61:05".
+juce::String formatDuration (double seconds);
+
+// A sample rate, in kilohertz: "44.1 kHz", "48 kHz".
+juce::String formatSampleRate (double hz);
+
+// What showing a file in its folder is called in the system's file manager: "Show in Explorer", "Show in Finder", or
+// "Show in File Manager".
+juce::String getShowInFolderText();
+
 // A value of one of Phazite's devices' parameters, as its unit says: "120 Hz", "1.20 kHz", "+3.0 dB", "35%", "12.5 ms",
 // "1.20 s", "+7 st", "-15 ct", "4.0:1", a choice's name, "On" or "Off", or a plain number ("0.71").
 juce::String formatParameterValue (const devices::ParameterInfo&, float value);

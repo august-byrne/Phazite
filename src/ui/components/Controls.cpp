@@ -189,6 +189,27 @@ void showAsParameter (juce::Slider& slider, const devices::ParameterInfo& parame
     { return (double) parseParameterValue (parameter, text).value_or ((float) slider.getValue()); };
 }
 
+void showAsLoudness (juce::Slider& slider)
+{
+    slider.textFromValueFunction = [] (double lufs) { return formatLoudness (lufs); };
+    slider.valueFromTextFunction = [&slider] (const juce::String& text) { return parseLoudness (text).value_or (slider.getValue()); };
+    slider.updateText();
+}
+
+void showAsTruePeak (juce::Slider& slider)
+{
+    slider.textFromValueFunction = [] (double dBTP) { return formatTruePeak (dBTP); };
+    slider.valueFromTextFunction = [&slider] (const juce::String& text) { return parseTruePeak (text).value_or (slider.getValue()); };
+    slider.updateText();
+}
+
+void setPrimary (juce::TextButton& button, bool primary)
+{
+    const auto& p = getPalette (button);
+    button.setColour (juce::TextButton::buttonColourId, primary ? p.accent : p.surfaceRaised);
+    button.setColour (juce::TextButton::textColourOffId, primary ? p.textOnAccent : p.text);
+}
+
 //==============================================================================
 ParameterAttachment::ParameterAttachment (juce::Slider& s, juce::String name)
     : slider (s),

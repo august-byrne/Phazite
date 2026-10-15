@@ -1,29 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Welcome.h"
+#include "ui/components/Controls.h"
+#include "ui/components/ValueText.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
 {
-namespace
-{
-    juce::String getShowText()
-    {
-#if JUCE_MAC
-        return "Show in Finder";
-#elif JUCE_WINDOWS
-        return "Show in Explorer";
-#else
-        return "Show in File Manager";
-#endif
-    }
-
-    void setPrimary (juce::TextButton& button, bool primary, const Palette& p)
-    {
-        button.setColour (juce::TextButton::buttonColourId, primary ? p.accent : p.surfaceRaised);
-        button.setColour (juce::TextButton::textColourOffId, primary ? p.textOnAccent : p.text);
-    }
-} // namespace
-
 //==============================================================================
 SoundPackPage::SoundPackPage (SoundPack& pack)
     : soundPack (pack)
@@ -44,7 +26,7 @@ SoundPackPage::SoundPackPage (SoundPack& pack)
     mainButton.onClick = [this] { mainButtonClicked(); };
     fileButton.setTooltip ("Installs them from " + soundPack.getRelease().zip.getFileName() + ", downloaded in a browser");
     fileButton.onClick = [this] { chooseFile(); };
-    showButton.setButtonText (getShowText());
+    showButton.setButtonText (getShowInFolderText());
     showButton.setTooltip ("Shows the folder they are in");
     showButton.onClick = [this] { soundPack.getFolder().revealToUser(); };
     progressBar.setTitle ("Download progress");
@@ -111,7 +93,7 @@ void SoundPackPage::update()
 
     mainButton.setButtonText (mainText);
     mainButton.setVisible (mainText.isNotEmpty());
-    setPrimary (mainButton, state != State::downloading, p);
+    setPrimary (mainButton, state != State::downloading);
     fileButton.setVisible (! busy && ! installed);
     showButton.setVisible (installed);
     progress = state == State::installing ? -1.0 : soundPack.getProgress();

@@ -49,6 +49,7 @@
     "project.open": [ "command + O" ],
     "project.save": [ "command + S" ],
     "project.saveAs": [ "command + shift + S" ],
+    "project.export": [ "command + R" ],
     "view.commandPalette": [ "command + K" ],
     "view.pianoRoll": [ "F7" ],
     "view.toggleBrowser": [ "alt + F8" ],

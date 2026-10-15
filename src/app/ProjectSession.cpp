@@ -2,6 +2,7 @@
 #include "ProjectSession.h"
 #include "model/arrangement/Outlines.h"
 #include "model/engine/LiveInput.h"
+#include "model/project/Export.h"
 #include "model/project/StarterProject.h"
 
 namespace phazite
@@ -218,6 +219,12 @@ void ProjectSession::saveProject()
         onProjectChanged();
 }
 
+void ProjectSession::exportSong()
+{
+    if (project != nullptr && onExport != nullptr)
+        onExport();
+}
+
 void ProjectSession::closeThen (std::function<void (bool)> callback)
 {
     if (project == nullptr || ! project->hasUnsavedChanges())
@@ -402,5 +409,14 @@ void ProjectSession::addCommands (CommandRegistry& registry)
                     .synonyms = { "store", "write" },
                     .perform = [this] { saveProject(); },
                     .isEnabled = [this] { return project != nullptr; } });
+
+    registry.add ({ .id = "project.export",
+                    .name = "Export Song",
+                    .category = "Project",
+                    .description = "Renders the song to a WAV or FLAC file, in the project's Renders folder unless you choose another, "
+                                   "and normalizes its loudness if you ask.",
+                    .synonyms = { "render", "bounce", "mixdown", "wav", "flac", "audio file", "loudness", "lufs" },
+                    .perform = [this] { exportSong(); },
+                    .isEnabled = [this] { return project != nullptr && canExport (project->getEdit()); } });
 }
 } // namespace phazite

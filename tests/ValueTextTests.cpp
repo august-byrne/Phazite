@@ -137,3 +137,29 @@ TEST_CASE ("Tempos read in beats per minute, to a hundredth, and time signatures
 
     CHECK (phazite::ui::formatTimeSignature (6, 8) == "6/8");
 }
+
+TEST_CASE ("Loudness, true peaks, durations and sample rates read as export tools write them")
+{
+    CHECK (phazite::ui::formatLoudness (-14.0) == "-14.0 LUFS");
+    CHECK (phazite::ui::formatLoudness (-23.04) == "-23.0 LUFS");
+    CHECK (phazite::ui::parseLoudness ("-14").value_or (0.0) == doctest::Approx (-14.0));
+    CHECK (phazite::ui::parseLoudness (" -16.5 LUFS ").value_or (0.0) == doctest::Approx (-16.5));
+    CHECK (phazite::ui::parseLoudness ("-24 lkfs").value_or (0.0) == doctest::Approx (-24.0));
+    CHECK_FALSE (phazite::ui::parseLoudness ("loud").has_value());
+
+    CHECK (phazite::ui::formatTruePeak (-1.0) == "-1.0 dBTP");
+    CHECK (phazite::ui::formatTruePeak (-0.04) == "0.0 dBTP");
+    CHECK (phazite::ui::parseTruePeak ("-2 dBTP").value_or (0.0) == doctest::Approx (-2.0));
+    CHECK (phazite::ui::parseTruePeak ("-0.5dB").value_or (0.0) == doctest::Approx (-0.5));
+    CHECK_FALSE (phazite::ui::parseTruePeak ("").has_value());
+
+    CHECK (phazite::ui::formatDuration (4.4) == "0:04");
+    CHECK (phazite::ui::formatDuration (151.0) == "2:31");
+    CHECK (phazite::ui::formatDuration (3665.0) == "61:05");
+
+    CHECK (phazite::ui::formatSampleRate (44100.0) == "44.1 kHz");
+    CHECK (phazite::ui::formatSampleRate (48000.0) == "48 kHz");
+    CHECK (phazite::ui::formatSampleRate (88200.0) == "88.2 kHz");
+
+    CHECK (phazite::ui::getShowInFolderText().startsWith ("Show in "));
+}

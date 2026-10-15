@@ -145,6 +145,8 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/Sidechain.h
     src/model/notes/Notes.cpp
     src/model/notes/Notes.h
+    src/model/project/Export.cpp
+    src/model/project/Export.h
     src/model/project/Project.cpp
     src/model/project/Project.h
     src/model/project/ProjectContext.cpp
@@ -379,6 +381,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/AppShell.h
     src/ui/shell/CommandPalette.cpp
     src/ui/shell/CommandPalette.h
+    src/ui/shell/ExportPanel.cpp
+    src/ui/shell/ExportPanel.h
     src/ui/shell/HintBar.cpp
     src/ui/shell/HintBar.h
     src/ui/shell/Panels.cpp
@@ -500,6 +504,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/EngineSetupTests.cpp
         tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
+        tests/ExportTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
         tests/GoldenProjectTests.cpp

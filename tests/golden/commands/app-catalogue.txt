@@ -60,6 +60,7 @@ project.open | ctrl + O
 project.openRecent
 project.saveAs | ctrl + shift + S
 project.save | ctrl + S
+project.export | ctrl + shift + R
 view.commandPalette | ctrl + K
 view.searchBrowser | ctrl + F
 device.add | F8

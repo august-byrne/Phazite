@@ -51,6 +51,12 @@ TEST_CASE ("Every setting keeps its key")
     CHECK (juce::String (Settings::browserPreview.key) == "phaziteBrowserPreview");
     CHECK (juce::String (Settings::browserPreviewVolume.key) == "phaziteBrowserPreviewVolume");
     CHECK (juce::String (Settings::browserOpenness.key) == "phaziteBrowserOpenness");
+    CHECK (juce::String (Settings::exportFormat.key) == "phaziteExportFormat");
+    CHECK (juce::String (Settings::exportSampleRate.key) == "phaziteExportSampleRate");
+    CHECK (juce::String (Settings::exportBitDepth.key) == "phaziteExportBitDepth");
+    CHECK (juce::String (Settings::exportNormalize.key) == "phaziteExportNormalize");
+    CHECK (juce::String (Settings::exportLoudnessTarget.key) == "phaziteExportLoudnessTarget");
+    CHECK (juce::String (Settings::exportTruePeakCeiling.key) == "phaziteExportTruePeakCeiling");
 }
 
 TEST_CASE ("Settings have their defaults, and are stored as before")
@@ -70,6 +76,12 @@ TEST_CASE ("Settings have their defaults, and are stored as before")
     CHECK (settings.get (Settings::browserPreview));
     CHECK (settings.get (Settings::browserPreviewVolume, 0.7) == doctest::Approx (0.7));
     CHECK (settings.get (Settings::browserOpenness).isEmpty());
+    CHECK (settings.get (Settings::exportFormat) == "wav");
+    CHECK (settings.get (Settings::exportSampleRate) == doctest::Approx (44100.0));
+    CHECK (settings.get (Settings::exportBitDepth) == doctest::Approx (24.0));
+    CHECK_FALSE (settings.get (Settings::exportNormalize));
+    CHECK (settings.get (Settings::exportLoudnessTarget) == doctest::Approx (-14.0));
+    CHECK (settings.get (Settings::exportTruePeakCeiling) == doctest::Approx (-1.0));
     CHECK (settings.getKeyChanges ("FL Studio").isEmpty());
 
     settings.set (Settings::theme, "light");

@@ -30,6 +30,7 @@ public:
 
     std::function<void()> onProjectClosing;  // the open project is about to close: let go of its Edit
     std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
+    std::function<void()> onExport;          // shows the export window (the main window's), for Export Song
     juce::Component* dialogParent = nullptr; // dialogs appear over this
     std::function<void (const juce::String& title, const juce::String& message)> onError; // shows an error; unset, a dialog
 
@@ -42,6 +43,7 @@ public:
     void chooseRecentProject(); // a menu of the recent projects
     void saveProject();
     void saveProjectAs(); // a copy under a new name, which then stays open
+    void exportSong();    // through onExport
 
     // Asks whether to save unsaved changes first. Calls back with false if the user cancelled.
     void closeThen (std::function<void (bool closed)>);

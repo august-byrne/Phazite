@@ -3,6 +3,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/engine/LiveInput.h"
 #include "ui/input/KeymapStore.h"
+#include "ui/shell/ExportPanel.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
@@ -86,7 +87,12 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     ui::setPluginKeys (pluginKeys.get());
 
     session.dialogParent = this;
-    session.onProjectClosing = [this] { shell->setEdit (nullptr); };
+    session.onExport = [this] { showExport(); };
+    session.onProjectClosing = [this]
+    {
+        delete exportWindow.getComponent(); // its export holds the Edit
+        shell->setEdit (nullptr);
+    };
     session.onProjectChanged = [this]
     {
         shell->setEdit (session.getContext().getEdit());
@@ -104,11 +110,13 @@ MainWindow::~MainWindow()
     stopTimer();
     session.onProjectClosing = nullptr;
     session.onProjectChanged = nullptr;
+    session.onExport = nullptr;
     session.dialogParent = nullptr;
     shell->setEdit (nullptr);
 
     // Close the dialogs: they point into the Engine and the commands, which are destroyed after
-    // this window.
+    // this window, and an export into the project's Edit.
+    delete exportWindow.getComponent();
     delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
     delete welcomeWindow.getComponent();
@@ -340,6 +348,40 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
     welcomeWindow = o.launchAsync();
 }
 
+void MainWindow::showExport()
+{
+    if (exportWindow != nullptr)
+    {
+        exportWindow->toFront (true);
+        return;
+    }
+
+    auto* project = session.getProject();
+
+    if (project == nullptr)
+        return;
+
+    // The song goes into the project's Renders folder, named after the project, unless the user chooses another file.
+    auto& edit = project->getEdit();
+    const auto defaultFile = project->getRendersFolder().getChildFile (project->getFile().getFileNameWithoutExtension() + ".wav");
+    auto* panel = new ui::ExportPanel (
+        services.settings, defaultFile, getExportRange (edit).getLength().inSeconds(),
+        [&edit] (const ExportSettings& settings, const juce::File& file, std::function<void (const ExportReport&)> onFinished)
+        { return std::make_unique<SongExport> (edit, file, settings, std::move (onFinished)); });
+    panel->setSize (560, 600);
+
+    juce::DialogWindow::LaunchOptions o;
+    o.dialogTitle = "Export Song";
+    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = false;
+    o.componentToCentreAround = this;
+    o.content.setOwned (panel);
+
+    exportWindow = o.launchAsync();
+}
+
 void MainWindow::showWelcomeOnFirstRun()
 {
     if (services.settings.get (Settings::welcomeShown))
@@ -515,6 +557,8 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSubMenu ("Open Recent", recentMenu, ! recent.isEmpty());
             menu.addSeparator();
             add (menu, { "project.save", "project.saveAs" });
+            menu.addSeparator();
+            add (menu, { "project.export" });
             menu.addSeparator();
             add (menu, { "app.quit" });
             break;

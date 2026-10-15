@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Browser.h"
+#include "ui/components/ValueText.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -720,16 +721,7 @@ void Browser::showMenu (const LibraryItem& item, bool canRemoveFolder)
                   });
 
     if (item.isFile())
-    {
-#if JUCE_MAC
-        const juce::String showText ("Show in Finder");
-#elif JUCE_WINDOWS
-        const juce::String showText ("Show in Explorer");
-#else
-        const juce::String showText ("Show in File Manager");
-#endif
-        menu.addItem (showText, [file = item.file] { file.revealToUser(); });
-    }
+        menu.addItem (getShowInFolderText(), [file = item.file] { file.revealToUser(); });
 
     if (canRemoveFolder)
         menu.addItem ("Remove from the Browser",

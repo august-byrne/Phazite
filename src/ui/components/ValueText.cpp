@@ -31,6 +31,12 @@ namespace
         return juce::String (value, size < 10.0 ? 2 : (size < 100.0 ? 1 : 0));
     }
 
+    // To a tenth, and "0.0" rather than "-0.0".
+    juce::String withOneDecimal (double value)
+    {
+        return juce::String (juce::roundToInt (value * 10.0) / 10.0, 1);
+    }
+
     // "+7", "-15", and "0" without a sign, with the decimals given.
     juce::String withSign (double value, int decimals)
     {
@@ -135,6 +141,57 @@ std::optional<double> parseTempo (const juce::String& text)
 juce::String formatTimeSignature (int numerator, int denominator)
 {
     return juce::String (numerator) + "/" + juce::String (denominator);
+}
+
+juce::String formatLoudness (double lufs)
+{
+    return withOneDecimal (lufs) + " LUFS";
+}
+
+std::optional<double> parseLoudness (const juce::String& text)
+{
+    auto t = text.trim().toLowerCase();
+    removeEnding (t, { "lufs", "lkfs", "lu" });
+    return parseNumber (t);
+}
+
+juce::String formatTruePeak (double dBTP)
+{
+    return withOneDecimal (dBTP) + " dBTP";
+}
+
+std::optional<double> parseTruePeak (const juce::String& text)
+{
+    auto t = text.trim().toLowerCase();
+    removeEnding (t, { "dbtp", "db" });
+    return parseNumber (t);
+}
+
+juce::String formatDuration (double seconds)
+{
+    const auto whole = juce::jmax (0, juce::roundToInt (seconds));
+    return juce::String (whole / 60) + ":" + juce::String (whole % 60).paddedLeft ('0', 2);
+}
+
+juce::String formatSampleRate (double hz)
+{
+    auto number = juce::String (hz / 1000.0, 1);
+
+    if (number.endsWith (".0"))
+        number = number.dropLastCharacters (2);
+
+    return number + " kHz";
+}
+
+juce::String getShowInFolderText()
+{
+#if JUCE_MAC
+    return "Show in Finder";
+#elif JUCE_WINDOWS
+    return "Show in Explorer";
+#else
+    return "Show in File Manager";
+#endif
 }
 } // namespace phazite::ui
 

@@ -34,7 +34,7 @@ Done before this plan (progress since then is under [Status](#status)):
 | 2. First outline styles | **Decided:** pop, rock, electronic, hip-hop/trap |
 | 3. UI font and its licence | **Decided:** Inter, bundled, SIL OFL 1.1 |
 | 4. Engine fixes: workarounds or a fork | **Decided:** simple workarounds first, a fork if they get awkward; replacing a part of the engine is a separate decision for each part (A5) |
-| 5. MP3 export | Step 1.8 |
+| 5. MP3 export | Before v1 (proposed: WAV and FLAC only in step 1.8) |
 | 6. Airwindows effects | Step 2.8 |
 | 7. Sandboxing before or after v1 | Phase 3 |
 | 8. Ableton Live keymap in v1 | Step 3.7 |
@@ -312,6 +312,7 @@ Done before this plan (progress since then is under [Status](#status)):
 **1.8 Export (S)**
 - Render to WAV and FLAC with loudness normalization.
 - *Done when:* an exported file plays correctly and meets the chosen loudness target.
+- *Status:* done (2026-10-15), pending a check by hand. In: File > Export Song (Ctrl+Shift+R; Ctrl+R in FL Studio's keymap) and its window (`src/ui/shell/ExportPanel.h`), which keeps its choices: WAV or FLAC, 44.1 to 96 kHz, 16-bit dithered, 24-bit or 32-bit float, and Normalize to a loudness under a true-peak ceiling. The model (`src/model/project/Export.h`) renders the song to its end with its tails on Tracktion's renderer, in the background with progress and Cancel, into a file that replaces the chosen one only once it is complete, then measures it again for the report, which says when the ceiling kept it under its target. Tests export WAV and FLAC files and check that they play the song, meet -14 and -23 LUFS within 0.07 LU, keep under the ceiling, and leave an older file alone when cancelled. MP3 waits for [question 5](design.md#25-open-questions).
 
 **1.9 First launch and starter project (M)**
 - The first-run flow: "Coming from…?" and audio setup.
@@ -491,7 +492,7 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; step 1.6 done (all six devices, and the starter project on them) and step 1.7 done (metronome, tempo, recording and Capture), pending checks by hand |
+| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; step 1.6 done (all six devices, and the starter project on them), step 1.7 done (metronome, tempo, recording and Capture) and step 1.8 done (export to WAV and FLAC, normalized to a loudness), pending checks by hand |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |

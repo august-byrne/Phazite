@@ -67,6 +67,12 @@ public:
     static constexpr BoolSetting browserPreview { "phaziteBrowserPreview", true, SaveTiming::soon };
     static constexpr NumberSettingWithoutDefault browserPreviewVolume { "phaziteBrowserPreviewVolume", SaveTiming::soon };
     static constexpr TextSetting browserOpenness { "phaziteBrowserOpenness", "", SaveTiming::soon };
+    static constexpr TextSetting exportFormat { "phaziteExportFormat", "wav", SaveTiming::now }; // wav, flac
+    static constexpr NumberSetting exportSampleRate { "phaziteExportSampleRate", 44100.0, SaveTiming::now };
+    static constexpr NumberSetting exportBitDepth { "phaziteExportBitDepth", 24.0, SaveTiming::now };
+    static constexpr BoolSetting exportNormalize { "phaziteExportNormalize", false, SaveTiming::now };
+    static constexpr NumberSetting exportLoudnessTarget { "phaziteExportLoudnessTarget", -14.0, SaveTiming::now };  // LUFS
+    static constexpr NumberSetting exportTruePeakCeiling { "phaziteExportTruePeakCeiling", -1.0, SaveTiming::now }; // dBTP
 
     // Kept in that file (the Engine's, which must outlive this), or, without one, in memory (tests). The parameter
     // isn't named 'file': it would hide the member (C4458, -Wshadow).

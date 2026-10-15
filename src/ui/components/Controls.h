@@ -87,6 +87,14 @@ void showAsPan (juce::Slider&);
 // Shows and reads a slider's value as a value of one of Phazite's devices' parameters, by its unit ("1.20 kHz").
 void showAsParameter (juce::Slider&, const devices::ParameterInfo&);
 
+// Shows and reads a slider's value as an integrated loudness ("-14.0 LUFS"), or as a true peak ("-1.0 dBTP").
+void showAsLoudness (juce::Slider&);
+void showAsTruePeak (juce::Slider&);
+
+// Shows a button as its window's main one, in the accent colour, or as an ordinary one. Call it again when the theme
+// changes (lookAndFeelChanged()).
+void setPrimary (juce::TextButton&, bool primary);
+
 //==============================================================================
 // Links a slider to a parameter of a plug-in, such as a track's volume. Moving the slider sets the
 // parameter, as one named undo step per drag or key press, which the model's ParameterHandle owns;
