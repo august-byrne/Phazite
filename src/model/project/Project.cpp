@@ -383,14 +383,16 @@ void Project::markChildChanged (const juce::ValueTree& parent, const juce::Value
 
 bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    return tree.hasType (te::IDs::TRANSPORT)
-           && (property == te::IDs::position || property == te::IDs::start || property == te::IDs::loopPoint1
-               || property == te::IDs::loopPoint2);
+    return (tree.hasType (te::IDs::TRANSPORT)
+            && (property == te::IDs::position || property == te::IDs::start || property == te::IDs::loopPoint1
+                || property == te::IDs::loopPoint2))
+           || (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property))
+           || (tree.hasType (schema::PHAZITE) && schema::isGridProperty (property));
 }
 
-bool Project::isUncountedElement (const juce::ValueTree&, const juce::ValueTree& element)
+bool Project::isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)
 {
-    return element.hasType (te::IDs::INPUTDEVICES);
+    return element.hasType (te::IDs::INPUTDEVICES) || (parent.hasType (schema::PHAZITE) && element.hasType (schema::PIANOROLL));
 }
 
 bool Project::isCounted (const juce::ValueTree& tree, const juce::Identifier& property)

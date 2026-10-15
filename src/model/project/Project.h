@@ -105,10 +105,13 @@ private:
 
     // Tracktion writes these while it plays, without anyone changing the song, so they don't count as changes: the
     // playhead position, and the Edit's input-device states (the inputs it knows, and which track live input goes to).
-    // Nor does where the loop is, which follows the song, or where playback starts. A property (isUncountedProperty()),
-    // or an element with everything in it (isUncountedElement()): notifications and the comparison with savedState leave
-    // out the same. Never leave out lastSignificantChange: Tracktion's time stamp is how a change it notices outside the
-    // Edit's values (a plug-in's own settings) reaches autosave.
+    // Nor does where the loop is, which follows the song, or where playback starts; nor do view settings, which are saved
+    // but aren't the song (decision 4: schema::isTrackViewProperty(), isGridProperty() and PIANOROLL). A property
+    // (isUncountedProperty()), or an element with everything in it (isUncountedElement()): notifications and the
+    // comparison with savedState leave out the same. Never leave out lastSignificantChange: Tracktion's time stamp is how
+    // a change it notices outside the Edit's values (a plug-in's own settings) reaches autosave. Tracktion renews it when
+    // the undo history changes, a track's mute or solo changes, or a plug-in reports a change; view settings are written
+    // without the undo manager, so they leave it alone.
     static bool isUncountedProperty (const juce::ValueTree&, const juce::Identifier& property);
     static bool isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element);
     static bool isCounted (const juce::ValueTree&, const juce::Identifier& property);

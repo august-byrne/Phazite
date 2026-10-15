@@ -2,14 +2,20 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "model/arrangement/Clips.h"
+#include "model/arrangement/Grid.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
+#include "model/arrangement/Tracks.h"
 #include "model/base/Migrations.h"
 #include "model/base/Schema.h"
+#include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
 #include "model/project/StarterProject.h"
 #include "model/transport/Playback.h"
+#include "ui/playlist/TrackHeights.h"
+
+#include <functional>
 
 namespace
 {
@@ -375,4 +381,108 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 
     track->state.setProperty (phazite::schema::phaziteKeyRoot, 3, nullptr);
     CHECK (project->hasUnsavedChanges());
+}
+
+TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
+{
+    namespace schema = phazite::schema;
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Views");
+    auto& edit = project->getEdit();
+
+    auto* track = phazite::insertTrack (edit, nullptr, nullptr);
+    REQUIRE (track != nullptr);
+    auto* other = phazite::insertTrack (edit, track, nullptr);
+    REQUIRE (other != nullptr);
+    auto* folder = phazite::insertFolder (edit, other, nullptr);
+    REQUIRE (folder != nullptr);
+    phazite::test::settle();
+
+    // Without undo steps, so that the view settings below can be seen to make none. Tracktion marks the Edit changed when
+    // its undo history changes (once the message about it arrives), so the project is saved after that.
+    edit.getUndoManager().clearUndoHistory();
+    phazite::test::settle();
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    // Every view setting: tracks' heights (one shown so short that it collapses), a collapsed folder, a pinned track, drum
+    // mode and rows, and both editors' grids, which gives the piano roll's its element.
+    phazite::ui::setTrackHeight (*track, 200);
+    phazite::ui::setShownTrackHeight (*other, 20);
+    phazite::setCollapsed (*folder, true);
+    phazite::setPinned (*track, true);
+    phazite::setDrumTrack (*track, true);
+    phazite::setDrumRowOrder (*track, { 38, 36 });
+    phazite::hideDrumRow (*track, 42);
+    phazite::hideDrumRow (*other, 42);
+    phazite::showAllDrumRows (*other);
+    phazite::saveGridSettings (edit, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 2 });
+    phazite::saveGridSettings (edit, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 10 });
+    phazite::test::settle();
+
+    // No unsaved change, nothing to undo, and nothing for autosave to write.
+    CHECK_FALSE (project->hasUnsavedChanges());
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+    REQUIRE (project->autosave().wasOk());
+    CHECK_FALSE (phazite::Project::getAutosaveFile (project->getFile()).exists());
+
+    // A notification that changes nothing, which makes the project compare itself with its saved copy, doesn't count them
+    // either; a change to the song still counts.
+    track->state.sendPropertyChangeMessage (te::IDs::name);
+    CHECK_FALSE (project->hasUnsavedChanges());
+    project->getPhaziteState().setProperty (schema::outline, "pop", nullptr);
+    CHECK (project->hasUnsavedChanges());
+
+    // Saved and opened again, they are all there.
+    const auto trackID = track->itemID, otherID = other->itemID, folderID = folder->itemID;
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+    project = openProject (file);
+    auto& reopened = project->getEdit();
+    auto* t = dynamic_cast<te::AudioTrack*> (te::findTrackForID (reopened, trackID));
+    auto* o = te::findTrackForID (reopened, otherID);
+    auto* f = dynamic_cast<te::FolderTrack*> (te::findTrackForID (reopened, folderID));
+    REQUIRE (t != nullptr);
+    REQUIRE (o != nullptr);
+    REQUIRE (f != nullptr);
+    CHECK (phazite::ui::getTrackHeight (*t) == 200);
+    CHECK (phazite::isCollapsed (*o));
+    CHECK (phazite::isCollapsed (*f));
+    CHECK (phazite::isPinned (*t));
+    CHECK (phazite::isDrumTrack (*t));
+    CHECK (phazite::getDrumRowOrder (*t) == std::vector<int> { 38, 36 });
+    CHECK (phazite::getHiddenDrumRows (*t) == std::vector<int> { 42 });
+    CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::playlist).adaptiveOffset == 2);
+    CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::pianoRoll).fixedLevel == 10);
+
+    // Everything else is the song or state, which closing without saving would lose: each of these is an unsaved change.
+    const auto isUnsavedChange = [&project] (const std::function<void()>& change)
+    {
+        REQUIRE (project->save().wasOk());
+        REQUIRE_FALSE (project->hasUnsavedChanges());
+        change();
+        phazite::test::settle();
+        return project->hasUnsavedChanges();
+    };
+
+    CHECK (isUnsavedChange ([&project] { project->getPhaziteState().setProperty (schema::outline, "rock", nullptr); }));
+
+    // With looping on and saved, a range looped on purpose (only loopFollowsSong changes, and the uncounted loop points).
+    reopened.getTransport().looping = true;
+    CHECK (isUnsavedChange (
+        [&reopened] { phazite::loopRange (reopened, { te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (6.0) }); }));
+
+    CHECK (isUnsavedChange ([&project] { project->getPhaziteState().getOrCreateChildWithName (schema::LASTKEY, nullptr); }));
+    CHECK (isUnsavedChange ([t] { phazite::setTrackKey (*t, phazite::Key { 2, te::Scale::dorian }); }));
+    CHECK (isUnsavedChange ([f] { phazite::setMixedAsBus (*f, true); }));
+
+    // Those two are undo steps, which Tracktion counts by itself; written without one, they count too.
+    CHECK (isUnsavedChange ([t] { t->state.setProperty (schema::phaziteKeyScale, "lydian", nullptr); }));
+    CHECK (isUnsavedChange ([f] { f->state.removeProperty (schema::phaziteBus, nullptr); }));
+
+    auto* section = phazite::insertSection (reopened, {}, { .name = "Verse", .length = te::BeatDuration::fromBeats (16.0) });
+    REQUIRE (section != nullptr);
+    CHECK (isUnsavedChange ([section] { section->state.setProperty (schema::phaziteRole, "chorus", nullptr); }));
+    CHECK (isUnsavedChange ([section] { section->state.setProperty (schema::phaziteEnergy, 0.9f, nullptr); }));
 }

@@ -96,6 +96,20 @@ inline const juce::Identifier phaziteDrumHidden { "phaziteDrumHidden" };
 // On FOLDERTRACK. true, or none: the folder was made a bus with the bus switch, so it stays one without effects. song
 inline const juce::Identifier phaziteBus { "phaziteBus" };
 
+// View settings: saved, written without undo steps, and not unsaved changes (decision 4; Project's isUncountedProperty()
+// and isUncountedElement()): on tracks, their heights, collapsed and pinned, drum mode and rows; on PHAZITE, the playlist's
+// grid. PIANOROLL holds view settings only. Keep these lists exact: anything else a project holds is song or state.
+inline bool isTrackViewProperty (const juce::Identifier& p)
+{
+    return p == phaziteHeight || p == phaziteCollapsed || p == phazitePinned || p == phaziteDrumMode || p == phaziteDrumOrder
+           || p == phaziteDrumHidden;
+}
+
+inline bool isGridProperty (const juce::Identifier& p)
+{
+    return p == gridSnap || p == gridAdaptive || p == gridOffset || p == gridStep || p == gridTriplets;
+}
+
 //==============================================================================
 // On sections: Tracktion's arranger clips (ARRANGERCLIP). song
 
