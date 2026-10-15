@@ -107,6 +107,16 @@ Done before this plan (progress since then is under [Status](#status)):
 - The UI's direct edits (about 20) and the editing rules in UI files (where dropped files go, what Draw places, that sections never overlap, and others) move into model functions with tests.
 - The big files split: the playlist into layout, clip tools, drop target, commands and view; the piano roll into session, note layout, note tools and commands; the channel strip into one file per class. The browser gets a model, and the playlist and the piano roll share one set of gesture code.
 - *Done when:* the UI starts no undo steps and makes no direct edits, and no source file is much over 1,000 lines.
+- *Status:* done (2026-10-15), alongside step 1.6, pending a check by hand that editing works as before. Each step was a commit of its own that built and passed the tests, golden tests included:
+  - model functions open their own named undo steps (`phazite::UndoStep`), and a drag holds a `phazite::Gesture` (`src/model/commands/Undo.h`) from its first change until the mouse goes up; knobs, faders and the mix knob change parameters through one. A gesture can also roll its changes back, which no tool offers yet (Escape during a drag could);
+  - the sections strip, the track header, the device menus, the mixer strip, the piano roll (the key menu, velocities, transforms and the note tools) and the playlist (dropped files, double-clicks, adding, coloring and moving tracks, and the clip tools) edit through model functions, and the rules they held moved with them: where dropped files go (`importFiles()`), what Draw and Paint place (`placeClip()`) and what Slip does (`slipClip()`); the mute and solo buttons use the track switches the commands use;
+  - the playlist is split into a file per part (`PlaylistParts.h`: the view, the rows, the tools, drops, and the track headers with the commands), the piano roll likewise (the view, the rows, the commands, the note grid and its tools), and the mixer strip into one file per class;
+  - the browser has a model (`src/services/BrowserModel.*`): its places, what each holds, search results and its rows' texts, without window code;
+  - the playlist's and the piano roll's tools share one gesture (`src/ui/timeline/TimelineGesture.*`).
+- *Done when, checked 2026-10-15:*
+  - `sh tools/check-architecture.sh` counts 0 UI undo steps (46 when A2 began), and the UI's Tracktion references went from 538 to 518;
+  - a search of `src/ui/` finds no call that changes the project except through a model function (or `ui::ParameterAttachment`, until A3);
+  - no source file is over 1,000 lines: the largest, `src/ui/timeline/TimelineEditor.cpp`, has 977.
 
 **A3. Phazite's types at the UI boundary (XL, one view at a time)**
 - IDs for tracks, clips and devices, built on Tracktion's `EditItemID`; stable note IDs saved in the project; selections held as IDs.
@@ -484,6 +494,6 @@ Roughly in order of value:
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
-| Architecture track | A0 (2026-10-14) and A1 (2026-10-15) done; A2 in progress alongside steps 1.6 to 1.9: drags have a gesture session in the model, knobs and faders change parameters through it, the sections strip, the track header, the device menus and the mixer strip (now split into a file per part) edit through model functions that are undo steps of their own, and the mix knob has a gesture of its own (the UI's undo steps 46 to 26) |
+| Architecture track | A0 (2026-10-14), A1 and A2 (2026-10-15) done, A2 pending a check by hand: the UI begins no undo steps (46 when A2 began) and makes no direct edits, the playlist, piano roll and mixer strip are split into a file per part, the browser has a model, and the two editors' tools share one gesture |
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.
