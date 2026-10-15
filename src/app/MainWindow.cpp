@@ -90,10 +90,8 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     setMenuBar (this);
     setApplicationCommandManagerToWatch (&commands.getCommandManager());
 
-    // Shortcuts work anywhere in the window. Key listeners added later are asked first, so the computer
-    // keyboard gets its letters before shortcuts do; it leaves alone keys pressed with Ctrl, Alt or Cmd.
-    addKeyListener (&commands);
-    addKeyListener (&computerKeyboard);
+    // Shortcuts work anywhere in the window, and the computer keyboard gets its letters before they do.
+    windowKeys = std::make_unique<ui::WindowKeys> (*this, commands, computerKeyboard);
     commands.getCommandManager().getKeyMappings()->addChangeListener (this);
 
     // Play and stop, and the computer keyboard, work over plug-in windows too.
@@ -131,8 +129,7 @@ MainWindow::~MainWindow()
     ui::setPluginKeys (nullptr);
     pluginKeys = nullptr;
     commands.getCommandManager().getKeyMappings()->removeChangeListener (this);
-    removeKeyListener (&computerKeyboard);
-    removeKeyListener (&commands);
+    windowKeys = nullptr;
     computerKeyboard.onChange = nullptr;
     setMenuBar (nullptr);
     clearContentComponent();
@@ -147,20 +144,14 @@ void MainWindow::activeWindowStatusChanged()
 {
     juce::DocumentWindow::activeWindowStatusChanged();
 
-    // Keys released in another window would never reach this one: end the notes now, and let the tools that
-    // spring back do so.
-    if (! isActiveWindow())
-    {
-        computerKeyboard.releaseAll();
-        commands.releaseHeldKeys();
-    }
+    // Keys released in another window would never reach this one.
+    if (! isActiveWindow() && windowKeys != nullptr)
+        windowKeys->releaseKeys();
 }
 
 bool MainWindow::keyPressed (const juce::KeyPress& key)
 {
-    // While the computer keyboard plays notes, Shift and a letter run that letter's single-key
-    // shortcut, as in Ableton Live. The key listeners have tried Shift's own shortcuts by now.
-    if (computerKeyboard.isEnabled() && commands.invokeWithoutShift (key))
+    if (windowKeys != nullptr && windowKeys->keyPressedAfterListeners (key))
         return true;
 
     return juce::DocumentWindow::keyPressed (key);

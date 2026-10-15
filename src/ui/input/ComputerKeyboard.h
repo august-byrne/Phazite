@@ -13,7 +13,7 @@ namespace phazite::ui
 // of letters plays the white keys from C (A S D F G H J K L ;) and the row above the black keys
 // (W E T Y U O P); Z and X change the octave, C and V the velocity. Keys pressed with Shift, Ctrl,
 // Alt or Cmd are shortcuts: as in Ableton Live, Shift and a letter run that letter's single-key
-// shortcut while this plays notes (CommandRegistry::invokeWithoutShift()). Keys typed into a text
+// shortcut while this plays notes (ui::WindowKeys::keyPressedAfterListeners()). Keys typed into a text
 // field never reach it.
 class ComputerKeyboard : public juce::KeyListener
 {

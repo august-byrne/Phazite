@@ -250,6 +250,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/input/ComputerKeyboard.h
     src/ui/input/PluginKeys.cpp
     src/ui/input/PluginKeys.h
+    src/ui/input/WindowKeys.cpp
+    src/ui/input/WindowKeys.h
     src/ui/mixer/ChannelStrip.cpp
     src/ui/mixer/ChannelStrip.h
     src/ui/mixer/MixerView.cpp
@@ -402,7 +404,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/UiTestHelpers.h
         tests/UndoTests.cpp
         tests/ValueTextTests.cpp
-        tests/WelcomeTests.cpp)
+        tests/WelcomeTests.cpp
+        tests/WindowKeysTests.cpp)
 
     phazite_use_core(phazite_tests)
     target_link_libraries(phazite_tests PRIVATE phazite_app phazite_ui)
