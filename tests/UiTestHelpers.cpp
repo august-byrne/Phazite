@@ -11,14 +11,82 @@ bool dispatchNextMessageOnSystemQueue (bool returnIfNoPendingMessages);
 
 namespace phazite::test
 {
+namespace
+{
+    // Dispatches what is waiting on the system queue (on Windows, window messages, JUCE's wake-ups among them) and what
+    // that posts in turn, and returns how many it dispatched. With a limit, in case something posts a new message each
+    // time it gets one.
+    int dispatchSystemQueue()
+    {
+        int count = 0;
+
+        while (count < 10000 && juce::detail::dispatchNextMessageOnSystemQueue (true))
+            ++count;
+
+        return count;
+    }
+} // namespace
+
 void dispatchPendingMessages()
 {
-    // With a limit, in case something posts a new message each time it gets one.
-    for (int i = 0; i < 10000 && juce::detail::dispatchNextMessageOnSystemQueue (true); ++i)
+    // On Windows, JUCE wakes the message thread for its queue with one window message, which the thread that finds the
+    // queue empty posts just after adding its message (juce_Messaging_windows.cpp). A message posted here while another
+    // thread (JUCE's timer thread, say) is between those two steps gets no wake-up of its own, so "no window message
+    // waiting" doesn't mean "nothing to deliver": CI once saw a click in the playlist miss the selection's change
+    // message that way. So each pass also queues a marker behind everything else, and dispatches until the marker has
+    // run, waiting for a wake-up that is on its way. The passes go on until one in which the marker came alone: nothing
+    // was waiting before it, its own wake-up delivered it, and nothing came after. (Linux's queue has no such gap; there
+    // the passes cost little.)
+    for (int pass = 0; pass < 100; ++pass)
     {
+        const auto before = dispatchSystemQueue();
+        auto markerRan = std::make_shared<bool> (false);
+
+        if (! juce::MessageManager::callAsync ([markerRan] { *markerRan = true; }))
+            break; // the message loop is shutting down
+
+        const auto start = juce::Time::getMillisecondCounter();
+        int tries = 0;
+
+        while (! *markerRan)
+        {
+            ++tries;
+
+            if (juce::detail::dispatchNextMessageOnSystemQueue (true))
+                continue;
+
+            if (juce::Time::getMillisecondCounter() - start > 5000u)
+            {
+                FAIL_CHECK ("A message waiting for the message thread wasn't delivered within 5 seconds");
+                return;
+            }
+
+            juce::Thread::sleep (1); // its wake-up is on its way from another thread
+        }
+
+        if (const auto after = dispatchSystemQueue(); before == 0 && tries == 1 && after == 0)
+            break;
     }
 
     juce::Timer::callPendingTimersSynchronously();
+}
+
+bool dispatchMessagesUntil (const std::function<bool()>& condition, int timeoutMilliseconds)
+{
+    const auto start = juce::Time::getMillisecondCounter();
+
+    for (;;)
+    {
+        dispatchPendingMessages();
+
+        if (condition())
+            return true;
+
+        if (juce::Time::getMillisecondCounter() - start > (juce::uint32) timeoutMilliseconds)
+            return false;
+
+        juce::Thread::sleep (5);
+    }
 }
 
 juce::Component* findComponentWithTitle (juce::Component& parent, const juce::String& title)
@@ -248,3 +316,53 @@ void Mouse::pause()
     time += juce::MouseEvent::getDoubleClickTimeout() + 100;
 }
 } // namespace phazite::test
+
+//==============================================================================
+#if JUCE_WINDOWS
+// Windows' header comes last, so that its macros reach nothing above. It is included as JUCE includes it
+// (juce_BasicNativeHeaders.h): without min and max macros, and without warnings of its own.
+#ifndef NOMINMAX
+ #define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+ #define WIN32_LEAN_AND_MEAN
+#endif
+JUCE_BEGIN_IGNORE_WARNINGS_LEVEL_MSVC (0, 4201)
+#include <windows.h>
+JUCE_END_IGNORE_WARNINGS_MSVC
+
+namespace phazite::test
+{
+namespace
+{
+    constexpr UINT jucesWakeUp = WM_USER + 123; // InternalMessageQueue::customMessageID, juce_Messaging_windows.cpp
+} // namespace
+
+std::jthread queueWithoutWakeUp (int delayMilliseconds)
+{
+    // Into the empty queue, this message's post sends a wake-up (if another thread's message got in first, that
+    // thread's comes instead, a moment later)...
+    dispatchPendingMessages();
+    juce::MessageManager::callAsync ([] {});
+
+    // ...which is taken back...
+    MSG wakeUp {};
+    const auto start = juce::Time::getMillisecondCounter();
+
+    while (! PeekMessageW (&wakeUp, nullptr, jucesWakeUp, jucesWakeUp, PM_REMOVE))
+    {
+        REQUIRE_MESSAGE (juce::Time::getMillisecondCounter() - start < 5000u,
+                         "no WM_USER + 123 for JUCE's queue: if juce_Messaging_windows.cpp changed it, change this");
+        juce::Thread::sleep (1);
+    }
+
+    // ...and posted again later, from a thread of its own. Until then no post sends one: the queue isn't empty.
+    return std::jthread (
+        [window = wakeUp.hwnd, delayMilliseconds]
+        {
+            juce::Thread::sleep (delayMilliseconds);
+            PostMessageW (window, jucesWakeUp, 0, 0);
+        });
+}
+} // namespace phazite::test
+#endif

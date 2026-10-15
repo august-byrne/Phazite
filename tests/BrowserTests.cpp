@@ -334,10 +334,10 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
 
     REQUIRE (phazite::test::waitForSoundPack (soundPack));
     REQUIRE (soundPack.isInstalled());
-    phazite::test::dispatchPendingMessages(); // the pack's change message, and the place filling again
 
-    // The place lists them now, and search finds them once they are indexed.
-    CHECK (getRows (browser).contains ("Drums"));
+    // The place lists them now (after the pack's change message, which its thread posts after it sets the state), and
+    // search finds them once they are indexed.
+    CHECK (phazite::test::dispatchMessagesUntil ([&browser] { return getRows (browser).contains ("Drums"); }));
     REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 10000));
     CHECK_FALSE (library.search ("kick").empty());
 }

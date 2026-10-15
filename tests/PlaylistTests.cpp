@@ -297,6 +297,27 @@ TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip
     CHECK (screen.selection.isSelected (screen.tracks[1]));
 }
 
+#if JUCE_WINDOWS
+TEST_CASE ("With FL Studio's keymap, a click places the clip selected just before, also while another thread's wake-up is late")
+{
+    // As CI once saw: the selection's change message, which tells the playlist which clip was used last, queued behind
+    // another thread's message whose wake-up wasn't posted yet, so it got none of its own, and the click came first.
+    PlaylistScreen screen;
+    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("FL Studio"));
+    auto& clip = screen.addClip (0, 0.0, 4.0);
+    auto lateWakeUp = phazite::test::queueWithoutWakeUp (100); // delivers what is waiting first
+    screen.selection.selectOnly (clip);
+    phazite::test::dispatchPendingMessages();
+
+    phazite::test::Mouse mouse (*screen.lanes);
+    mouse.click (screen.at (8.05, 1));
+    lateWakeUp.join(); // before this was fixed, the selection's message came only after this
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.getClipStarts (1).size() == 1);
+    CHECK (screen.getClipStarts (1)[0] == doctest::Approx (8.0).epsilon (0.01));
+}
+#endif
+
 TEST_CASE ("With FL Studio's keymap, a selected time range loops while it is selected")
 {
     PlaylistScreen screen;

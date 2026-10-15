@@ -34,7 +34,8 @@ TEST_CASE ("The welcome window offers Phazite Sounds, shows the download, and th
     }
 
     REQUIRE (phazite::test::waitForSoundPack (soundPack));
-    phazite::test::dispatchPendingMessages(); // the pack's change message
+    // The pack's change message: its thread posts it after it sets the state, so it may not be queued yet.
+    CHECK (phazite::test::dispatchMessagesUntil ([&page] { return page.getStatus().startsWith ("Installed in "); }));
     CHECK (soundPack.isInstalled());
     CHECK (page.getStatus().startsWith ("Installed in " + soundPack.getFolder().getFullPathName()));
     CHECK_FALSE (mainButton.isVisible());
@@ -56,11 +57,12 @@ TEST_CASE ("The welcome window says why a download failed, and offers it again")
     phazite::ui::WelcomePanel panel (soundPack);
     phazite::test::TestWindow window (panel, 560, 460);
 
+    auto& page = panel.getSoundPackPage();
     soundPack.download();
     REQUIRE (phazite::test::waitForSoundPack (soundPack));
-    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::test::dispatchMessagesUntil (
+        [&page, &soundPack] { return soundPack.getError().isNotEmpty() && page.getStatus() == soundPack.getError(); }));
 
-    auto& page = panel.getSoundPackPage();
     CHECK (page.getStatus() == soundPack.getError());
     CHECK (page.getMainButton().getButtonText()
            == juce::String (phazite::SoundPack::canDownload() ? "Try Again" : "Open the Download Page"));

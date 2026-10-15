@@ -373,6 +373,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ImportTests.cpp
         tests/LibraryTests.cpp
         tests/LiveInputTests.cpp
+        tests/MessageQueueTests.cpp
         tests/MigrationTests.cpp
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp

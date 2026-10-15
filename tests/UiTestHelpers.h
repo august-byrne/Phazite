@@ -9,12 +9,30 @@
 #include "TestHelpers.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <thread>
 
 namespace phazite::test
 {
-// Delivers the messages that are waiting (AsyncUpdater callbacks, change messages, posted calls) and runs
-// the timers that are due, as the app's message loop would between two events.
+// Delivers the messages that are waiting (AsyncUpdater callbacks, change messages, posted calls) and what they post in
+// turn, and runs the timers that are due, as the app's message loop would between two events. Every message posted
+// before the call is delivered, even while another thread's wake-up for JUCE's queue is late (it waits for that, and
+// fails the test after 5 seconds). A message that another thread posts may come later, even after that thread's work
+// looks done: wait for its effect with dispatchMessagesUntil().
 void dispatchPendingMessages();
+
+// Delivers messages and runs the timers that are due until the condition holds, for a message another thread posts
+// (SoundPack's thread posts its change message after it sets the state that waitForSoundPack() sees). False if the
+// condition still doesn't hold after timeoutMilliseconds.
+bool dispatchMessagesUntil (const std::function<bool()>& condition, int timeoutMilliseconds = 5000);
+
+#if JUCE_WINDOWS
+// Leaves JUCE's message queue as another thread leaves it halfway through posting (JUCE's timer thread, say): a message
+// queued (one that does nothing), and the window message that wakes the message thread for it (WM_USER + 123,
+// juce_Messaging_windows.cpp) not posted yet. Until it is, a message posted here gets no wake-up of its own: JUCE posts
+// one only into an empty queue. A thread of its own posts the wake-up after delayMilliseconds; the std::jthread
+// returned waits for that when it goes.
+std::jthread queueWithoutWakeUp (int delayMilliseconds);
+#endif
 
 // The first component in parent's tree (parent included) with this title, or nullptr.
 juce::Component* findComponentWithTitle (juce::Component& parent, const juce::String& title);
