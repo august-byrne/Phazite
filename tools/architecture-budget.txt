@@ -14,6 +14,7 @@ model-window-references        0
 model-tracktion-includes       0
 model-undo-steps               0
 model-include-loops            0
+devices-tracktion              0
 ui-tracktion-includes          7
 ui-tracktion-references      546
 ui-tracktion-aliases           0

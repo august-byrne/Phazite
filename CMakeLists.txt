@@ -59,6 +59,8 @@ phazite_check_juceaide_toolchain("${_phazite_juceaide_dir}")
 add_library(phazite_core STATIC)
 
 target_sources(phazite_core PRIVATE
+    src/devices/core/DeviceInfo.cpp
+    src/devices/core/DeviceInfo.h
     src/model/arrangement/Arrangement.cpp
     src/model/arrangement/Arrangement.h
     src/model/arrangement/Clips.cpp
@@ -399,6 +401,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ComputerKeyboardTests.cpp
         tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
+        tests/DeviceInfoTests.cpp
         tests/DrumRowTests.cpp
         tests/EngineSetupTests.cpp
         tests/GoldenFiles.cpp
