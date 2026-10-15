@@ -5,7 +5,7 @@ edit.undoOrRedo | Undo or Redo | Edit | Undoes the last change, or redoes it if 
 transport.playStop | Play / Stop | Transport | Plays from where you last put the playhead, or stops and goes back there. | start, playback, return to start | enabled-when over-plugins
 transport.playPause | Play / Pause | Transport | Plays from where the playhead is, or stops it there, so that playback goes on from there. | pause, continue, resume | enabled-when over-plugins
 transport.goToStart | Go to Start | Transport | Moves the playhead to the start of the song. | home, beginning, rewind, return | enabled-when
-transport.goToEnd | Go to End | Transport | Moves the playhead to the end of the song, where its last clip ends. | end, last, fast forward | enabled-when
+transport.goToEnd | Go to End | Transport | Moves the playhead to the end of the song: the end of the bar its last clip ends in. | end, last, fast forward | enabled-when
 edit.delete | Delete | Edit | Deletes the selected notes, time range, sections, clips or tracks. A section goes with what is in it. | remove, erase | enabled-when undo current-name
 edit.deleteAndCloseGap | Delete and Close Gap | Edit | Deletes the selected time range or clips, and moves what comes after them back to close the gap. | ripple delete, shuffle, remove gap | enabled-when undo
 edit.duplicate | Duplicate | Edit | Duplicates the selected sections or clips, right after them, or the selected tracks, each below its original. | copy, clone, repeat | enabled-when undo current-name
@@ -48,7 +48,7 @@ track.addReturn | Add Return Track | Track | Adds a return track, for an effect 
 transport.loop | Loop | Transport | Plays the song over and over, or the part looped on purpose: at its end, playback starts again. | repeat, cycle, loop playback | enabled-when ticked
 transport.loopSelection | Loop Selection | Transport | Loops the time range selected in the playlist, or the whole song when none is selected. | loop range, cycle region, loop brace, set loop | enabled-when
 section.loop | Loop Section | Section | Loops the selected sections instead of the whole song. | repeat section, cycle, practice | enabled-when
-transport.loopSong | Loop the Song | Transport | Loops the whole song again, from its start to the end of its last clip; the loop grows as clips go later. | loop all, whole song, song mode | enabled-when ticked
+transport.loopSong | Loop the Song | Transport | Loops the whole song again, from its start to the end of the bar its last clip ends in; the loop grows as clips go later. | loop all, whole song, song mode | enabled-when ticked
 note.transposeUp | Transpose Up | Note | Moves the selected notes up a semitone. | pitch up, semitone, raise | enabled-when undo priority=1 repeats
 note.transposeDown | Transpose Down | Note | Moves the selected notes down a semitone. | pitch down, semitone, lower | enabled-when undo priority=1 repeats
 note.octaveUp | Octave Up | Note | Moves the selected notes up an octave. | transpose, pitch up, raise | enabled-when undo priority=1 repeats

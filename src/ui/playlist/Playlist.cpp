@@ -1785,6 +1785,9 @@ te::BeatRange Playlist::getContentRange() const
 {
     auto end = 16.0; // an empty song still shows some bars
 
+    // Everything on the time line, sections included (Tracktion's Edit length counts them), so that an outline longer
+    // than the song so far can be scrolled to and fits Zoom to Fit. Not the song's end (getSongEnd()), which sections
+    // don't make longer.
     if (auto* e = getEdit())
         end = std::max (end, e->tempoSequence.toBeats (te::toPosition (e->getLength())).inBeats());
 

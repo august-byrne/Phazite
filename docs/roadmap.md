@@ -86,7 +86,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Done when:*
   - the architecture check's counts of JUCE window includes and window classes in the model, Tracktion includes in the model outside its prelude, model undo steps outside the undo code, model files on include loops and files outside an area folder are all 0;
   - every command's logic can be called and tested without the registry;
-  - the app behaves as before, except for the two changes decided on 2026-10-14 (view state no longer marks the project as changed; older projects' grid sizes and key scales are converted) and question 17's handling of projects from a newer Phazite, and the golden files change only for that conversion.
+  - the app behaves as before, except for the two changes decided on 2026-10-14 (view state no longer marks the project as changed; older projects' grid sizes and key scales are converted), question 17's handling of projects from a newer Phazite, and the fixes the golden tests found (Phase 1, after step 1.5); the golden files change only for that conversion and those fixes.
 
 **A2. One path for every edit (L, alongside steps 1.6 to 1.9)**
 - Model functions open their own named undo steps.
@@ -258,6 +258,8 @@ Done before this plan (progress since then is under [Status](#status)):
 - **Fixes from the third round of feedback (2026-10-13):** Space stops back at the play start (the last click in a ruler, or the song's start in a project just opened), and Shift+Space (Ctrl+Space in FL Studio's keymap) pauses; play, stop and the computer keyboard work while a plug-in window has the focus (`src/ui/input/PluginKeys.h`); each effect has a Mix knob; the inspector's channel strip fills its height.
 
 **Architecture phases A0 and A1 (from 2026-10-14)**, before step 1.6: golden tests, the architecture check, and untangling the model, with no new features ([architecture track](#architecture-track)).
+- **Fixes the golden tests found (2026-10-14),** where they showed wrong behavior; the golden files change only where a fix says so:
+  - Go to End goes to the end of the song, the end of the bar its last clip ends in, not to the end of its sections.
 
 **1.6 First built-in devices (XL)**
 - The first devices:

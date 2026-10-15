@@ -21,19 +21,29 @@ namespace
     }
 } // namespace
 
-te::TimeRange getSongLoopRange (const te::Edit& edit)
+te::TimePosition getSongEnd (const te::Edit& edit)
 {
-    auto end = te::TimePosition();
+    auto lastClipEnd = te::TimePosition();
 
     for (auto* track : te::getAudioTracks (edit))
         for (auto* clip : track->getClips())
-            end = std::max (end, clip->getPosition().getEnd());
+            lastClipEnd = std::max (lastClipEnd, clip->getPosition().getEnd());
+
+    if (lastClipEnd <= te::TimePosition())
+        return {}; // no clips: the song ends where it starts
 
     // To the end of the bar the last clip ends in.
     const auto& tempo = edit.tempoSequence;
-    const auto barsAndBeats = tempo.toBarsAndBeats (end);
+    const auto barsAndBeats = tempo.toBarsAndBeats (lastClipEnd);
     const auto bars = barsAndBeats.bars + (barsAndBeats.beats.inBeats() > 1.0e-6 ? 1 : 0);
-    return { te::TimePosition(), tempo.toTime (te::tempo::BarsAndBeats { std::max (1, bars), {}, 0 }) };
+    return tempo.toTime (te::tempo::BarsAndBeats { bars, {}, 0 });
+}
+
+te::TimeRange getSongLoopRange (const te::Edit& edit)
+{
+    // At least a bar long: a song without clips loops its first bar.
+    const auto firstBarEnd = edit.tempoSequence.toTime (te::tempo::BarsAndBeats { 1, {}, 0 });
+    return { te::TimePosition(), std::max (getSongEnd (edit), firstBarEnd) };
 }
 
 bool doesLoopFollowSong (const te::Edit& edit)
@@ -90,7 +100,7 @@ void goToStart (te::Edit& edit)
 
 void goToEnd (te::Edit& edit)
 {
-    movePlayhead (edit, te::toPosition (edit.getLength()));
+    movePlayhead (edit, getSongEnd (edit));
 }
 
 void playOrStop (te::Edit& edit)
@@ -219,7 +229,7 @@ void addTransportCommands (CommandRegistry& registry, te::SelectionManager& sele
     registry.add ({ .id = "transport.goToEnd",
                     .name = "Go to End",
                     .category = "Transport",
-                    .description = "Moves the playhead to the end of the song, where its last clip ends.",
+                    .description = "Moves the playhead to the end of the song: the end of the bar its last clip ends in.",
                     .synonyms = { "end", "last", "fast forward" },
                     .perform = withEdit (selection, goToEnd),
                     .isEnabled = hasEdit });
@@ -296,7 +306,8 @@ void addLoopCommands (CommandRegistry& registry, te::SelectionManager& selection
         { .id = "transport.loopSong",
           .name = "Loop the Song",
           .category = "Transport",
-          .description = "Loops the whole song again, from its start to the end of its last clip; the loop grows as clips go later.",
+          .description =
+              "Loops the whole song again, from its start to the end of the bar its last clip ends in; the loop grows as clips go later.",
           .synonyms = { "loop all", "whole song", "song mode" },
           .perform =
               [&selection]

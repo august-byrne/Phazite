@@ -2,6 +2,7 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/Clips.h"
+#include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Selection.h"
 #include "model/commands/CommandRegistry.h"
@@ -233,13 +234,14 @@ TEST_CASE ("Go to start and end")
 {
     Song song;
     phazite::addTransportCommands (song.registry, song.selection);
-    song.addClip (0, 2.0, 6.0); // ends 3 seconds in
+    song.addClip (0, 2.0, 6.0); // ends 3 seconds in, inside the second bar
     auto& transport = song.edit->getTransport();
 
-    // Home and End put the playhead at the song's start or where its last clip ends, and playback starts there.
+    // Home and End put the playhead at the song's start or its end (the end of the bar its last clip ends in), and
+    // playback starts there.
     phazite::goToEnd (*song.edit);
-    CHECK (transport.getPosition().inSeconds() == doctest::Approx (3.0));
-    CHECK (phazite::getPlayStart (*song.edit).inSeconds() == doctest::Approx (3.0));
+    CHECK (transport.getPosition().inSeconds() == doctest::Approx (4.0));
+    CHECK (phazite::getPlayStart (*song.edit).inSeconds() == doctest::Approx (4.0));
 
     phazite::goToStart (*song.edit);
     CHECK (transport.getPosition().inSeconds() == doctest::Approx (0.0));
@@ -247,7 +249,7 @@ TEST_CASE ("Go to start and end")
 
     // Their commands act on the selection manager's Edit.
     REQUIRE (song.registry.invoke ("transport.goToEnd"));
-    CHECK (transport.getPosition().inSeconds() == doctest::Approx (3.0));
+    CHECK (transport.getPosition().inSeconds() == doctest::Approx (4.0));
     REQUIRE (song.registry.invoke ("transport.goToStart"));
     CHECK (transport.getPosition().inSeconds() == doctest::Approx (0.0));
 
@@ -260,4 +262,47 @@ TEST_CASE ("Go to start and end")
         CHECK_FALSE (song.registry.find (id)->isEnabled());
         CHECK_FALSE (song.registry.invoke (id));
     }
+}
+
+TEST_CASE ("The song ends with the bar its last clip ends in, and its sections don't make it longer")
+{
+    Song song;
+    const auto songEnd = [&song] { return juce::String (phazite::getSongEnd (*song.edit).inSeconds(), 3); };
+    CHECK (songEnd() == "0.000");                // without clips it ends where it starts,
+    CHECK (song.getSongLoop() == "0.000-2.000"); // though it loops its first bar
+
+    // An outline runs on past what is in it so far: Tracktion's length counts its sections; the song's end doesn't.
+    REQUIRE (phazite::applyOutline (*song.edit, "rock")); // 96 bars
+    CHECK (song.edit->getLength().inSeconds() == doctest::Approx (192.0));
+    CHECK (songEnd() == "0.000");
+    CHECK (song.getSongLoop() == "0.000-2.000");
+
+    auto& clip = song.addClip (1, 2.0, 4.5); // half a beat into the second bar
+    CHECK (songEnd() == "4.000");
+    CHECK (song.getSongLoop() == "0.000-4.000");
+
+    clip.setMuted (true); // a muted clip counts
+    CHECK (songEnd() == "4.000");
+
+    song.edit->tempoSequence.getTimeSigs()[0]->setStringTimeSig ("3/4"); // beat 4.5 is in the second bar of three beats
+    CHECK (songEnd() == "3.000");
+}
+
+TEST_CASE ("Go to End goes to the song's end, not to the end of its sections")
+{
+    Song song;
+    phazite::addTransportCommands (song.registry, song.selection);
+    REQUIRE (phazite::applyOutline (*song.edit, "rock"));
+    const auto playhead = [&song] { return song.edit->getTransport().getPosition().inSeconds(); };
+
+    phazite::movePlayhead (*song.edit, seconds (10.0));
+    REQUIRE (song.registry.invoke ("transport.goToEnd"));
+    CHECK (playhead() == doctest::Approx (0.0)); // no clips: the song's start
+
+    song.addClip (0, 0.0, 8.0);
+    song.addClip (1, 2.0, 12.5); // ends half a beat into the fourth bar
+    REQUIRE (song.registry.invoke ("transport.goToEnd"));
+    CHECK (playhead() == doctest::Approx (8.0));
+    CHECK (phazite::getPlayStart (*song.edit).inSeconds() == doctest::Approx (8.0)); // playback starts there
+    CHECK (song.getSongLoop() == "0.000-8.000");                                     // where the loop ends
 }

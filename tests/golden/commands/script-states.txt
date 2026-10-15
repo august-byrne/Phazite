@@ -367,7 +367,7 @@ after clip.makeUnique:
 after select the clip:
   selected: clip on One at 0.000
 after transport.goToEnd:
-  playhead at 384.000
+  playhead at 8.000
 after transport.goToStart:
   playhead at 0.000
 after put the playhead at 1 s:

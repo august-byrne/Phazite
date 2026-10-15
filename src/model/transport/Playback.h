@@ -14,8 +14,14 @@ namespace phazite
 {
 class CommandRegistry;
 
-// The song as a loop: from its start to the end of the bar its last clip ends in, and at least a bar long.
-// Sections don't count: an outline can be longer than what is in it so far.
+// Where the song ends: at the end of the bar its last clip ends in, as a song in FL Studio ends with the last bar that
+// has something in it, or at its start if it has no clips. Every clip on the song's tracks counts, muted or not, in
+// folders too; sections don't, since an outline can run longer than what is in it so far. Not Tracktion's
+// Edit::getLength(), which counts sections. Go to End goes here, and the song's loop ends here.
+te::TimePosition getSongEnd (const te::Edit&);
+
+// The song as a loop: from its start to its end (getSongEnd()), and at least a bar long, so that a song without clips
+// loops its first bar.
 te::TimeRange getSongLoopRange (const te::Edit&);
 
 // Whether the loop is the song's, and follows it, rather than a range looped on purpose. Kept in the project.
@@ -38,8 +44,10 @@ te::TimePosition getPlayStart (const te::Edit&);
 // if it is playing).
 void movePlayhead (te::Edit&, te::TimePosition);
 
-// Home and End: put the playhead at the song's start, or at its end, where its last clip ends (movePlayhead()).
+// Home: puts the playhead at the song's start, as a click in a ruler would (movePlayhead()): playback starts there.
 void goToStart (te::Edit&);
+
+// End: moves the playhead to the song's end (getSongEnd()), as a click in a ruler would: playback starts there.
 void goToEnd (te::Edit&);
 
 // Space: plays from where playback starts, or stops and goes back there.
@@ -66,7 +74,7 @@ public:
 private:
     te::Edit& edit;
     juce::ValueTree editState;
-    te::TimePosition songEnd;
+    te::TimePosition songEnd;                     // where the song's loop ends: getSongEnd(), or a bar in for a song without clips
     std::optional<te::TimePosition> lastPosition; // while playing without a loop: where the playhead was last time
 
     void changed (const juce::ValueTree&);
