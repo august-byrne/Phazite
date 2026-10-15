@@ -17,6 +17,7 @@ enum class Icon
     plus,
     magnet,
     loop,
+    metronome,
     grip,     // a handle to drag something by
     expanded, // a chevron pointing down: something open that can fold
     folded,   // pointing right: folded

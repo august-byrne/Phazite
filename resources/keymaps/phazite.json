@@ -8,6 +8,7 @@
     "transport.goToEnd": [ "end" ],
     "transport.loop": [ "L" ],
     "transport.loopSelection": [ "command + L" ],
+    "transport.metronome": [ "O" ],
     "edit.undo": [ "command + Z" ],
     "edit.redo": [ "command + shift + Z", "command + Y" ],
     "edit.delete": [ "delete", "backspace" ],

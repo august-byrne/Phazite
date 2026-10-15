@@ -30,6 +30,8 @@ namespace
                 return "magnet.svg";
             case Icon::loop:
                 return "repeat.svg";
+            case Icon::metronome:
+                return "metronome.svg";
             case Icon::grip:
                 return "grip-vertical.svg";
             case Icon::expanded:

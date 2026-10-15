@@ -50,6 +50,8 @@ after start:
   transport.loopSelection: on "Loop Selection"
   section.loop: off "Loop Section"
   transport.loopSong: on "Loop the Song"
+  transport.metronome: on "Metronome"
+  transport.countIn: on "Count-In"
   note.transposeUp: off "Transpose Up"
   note.transposeDown: off "Transpose Down"
   note.octaveUp: off "Octave Up"

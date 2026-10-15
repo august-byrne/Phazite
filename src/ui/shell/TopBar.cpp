@@ -16,6 +16,17 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
 
     playButton.onClick = [this] { commands.invoke ("transport.playStop"); };
     loopButton.onClick = [this] { commands.invoke ("transport.loop"); };
+    metronomeButton.onClicked = [this] (bool isMenuClick)
+    {
+        if (isMenuClick)
+        {
+            showMetronomeMenu();
+            return;
+        }
+
+        commands.invoke ("transport.metronome");
+        metronomeButton.setToggleState (isTicked ("transport.metronome"), juce::dontSendNotification);
+    };
     keyboardButton.onClick = [this] { commands.invoke ("input.computerKeyboard"); };
 
     searchButton.setButtonText ("Search commands");
@@ -36,7 +47,7 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
     masterVolume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
-    for (auto* button : { &playButton, &loopButton, &keyboardButton, &searchButton })
+    for (auto* button : std::initializer_list<IconButton*> { &playButton, &loopButton, &metronomeButton, &keyboardButton, &searchButton })
     {
         button->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (button);
@@ -56,6 +67,8 @@ void TopBar::refreshTooltips()
                                          "Loop: at the end of the song, playback starts again from its start. The song ends with "
                                          "the bar its last clip ends in, so the loop grows as you add clips later",
                                          "transport.loop"));
+    metronomeButton.setTooltip (withShortcut (
+        commands, "Metronome: clicks on every beat while the song plays. Right-click for the count-in", "transport.metronome"));
     searchButton.setTooltip (withShortcut (commands, "Find and run any command by typing part of its name", "view.commandPalette"));
 
     shownKeyboardState = -1; // its tooltip names a shortcut too
@@ -86,6 +99,19 @@ void TopBar::updateKeyboardButton()
                                              "input.computerKeyboard"));
 }
 
+void TopBar::showMetronomeMenu()
+{
+    juce::PopupMenu menu;
+    addCommandItems (menu, commands, { "transport.metronome", "transport.countIn" });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (metronomeButton));
+}
+
+bool TopBar::isTicked (const juce::String& commandID) const
+{
+    const auto* command = commands.getRegistry().find (commandID);
+    return command != nullptr && command->isTicked != nullptr && command->isTicked();
+}
+
 void TopBar::paint (juce::Graphics& g)
 {
     const auto& p = getPalette (*this);
@@ -100,6 +126,7 @@ void TopBar::resized()
 
     playButton.setBounds (area.removeFromLeft (44));
     loopButton.setBounds (area.removeFromLeft (44));
+    metronomeButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::m);
 
     searchButton.setBounds (area.removeFromRight (180));
@@ -134,6 +161,8 @@ void TopBar::timerCallback()
     playButton.setEnabled (edit != nullptr);
     loopButton.setEnabled (edit != nullptr);
     loopButton.setToggleState (edit != nullptr && edit->getTransport().looping.get(), juce::dontSendNotification);
+    metronomeButton.setEnabled (edit != nullptr);
+    metronomeButton.setToggleState (isTicked ("transport.metronome"), juce::dontSendNotification);
 
     juce::String tempo;
 

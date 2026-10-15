@@ -38,8 +38,23 @@ private:
     ComputerKeyboard& computerKeyboard;
     const ProjectContext& projectContext;
 
+    // A transport button whose right-click opens its options, rather than clicking it.
+    struct OptionsButton : public IconButton
+    {
+        using IconButton::clicked;
+        using IconButton::IconButton;
+        std::function<void (bool isMenuClick)> onClicked;
+
+        void clicked (const juce::ModifierKeys& mods) override
+        {
+            if (onClicked != nullptr)
+                onClicked (mods.isPopupMenu());
+        }
+    };
+
     IconButton playButton { "Play", Icon::play }, loopButton { "Loop", Icon::loop }, keyboardButton { "Computer keyboard", Icon::keyboard },
         searchButton { "Search commands", Icon::search };
+    OptionsButton metronomeButton { "Metronome", Icon::metronome };
     juce::Label tempoLabel, cpuLabel;
     LevelMeter masterMeter { "Master level" };
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", te::decibelsToVolumeFaderPosition (0.0f) };
@@ -48,5 +63,7 @@ private:
 
     void timerCallback() override; // updates the readouts a few times a second; only changes repaint
     void updateKeyboardButton();
+    void showMetronomeMenu();
+    bool isTicked (const juce::String& commandID) const;
 };
 } // namespace phazite::ui

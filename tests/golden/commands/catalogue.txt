@@ -49,6 +49,8 @@ transport.loop | Loop | Transport | Plays the song over and over, or the part lo
 transport.loopSelection | Loop Selection | Transport | Loops the time range selected in the playlist, or the whole song when none is selected. | loop range, cycle region, loop brace, set loop | enabled-when
 section.loop | Loop Section | Section | Loops the selected sections instead of the whole song. | repeat section, cycle, practice | enabled-when
 transport.loopSong | Loop the Song | Transport | Loops the whole song again, from its start to the end of the bar its last clip ends in; the loop grows as clips go later. | loop all, whole song, song mode | enabled-when ticked
+transport.metronome | Metronome | Transport | Clicks on every beat while the song plays, louder on each bar's first. | click, click track, beat, tick, tempo | enabled-when ticked
+transport.countIn | Count-In | Transport | Plays a bar of clicks before recording starts from a stop, even with the metronome off. | precount, pre-roll, count in, lead-in | enabled-when ticked
 note.transposeUp | Transpose Up | Note | Moves the selected notes up a semitone. | pitch up, semitone, raise | enabled-when undo priority=1 repeats
 note.transposeDown | Transpose Down | Note | Moves the selected notes down a semitone. | pitch down, semitone, lower | enabled-when undo priority=1 repeats
 note.octaveUp | Octave Up | Note | Moves the selected notes up an octave. | transpose, pitch up, raise | enabled-when undo priority=1 repeats

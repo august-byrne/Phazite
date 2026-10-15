@@ -151,6 +151,8 @@ target_sources(phazite_core PRIVATE
     src/model/project/ProjectContext.h
     src/model/project/StarterProject.cpp
     src/model/project/StarterProject.h
+    src/model/transport/Metronome.cpp
+    src/model/transport/Metronome.h
     src/model/transport/Playback.cpp
     src/model/transport/Playback.h
     # services: what the whole app shares (they use the model; the model never uses them)
@@ -196,6 +198,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/headphones.svg
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/magnet.svg
+        resources/icons/lucide/metronome.svg
         resources/icons/lucide/mouse-pointer-2.svg
         resources/icons/lucide/move-horizontal.svg
         resources/icons/lucide/music.svg
@@ -500,6 +503,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/LimiterTests.cpp
         tests/LiveInputTests.cpp
         tests/MessageQueueTests.cpp
+        tests/MetronomeTests.cpp
         tests/MigrationTests.cpp
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp

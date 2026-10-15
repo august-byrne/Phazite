@@ -9,6 +9,8 @@
     "transport.playPause": [ "command + spacebar" ],
     "transport.goToStart": [ "home" ],
     "transport.loopSelection": [ "command + L" ],
+    "transport.metronome": [ "command + M" ],
+    "transport.countIn": [ "command + P" ],
     "edit.undoOrRedo": [ "command + Z" ],
     "edit.undo": [ "command + alt + Z" ],
     "edit.delete": [ "delete" ],

@@ -25,6 +25,7 @@
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/mixer/Mixer.h"
 #include "model/mixer/Sidechain.h"
+#include "model/transport/Metronome.h"
 
 #include <chrono>
 #include <thread>
@@ -227,6 +228,16 @@ TEST_SUITE ("realtime-audit")
         const auto m = playAndMeasure (*edit);
         report ("One empty track", m);
         CHECK (m.peakLevel == 0.0f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: the metronome, clicking louder on each bar's first beat")
+    {
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        phazite::setMetronomeOn (*edit, true);
+        const auto m = playAndMeasure (*edit);
+        report ("The metronome", m);
+        CHECK (m.peakLevel > 0.01f); // it clicks
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

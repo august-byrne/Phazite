@@ -49,6 +49,8 @@ transport.loop | L
 transport.loopSelection | ctrl + L
 section.loop
 transport.loopSong
+transport.metronome | O
+transport.countIn
 project.new | ctrl + N
 project.open | ctrl + O
 project.openRecent
