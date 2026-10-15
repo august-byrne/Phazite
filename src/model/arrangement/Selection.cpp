@@ -113,208 +113,172 @@ void RangeSelection::setInUndoStep (te::Edit& edit, te::BeatRange newRange, cons
 }
 
 //==============================================================================
-namespace
+void deleteSelection (te::SelectionManager& selection, const RangeSelection& range, bool closeGap)
 {
-    // Sections, the last first, held so that one deleted by an edit of another is skipped.
-    std::vector<te::SafeSelectable<te::ArrangerClip>> toSafeLatestFirst (const juce::Array<te::ArrangerClip*>& sections)
+    auto* edit = selection.getEdit();
+
+    if (edit == nullptr)
+        return;
+
+    if (const auto notes = getSelectedNotes (selection); ! notes.empty())
     {
-        std::vector<te::SafeSelectable<te::ArrangerClip>> safe;
-
-        for (int i = sections.size(); --i >= 0;)
-            safe.emplace_back (sections[i]);
-
-        return safe;
+        deleteNotes (notes);
+        return;
     }
 
-    void deleteSelection (te::SelectionManager& selection, const RangeSelection& range, bool closeGap)
+    if (! range.isEmpty())
     {
-        auto* edit = selection.getEdit();
-
-        if (edit == nullptr)
-            return;
-
-        if (const auto notes = getSelectedNotes (selection); ! notes.empty())
-        {
-            deleteNotes (notes);
-            return;
-        }
-
-        if (! range.isEmpty())
-        {
-            deleteTimeRange (*edit, range.getRange(), range.getTracks(), closeGap);
-            return;
-        }
-
-        // Sections go with what is in them, and the rest of the song closes up; latest first, so that
-        // deleting one doesn't move another still to be deleted. Deleting one can delete another inside it.
-        if (const auto sections = getSelectedSections (selection); ! sections.isEmpty())
-        {
-            for (const auto& section : toSafeLatestFirst (sections))
-                if (auto* s = section.get())
-                    deleteSection (*s);
-
-            return;
-        }
-
-        if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
-        {
-            deleteClips (clips, closeGap);
-            return;
-        }
-
-        const auto tracks = getSelectedOutermostTracks (selection);
-
-        if (tracks.isEmpty() || closeGap)
-            return;
-
-        const auto row = getPlaylistTracks (*edit).indexOf (tracks.getFirst());
-
-        for (auto* track : tracks)
-            edit->deleteTrack (track);
-
-        // The track that takes the first one's place is selected, as in Ableton Live, so the keyboard
-        // can carry on from there.
-        if (const auto remaining = getPlaylistTracks (*edit); ! remaining.isEmpty())
-            selection.selectOnly (remaining[juce::jmin (row, remaining.size() - 1)]);
+        deleteTimeRange (*edit, range.getRange(), range.getTracks(), closeGap);
+        return;
     }
 
-    void duplicateSelection (te::SelectionManager& selection, RangeSelection& range, bool asAliases)
+    // Sections go with what is in them, and the rest of the song closes up.
+    if (const auto sections = getSelectedSections (selection); ! sections.isEmpty())
     {
-        auto* edit = selection.getEdit();
-
-        if (edit == nullptr)
-            return;
-
-        // Notes: the copies go right after them, and are selected instead.
-        if (const auto notes = getSelectedNotes (selection); ! notes.empty() && ! asAliases)
-        {
-            auto* events = getSelectedMidiEvents (selection);
-            juce::Array<te::MidiNote*> copies;
-
-            for (const auto& copy : duplicateNotes (notes))
-                copies.add (copy.note);
-
-            events->setSelected (selection, copies, false);
-            return;
-        }
-
-        // A time range, before sections, clips and tracks (the order Delete and the command's name take): what lies in
-        // it goes again right after it, on its tracks, and the copy becomes the range in the same undo step, so that
-        // Duplicate again repeats it and Undo puts the range back. What else is selected stays, as Delete leaves it.
-        if (! range.isEmpty() && ! asAliases)
-        {
-            const auto tracks = range.getTracks();
-            const auto copied = duplicateTimeRange (*edit, range.getRange(), tracks);
-            range.setInUndoStep (*edit, copied, tracks);
-            return;
-        }
-
-        // Sections: each copy goes right after its original, with what is in it, latest first.
-        if (const auto sections = getSelectedSections (selection); ! sections.isEmpty())
-        {
-            selection.deselectAll();
-
-            for (const auto& section : toSafeLatestFirst (sections))
-                if (auto* s = section.get())
-                    if (auto* copy = duplicateSection (*s, asAliases))
-                        selection.addToSelection (copy);
-
-            return;
-        }
-
-        // Clips: the copies go right after the selection, as FL Studio's Ctrl+B does.
-        if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
-        {
-            auto start = clips.getFirst()->getStartBeat(), end = clips.getFirst()->getEndBeat();
-
-            for (auto* clip : clips)
-            {
-                start = std::min (start, clip->getStartBeat());
-                end = std::max (end, clip->getEndBeat());
-            }
-
-            selection.deselectAll();
-
-            for (auto* copy : copyClips (clips, asAliases)) // each starts where its original is
-            {
-                if (auto* track = copy->getClipTrack())
-                    moveClip (*copy, copy->getStartBeat() + (end - start), *track);
-
-                selection.addToSelection (copy);
-            }
-
-            return;
-        }
-
-        if (asAliases)
-            return;
-
-        // Tracks: each copy goes right after its original.
-        juce::Array<te::Track*> copies;
-
-        for (auto* track : getSelectedOutermostTracks (selection))
-            if (auto copy = edit->copyTrack (track, getInsertPointAfter (*track)))
-                copies.add (copy.get());
-
-        selection.deselectAll();
-
-        for (auto* copy : copies)
-            selection.addToSelection (copy);
+        deleteSections (sections);
+        return;
     }
 
-    // Splits the clips in the range at its edges, or else the selected clips at the playhead.
-    void split (te::SelectionManager& selection, const RangeSelection& range)
+    if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
     {
-        auto* edit = selection.getEdit();
+        deleteClips (clips, closeGap);
+        return;
+    }
 
-        if (edit == nullptr)
-            return;
+    if (! closeGap)
+        deleteTracks (getSelectedOutermostTracks (selection), &selection);
+}
 
-        if (! range.isEmpty())
-        {
-            juce::Array<te::Clip*> clips;
+void duplicateSelection (te::SelectionManager& selection, RangeSelection& range, bool asAliases)
+{
+    auto* edit = selection.getEdit();
 
-            for (auto* track : range.getTracks())
-                if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (track))
-                    clips.addArray (clipTrack->getClips());
+    if (edit == nullptr)
+        return;
 
-            const auto parts = splitClips (clips, range.getRange().getStart());
-            auto all = clips;
-            all.addArray (parts);
-            splitClips (all, range.getRange().getEnd());
-            return;
-        }
+    // Notes: the copies go right after them, and are selected instead.
+    if (const auto notes = getSelectedNotes (selection); ! notes.empty() && ! asAliases)
+    {
+        auto* events = getSelectedMidiEvents (selection); // before the copies change the clips
+        events->setSelected (selection, toMidiNotes (duplicateNotes (notes)), false);
+        return;
+    }
 
+    // A time range, before sections, clips and tracks (the order Delete and the command's name take): what lies in
+    // it goes again right after it, on its tracks, and the copy becomes the range in the same undo step, so that
+    // Duplicate again repeats it and Undo puts the range back. What else is selected stays, as Delete leaves it.
+    if (! range.isEmpty() && ! asAliases)
+    {
+        const auto tracks = range.getTracks();
+        const auto copied = duplicateTimeRange (*edit, range.getRange(), tracks);
+        range.setInUndoStep (*edit, copied, tracks);
+        return;
+    }
+
+    // Sections, with what is in them, and clips go right after themselves.
+    if (const auto sections = getSelectedSections (selection); ! sections.isEmpty())
+    {
+        duplicateSections (sections, asAliases, &selection);
+        return;
+    }
+
+    if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
+    {
+        duplicateClips (clips, asAliases, &selection);
+        return;
+    }
+
+    if (! asAliases)
+        duplicateTracks (getSelectedOutermostTracks (selection), &selection);
+}
+
+void splitSelection (const te::SelectionManager& selection, const RangeSelection& range)
+{
+    auto* edit = selection.getEdit();
+
+    if (edit == nullptr)
+        return;
+
+    if (! range.isEmpty())
+        splitClipsAtEdges (range.getTracks(), range.getRange());
+    else
         splitClips (getSelectedClips (selection), edit->tempoSequence.toBeats (edit->getTransport().getPosition()));
-    }
+}
 
-    void selectAll (te::SelectionManager& selection, RangeSelection& range)
-    {
-        auto* edit = selection.getEdit();
+void selectAllClipsOrTracks (te::SelectionManager& selection, RangeSelection& range)
+{
+    auto* edit = selection.getEdit();
 
-        if (edit == nullptr)
-            return;
+    if (edit == nullptr)
+        return;
 
-        // Every track while tracks are selected; otherwise every clip, or every track if there are none.
-        const auto tracksSelected = ! getSelectedTracks (selection).isEmpty();
-        juce::Array<te::Selectable*> items;
+    // Every track while tracks are selected; otherwise every clip, or every track if there are none.
+    const auto tracksSelected = hasSelectedTracks (selection);
+    juce::Array<te::Selectable*> items;
 
+    for (auto* track : getPlaylistTracks (*edit))
+        if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (track); clipTrack != nullptr && ! tracksSelected)
+            for (auto* clip : clipTrack->getClips())
+                items.add (clip);
+
+    if (items.isEmpty())
         for (auto* track : getPlaylistTracks (*edit))
-            if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (track); clipTrack != nullptr && ! tracksSelected)
-                for (auto* clip : clipTrack->getClips())
-                    items.add (clip);
+            items.add (track);
 
-        if (items.isEmpty())
-            for (auto* track : getPlaylistTracks (*edit))
-                items.add (track);
+    range.clear();
+    selection.deselectAll();
 
-        range.clear();
-        selection.deselectAll();
+    for (auto* item : items)
+        selection.addToSelection (item);
+}
 
-        for (auto* item : items)
-            selection.addToSelection (item);
-    }
-} // namespace
+void clearSelection (te::SelectionManager& selection, RangeSelection& range)
+{
+    range.clear();
+    selection.deselectAll();
+}
+
+void toggleSelectionMuted (const te::SelectionManager& selection)
+{
+    if (const auto notes = getSelectedNotes (selection); ! notes.empty())
+        toggleNotesMuted (notes);
+    else
+        toggleClipsMuted (getSelectedClips (selection));
+}
+
+bool isSelectionMuted (const te::SelectionManager& selection)
+{
+    if (const auto notes = getSelectedNotes (selection); ! notes.empty())
+        return areAllNotesMuted (notes);
+
+    return areAllClipsMuted (getSelectedClips (selection));
+}
+
+bool canDeleteSelection (const te::SelectionManager& selection, const RangeSelection& range)
+{
+    return hasSelectedNotes (selection) || ! range.isEmpty() || hasSelectedSections (selection) || hasSelectedClips (selection)
+           || hasSelectedTracks (selection);
+}
+
+bool hasSelectedRangeOrClips (const te::SelectionManager& selection, const RangeSelection& range)
+{
+    return ! range.isEmpty() || hasSelectedClips (selection);
+}
+
+bool canDuplicateAsAliases (const te::SelectionManager& selection)
+{
+    return hasSelectedClips (selection) || hasSelectedSections (selection);
+}
+
+bool canMuteSelection (const te::SelectionManager& selection)
+{
+    return hasSelectedNotes (selection) || hasSelectedClips (selection);
+}
+
+bool isAnythingSelected (const te::SelectionManager& selection, const RangeSelection& range)
+{
+    return selection.getNumObjectsSelected() > 0 || ! range.isEmpty();
+}
 
 juce::String describeSelection (const te::SelectionManager& selection, const RangeSelection& range, const juce::String& verb)
 {
@@ -343,16 +307,6 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
 {
     const auto getEdit = [&selection] { return selection.getEdit(); };
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
-    const auto hasClips = [&selection] { return ! getSelectedClips (selection).isEmpty(); };
-    const auto hasRange = [&range] { return ! range.isEmpty(); };
-    const auto hasRangeOrClips = [&selection, &range] { return ! range.isEmpty() || ! getSelectedClips (selection).isEmpty(); };
-    const auto hasSections = [&selection] { return ! getSelectedSections (selection).isEmpty(); };
-    const auto hasNotes = [&selection] { return ! getSelectedNotes (selection).empty(); };
-    const auto hasAnything = [&selection, &range, hasSections, hasNotes]
-    {
-        return hasNotes() || ! range.isEmpty() || hasSections() || ! getSelectedClips (selection).isEmpty()
-               || ! getSelectedTracks (selection).isEmpty();
-    };
 
     registry.add ({ .id = "edit.delete",
                     .name = "Delete",
@@ -360,7 +314,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .description = "Deletes the selected notes, time range, sections, clips or tracks. A section goes with what is in it.",
                     .synonyms = { "remove", "erase" },
                     .perform = [&selection, &range] { deleteSelection (selection, range, false); },
-                    .isEnabled = hasAnything,
+                    .isEnabled = [&selection, &range] { return canDeleteSelection (selection, range); },
                     .undoTarget = getEdit,
                     .currentName = [&selection, &range] { return describeSelection (selection, range, "Delete"); } });
 
@@ -370,7 +324,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .description = "Deletes the selected time range or clips, and moves what comes after them back to close the gap.",
                     .synonyms = { "ripple delete", "shuffle", "remove gap" },
                     .perform = [&selection, &range] { deleteSelection (selection, range, true); },
-                    .isEnabled = hasRangeOrClips,
+                    .isEnabled = [&selection, &range] { return hasSelectedRangeOrClips (selection, range); },
                     .undoTarget = getEdit });
 
     registry.add ({ .id = "edit.duplicate",
@@ -381,21 +335,21 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                         "below its original. A time range's copy replaces what it lands on, and the range moves to it.",
                     .synonyms = { "copy", "clone", "repeat" },
                     .perform = [&selection, &range] { duplicateSelection (selection, range, false); },
-                    .isEnabled = hasAnything,
+                    .isEnabled = [&selection, &range] { return canDeleteSelection (selection, range); },
                     .undoTarget = getEdit,
                     .currentName = [&selection, &range] { return describeSelection (selection, range, "Duplicate"); } });
 
-    registry.add (
-        { .id = "edit.duplicateAsAlias",
-          .name = "Duplicate as Alias",
-          .category = "Edit",
-          .description = "Duplicates the selected sections or clips right after them, as aliases: editing the notes of one edits "
-                         "them all. A section is copied with what is in it.",
-          .synonyms = { "linked copy", "ghost", "pattern", "clone", "repeat section" },
-          .perform = [&selection, &range] { duplicateSelection (selection, range, true); },
-          .isEnabled = [hasClips, hasSections] { return hasClips() || hasSections(); },
-          .undoTarget = getEdit,
-          .currentName = [hasSections] { return hasSections() ? juce::String ("Duplicate Section as Aliases") : juce::String(); } });
+    registry.add ({ .id = "edit.duplicateAsAlias",
+                    .name = "Duplicate as Alias",
+                    .category = "Edit",
+                    .description = "Duplicates the selected sections or clips right after them, as aliases: editing the notes of one edits "
+                                   "them all. A section is copied with what is in it.",
+                    .synonyms = { "linked copy", "ghost", "pattern", "clone", "repeat section" },
+                    .perform = [&selection, &range] { duplicateSelection (selection, range, true); },
+                    .isEnabled = [&selection] { return canDuplicateAsAliases (selection); },
+                    .undoTarget = getEdit,
+                    .currentName = [&selection]
+                    { return hasSelectedSections (selection) ? juce::String ("Duplicate Section as Aliases") : juce::String(); } });
 
     registry.add ({ .id = "clip.makeUnique",
                     .name = "Make Unique",
@@ -403,12 +357,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .description = "Turns the selected aliases into separate clips, which can be edited on their own.",
                     .synonyms = { "unlink", "independent" },
                     .perform = [&selection] { makeClipsUnique (getSelectedClips (selection)); },
-                    .isEnabled =
-                        [&selection]
-                    {
-                        const auto clips = getSelectedClips (selection);
-                        return std::any_of (clips.begin(), clips.end(), [] (te::Clip* clip) { return clip->isLinked(); });
-                    },
+                    .isEnabled = [&selection] { return hasAliases (getSelectedClips (selection)); },
                     .undoTarget = getEdit });
 
     registry.add ({ .id = "edit.mute",
@@ -416,24 +365,10 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .category = "Edit",
                     .description = "Silences the selected notes or clips, or unmutes them.",
                     .synonyms = { "deactivate", "disable", "silence" },
-                    .perform =
-                        [&selection]
-                    {
-                        if (const auto notes = getSelectedNotes (selection); ! notes.empty())
-                            toggleNotesMuted (notes);
-                        else
-                            toggleClipsMuted (getSelectedClips (selection));
-                    },
-                    .isEnabled = [hasNotes, hasClips] { return hasNotes() || hasClips(); },
+                    .perform = [&selection] { toggleSelectionMuted (selection); },
+                    .isEnabled = [&selection] { return canMuteSelection (selection); },
                     .undoTarget = getEdit,
-                    .isTicked =
-                        [&selection]
-                    {
-                        if (const auto notes = getSelectedNotes (selection); ! notes.empty())
-                            return areAllNotesMuted (notes);
-
-                        return areAllClipsMuted (getSelectedClips (selection));
-                    } });
+                    .isTicked = [&selection] { return isSelectionMuted (selection); } });
 
     // Fade shapes, for the selected audio clips' fade-ins and fade-outs.
     struct FadeShape
@@ -442,12 +377,6 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
         const char* id;
         const char* name;
         const char* description;
-    };
-
-    const auto hasAudioClips = [&selection]
-    {
-        const auto clips = getSelectedClips (selection);
-        return std::any_of (clips.begin(), clips.end(), [] (te::Clip* clip) { return dynamic_cast<te::AudioClipBase*> (clip) != nullptr; });
     };
 
     for (const auto& shape :
@@ -465,27 +394,9 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                         .description = juce::String (shape.description) + " For the selected audio clips.",
                         .synonyms = { "fade shape", "fade curve", "crossfade" },
                         .perform = [&selection, type] { setFadeShape (getSelectedClips (selection), type); },
-                        .isEnabled = hasAudioClips,
+                        .isEnabled = [&selection] { return hasAudioClips (getSelectedClips (selection)); },
                         .undoTarget = getEdit,
-                        .isTicked =
-                            [&selection, type]
-                        {
-                            const auto clips = getSelectedClips (selection);
-                            auto any = false;
-
-                            for (auto* clip : clips)
-                            {
-                                if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
-                                {
-                                    if (audio->getFadeInType() != type || audio->getFadeOutType() != type)
-                                        return false;
-
-                                    any = true;
-                                }
-                            }
-
-                            return any;
-                        } });
+                        .isTicked = [&selection, type] { return hasFadeShape (getSelectedClips (selection), type); } });
     }
 
     registry.add ({ .id = "edit.split",
@@ -493,8 +404,8 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .category = "Edit",
                     .description = "Splits the clips in the selected time range at its edges, or the selected clips at the playhead.",
                     .synonyms = { "cut", "slice", "divide", "razor" },
-                    .perform = [&selection, &range] { split (selection, range); },
-                    .isEnabled = hasRangeOrClips,
+                    .perform = [&selection, &range] { splitSelection (selection, range); },
+                    .isEnabled = [&selection, &range] { return hasSelectedRangeOrClips (selection, range); },
                     .undoTarget = getEdit });
 
     registry.add (
@@ -504,13 +415,9 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
           .description =
               "Inserts empty time, as long as the selected time range, at its start, on every track. A section it falls inside gets longer.",
           .synonyms = { "insert silence", "add bars", "make room" },
-          .perform =
-              [&selection, &range]
-          {
-              if (auto* edit = selection.getEdit())
-                  insertTime (*edit, range.getRange().getStart(), range.getRange().getLength());
-          },
-          .isEnabled = hasRange,
+          .perform = withEdit (selection,
+                               [&range] (te::Edit& edit) { insertTime (edit, range.getRange().getStart(), range.getRange().getLength()); }),
+          .isEnabled = [&range] { return ! range.isEmpty(); },
           .undoTarget = getEdit });
 
     registry.add (
@@ -520,13 +427,8 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
           .description =
               "Removes the selected time range from every track, and moves what comes after it back. Sections that reach into it get shorter.",
           .synonyms = { "delete time", "remove bars", "cut time" },
-          .perform =
-              [&selection, &range]
-          {
-              if (auto* edit = selection.getEdit())
-                  removeTime (*edit, range.getRange());
-          },
-          .isEnabled = hasRange,
+          .perform = withEdit (selection, [&range] (te::Edit& edit) { removeTime (edit, range.getRange()); }),
+          .isEnabled = [&range] { return ! range.isEmpty(); },
           .undoTarget = getEdit });
 
     registry.add ({ .id = "edit.selectAll",
@@ -534,7 +436,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .category = "Edit",
                     .description = "Selects every clip, or every track while tracks are selected.",
                     .synonyms = { "everything" },
-                    .perform = [&selection, &range] { selectAll (selection, range); },
+                    .perform = [&selection, &range] { selectAllClipsOrTracks (selection, range); },
                     .isEnabled = hasEdit });
 
     registry.add ({ .id = "edit.deselectAll",
@@ -542,12 +444,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .category = "Edit",
                     .description = "Clears the selection.",
                     .synonyms = { "select none", "clear selection" },
-                    .perform =
-                        [&selection, &range]
-                    {
-                        range.clear();
-                        selection.deselectAll();
-                    },
-                    .isEnabled = [&selection, &range] { return selection.getNumObjectsSelected() > 0 || ! range.isEmpty(); } });
+                    .perform = [&selection, &range] { clearSelection (selection, range); },
+                    .isEnabled = [&selection, &range] { return isAnythingSelected (selection, range); } });
 }
 } // namespace phazite

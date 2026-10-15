@@ -419,3 +419,34 @@ TEST_CASE ("The section commands")
     CHECK (song.registry.find ("section.outline.hipHop")->isTicked());
     CHECK (undoManager.getUndoDescription() == juce::String ("Apply Outline: Hip-hop and trap"));
 }
+
+TEST_CASE ("Deleting and duplicating sections directly")
+{
+    Song song;
+    const auto count = [&song] { return phazite::getSections (*song.edit).size(); };
+    REQUIRE (count() == 7);
+
+    // Each copy goes right after its original, the last first, so that copying one doesn't move another still to be
+    // copied; with a selection manager, the copies are selected instead of what was. Intro 0-64 and its copy 64-128,
+    // Build-up 128-160, Drop 160-224 and its copy 224-288, and the rest 64 beats later.
+    song.selection.selectOnly (song.tracks[0]);
+    const auto copies = phazite::duplicateSections ({ &song.section (0), &song.section (2) }, false, &song.selection);
+    REQUIRE (copies.size() == 2);
+    CHECK (count() == 9);
+    CHECK (phazite::getSelectedSections (song.selection).size() == 2);
+    CHECK_FALSE (song.selection.isSelected (song.tracks[0]));
+    CHECK (song.section (1).getStartBeat().inBeats() == doctest::Approx (64.0));
+    CHECK (song.section (4).getStartBeat().inBeats() == doctest::Approx (224.0));
+
+    // Deleting them, the last first, puts the song back as it was.
+    phazite::deleteSections ({ &song.section (1), &song.section (4) });
+    CHECK (count() == 7);
+    CHECK (song.section (1).getStartBeat().inBeats() == doctest::Approx (64.0));  // the build-up
+    CHECK (song.section (3).getStartBeat().inBeats() == doctest::Approx (160.0)); // the breakdown
+    CHECK (song.section (6).getEndBeat().inBeats() == doctest::Approx (384.0));
+
+    // No sections: nothing is copied.
+    song.selection.selectOnly (song.tracks[0]);
+    CHECK (phazite::duplicateSections ({}, false, &song.selection).isEmpty());
+    CHECK (song.selection.isSelected (song.tracks[0]));
+}

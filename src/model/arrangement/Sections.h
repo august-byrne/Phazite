@@ -28,6 +28,7 @@ struct SectionInfo
 juce::Array<te::ArrangerClip*> getSections (const te::Edit&);
 te::ArrangerClip* getSectionAt (const te::Edit&, te::BeatPosition);
 juce::Array<te::ArrangerClip*> getSelectedSections (const te::SelectionManager&);
+bool hasSelectedSections (const te::SelectionManager&);
 
 juce::String getSectionRole (const te::Clip&);
 juce::String getSectionTip (const te::Clip&);
@@ -59,6 +60,14 @@ te::ArrangerClip* duplicateSection (te::ArrangerClip&, bool asAliases);
 
 // Deletes the section and what is in it; what comes after moves back.
 void deleteSection (te::ArrangerClip&);
+
+// The same for several sections, the last first, so that deleting one doesn't move another still to be deleted.
+// Deleting one can delete another inside it.
+void deleteSections (const juce::Array<te::ArrangerClip*>&);
+
+// Copies each section right after itself, the last first, and returns the copies. With a selection manager, the
+// copies are selected instead of what was.
+juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::ArrangerClip*>&, bool asAliases, te::SelectionManager*);
 
 // Makes the section longer or shorter at its end, at least a beat long. With moveRest, what comes after
 // it moves along: time is inserted at its end, or removed from it with what lies there. Otherwise only the

@@ -443,3 +443,76 @@ TEST_CASE ("A crossfade overlaps two touching audio clips, as far as their audio
     CHECK (first->getFadeOutType() == te::AudioFadeCurve::sCurve);
     CHECK (second->getFadeInType() == te::AudioFadeCurve::sCurve);
 }
+
+TEST_CASE ("Duplicated clips go right after them all")
+{
+    ClipEdit e;
+    auto& a = e.addClip (0, 0.0, 4.0);
+    auto& b = e.addClip (1, 2.0, 4.0); // together they span beats 0-6
+
+    // Each copy starts 6 beats after its original, on its track; without a selection manager, nothing gets selected.
+    auto copies = phazite::duplicateClips ({ &a, &b }, false, nullptr);
+    REQUIRE (copies.size() == 2);
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-4.00 6.00-10.00"));
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("2.00-6.00 8.00-12.00"));
+    CHECK_FALSE (copies.getFirst()->isLinked());
+    CHECK (e.selection.getNumObjectsSelected() == 0);
+
+    // As aliases, with a selection manager: the copy is selected instead of what was.
+    e.selection.selectOnly (e.tracks[1]);
+    copies = phazite::duplicateClips ({ &a }, true, &e.selection);
+    REQUIRE (copies.size() == 1);
+    CHECK (copies.getFirst()->isLinked());
+    CHECK (copies.getFirst()->getStartBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (e.selection.isSelected (copies.getFirst()));
+    CHECK_FALSE (e.selection.isSelected (e.tracks[1]));
+
+    // No clips: nothing is copied, and the selection stays.
+    CHECK (phazite::duplicateClips ({}, false, &e.selection).isEmpty());
+    CHECK (e.selection.isSelected (copies.getFirst()));
+}
+
+TEST_CASE ("Splitting at a range's edges")
+{
+    ClipEdit e;
+    e.addClip (0, 0.0, 8.0);
+    e.addClip (1, 1.0, 6.0); // across the range's edges too, but on a track the range doesn't cover
+
+    phazite::splitClipsAtEdges ({ e.tracks[0] }, { beats (2.0), beats (6.0) });
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-6.00 6.00-8.00"));
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("1.00-7.00"));
+
+    // A clip that ends inside the range is cut once.
+    phazite::splitClipsAtEdges ({ e.tracks[1] }, { beats (5.0), beats (9.0) });
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("1.00-5.00 5.00-7.00"));
+}
+
+TEST_CASE ("Aliases, audio clips and fade shapes")
+{
+    ClipEdit e;
+    auto& midi = e.addClip (0, 0.0, 4.0);
+    CHECK_FALSE (phazite::hasAliases ({ &midi }));
+    CHECK_FALSE (phazite::hasAliases ({}));
+    CHECK_FALSE (phazite::hasAudioClips ({ &midi }));
+    CHECK_FALSE (phazite::hasFadeShape ({ &midi }, te::AudioFadeCurve::linear)); // there is no audio clip
+
+    const auto aliases = phazite::copyClips ({ &midi }, true);
+    REQUIRE (aliases.size() == 1);
+    CHECK (phazite::hasAliases ({ &midi }));
+    CHECK (phazite::hasAliases (aliases));
+
+    // The shape is on when every audio clip fades in and out with it; MIDI clips don't count.
+    SilentFile file;
+    auto audio = e.tracks[1]->insertWaveClip ("Silence", file.temp.getFile(),
+                                              { te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.0)) }, false);
+    REQUIRE (audio != nullptr);
+    const juce::Array<te::Clip*> both { &midi, audio.get() };
+    CHECK (phazite::hasAudioClips (both));
+
+    phazite::setFadeShape (both, te::AudioFadeCurve::convex);
+    CHECK (phazite::hasFadeShape (both, te::AudioFadeCurve::convex));
+    CHECK_FALSE (phazite::hasFadeShape (both, te::AudioFadeCurve::linear));
+
+    audio->setFadeOutType (te::AudioFadeCurve::linear); // in and out differ
+    CHECK_FALSE (phazite::hasFadeShape (both, te::AudioFadeCurve::convex));
+}

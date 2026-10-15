@@ -60,6 +60,39 @@ juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager& selection)
     return clips;
 }
 
+bool hasSelectedClips (const te::SelectionManager& selection)
+{
+    return ! getSelectedClips (selection).isEmpty();
+}
+
+bool hasAliases (const juce::Array<te::Clip*>& clips)
+{
+    return std::any_of (clips.begin(), clips.end(), [] (te::Clip* clip) { return clip->isLinked(); });
+}
+
+bool hasAudioClips (const juce::Array<te::Clip*>& clips)
+{
+    return std::any_of (clips.begin(), clips.end(), [] (te::Clip* clip) { return dynamic_cast<te::AudioClipBase*> (clip) != nullptr; });
+}
+
+bool hasFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type type)
+{
+    auto any = false;
+
+    for (auto* clip : clips)
+    {
+        if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
+        {
+            if (audio->getFadeInType() != type || audio->getFadeOutType() != type)
+                return false;
+
+            any = true;
+        }
+    }
+
+    return any;
+}
+
 juce::Colour getClipColour (const te::Clip& clip, juce::Colour trackColour)
 {
     return clip.state.hasProperty (te::IDs::colour) ? clip.getColour() : trackColour;
@@ -181,6 +214,51 @@ juce::Array<te::Clip*> splitClips (const juce::Array<te::Clip*>& clips, te::Beat
     }
 
     return parts;
+}
+
+void splitClipsAtEdges (const juce::Array<te::Track*>& tracks, te::BeatRange range)
+{
+    juce::Array<te::Clip*> clips;
+
+    for (auto* track : tracks)
+        if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (track))
+            clips.addArray (clipTrack->getClips());
+
+    // The right-hand parts of the first split can reach past the end too.
+    const auto parts = splitClips (clips, range.getStart());
+    auto all = clips;
+    all.addArray (parts);
+    splitClips (all, range.getEnd());
+}
+
+juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>& clips, bool asAliases, te::SelectionManager* selection)
+{
+    if (clips.isEmpty())
+        return {};
+
+    auto start = clips.getFirst()->getStartBeat(), end = clips.getFirst()->getEndBeat();
+
+    for (auto* clip : clips)
+    {
+        start = std::min (start, clip->getStartBeat());
+        end = std::max (end, clip->getEndBeat());
+    }
+
+    if (selection != nullptr)
+        selection->deselectAll();
+
+    const auto copies = copyClips (clips, asAliases); // each starts where its original is
+
+    for (auto* copy : copies)
+    {
+        if (auto* track = copy->getClipTrack())
+            moveClip (*copy, copy->getStartBeat() + (end - start), *track);
+
+        if (selection != nullptr)
+            selection->addToSelection (copy);
+    }
+
+    return copies;
 }
 
 void makeClipsUnique (const juce::Array<te::Clip*>& clips)

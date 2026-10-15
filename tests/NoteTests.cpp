@@ -9,6 +9,8 @@
 #include "model/notes/Notes.h"
 #include "ui/input/KeyDispatcher.h"
 
+#include <algorithm>
+
 namespace
 {
 te::BeatPosition beats (double b)
@@ -400,4 +402,42 @@ TEST_CASE ("The note commands act on the selected notes, and take the arrow keys
 
     n.selection.deselectAll();
     CHECK (keys.findCommandForKey (juce::KeyPress (juce::KeyPress::upKey)) == nullptr);
+}
+
+TEST_CASE ("Replacing the selected notes selects the new ones")
+{
+    Notes n;
+    auto& a = n.add (60, 4.0, 1.0);
+    auto& b = n.add (64, 5.0, 1.0);
+    const auto octaveUp = [] (std::vector<phazite::NoteData> notes)
+    {
+        for (auto& data : notes)
+            data.pitch += 12;
+
+        return notes;
+    };
+
+    // With no notes selected, nothing changes.
+    CHECK_FALSE (phazite::hasSelectedNotes (n.selection));
+    CHECK (phazite::replaceSelectedNotes (n.selection, octaveUp).empty());
+    CHECK (n.clip->getSequence().getNumNotes() == 2);
+
+    n.select ({ &a, &b });
+    CHECK (phazite::hasSelectedNotes (n.selection));
+    const auto added = phazite::replaceSelectedNotes (n.selection, octaveUp);
+    REQUIRE (added.size() == 2);
+    CHECK (n.clip->getSequence().getNumNotes() == 2); // replaced, not added to
+
+    std::vector<int> pitches;
+
+    for (const auto& selected : phazite::getSelectedNotes (n.selection))
+        pitches.push_back (selected.note->getNoteNumber());
+
+    std::sort (pitches.begin(), pitches.end());
+    CHECK (pitches == std::vector<int> { 72, 76 });
+
+    const auto midiNotes = phazite::toMidiNotes (added);
+    REQUIRE (midiNotes.size() == 2);
+    CHECK (midiNotes[0] == added[0].note);
+    CHECK (midiNotes[1] == added[1].note);
 }

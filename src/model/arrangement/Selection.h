@@ -38,6 +38,34 @@ private:
 };
 
 //==============================================================================
+// What the selection commands do, to the first kind of thing selected, in this order: notes, a time range, sections,
+// clips, tracks. These don't start an undo step: the command does (Command::undoTarget).
+
+// Deletes it. With closeGap, what comes after a range or clips moves back to close the gap, and tracks stay.
+void deleteSelection (te::SelectionManager&, const RangeSelection&, bool closeGap);
+
+// Duplicates it right after it (tracks each below its original), and selects the copies; a time range's copy becomes
+// the range, in the same undo step. As aliases, only sections and clips are copied.
+void duplicateSelection (te::SelectionManager&, RangeSelection&, bool asAliases);
+
+// Splits the clips in the range at its edges, or else the selected clips at the playhead.
+void splitSelection (const te::SelectionManager&, const RangeSelection&);
+
+// Selects every clip, or every track while tracks are selected or there are no clips, and clears the range.
+void selectAllClipsOrTracks (te::SelectionManager&, RangeSelection&);
+void clearSelection (te::SelectionManager&, RangeSelection&); // the range, then everything else
+
+// Mutes the selected notes, or else the selected clips, or unmutes them if they all are muted.
+void toggleSelectionMuted (const te::SelectionManager&);
+bool isSelectionMuted (const te::SelectionManager&);
+
+// When the commands can act.
+bool canDeleteSelection (const te::SelectionManager&, const RangeSelection&);      // and duplicate it
+bool hasSelectedRangeOrClips (const te::SelectionManager&, const RangeSelection&); // close a gap, split
+bool canDuplicateAsAliases (const te::SelectionManager&);                          // sections or clips
+bool canMuteSelection (const te::SelectionManager&);                               // notes or clips
+bool isAnythingSelected (const te::SelectionManager&, const RangeSelection&);
+
 // "Delete Clip", "Delete 3 Tracks", "Delete Range", or the verb alone when nothing is selected.
 juce::String describeSelection (const te::SelectionManager&, const RangeSelection&, const juce::String& verb);
 

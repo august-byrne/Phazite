@@ -197,6 +197,21 @@ std::vector<ClipNote> getSelectedNotes (const te::SelectionManager& selection)
     return notes;
 }
 
+bool hasSelectedNotes (const te::SelectionManager& selection)
+{
+    return ! getSelectedNotes (selection).empty();
+}
+
+juce::Array<te::MidiNote*> toMidiNotes (const std::vector<ClipNote>& notes)
+{
+    juce::Array<te::MidiNote*> midiNotes;
+
+    for (const auto& n : notes)
+        midiNotes.add (n.note);
+
+    return midiNotes;
+}
+
 //==============================================================================
 te::MidiNote* addNote (te::MidiClip& clip, int pitch, te::BeatPosition start, te::BeatDuration length, int velocity)
 {
@@ -319,6 +334,21 @@ std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std:
         }
     }
 
+    return added;
+}
+
+std::vector<ClipNote> replaceSelectedNotes (te::SelectionManager& selection,
+                                            const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform)
+{
+    // The selection's notes object, before the edit replaces the notes in it.
+    auto* events = getSelectedMidiEvents (selection);
+    const auto notes = getSelectedNotes (selection);
+
+    if (events == nullptr || notes.empty())
+        return {};
+
+    auto added = replaceNotes (notes, transform (getNoteData (notes)));
+    events->setSelected (selection, toMidiNotes (added), false);
     return added;
 }
 
@@ -617,27 +647,6 @@ void showAllDrumRows (te::AudioTrack& track)
 void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection, std::function<double()> getGridStepInBeats)
 {
     const auto getEdit = [&selection] { return selection.getEdit(); };
-    const auto hasNotes = [&selection] { return ! getSelectedNotes (selection).empty(); };
-
-    // The notes' new versions replace them and are selected in their place.
-    const auto replaceSelected = [&selection] (std::function<std::vector<NoteData> (std::vector<NoteData>)> transform)
-    {
-        return [&selection, transform]
-        {
-            auto* events = getSelectedMidiEvents (selection);
-            const auto notes = getSelectedNotes (selection);
-
-            if (events == nullptr || notes.empty())
-                return;
-
-            juce::Array<te::MidiNote*> added;
-
-            for (const auto& n : replaceNotes (notes, transform (getNoteData (notes))))
-                added.add (n.note);
-
-            events->setSelected (selection, added, false);
-        };
-    };
 
     struct Simple
     {
@@ -688,7 +697,7 @@ void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection
                         .description = simple.description,
                         .synonyms = simple.synonyms,
                         .perform = [&selection, action = simple.action] { action (getSelectedNotes (selection)); },
-                        .isEnabled = hasNotes,
+                        .isEnabled = [&selection] { return hasSelectedNotes (selection); },
                         .undoTarget = getEdit,
                         .keyPriority = Command::notePriority,
                         .repeatsWhileHeld = true });
@@ -699,8 +708,9 @@ void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection
                     .category = "Note",
                     .description = "Makes each selected note last until the next one starts.",
                     .synonyms = { "connect", "glue", "smooth", "length" },
-                    .perform = replaceSelected ([] (std::vector<NoteData> notes) { return legato (std::move (notes)); }),
-                    .isEnabled = hasNotes,
+                    .perform = [&selection]
+                    { replaceSelectedNotes (selection, [] (std::vector<NoteData> notes) { return legato (std::move (notes)); }); },
+                    .isEnabled = [&selection] { return hasSelectedNotes (selection); },
                     .undoTarget = getEdit,
                     .keyPriority = Command::notePriority });
 
@@ -709,9 +719,13 @@ void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection
                     .category = "Note",
                     .description = "Cuts the selected notes into pieces a step of the grid long.",
                     .synonyms = { "slice", "cut", "split", "stutter" },
-                    .perform = replaceSelected ([getGridStepInBeats] (std::vector<NoteData> notes)
-                                                { return chop (std::move (notes), getGridStepInBeats()); }),
-                    .isEnabled = hasNotes,
+                    .perform =
+                        [&selection, getGridStepInBeats]
+                    {
+                        replaceSelectedNotes (selection, [&getGridStepInBeats] (std::vector<NoteData> notes)
+                                              { return chop (std::move (notes), getGridStepInBeats()); });
+                    },
+                    .isEnabled = [&selection] { return hasSelectedNotes (selection); },
                     .undoTarget = getEdit,
                     .keyPriority = Command::notePriority });
 }

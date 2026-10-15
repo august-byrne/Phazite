@@ -6,6 +6,7 @@
 #include "model/commands/CommandRegistry.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace phazite
 {
@@ -35,6 +36,17 @@ namespace
                 return section;
 
         return nullptr;
+    }
+
+    // Sections, the last first, held so that one deleted by an edit of another is skipped.
+    std::vector<te::SafeSelectable<te::ArrangerClip>> toSafeLatestFirst (const juce::Array<te::ArrangerClip*>& sections)
+    {
+        std::vector<te::SafeSelectable<te::ArrangerClip>> safe;
+
+        for (int i = sections.size(); --i >= 0;)
+            safe.emplace_back (sections[i]);
+
+        return safe;
     }
 } // namespace
 
@@ -72,6 +84,11 @@ juce::Array<te::ArrangerClip*> getSelectedSections (const te::SelectionManager& 
                 selected.add (section);
 
     return selected;
+}
+
+bool hasSelectedSections (const te::SelectionManager& selection)
+{
+    return ! getSelectedSections (selection).isEmpty();
 }
 
 juce::String getSectionRole (const te::Clip& section)
@@ -164,6 +181,41 @@ te::ArrangerClip* duplicateSection (te::ArrangerClip& section, bool asAliases)
 void deleteSection (te::ArrangerClip& section)
 {
     removeTime (section.edit, getRange (section));
+}
+
+void deleteSections (const juce::Array<te::ArrangerClip*>& sections)
+{
+    for (const auto& section : toSafeLatestFirst (sections))
+        if (auto* s = section.get())
+            deleteSection (*s);
+}
+
+juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::ArrangerClip*>& sections, bool asAliases,
+                                                  te::SelectionManager* selection)
+{
+    juce::Array<te::ArrangerClip*> copies;
+
+    if (sections.isEmpty())
+        return copies;
+
+    if (selection != nullptr)
+        selection->deselectAll();
+
+    for (const auto& section : toSafeLatestFirst (sections))
+    {
+        if (auto* s = section.get())
+        {
+            if (auto* copy = duplicateSection (*s, asAliases))
+            {
+                copies.add (copy);
+
+                if (selection != nullptr)
+                    selection->addToSelection (copy);
+            }
+        }
+    }
+
+    return copies;
 }
 
 void resizeSection (te::ArrangerClip& section, te::BeatDuration newLength, bool moveRest)

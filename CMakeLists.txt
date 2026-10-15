@@ -419,6 +419,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/RealtimeAuditTests.cpp
         tests/SchemaTests.cpp
         tests/SectionTests.cpp
+        tests/SelectionTests.cpp
         tests/SettingsTests.cpp
         tests/ShortcutTests.cpp
         tests/SoundPackTestHelpers.h

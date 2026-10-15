@@ -7,6 +7,7 @@
 
 #include "model/base/Tracktion.h"
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -45,6 +46,8 @@ te::BeatDuration getMinimumNoteLength();
 // The selected notes: Tracktion's SelectedMidiEvents, while the selection manager holds it.
 te::SelectedMidiEvents* getSelectedMidiEvents (const te::SelectionManager&);
 std::vector<ClipNote> getSelectedNotes (const te::SelectionManager&);
+bool hasSelectedNotes (const te::SelectionManager&);
+juce::Array<te::MidiNote*> toMidiNotes (const std::vector<ClipNote>&); // as SelectedMidiEvents takes them
 
 //==============================================================================
 // Edits, with the clip's Edit's undo manager: a command's undo step holds them.
@@ -83,6 +86,11 @@ std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>&);
 // Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to
 // the clips they name. Returns the new notes.
 std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements);
+
+// Replaces the selected notes with what a transform makes of them (legato, chop), and selects the new notes. Returns
+// them; with no notes selected, nothing changes.
+std::vector<ClipNote> replaceSelectedNotes (te::SelectionManager&,
+                                            const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform);
 
 //==============================================================================
 // Transforms: what a change would make of some notes.

@@ -8,6 +8,14 @@ namespace phazite
 {
 // The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).
 juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager&);
+bool hasSelectedClips (const te::SelectionManager&);
+
+bool hasAliases (const juce::Array<te::Clip*>&);    // whether any of the clips is linked to others
+bool hasAudioClips (const juce::Array<te::Clip*>&); // whether any of them holds audio
+
+// Whether there is an audio clip among these, and every audio clip among them fades in and out in this shape. MIDI
+// clips don't count.
+bool hasFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
 
 // The color a clip shows: its own, if it was given one, otherwise its track's.
 juce::Colour getClipColour (const te::Clip&, juce::Colour trackColour);
@@ -40,6 +48,14 @@ te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, te::SelectionManage
 //==============================================================================
 // Splits each clip that the beat falls inside into two there. Returns the new right-hand parts.
 juce::Array<te::Clip*> splitClips (const juce::Array<te::Clip*>&, te::BeatPosition);
+
+// Splits the clips on these tracks at both edges of a time range.
+void splitClipsAtEdges (const juce::Array<te::Track*>&, te::BeatRange);
+
+// Copies the clips right after them all, as FL Studio's Ctrl+B does: each copy starts as far after its original as
+// the clips span, on its track. As aliases, the copies stay linked to their originals. With a selection manager, the
+// copies are selected instead of what was. Returns the copies.
+juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>&, bool asAliases, te::SelectionManager*);
 
 // Turns aliases back into separate clips. A clip left alone in its link group is unlinked too.
 void makeClipsUnique (const juce::Array<te::Clip*>&);
