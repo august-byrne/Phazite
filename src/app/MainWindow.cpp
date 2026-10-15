@@ -40,19 +40,6 @@ namespace
 
         return ui::ThemeName::dark;
     }
-
-    // The computer keyboard plays into Tracktion's "All MIDI Ins", as a MIDI keyboard would, so its
-    // notes go to the track that live MIDI plays.
-    void playIntoAllMidiInputs (te::Engine& engine, const juce::MidiMessage& m)
-    {
-        if (const auto device = getAllMidiInputs (engine))
-        {
-            if (m.isNoteOn())
-                device->keyboardState.noteOn (m.getChannel(), m.getNoteNumber(), m.getFloatVelocity());
-            else if (m.isNoteOff())
-                device->keyboardState.noteOff (m.getChannel(), m.getNoteNumber(), m.getFloatVelocity());
-        }
-    }
 } // namespace
 
 MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices)

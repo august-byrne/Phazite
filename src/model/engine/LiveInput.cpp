@@ -59,6 +59,17 @@ std::shared_ptr<te::MidiInputDevice> getAllMidiInputs (te::Engine& engine)
     return nullptr;
 }
 
+void playIntoAllMidiInputs (te::Engine& engine, const juce::MidiMessage& m)
+{
+    if (const auto device = getAllMidiInputs (engine))
+    {
+        if (m.isNoteOn())
+            device->keyboardState.noteOn (m.getChannel(), m.getNoteNumber(), m.getFloatVelocity());
+        else if (m.isNoteOff())
+            device->keyboardState.noteOff (m.getChannel(), m.getNoteNumber(), m.getFloatVelocity());
+    }
+}
+
 te::AudioTrack* getLiveMidiTrack (te::Edit& edit)
 {
     if (auto device = getAllMidiInputs (edit.engine))

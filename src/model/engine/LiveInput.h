@@ -11,6 +11,11 @@ namespace phazite
 // nullptr until Tracktion has scanned the MIDI devices, which it does just after the Engine starts.
 std::shared_ptr<te::MidiInputDevice> getAllMidiInputs (te::Engine&);
 
+// Plays a note-on or note-off into "All MIDI Ins" as a MIDI keyboard would, so it reaches the track that live MIDI
+// plays (the computer keyboard's notes). Other messages, and notes before Tracktion has scanned the MIDI devices, do
+// nothing.
+void playIntoAllMidiInputs (te::Engine&, const juce::MidiMessage&);
+
 // The track that live MIDI input plays, or nullptr.
 te::AudioTrack* getLiveMidiTrack (te::Edit&);
 

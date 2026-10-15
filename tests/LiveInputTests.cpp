@@ -115,3 +115,25 @@ TEST_CASE ("Live MIDI follows the selected track, if it has an instrument")
 
     selection.deselectAll();
 }
+
+TEST_CASE ("The computer keyboard's notes play into All MIDI Ins")
+{
+    const auto allMidiInputs = findAllMidiInputs();
+    REQUIRE (allMidiInputs != nullptr);
+    auto& engine = phazite::test::getEngine();
+    const auto& keys = allMidiInputs->keyboardState;
+
+    phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOn (1, 60, 0.8f));
+    CHECK (keys.isNoteOn (1, 60));
+
+    phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOff (1, 60));
+    CHECK_FALSE (keys.isNoteOn (1, 60));
+
+    // Only notes: a controller, even All Notes Off, changes nothing.
+    phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOn (1, 62, 0.8f));
+    phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::allNotesOff (1));
+    CHECK (keys.isNoteOn (1, 62));
+
+    phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOff (1, 62));
+    CHECK_FALSE (keys.isNoteOn (1, 62));
+}
