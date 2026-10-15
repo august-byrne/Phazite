@@ -3,6 +3,7 @@
 #include "model/base/Schema.h"
 #include "model/base/Toggles.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 #include "model/devices/DrumSamplerPlugin.h"
 
 #include <algorithm>
@@ -311,6 +312,17 @@ void setNoteVelocities (const std::vector<ClipNote>& notes, int velocity)
         n.note->setVelocity (juce::jlimit (1, 127, velocity), getUndoManager (*n.clip));
 }
 
+void changeNoteVelocities (const std::vector<ClipNote>& notes, int change)
+{
+    if (notes.empty())
+        return;
+
+    const UndoStep step (notes.front().clip->edit, "Change Velocity");
+
+    for (const auto& n : notes)
+        setNoteVelocities ({ n }, n.note->getVelocity() + change);
+}
+
 std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>& notes)
 {
     if (notes.empty())
@@ -353,6 +365,18 @@ std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std:
     }
 
     return added;
+}
+
+std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements,
+                                    const juce::String& undoName)
+{
+    auto* clip = ! old.empty() ? old.front().clip : (! replacements.empty() ? replacements.front().clip : nullptr);
+
+    if (clip == nullptr)
+        return {};
+
+    const UndoStep step (clip->edit, undoName);
+    return replaceNotes (old, replacements);
 }
 
 std::vector<ClipNote> replaceSelectedNotes (te::SelectionManager& selection,
@@ -521,6 +545,12 @@ void setTrackKeys (const juce::Array<te::Track*>& tracks, const std::optional<Ke
 {
     for (auto* track : tracks)
         setTrackKey (*track, key);
+}
+
+void chooseTrackKey (te::Track& track, const std::optional<Key>& key)
+{
+    const UndoStep step (track.edit, key.has_value() ? "Set Key" : "Turn Key Off");
+    setTrackKey (track, key);
 }
 
 void applyLastKey (te::Track& track)

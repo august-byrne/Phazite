@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll, driven with the mouse and the selection as the user would.
+#include "GoldenFiles.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
+#include "model/commands/Undo.h"
 #include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"
 #include "ui/pianoroll/PianoRoll.h"
@@ -185,4 +187,24 @@ TEST_CASE ("A note drawn past its clip, where the next clip on the track starts,
 
     screen.edit->getUndoManager().undo(); // one step
     CHECK (first.getSequence().getNumNotes() == 0);
+}
+
+TEST_CASE ("A note added and dragged is one undo step, however long the drag takes")
+{
+    PianoRollScreen screen;
+    auto& clip = screen.addClip (0, 0.0, 8.0);
+    screen.select (clip);
+
+    phazite::test::Mouse mouse (*screen.notes);
+    mouse.press (screen.at (1.0));
+    REQUIRE (clip.getSequence().getNumNotes() == 1);
+    mouse.dragTo (screen.at (2.0));
+    phazite::test::settle (500); // Tracktion starts a new undo step 350 ms after a change, though not while the mouse is down
+    mouse.dragTo (screen.at (3.0));
+    mouse.release();
+
+    CHECK (phazite::getNoteStart (clip, *clip.getSequence().getNotes().getFirst()).inBeats() > 2.5);
+    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Add Note"));
+    phazite::undo (*screen.edit);
+    CHECK (clip.getSequence().getNumNotes() == 0); // the note and all its moves, in one step
 }

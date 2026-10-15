@@ -483,3 +483,31 @@ TEST_CASE ("Scales are saved by name")
     CHECK_FALSE (phazite::findScale ("Dorian").has_value());
     CHECK_FALSE (phazite::findScale ("").has_value());
 }
+
+TEST_CASE ("The piano roll's key menu, Alt and the wheel, and an applied transform are undo steps of their own")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto* track = te::getAudioTracks (*edit)[0];
+    auto* clip = phazite::insertMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, nullptr);
+    REQUIRE (clip != nullptr);
+    auto* note = phazite::addNote (*clip, 60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100);
+    REQUIRE (note != nullptr);
+    auto& undo = edit->getUndoManager();
+    undo.clearUndoHistory();
+
+    phazite::chooseTrackKey (*track, phazite::Key { 9, te::Scale::minor });
+    CHECK (undo.getUndoDescription() == juce::String ("Set Key"));
+    phazite::chooseTrackKey (*track, std::nullopt);
+    CHECK (undo.getUndoDescription() == juce::String ("Turn Key Off"));
+
+    phazite::changeNoteVelocities ({ { clip, note } }, -10);
+    CHECK (note->getVelocity() == 90);
+    CHECK (undo.getUndoDescription() == juce::String ("Change Velocity"));
+
+    auto data = phazite::getNoteData ({ { clip, note } });
+    data.front().pitch = 67;
+    const auto replaced = phazite::replaceNotes ({ { clip, note } }, data, "Transpose Notes");
+    REQUIRE (replaced.size() == 1);
+    CHECK (replaced.front().note->getNoteNumber() == 67);
+    CHECK (undo.getUndoDescription() == juce::String ("Transpose Notes"));
+}

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "PianoRoll.h"
+#include "model/commands/Undo.h"
 #include "ui/components/Controls.h"
 
 namespace phazite::ui
@@ -87,6 +88,7 @@ struct PianoRoll::VelocityLane : public juce::Component
 
     PianoRoll& roll;
     bool dragging = false;
+    std::unique_ptr<phazite::Gesture> step; // a drag's undo step, from mouse down to mouse up
 
     int velocityAt (float y) const;
     void setVelocitiesAt (const juce::MouseEvent&);

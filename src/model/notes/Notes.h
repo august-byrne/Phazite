@@ -79,6 +79,9 @@ bool areAllNotesMuted (const std::vector<ClipNote>&);
 void toggleNotesMuted (const std::vector<ClipNote>&); // mutes them, or unmutes them if they all are
 void setNoteVelocities (const std::vector<ClipNote>&, int velocity);
 
+// Raises or lowers each note's velocity by the same amount, as one undo step, "Change Velocity" (Alt and the wheel).
+void changeNoteVelocities (const std::vector<ClipNote>&, int change);
+
 // Copies the notes right after them, as FL Studio's Ctrl+B does, each into its original's clip, which grows as
 // addNote() says. Returns the copies.
 std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>&);
@@ -86,6 +89,10 @@ std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>&);
 // Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to
 // the clips they name. Returns the new notes.
 std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements);
+
+// The same, as one undo step with the name given (a transform's, such as "Quantize Notes").
+std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements,
+                                    const juce::String& undoName);
 
 // Replaces the selected notes with what a transform makes of them (legato, chop), and selects the new notes. Returns
 // them; with no notes selected, nothing changes.
@@ -142,6 +149,9 @@ std::optional<Key> getTrackKey (const te::Track&);
 // (applyLastKey()).
 void setTrackKey (te::Track&, const std::optional<Key>&);
 void setTrackKeys (const juce::Array<te::Track*>&, const std::optional<Key>&); // the same key for each of them
+
+// Sets a track's key as the piano roll's key menu does, as one undo step: "Set Key", or "Turn Key Off".
+void chooseTrackKey (te::Track&, const std::optional<Key>&);
 void applyLastKey (te::Track&); // the key set last on any of the song's tracks, if there is one
 
 // The pitch in the key nearest to a pitch (the lower one when two are as near).

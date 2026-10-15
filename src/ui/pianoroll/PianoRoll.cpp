@@ -343,10 +343,7 @@ std::optional<Key> PianoRoll::getKey() const
 void PianoRoll::setKey (const std::optional<Key>& key)
 {
     if (auto* track = getTrack())
-    {
-        track->edit.getUndoManager().beginNewTransaction (key.has_value() ? "Set Key" : "Turn Key Off");
-        setTrackKey (*track, key);
-    }
+        chooseTrackKey (*track, key);
 
     updateToolbar();
     grid->repaint();
@@ -430,11 +427,9 @@ void PianoRoll::applyTransform()
         return;
 
     const auto result = getPreview();
-    e->getUndoManager().beginNewTransaction (describeTransform());
-
     juce::Array<te::MidiNote*> added;
 
-    for (const auto& n : replaceNotes (notes, result))
+    for (const auto& n : replaceNotes (notes, result, describeTransform()))
         added.add (n.note);
 
     closeTransform();
@@ -1033,11 +1028,7 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
     {
         if (const auto notes = getSelectedNotesHere(); ! notes.empty())
         {
-            const auto change = notches > 0.0 ? velocityPerNotch : -velocityPerNotch;
-            notes.front().clip->edit.getUndoManager().beginNewTransaction ("Change Velocity");
-
-            for (const auto& n : notes)
-                setNoteVelocities ({ n }, n.note->getVelocity() + change);
+            changeNoteVelocities (notes, notches > 0.0 ? velocityPerNotch : -velocityPerNotch);
         }
 
         return;

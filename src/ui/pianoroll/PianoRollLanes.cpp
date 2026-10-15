@@ -267,7 +267,7 @@ void PianoRoll::VelocityLane::mouseDown (const juce::MouseEvent& e)
         return;
 
     dragging = true;
-    ed->getUndoManager().beginNewTransaction ("Change Velocity");
+    step = std::make_unique<phazite::Gesture> (*ed, "Change Velocity");
     setVelocitiesAt (e);
 }
 
@@ -280,6 +280,7 @@ void PianoRoll::VelocityLane::mouseDrag (const juce::MouseEvent& e)
 void PianoRoll::VelocityLane::mouseUp (const juce::MouseEvent&)
 {
     dragging = false;
+    step = nullptr; // the drag's undo step is done
 }
 
 //==============================================================================

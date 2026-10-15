@@ -3,6 +3,7 @@
 #include "PianoRollParts.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Tracks.h"
+#include "model/commands/Undo.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -128,9 +129,10 @@ struct PianoRoll::NoteGrid::Gesture
     juce::ValueTree noteState;
     te::BeatPosition startBeat;
     juce::Point<int> startPosition;
-    int startScrollY = 0;        // how far the rows had scrolled then
-    bool clickOnMouseUp = false; // a click on a selected note selects it alone, unless it becomes a drag
-    bool added = false;          // the note was added by this click: a drag that follows is the same undo step
+    int startScrollY = 0;                   // how far the rows had scrolled then
+    bool clickOnMouseUp = false;            // a click on a selected note selects it alone, unless it becomes a drag
+    bool added = false;                     // the note was added by this click: a drag that follows is the same undo step
+    std::unique_ptr<phazite::Gesture> step; // the drag's undo step, from its first change until it ends
 
     std::vector<Original> originals;
     Original anchor;                             // the note the mouse went down on, as it was
@@ -455,7 +457,6 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
     gesture->startScrollY = roll.scrollY;
     beginDragAutoRepeat (TimelineEditor::autoRepeatInterval); // so the grid goes on scrolling while the mouse rests past an edge
 
-    auto& undo = ed->getUndoManager();
     const auto hit = getNoteAt (e.position);
 
     if (hit.has_value())
@@ -480,7 +481,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
-        undo.beginNewTransaction ("Delete Notes");
+        gesture->step = std::make_unique<phazite::Gesture> (*ed, "Delete Notes");
         gesture->kind = Gesture::Kind::erase;
         eraseOrMuteAt (e.position, true);
         return;
@@ -524,7 +525,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
                 return;
             }
 
-            undo.beginNewTransaction ("Paint Notes");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Paint Notes");
             gesture->kind = Gesture::Kind::paint;
             gesture->paintPitch = roll.getPitchForRow (roll.getRowAt (e.y));
             gesture->nextPaintStart = roll.snapDown (gesture->startBeat, e.mods);
@@ -543,7 +544,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
                     first.length = at - data.start;
                     second.start = at;
                     second.length = data.getEnd() - at;
-                    undo.beginNewTransaction ("Split Note");
+                    gesture->step = std::make_unique<phazite::Gesture> (*ed, "Split Note");
                     replaceNotes ({ *hit }, { first, second });
                 }
             }
@@ -555,7 +556,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
         case Tool::erase:
         {
             const auto erase = roll.getTool() == Tool::erase;
-            undo.beginNewTransaction (erase ? "Delete Notes" : "Mute Notes");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, erase ? "Delete Notes" : "Mute Notes");
             gesture->kind = erase ? Gesture::Kind::erase : Gesture::Kind::mute;
             eraseOrMuteAt (e.position, erase);
             return;
@@ -606,7 +607,7 @@ void PianoRoll::NoteGrid::addNoteAt (const juce::MouseEvent& e)
     if (roll.chordStamp.has_value() && ! roll.drumMode)
         pitches = getChordPitches (pitch, *roll.chordStamp);
 
-    ed->getUndoManager().beginNewTransaction (pitches.size() > 1 ? "Stamp Chord" : "Add Note");
+    gesture->step = std::make_unique<phazite::Gesture> (*ed, pitches.size() > 1 ? "Stamp Chord" : "Add Note");
 
     if (clip == nullptr)
         clip = roll.makeClipForNewNotes();
@@ -727,8 +728,9 @@ void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
     auto notes = roll.getSelectedNotesHere();
     const auto copy = gesture->zone == Zone::body && e.mods.isShiftDown();
 
-    if (! gesture->added)
-        ed->getUndoManager().beginNewTransaction (gesture->zone != Zone::body ? "Resize Notes" : (copy ? "Copy Notes" : "Move Notes"));
+    if (gesture->step == nullptr) // a note added by this click: the drag joins its step
+        gesture->step =
+            std::make_unique<phazite::Gesture> (*ed, gesture->zone != Zone::body ? "Resize Notes" : (copy ? "Copy Notes" : "Move Notes"));
 
     // Shift+drag copies the notes first, as in FL Studio, and the copies move.
     if (copy)
