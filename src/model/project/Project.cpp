@@ -8,8 +8,6 @@ namespace phazite
 {
 namespace
 {
-    constexpr const char* recentProjectsKey = "phaziteRecentProjects";
-
     // The ID saved in a project file. The Edit names its temporary folder (freeze files, comp renders)
     // after it, so a project keeps its ID from one session to the next. te::loadEditFromFile replaces
     // the saved ID with the one it is given, so this reads it first.
@@ -473,53 +471,5 @@ void AutosaveTimer::timerCallback()
 {
     // A failed autosave is retried at the next interval; the project file itself is untouched.
     [[maybe_unused]] const auto result = project.autosave();
-}
-
-//==============================================================================
-RecentProjects::RecentProjects (te::Engine& e)
-    : engine (e)
-{
-}
-
-void RecentProjects::add (const juce::File& projectFile)
-{
-    auto list = load();
-    list.addFile (projectFile);
-    store (list);
-}
-
-void RecentProjects::remove (const juce::File& projectFile)
-{
-    auto list = load();
-    list.removeFile (projectFile);
-    store (list);
-}
-
-juce::Array<juce::File> RecentProjects::getProjects() const
-{
-    auto list = load();
-    list.removeNonExistentFiles();
-
-    juce::Array<juce::File> projects;
-
-    for (int i = 0; i < list.getNumFiles(); ++i)
-        projects.add (list.getFile (i));
-
-    return projects;
-}
-
-juce::RecentlyOpenedFilesList RecentProjects::load() const
-{
-    juce::RecentlyOpenedFilesList list;
-    list.setMaxNumberOfItems (maxNumProjects);
-    list.restoreFromString (engine.getPropertyStorage().getPropertiesFile().getValue (recentProjectsKey));
-    return list;
-}
-
-void RecentProjects::store (const juce::RecentlyOpenedFilesList& list)
-{
-    auto& settings = engine.getPropertyStorage().getPropertiesFile();
-    settings.setValue (recentProjectsKey, list.toString());
-    settings.saveIfNeeded();
 }
 } // namespace phazite

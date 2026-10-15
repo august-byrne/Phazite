@@ -5,7 +5,6 @@
 #include "model/base/Tracktion.h"
 
 #include <functional>
-#include <juce_gui_extra/juce_gui_extra.h>
 
 namespace phazite
 {
@@ -129,24 +128,5 @@ public:
 private:
     Project& project;
     void timerCallback() override;
-};
-
-//==============================================================================
-// The projects opened most recently, newest first, kept in Phazite's settings.
-class RecentProjects
-{
-public:
-    static constexpr int maxNumProjects = 10;
-
-    explicit RecentProjects (te::Engine&);
-
-    void add (const juce::File& projectFile);
-    void remove (const juce::File& projectFile);
-    juce::Array<juce::File> getProjects() const; // only those that still exist
-
-private:
-    te::Engine& engine;
-    juce::RecentlyOpenedFilesList load() const;
-    void store (const juce::RecentlyOpenedFilesList&);
 };
 } // namespace phazite

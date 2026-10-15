@@ -190,29 +190,6 @@ TEST_CASE ("Save As makes a copy with the unsaved changes, and leaves the origin
     CHECK (error.isNotEmpty());
 }
 
-TEST_CASE ("Recent projects list the newest first and skip missing ones")
-{
-    TemporaryFolder temp;
-    const auto a = createProject (temp.folder, "A")->getFile();
-    const auto b = createProject (temp.folder, "B")->getFile();
-    const auto c = createProject (temp.folder, "C")->getFile();
-
-    phazite::RecentProjects recent (phazite::test::getEngine());
-
-    for (const auto& file : { a, b, c, a })
-        recent.add (file);
-
-    CHECK (recent.getProjects() == juce::Array<juce::File> { a, c, b });
-
-    recent.remove (c);
-    CHECK (recent.getProjects() == juce::Array<juce::File> { a, b });
-
-    b.getParentDirectory().deleteRecursively();
-    CHECK (recent.getProjects() == juce::Array<juce::File> { a });
-
-    recent.remove (a);
-}
-
 TEST_CASE ("A project opens with the playhead at the song's start, where playback starts")
 {
     TemporaryFolder temp;

@@ -7,13 +7,17 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
 #include "model/project/Project.h"
+#include "services/RecentProjects.h"
+
+#include <juce_gui_basics/juce_gui_basics.h>
 
 namespace phazite
 {
 class ProjectSession : private juce::ChangeListener
 {
 public:
-    ProjectSession (te::Engine&, UIBehaviour&);
+    // New projects go into projectsFolder, and the Open dialog starts there.
+    ProjectSession (te::Engine&, UIBehaviour&, RecentProjects&, juce::File projectsFolder);
     ~ProjectSession() override;
 
     Project* getProject() const noexcept { return project.get(); }
@@ -49,7 +53,8 @@ public:
 private:
     te::Engine& engine;
     UIBehaviour& uiBehaviour;
-    RecentProjects recent;
+    const juce::File projectsFolder;
+    RecentProjects& recent;
     te::SelectionManager selection { engine };
     RangeSelection rangeSelection;
     std::unique_ptr<Project> project;

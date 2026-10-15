@@ -6,10 +6,11 @@
 
 namespace phazite
 {
-ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui)
+ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui, RecentProjects& recentProjects, juce::File folder)
     : engine (e),
       uiBehaviour (ui),
-      recent (e)
+      projectsFolder (std::move (folder)),
+      recent (recentProjects)
 {
     engine.getDeviceManager().addChangeListener (this);
     selection.addChangeListener (this);
@@ -45,7 +46,7 @@ void ProjectSession::openAtStartup()
 
 void ProjectSession::createFirstProject()
 {
-    auto folder = getDefaultProjectsFolder();
+    auto folder = projectsFolder;
     folder.createDirectory();
 
     juce::String name ("My First Song");
@@ -73,7 +74,7 @@ void ProjectSession::newProject()
             if (! closed)
                 return;
 
-            const auto folder = getDefaultProjectsFolder();
+            const auto folder = projectsFolder;
             auto* window = new juce::AlertWindow ("New project",
                                                   "Name the project. Phazite makes a folder for it in " + folder.getFullPathName()
                                                       + ". A song outline lays out its sections, which you can change later.",
@@ -123,8 +124,7 @@ void ProjectSession::newProject()
 
 void ProjectSession::openProject()
 {
-    fileChooser =
-        std::make_unique<juce::FileChooser> ("Open a project", getDefaultProjectsFolder(), juce::String ("*") + Project::fileExtension);
+    fileChooser = std::make_unique<juce::FileChooser> ("Open a project", projectsFolder, juce::String ("*") + Project::fileExtension);
 
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                               [this] (const juce::FileChooser& chooser)

@@ -308,7 +308,7 @@ Once the setup script has turned crash dumps on, a crash outside a debugger leav
 | `src/app/` | The app: startup, the main window with its menus and dialogs, and the open project; a library (`phazite_app`) the tests link, plus `Main.cpp` |
 | `src/ui/` | What you see and touch, by area: the theme and design tokens, base controls, keys and shortcuts, device menus and windows, and one folder per view (time line, playlist, piano roll, mixer, browser, and the window's shell) |
 | `src/model/` | The project model on top of Tracktion Engine, by area (commands, engine, project, transport, arrangement, notes, mixer), without window code; compiled with Tracktion Engine and JUCE into the `phazite_core` library that the app and the tests share |
-| `src/services/` | What the app keeps outside a project: the browser's library index and the Phazite Sounds download (also in `phazite_core`) |
+| `src/services/` | What the app keeps outside a project: settings, recent projects, the browser's library index and the Phazite Sounds download (also in `phazite_core`) |
 | `resources/` | Keymaps, song outlines and icons (compiled into the app), and the Inter font (copied next to the app, into `fonts/`) |
 | `tests/` | Unit tests (`phazite_tests`, doctest), including golden tests that compare saved projects, short renders and the model's commands with committed files; `ctest --preset <preset>` runs them |
 | `docs/` | [The design](docs/design.md) and [the roadmap](docs/roadmap.md) |

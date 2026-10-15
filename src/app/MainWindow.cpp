@@ -11,12 +11,6 @@ namespace phazite
 {
 namespace
 {
-    constexpr const char* themeSettingKey = "phaziteTheme";
-    constexpr const char* hoverHelpSettingKey = "phaziteHoverHelp";
-    constexpr const char* computerKeyboardSettingKey = "phaziteComputerKeyboard";
-    constexpr const char* interfaceScaleSettingKey = "phaziteInterfaceScale";
-    constexpr const char* welcomeShownSettingKey = "phaziteWelcomeShown";
-
     // Interface sizes, on top of the operating system's display scaling.
     constexpr std::array<float, 8> interfaceScales { 0.75f, 0.9f, 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f };
     constexpr const char* keymapSettingKey = "phaziteKeymap"; // also read by CommandRegistry::loadKeySettings
@@ -61,16 +55,17 @@ namespace
     }
 } // namespace
 
-MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui::LookAndFeel& lf)
+MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices)
     : juce::DocumentWindow ("Phazite", lf.getPalette().background, juce::DocumentWindow::allButtons),
       engine (e),
       commands (r),
       session (s),
       lookAndFeel (lf),
+      services (appServices),
       computerKeyboard ([&e] (const juce::MidiMessage& m) { playIntoAllMidiInputs (e, m); })
 {
     setUsingNativeTitleBar (true);
-    setInterfaceScale ((float) engine.getPropertyStorage().getPropertiesFile().getDoubleValue (interfaceScaleSettingKey, 1.0));
+    setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
     auto content = std::make_unique<ui::AppShell> (
         engine, commands, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection(), s.getRangeSelection());
@@ -81,16 +76,13 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     setResizeLimits (800, 500, 16384, 16384);
     centreWithSize (1280, 800);
 
-    auto& settings = engine.getPropertyStorage().getPropertiesFile();
-    setTheme (themeFromString (settings.getValue (themeSettingKey, "dark")));
-    setHoverHelp (settings.getBoolValue (hoverHelpSettingKey, true));
+    setTheme (themeFromString (services.settings.get (Settings::theme)));
+    setHoverHelp (services.settings.get (Settings::hoverHelp));
 
-    computerKeyboard.setEnabled (settings.getBoolValue (computerKeyboardSettingKey, true));
+    computerKeyboard.setEnabled (services.settings.get (Settings::computerKeyboard));
     computerKeyboard.onChange = [this]
     {
-        auto& props = engine.getPropertyStorage().getPropertiesFile();
-        props.setValue (computerKeyboardSettingKey, computerKeyboard.isEnabled());
-        props.saveIfNeeded();
+        services.settings.set (Settings::computerKeyboard, computerKeyboard.isEnabled());
         menuItemsChanged();
     };
 
@@ -370,13 +362,10 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
 
 void MainWindow::showWelcomeOnFirstRun()
 {
-    auto& settings = engine.getPropertyStorage().getPropertiesFile();
-
-    if (settings.getBoolValue (welcomeShownSettingKey, false))
+    if (services.settings.get (Settings::welcomeShown))
         return;
 
-    settings.setValue (welcomeShownSettingKey, true);
-    settings.saveIfNeeded();
+    services.settings.set (Settings::welcomeShown, true);
 
     // Once the window is on the screen.
     if (! shell->getSoundPack().isInstalled())
@@ -450,9 +439,7 @@ void MainWindow::setTheme (ui::ThemeName theme)
 
     repaint();
 
-    auto& settings = engine.getPropertyStorage().getPropertiesFile();
-    settings.setValue (themeSettingKey, toString (theme));
-    settings.saveIfNeeded();
+    services.settings.set (Settings::theme, toString (theme));
     menuItemsChanged();
 }
 
@@ -460,9 +447,7 @@ void MainWindow::setHoverHelp (bool on)
 {
     tooltipWindow = on ? std::make_unique<juce::TooltipWindow> (nullptr, 700) : nullptr;
 
-    auto& settings = engine.getPropertyStorage().getPropertiesFile();
-    settings.setValue (hoverHelpSettingKey, on);
-    settings.saveIfNeeded();
+    services.settings.set (Settings::hoverHelp, on);
     menuItemsChanged();
 }
 
@@ -470,10 +455,7 @@ void MainWindow::setInterfaceScale (float scale)
 {
     scale = juce::jlimit (interfaceScales.front(), interfaceScales.back(), scale);
     juce::Desktop::getInstance().setGlobalScaleFactor (scale);
-
-    auto& settings = engine.getPropertyStorage().getPropertiesFile();
-    settings.setValue (interfaceScaleSettingKey, scale);
-    settings.saveIfNeeded();
+    services.settings.set (Settings::interfaceScale, scale);
 }
 
 void MainWindow::stepInterfaceScale (int direction)

@@ -3,11 +3,13 @@
 // Written against tracktion_engine develop @bb386171 (module 3.5.0) and the JUCE it pins (37c894f8).
 
 #include "AppCommands.h"
+#include "AppServices.h"
 #include "MainWindow.h"
 #include "ProjectSession.h"
 #include "model/arrangement/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
+#include "model/project/StarterProject.h"
 #include "ui/devices/PluginWindow.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -41,6 +43,7 @@ public:
         // The Engine opens the default audio device and loads the saved plug-in list (settings live in
         // %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in a child copy of this exe (see above).
         engine = createEngine ({});
+        services = std::make_unique<AppServices> (*engine);
 
         lookAndFeel = std::make_unique<ui::LookAndFeel>();
         juce::LookAndFeel::setDefaultLookAndFeel (lookAndFeel.get()); // dialogs and menus use it too
@@ -50,8 +53,8 @@ public:
         uiBehaviour.recreatePluginWindowFunction = ui::recreatePluginWindowContent;
 
         commands = std::make_unique<CommandRegistry>();
-        session = std::make_unique<ProjectSession> (*engine, uiBehaviour);
-        mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel);
+        session = std::make_unique<ProjectSession> (*engine, uiBehaviour, services->recentProjects, getDefaultProjectsFolder());
+        mainWindow = std::make_unique<MainWindow> (*engine, *commands, *session, *lookAndFeel, *services);
 
         addSongCommands (*commands, session->getSelection(), session->getRangeSelection());
         session->addCommands (*commands);
@@ -71,12 +74,14 @@ public:
             commands->saveKeySettings (engine->getPropertyStorage().getPropertiesFile());
 
         // Reverse order of creation: the window uses the session and the commands, the session holds
-        // the Edit, and every Edit must go before the Engine.
+        // the Edit, and every Edit must go before the Engine. The services keep their settings in the
+        // Engine's settings file.
         mainWindow = nullptr;
         session = nullptr;
         commands = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         lookAndFeel = nullptr;
+        services = nullptr;
         engine = nullptr;
     }
 
@@ -107,6 +112,7 @@ private:
     // Declaration order matters: members are destroyed in reverse order, so even if shutdown() is
     // never called, the window goes first and the Engine last.
     std::unique_ptr<te::Engine> engine;
+    std::unique_ptr<AppServices> services;
     std::unique_ptr<ui::LookAndFeel> lookAndFeel;
     std::unique_ptr<CommandRegistry> commands;
     std::unique_ptr<ProjectSession> session;

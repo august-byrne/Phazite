@@ -107,6 +107,10 @@ target_sources(phazite_core PRIVATE
     # services: what the whole app shares (they use the model; the model never uses them)
     src/services/Library.cpp
     src/services/Library.h
+    src/services/RecentProjects.cpp
+    src/services/RecentProjects.h
+    src/services/Settings.cpp
+    src/services/Settings.h
     src/services/SoundPack.cpp
     src/services/SoundPack.h)
 
@@ -296,6 +300,8 @@ add_library(phazite_app STATIC)
 target_sources(phazite_app PRIVATE
     src/app/AppCommands.cpp
     src/app/AppCommands.h
+    src/app/AppServices.cpp
+    src/app/AppServices.h
     src/app/MainWindow.cpp
     src/app/MainWindow.h
     src/app/ProjectSession.cpp
@@ -355,6 +361,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestMain.cpp
         tests/TestHelpers.h
         tests/AppInfoTests.cpp
+        tests/AppTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
         tests/BrowserTests.cpp
@@ -386,6 +393,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/RealtimeAuditTests.cpp
         tests/SchemaTests.cpp
         tests/SectionTests.cpp
+        tests/SettingsTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
         tests/TimelineTests.cpp
