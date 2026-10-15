@@ -9,6 +9,7 @@
 #include "services/Library.h"
 #include "ui/browser/Browser.h"
 #include "ui/browser/PluginPicker.h"
+#include "ui/input/LibraryDrag.h"
 #include "ui/playlist/Playlist.h"
 
 namespace
@@ -134,10 +135,10 @@ TEST_CASE ("The browser shows its places, plays a sound when clicked, and Enter 
     // A folder's sound dragged into the song and dropped there is noted too.
     auto kick = screen.library.findItem (screen.soundPack.getFolder().getChildFile ("Drums/Kick.wav").getFullPathName());
     REQUIRE (kick.has_value());
-    const auto description = phazite::toDragDescription (*kick);
+    const auto description = phazite::ui::toDragDescription (*kick);
     screen.browser.dragOperationEnded ({ description, &screen.browser, {} }); // dropped where nothing took it
     CHECK (screen.library.getRecent()[0].name == juce::String ("Snare"));
-    phazite::markPlaced (description);
+    phazite::ui::markPlaced (description);
     screen.browser.dragOperationEnded ({ description, &screen.browser, {} });
     CHECK (screen.library.getRecent()[0].name == juce::String ("Kick"));
 }
@@ -252,7 +253,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     phazite::LibraryItem kick;
     kick.name = "Kick";
     kick.file = phazite::test::writeSound (temp.folder.getChildFile ("Kick.wav"), 0.3);
-    const auto sound = phazite::toDragDescription (kick);
+    const auto sound = phazite::ui::toDragDescription (kick);
     const auto beat4 = juce::roundToInt (playlist.getView().beatToX (te::BeatPosition::fromBeats (4.0)));
     const juce::DragAndDropTarget::SourceDetails onTrack (sound, &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat4, 10)));
 
@@ -260,7 +261,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     target.itemDropped (onTrack);
     REQUIRE (track->getClips().size() == 1);
     CHECK (track->getClips()[0]->getStartBeat().inBeats() == doctest::Approx (4.0));
-    CHECK (phazite::wasPlaced (sound));
+    CHECK (phazite::ui::wasPlaced (sound));
 
     // An instrument dropped below the tracks gets a track of its own.
     phazite::LibraryItem synth;
@@ -268,14 +269,14 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     synth.device = phazite::getDeviceTypes (engine).at (0);
     synth.name = synth.device->name;
     REQUIRE (synth.device->isInstrument);
-    const auto device = phazite::toDragDescription (synth);
+    const auto device = phazite::ui::toDragDescription (synth);
     const juce::DragAndDropTarget::SourceDetails below (device, &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat4, 500)));
 
     REQUIRE (target.isInterestedInDragSource (below));
     target.itemDropped (below);
     REQUIRE (te::getAudioTracks (*edit).size() == 2);
     CHECK (phazite::getInstrument (*te::getAudioTracks (*edit)[1]) != nullptr);
-    CHECK (phazite::wasPlaced (device));
+    CHECK (phazite::ui::wasPlaced (device));
 
     // A loop that knows its tempo follows the song's, as it played in the preview: two bars at 120 BPM span two bars
     // at 100.
@@ -285,7 +286,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     breakLoop.file = phazite::test::writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
     const auto beat16 = juce::roundToInt (playlist.getView().beatToX (te::BeatPosition::fromBeats (16.0)));
     target.itemDropped (
-        { phazite::toDragDescription (breakLoop), &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat16, 10)) });
+        { phazite::ui::toDragDescription (breakLoop), &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat16, 10)) });
     REQUIRE (track->getClips().size() == 2);
     auto* loopClip = dynamic_cast<te::WaveAudioClip*> (track->getClips().getLast());
     REQUIRE (loopClip != nullptr);
@@ -344,4 +345,49 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     CHECK (phazite::test::dispatchMessagesUntil ([&browser] { return getRows (browser).contains ("Drums"); }));
     REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 10000));
     CHECK_FALSE (library.search ("kick").empty());
+}
+
+TEST_CASE ("A dragged item says what it is, and remembers being placed")
+{
+    // A sound: its file and its key, and no device.
+    phazite::LibraryItem kick;
+    kick.name = "Kick";
+    kick.file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Kick.wav");
+
+    const auto sound = phazite::ui::toDragDescription (kick);
+    CHECK (phazite::ui::getDraggedFile (sound).value_or (juce::File()) == kick.file);
+    CHECK (phazite::ui::getDraggedKey (sound) == kick.getKey());
+    CHECK_FALSE (phazite::ui::getDraggedDevice (sound).has_value());
+
+    // Whatever puts it into the song marks it, and every copy of the description sees that.
+    const auto copy = sound;
+    CHECK_FALSE (phazite::ui::wasPlaced (copy));
+    phazite::ui::markPlaced (sound);
+    CHECK (phazite::ui::wasPlaced (copy));
+
+    // A device: its plug-in description, which says whether it is an instrument.
+    juce::PluginDescription plugin;
+    plugin.name = "Test Synth";
+    plugin.pluginFormatName = "VST3";
+    plugin.fileOrIdentifier = "Test Synth.vst3";
+    plugin.isInstrument = true;
+
+    phazite::LibraryItem synth;
+    synth.kind = phazite::LibraryItem::Kind::instrument;
+    synth.name = plugin.name;
+    synth.device = phazite::makeDeviceType (plugin);
+
+    const auto dragged = phazite::ui::toDragDescription (synth);
+    const auto device = phazite::ui::getDraggedDevice (dragged);
+    REQUIRE (device.has_value());
+    CHECK (device->name == juce::String ("Test Synth"));
+    CHECK (device->isInstrument);
+    CHECK (device->category == juce::String ("Instrument"));
+    CHECK (phazite::ui::getDraggedKey (dragged) == synth.getKey());
+    CHECK_FALSE (phazite::ui::getDraggedFile (dragged).has_value());
+
+    // A file is only taken with its full path.
+    auto* relative = new juce::DynamicObject();
+    relative->setProperty ("file", "Kick.wav");
+    CHECK_FALSE (phazite::ui::getDraggedFile (juce::var (relative)).has_value());
 }

@@ -67,6 +67,9 @@ struct DeviceType
     bool isInstrument = false;
 };
 
+// A plug-in description's device: an instrument or an effect, named as the description names it.
+DeviceType makeDeviceType (const juce::PluginDescription&);
+
 std::vector<DeviceType> getDeviceTypes (te::Engine&);
 te::Plugin::Ptr createDevice (te::Edit&, const DeviceType&);
 

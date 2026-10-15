@@ -258,6 +258,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/input/Keymap.h
     src/ui/input/KeymapStore.cpp
     src/ui/input/KeymapStore.h
+    src/ui/input/LibraryDrag.cpp
+    src/ui/input/LibraryDrag.h
     src/ui/input/PluginKeys.cpp
     src/ui/input/PluginKeys.h
     src/ui/input/WindowKeys.cpp

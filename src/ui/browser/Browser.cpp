@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Browser.h"
+#include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui

@@ -105,7 +105,7 @@ namespace
         description.manufacturerName = "Tracktion";
         description.fileOrIdentifier = xmlType;
         description.isInstrument = isInstrument;
-        return { name, isInstrument ? "Instrument" : "Effect", description, isInstrument };
+        return makeDeviceType (description);
     }
 } // namespace
 
@@ -259,6 +259,11 @@ te::AutomatableParameter::Array getMixParameters (te::Plugin& device)
 }
 
 //==============================================================================
+DeviceType makeDeviceType (const juce::PluginDescription& description)
+{
+    return { description.name, description.isInstrument ? "Instrument" : "Effect", description, description.isInstrument };
+}
+
 std::vector<DeviceType> getDeviceTypes (te::Engine& engine)
 {
     // Until Phazite's own devices arrive (roadmap step 1.6), two of Tracktion's: the 4OSC synth, which the starter
@@ -268,7 +273,7 @@ std::vector<DeviceType> getDeviceTypes (te::Engine& engine)
                                     makeBuiltIn ("Reverb", te::ReverbPlugin::xmlTypeName, false) };
 
     for (const auto& description : engine.getPluginManager().knownPluginList.getTypes())
-        types.push_back ({ description.name, description.isInstrument ? "Instrument" : "Effect", description, description.isInstrument });
+        types.push_back (makeDeviceType (description));
 
     return types;
 }

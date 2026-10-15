@@ -11,6 +11,7 @@
 #include "model/transport/Playback.h"
 #include "services/Library.h"
 #include "ui/input/CommandUI.h"
+#include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
