@@ -61,6 +61,13 @@ add_library(phazite_core STATIC)
 target_sources(phazite_core PRIVATE
     src/devices/core/DeviceInfo.cpp
     src/devices/core/DeviceInfo.h
+    src/devices/dsp/DelayLine.h
+    src/devices/dsp/Envelopes.h
+    src/devices/dsp/Filters.cpp
+    src/devices/dsp/Filters.h
+    src/devices/dsp/Math.h
+    src/devices/dsp/Oscillators.h
+    src/devices/dsp/Random.h
     src/model/arrangement/Arrangement.cpp
     src/model/arrangement/Arrangement.h
     src/model/arrangement/Clips.cpp
@@ -403,6 +410,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DesignTokenTests.cpp
         tests/DeviceInfoTests.cpp
         tests/DrumRowTests.cpp
+        tests/DspTests.cpp
         tests/EngineSetupTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
