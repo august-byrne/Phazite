@@ -2,6 +2,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
+#include "model/commands/Undo.h"
 #include "model/project/Project.h"
 
 namespace
@@ -149,4 +150,43 @@ TEST_CASE ("Track colors follow the words in a file's name")
     CHECK (phazite::getColourForName ("Lead Synth") == colourNamed ("Sky blue"));
     CHECK (phazite::getColourForName ("Vox Chop") == colourNamed ("Reddish purple"));
     CHECK_FALSE (phazite::getColourForName ("Recording 3").has_value());
+}
+
+TEST_CASE ("Dropped files go on the track that suits them, or on new tracks below it, as one undo step")
+{
+    TemporaryFolder temp;
+    const auto kick = temp.folder.getChildFile ("Kick.wav");
+    const auto chords = temp.folder.getChildFile ("Chords.mid");
+    writeWav (kick, 22050);
+    writeMidi (chords);
+
+    auto project = createProject (temp.folder.getChildFile ("Project"));
+    auto& edit = project->getEdit();
+    auto* target = te::getAudioTracks (edit)[0];
+    edit.getUndoManager().clearUndoHistory();
+
+    // The audio suits the empty track; the MIDI file gets a new track below it, named after the file. A file that is
+    // neither is left out.
+    const auto added = phazite::importFiles (
+        edit, { kick.getFullPathName(), chords.getFullPathName(), temp.folder.getChildFile ("Notes.txt").getFullPathName() }, target,
+        beats (4.0));
+    REQUIRE (added.size() == 2);
+    CHECK (added[0]->getTrack() == target);
+    CHECK (dynamic_cast<te::MidiClip*> (added[1]) != nullptr);
+    CHECK (added[1]->getStartBeat().inBeats() == doctest::Approx (4.0));
+
+    auto* midiTrack = added[1]->getTrack();
+    const auto tracks = phazite::getPlaylistTracks (edit);
+    CHECK (midiTrack->getName() == juce::String ("Chords"));
+    CHECK (tracks.indexOf (midiTrack) == tracks.indexOf (target) + 1);
+    CHECK (edit.getUndoManager().getUndoDescription() == juce::String ("Add Files"));
+
+    // MIDI doesn't go on a track with audio on it.
+    const auto more = phazite::importFiles (edit, { chords.getFullPathName() }, target, beats (0.0));
+    REQUIRE (more.size() == 1);
+    CHECK (more[0]->getTrack() != target);
+    CHECK (edit.getUndoManager().getUndoDescription() == juce::String ("Add File"));
+
+    phazite::undo (edit);
+    CHECK (phazite::getPlaylistTracks (edit).size() == 2);
 }

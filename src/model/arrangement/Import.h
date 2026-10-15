@@ -33,4 +33,10 @@ std::optional<juce::Colour> getColourForName (const juce::String&);
 // tempo stretched to the song's, as the browser previews it), or a MIDI clip. Returns nullptr for other files, or if
 // the file can't be read.
 te::Clip* importFile (te::ClipTrack&, const juce::File&, te::BeatPosition start);
+
+// Adds files dropped on the playlist, at a beat, as one undo step ("Add File" or "Add Files"). The first goes on the target
+// track if it suits it (MIDI on a track with no audio clips; audio on one with no MIDI clips and no instrument, which would
+// silence it); each other file, and one that doesn't suit the track, goes on a new track below, named after the file and
+// colored by what its name says. Files that are neither audio nor MIDI are left out. Returns the clips added.
+juce::Array<te::Clip*> importFiles (te::Edit&, const juce::StringArray& paths, te::Track* target, te::BeatPosition start);
 } // namespace phazite

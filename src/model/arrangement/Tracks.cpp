@@ -435,6 +435,55 @@ void renameTrack (te::Track& track, const juce::String& name)
     track.setName (trimmed);
 }
 
+te::Track* addTrackAtEnd (te::Edit& edit, bool folder, te::SelectionManager* selection)
+{
+    const UndoStep step (edit, folder ? "Add Folder" : "Add Track");
+
+    if (folder)
+        return insertFolder (edit, nullptr, selection);
+
+    return insertTrack (edit, nullptr, selection);
+}
+
+void setTrackColours (const juce::Array<te::Track*>& tracks, juce::Colour colour)
+{
+    if (tracks.isEmpty())
+        return;
+
+    const UndoStep step (tracks.getFirst()->edit, tracks.size() > 1 ? "Change Track Colors" : "Change Track Color");
+
+    for (auto* track : tracks)
+        track->setColour (colour);
+}
+
+void moveTracksAfter (const juce::Array<te::Track*>& moving, te::Track* previous)
+{
+    if (moving.isEmpty())
+        return;
+
+    auto& edit = moving.getFirst()->edit;
+    const UndoStep step (edit, moving.size() > 1 ? "Move Tracks" : "Move Track");
+
+    // To the playlist's first place: after Tracktion's global tracks (tempo, markers...).
+    te::Track* lastGlobalTrack = nullptr;
+
+    edit.getTrackList().visitAllTopLevel (
+        [&lastGlobalTrack] (te::Track& track)
+        {
+            if (track.isAudioTrack() || track.isFolderTrack())
+                return false;
+
+            lastGlobalTrack = &track;
+            return true;
+        });
+
+    for (auto* track : moving)
+    {
+        edit.moveTrack (track, previous != nullptr ? getInsertPointAfter (*previous) : te::TrackInsertPoint (nullptr, lastGlobalTrack));
+        previous = track;
+    }
+}
+
 void deleteTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* selection)
 {
     // A folder takes the tracks inside it along, so those aren't deleted on their own.

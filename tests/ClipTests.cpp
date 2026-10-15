@@ -516,3 +516,20 @@ TEST_CASE ("Aliases, audio clips and fade shapes")
     audio->setFadeOutType (te::AudioFadeCurve::linear); // in and out differ
     CHECK_FALSE (phazite::hasFadeShape (both, te::AudioFadeCurve::convex));
 }
+
+TEST_CASE ("A double-click's MIDI clip lasts a bar of the time signature there, as one undo step")
+{
+    ClipEdit e;
+    e.edit->tempoSequence.getTimeSigs()[0]->setStringTimeSig ("3/4");
+    e.edit->getUndoManager().clearUndoHistory();
+
+    auto* clip = phazite::addMidiClipAt (*e.tracks[0], beats (6.0), &e.selection);
+    REQUIRE (clip != nullptr);
+    CHECK (clip->getStartBeat().inBeats() == doctest::Approx (6.0));
+    CHECK (clip->getEndBeat().inBeats() == doctest::Approx (9.0));
+    CHECK (phazite::getSelectedClips (e.selection) == juce::Array<te::Clip*> { clip });
+    CHECK (e.edit->getUndoManager().getUndoDescription() == juce::String ("Add MIDI Clip"));
+
+    phazite::undo (*e.edit);
+    CHECK (e.tracks[0]->getClips().isEmpty());
+}

@@ -626,3 +626,39 @@ TEST_CASE ("Renaming a track is an undo step, and an empty name gives it its num
     CHECK (track->getName() != juce::String ("Bass"));
     CHECK (track->getName().isNotEmpty());
 }
+
+TEST_CASE ("Adding a track at the end, coloring tracks and moving them are undo steps of their own")
+{
+    Tracks t (3);
+
+    auto* added = phazite::addTrackAtEnd (*t.edit, false, &t.selection);
+    REQUIRE (added != nullptr);
+    CHECK (phazite::getPlaylistTracks (*t.edit).getLast() == added);
+    CHECK (t.selection.isSelected (added));
+    CHECK (t.getUndoName() == juce::String ("Add Track"));
+    added->setName ("D");
+
+    auto* folder = phazite::addTrackAtEnd (*t.edit, true, nullptr);
+    REQUIRE (folder != nullptr);
+    CHECK (folder->isFolderTrack());
+    CHECK (t.getUndoName() == juce::String ("Add Folder"));
+    folder->setName ("F");
+
+    phazite::setTrackColours ({ t["A"], t["B"] }, juce::Colours::red);
+    CHECK (t["A"]->getColour() == juce::Colours::red);
+    CHECK (t["B"]->getColour() == juce::Colours::red);
+    CHECK (t.getUndoName() == juce::String ("Change Track Colors"));
+    phazite::setTrackColours ({ t["C"] }, juce::Colours::red);
+    CHECK (t.getUndoName() == juce::String ("Change Track Color"));
+
+    // To the start, in the order given; then after another track.
+    phazite::moveTracksAfter ({ t["C"], t["A"] }, nullptr);
+    CHECK (t.getOrder() == juce::String ("C A B D F"));
+    CHECK (t.getUndoName() == juce::String ("Move Tracks"));
+    phazite::moveTracksAfter ({ t["C"] }, t["D"]);
+    CHECK (t.getOrder() == juce::String ("A B D C F"));
+    CHECK (t.getUndoName() == juce::String ("Move Track"));
+
+    phazite::undo (*t.edit);
+    CHECK (t.getOrder() == juce::String ("C A B D F"));
+}

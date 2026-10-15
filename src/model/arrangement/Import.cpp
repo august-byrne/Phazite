@@ -2,9 +2,25 @@
 #include "Import.h"
 #include "Clips.h"
 #include "Tracks.h"
+#include "model/commands/Undo.h"
+#include "model/engine/LiveInput.h"
 
 namespace phazite
 {
+namespace
+{
+    // Whether a dropped file can go on a track. Audio and notes don't share a track in v1 (docs/design.md,
+    // section 5): an instrument would silence the audio.
+    bool suitsTrack (te::AudioTrack& track, FileKind kind)
+    {
+        for (auto* clip : track.getClips())
+            if ((dynamic_cast<te::MidiClip*> (clip) != nullptr) != (kind == FileKind::midi))
+                return false;
+
+        return kind == FileKind::midi || ! hasInstrument (track);
+    }
+} // namespace
+
 FileKind getFileKind (te::Engine& engine, const juce::File& file)
 {
     const auto extension = file.getFileExtension().toLowerCase();
@@ -119,5 +135,46 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
         default:
             return nullptr;
     }
+}
+
+juce::Array<te::Clip*> importFiles (te::Edit& edit, const juce::StringArray& paths, te::Track* target, te::BeatPosition start)
+{
+    // The first file can go on the target track; the others get new tracks below it.
+    auto* after = target != nullptr ? target : getPlaylistTracks (edit).getLast();
+    juce::Array<te::Clip*> added;
+    const UndoStep step (edit, paths.size() > 1 ? "Add Files" : "Add File");
+
+    for (const auto& path : paths)
+    {
+        const juce::File file (path);
+        const auto kind = getFileKind (edit.engine, file);
+
+        if (kind == FileKind::other)
+            continue;
+
+        // A new track is named after the file, and colored by what its name says it is.
+        auto* track = dynamic_cast<te::AudioTrack*> (target);
+
+        if (track == nullptr || ! suitsTrack (*track, kind))
+        {
+            track = insertTrack (edit, after, nullptr);
+
+            if (track == nullptr)
+                break;
+
+            track->setName (file.getFileNameWithoutExtension());
+
+            if (const auto colour = getColourForName (file.getFileNameWithoutExtension()))
+                track->setColour (*colour);
+        }
+
+        if (auto* clip = importFile (*track, file, start))
+            added.add (clip);
+
+        after = track;
+        target = nullptr;
+    }
+
+    return added;
 }
 } // namespace phazite

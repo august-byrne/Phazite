@@ -6,6 +6,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Tracks.h"
+#include "model/commands/Undo.h"
 #include "model/engine/LiveInput.h"
 #include "model/mixer/Mixer.h"
 #include "model/transport/Playback.h"
@@ -59,17 +60,6 @@ namespace
         }
     }
 
-    // Whether a dropped file can go on a track. Audio and notes don't share a track in v1 (docs/design.md,
-    // section 5): an instrument would silence the audio.
-    bool suitsTrack (te::AudioTrack& track, FileKind kind)
-    {
-        for (auto* clip : track.getClips())
-            if ((dynamic_cast<te::MidiClip*> (clip) != nullptr) != (kind == FileKind::midi))
-                return false;
-
-        return kind == FileKind::midi || ! hasInstrument (track);
-    }
-
     juce::MouseCursor::StandardCursorType getCursorFor (Tool tool)
     {
         switch (tool)
@@ -101,24 +91,6 @@ namespace
     bool isContentClipState (const juce::ValueTree& state)
     {
         return te::Clip::isClipState (state) && ! state.hasType (te::IDs::ARRANGERCLIP);
-    }
-
-    // Where a track goes to be the playlist's first: after Tracktion's global tracks (tempo, markers...).
-    te::TrackInsertPoint getFirstInsertPoint (te::Edit& edit)
-    {
-        te::Track* lastGlobalTrack = nullptr;
-
-        edit.getTrackList().visitAllTopLevel (
-            [&lastGlobalTrack] (te::Track& track)
-            {
-                if (track.isAudioTrack() || track.isFolderTrack())
-                    return false;
-
-                lastGlobalTrack = &track;
-                return true;
-            });
-
-        return { nullptr, lastGlobalTrack };
     }
 } // namespace
 
@@ -414,6 +386,7 @@ struct Playlist::Gesture
     te::BeatPosition nextPaintStart;                                // Paint: where the next copy goes
     std::vector<te::SafeSelectable<te::Clip>> done;                 // Mute and Delete: the clips already done
     std::vector<te::SafeSelectable<te::Selectable>> selectedBefore; // Select with Ctrl: what was selected already
+    std::unique_ptr<phazite::Gesture> step;                         // the drag's undo step, from its first change until it ends
 };
 
 //==============================================================================
@@ -1032,43 +1005,7 @@ bool Playlist::addFiles (const juce::StringArray& paths, te::Track* target, te::
     if (e == nullptr)
         return false;
 
-    // The first file can go on the target track; the others get new tracks below it.
-    auto* after = target != nullptr ? target : getPlaylistTracks (*e).getLast();
-    juce::Array<te::Clip*> added;
-
-    e->getUndoManager().beginNewTransaction (paths.size() > 1 ? "Add Files" : "Add File");
-
-    for (const auto& path : paths)
-    {
-        const juce::File file (path);
-        const auto kind = getFileKind (e->engine, file);
-
-        if (kind == FileKind::other)
-            continue;
-
-        // A new track is named after the file, and colored by what its name says it is.
-        auto* track = dynamic_cast<te::AudioTrack*> (target);
-
-        if (track == nullptr || ! suitsTrack (*track, kind))
-        {
-            track = insertTrack (*e, after, nullptr);
-
-            if (track == nullptr)
-                break;
-
-            track->setName (file.getFileNameWithoutExtension());
-
-            if (const auto colour = getColourForName (file.getFileNameWithoutExtension()))
-                track->setColour (*colour);
-        }
-
-        if (auto* clip = importFile (*track, file, start))
-            added.add (clip);
-
-        after = track;
-        target = nullptr;
-    }
-
+    const auto added = phazite::importFiles (*e, paths, target, start);
     range.clear();
     selection.deselectAll();
 
@@ -1228,7 +1165,6 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 
     auto* component = getClipComponentAt (e.getPosition());
     auto* clip = component != nullptr ? component->getClip() : nullptr;
-    auto& undo = ed->getUndoManager();
     auto currentTool = getTool();
 
     if (e.mods.isPopupMenu())
@@ -1237,7 +1173,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
         // Shift+right-click opens the menu, as in the piano roll.
         if (getCommands().getKeymap().rightClickDeletes && ! e.mods.isShiftDown())
         {
-            undo.beginNewTransaction ("Delete Clips");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Delete Clips");
             gesture->kind = Gesture::Kind::erase;
             muteOrDeleteClipAt (e.getPosition(), true);
         }
@@ -1279,11 +1215,13 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
             }
 
             range.clear();
-            undo.beginNewTransaction (currentTool == Tool::draw ? "Place Clip" : "Paint Clips");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, currentTool == Tool::draw ? "Place Clip" : "Paint Clips");
             auto* placed = placeClip (gesture->startRow, gesture->startBeat, getGrid().snap && ! e.mods.isAltDown());
 
             if (placed == nullptr)
             {
+                gesture->step = nullptr; // nothing was placed, so a drag that follows begins a step of its own
+
                 // Nothing to place (a track without an instrument, before any clip was used): the Smart Tool's click.
                 if (placesForSmartTool)
                 {
@@ -1317,7 +1255,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
         case Tool::slice:
             if (clip != nullptr)
             {
-                undo.beginNewTransaction ("Split Clip");
+                gesture->step = std::make_unique<phazite::Gesture> (*ed, "Split Clip");
                 splitClips ({ clip }, snap (gesture->startBeat, e.mods));
             }
 
@@ -1332,7 +1270,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
             }
 
             clipClicked (*clip, {});
-            undo.beginNewTransaction ("Slip Clip");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Slip Clip");
             gesture->kind = Gesture::Kind::slip;
             gesture->clip = clip;
             gesture->startOffset = clip->getPosition().getOffset();
@@ -1340,7 +1278,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 
         case Tool::mute:
         case Tool::erase:
-            undo.beginNewTransaction (currentTool == Tool::mute ? "Mute Clips" : "Delete Clips");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, currentTool == Tool::mute ? "Mute Clips" : "Delete Clips");
             gesture->kind = currentTool == Tool::mute ? Gesture::Kind::mute : Gesture::Kind::erase;
             muteOrDeleteClipAt (e.getPosition(), currentTool == Tool::erase);
             return;
@@ -1615,7 +1553,7 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
     if (gesture->crossfade.has_value())
     {
         gesture->kind = Gesture::Kind::crossfade;
-        ed->getUndoManager().beginNewTransaction ("Crossfade");
+        gesture->step = std::make_unique<phazite::Gesture> (*ed, "Crossfade");
         return;
     }
 
@@ -1628,28 +1566,26 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
         return;
     }
 
-    auto& undo = ed->getUndoManager();
-
     switch (*gesture->zone)
     {
         case ClipZone::trimStart:
             gesture->kind = Gesture::Kind::trimStart;
-            undo.beginNewTransaction ("Trim Clip Start");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Trim Clip Start");
             return;
 
         case ClipZone::trimEnd:
             gesture->kind = Gesture::Kind::trimEnd;
-            undo.beginNewTransaction ("Trim Clip End");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Trim Clip End");
             return;
 
         case ClipZone::fadeIn:
             gesture->kind = Gesture::Kind::fadeIn;
-            undo.beginNewTransaction ("Fade In");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Fade In");
             return;
 
         case ClipZone::fadeOut:
             gesture->kind = Gesture::Kind::fadeOut;
-            undo.beginNewTransaction ("Fade Out");
+            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Fade Out");
             return;
 
         case ClipZone::move:
@@ -1669,9 +1605,9 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
     const auto alias = e.mods.isCommandDown() && e.mods.isShiftDown();
     const auto copy = e.mods.isCommandDown() && ! alias;
     const auto many = clips.size() > 1;
-    undo.beginNewTransaction (alias  ? (many ? "Make Aliases" : "Make Alias")
-                              : copy ? (many ? "Copy Clips" : "Copy Clip")
-                                     : (many ? "Move Clips" : "Move Clip"));
+    gesture->step = std::make_unique<phazite::Gesture> (*ed, alias  ? (many ? "Make Aliases" : "Make Alias")
+                                                             : copy ? (many ? "Copy Clips" : "Copy Clip")
+                                                                    : (many ? "Move Clips" : "Move Clip"));
 
     if (copy || alias)
     {
@@ -1771,10 +1707,7 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
     if (track == nullptr || ! hasInstrument (*track))
         return;
 
-    const auto start = snapDown (getView().xToBeat (e.position.x), e.mods);
-    const auto bar = te::BeatDuration::fromBeats (ed->tempoSequence.getTimeSigAt (start).numerator.get());
-    ed->getUndoManager().beginNewTransaction ("Add MIDI Clip");
-    insertMidiClip (*track, { start, start + bar }, &selection);
+    addMidiClipAt (*track, snapDown (getView().xToBeat (e.position.x), e.mods), &selection);
 }
 
 //==============================================================================
@@ -1827,9 +1760,7 @@ void Playlist::addTrackAtEnd (bool folder)
     if (e == nullptr)
         return;
 
-    e->getUndoManager().beginNewTransaction (folder ? "Add Folder" : "Add Track");
-    te::Track* added = folder ? static_cast<te::Track*> (insertFolder (*e, nullptr, &selection)) : insertTrack (*e, nullptr, &selection);
-
+    auto* added = phazite::addTrackAtEnd (*e, folder, &selection);
     handleUpdateNowIfNeeded(); // its row is there now
     scrollToShow (getRowOf (added));
 }
@@ -1876,15 +1807,7 @@ void Playlist::showRulerMenu (te::BeatPosition beat)
 
 void Playlist::setColourOfSelectedTracks (juce::Colour colour)
 {
-    const auto tracks = getSelectedTracks (selection);
-
-    if (tracks.isEmpty())
-        return;
-
-    tracks.getFirst()->edit.getUndoManager().beginNewTransaction (tracks.size() > 1 ? "Change Track Colors" : "Change Track Color");
-
-    for (auto* track : tracks)
-        track->setColour (colour);
+    setTrackColours (getSelectedTracks (selection), colour);
 }
 
 //==============================================================================
@@ -2008,13 +1931,7 @@ void Playlist::trackDragEnded (TrackHeader&, const juce::MouseEvent&)
         if (auto* t = rows[(size_t) i].track.get(); t != nullptr && ! selection.isSelected (t))
             previous = t;
 
-    e->getUndoManager().beginNewTransaction (moving.size() > 1 ? "Move Tracks" : "Move Track");
-
-    for (auto* track : moving)
-    {
-        e->moveTrack (track, previous != nullptr ? getInsertPointAfter (*previous) : getFirstInsertPoint (*e));
-        previous = track;
-    }
+    moveTracksAfter (moving, previous);
 }
 
 //==============================================================================

@@ -119,6 +119,16 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>&, te::Sel
 // Renames a track, as one undo step; an empty name gives it its number back. The same name changes nothing.
 void renameTrack (te::Track&, const juce::String& name);
 
+// Adds a track, or a folder, after the last one, as one undo step ("Add Track", "Add Folder"), and selects it if a selection
+// manager is given. Returns it, or nullptr.
+te::Track* addTrackAtEnd (te::Edit&, bool folder, te::SelectionManager*);
+
+// Gives tracks a color, as one undo step ("Change Track Color", or "Colors" for several).
+void setTrackColours (const juce::Array<te::Track*>&, juce::Colour);
+
+// Moves tracks, in their order, to right after another (nullptr: to the start), as one undo step ("Move Track(s)").
+void moveTracksAfter (const juce::Array<te::Track*>& moving, te::Track* previous);
+
 // Deletes tracks; a folder goes with the tracks inside it, and devices whose sidechain listened to one of them listen
 // to their own sound again. With a selection manager, the track that takes the first one's place is selected, as in
 // Ableton Live, so the keyboard can carry on from there.

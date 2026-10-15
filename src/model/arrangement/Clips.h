@@ -45,6 +45,10 @@ void setFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
 // Adds an empty MIDI clip, named after its track, and selects it if a selection manager is given.
 te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, te::SelectionManager*);
 
+// An empty MIDI clip a bar long (in the time signature there) from a beat, as one undo step, "Add MIDI Clip": a
+// double-click on a track with an instrument.
+te::MidiClip* addMidiClipAt (te::ClipTrack&, te::BeatPosition, te::SelectionManager*);
+
 //==============================================================================
 // Splits each clip that the beat falls inside into two there. Returns the new right-hand parts.
 juce::Array<te::Clip*> splitClips (const juce::Array<te::Clip*>&, te::BeatPosition);

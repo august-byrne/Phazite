@@ -2,6 +2,7 @@
 #include "Clips.h"
 #include "Tracks.h"
 #include "model/base/Toggles.h"
+#include "model/commands/Undo.h"
 
 #include <algorithm>
 #include <vector>
@@ -195,6 +196,13 @@ te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, te::Sel
 {
     const auto clip = track.insertMIDIClip (track.getName(), track.edit.tempoSequence.toTime (range), selection);
     return clip.get();
+}
+
+te::MidiClip* addMidiClipAt (te::ClipTrack& track, te::BeatPosition start, te::SelectionManager* selection)
+{
+    const UndoStep step (track.edit, "Add MIDI Clip");
+    const auto bar = te::BeatDuration::fromBeats (track.edit.tempoSequence.getTimeSigAt (start).numerator.get());
+    return insertMidiClip (track, { start, start + bar }, selection);
 }
 
 //==============================================================================
