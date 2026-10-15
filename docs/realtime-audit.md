@@ -27,7 +27,7 @@ Replacing a part of the engine outright is a separate decision, made one capabil
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** four scenarios read no files and use none of the code Phazite is replacing: one empty track, built-in effects with a send, automation with an LFO, and the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
+- **Guards:** seven scenarios read no files and use none of the code Phazite is replacing: one empty track, built-in effects with a send, automation with an LFO, the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), and one for each of Phazite's own devices so far (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, and the limiter on the master). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
 
 ## Results (Windows Debug)
 
@@ -39,6 +39,9 @@ The first column covers the first 0.25 s after playback starts; the second cover
 | Built-in EQ, compressor, and a send to a reverb return | 4 allocations | 0 |
 | Volume automation and an LFO on pan | 2 allocations | 0 |
 | A tone through a bus, with a send to a reverb return, into the loudness meter | 6 allocations | 0 |
+| Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |
+| Phazite's compressor, ducked by another track at 70 % mix, with its meters read | 4 allocations | 0 |
+| Phazite's limiter on the master, pushed 12 dB, with its meters read | 2 allocations | 0 |
 | An audio clip | 2 allocations (more if the file cache misses) | 0 |
 | Two tracks in a folder bus with a compressor | 7 allocations, 1 free | 0 |
 | MIDI into Tracktion's 4OSC synth | 29 allocations, 3 frees | 10 allocations, 8 frees |

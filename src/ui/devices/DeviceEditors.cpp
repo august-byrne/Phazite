@@ -2,7 +2,9 @@
 #include "DeviceEditors.h"
 #include "CompressorEditor.h"
 #include "EqEditor.h"
+#include "LimiterEditor.h"
 #include "devices/dynamics/Compressor.h"
+#include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -30,6 +32,9 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Compressor::typeID)
         return std::make_unique<CompressorEditor> (device);
+
+    if (info->typeID == devices::Limiter::typeID)
+        return std::make_unique<LimiterEditor> (device);
 
     return std::make_unique<DeviceKnobs> (device);
 }

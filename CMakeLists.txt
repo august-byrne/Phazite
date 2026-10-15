@@ -75,6 +75,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/Random.h
     src/devices/dynamics/Compressor.cpp
     src/devices/dynamics/Compressor.h
+    src/devices/dynamics/Limiter.cpp
+    src/devices/dynamics/Limiter.h
     src/devices/eq/Equalizer.cpp
     src/devices/eq/Equalizer.h
     src/model/arrangement/Arrangement.cpp
@@ -283,6 +285,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DeviceMenus.h
     src/ui/devices/EqEditor.cpp
     src/ui/devices/EqEditor.h
+    src/ui/devices/LimiterEditor.cpp
+    src/ui/devices/LimiterEditor.h
     src/ui/devices/PluginWindow.cpp
     src/ui/devices/PluginWindow.h
     src/ui/input/CommandBridge.cpp
@@ -450,6 +454,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/IconTests.cpp
         tests/ImportTests.cpp
         tests/LibraryTests.cpp
+        tests/LimiterEditorTests.cpp
+        tests/LimiterTests.cpp
         tests/LiveInputTests.cpp
         tests/MessageQueueTests.cpp
         tests/MigrationTests.cpp

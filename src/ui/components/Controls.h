@@ -11,6 +11,7 @@
 #include <tracktion_engine/tracktion_engine.h>
 
 #include <array>
+#include <optional>
 
 namespace phazite::ui
 {
@@ -150,6 +151,42 @@ private:
     juce::String getLevelText() const; // what screen readers read
     void detach();
     void timerCallback() override;
+};
+
+//==============================================================================
+// A meter of one value that a device's editor reads from its DSP, in decibels: a level, filled from the bottom, or how
+// far a device turns the sound down, filled from the top. A line can mark a value, such as a limiter's ceiling.
+// Screen readers read its value.
+class ValueMeter : public juce::Component
+{
+public:
+    enum class Fill
+    {
+        fromBottom, // a level, from lowest at the bottom to highest at the top
+        fromTop     // a reduction, from lowest at the top down to highest at the bottom
+    };
+
+    ValueMeter (const juce::String& title, float lowest, float highest, Fill);
+
+    // Jumps up to what was reached since the last update, or falls back smoothly: call it from a timer.
+    void update (float reached);
+    float getValue() const noexcept { return value; }
+
+    void setMark (std::optional<float>); // none by default
+
+    // What screen readers read: the value in decibels, a reduction as a negative number.
+    juce::String getValueText() const;
+
+    void paint (juce::Graphics&) override;
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
+
+private:
+    static constexpr float fallPerUpdate = 0.5f; // dB: 15 dB a second, at 30 updates a second
+
+    const float lowest, highest;
+    const Fill fill;
+    float value;
+    std::optional<float> mark;
 };
 
 //==============================================================================

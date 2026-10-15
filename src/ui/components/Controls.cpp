@@ -360,6 +360,97 @@ std::unique_ptr<juce::AccessibilityHandler> LevelMeter::createAccessibilityHandl
 }
 
 //==============================================================================
+ValueMeter::ValueMeter (const juce::String& title, float lowestValue, float highestValue, Fill direction)
+    : lowest (lowestValue),
+      highest (highestValue),
+      fill (direction),
+      value (lowestValue)
+{
+    setTitle (title);
+}
+
+void ValueMeter::update (float reached)
+{
+    const auto shown = juce::jlimit (lowest, highest, std::max (reached, value - fallPerUpdate));
+
+    if (! juce::exactlyEqual (shown, value))
+    {
+        value = shown;
+        repaint();
+    }
+}
+
+void ValueMeter::setMark (std::optional<float> newMark)
+{
+    const auto same = newMark.has_value() == mark.has_value() && (! mark.has_value() || juce::exactlyEqual (*newMark, *mark));
+
+    if (! same)
+    {
+        mark = newMark;
+        repaint();
+    }
+}
+
+void ValueMeter::paint (juce::Graphics& g)
+{
+    const auto& p = getPalette (*this);
+    const auto area = getLocalBounds().toFloat();
+    g.setColour (p.background);
+    g.fillRoundedRectangle (area, cornerRadius);
+
+    const auto proportion = (value - lowest) / (highest - lowest);
+    const auto length = area.getHeight() * proportion;
+
+    if (fill == Fill::fromBottom)
+    {
+        g.setColour (p.accent);
+        g.fillRect (area.withTop (area.getBottom() - length));
+    }
+    else
+    {
+        g.setColour (p.warning);
+        g.fillRect (area.withHeight (length));
+    }
+
+    if (mark.has_value())
+    {
+        const auto markProportion = juce::jlimit (0.0f, 1.0f, (*mark - lowest) / (highest - lowest));
+        const auto y = fill == Fill::fromBottom ? area.getBottom() - area.getHeight() * markProportion
+                                                : area.getY() + area.getHeight() * markProportion;
+        g.setColour (p.text.withAlpha (GraphTint::marker));
+        g.fillRect (area.withY (y - GraphTint::curveWidth / 2.0f).withHeight (GraphTint::curveWidth));
+    }
+}
+
+juce::String ValueMeter::getValueText() const
+{
+    return formatDecibels (fill == Fill::fromTop ? -value : value);
+}
+
+std::unique_ptr<juce::AccessibilityHandler> ValueMeter::createAccessibilityHandler()
+{
+    // Screen readers read the meter as a value that can't be changed.
+    class Value final : public juce::AccessibilityTextValueInterface
+    {
+    public:
+        explicit Value (const ValueMeter& m)
+            : meter (m)
+        {
+        }
+
+        bool isReadOnly() const override { return true; }
+        juce::String getCurrentValueAsString() const override { return meter.getValueText(); }
+        void setValueAsString (const juce::String&) override {}
+
+    private:
+        const ValueMeter& meter;
+    };
+
+    return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::progressBar, juce::AccessibilityActions(),
+                                                         juce::AccessibilityHandler::Interfaces { std::make_unique<Value> (*this) });
+}
+
+//==============================================================================
 // A button that shows the track's state rather than toggling itself, and tells a right-click (which JUCE's
 // buttons report as clicks too) from a click by the keys it passes on. Half lit is a state between off and on.
 struct MuteSoloButtons::Button : public juce::TextButton

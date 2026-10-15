@@ -14,6 +14,7 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
+#include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/Import.h"
 #include "model/arrangement/Tracks.h"
@@ -358,6 +359,29 @@ TEST_SUITE ("realtime-audit")
         CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
         CHECK (compressor.getReductionMeter().take() > 1.0f);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's limiter on the master, pushed 12 dB, with its meters read")
+    {
+        using phazite::devices::Limiter;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        REQUIRE (phazite::insertDevice (getTrack (*edit, 0), createToneGenerator (*edit)) != nullptr);
+
+        const auto plugin = edit->getPluginCache().createNewPlugin (Limiter::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::insertMasterDevice (*edit, plugin) != nullptr);
+        device->findParameter ("gain")->setParameter (12.0f, juce::sendNotification);
+
+        auto& limiter = dynamic_cast<Limiter&> (device->getProcessor());
+        limiter.getReductionMeter().take();
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's limiter on the master, pushed 12 dB, with its meters read", m);
+        CHECK (m.peakLevel > 0.01f);
+        CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // its ceiling
+        checkSteadyPlaybackDoesNotAllocate (m);
+        CHECK (limiter.getReductionMeter().take() > 1.0f);
     }
 
     // These read audio files or use code Phazite is replacing, so they only report.
