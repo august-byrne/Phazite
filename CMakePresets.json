@@ -119,6 +119,12 @@
     { "name": "linux-debug",     "inherits": "linux-test-base",   "configurePreset": "linux-debug" },
     { "name": "linux-release",   "inherits": "linux-test-base",   "configurePreset": "linux-release" },
     { "name": "linux-asan",      "inherits": "linux-test-base",   "configurePreset": "linux-asan" },
-    { "name": "linux-tsan",      "inherits": "linux-test-base",   "configurePreset": "linux-tsan" }
+    {
+      "name": "linux-tsan",
+      "inherits": "linux-test-base",
+      "configurePreset": "linux-tsan",
+      "description": "Known data races in Tracktion, which Phazite can't change, are suppressed (tools/tsan-suppressions.txt, docs/realtime-audit.md).",
+      "environment": { "TSAN_OPTIONS": "suppressions=${sourceDir}/tools/tsan-suppressions.txt" }
+    }
   ]
 }

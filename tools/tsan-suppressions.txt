@@ -1,0 +1,10 @@
+# ThreadSanitizer suppressions for the linux-tsan build. Each entry is a known data race in code Phazite can't
+# change (external/ is read-only), with the finding in docs/realtime-audit.md that explains it. Never add a race
+# in Phazite's own code here: fix it.
+#
+# The linux-tsan test preset passes this file to the tests. To run the app with it:
+#   TSAN_OPTIONS=suppressions=tools/tsan-suppressions.txt setarch $(uname -m) -R build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite
+
+# Finding 18: Tracktion's audio file cache replaces a file's AudioFileInfo, under the file's lock, each time it
+# maps the file again, while playback reads the sample rate, length and channel count without that lock.
+race:tracktion::engine::AudioFileCache::CachedFile::createNewReader
