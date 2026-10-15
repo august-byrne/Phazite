@@ -41,8 +41,9 @@ TEST_CASE ("The session opens and saves a project")
         session.openProject (file);
         REQUIRE (session.getProject() != nullptr);
         CHECK (session.getProject()->getFile() == file);
-        CHECK (session.getSelection().getEdit() == session.getEdit());
-        CHECK (uiBehaviour.getLastFocusedEdit() == session.getEdit());
+        CHECK (session.getContext().getEdit() == &session.getProject()->getEdit());
+        CHECK (session.getSelection().getEdit() == &session.getProject()->getEdit());
+        CHECK (uiBehaviour.getLastFocusedEdit() == &session.getProject()->getEdit());
         CHECK (recent.getProjects() == juce::Array<juce::File> { file });
         CHECK (changes == 1);
         phazite::test::settle();
@@ -84,13 +85,13 @@ TEST_CASE ("The first start makes My First Song")
     CHECK (file
            == temp.folder.getChildFile ("My First Song").getChildFile (juce::String ("My First Song") + phazite::Project::fileExtension));
     CHECK (file.existsAsFile());
-    CHECK (te::getAudioTracks (*session.getEdit()).size() == 1); // the starter song
+    CHECK (te::getAudioTracks (*session.getContext().getEdit()).size() == 1); // the starter song
     CHECK (recent.getProjects() == juce::Array<juce::File> { file });
 
     // It is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (session.getEdit()->getUndoManager().canUndo());
+    CHECK_FALSE (session.getContext().getEdit()->getUndoManager().canUndo());
 }
 
 TEST_CASE ("Startup opens the most recent project")

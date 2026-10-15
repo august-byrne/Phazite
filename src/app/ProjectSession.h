@@ -3,10 +3,10 @@
 // restoring an autosave after a crash.
 #pragma once
 
-#include "model/arrangement/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
 #include "model/project/Project.h"
+#include "model/project/ProjectContext.h"
 #include "services/RecentProjects.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -21,12 +21,12 @@ public:
     ~ProjectSession() override;
 
     Project* getProject() const noexcept { return project.get(); }
-    te::Edit* getEdit() const noexcept { return project != nullptr ? &project->getEdit() : nullptr; }
 
-    // What is selected in the open project: tracks and clips (live MIDI input follows the selected track),
-    // and a time range across tracks.
-    te::SelectionManager& getSelection() noexcept { return selection; }
-    RangeSelection& getRangeSelection() noexcept { return rangeSelection; }
+    // The open project's Edit and what is selected in it: tracks and clips (live MIDI input follows the selected
+    // track), and a time range across tracks.
+    ProjectContext& getContext() noexcept { return context; }
+    te::SelectionManager& getSelection() noexcept { return context.getSelection(); }
+    RangeSelection& getRangeSelection() noexcept { return context.getRangeSelection(); }
 
     std::function<void()> onProjectClosing;  // the open project is about to close: let go of its Edit
     std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
@@ -52,11 +52,9 @@ public:
 
 private:
     te::Engine& engine;
-    UIBehaviour& uiBehaviour;
     const juce::File projectsFolder;
     RecentProjects& recent;
-    te::SelectionManager selection { engine };
-    RangeSelection rangeSelection;
+    ProjectContext context; // keeps Tracktion's focus in step
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
     std::unique_ptr<juce::FileChooser> fileChooser;

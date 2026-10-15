@@ -7,7 +7,6 @@
 #include "AppUIBehaviour.h"
 #include "MainWindow.h"
 #include "ProjectSession.h"
-#include "model/arrangement/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
 #include "model/project/StarterProject.h"
@@ -56,7 +55,7 @@ public:
             std::make_unique<ProjectSession> (*engine, getUIBehaviour (*engine), services->recentProjects, getDefaultProjectsFolder());
         mainWindow = std::make_unique<MainWindow> (*engine, *commandBridge, *session, *lookAndFeel, *services);
 
-        addSongCommands (*commands, session->getSelection(), session->getRangeSelection());
+        addSongCommands (*commands, session->getContext());
         session->addCommands (*commands);
         mainWindow->addCommands();
 

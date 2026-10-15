@@ -57,6 +57,7 @@ struct BrowserScreen
 {
     BrowserScreen()
     {
+        context.setEdit (edit.get());
         browser.onPlace = [this] (const phazite::LibraryItem& item)
         {
             placed.push_back (item);
@@ -75,10 +76,11 @@ struct BrowserScreen
     phazite::test::TemporaryFolder temp;
     phazite::SoundPack soundPack { writeSoundPack (temp.folder) };
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    phazite::ProjectContext context { phazite::test::getEngine() }; // with the Edit open
     phazite::Settings settings;
     phazite::Library library { phazite::test::getEngine(), settings, soundPack.getFolder() };
     phazite::Previewer previewer { phazite::test::getEngine() };
-    phazite::ui::Browser browser { library, previewer, soundPack, settings, [this] { return edit.get(); } };
+    phazite::ui::Browser browser { library, previewer, soundPack, settings, context };
     phazite::test::TestWindow window { browser, 320, 700 };
     std::vector<phazite::LibraryItem> placed;
 };
@@ -311,7 +313,8 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     phazite::Settings settings;
     phazite::Library library (phazite::test::getEngine(), settings, soundPack.getFolder());
     phazite::Previewer previewer (phazite::test::getEngine());
-    phazite::ui::Browser browser (library, previewer, soundPack, settings, []() -> te::Edit* { return nullptr; });
+    const phazite::ProjectContext noProject (phazite::test::getEngine());
+    phazite::ui::Browser browser (library, previewer, soundPack, settings, noProject);
     phazite::test::TestWindow window (browser, 320, 700);
     bool pageShown = false;
     browser.onShowSoundPack = [&pageShown] { pageShown = true; };

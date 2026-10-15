@@ -68,9 +68,8 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     setUsingNativeTitleBar (true);
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
-    auto content = std::make_unique<ui::AppShell> (
-        engine, commands, shortcutKeys, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection(), s.getRangeSelection(),
-        services.settings, services.soundPack, services.library, services.previewer);
+    auto content = std::make_unique<ui::AppShell> (engine, commands, shortcutKeys, computerKeyboard, s.getContext(), services.settings,
+                                                   services.soundPack, services.library, services.previewer);
     shell = content.get();
     setContentOwned (content.release(), false);
 
@@ -103,7 +102,7 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     session.onProjectClosing = [this] { shell->setEdit (nullptr); };
     session.onProjectChanged = [this]
     {
-        shell->setEdit (session.getEdit());
+        shell->setEdit (session.getContext().getEdit());
         updateTitle();
         menuItemsChanged(); // the recent projects
     };
@@ -308,8 +307,8 @@ void MainWindow::showSettings (std::optional<ui::SettingsPanel::Tab> tab)
         return;
     }
 
-    auto* panel = new ui::SettingsPanel (
-        engine, commands, computerKeyboard, [this] { return session.getEdit(); }, [this] (const juce::String& name) { setKeymap (name); });
+    auto* panel = new ui::SettingsPanel (engine, commands, computerKeyboard, session.getContext(),
+                                         [this] (const juce::String& name) { setKeymap (name); });
     panel->setSize (640, 600);
     panel->showTab (tab.value_or (ui::SettingsPanel::audio));
     settingsPanel = panel;

@@ -10,6 +10,11 @@
 
 #include <vector>
 
+namespace phazite
+{
+class ProjectContext;
+} // namespace phazite
+
 namespace phazite::ui
 {
 // A small heading over a group of a strip's controls, such as "Effects", in the theme's muted text color. Screen
@@ -183,15 +188,15 @@ class Inspector : public juce::Component,
                   private juce::Timer
 {
 public:
-    Inspector (te::Engine&, CommandBridge&, std::function<te::Edit*()> getEdit, te::SelectionManager&);
+    Inspector (te::Engine&, CommandBridge&, ProjectContext&);
     ~Inspector() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    std::function<te::Edit*()> getEdit;
-    te::SelectionManager& selection;
+    ProjectContext& projectContext;
+    te::SelectionManager& selection; // the project's
     ChannelStrip strip;
     juce::Viewport stripView; // scrolls the strip up and down when the panel is shorter than it needs
 

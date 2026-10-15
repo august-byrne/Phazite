@@ -100,6 +100,8 @@ target_sources(phazite_core PRIVATE
     src/model/notes/Notes.h
     src/model/project/Project.cpp
     src/model/project/Project.h
+    src/model/project/ProjectContext.cpp
+    src/model/project/ProjectContext.h
     src/model/project/StarterProject.cpp
     src/model/project/StarterProject.h
     src/model/transport/Playback.cpp
@@ -402,6 +404,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/PlaybackTests.cpp
         tests/PluginKeysTests.cpp
         tests/PlaylistTests.cpp
+        tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp
         tests/SchemaTests.cpp

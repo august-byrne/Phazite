@@ -8,19 +8,17 @@ namespace phazite
 {
 ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui, RecentProjects& recentProjects, juce::File folder)
     : engine (e),
-      uiBehaviour (ui),
       projectsFolder (std::move (folder)),
-      recent (recentProjects)
+      recent (recentProjects),
+      context (e, &ui)
 {
     engine.getDeviceManager().addChangeListener (this);
-    selection.addChangeListener (this);
-    uiBehaviour.setSelectionManager (&selection);
+    context.getSelection().addChangeListener (this);
 }
 
 ProjectSession::~ProjectSession()
 {
-    uiBehaviour.setSelectionManager (nullptr);
-    selection.removeChangeListener (this);
+    context.getSelection().removeChangeListener (this);
     engine.getDeviceManager().removeChangeListener (this);
     setProject (nullptr); // closes the project on the message thread, before the Engine goes
 }
@@ -30,8 +28,8 @@ void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (project == nullptr)
         return;
 
-    if (source == &selection)
-        followSelectedTrack (selection);
+    if (source == &context.getSelection())
+        followSelectedTrack (context.getSelection());
     else
         routeLiveMidiInput (project->getEdit()); // MIDI inputs show up a moment after startup, and when plugged in
 }
@@ -302,10 +300,7 @@ void ProjectSession::open (const juce::File& file, bool restoreAutosave)
 void ProjectSession::setProject (std::unique_ptr<Project> newProject)
 {
     autosaveTimer = nullptr;
-    uiBehaviour.setFocusedEdit (nullptr);
-    selection.deselectAll();
-    selection.edit = nullptr;
-    rangeSelection.clear();
+    context.setEdit (nullptr);
 
     if (project != nullptr && onProjectClosing != nullptr)
         onProjectClosing();
@@ -314,8 +309,7 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject)
 
     if (project != nullptr)
     {
-        selection.edit = &project->getEdit();
-        uiBehaviour.setFocusedEdit (&project->getEdit());
+        context.setEdit (&project->getEdit());
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
         recent.add (project->getFile());
         routeLiveMidiInput (project->getEdit()); // MIDI keyboards and the computer keyboard play it

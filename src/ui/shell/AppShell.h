@@ -19,10 +19,10 @@ class AppShell : public juce::Component,
                  private juce::FocusChangeListener
 {
 public:
-    // The commands, as menus and keys see them, and the services (settings, Phazite Sounds, the library and the previewer:
-    // app/AppServices.h) are the app's, and outlive this. Detached panels' windows run shortcuts through the dispatcher.
-    AppShell (te::Engine&, CommandBridge&, KeyDispatcher&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&,
-              RangeSelection&, Settings&, SoundPack&, Library&, Previewer&);
+    // The commands, as menus and keys see them, the open project and the services (settings, Phazite Sounds, the library
+    // and the previewer: app/AppServices.h) are the app's, and outlive this. Detached panels' windows run shortcuts through
+    // the dispatcher.
+    AppShell (te::Engine&, CommandBridge&, KeyDispatcher&, ComputerKeyboard&, ProjectContext&, Settings&, SoundPack&, Library&, Previewer&);
     ~AppShell() override;
 
     // The open project's Edit, or nullptr while none is open (call this before it closes, too).
@@ -64,10 +64,10 @@ public:
 private:
     CommandBridge& commands;
     KeyDispatcher& shortcutKeys; // for the windows of detached panels
-    te::SelectionManager& selection;
-    std::function<te::Edit*()> getEdit;
-    Library& library;     // what the browser and the plug-in picker show
-    Previewer& previewer; // the browser's
+    ProjectContext& projectContext;
+    te::SelectionManager& selection; // the project's
+    Library& library;                // what the browser and the plug-in picker show
+    Previewer& previewer;            // the browser's
 
     TopBar topBar;
     Browser browser;

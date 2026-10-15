@@ -50,14 +50,16 @@ private:
 class UIBehaviour : public te::UIBehaviour
 {
 public:
-    // The Edit of the open project. Tracktion sends MIDI controller mappings and app commands to it.
+    // The Edit of the open project. Tracktion sends MIDI controller mappings and app commands to it. Kept in step by
+    // ProjectContext (model/project/ProjectContext.h); Phazite's own code reads ProjectContext::getEdit().
     void setFocusedEdit (te::Edit*);
 
     te::Edit* getCurrentlyFocusedEdit() override;
     te::Edit* getLastFocusedEdit() override;
     juce::Array<te::Edit*> getAllOpenEdits() override;
 
-    // What is selected in the open project. Tracktion's own commands (such as delete and copy) act on it.
+    // What is selected in the open project. Tracktion's own commands (such as delete and copy) act on it. Kept in step
+    // by ProjectContext too.
     void setSelectionManager (te::SelectionManager*);
     te::SelectionManager* getCurrentlyFocusedSelectionManager() override;
 

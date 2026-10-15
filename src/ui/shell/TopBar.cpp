@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TopBar.h"
+#include "model/project/ProjectContext.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
 {
-TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard, std::function<te::Edit*()> editGetter)
+TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard, const ProjectContext& context)
     : engine (e),
       commands (bridge),
       computerKeyboard (keyboard),
-      getEdit (std::move (editGetter))
+      projectContext (context)
 {
     setTitle ("Transport");
 
@@ -120,7 +121,7 @@ void TopBar::resized()
 
 void TopBar::timerCallback()
 {
-    auto* edit = getEdit();
+    auto* edit = projectContext.getEdit();
     const bool playing = edit != nullptr && edit->getTransport().isPlaying();
 
     // The play button shows what clicking it does, and screen readers say so.

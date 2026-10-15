@@ -8,6 +8,11 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+namespace phazite
+{
+class ProjectContext;
+} // namespace phazite
+
 namespace phazite::ui
 {
 //==============================================================================
@@ -17,7 +22,7 @@ class MidiSettings : public juce::Component,
                      private juce::ChangeListener
 {
 public:
-    MidiSettings (te::Engine&, ComputerKeyboard&, std::function<te::Edit*()> getEdit);
+    MidiSettings (te::Engine&, ComputerKeyboard&, const ProjectContext&);
     ~MidiSettings() override;
 
     void paint (juce::Graphics&) override;
@@ -26,7 +31,7 @@ public:
 private:
     te::Engine& engine;
     ComputerKeyboard& computerKeyboard;
-    std::function<te::Edit*()> getEdit;
+    const ProjectContext& projectContext;
 
     juce::Label inputsHeading, noInputsLabel, keyboardHeading, keyboardHelp, routingLabel;
     juce::OwnedArray<juce::ToggleButton> inputButtons;
@@ -63,7 +68,7 @@ public:
         shortcuts
     };
 
-    SettingsPanel (te::Engine&, CommandBridge&, ComputerKeyboard&, std::function<te::Edit*()> getEdit,
+    SettingsPanel (te::Engine&, CommandBridge&, ComputerKeyboard&, const ProjectContext&,
                    std::function<void (const juce::String& keymapName)> chooseKeymap);
 
     void showTab (Tab tab) { setCurrentTabIndex (tab); }

@@ -21,11 +21,11 @@ struct Screen
     Screen()
     {
         // As Main.cpp and MainWindow do.
-        phazite::addSongCommands (registry, session.getSelection(), session.getRangeSelection());
+        phazite::addSongCommands (registry, session.getContext());
         session.addCommands (registry);
         shell.addCommands (registry);
         session.onProjectClosing = [this] { shell.setEdit (nullptr); };
-        session.onProjectChanged = [this] { shell.setEdit (session.getEdit()); };
+        session.onProjectChanged = [this] { shell.setEdit (session.getContext().getEdit()); };
         phazite::test::dispatchPendingMessages();
     }
 
@@ -47,17 +47,10 @@ struct Screen
     phazite::ProjectSession session { engine, phazite::getUIBehaviour (engine), services.recentProjects,
                                       temp.folder.getChildFile ("Projects") };
     phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
-    phazite::ui::AppShell shell { engine,
-                                  commands,
-                                  shortcutKeys,
-                                  keyboard,
-                                  [this] { return session.getEdit(); },
-                                  session.getSelection(),
-                                  session.getRangeSelection(),
-                                  services.settings,
-                                  services.soundPack,
-                                  services.library,
-                                  services.previewer };
+    phazite::ui::AppShell shell {
+        engine,           commands,          shortcutKeys, keyboard, session.getContext(), services.settings, services.soundPack,
+        services.library, services.previewer
+    };
     phazite::test::TestWindow window { shell, 1280, 800 };
 };
 
@@ -104,7 +97,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     // No recent projects: the first start makes My First Song.
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
-    REQUIRE (screen.session.getEdit() != nullptr);
+    REQUIRE (screen.session.getContext().getEdit() != nullptr);
     phazite::test::settle();
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 

@@ -9,6 +9,11 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+namespace phazite
+{
+class ProjectContext;
+} // namespace phazite
+
 namespace phazite::ui
 {
 // The bar along the top: play, loop, tempo, CPU, the master level and volume, the computer keyboard and the
@@ -17,7 +22,7 @@ class TopBar : public juce::Component,
                private juce::Timer
 {
 public:
-    TopBar (te::Engine&, CommandBridge&, ComputerKeyboard&, std::function<te::Edit*()> getEdit);
+    TopBar (te::Engine&, CommandBridge&, ComputerKeyboard&, const ProjectContext&);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -31,7 +36,7 @@ private:
     te::Engine& engine;
     CommandBridge& commands;
     ComputerKeyboard& computerKeyboard;
-    std::function<te::Edit*()> getEdit;
+    const ProjectContext& projectContext;
 
     IconButton playButton { "Play", Icon::play }, loopButton { "Loop", Icon::loop }, keyboardButton { "Computer keyboard", Icon::keyboard },
         searchButton { "Search commands", Icon::search };

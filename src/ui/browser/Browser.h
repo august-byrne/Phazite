@@ -8,6 +8,7 @@
 #pragma once
 
 #include "model/engine/Preview.h"
+#include "model/project/ProjectContext.h"
 #include "services/Library.h"
 #include "services/SoundPack.h"
 #include "ui/components/Controls.h"
@@ -27,8 +28,8 @@ class Browser : public juce::Component,
                 private juce::Timer
 {
 public:
-    // The library's factory sounds are the sound pack's.
-    Browser (Library&, Previewer&, SoundPack&, Settings&, std::function<te::Edit*()> getEdit);
+    // The library's factory sounds are the sound pack's. Loops preview in time with the open project.
+    Browser (Library&, Previewer&, SoundPack&, Settings&, const ProjectContext&);
     ~Browser() override;
 
     // Puts an item into the song (Enter, a double-click, or the plug-in picker). Returns whether it went in.
@@ -75,7 +76,7 @@ private:
     Previewer& previewer;
     SoundPack& soundPack;
     Settings& settings;
-    std::function<te::Edit*()> getEdit;
+    const ProjectContext& projectContext;
     bool soundPackInstalled = false; // when the tree last showed it
 
     SearchField searchField;
@@ -92,7 +93,7 @@ private:
     std::map<std::tuple<Icon, bool, juce::uint32>, std::unique_ptr<juce::Drawable>> icons;
     void drawIcon (juce::Graphics&, Icon, juce::Rectangle<float>, juce::Colour, bool filled = false);
 
-    te::Edit* getProject() const { return getEdit != nullptr ? getEdit() : nullptr; }
+    te::Edit* getProject() const { return projectContext.getEdit(); }
     void rebuildPlaces();
     void refreshPlace (int kind); // a PlaceNode::Kind, after what it lists changed
     void updateSearch();

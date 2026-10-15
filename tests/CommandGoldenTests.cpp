@@ -17,6 +17,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
+#include "model/project/ProjectContext.h"
 #include "model/transport/Playback.h"
 
 #include <algorithm>
@@ -53,10 +54,10 @@ te::BeatPosition beats (double b)
 
 // The model's commands, registered as the app registers them: addSongCommands(), which Main.cpp calls, then the note
 // commands as AppShell adds them, with a grid of a quarter beat.
-void addModelCommands (phazite::CommandRegistry& registry, te::SelectionManager& selection, phazite::RangeSelection& range)
+void addModelCommands (phazite::CommandRegistry& registry, phazite::ProjectContext& context)
 {
-    phazite::addSongCommands (registry, selection, range);
-    phazite::addNoteCommands (registry, selection, [] { return 0.25; });
+    phazite::addSongCommands (registry, context);
+    phazite::addNoteCommands (registry, context.getSelection(), [] { return 0.25; });
 }
 
 //==============================================================================
@@ -212,8 +213,8 @@ struct Script
         one->setName ("One");
         edit.getUndoManager().clearUndoHistory();
 
-        selection.edit = &edit;
-        addModelCommands (registry, selection, range);
+        context.setEdit (&edit);
+        addModelCommands (registry, context);
         snapshot ("start");
     }
 
@@ -314,8 +315,9 @@ struct Script
     std::unique_ptr<phazite::Project> project = createProject (temp.folder);
     te::Edit& edit = project->getEdit();
     te::AudioTrack* one = nullptr;
-    te::SelectionManager selection { phazite::test::getEngine() };
-    phazite::RangeSelection range;
+    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
+    te::SelectionManager& selection = context.getSelection();
+    phazite::RangeSelection& range = context.getRangeSelection();
     phazite::CommandRegistry registry;
     std::unique_ptr<te::SelectedMidiEvents> events; // the selected notes, while the script edits them
 
@@ -330,10 +332,9 @@ TEST_SUITE ("golden")
 {
     TEST_CASE ("Golden commands: the model's commands keep their ids, texts, switches and order")
     {
-        te::SelectionManager selection { phazite::test::getEngine() };
-        phazite::RangeSelection range;
+        phazite::ProjectContext context { phazite::test::getEngine() };
         phazite::CommandRegistry registry;
-        addModelCommands (registry, selection, range);
+        addModelCommands (registry, context);
 
         juce::StringArray lines;
 

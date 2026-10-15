@@ -6,12 +6,16 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/UndoCommands.h"
 #include "model/mixer/Mixer.h"
+#include "model/project/ProjectContext.h"
 #include "model/transport/Playback.h"
 
 namespace phazite
 {
-void addSongCommands (CommandRegistry& registry, te::SelectionManager& selection, RangeSelection& range)
+void addSongCommands (CommandRegistry& registry, ProjectContext& context)
 {
+    auto& selection = context.getSelection();
+    auto& range = context.getRangeSelection();
+
     addUndoCommands (registry, selection);
     addTransportCommands (registry, selection);
     addSelectionCommands (registry, selection, range);

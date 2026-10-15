@@ -4,6 +4,7 @@
 #include "model/engine/LiveInput.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/mixer/Mixer.h"
+#include "model/project/ProjectContext.h"
 #include "services/Library.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandUI.h"
@@ -1076,11 +1077,10 @@ int MasterStrip::getMinimumHeight()
 }
 
 //==============================================================================
-Inspector::Inspector (te::Engine& engine, CommandBridge& bridge, std::function<te::Edit*()> editGetter,
-                      te::SelectionManager& selectionManager)
-    : getEdit (std::move (editGetter)),
-      selection (selectionManager),
-      strip (engine, bridge, selectionManager)
+Inspector::Inspector (te::Engine& engine, CommandBridge& bridge, ProjectContext& context)
+    : projectContext (context),
+      selection (context.getSelection()),
+      strip (engine, bridge, context.getSelection())
 {
     setTitle ("Inspector");
     setDescription ("The channel of the selected track.");
@@ -1100,7 +1100,7 @@ void Inspector::showTrack()
 {
     te::Track* track = nullptr;
 
-    if (auto* edit = getEdit())
+    if (auto* edit = projectContext.getEdit())
     {
         track = getSelectedTracks (selection).getFirst();
 

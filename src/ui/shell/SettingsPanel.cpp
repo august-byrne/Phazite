@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SettingsPanel.h"
 #include "model/engine/LiveInput.h"
+#include "model/project/ProjectContext.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // AudioDeviceSelectorComponent
@@ -19,10 +20,10 @@ namespace
 } // namespace
 
 //==============================================================================
-MidiSettings::MidiSettings (te::Engine& e, ComputerKeyboard& keyboard, std::function<te::Edit*()> editGetter)
+MidiSettings::MidiSettings (te::Engine& e, ComputerKeyboard& keyboard, const ProjectContext& context)
     : engine (e),
       computerKeyboard (keyboard),
-      getEdit (std::move (editGetter))
+      projectContext (context)
 {
     makeHeading (inputsHeading, "MIDI inputs");
     makeHeading (keyboardHeading, "Computer keyboard");
@@ -82,7 +83,7 @@ void MidiSettings::rebuild()
 
     juce::String routing ("Live MIDI plays no track yet: it goes to the first track with an instrument.");
 
-    if (auto* edit = getEdit())
+    if (auto* edit = projectContext.getEdit())
         if (auto* track = getLiveMidiTrack (*edit))
             routing = "Live MIDI plays the track \"" + track->getName() + "\".";
 
@@ -152,7 +153,7 @@ void ShortcutSettings::resized()
 
 //==============================================================================
 SettingsPanel::SettingsPanel (te::Engine& engine, CommandBridge& commands, ComputerKeyboard& computerKeyboard,
-                              std::function<te::Edit*()> getEdit, std::function<void (const juce::String&)> chooseKeymap)
+                              const ProjectContext& context, std::function<void (const juce::String&)> chooseKeymap)
     : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop)
 {
     setTitle ("Settings");
@@ -168,7 +169,7 @@ SettingsPanel::SettingsPanel (te::Engine& engine, CommandBridge& commands, Compu
     addTab ("Audio", background,
             new juce::AudioDeviceSelectorComponent (engine.getDeviceManager().deviceManager, 0, 512, 1, 512, false, false, true, true),
             true);
-    addTab ("MIDI", background, new MidiSettings (engine, computerKeyboard, std::move (getEdit)), true);
+    addTab ("MIDI", background, new MidiSettings (engine, computerKeyboard, context), true);
     addTab ("Shortcuts", background, new ShortcutSettings (commands, std::move (chooseKeymap)), true);
 }
 } // namespace phazite::ui

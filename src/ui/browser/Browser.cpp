@@ -615,12 +615,12 @@ struct Browser::Tree : public juce::TreeView
 };
 
 //==============================================================================
-Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, std::function<te::Edit*()> editGetter)
+Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const ProjectContext& context)
     : library (l),
       previewer (p),
       soundPack (pack),
       settings (s),
-      getEdit (std::move (editGetter)),
+      projectContext (context),
       soundPackInstalled (pack.isInstalled()),
       tree (std::make_unique<Tree> (*this)),
       searchRoot (std::make_unique<RootNode> (*this))

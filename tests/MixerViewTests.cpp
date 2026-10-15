@@ -2,6 +2,7 @@
 // The mixer and the inspector, as they lay out in the window.
 #include "UiTestHelpers.h"
 #include "model/mixer/Mixer.h"
+#include "model/project/ProjectContext.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/theme/DesignTokens.h"
@@ -133,11 +134,11 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
 TEST_CASE ("The inspector's channel fills the panel, and scrolls only when the panel is shorter than it needs")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    te::SelectionManager selection { phazite::test::getEngine() };
-    selection.edit = edit.get();
+    phazite::ProjectContext context { phazite::test::getEngine() };
+    context.setEdit (edit.get());
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
-    phazite::ui::Inspector inspector { phazite::test::getEngine(), commands, [&edit] { return edit.get(); }, selection };
+    phazite::ui::Inspector inspector { phazite::test::getEngine(), commands, context };
     phazite::test::TestWindow window { inspector, 300, 1000 };
     phazite::test::dispatchPendingMessages();
 
@@ -150,5 +151,5 @@ TEST_CASE ("The inspector's channel fills the panel, and scrolls only when the p
 
     window.setSize (300, 200);
     CHECK (strips[0]->getHeight() == phazite::ui::ChannelStrip::getMinimumHeight());
-    selection.deselectAll();
+    context.getSelection().deselectAll();
 }

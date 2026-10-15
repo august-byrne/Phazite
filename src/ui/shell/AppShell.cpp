@@ -72,20 +72,19 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 
 //==============================================================================
 AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& keys, ComputerKeyboard& computerKeyboard,
-                    std::function<te::Edit*()> editGetter, te::SelectionManager& selectionManager, RangeSelection& range, Settings& s,
-                    SoundPack& pack, Library& l, Previewer& p)
+                    ProjectContext& context, Settings& s, SoundPack& pack, Library& l, Previewer& p)
     : commands (bridge),
       shortcutKeys (keys),
-      selection (selectionManager),
-      getEdit (std::move (editGetter)),
+      projectContext (context),
+      selection (context.getSelection()),
       library (l),
       previewer (p),
-      topBar (engine, bridge, computerKeyboard, getEdit),
-      browser (library, previewer, pack, s, getEdit),
-      playlist (bridge, selectionManager, range),
-      inspector (engine, bridge, getEdit, selectionManager),
-      pianoRoll (bridge, selectionManager),
-      mixer (engine, bridge, selectionManager)
+      topBar (engine, bridge, computerKeyboard, context),
+      browser (library, previewer, pack, s, context),
+      playlist (bridge, context.getSelection(), context.getRangeSelection()),
+      inspector (engine, bridge, context),
+      pianoRoll (bridge, context.getSelection()),
+      mixer (engine, bridge, context.getSelection())
 {
     setTitle ("Phazite");
 
@@ -231,7 +230,7 @@ void AppShell::showPluginPicker()
 
 bool AppShell::placeItem (const LibraryItem& item)
 {
-    auto* edit = getEdit();
+    auto* edit = projectContext.getEdit();
 
     if (edit == nullptr)
         return false;
@@ -456,7 +455,7 @@ void AppShell::addCommands (CommandRegistry& registry)
                                    "picker does.",
                     .synonyms = { "plug-in picker", "plugin", "vst", "synth", "insert", "fx" },
                     .perform = [this] { showPluginPicker(); },
-                    .isEnabled = [this] { return getEdit() != nullptr; } });
+                    .isEnabled = [this] { return projectContext.getEdit() != nullptr; } });
 
     // Showing and hiding apply to the main window; a panel in its own window is closed there.
     add (
