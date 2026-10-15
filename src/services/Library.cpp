@@ -8,9 +8,6 @@ namespace phazite
 {
 namespace
 {
-    constexpr const char* foldersSetting = "phaziteBrowserFolders";
-    constexpr const char* favoritesSetting = "phaziteBrowserFavorites";
-    constexpr const char* recentSetting = "phaziteBrowserRecent";
     constexpr const char* devicePrefix = "device:";
 
     // The words in a name, lowercase: split at anything but letters and digits, between letters and digits
@@ -370,7 +367,7 @@ struct Library::Indexer : public juce::Thread
 };
 
 //==============================================================================
-Library::Library (te::Engine& e, juce::PropertySet& s, juce::File factory)
+Library::Library (te::Engine& e, Settings& s, juce::File factory)
     : engine (e),
       settings (s),
       factorySounds (std::move (factory))
@@ -401,23 +398,11 @@ bool Library::isMidiFile (const juce::File& file) const
     return file.hasFileExtension (".mid;.midi");
 }
 
-juce::StringArray Library::getList (const juce::String& setting) const
-{
-    auto list = juce::StringArray::fromLines (settings.getValue (setting));
-    list.removeEmptyStrings();
-    return list;
-}
-
-void Library::setList (const juce::String& setting, const juce::StringArray& list)
-{
-    settings.setValue (setting, list.joinIntoString ("\n"));
-}
-
 juce::Array<juce::File> Library::getUserFolders() const
 {
     juce::Array<juce::File> folders;
 
-    for (const auto& path : getList (foldersSetting))
+    for (const auto& path : settings.get (Settings::browserFolders))
         if (juce::File::isAbsolutePath (path))
             folders.add (juce::File (path));
 
@@ -426,21 +411,21 @@ juce::Array<juce::File> Library::getUserFolders() const
 
 void Library::addUserFolder (const juce::File& folder)
 {
-    auto list = getList (foldersSetting);
+    auto list = settings.get (Settings::browserFolders);
 
     if (list.contains (folder.getFullPathName()))
         return;
 
     list.add (folder.getFullPathName());
-    setList (foldersSetting, list);
+    settings.set (Settings::browserFolders, list);
     reindex();
 }
 
 void Library::removeUserFolder (const juce::File& folder)
 {
-    auto list = getList (foldersSetting);
+    auto list = settings.get (Settings::browserFolders);
     list.removeString (folder.getFullPathName());
-    setList (foldersSetting, list);
+    settings.set (Settings::browserFolders, list);
     reindex();
 }
 
@@ -652,40 +637,40 @@ void Library::handleAsyncUpdate()
 
 bool Library::isFavorite (const LibraryItem& item) const
 {
-    return getList (favoritesSetting).contains (item.getKey());
+    return settings.get (Settings::browserFavorites).contains (item.getKey());
 }
 
 void Library::setFavorite (const LibraryItem& item, bool favorite)
 {
-    auto list = getList (favoritesSetting);
+    auto list = settings.get (Settings::browserFavorites);
     list.removeString (item.getKey());
 
     if (favorite)
         list.add (item.getKey());
 
-    setList (favoritesSetting, list);
+    settings.set (Settings::browserFavorites, list);
 }
 
 std::vector<LibraryItem> Library::getFavorites() const
 {
-    return getItems (getList (favoritesSetting));
+    return getItems (settings.get (Settings::browserFavorites));
 }
 
 void Library::noteUsed (const LibraryItem& item)
 {
-    auto list = getList (recentSetting);
+    auto list = settings.get (Settings::browserRecent);
     list.removeString (item.getKey());
     list.insert (0, item.getKey());
 
     while (list.size() > maxRecent)
         list.remove (list.size() - 1);
 
-    setList (recentSetting, list);
+    settings.set (Settings::browserRecent, list);
 }
 
 std::vector<LibraryItem> Library::getRecent() const
 {
-    return getItems (getList (recentSetting));
+    return getItems (settings.get (Settings::browserRecent));
 }
 
 std::vector<LibraryItem> Library::getItems (const juce::StringArray& keys) const

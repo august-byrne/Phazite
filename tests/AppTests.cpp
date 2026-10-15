@@ -3,6 +3,7 @@
 // projects. Nothing here may reach a dialog (an AlertWindow, a FileChooser or a menu): Linux CI has no display.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "app/AppServices.h"
 #include "app/ProjectSession.h"
 #include "model/base/Schema.h"
 #include "services/RecentProjects.h"
@@ -110,4 +111,25 @@ TEST_CASE ("Startup opens the most recent project")
     REQUIRE (session.getProject() != nullptr);
     CHECK (session.getProject()->getFile() == newer);
     CHECK (recent.getProjects() == juce::Array<juce::File> { newer, older });
+}
+
+TEST_CASE ("The app's services are made together, with the settings in memory")
+{
+    auto& engine = phazite::test::getEngine();
+    phazite::test::TemporaryFolder temp;
+    phazite::AppServices services (engine, { .settingsInMemory = true, .packsFolder = temp.folder });
+
+    // The library shows Phazite Sounds' folder, installed or not.
+    CHECK (services.library.getFactorySounds() == services.soundPack.getFolder());
+    CHECK (services.soundPack.getFolder().isAChildOf (temp.folder));
+    CHECK_FALSE (services.soundPack.isInstalled());
+
+    // The recent projects are kept in the services' settings.
+    const auto project = temp.folder.getChildFile ("Song/Song.phazite");
+    REQUIRE (project.create().wasOk());
+    services.recentProjects.add (project);
+    CHECK (services.settings.get (phazite::Settings::recentProjects) == juce::StringArray { project.getFullPathName() });
+
+    // The library indexes on its own thread; it is done before the services go.
+    CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 10000));
 }

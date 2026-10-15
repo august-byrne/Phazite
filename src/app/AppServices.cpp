@@ -5,7 +5,10 @@ namespace phazite
 {
 AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
     : settings (options.settingsInMemory ? nullptr : &engine.getPropertyStorage().getPropertiesFile()),
-      recentProjects (settings)
+      recentProjects (settings),
+      soundPack (options.packsFolder, options.soundPackRelease),
+      library (engine, settings, soundPack.getFolder()),
+      previewer (engine)
 {
 }
 } // namespace phazite

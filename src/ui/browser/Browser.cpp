@@ -6,9 +6,6 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr const char* previewOnSetting = "phaziteBrowserPreview";
-    constexpr const char* previewVolumeSetting = "phaziteBrowserPreviewVolume";
-    constexpr const char* opennessSetting = "phaziteBrowserOpenness";
     constexpr int iconSize = 16;
     constexpr int starWidth = 24;
     constexpr int detachButtonRoom = 30; // the panel's detach button, in its top right corner
@@ -618,10 +615,11 @@ struct Browser::Tree : public juce::TreeView
 };
 
 //==============================================================================
-Browser::Browser (Library& l, Previewer& p, SoundPack& pack, std::function<te::Edit*()> editGetter)
+Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, std::function<te::Edit*()> editGetter)
     : library (l),
       previewer (p),
       soundPack (pack),
+      settings (s),
       getEdit (std::move (editGetter)),
       soundPackInstalled (pack.isInstalled()),
       tree (std::make_unique<Tree> (*this)),
@@ -653,7 +651,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, std::function<te::E
     previewButton.setTooltip ("Plays each sound as you click it or move to it with the arrow keys; Esc stops it");
     previewButton.onClick = [this]
     {
-        library.getSettings().setValue (previewOnSetting, previewButton.getToggleState());
+        settings.set (Settings::browserPreview, previewButton.getToggleState());
 
         if (! previewButton.getToggleState())
             previewer.stop();
@@ -663,12 +661,12 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, std::function<te::E
     };
 
     showAsDecibels (volumeFader);
-    volumeFader.setValue (library.getSettings().getDoubleValue (previewVolumeSetting, previewer.getVolume()), juce::dontSendNotification);
+    volumeFader.setValue (settings.get (Settings::browserPreviewVolume, previewer.getVolume()), juce::dontSendNotification);
     volumeFader.setTooltip ("How loud sounds play while you browse. Double-click for -6 dB");
     volumeFader.onValueChange = [this]
     {
         previewer.setVolume ((float) volumeFader.getValue());
-        library.getSettings().setValue (previewVolumeSetting, volumeFader.getValue());
+        settings.set (Settings::browserPreviewVolume, volumeFader.getValue());
     };
     previewer.setVolume ((float) volumeFader.getValue());
 
@@ -696,7 +694,7 @@ Browser::~Browser()
 
     // The folders open now open again next time.
     if (const auto openness = placesRoot->getOpennessState())
-        library.getSettings().setValue (opennessSetting, openness->toString (juce::XmlElement::TextFormat().singleLine().withoutHeader()));
+        settings.set (Settings::browserOpenness, openness->toString (juce::XmlElement::TextFormat().singleLine().withoutHeader()));
 
     tree->setRootItem (nullptr);
 }
@@ -715,7 +713,7 @@ void Browser::rebuildPlaces()
     if (placesRoot != nullptr)
         openness = placesRoot->getOpennessState();
     else
-        openness = juce::parseXML (library.getSettings().getValue (opennessSetting));
+        openness = juce::parseXML (settings.get (Settings::browserOpenness));
 
     auto root = std::make_unique<RootNode> (*this);
     root->addSubItem (new PlaceNode (*this, PlaceNode::favorites, "Favorites"));
@@ -896,7 +894,7 @@ bool Browser::isPreviewing (const LibraryItem& item) const
 
 bool Browser::isPreviewOn() const
 {
-    return library.getSettings().getBoolValue (previewOnSetting, true);
+    return settings.get (Settings::browserPreview);
 }
 
 void Browser::toggleFavorite (const LibraryItem& item)

@@ -28,7 +28,7 @@ class Browser : public juce::Component,
 {
 public:
     // The library's factory sounds are the sound pack's.
-    Browser (Library&, Previewer&, SoundPack&, std::function<te::Edit*()> getEdit);
+    Browser (Library&, Previewer&, SoundPack&, Settings&, std::function<te::Edit*()> getEdit);
     ~Browser() override;
 
     // Puts an item into the song (Enter, a double-click, or the plug-in picker). Returns whether it went in.
@@ -74,6 +74,7 @@ private:
     Library& library;
     Previewer& previewer;
     SoundPack& soundPack;
+    Settings& settings;
     std::function<te::Edit*()> getEdit;
     bool soundPackInstalled = false; // when the tree last showed it
 

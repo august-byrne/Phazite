@@ -72,14 +72,15 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 
 //==============================================================================
 AppShell::AppShell (te::Engine& engine, CommandRegistry& registry, ComputerKeyboard& computerKeyboard,
-                    std::function<te::Edit*()> editGetter, te::SelectionManager& selectionManager, RangeSelection& range)
+                    std::function<te::Edit*()> editGetter, te::SelectionManager& selectionManager, RangeSelection& range, Settings& s,
+                    SoundPack& pack, Library& l, Previewer& p)
     : commands (registry),
       selection (selectionManager),
       getEdit (std::move (editGetter)),
-      library (engine, engine.getPropertyStorage().getPropertiesFile(), soundPack.getFolder()),
-      previewer (engine),
+      library (l),
+      previewer (p),
       topBar (engine, registry, computerKeyboard, getEdit),
-      browser (library, previewer, soundPack, getEdit),
+      browser (library, previewer, pack, s, getEdit),
       playlist (registry, selectionManager, range),
       inspector (engine, registry, getEdit, selectionManager),
       pianoRoll (registry, selectionManager),

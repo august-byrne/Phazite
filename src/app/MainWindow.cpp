@@ -68,7 +68,8 @@ MainWindow::MainWindow (te::Engine& e, CommandRegistry& r, ProjectSession& s, ui
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
     auto content = std::make_unique<ui::AppShell> (
-        engine, commands, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection(), s.getRangeSelection());
+        engine, commands, computerKeyboard, [&s] { return s.getEdit(); }, s.getSelection(), s.getRangeSelection(), services.settings,
+        services.soundPack, services.library, services.previewer);
     shell = content.get();
     setContentOwned (content.release(), false);
 
@@ -343,7 +344,7 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
         return;
     }
 
-    auto* panel = new ui::WelcomePanel (shell->getSoundPack());
+    auto* panel = new ui::WelcomePanel (services.soundPack);
     panel->setSize (560, 460);
     panel->showPage (page);
     welcomePanel = panel;
@@ -368,7 +369,7 @@ void MainWindow::showWelcomeOnFirstRun()
     services.settings.set (Settings::welcomeShown, true);
 
     // Once the window is on the screen.
-    if (! shell->getSoundPack().isInstalled())
+    if (! services.soundPack.isInstalled())
         juce::MessageManager::callAsync (
             [safeThis = juce::Component::SafePointer<MainWindow> (this)]
             {

@@ -5,6 +5,7 @@
 // items, which Phazite's settings keep.
 #pragma once
 
+#include "Settings.h"
 #include "model/mixer/Mixer.h"
 
 #include <optional>
@@ -62,7 +63,7 @@ class Library : private juce::AsyncUpdater
 public:
     // The user's folders, favorites and recent items are kept in the settings. The factory library is Phazite Sounds'
     // folder (SoundPack::getFolder()), whether it is installed yet or not; tests give none.
-    Library (te::Engine&, juce::PropertySet& settings, juce::File factorySounds = {});
+    Library (te::Engine&, Settings&, juce::File factorySounds = {});
     ~Library() override;
 
     // The folders the browser shows besides the factory library, in the order added.
@@ -114,8 +115,7 @@ public:
 
     LibraryItem makeFileItem (const juce::File&, const juce::File& root) const; // a folder, sound or MIDI file
 
-    juce::File getFactorySounds() const { return factorySounds; }        // the library that comes with Phazite
-    juce::PropertySet& getSettings() const noexcept { return settings; } // where the browser keeps its own settings too
+    juce::File getFactorySounds() const { return factorySounds; } // the library that comes with Phazite
 
     static constexpr int maxRecent = 50;
     static constexpr int maxIndexed = 50000; // sounds; a larger library is searched as far as this
@@ -124,7 +124,7 @@ private:
     struct Indexer;
 
     te::Engine& engine;
-    juce::PropertySet& settings;
+    Settings& settings;
     const juce::File factorySounds;
     juce::StringArray audioExtensions; // of the formats Tracktion reads, as ".wav"
     std::unique_ptr<Indexer> indexer;
@@ -137,8 +137,6 @@ private:
     void reindex();
     void handleAsyncUpdate() override;
 
-    juce::StringArray getList (const juce::String& setting) const;
-    void setList (const juce::String& setting, const juce::StringArray&);
     std::vector<LibraryItem> getItems (const juce::StringArray& keys) const;
     juce::Array<juce::File> getRoots() const; // the factory library and the user's folders
 };

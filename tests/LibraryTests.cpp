@@ -41,7 +41,7 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
     writeSound (temp.folder.getChildFile ("Loops/Break 120 BPM.wav"), 4.0);
     temp.folder.getChildFile ("Drums/notes.txt").replaceWithText ("not a sound");
 
-    juce::PropertySet settings;
+    phazite::Settings settings;
     phazite::Library library (phazite::test::getEngine(), settings, {});
     library.addUserFolder (temp.folder);
     CHECK (library.getUserFolders() == juce::Array<juce::File> { temp.folder });

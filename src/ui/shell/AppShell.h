@@ -18,7 +18,10 @@ class AppShell : public juce::Component,
                  private juce::FocusChangeListener
 {
 public:
-    AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&, RangeSelection&);
+    // The services (settings, Phazite Sounds, the library and the previewer) are the app's (app/AppServices.h), and
+    // outlive this.
+    AppShell (te::Engine&, CommandRegistry&, ComputerKeyboard&, std::function<te::Edit*()> getEdit, te::SelectionManager&, RangeSelection&,
+              Settings&, SoundPack&, Library&, Previewer&);
     ~AppShell() override;
 
     // The open project's Edit, or nullptr while none is open (call this before it closes, too).
@@ -54,8 +57,6 @@ public:
     // Updates tooltips and hints that mention shortcuts, e.g. after the keymap changed.
     void refreshShortcutTexts();
 
-    SoundPack& getSoundPack() noexcept { return soundPack; } // Phazite Sounds, which the browser shows
-
     void paint (juce::Graphics&) override;
     void resized() override;
 
@@ -63,9 +64,8 @@ private:
     CommandRegistry& commands;
     te::SelectionManager& selection;
     std::function<te::Edit*()> getEdit;
-    SoundPack soundPack; // Phazite Sounds, downloaded when the user asks
-    Library library;     // what the browser and the plug-in picker show
-    Previewer previewer; // the browser's
+    Library& library;     // what the browser and the plug-in picker show
+    Previewer& previewer; // the browser's
 
     TopBar topBar;
     Browser browser;
