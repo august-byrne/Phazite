@@ -7,6 +7,7 @@
 #include "model/commands/UndoCommands.h"
 #include "model/mixer/Mixer.h"
 #include "model/project/ProjectContext.h"
+#include "model/transport/Capture.h"
 #include "model/transport/Metronome.h"
 #include "model/transport/Playback.h"
 #include "model/transport/Recording.h"
@@ -30,5 +31,6 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context)
     addLoopCommands (registry, selection, range);
     addMetronomeCommands (registry, selection);
     addRecordingCommands (registry, selection);
+    addCaptureCommands (registry, selection);
 }
 } // namespace phazite

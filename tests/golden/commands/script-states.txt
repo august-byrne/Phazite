@@ -55,6 +55,7 @@ after start:
   transport.record: off "Record"
   transport.overdub: on, ticked "Overdub"
   transport.quantizeRecordings: on "Quantize Recordings"
+  transport.capture: off "Capture"
   note.transposeUp: off "Transpose Up"
   note.transposeDown: off "Transpose Down"
   note.octaveUp: off "Octave Up"

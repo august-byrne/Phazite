@@ -20,6 +20,8 @@ namespace
                 return "square.svg";
             case Icon::record:
                 return "circle.svg";
+            case Icon::capture:
+                return "clock-arrow-down.svg";
             case Icon::keyboard:
                 return "keyboard-music.svg";
             case Icon::search:

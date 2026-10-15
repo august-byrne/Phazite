@@ -54,6 +54,7 @@ transport.countIn
 transport.record | R
 transport.overdub
 transport.quantizeRecordings
+transport.capture | ctrl + shift + C
 project.new | ctrl + N
 project.open | ctrl + O
 project.openRecent

@@ -151,6 +151,8 @@ target_sources(phazite_core PRIVATE
     src/model/project/ProjectContext.h
     src/model/project/StarterProject.cpp
     src/model/project/StarterProject.h
+    src/model/transport/Capture.cpp
+    src/model/transport/Capture.h
     src/model/transport/Metronome.cpp
     src/model/transport/Metronome.h
     src/model/transport/Playback.cpp
@@ -194,6 +196,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/chevron-down.svg
         resources/icons/lucide/chevron-right.svg
         resources/icons/lucide/circle.svg
+        resources/icons/lucide/clock-arrow-down.svg
         resources/icons/lucide/clock.svg
         resources/icons/lucide/download.svg
         resources/icons/lucide/eraser.svg

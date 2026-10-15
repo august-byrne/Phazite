@@ -307,6 +307,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - Editing tempo, key and time signature.
 - MIDI recording (overdub or replace), and Capture.
 - *Done when:* playing an idea and then pressing Capture turns it into a clip.
+- *Status:* done (2026-10-15), pending a check by hand. In: the metronome (Tracktion's click, louder on bars' first beats) and a one-bar count-in; the tempo and time signature in the top bar, the tempo a field to drag, scroll or type (a key is a track's, set in the piano roll since step 1.3); MIDI recording onto the track live MIDI plays, with overdub or replace and input quantize, each take one undo step, the song's own loop set aside while it records; and Capture (Ctrl+Shift+C), which sets the tempo from the notes in a song without clips. Tests play notes in real time through Tracktion's hosted audio device and check the takes and captured clips, and the real-time audit guards the metronome and a recording.
 
 **1.8 Export (S)**
 - Render to WAV and FLAC with loudness normalization.
@@ -490,7 +491,7 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; step 1.6 done (all six devices, and the starter project on them), pending a check by hand |
+| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; step 1.6 done (all six devices, and the starter project on them) and step 1.7 done (metronome, tempo, recording and Capture), pending checks by hand |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |

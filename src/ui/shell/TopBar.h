@@ -55,8 +55,8 @@ private:
         }
     };
 
-    IconButton playButton { "Play", Icon::play }, loopButton { "Loop", Icon::loop }, keyboardButton { "Computer keyboard", Icon::keyboard },
-        searchButton { "Search commands", Icon::search };
+    IconButton playButton { "Play", Icon::play }, captureButton { "Capture", Icon::capture }, loopButton { "Loop", Icon::loop },
+        keyboardButton { "Computer keyboard", Icon::keyboard }, searchButton { "Search commands", Icon::search };
     OptionsButton recordButton { "Record", Icon::record }, metronomeButton { "Metronome", Icon::metronome };
     NumberField tempoField;                      // dragged, scrolled or typed, a drag being one undo step
     std::unique_ptr<phazite::Gesture> tempoDrag; // while the tempo is dragged

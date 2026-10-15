@@ -6,11 +6,11 @@ TEST_CASE ("Every icon reads as a drawing that can be recolored")
 {
     using phazite::ui::Icon;
 
-    for (const auto icon : { Icon::play,       Icon::stop,   Icon::record,    Icon::keyboard, Icon::search,   Icon::detach, Icon::plus,
-                             Icon::magnet,     Icon::loop,   Icon::metronome, Icon::grip,     Icon::expanded, Icon::folded, Icon::smartTool,
-                             Icon::draw,       Icon::paint,  Icon::slice,     Icon::slip,     Icon::mute,     Icon::erase,  Icon::select,
-                             Icon::zoom,       Icon::folder, Icon::addFolder, Icon::favorite, Icon::recent,   Icon::sound,  Icon::midi,
-                             Icon::instrument, Icon::effect, Icon::preview,   Icon::download })
+    for (const auto icon : { Icon::play,      Icon::stop,       Icon::record, Icon::capture,   Icon::keyboard, Icon::search,   Icon::detach,
+                             Icon::plus,      Icon::magnet,     Icon::loop,   Icon::metronome, Icon::grip,     Icon::expanded, Icon::folded,
+                             Icon::smartTool, Icon::draw,       Icon::paint,  Icon::slice,     Icon::slip,     Icon::mute,     Icon::erase,
+                             Icon::select,    Icon::zoom,       Icon::folder, Icon::addFolder, Icon::favorite, Icon::recent,   Icon::sound,
+                             Icon::midi,      Icon::instrument, Icon::effect, Icon::preview,   Icon::download })
     {
         CAPTURE ((int) icon);
         const auto drawable = phazite::ui::createIcon (icon);

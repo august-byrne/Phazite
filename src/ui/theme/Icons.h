@@ -12,6 +12,7 @@ enum class Icon
     play,
     stop,
     record,
+    capture,
     keyboard,
     search,
     detach,

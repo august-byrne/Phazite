@@ -41,6 +41,7 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
         commands.invoke ("transport.record");
         recordButton.setToggleState (isCommandTicked ("transport.record"), juce::dontSendNotification);
     };
+    captureButton.onClick = [this] { commands.invoke ("transport.capture"); };
     loopButton.onClick = [this] { commands.invoke ("transport.loop"); };
     metronomeButton.onClicked = [this] (bool isMenuClick)
     {
@@ -88,7 +89,7 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
     masterVolume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
-    for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &loopButton, &metronomeButton,
+    for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &captureButton, &loopButton, &metronomeButton,
                                                                &timeSignatureButton, &keyboardButton, &searchButton })
     {
         button->setMouseClickGrabsKeyboardFocus (false);
@@ -112,6 +113,10 @@ void TopBar::refreshTooltips()
                                            "Record what you play onto the selected track, from where playback starts. Right-click "
                                            "for the count-in, overdub and quantizing",
                                            "transport.record"));
+    captureButton.setTooltip (withShortcut (commands,
+                                            "Capture: turns what you played in the last 30 seconds into a clip on the selected "
+                                            "track, recording or not",
+                                            "transport.capture"));
     loopButton.setTooltip (withShortcut (commands,
                                          "Loop: at the end of the song, playback starts again from its start. The song ends with "
                                          "the bar its last clip ends in, so the loop grows as you add clips later",
@@ -248,6 +253,7 @@ void TopBar::resized()
 
     playButton.setBounds (area.removeFromLeft (44));
     recordButton.setBounds (area.removeFromLeft (44));
+    captureButton.setBounds (area.removeFromLeft (44));
     loopButton.setBounds (area.removeFromLeft (44));
     metronomeButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::m);
@@ -286,6 +292,7 @@ void TopBar::timerCallback()
     playButton.setEnabled (edit != nullptr);
     recordButton.setEnabled (isCommandEnabled ("transport.record"));
     recordButton.setToggleState (isCommandTicked ("transport.record"), juce::dontSendNotification);
+    captureButton.setEnabled (isCommandEnabled ("transport.capture"));
     loopButton.setEnabled (edit != nullptr);
     loopButton.setToggleState (edit != nullptr && edit->getTransport().looping.get(), juce::dontSendNotification);
     metronomeButton.setEnabled (edit != nullptr);
