@@ -181,13 +181,8 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     REQUIRE (phazite::insertMasterDevice (edit, createBuiltInDevice (edit, te::ReverbPlugin::xmlTypeName)) != nullptr);
 
     // View settings: the playlist's grid and the piano roll's, and a range looped on purpose.
-    auto state = project.getPhaziteState();
-    const phazite::GridSettings playlistGrid { .snap = false, .adaptiveOffset = 1 };
-    playlistGrid.save (state);
-
-    auto pianoRollState = state.getOrCreateChildWithName (phazite::schema::PIANOROLL, nullptr);
-    const phazite::GridSettings pianoRollGrid { .adaptive = false, .fixedLevel = 8, .triplets = true };
-    pianoRollGrid.save (pianoRollState);
+    phazite::saveGridSettings (edit, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 1 });
+    phazite::saveGridSettings (edit, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 8, .triplets = true });
 
     phazite::loopRange (edit, { te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (6.0) });
 }

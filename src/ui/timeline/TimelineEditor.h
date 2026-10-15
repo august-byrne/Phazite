@@ -5,6 +5,7 @@
 #pragma once
 
 #include "SmartTool.h"
+#include "TimelineView.h"
 #include "model/arrangement/Grid.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
@@ -39,9 +40,8 @@ class TimelineEditor : public juce::Component,
 public:
     static constexpr int toolbarHeight = 36, rulerHeight = 28, scrollBarSize = 12;
 
-    // The editor keeps its grid in the project's Phazite state, in a child of type gridStateType, or in
-    // the state itself if that is invalid.
-    TimelineEditor (CommandBridge&, const juce::Identifier& gridStateType);
+    // The editor keeps its grid in the project as that GridOwner's (loadGridSettings()).
+    TimelineEditor (CommandBridge&, GridOwner);
     ~TimelineEditor() override;
 
     te::Edit* getEdit() const noexcept { return edit.get(); }
@@ -175,7 +175,7 @@ private:
     struct UseListener;
 
     CommandBridge& commands;
-    const juce::Identifier gridStateType;
+    const GridOwner gridOwner;
     te::SafeSelectable<te::Edit> edit;
     TimelineView view;
     te::BeatPosition timeOrigin;
@@ -192,7 +192,6 @@ private:
     std::unique_ptr<Playhead> playhead;
     std::unique_ptr<UseListener> useListener;
 
-    juce::ValueTree getGridState (bool createIfMissing) const;
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
     void timerCallback() override; // moves the playhead, and follows it while playing
 

@@ -416,7 +416,7 @@ struct Playlist::Gesture
 
 //==============================================================================
 Playlist::Playlist (CommandBridge& bridge, te::SelectionManager& selectionManager, RangeSelection& rangeSelection)
-    : TimelineEditor (bridge, {}),
+    : TimelineEditor (bridge, GridOwner::playlist),
       selection (selectionManager),
       range (rangeSelection),
       addTrackRow (std::make_unique<AddTrackRow> (*this)),

@@ -2,7 +2,6 @@
 #include "PianoRollParts.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Tracks.h"
-#include "model/base/Schema.h"
 #include "model/engine/LiveInput.h"
 #include "model/mixer/Mixer.h"
 #include "ui/devices/DeviceMenus.h"
@@ -29,7 +28,7 @@ namespace
 
 //==============================================================================
 PianoRoll::PianoRoll (CommandBridge& bridge, te::SelectionManager& selectionManager)
-    : TimelineEditor (bridge, schema::PIANOROLL),
+    : TimelineEditor (bridge, GridOwner::pianoRoll),
       selection (selectionManager),
       keys (std::make_unique<Keys> (*this)),
       grid (std::make_unique<NoteGrid> (*this)),

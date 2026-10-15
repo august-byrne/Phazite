@@ -42,7 +42,7 @@ std::unique_ptr<phazite::Project> openProject (const juce::File& file)
 juce::String describeFixedGrid (phazite::GridSettings grid, const te::TempoSequence& tempo)
 {
     grid.adaptive = false;
-    return phazite::getGridDescription (phazite::getGridSnapType (grid, tempo, {}, 24.0), tempo, grid.triplets);
+    return phazite::getGridDescription (phazite::getGridSnapType (grid, tempo, {}, 24.0, 20.0), tempo, grid.triplets);
 }
 
 te::AudioTrack& findTrack (const te::Edit& edit, const juce::String& name)
@@ -69,14 +69,14 @@ void checkOldProject (const phazite::Project& project)
     const auto& edit = project.getEdit();
 
     // The playlist's grid: an offset and a level beyond the largest are read as the largest.
-    const auto playlistGrid = phazite::GridSettings::load (phazite::findPhaziteState (edit));
+    const auto playlistGrid = phazite::loadGridSettings (edit, phazite::GridOwner::playlist);
     CHECK_FALSE (playlistGrid.snap);
     CHECK (playlistGrid.adaptive);
     CHECK (playlistGrid.adaptiveOffset == 3);
     CHECK (describeFixedGrid (playlistGrid, edit.tempoSequence) == juce::String ("8 bars"));
 
     // The piano roll's: a 1/4 beat in triplets.
-    const auto pianoRollGrid = phazite::GridSettings::load (phazite::findPhaziteState (edit).getChildWithName (phazite::schema::PIANOROLL));
+    const auto pianoRollGrid = phazite::loadGridSettings (edit, phazite::GridOwner::pianoRoll);
     CHECK (pianoRollGrid.snap);
     CHECK_FALSE (pianoRollGrid.adaptive);
     CHECK (pianoRollGrid.triplets);

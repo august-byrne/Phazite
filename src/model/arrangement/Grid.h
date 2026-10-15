@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist's time axis: which part of the song is on screen, how wide a beat is, and the grid that
-// positions snap to. Positions are in beats, as in FL Studio and Ableton Live, so a tempo change doesn't
-// move the grid; Tracktion's TempoSequence converts beats to and from seconds.
+// The grid that positions snap to: its settings, sizes and lines. Positions are in beats, as in FL Studio and Ableton
+// Live, so a tempo change doesn't move the grid; Tracktion's TempoSequence converts beats to and from seconds.
 #pragma once
 
 #include "model/base/Tracktion.h"
@@ -10,28 +9,6 @@
 
 namespace phazite
 {
-//==============================================================================
-// The visible part of the timeline: the beat at the left edge, and the zoom in pixels per beat.
-struct TimelineView
-{
-    static constexpr double minPixelsPerBeat = 0.5;    // about 500 bars across a wide window
-    static constexpr double maxPixelsPerBeat = 1024.0; // a 1/64 beat is 16 pixels wide
-    static constexpr double defaultPixelsPerBeat = 24.0;
-
-    te::BeatPosition start;
-    double pixelsPerBeat = defaultPixelsPerBeat;
-
-    double beatToX (te::BeatPosition) const;
-    te::BeatPosition xToBeat (double x) const;
-
-    // Zooms in (a factor above 1) or out, keeping the beat at x where it is. The zoom stays within its
-    // limits, and the view doesn't start before the song does.
-    void zoomAround (double x, double factor);
-
-    // Moves the view sideways by some pixels (positive: later in the song), but not before beat 0.
-    void scrollBy (double pixels);
-};
-
 //==============================================================================
 // The grid: how fine it is, and whether positions snap to it. Each project keeps its own.
 struct GridSettings
@@ -51,23 +28,35 @@ struct GridSettings
     void makeFiner();   // Ableton Live's "Narrow Grid"
     void makeCoarser(); // "Widen Grid"
 
-    // Kept in the project's Phazite state (getPhaziteState()), without undo steps.
-    static GridSettings load (const juce::ValueTree& phaziteState);
-    void save (juce::ValueTree& phaziteState) const;
+    // Read from and written to a tree of the project's Phazite state (each editor's: loadGridSettings()), without undo
+    // steps.
+    static GridSettings load (const juce::ValueTree& state);
+    void save (juce::ValueTree& state) const;
 
     bool operator== (const GridSettings&) const = default;
 };
 
-// The lines of an adaptive grid are at least this far apart, in pixels.
-inline constexpr double minGridSpacing = 20.0;
+// The editors that keep a grid of their own in the project: the playlist's on the Phazite state, the piano roll's on its
+// PIANOROLL child. View settings, without undo steps.
+enum class GridOwner
+{
+    playlist,
+    pianoRoll
+};
 
-// The coarsest grid whose lines are no closer than minSpacing pixels at this zoom, as a Tracktion snap
-// type. "where" matters only for bar lengths, which depend on the time signature.
-te::TimecodeSnapType getAdaptiveSnapType (const te::TempoSequence&, te::BeatPosition where, double pixelsPerBeat, bool triplets,
-                                          double minSpacing = minGridSpacing);
+GridSettings loadGridSettings (const te::Edit&, GridOwner); // the defaults if there are none; reading adds nothing
+void saveGridSettings (te::Edit&, GridOwner, const GridSettings&);
 
-// The grid these settings give at this zoom: the fixed size, or the adaptive one moved by its offset.
-te::TimecodeSnapType getGridSnapType (const GridSettings&, const te::TempoSequence&, te::BeatPosition where, double pixelsPerBeat);
+// The coarsest grid whose lines are no closer than minLineSpacing at this zoom, as a Tracktion snap type. widthPerBeat and
+// minLineSpacing are in the caller's unit (the editors use pixels). "where" matters only for bar lengths, which depend on
+// the time signature.
+te::TimecodeSnapType getAdaptiveSnapType (const te::TempoSequence&, te::BeatPosition where, double widthPerBeat, bool triplets,
+                                          double minLineSpacing);
+
+// The grid these settings give at this zoom: the fixed size, or the adaptive one (getAdaptiveSnapType()) moved by its
+// offset.
+te::TimecodeSnapType getGridSnapType (const GridSettings&, const te::TempoSequence&, te::BeatPosition where, double widthPerBeat,
+                                      double minLineSpacing);
 
 // How long one step of the grid is, in beats.
 double getGridStepInBeats (te::TimecodeSnapType, const te::TempoSequence&, te::BeatPosition where, bool triplets);

@@ -15,29 +15,6 @@ namespace
 } // namespace
 
 //==============================================================================
-double TimelineView::beatToX (te::BeatPosition beat) const
-{
-    return (beat - start).inBeats() * pixelsPerBeat;
-}
-
-te::BeatPosition TimelineView::xToBeat (double x) const
-{
-    return start + te::BeatDuration::fromBeats (x / pixelsPerBeat);
-}
-
-void TimelineView::zoomAround (double x, double factor)
-{
-    const auto anchor = xToBeat (x);
-    pixelsPerBeat = juce::jlimit (minPixelsPerBeat, maxPixelsPerBeat, pixelsPerBeat * factor);
-    start = te::BeatPosition::fromBeats (std::max (0.0, anchor.inBeats() - x / pixelsPerBeat));
-}
-
-void TimelineView::scrollBy (double pixels)
-{
-    start = te::BeatPosition::fromBeats (std::max (0.0, start.inBeats() + pixels / pixelsPerBeat));
-}
-
-//==============================================================================
 void GridSettings::makeFiner()
 {
     if (adaptive)
@@ -74,6 +51,23 @@ void GridSettings::save (juce::ValueTree& state) const
     state.setProperty (schema::gridTriplets, triplets, nullptr);
 }
 
+GridSettings loadGridSettings (const te::Edit& edit, GridOwner owner)
+{
+    // Reading leaves the project as it is: a project that doesn't have the state yet reads the defaults.
+    const auto state = findPhaziteState (edit);
+    return GridSettings::load (owner == GridOwner::pianoRoll ? state.getChildWithName (schema::PIANOROLL) : state);
+}
+
+void saveGridSettings (te::Edit& edit, GridOwner owner, const GridSettings& grid)
+{
+    auto state = getPhaziteState (edit);
+
+    if (owner == GridOwner::pianoRoll)
+        state = state.getOrCreateChildWithName (schema::PIANOROLL, nullptr);
+
+    grid.save (state);
+}
+
 //==============================================================================
 double getGridStepInBeats (te::TimecodeSnapType type, const te::TempoSequence& tempo, te::BeatPosition where, bool triplets)
 {
@@ -81,24 +75,24 @@ double getGridStepInBeats (te::TimecodeSnapType type, const te::TempoSequence& t
     return type.getApproxIntervalTime (setting, triplets) / setting.getApproxBeatLength();
 }
 
-te::TimecodeSnapType getAdaptiveSnapType (const te::TempoSequence& tempo, te::BeatPosition where, double pixelsPerBeat, bool triplets,
-                                          double minSpacing)
+te::TimecodeSnapType getAdaptiveSnapType (const te::TempoSequence& tempo, te::BeatPosition where, double widthPerBeat, bool triplets,
+                                          double minLineSpacing)
 {
     auto level = GridSettings::minLevel;
 
-    while (level < GridSettings::maxLevel && getGridStepInBeats (barsBeats (level), tempo, where, triplets) * pixelsPerBeat < minSpacing)
+    while (level < GridSettings::maxLevel && getGridStepInBeats (barsBeats (level), tempo, where, triplets) * widthPerBeat < minLineSpacing)
         ++level;
 
     return barsBeats (level);
 }
 
-te::TimecodeSnapType getGridSnapType (const GridSettings& grid, const te::TempoSequence& tempo, te::BeatPosition where,
-                                      double pixelsPerBeat)
+te::TimecodeSnapType getGridSnapType (const GridSettings& grid, const te::TempoSequence& tempo, te::BeatPosition where, double widthPerBeat,
+                                      double minLineSpacing)
 {
     if (! grid.adaptive)
         return barsBeats (grid.fixedLevel);
 
-    return barsBeats (getAdaptiveSnapType (tempo, where, pixelsPerBeat, grid.triplets).getLevel() + grid.adaptiveOffset);
+    return barsBeats (getAdaptiveSnapType (tempo, where, widthPerBeat, grid.triplets, minLineSpacing).getLevel() + grid.adaptiveOffset);
 }
 
 te::BeatPosition snapToGrid (te::BeatPosition beat, te::TimecodeSnapType type, const te::TempoSequence& tempo, bool triplets)

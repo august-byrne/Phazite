@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TimelineEditor.h"
-#include "model/base/Schema.h"
 #include "model/transport/Playback.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -15,6 +14,7 @@ namespace
     constexpr double scrollPerNotch = 48.0; // pixels
     constexpr double zoomStep = 1.5;        // for the zoom commands
     constexpr double minLineSpacing = 6.0;  // grid lines closer than this many pixels aren't drawn
+    constexpr double minGridSpacing = 20.0; // adaptive grid lines at least this far apart, in pixels
 
     constexpr int autoScrollMargin = 16;             // pixels inside an edge where a drag starts to scroll
     constexpr double autoScrollSpeedPerPixel = 15.0; // pixels per second for each pixel nearer the edge, or past it
@@ -280,9 +280,9 @@ struct TimelineEditor::UseListener : public juce::MouseListener
 };
 
 //==============================================================================
-TimelineEditor::TimelineEditor (CommandBridge& bridge, const juce::Identifier& stateType)
+TimelineEditor::TimelineEditor (CommandBridge& bridge, GridOwner owner)
     : commands (bridge),
-      gridStateType (stateType),
+      gridOwner (owner),
       playhead (std::make_unique<Playhead>()),
       useListener (std::make_unique<UseListener> (*this))
 {
@@ -330,7 +330,7 @@ void TimelineEditor::setTimelineEdit (te::Edit* newEdit)
     edit = newEdit;
     view = {};
     timeOrigin = {};
-    grid = newEdit != nullptr ? GridSettings::load (getGridState (false)) : GridSettings();
+    grid = newEdit != nullptr ? loadGridSettings (*newEdit, gridOwner) : GridSettings();
     snapButton.setEnabled (newEdit != nullptr);
     gridButton.setEnabled (newEdit != nullptr);
 
@@ -341,22 +341,6 @@ void TimelineEditor::setTimelineEdit (te::Edit* newEdit)
         startTimerHz (5);
     else
         stopTimer();
-}
-
-juce::ValueTree TimelineEditor::getGridState (bool createIfMissing) const
-{
-    auto* e = edit.get();
-
-    if (e == nullptr)
-        return {};
-
-    // Reading leaves the project as it is: a project that doesn't have the state yet reads the defaults.
-    auto state = createIfMissing ? getPhaziteState (*e) : findPhaziteState (*e);
-
-    if (! gridStateType.isValid())
-        return state;
-
-    return createIfMissing ? state.getOrCreateChildWithName (gridStateType, nullptr) : state.getChildWithName (gridStateType);
 }
 
 //==============================================================================
@@ -519,7 +503,7 @@ bool TimelineEditor::autoScroll (juce::Point<int> position, juce::Rectangle<int>
 te::TimecodeSnapType TimelineEditor::getSnapType() const
 {
     if (auto* e = edit.get())
-        return getGridSnapType (grid, e->tempoSequence, view.start, view.pixelsPerBeat);
+        return getGridSnapType (grid, e->tempoSequence, view.start, view.pixelsPerBeat, minGridSpacing);
 
     return te::TimecodeSnapType::get1BeatSnapType();
 }
@@ -561,8 +545,8 @@ void TimelineEditor::setGrid (const GridSettings& newGrid)
 {
     grid = newGrid;
 
-    if (auto state = getGridState (true); state.isValid())
-        grid.save (state);
+    if (auto* e = edit.get())
+        saveGridSettings (*e, gridOwner, grid);
 
     updateGridControls();
     gridChanged();

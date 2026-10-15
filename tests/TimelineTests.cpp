@@ -41,38 +41,12 @@ void checkLines (const std::vector<Line>& lines, std::initializer_list<Line> exp
 }
 } // namespace
 
-TEST_CASE ("The timeline converts between beats and pixels, and zooms around a point")
-{
-    phazite::TimelineView view;
-    view.start = 4_bp;
-    view.pixelsPerBeat = 10.0;
-
-    CHECK (view.beatToX (6_bp) == doctest::Approx (20.0));
-    CHECK (view.xToBeat (20.0).inBeats() == doctest::Approx (6.0));
-
-    // The beat under the pointer stays where it is.
-    view.zoomAround (20.0, 2.0);
-    CHECK (view.pixelsPerBeat == doctest::Approx (20.0));
-    CHECK (view.xToBeat (20.0).inBeats() == doctest::Approx (6.0));
-
-    // The zoom has limits, and the view doesn't start before the song.
-    view.zoomAround (0.0, 1.0e9);
-    CHECK (view.pixelsPerBeat == doctest::Approx (phazite::TimelineView::maxPixelsPerBeat));
-    view.zoomAround (500.0, 1.0e-9);
-    CHECK (view.pixelsPerBeat == doctest::Approx (phazite::TimelineView::minPixelsPerBeat));
-    CHECK (view.start.inBeats() == doctest::Approx (0.0));
-
-    view.start = 4_bp;
-    view.scrollBy (-1.0e6);
-    CHECK (view.start.inBeats() == doctest::Approx (0.0));
-}
-
 TEST_CASE ("The adaptive grid follows the zoom, and the settings change its size")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     const auto& tempo = edit->tempoSequence;
     const auto levelAt = [&tempo] (const phazite::GridSettings& grid, double pixelsPerBeat)
-    { return phazite::getGridSnapType (grid, tempo, 0_bp, pixelsPerBeat).getLevel(); };
+    { return phazite::getGridSnapType (grid, tempo, 0_bp, pixelsPerBeat, 20.0).getLevel(); };
 
     // Lines at least 20 pixels apart.
     phazite::GridSettings grid;
@@ -152,4 +126,30 @@ TEST_CASE ("Grid settings are kept in the project")
 
     // A project that has none uses the defaults.
     CHECK (phazite::GridSettings::load (juce::ValueTree()) == phazite::GridSettings());
+}
+
+TEST_CASE ("Each editor keeps its own grid in the project")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    edit->getUndoManager().clearUndoHistory();
+
+    // A project that has none reads the defaults, and reading adds nothing to it.
+    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == phazite::GridSettings());
+    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::playlist) == phazite::GridSettings());
+    CHECK_FALSE (phazite::findPhaziteState (*edit).isValid());
+
+    // The piano roll's grid goes on its own child of the Phazite state, and the playlist's stays as it was.
+    const phazite::GridSettings pianoRollGrid { .adaptive = false, .fixedLevel = 8, .triplets = true };
+    phazite::saveGridSettings (*edit, phazite::GridOwner::pianoRoll, pianoRollGrid);
+    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == pianoRollGrid);
+    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::playlist) == phazite::GridSettings());
+    CHECK (phazite::GridSettings::load (phazite::findPhaziteState (*edit).getChildWithName (phazite::schema::PIANOROLL)) == pianoRollGrid);
+
+    const phazite::GridSettings playlistGrid { .snap = false, .adaptiveOffset = 1 };
+    phazite::saveGridSettings (*edit, phazite::GridOwner::playlist, playlistGrid);
+    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::playlist) == playlistGrid);
+    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == pianoRollGrid);
+
+    // View settings: no undo steps.
+    CHECK_FALSE (edit->getUndoManager().canUndo());
 }

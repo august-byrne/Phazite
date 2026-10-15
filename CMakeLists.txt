@@ -301,7 +301,9 @@ target_sources(phazite_ui PRIVATE
     src/ui/timeline/SmartTool.cpp
     src/ui/timeline/SmartTool.h
     src/ui/timeline/TimelineEditor.cpp
-    src/ui/timeline/TimelineEditor.h)
+    src/ui/timeline/TimelineEditor.h
+    src/ui/timeline/TimelineView.cpp
+    src/ui/timeline/TimelineView.h)
 
 phazite_use_core(phazite_ui)
 
@@ -414,6 +416,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
         tests/TimelineTests.cpp
+        tests/TimelineViewTests.cpp
         tests/TrackTests.cpp
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h
