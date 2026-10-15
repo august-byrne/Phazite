@@ -217,7 +217,7 @@ Measurement recordAndMeasure (te::Edit& edit)
     midi.ensureSize (4096);
     const auto blockDuration =
         std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
-    std::atomic<bool> measuring { true }, running { true };
+    std::atomic<bool> measuring { true }, running { true }, notesBegun { false };
 
     AudioThreadMonitor::reset();
 
@@ -241,6 +241,11 @@ Measurement recordAndMeasure (te::Edit& edit)
                 }
             };
 
+            // The warm-up starts once recording has begun and the first note was played: what Tracktion allocates once,
+            // as a take starts, belongs to it however long a busy machine takes to get there.
+            while (! notesBegun.load())
+                processFor (0.01);
+
             processFor (warmUpSeconds);
             m.warmUp = AudioThreadMonitor::getCounts();
 
@@ -258,11 +263,12 @@ Measurement recordAndMeasure (te::Edit& edit)
     phazite::startRecording (edit);
 
     std::thread midiThread (
-        [&edit, &measuring]
+        [&edit, &measuring, &notesBegun]
         {
             for (int note = 0; measuring.load(); ++note)
             {
                 phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOn (1, 48 + note % 24, 0.8f));
+                notesBegun = true;
                 std::this_thread::sleep_for (std::chrono::milliseconds (50));
                 phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOff (1, 48 + note % 24));
                 std::this_thread::sleep_for (std::chrono::milliseconds (50));
