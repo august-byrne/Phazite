@@ -8,6 +8,7 @@
 #include "PianoRoll.h"
 #include "model/commands/Undo.h"
 #include "ui/components/Controls.h"
+#include "ui/timeline/TimelineGesture.h"
 
 namespace phazite::ui
 {
@@ -78,7 +79,7 @@ struct PianoRoll::NoteGrid : public juce::Component
 
 //==============================================================================
 // What the mouse is doing in the grid, from the moment it goes down until it goes up.
-struct PianoRoll::NoteGrid::Gesture
+struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
 {
     enum class Kind
     {
@@ -128,18 +129,10 @@ struct PianoRoll::NoteGrid::Gesture
     Zone zone = Zone::body;
     te::SafeSelectable<te::MidiClip> clip; // the note the mouse went down on, if any
     juce::ValueTree noteState;
-    te::BeatPosition startBeat;
-    juce::Point<int> startPosition;
-    int startScrollY = 0;                   // how far the rows had scrolled then
-    bool clickOnMouseUp = false;            // a click on a selected note selects it alone, unless it becomes a drag
-    bool added = false;                     // the note was added by this click: a drag that follows is the same undo step
-    std::unique_ptr<phazite::Gesture> step; // the drag's undo step, from its first change until it ends
 
     std::vector<Original> originals;
     Original anchor;                             // the note the mouse went down on, as it was
-    std::vector<juce::ValueTree> done;           // Delete and Mute: the notes already done
     std::vector<juce::ValueTree> selectedBefore; // a rectangle with Ctrl adds to these
-    te::BeatPosition nextPaintStart;
     int paintPitch = -1;
     int auditionedPitch = -1;
 };

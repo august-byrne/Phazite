@@ -10,11 +10,6 @@
 
 namespace phazite::ui
 {
-namespace
-{
-    constexpr int dragThreshold = 4;
-} // namespace
-
 PianoRoll::NoteGrid::~NoteGrid() = default;
 
 void PianoRoll::NoteGrid::mouseMove (const juce::MouseEvent& e)
@@ -61,7 +56,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
-        gesture->step = std::make_unique<phazite::Gesture> (*ed, "Delete Notes");
+        gesture->beginStep (*ed, "Delete Notes");
         gesture->kind = Gesture::Kind::erase;
         eraseOrMuteAt (e.position, true);
         return;
@@ -105,7 +100,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
                 return;
             }
 
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Paint Notes");
+            gesture->beginStep (*ed, "Paint Notes");
             gesture->kind = Gesture::Kind::paint;
             gesture->paintPitch = roll.getPitchForRow (roll.getRowAt (e.y));
             gesture->nextPaintStart = roll.snapDown (gesture->startBeat, e.mods);
@@ -124,7 +119,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
                     first.length = at - data.start;
                     second.start = at;
                     second.length = data.getEnd() - at;
-                    gesture->step = std::make_unique<phazite::Gesture> (*ed, "Split Note");
+                    gesture->beginStep (*ed, "Split Note");
                     replaceNotes ({ *hit }, { first, second });
                 }
             }
@@ -136,7 +131,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
         case Tool::erase:
         {
             const auto erase = roll.getTool() == Tool::erase;
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, erase ? "Delete Notes" : "Mute Notes");
+            gesture->beginStep (*ed, erase ? "Delete Notes" : "Mute Notes");
             gesture->kind = erase ? Gesture::Kind::erase : Gesture::Kind::mute;
             eraseOrMuteAt (e.position, erase);
             return;
@@ -187,7 +182,7 @@ void PianoRoll::NoteGrid::addNoteAt (const juce::MouseEvent& e)
     if (roll.chordStamp.has_value() && ! roll.drumMode)
         pitches = getChordPitches (pitch, *roll.chordStamp);
 
-    gesture->step = std::make_unique<phazite::Gesture> (*ed, pitches.size() > 1 ? "Stamp Chord" : "Add Note");
+    gesture->beginStep (*ed, pitches.size() > 1 ? "Stamp Chord" : "Add Note");
 
     if (clip == nullptr)
         clip = roll.makeClipForNewNotes();
@@ -218,7 +213,6 @@ void PianoRoll::NoteGrid::addNoteAt (const juce::MouseEvent& e)
     gesture->clip = clip;
     gesture->noteState = added.getFirst()->state;
     gesture->zone = Zone::body;
-    gesture->added = true;
 }
 
 void PianoRoll::NoteGrid::eraseOrMuteAt (juce::Point<float> position, bool erase)
@@ -229,10 +223,8 @@ void PianoRoll::NoteGrid::eraseOrMuteAt (juce::Point<float> position, bool erase
         return;
 
     // Each note once per drag, however long the mouse stays on it.
-    if (std::find (gesture->done.begin(), gesture->done.end(), hit->note->state) != gesture->done.end())
+    if (! gesture->doOnce (hit->note->state))
         return;
-
-    gesture->done.push_back (hit->note->state);
 
     if (erase)
         deleteNotes ({ *hit });
@@ -308,9 +300,8 @@ void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
     auto notes = roll.getSelectedNotesHere();
     const auto copy = gesture->zone == Zone::body && e.mods.isShiftDown();
 
-    if (gesture->step == nullptr) // a note added by this click: the drag joins its step
-        gesture->step =
-            std::make_unique<phazite::Gesture> (*ed, gesture->zone != Zone::body ? "Resize Notes" : (copy ? "Copy Notes" : "Move Notes"));
+    // A note added by this click and the drag that moves it are one step, the click's.
+    gesture->beginStep (*ed, gesture->zone != Zone::body ? "Resize Notes" : (copy ? "Copy Notes" : "Move Notes"));
 
     // Shift+drag copies the notes first, as in FL Studio, and the copies move.
     if (copy)
@@ -451,7 +442,7 @@ void PianoRoll::NoteGrid::mouseDrag (const juce::MouseEvent& e)
 
     if (gesture->kind == Gesture::Kind::pending)
     {
-        if (e.getDistanceFromDragStart() < dragThreshold)
+        if (! TimelineGesture::isPastDragThreshold (e))
             return;
 
         beginDrag (e);
@@ -547,7 +538,7 @@ void PianoRoll::NoteGrid::mouseUp (const juce::MouseEvent& e)
             roll.selectNotes ({}, false);
         }
     }
-    else if (gesture->kind == Gesture::Kind::zoom && rubberBand.getWidth() > dragThreshold)
+    else if (gesture->kind == Gesture::Kind::zoom && rubberBand.getWidth() > TimelineGesture::dragThreshold)
     {
         roll.zoomTo ({ roll.getView().xToBeat (rubberBand.getX()), roll.getView().xToBeat (rubberBand.getRight()) });
     }
@@ -565,9 +556,7 @@ void PianoRoll::NoteGrid::mouseUp (const juce::MouseEvent& e)
 
 juce::Point<int> PianoRoll::NoteGrid::getGestureStart() const
 {
-    // The grid may have scrolled since.
-    return { juce::roundToInt (roll.getView().beatToX (gesture->startBeat)),
-             gesture->startPosition.y + gesture->startScrollY - roll.scrollY };
+    return gesture->getStart (roll.getView(), roll.scrollY); // the grid may have scrolled since
 }
 
 void PianoRoll::NoteGrid::cancelGesture()

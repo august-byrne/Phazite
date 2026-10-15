@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// What the playlist's and the piano roll's tools share while the mouse is down (src/ui/timeline/TimelineGesture.h).
+#include "TestHelpers.h"
+#include "model/commands/Undo.h"
+#include "ui/timeline/TimelineGesture.h"
+
+using namespace tracktion::literals; // 2_bp: beat positions
+
+TEST_CASE ("A gesture's changes are one undo step, the first one's, however many steps it begins")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto* track = te::getAudioTracks (*edit)[0];
+    const auto name = track->getName();
+    edit->getUndoManager().clearUndoHistory();
+
+    {
+        phazite::ui::TimelineGesture gesture;
+        gesture.beginStep (*edit, "Add Note");
+        track->setName ("Added");
+        gesture.beginStep (*edit, "Move Notes"); // the drag after the click
+        track->setName ("Moved");
+    }
+
+    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Add Note"));
+    phazite::undo (*edit);
+    CHECK (track->getName() == name);
+    CHECK_FALSE (edit->getUndoManager().canUndo());
+}
+
+TEST_CASE ("A gesture does each thing once, and finds where it began after the content scrolled")
+{
+    phazite::ui::TimelineGesture gesture;
+    const juce::ValueTree first ("CLIP"), second ("CLIP");
+    CHECK (gesture.doOnce (first));
+    CHECK_FALSE (gesture.doOnce (first));
+    CHECK (gesture.doOnce (second));
+
+    phazite::ui::TimelineView view;
+    view.pixelsPerBeat = 10.0;
+    gesture.startBeat = 2_bp;
+    gesture.startPosition = { 20, 100 };
+    gesture.startScrollY = 30;
+
+    // The rows scrolled 20 pixels further down since: where the mouse went down is 20 pixels higher now.
+    CHECK (gesture.getStart (view, 50) == juce::Point<int> (20, 80));
+
+    // Unless it went down in a band at the top that doesn't scroll.
+    CHECK (gesture.getStart (view, 50, 120) == juce::Point<int> (20, 100));
+
+    // The time line scrolled sideways: the beat it went down on is where it is now.
+    view.start = 1_bp;
+    CHECK (gesture.getStart (view, 50).x == 10);
+}

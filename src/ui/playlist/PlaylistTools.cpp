@@ -12,8 +12,6 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr int dragThreshold = 4; // pixels the mouse moves before a click becomes a drag
-
     const juce::String emptySpaceHint ("Click to select the track, drag to select a time range, and double-click on a track with an "
                                        "instrument to add a MIDI clip, or under the last track to add a track. Ctrl+wheel zooms; "
                                        "Alt+wheel resizes the tracks.");
@@ -166,11 +164,8 @@ void Playlist::muteOrDeleteClipAt (juce::Point<int> position, bool deleteIt)
         return;
 
     // Each clip once per drag, however long the mouse stays on it.
-    for (const auto& done : gesture->done)
-        if (done.get() == clip)
-            return;
-
-    gesture->done.emplace_back (clip);
+    if (! gesture->doOnce (clip->state))
+        return;
 
     if (deleteIt)
         deleteClips ({ clip }, false);
@@ -305,7 +300,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
         // Shift+right-click opens the menu, as in the piano roll.
         if (getCommands().getKeymap().rightClickDeletes && ! e.mods.isShiftDown())
         {
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Delete Clips");
+            gesture->beginStep (*ed, "Delete Clips");
             gesture->kind = Gesture::Kind::erase;
             muteOrDeleteClipAt (e.getPosition(), true);
         }
@@ -347,12 +342,12 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
             }
 
             range.clear();
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, currentTool == Tool::draw ? "Place Clip" : "Paint Clips");
+            gesture->beginStep (*ed, currentTool == Tool::draw ? "Place Clip" : "Paint Clips");
             auto* placed = placeClip (gesture->startRow, gesture->startBeat, getGrid().snap && ! e.mods.isAltDown());
 
             if (placed == nullptr)
             {
-                gesture->step = nullptr; // nothing was placed, so a drag that follows begins a step of its own
+                gesture->endStep(); // nothing was placed, so a drag that follows begins a step of its own
 
                 // Nothing to place (a track without an instrument, before any clip was used): the Smart Tool's click.
                 if (placesForSmartTool)
@@ -387,7 +382,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
         case Tool::slice:
             if (clip != nullptr)
             {
-                gesture->step = std::make_unique<phazite::Gesture> (*ed, "Split Clip");
+                gesture->beginStep (*ed, "Split Clip");
                 splitClips ({ clip }, snap (gesture->startBeat, e.mods));
             }
 
@@ -402,7 +397,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
             }
 
             clipClicked (*clip, {});
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Slip Clip");
+            gesture->beginStep (*ed, "Slip Clip");
             gesture->kind = Gesture::Kind::slip;
             gesture->clip = clip;
             gesture->startOffset = clip->getPosition().getOffset();
@@ -410,7 +405,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 
         case Tool::mute:
         case Tool::erase:
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, currentTool == Tool::mute ? "Mute Clips" : "Delete Clips");
+            gesture->beginStep (*ed, currentTool == Tool::mute ? "Mute Clips" : "Delete Clips");
             gesture->kind = currentTool == Tool::mute ? Gesture::Kind::mute : Gesture::Kind::erase;
             muteOrDeleteClipAt (e.getPosition(), currentTool == Tool::erase);
             return;
@@ -505,7 +500,7 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
 
     if (gesture->kind == Gesture::Kind::pending)
     {
-        if (e.getDistanceFromDragStart() < dragThreshold)
+        if (! TimelineGesture::isPastDragThreshold (e))
             return;
 
         beginDrag (e);
@@ -685,7 +680,7 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
     if (gesture->crossfade.has_value())
     {
         gesture->kind = Gesture::Kind::crossfade;
-        gesture->step = std::make_unique<phazite::Gesture> (*ed, "Crossfade");
+        gesture->beginStep (*ed, "Crossfade");
         return;
     }
 
@@ -702,22 +697,22 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
     {
         case ClipZone::trimStart:
             gesture->kind = Gesture::Kind::trimStart;
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Trim Clip Start");
+            gesture->beginStep (*ed, "Trim Clip Start");
             return;
 
         case ClipZone::trimEnd:
             gesture->kind = Gesture::Kind::trimEnd;
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Trim Clip End");
+            gesture->beginStep (*ed, "Trim Clip End");
             return;
 
         case ClipZone::fadeIn:
             gesture->kind = Gesture::Kind::fadeIn;
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Fade In");
+            gesture->beginStep (*ed, "Fade In");
             return;
 
         case ClipZone::fadeOut:
             gesture->kind = Gesture::Kind::fadeOut;
-            gesture->step = std::make_unique<phazite::Gesture> (*ed, "Fade Out");
+            gesture->beginStep (*ed, "Fade Out");
             return;
 
         case ClipZone::move:
@@ -737,9 +732,9 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
     const auto alias = e.mods.isCommandDown() && e.mods.isShiftDown();
     const auto copy = e.mods.isCommandDown() && ! alias;
     const auto many = clips.size() > 1;
-    gesture->step = std::make_unique<phazite::Gesture> (*ed, alias  ? (many ? "Make Aliases" : "Make Alias")
-                                                             : copy ? (many ? "Copy Clips" : "Copy Clip")
-                                                                    : (many ? "Move Clips" : "Move Clip"));
+    gesture->beginStep (*ed, alias  ? (many ? "Make Aliases" : "Make Alias")
+                             : copy ? (many ? "Copy Clips" : "Copy Clip")
+                                    : (many ? "Move Clips" : "Move Clip"));
 
     if (copy || alias)
     {
@@ -762,10 +757,7 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
 
 juce::Point<int> Playlist::getGestureStart() const
 {
-    // The lanes may have scrolled since; the pinned band doesn't scroll up and down.
-    const auto& start = gesture->startPosition;
-    const auto y = start.y < pinnedHeight ? start.y : start.y + gesture->startScrollY - scrollY;
-    return { juce::roundToInt (getView().beatToX (gesture->startBeat)), y };
+    return gesture->getStart (getView(), scrollY, pinnedHeight); // the pinned band doesn't scroll up and down
 }
 
 void Playlist::lanesMouseUp (const juce::MouseEvent& e)
@@ -790,7 +782,7 @@ void Playlist::lanesMouseUp (const juce::MouseEvent& e)
             selection.deselectAll();
         }
     }
-    else if (gesture->kind == Gesture::Kind::zoom && rubberBand.getWidth() > dragThreshold)
+    else if (gesture->kind == Gesture::Kind::zoom && rubberBand.getWidth() > TimelineGesture::dragThreshold)
     {
         // Zoom to the dragged time.
         zoomTo ({ getView().xToBeat (rubberBand.getX()), getView().xToBeat (rubberBand.getRight()) });

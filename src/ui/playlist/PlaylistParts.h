@@ -6,7 +6,7 @@
 #pragma once
 
 #include "Playlist.h"
-#include "model/commands/Undo.h"
+#include "ui/timeline/TimelineGesture.h"
 
 namespace phazite::ui
 {
@@ -50,7 +50,7 @@ struct Playlist::AddTrackRow : public juce::Button
 
 //==============================================================================
 // What the mouse is doing in the lanes, from the moment it goes down until it goes up.
-struct Playlist::Gesture
+struct Playlist::Gesture : public TimelineGesture
 {
     enum class Kind
     {
@@ -107,21 +107,14 @@ struct Playlist::Gesture
     Kind kind = Kind::pending;
     te::SafeSelectable<te::Clip> clip; // the clip the mouse went down on, if any
     std::optional<ClipZone> zone;      // and where on it
-    te::BeatPosition startBeat;        // the beat under the mouse when it went down
-    int startRow = -1;
-    int startScrollY = 0;        // how far the rows had scrolled then
-    bool clickOnMouseUp = false; // the click's selection waits for the mouse to go up without a drag
+    int startRow = -1;                 // the row it went down on
 
     std::vector<MovingClip> moving;
     te::BeatPosition anchorStart; // where the clip under the mouse (or its copy) started; it is the one that snaps
     int rowOffset = 0;            // how many rows the moving clips have moved
 
     std::optional<CrossfadeSpot> crossfade;                         // where the mouse went down to draw a crossfade
-    juce::Point<int> startPosition;                                 // in the lanes
     te::TimeDuration startOffset;                                   // Slip: the clip's offset when the drag began
-    te::BeatPosition nextPaintStart;                                // Paint: where the next copy goes
-    std::vector<te::SafeSelectable<te::Clip>> done;                 // Mute and Delete: the clips already done
     std::vector<te::SafeSelectable<te::Selectable>> selectedBefore; // Select with Ctrl: what was selected already
-    std::unique_ptr<phazite::Gesture> step;                         // the drag's undo step, from its first change until it ends
 };
 } // namespace phazite::ui
