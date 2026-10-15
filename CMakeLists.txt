@@ -275,6 +275,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/Controls.h
     src/ui/components/ValueText.cpp
     src/ui/components/ValueText.h
+    src/ui/devices/CompressorEditor.cpp
+    src/ui/devices/CompressorEditor.h
     src/ui/devices/DeviceEditors.cpp
     src/ui/devices/DeviceEditors.h
     src/ui/devices/DeviceMenus.cpp
@@ -428,6 +430,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ClipTests.cpp
         tests/CommandGoldenTests.cpp
         tests/CommandTests.cpp
+        tests/CompressorEditorTests.cpp
         tests/CompressorTests.cpp
         tests/ComputerKeyboardTests.cpp
         tests/ControlsTests.cpp

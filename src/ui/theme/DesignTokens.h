@@ -93,9 +93,12 @@ namespace GraphTint
     inline constexpr float zeroLine = 0.25f;
     inline constexpr float partCurve = 0.25f;
     inline constexpr float partOff = 0.5f; // a part that is off, such as an EQ band's button
+    inline constexpr float marker = 0.5f;  // a line that marks a setting, such as a compressor's threshold
     inline constexpr float curveWidth = 2.0f;
     inline constexpr float dotRadius = 8.0f;
     inline constexpr int height = 280;
+    inline constexpr float levelDotRadius = 5.0f; // the dot that rides a compressor's curve at the level it hears
+    inline constexpr int meterWidth = 12;         // a meter beside a graph, such as how far a compressor turns down
 } // namespace GraphTint
 
 // How far a button that needs attention, such as one asking for the instrument a track's notes need, is mixed with the

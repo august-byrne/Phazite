@@ -53,7 +53,7 @@ float steady (int time, float decibels)
 // the sound and, when given, sidechain gives the sidechain's.
 template <typename Input, typename Sidechain = std::nullptr_t>
 std::array<std::vector<float>, 2> play (Compressor& compressor, const std::vector<float>& values, int numSamples, Input input,
-                                        Sidechain sidechain = nullptr)
+                                        [[maybe_unused]] Sidechain sidechain = nullptr)
 {
     juce::AudioBuffer<float> buffer (2, testBlockSize), side (2, testBlockSize);
     std::array<std::vector<float>, 2> played;
@@ -74,7 +74,7 @@ std::array<std::vector<float>, 2> play (Compressor& compressor, const std::vecto
         }
 
         float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
-        const float* sides[] = { side.getReadPointer (0), side.getReadPointer (1) };
+        [[maybe_unused]] const float* sides[] = { side.getReadPointer (0), side.getReadPointer (1) };
         devices::ProcessContext block;
         block.channels = channels;
         block.numChannels = 2;

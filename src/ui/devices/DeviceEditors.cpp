@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceEditors.h"
+#include "CompressorEditor.h"
 #include "EqEditor.h"
+#include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -25,6 +27,9 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Equalizer::typeID)
         return std::make_unique<EqEditor> (device);
+
+    if (info->typeID == devices::Compressor::typeID)
+        return std::make_unique<CompressorEditor> (device);
 
     return std::make_unique<DeviceKnobs> (device);
 }

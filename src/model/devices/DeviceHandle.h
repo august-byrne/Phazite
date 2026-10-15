@@ -9,7 +9,9 @@
 #include "devices/core/Processor.h"
 #include "model/base/Tracktion.h"
 
+#include <cstdint>
 #include <string_view>
+#include <vector>
 
 namespace phazite
 {
@@ -26,6 +28,18 @@ public:
 
     // The parameter with that ID; its changes are undo steps named "Change" and its name, or undoName.
     ParameterHandle getParameter (std::string_view id, const juce::String& undoName = {}) const;
+
+    // A track a device's sidechain can listen to (model/mixer/Sidechain.h), by its ID, which stays the same while the
+    // project is open; 0 for none, the sound passing through the device.
+    struct SidechainChoice
+    {
+        std::uint64_t trackID = 0;
+        juce::String name;
+    };
+
+    std::vector<SidechainChoice> getSidechainChoices() const; // in the song's order
+    SidechainChoice getSidechainSource() const;
+    void setSidechainSource (std::uint64_t trackID) const; // one of the choices, or 0; as one undo step
 
     // The device's DSP as its own type, for an editor's lock-free reads; nullptr once the device is gone, or for another
     // type. Ask each time: never keep the pointer.
