@@ -73,7 +73,7 @@ Done before this plan (progress since then is under [Status](#status)):
 
 **A1. Untangle the model, without changing behavior (L)**
 - **Folders by area:** `model/<area>/` with `base/` and `commands/` at the bottom, `services/`, `ui/<area>/` with `theme/`, `components/` and `input/`, and `app/`, which becomes a library the tests link.
-- **Headers:** the model gets Tracktion from one small header instead of through the command registry's, and has no include loops. Today Project and Playback, Sections and Outlines, and the commands and Playback include each other.
+- **Headers:** the model gets Tracktion from one small header instead of through the command registry's, and has no include loops. At the start of A1, Project and Playback, Sections and Outlines, and the commands and Playback included each other; since 2026-10-14 no model file is on an include loop.
 - **Project data:**
   - one schema file with every property Phazite saves, a schema version and migrations;
   - the grid's fixed size and a key's scale, saved as Tracktion enum numbers, become Phazite's own values, and older projects are converted when they open;

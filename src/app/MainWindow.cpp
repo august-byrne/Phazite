@@ -604,7 +604,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             juce::PopupMenu outlines;
 
             for (const auto& outline : getBuiltInOutlines())
-                addOne (outlines, "section.outline." + outline.id);
+                addOne (outlines, getOutlineCommandID (outline.id));
 
             menu.addSubMenu ("Song Outline", outlines);
             break;

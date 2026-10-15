@@ -3,6 +3,7 @@
 #include "Sections.h"
 #include "Tracks.h"
 #include "model/base/Schema.h"
+#include "model/commands/CommandRegistry.h"
 
 #include <PhaziteData.h>
 
@@ -127,8 +128,49 @@ void applyOutline (te::Edit& edit, const Outline& outline)
     getPhaziteState (edit).setProperty (schema::outline, outline.id, &edit.getUndoManager());
 }
 
+bool applyOutline (te::Edit& edit, const juce::String& outlineID)
+{
+    const auto* outline = findOutline (outlineID);
+
+    if (outline == nullptr)
+        return false;
+
+    applyOutline (edit, *outline);
+    return true;
+}
+
 juce::String getAppliedOutline (const te::Edit& edit)
 {
     return findPhaziteState (edit)[schema::outline].toString();
+}
+
+bool isOutlineApplied (const te::Edit& edit, const juce::String& outlineID)
+{
+    return getAppliedOutline (edit) == outlineID && ! getSections (edit).isEmpty();
+}
+
+juce::String getOutlineCommandID (const juce::String& outlineID)
+{
+    return "section.outline." + outlineID;
+}
+
+//==============================================================================
+void addOutlineCommands (CommandRegistry& registry, te::SelectionManager& selection)
+{
+    // One command for each outline, so the palette finds them by name.
+    for (const auto& outline : getBuiltInOutlines())
+    {
+        const auto id = outline.id;
+        registry.add ({ .id = getOutlineCommandID (id),
+                        .name = "Apply Outline: " + outline.name,
+                        .category = "Section",
+                        .description = "Lays out the song's sections. " + outline.description
+                                       + " It replaces the sections there are; what is on the tracks stays where it is.",
+                        .synonyms = { "song outline", "structure", "template", "arrangement", "form" },
+                        .perform = withEdit (selection, [id] (te::Edit& edit) { applyOutline (edit, id); }),
+                        .isEnabled = [&selection] { return selection.getEdit() != nullptr; },
+                        .undoTarget = [&selection] { return selection.getEdit(); },
+                        .isTicked = ifEdit (selection, [id] (te::Edit& edit) { return isOutlineApplied (edit, id); }) });
+    }
 }
 } // namespace phazite

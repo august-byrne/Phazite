@@ -488,7 +488,7 @@ void SectionsStrip::showMenu (te::ArrangerClip* section, te::BeatPosition where)
     juce::PopupMenu outlines;
 
     for (const auto& outline : getBuiltInOutlines())
-        addCommandItem (outlines, registry, "section.outline." + outline.id);
+        addCommandItem (outlines, registry, getOutlineCommandID (outline.id));
 
     menu.addSubMenu ("Song Outline", outlines);
 

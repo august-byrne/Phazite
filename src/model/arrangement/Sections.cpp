@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Sections.h"
 #include "Arrangement.h"
-#include "Outlines.h"
 #include "Tracks.h"
 #include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -246,32 +245,5 @@ void addSectionCommands (CommandRegistry& registry, te::SelectionManager& select
                     },
                     .isEnabled = hasEdit,
                     .undoTarget = getEdit });
-
-    // One command for each outline, so the palette finds them by name.
-    for (const auto& outline : getBuiltInOutlines())
-    {
-        const auto id = outline.id;
-        registry.add ({ .id = "section.outline." + id,
-                        .name = "Apply Outline: " + outline.name,
-                        .category = "Section",
-                        .description = "Lays out the song's sections. " + outline.description
-                                       + " It replaces the sections there are; what is on the tracks stays where it is.",
-                        .synonyms = { "song outline", "structure", "template", "arrangement", "form" },
-                        .perform =
-                            [&selection, id]
-                        {
-                            if (auto* edit = selection.getEdit())
-                                if (const auto* chosen = findOutline (id))
-                                    applyOutline (*edit, *chosen);
-                        },
-                        .isEnabled = hasEdit,
-                        .undoTarget = getEdit,
-                        .isTicked =
-                            [&selection, id]
-                        {
-                            auto* edit = selection.getEdit();
-                            return edit != nullptr && getAppliedOutline (*edit) == id && ! getSections (*edit).isEmpty();
-                        } });
-    }
 }
 } // namespace phazite

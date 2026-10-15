@@ -15,7 +15,7 @@ te::BeatPosition beats (double b)
     return te::BeatPosition::fromBeats (b);
 }
 
-// An Edit with two tracks, the selection and section commands, and the electronic outline's sections:
+// An Edit with two tracks, the selection, section and outline commands, and the electronic outline's sections:
 // Intro 0-64, Build-up 64-96, Drop 96-160, Breakdown 160-224, Build-up 224-256, Drop 256-320, Outro 320-384
 // (in beats; 4/4 at 120 BPM, so a beat is half a second).
 struct Song
@@ -27,6 +27,7 @@ struct Song
         selection.edit = edit.get();
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addSectionCommands (registry, selection);
+        phazite::addOutlineCommands (registry, selection);
 
         if (const auto* outline = phazite::findOutline ("electronic"))
             phazite::applyOutline (*edit, *outline);
@@ -178,6 +179,51 @@ TEST_CASE ("Applying the electronic outline creates its seven sections at the pr
     CHECK (phazite::getSections (*edit).size() == 7);
     phazite::undo (*edit);
     CHECK (phazite::getSections (*edit).isEmpty());
+}
+
+TEST_CASE ("Outlines by id")
+{
+    Song song; // with the electronic outline's sections
+    auto& edit = *song.edit;
+
+    // An id no outline has changes nothing.
+    const auto before = edit.state.createCopy();
+    CHECK_FALSE (phazite::applyOutline (edit, "unknown"));
+    CHECK (edit.state.isEquivalentTo (before));
+    CHECK (phazite::getAppliedOutline (edit) == juce::String ("electronic"));
+
+    // Pop's id lays out pop's sections, one after the other, in bars of 4 beats.
+    const auto* pop = phazite::findOutline ("pop");
+    REQUIRE (pop != nullptr);
+    REQUIRE (phazite::applyOutline (edit, "pop"));
+
+    const auto sections = phazite::getSections (edit);
+    REQUIRE (sections.size() == (int) pop->sections.size());
+    auto bar = 0;
+
+    for (int i = 0; i < sections.size(); ++i)
+    {
+        CAPTURE (i);
+        const auto& expected = pop->sections[(size_t) i];
+        CHECK (sections[i]->getName() == expected.name);
+        CHECK (sections[i]->getStartBeat().inBeats() == doctest::Approx (bar * 4.0));
+        CHECK (sections[i]->getLengthInBeats().inBeats() == doctest::Approx (expected.bars * 4.0));
+        bar += expected.bars;
+    }
+
+    // It is the outline applied while the song has sections.
+    CHECK (phazite::isOutlineApplied (edit, "pop"));
+    CHECK_FALSE (phazite::isOutlineApplied (edit, "electronic"));
+
+    for (auto* section : phazite::getSections (edit))
+        section->removeFromParent();
+
+    CHECK (phazite::getAppliedOutline (edit) == juce::String ("pop"));
+    CHECK_FALSE (phazite::isOutlineApplied (edit, "pop"));
+
+    // The command that applies it.
+    CHECK (phazite::getOutlineCommandID ("pop") == juce::String ("section.outline.pop"));
+    CHECK (song.registry.find (phazite::getOutlineCommandID ("pop")) != nullptr);
 }
 
 TEST_CASE ("Moving the Drop moves everything in it")

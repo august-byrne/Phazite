@@ -68,8 +68,7 @@ void resizeSection (te::ArrangerClip&, te::BeatDuration newLength, bool moveRest
 // Where a section can be moved or copied to: the start of each section and the end of the last.
 juce::Array<te::BeatPosition> getSectionBoundaries (const te::Edit&);
 
-// The section commands: add a section, and apply each built-in song outline (Outlines.h). Delete,
-// duplicate and duplicate as aliases are the selection commands (Selection.h); the sections strip adds
-// rename and color.
+// The section commands: add a section. Delete, duplicate and duplicate as aliases are the selection
+// commands (Selection.h); the song outlines' are Outlines.h's; the sections strip adds rename and color.
 void addSectionCommands (CommandRegistry&, te::SelectionManager&);
 } // namespace phazite
