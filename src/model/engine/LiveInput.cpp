@@ -70,12 +70,19 @@ void playIntoAllMidiInputs (te::Engine& engine, const juce::MidiMessage& m)
     }
 }
 
+te::InputDeviceInstance* findLiveMidiInput (te::Edit& edit)
+{
+    if (const auto device = getAllMidiInputs (edit.engine))
+        return findInstance (edit, *device);
+
+    return nullptr;
+}
+
 te::AudioTrack* getLiveMidiTrack (te::Edit& edit)
 {
-    if (auto device = getAllMidiInputs (edit.engine))
-        if (auto* instance = findInstance (edit, *device))
-            if (const auto tracks = te::getTargetTracks (*instance); ! tracks.isEmpty())
-                return tracks.getFirst();
+    if (auto* instance = findLiveMidiInput (edit))
+        if (const auto tracks = te::getTargetTracks (*instance); ! tracks.isEmpty())
+            return tracks.getFirst();
 
     return nullptr;
 }
@@ -94,20 +101,30 @@ bool setLiveMidiTrack (te::AudioTrack& track)
     if (instance == nullptr)
         return false;
 
-    if (const auto tracks = te::getTargetTracks (*instance); tracks.size() == 1 && tracks.getFirst() == &track)
-        return true;
-
     // Without an undo step: this follows the track being played, it isn't an edit of the song.
-    const auto destination = instance->setTarget (track.itemID, true, nullptr, 0);
-    return destination.has_value() && *destination != nullptr;
+    if (const auto tracks = te::getTargetTracks (*instance); tracks.size() != 1 || tracks.getFirst() != &track)
+        if (const auto destination = instance->setTarget (track.itemID, true, nullptr, 0);
+            ! destination.has_value() || *destination == nullptr)
+            return false;
+
+    // Armed from the start, so that Record can begin at once: arming rebuilds Tracktion's playback graph, which would
+    // lose a recording begun meanwhile.
+    if (! instance->isRecordingEnabled (track.itemID))
+        instance->setRecordingEnabled (track.itemID, true);
+
+    return true;
 }
 
 void routeLiveMidiInput (te::Edit& edit)
 {
     edit.getTransport().ensureContextAllocated();
 
-    if (getLiveMidiTrack (edit) != nullptr)
+    // The track it plays already, armed as setLiveMidiTrack() arms it.
+    if (auto* track = getLiveMidiTrack (edit))
+    {
+        setLiveMidiTrack (*track);
         return;
+    }
 
     for (auto* track : te::getAudioTracks (edit))
     {

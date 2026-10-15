@@ -8,6 +8,7 @@
     "transport.playStop": [ "spacebar" ],
     "transport.playPause": [ "command + spacebar" ],
     "transport.goToStart": [ "home" ],
+    "transport.record": [ "R" ],
     "transport.loopSelection": [ "command + L" ],
     "transport.metronome": [ "command + M" ],
     "transport.countIn": [ "command + P" ],

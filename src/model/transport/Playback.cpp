@@ -3,6 +3,7 @@
 #include "model/arrangement/Sections.h"
 #include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 
 namespace phazite
 {
@@ -18,6 +19,25 @@ namespace
     bool isNear (te::TimePosition a, te::TimePosition b)
     {
         return std::abs ((a - b).inSeconds()) < 1.0e-6;
+    }
+
+    // Stops playback. A recording that stops with it is kept as one undo step, "Record" (Recording.h).
+    void stopPlaying (te::Edit& edit)
+    {
+        auto& transport = edit.getTransport();
+
+        if (transport.isRecording())
+        {
+            {
+                const UndoStep step (edit, "Record");
+                transport.stop (false, false);
+            }
+
+            updateSongLoop (edit); // which the recording set aside
+            return;
+        }
+
+        transport.stop (false, false);
     }
 } // namespace
 
@@ -71,7 +91,8 @@ void loopRange (te::Edit& edit, te::TimeRange range)
 
 void updateSongLoop (te::Edit& edit)
 {
-    if (! doesLoopFollowSong (edit))
+    // Not during a recording, which runs on past the song's end (Recording.h).
+    if (! doesLoopFollowSong (edit) || edit.getTransport().isRecording())
         return;
 
     auto& transport = edit.getTransport();
@@ -149,15 +170,15 @@ void playOrPause (te::Edit& edit)
     auto& transport = edit.getTransport();
 
     if (transport.isPlaying())
-        transport.stop (false, false);
+        stopPlaying (edit);
     else
         transport.play (false);
 }
 
 void stopAndReturn (te::Edit& edit)
 {
+    stopPlaying (edit);
     auto& transport = edit.getTransport();
-    transport.stop (false, false);
     transport.setPosition (transport.startPosition);
 }
 
@@ -187,6 +208,15 @@ void SongFollower::handleAsyncUpdate()
 void SongFollower::timerCallback()
 {
     auto& transport = edit.getTransport();
+
+    // A recording that stopped some other way than Playback.h's functions: the song's loop back.
+    if (const auto recording = transport.isRecording(); recording != wasRecording)
+    {
+        wasRecording = recording;
+
+        if (! recording)
+            updateSongLoop (edit);
+    }
 
     if (! transport.isPlaying() || transport.looping.get() || transport.isRecording())
     {

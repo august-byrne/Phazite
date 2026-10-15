@@ -11,6 +11,7 @@ enum class Icon
 {
     play,
     stop,
+    record,
     keyboard,
     search,
     detach,

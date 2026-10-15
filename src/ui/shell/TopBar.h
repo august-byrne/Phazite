@@ -28,6 +28,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void lookAndFeelChanged() override; // the record button is red while recording
 
     juce::Component& getSearchButton() noexcept { return searchButton; } // the palette opens under it
 
@@ -56,7 +57,7 @@ private:
 
     IconButton playButton { "Play", Icon::play }, loopButton { "Loop", Icon::loop }, keyboardButton { "Computer keyboard", Icon::keyboard },
         searchButton { "Search commands", Icon::search };
-    OptionsButton metronomeButton { "Metronome", Icon::metronome };
+    OptionsButton recordButton { "Record", Icon::record }, metronomeButton { "Metronome", Icon::metronome };
     NumberField tempoField;                      // dragged, scrolled or typed, a drag being one undo step
     std::unique_ptr<phazite::Gesture> tempoDrag; // while the tempo is dragged
     juce::TextButton timeSignatureButton;        // a menu of time signatures
@@ -69,8 +70,10 @@ private:
     void timerCallback() override; // updates the readouts a few times a second; only changes repaint
     void updateKeyboardButton();
     void updateTempo();
+    void showRecordMenu();
     void showMetronomeMenu();
     void showTimeSignatureMenu();
-    bool isTicked (const juce::String& commandID) const;
+    bool isCommandTicked (const juce::String& commandID) const;
+    bool isCommandEnabled (const juce::String& commandID) const;
 };
 } // namespace phazite::ui

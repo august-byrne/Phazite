@@ -30,6 +30,17 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
     setTitle ("Transport");
 
     playButton.onClick = [this] { commands.invoke ("transport.playStop"); };
+    recordButton.onClicked = [this] (bool isMenuClick)
+    {
+        if (isMenuClick)
+        {
+            showRecordMenu();
+            return;
+        }
+
+        commands.invoke ("transport.record");
+        recordButton.setToggleState (isCommandTicked ("transport.record"), juce::dontSendNotification);
+    };
     loopButton.onClick = [this] { commands.invoke ("transport.loop"); };
     metronomeButton.onClicked = [this] (bool isMenuClick)
     {
@@ -40,7 +51,7 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
         }
 
         commands.invoke ("transport.metronome");
-        metronomeButton.setToggleState (isTicked ("transport.metronome"), juce::dontSendNotification);
+        metronomeButton.setToggleState (isCommandTicked ("transport.metronome"), juce::dontSendNotification);
     };
     keyboardButton.onClick = [this] { commands.invoke ("input.computerKeyboard"); };
 
@@ -77,8 +88,8 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
     masterVolume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
-    for (auto* button : std::initializer_list<juce::Button*> { &playButton, &loopButton, &metronomeButton, &timeSignatureButton,
-                                                               &keyboardButton, &searchButton })
+    for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &loopButton, &metronomeButton,
+                                                               &timeSignatureButton, &keyboardButton, &searchButton })
     {
         button->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (button);
@@ -87,6 +98,7 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
     for (auto* c : std::initializer_list<juce::Component*> { &tempoField, &cpuLabel, &masterMeter, &masterVolume })
         addAndMakeVisible (c);
 
+    lookAndFeelChanged();
     timerCallback();
     startTimerHz (4);
 }
@@ -96,6 +108,10 @@ TopBar::~TopBar() = default;
 void TopBar::refreshTooltips()
 {
     playButton.setTooltip (withShortcut (commands, "Play or stop", "transport.playStop"));
+    recordButton.setTooltip (withShortcut (commands,
+                                           "Record what you play onto the selected track, from where playback starts. Right-click "
+                                           "for the count-in, overdub and quantizing",
+                                           "transport.record"));
     loopButton.setTooltip (withShortcut (commands,
                                          "Loop: at the end of the song, playback starts again from its start. The song ends with "
                                          "the bar its last clip ends in, so the loop grows as you add clips later",
@@ -152,6 +168,13 @@ void TopBar::updateTempo()
     timeSignatureButton.setButtonText (formatTimeSignature (timeSignature.numerator, timeSignature.denominator));
 }
 
+void TopBar::showRecordMenu()
+{
+    juce::PopupMenu menu;
+    addCommandItems (menu, commands, { "transport.record", "transport.countIn", "transport.overdub", "transport.quantizeRecordings" });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (recordButton));
+}
+
 void TopBar::showMetronomeMenu()
 {
     juce::PopupMenu menu;
@@ -194,10 +217,21 @@ void TopBar::showTimeSignatureMenu()
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (timeSignatureButton));
 }
 
-bool TopBar::isTicked (const juce::String& commandID) const
+bool TopBar::isCommandEnabled (const juce::String& commandID) const
+{
+    const auto* command = commands.getRegistry().find (commandID);
+    return command != nullptr && CommandRegistry::isEnabled (*command);
+}
+
+bool TopBar::isCommandTicked (const juce::String& commandID) const
 {
     const auto* command = commands.getRegistry().find (commandID);
     return command != nullptr && command->isTicked != nullptr && command->isTicked();
+}
+
+void TopBar::lookAndFeelChanged()
+{
+    recordButton.setColour (juce::TextButton::buttonOnColourId, getPalette (*this).danger);
 }
 
 void TopBar::paint (juce::Graphics& g)
@@ -213,6 +247,7 @@ void TopBar::resized()
     auto area = getLocalBounds().reduced (Space::s, (getHeight() - controlHeight) / 2);
 
     playButton.setBounds (area.removeFromLeft (44));
+    recordButton.setBounds (area.removeFromLeft (44));
     loopButton.setBounds (area.removeFromLeft (44));
     metronomeButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::m);
@@ -249,10 +284,12 @@ void TopBar::timerCallback()
     }
 
     playButton.setEnabled (edit != nullptr);
+    recordButton.setEnabled (isCommandEnabled ("transport.record"));
+    recordButton.setToggleState (isCommandTicked ("transport.record"), juce::dontSendNotification);
     loopButton.setEnabled (edit != nullptr);
     loopButton.setToggleState (edit != nullptr && edit->getTransport().looping.get(), juce::dontSendNotification);
     metronomeButton.setEnabled (edit != nullptr);
-    metronomeButton.setToggleState (isTicked ("transport.metronome"), juce::dontSendNotification);
+    metronomeButton.setToggleState (isCommandTicked ("transport.metronome"), juce::dontSendNotification);
     updateTempo();
 
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",

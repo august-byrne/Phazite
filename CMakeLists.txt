@@ -155,6 +155,8 @@ target_sources(phazite_core PRIVATE
     src/model/transport/Metronome.h
     src/model/transport/Playback.cpp
     src/model/transport/Playback.h
+    src/model/transport/Recording.cpp
+    src/model/transport/Recording.h
     src/model/transport/Tempo.cpp
     src/model/transport/Tempo.h
     # services: what the whole app shares (they use the model; the model never uses them)
@@ -191,6 +193,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/audio-lines.svg
         resources/icons/lucide/chevron-down.svg
         resources/icons/lucide/chevron-right.svg
+        resources/icons/lucide/circle.svg
         resources/icons/lucide/clock.svg
         resources/icons/lucide/download.svg
         resources/icons/lucide/eraser.svg
@@ -518,6 +521,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp
         tests/RealtimeAuditTests.cpp
+        tests/RecordingTests.cpp
         tests/ReverbEditorTests.cpp
         tests/ReverbTests.cpp
         tests/SchemaTests.cpp

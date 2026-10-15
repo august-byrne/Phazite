@@ -31,7 +31,8 @@ bool doesLoopFollowSong (const te::Edit&);
 void loopSong (te::Edit&);
 void loopRange (te::Edit&, te::TimeRange);
 
-// Puts the loop around the song again if it follows the song and the song's end has moved.
+// Puts the loop around the song again if it follows the song and the song's end has moved. Not during a recording, for
+// which the song's loop is set aside (Recording.h).
 void updateSongLoop (te::Edit&);
 
 // What the loop commands do. Looping is on or off; turning it on puts the loop around the song again if it follows
@@ -62,7 +63,8 @@ void goToStart (te::Edit&);
 // End: moves the playhead to the song's end (getSongEnd()), as a click in a ruler would: playback starts there.
 void goToEnd (te::Edit&);
 
-// Space: plays from where playback starts, or stops and goes back there.
+// Space: plays from where playback starts, or stops and goes back there. A recording that these stop is kept as one
+// undo step, "Record" (Recording.h).
 void playOrStop (te::Edit&);
 
 // Plays from where the playhead is, or stops it where it is, as Shift+Space does in Ableton Live.
@@ -74,7 +76,8 @@ void stopAndReturn (te::Edit&);
 //==============================================================================
 // Follows where an Edit's song ends, as clips are added, moved, trimmed or deleted and the tempo changes: keeps the
 // loop around the song while the loop follows it, and stops playback that doesn't loop at the song's end, rather
-// than playing on into silence (as Logic does), going back to where playback starts. Each open project has one.
+// than playing on into silence (as Logic does), going back to where playback starts; and puts the song's loop back
+// after a recording, however it stopped. Each open project has one.
 class SongFollower : private juce::ValueTree::Listener,
                      private juce::AsyncUpdater,
                      private juce::Timer
@@ -88,6 +91,7 @@ private:
     juce::ValueTree editState;
     te::TimePosition songEnd;                     // where the song's loop ends: getSongEnd(), or a bar in for a song without clips
     std::optional<te::TimePosition> lastPosition; // while playing without a loop: where the playhead was last time
+    bool wasRecording = false;
 
     void changed (const juce::ValueTree&);
     void handleAsyncUpdate() override;

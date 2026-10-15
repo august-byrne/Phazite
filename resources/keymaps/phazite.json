@@ -6,6 +6,7 @@
     "transport.playPause": [ "shift + spacebar" ],
     "transport.goToStart": [ "home" ],
     "transport.goToEnd": [ "end" ],
+    "transport.record": [ "R" ],
     "transport.loop": [ "L" ],
     "transport.loopSelection": [ "command + L" ],
     "transport.metronome": [ "O" ],

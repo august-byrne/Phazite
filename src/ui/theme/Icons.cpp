@@ -18,6 +18,8 @@ namespace
                 return "play.svg";
             case Icon::stop:
                 return "square.svg";
+            case Icon::record:
+                return "circle.svg";
             case Icon::keyboard:
                 return "keyboard-music.svg";
             case Icon::search:

@@ -22,10 +22,12 @@
 #include "model/arrangement/Tracks.h"
 #include "model/devices/DevicePlugin.h"
 #include "model/devices/DrumSamplerPlugin.h"
+#include "model/engine/LiveInput.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/mixer/Mixer.h"
 #include "model/mixer/Sidechain.h"
 #include "model/transport/Metronome.h"
+#include "model/transport/Recording.h"
 
 #include <chrono>
 #include <thread>
@@ -175,6 +177,104 @@ Measurement playAndMeasure (te::Edit& edit, int numInputChannels = 0)
     m.callSites = AudioThreadMonitor::describeCallSites();
 
     // Remove the hosted device again, as Tracktion's own tests do, so later tests start without one.
+    deviceManager.closeDevices();
+    deviceManager.removeHostedAudioDeviceInterface();
+    deviceManager.deviceManager.closeAudioDevice();
+
+    return m;
+}
+
+// Records onto the track live MIDI plays, measured as playAndMeasure() measures playback, while another thread plays
+// a note every tenth of a second into "All MIDI Ins", as a MIDI driver would. Stopping keeps the take.
+Measurement recordAndMeasure (te::Edit& edit)
+{
+    auto& deviceManager = edit.engine.getDeviceManager();
+    auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
+
+    te::HostedAudioDeviceInterface::Parameters params;
+    params.sampleRate = auditSampleRate;
+    params.blockSize = auditBlockSize;
+    params.inputChannels = 0;
+    audioIO.initialise (params);
+    audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
+    deviceManager.dispatchPendingUpdates();
+
+    // Tracktion's merged MIDI input, which it creates on a timer once asked to scan the MIDI devices.
+    if (phazite::getAllMidiInputs (edit.engine) == nullptr)
+    {
+        deviceManager.rescanMidiDeviceList();
+        phazite::test::runTimersUntil ([&edit] { return phazite::getAllMidiInputs (edit.engine) != nullptr; });
+    }
+
+    phazite::setCountInOn (edit, false);
+    edit.getTransport().looping = false;
+    phazite::routeLiveMidiInput (edit);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 200); // Tracktion rebuilds its graph with the input armed
+
+    Measurement m;
+    juce::AudioBuffer<float> buffer (params.outputChannels, auditBlockSize);
+    juce::MidiBuffer midi;
+    midi.ensureSize (4096);
+    const auto blockDuration =
+        std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
+    std::atomic<bool> measuring { true }, running { true };
+
+    AudioThreadMonitor::reset();
+
+    std::thread audioThread (
+        [&]
+        {
+            const AudioThreadMonitor::ScopedAudioThread marker;
+
+            const auto processFor = [&] (double seconds)
+            {
+                const auto numBlocks = juce::roundToInt (seconds * auditSampleRate / auditBlockSize);
+
+                for (int i = 0; i < numBlocks; ++i)
+                {
+                    const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
+                    buffer.clear();
+                    midi.clear();
+                    audioIO.processBlock (buffer, midi);
+                    m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
+                    std::this_thread::sleep_until (blockEnd);
+                }
+            };
+
+            processFor (warmUpSeconds);
+            m.warmUp = AudioThreadMonitor::getCounts();
+
+            processFor (steadySeconds);
+            const auto total = AudioThreadMonitor::getCounts();
+            m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
+            measuring = false;
+
+            // On, unmeasured, while recording stops.
+            while (running.load())
+                processFor (0.01);
+        });
+
+    // Tracktion waits for a block to go by before recording begins, so this starts once the audio thread runs.
+    phazite::startRecording (edit);
+
+    std::thread midiThread (
+        [&edit, &measuring]
+        {
+            for (int note = 0; measuring.load(); ++note)
+            {
+                phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOn (1, 48 + note % 24, 0.8f));
+                std::this_thread::sleep_for (std::chrono::milliseconds (50));
+                phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOff (1, 48 + note % 24));
+                std::this_thread::sleep_for (std::chrono::milliseconds (50));
+            }
+        });
+
+    midiThread.join(); // once the measuring is done
+    phazite::stopRecording (edit);
+    running = false;
+    audioThread.join();
+    m.callSites = AudioThreadMonitor::describeCallSites();
+
     deviceManager.closeDevices();
     deviceManager.removeHostedAudioDeviceInterface();
     deviceManager.deviceManager.closeAudioDevice();
@@ -422,6 +522,20 @@ TEST_SUITE ("realtime-audit")
         const auto m = playAndMeasure (*edit);
         report ("MIDI into Phazite's synth, notes overlapping, with noise and its LFO", m);
         CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: notes recorded from the computer keyboard onto Phazite's synth")
+    {
+        using phazite::devices::Synth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::setInstrument (track, edit->getPluginCache().createNewPlugin (Synth::typeID, {})) != nullptr);
+
+        const auto m = recordAndMeasure (*edit);
+        report ("Notes recorded from the computer keyboard onto Phazite's synth", m);
+        CHECK (m.peakLevel > 0.01f);          // heard as they are played
+        CHECK (track.getClips().size() == 1); // the take
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

@@ -51,6 +51,9 @@ section.loop
 transport.loopSong
 transport.metronome | O
 transport.countIn
+transport.record | R
+transport.overdub
+transport.quantizeRecordings
 project.new | ctrl + N
 project.open | ctrl + O
 project.openRecent

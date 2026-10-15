@@ -9,6 +9,7 @@
 #include "model/project/ProjectContext.h"
 #include "model/transport/Metronome.h"
 #include "model/transport/Playback.h"
+#include "model/transport/Recording.h"
 #include "ui/playlist/TrackHeights.h"
 
 namespace phazite
@@ -28,5 +29,6 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context)
     addMixerCommands (registry, selection);
     addLoopCommands (registry, selection, range);
     addMetronomeCommands (registry, selection);
+    addRecordingCommands (registry, selection);
 }
 } // namespace phazite

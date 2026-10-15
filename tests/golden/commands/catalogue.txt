@@ -51,6 +51,9 @@ section.loop | Loop Section | Section | Loops the selected sections instead of t
 transport.loopSong | Loop the Song | Transport | Loops the whole song again, from its start to the end of the bar its last clip ends in; the loop grows as clips go later. | loop all, whole song, song mode | enabled-when ticked
 transport.metronome | Metronome | Transport | Clicks on every beat while the song plays, louder on each bar's first. | click, click track, beat, tick, tempo | enabled-when ticked
 transport.countIn | Count-In | Transport | Plays a bar of clicks before recording starts from a stop, even with the metronome off. | precount, pre-roll, count in, lead-in | enabled-when ticked
+transport.record | Record | Transport | Records what you play onto the track live MIDI plays, from where playback starts, or stops recording. | rec, take, record midi, arm | enabled-when ticked
+transport.overdub | Overdub | Transport | Recording adds what you play to the clips already there; off, it takes their place. | merge recordings, replace, blend, record mode | ticked
+transport.quantizeRecordings | Quantize Recordings | Transport | Moves the notes you record to the nearest sixteenth as they go in. | input quantize, record quantize, snap recording, timing | ticked
 note.transposeUp | Transpose Up | Note | Moves the selected notes up a semitone. | pitch up, semitone, raise | enabled-when undo priority=1 repeats
 note.transposeDown | Transpose Down | Note | Moves the selected notes down a semitone. | pitch down, semitone, lower | enabled-when undo priority=1 repeats
 note.octaveUp | Octave Up | Note | Moves the selected notes up an octave. | transpose, pitch up, raise | enabled-when undo priority=1 repeats

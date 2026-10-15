@@ -19,6 +19,10 @@ void playIntoAllMidiInputs (te::Engine&, const juce::MidiMessage&);
 // The track that live MIDI input plays, or nullptr.
 te::AudioTrack* getLiveMidiTrack (te::Edit&);
 
+// The Edit's instance of "All MIDI Ins", which plays live MIDI's track and records onto it (Recording.h in transport/).
+// nullptr until Tracktion has scanned the MIDI devices and the Edit's playback is allocated.
+te::InputDeviceInstance* findLiveMidiInput (te::Edit&);
+
 // Makes live MIDI input play this track, and no other. Returns false if there is no MIDI input yet.
 bool setLiveMidiTrack (te::AudioTrack&);
 

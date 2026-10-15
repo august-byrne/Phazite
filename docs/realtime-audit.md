@@ -27,7 +27,7 @@ Replacing a part of the engine outright is a separate decision, made one capabil
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** eleven scenarios read no files and use none of the code Phazite is replacing: one empty track, the metronome (step 1.7), built-in effects with a send, automation with an LFO, the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), and one for each of Phazite's own devices so far (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
+- **Guards:** twelve scenarios read no files and use none of the code Phazite is replacing: one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), built-in effects with a send, automation with an LFO, the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), and one for each of Phazite's own devices so far (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
 
 ## Results (Windows Debug)
 
@@ -45,6 +45,7 @@ The first column covers the first 0.25 s after playback starts; the second cover
 | Phazite's limiter on the master, pushed 12 dB, with its meters read | 2 allocations | 0 |
 | Phazite's reverb on a return, with an 8-second decay | 5 allocations | 0 |
 | MIDI into Phazite's synth, notes overlapping, with noise and its LFO | 25 allocations (Tracktion's MIDI message arrays growing in their first blocks) | 0 |
+| Notes recorded from the computer keyboard onto Phazite's synth | 21 allocations (the same) | 0 |
 | A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor | 25 allocations (the same) | 0 |
 | An audio clip | 2 allocations (more if the file cache misses) | 0 |
 | Two tracks in a folder bus with a compressor | 7 allocations, 1 free | 0 |
