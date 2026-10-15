@@ -55,6 +55,29 @@ public:
     Fader (Direction, const juce::String& title, double defaultValue);
 };
 
+// A number that is dragged up and down, scrolled, stepped with the arrow keys, or clicked and typed, such as the top
+// bar's tempo: its text is its face. Dragging (a fifth as far with Shift), the wheel and the keys move it in steps;
+// typing takes any value in its range, to a hundredth of a step. textFromValueFunction and valueFromTextFunction give
+// it units ("120 BPM"), which screen readers read too.
+class NumberField : public ValueSlider
+{
+public:
+    NumberField (const juce::String& title, double minimum, double maximum, double step, double defaultValue);
+
+    double getStep() const noexcept { return step; }
+
+    double snapValue (double attemptedValue, DragMode) override; // a drag moves in whole steps
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    bool keyPressed (const juce::KeyPress&) override; // up and right step up, down and left down
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
+
+private:
+    static constexpr int pixelsPerStep = 2;
+    static constexpr double wheelNotch = 60.0 / 256.0; // one notch of a mouse wheel, as JUCE reports it on Windows
+    const double step;
+    double wheelNotches = 0.0; // a trackpad's movements, added up until they make a step
+};
+
 // Shows and reads a slider's value, a Tracktion volume fader position from 0 to 1, in decibels.
 void showAsDecibels (juce::Slider&);
 

@@ -25,6 +25,15 @@ juce::String formatPan (double pan);
 // Reads a pan position as formatPan() writes it, or as a number from -100 (left) to 100 (right).
 std::optional<double> parsePan (const juce::String&);
 
+// A tempo, to a hundredth of a beat per minute, without zeros after the point: "120 BPM", "128.5 BPM", "87.25 BPM".
+juce::String formatTempo (double bpm);
+
+// Reads a tempo as someone might type it ("128", "128.5 bpm"). Nothing if it isn't a number.
+std::optional<double> parseTempo (const juce::String&);
+
+// A time signature: "4/4", "6/8".
+juce::String formatTimeSignature (int numerator, int denominator);
+
 // A value of one of Phazite's devices' parameters, as its unit says: "120 Hz", "1.20 kHz", "+3.0 dB", "35%", "12.5 ms",
 // "1.20 s", "+7 st", "-15 ct", "4.0:1", a choice's name, "On" or "Off", or a plain number ("0.71").
 juce::String formatParameterValue (const devices::ParameterInfo&, float value);

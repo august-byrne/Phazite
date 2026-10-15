@@ -2,6 +2,7 @@
 #include "UiTestHelpers.h"
 #include "model/commands/Undo.h"
 #include "ui/components/Controls.h"
+#include "ui/components/ValueText.h"
 
 TEST_CASE ("A slider linked to a track's volume sets it, one undo step per change")
 {
@@ -93,4 +94,46 @@ TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
     CHECK (tracks[0]->isSolo (false));
     CHECK_FALSE (tracks[1]->isSolo (false));
     CHECK_FALSE (tracks[0]->isMuted (false));
+}
+
+TEST_CASE ("A number field moves in steps when dragged or stepped, takes any value typed, and says it with its units")
+{
+    phazite::ui::NumberField field ("Tempo", 20.0, 300.0, 1.0, 120.0);
+    field.textFromValueFunction = [] (double bpm) { return phazite::ui::formatTempo (bpm); };
+    phazite::test::TestWindow window (field, 96, 24);
+
+    int changes = 0, drags = 0;
+    field.onValueChange = [&changes] { ++changes; };
+    field.onDragStart = [&drags] { ++drags; };
+
+    // Two pixels a step, up for more.
+    phazite::test::Mouse mouse (field);
+    mouse.press ({ 48, 12 });
+    mouse.dragTo ({ 48, -8 });
+    mouse.release();
+    CHECK (field.getValue() == doctest::Approx (130.0));
+    CHECK (drags == 1);
+    CHECK (changes > 0);
+
+    // The drag gave it the keyboard: the arrow keys step it.
+    window.pressKey (juce::KeyPress (juce::KeyPress::upKey));
+    CHECK (field.getValue() == doctest::Approx (131.0));
+    window.pressKey (juce::KeyPress (juce::KeyPress::leftKey));
+    window.pressKey (juce::KeyPress (juce::KeyPress::leftKey));
+    CHECK (field.getValue() == doctest::Approx (129.0));
+
+    // A typed value can fall between the steps, to a hundredth of one.
+    field.setValue (128.374, juce::sendNotificationSync);
+    CHECK (field.getValue() == doctest::Approx (128.37));
+    CHECK (field.getTextFromValue (field.getValue()) == juce::String ("128.37 BPM"));
+
+    // Screen readers hear the units, and step it as the keys do.
+    const auto handler = field.createAccessibilityHandler();
+    REQUIRE (handler != nullptr);
+    auto* value = handler->getValueInterface();
+    REQUIRE (value != nullptr);
+    CHECK (value->getCurrentValueAsString() == juce::String ("128.37 BPM"));
+    CHECK (value->getRange().getInterval() == doctest::Approx (1.0));
+    value->setValue (140.0);
+    CHECK (field.getValue() == doctest::Approx (140.0));
 }

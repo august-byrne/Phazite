@@ -155,6 +155,8 @@ target_sources(phazite_core PRIVATE
     src/model/transport/Metronome.h
     src/model/transport/Playback.cpp
     src/model/transport/Playback.h
+    src/model/transport/Tempo.cpp
+    src/model/transport/Tempo.h
     # services: what the whole app shares (they use the model; the model never uses them)
     src/services/BrowserModel.cpp
     src/services/BrowserModel.h
@@ -528,10 +530,12 @@ if(PHAZITE_BUILD_TESTS)
         tests/SoundPackTests.cpp
         tests/SynthTests.cpp
         tests/TestDevices.h
+        tests/TempoTests.cpp
         tests/TimelineGestureTests.cpp
         tests/TimelineTests.cpp
         tests/TimelineViewTests.cpp
         tests/ToggleTests.cpp
+        tests/TopBarTests.cpp
         tests/TrackTests.cpp
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h

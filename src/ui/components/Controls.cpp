@@ -74,6 +74,96 @@ Fader::Fader (Direction direction, const juce::String& title, double defaultValu
     setSliderSnapsToMousePosition (false);
 }
 
+//==============================================================================
+namespace
+{
+    // What screen readers read and set for a number field: its value with its units, stepped as the arrow keys step it
+    // (JUCE's keys take the step from here).
+    class NumberFieldAccessibility : public juce::AccessibilityHandler
+    {
+    public:
+        explicit NumberFieldAccessibility (NumberField& field)
+            : juce::AccessibilityHandler (field, juce::AccessibilityRole::slider, juce::AccessibilityActions {},
+                                          juce::AccessibilityHandler::Interfaces { std::make_unique<Value> (field) })
+        {
+        }
+
+    private:
+        struct Value : public juce::AccessibilityValueInterface
+        {
+            explicit Value (NumberField& f)
+                : field (f)
+            {
+            }
+
+            bool isReadOnly() const override { return ! field.isEnabled(); }
+            double getCurrentValue() const override { return field.getValue(); }
+            juce::String getCurrentValueAsString() const override { return field.getTextFromValue (field.getValue()); }
+            void setValue (double newValue) override { field.setValue (newValue, juce::sendNotificationSync); }
+            void setValueAsString (const juce::String& text) override { setValue (field.getValueFromText (text)); }
+            AccessibleValueRange getRange() const override { return { { field.getMinimum(), field.getMaximum() }, field.getStep() }; }
+
+            NumberField& field;
+        };
+    };
+} // namespace
+
+NumberField::NumberField (const juce::String& title, double minimum, double maximum, double stepToUse, double defaultValue)
+    : ValueSlider (LinearBarVertical, title, defaultValue),
+      step (stepToUse)
+{
+    // The text box covers a bar slider, and a click on it without a drag types in it.
+    setTextBoxStyle (TextBoxLeft, false, 0, 0);
+    setRange (minimum, maximum, step / 100.0);
+    setValue (defaultValue, juce::dontSendNotification);
+    setSliderSnapsToMousePosition (false);
+    setMouseDragSensitivity (juce::roundToInt ((maximum - minimum) / step) * pixelsPerStep);
+    setDoubleClickReturnValue (false, defaultValue); // a click types instead
+    setPopupDisplayEnabled (false, false, nullptr);  // the field shows its value itself
+}
+
+double NumberField::snapValue (double attemptedValue, DragMode dragMode)
+{
+    if (dragMode == notDragging)
+        return attemptedValue; // typed, or stepped by a key or the wheel
+
+    const auto steps = std::round ((attemptedValue - getMinimum()) / step);
+    return juce::jlimit (getMinimum(), getMaximum(), getMinimum() + steps * step);
+}
+
+void NumberField::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    if (! isEnabled() || e.mods.isAnyMouseButtonDown())
+        return;
+
+    // A step a notch, from a mouse wheel's notches or a trackpad's smaller movements added up.
+    const auto amount = std::abs (wheel.deltaX) > std::abs (wheel.deltaY) ? -wheel.deltaX : wheel.deltaY;
+    wheelNotches += (wheel.isReversed ? -amount : amount) / wheelNotch;
+    const auto steps = (int) wheelNotches;
+    wheelNotches -= steps;
+
+    if (steps != 0)
+        setValue (juce::jlimit (getMinimum(), getMaximum(), getValue() + steps * step), juce::sendNotificationSync);
+}
+
+bool NumberField::keyPressed (const juce::KeyPress& key)
+{
+    const auto steps = (key == juce::KeyPress::upKey || key == juce::KeyPress::rightKey)    ? 1
+                       : (key == juce::KeyPress::downKey || key == juce::KeyPress::leftKey) ? -1
+                                                                                            : 0;
+
+    if (steps == 0 || key.getModifiers().isAnyModifierKeyDown())
+        return juce::Slider::keyPressed (key);
+
+    setValue (juce::jlimit (getMinimum(), getMaximum(), getValue() + steps * step), juce::sendNotificationSync);
+    return true;
+}
+
+std::unique_ptr<juce::AccessibilityHandler> NumberField::createAccessibilityHandler()
+{
+    return std::make_unique<NumberFieldAccessibility> (*this);
+}
+
 void showAsDecibels (juce::Slider& slider)
 {
     slider.textFromValueFunction = [] (double position) { return formatDecibels (te::volumeFaderPositionToDB ((float) position)); };

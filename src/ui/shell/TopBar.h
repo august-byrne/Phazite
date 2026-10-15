@@ -11,18 +11,20 @@
 
 namespace phazite
 {
+class Gesture;
 class ProjectContext;
 } // namespace phazite
 
 namespace phazite::ui
 {
-// The bar along the top: play, loop, tempo, CPU, the master level and volume, the computer keyboard and the
-// command search. (A key is a track's, so the piano roll shows it.)
+// The bar along the top: play, loop, the metronome, the tempo and time signature, CPU, the master level and volume,
+// the computer keyboard and the command search. (A key is a track's, so the piano roll shows it.)
 class TopBar : public juce::Component,
                private juce::Timer
 {
 public:
     TopBar (te::Engine&, CommandBridge&, ComputerKeyboard&, const ProjectContext&);
+    ~TopBar() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -55,7 +57,10 @@ private:
     IconButton playButton { "Play", Icon::play }, loopButton { "Loop", Icon::loop }, keyboardButton { "Computer keyboard", Icon::keyboard },
         searchButton { "Search commands", Icon::search };
     OptionsButton metronomeButton { "Metronome", Icon::metronome };
-    juce::Label tempoLabel, cpuLabel;
+    NumberField tempoField;                      // dragged, scrolled or typed, a drag being one undo step
+    std::unique_ptr<phazite::Gesture> tempoDrag; // while the tempo is dragged
+    juce::TextButton timeSignatureButton;        // a menu of time signatures
+    juce::Label cpuLabel;
     LevelMeter masterMeter { "Master level" };
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", te::decibelsToVolumeFaderPosition (0.0f) };
     ParameterAttachment masterVolumeAttachment { masterVolume, "Change Master Volume" };
@@ -63,7 +68,9 @@ private:
 
     void timerCallback() override; // updates the readouts a few times a second; only changes repaint
     void updateKeyboardButton();
+    void updateTempo();
     void showMetronomeMenu();
+    void showTimeSignatureMenu();
     bool isTicked (const juce::String& commandID) const;
 };
 } // namespace phazite::ui

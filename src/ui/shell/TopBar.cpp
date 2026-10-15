@@ -1,16 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TopBar.h"
+#include "model/commands/Undo.h"
 #include "model/project/ProjectContext.h"
+#include "model/transport/Tempo.h"
+#include "ui/components/ValueText.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
+#include <array>
+
 namespace phazite::ui
 {
+namespace
+{
+    // The time signatures the menu offers, as most DAWs do.
+    constexpr std::array<TimeSignature, 8> commonTimeSignatures {
+        { { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } }
+    };
+} // namespace
+
 TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard, const ProjectContext& context)
     : engine (e),
       commands (bridge),
       computerKeyboard (keyboard),
-      projectContext (context)
+      projectContext (context),
+      tempoField ("Tempo", minTempo, maxTempo, 1.0, 120.0)
 {
     setTitle ("Transport");
 
@@ -31,34 +46,52 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
 
     searchButton.setButtonText ("Search commands");
     searchButton.onClick = [this] { commands.invoke ("view.commandPalette"); };
+
+    // The tempo: each drag is one undo step, as are a typed tempo and each step of the wheel or the arrow keys.
+    tempoField.textFromValueFunction = [] (double bpm) { return formatTempo (bpm); };
+    tempoField.valueFromTextFunction = [this] (const juce::String& text) { return parseTempo (text).value_or (tempoField.getValue()); };
+    tempoField.updateText();
+    tempoField.onDragStart = [this]
+    {
+        if (auto* edit = projectContext.getEdit())
+            tempoDrag = std::make_unique<phazite::Gesture> (*edit, "Change Tempo");
+    };
+    tempoField.onDragEnd = [this] { tempoDrag = nullptr; };
+    tempoField.onValueChange = [this]
+    {
+        if (auto* edit = projectContext.getEdit())
+            setTempo (*edit, tempoField.getValue());
+    };
+    tempoField.setTooltip ("Tempo, in beats per minute: drag it up or down, scroll, or click it and type");
+
+    timeSignatureButton.setTitle ("Time signature");
+    timeSignatureButton.setTooltip ("Time signature: the beats in a bar, and the note that counts as a beat. Click for others");
+    timeSignatureButton.onClick = [this] { showTimeSignatureMenu(); };
     refreshTooltips();
 
-    for (auto* label : { &tempoLabel, &cpuLabel })
-    {
-        label->setFont (LookAndFeel::getNumberFont (TextSize::body));
-        label->setJustificationType (juce::Justification::centred);
-        addAndMakeVisible (*label);
-    }
-
-    tempoLabel.setTooltip ("Tempo, in beats per minute");
+    cpuLabel.setFont (LookAndFeel::getNumberFont (TextSize::body));
+    cpuLabel.setJustificationType (juce::Justification::centred);
     cpuLabel.setTooltip ("How much of the time available for each audio block the engine uses");
 
     showAsDecibels (masterVolume);
     masterVolume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
-    for (auto* button : std::initializer_list<IconButton*> { &playButton, &loopButton, &metronomeButton, &keyboardButton, &searchButton })
+    for (auto* button : std::initializer_list<juce::Button*> { &playButton, &loopButton, &metronomeButton, &timeSignatureButton,
+                                                               &keyboardButton, &searchButton })
     {
         button->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (button);
     }
 
-    addAndMakeVisible (masterMeter);
-    addAndMakeVisible (masterVolume);
+    for (auto* c : std::initializer_list<juce::Component*> { &tempoField, &cpuLabel, &masterMeter, &masterVolume })
+        addAndMakeVisible (c);
 
     timerCallback();
     startTimerHz (4);
 }
+
+TopBar::~TopBar() = default;
 
 void TopBar::refreshTooltips()
 {
@@ -99,11 +132,66 @@ void TopBar::updateKeyboardButton()
                                              "input.computerKeyboard"));
 }
 
+void TopBar::updateTempo()
+{
+    auto* edit = projectContext.getEdit();
+    tempoField.setEnabled (edit != nullptr);
+    timeSignatureButton.setEnabled (edit != nullptr);
+
+    if (edit == nullptr)
+        return;
+
+    // Not while it is dragged or typed in. (Its text box keeps the keyboard focus after a click, typing or not.)
+    const auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    const auto typing = dynamic_cast<const juce::TextEditor*> (focused) != nullptr && tempoField.isParentOf (focused);
+
+    if (tempoDrag == nullptr && ! typing)
+        tempoField.setValue (getTempo (*edit), juce::dontSendNotification);
+
+    const auto timeSignature = getTimeSignature (*edit);
+    timeSignatureButton.setButtonText (formatTimeSignature (timeSignature.numerator, timeSignature.denominator));
+}
+
 void TopBar::showMetronomeMenu()
 {
     juce::PopupMenu menu;
     addCommandItems (menu, commands, { "transport.metronome", "transport.countIn" });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (metronomeButton));
+}
+
+void TopBar::showTimeSignatureMenu()
+{
+    auto* edit = projectContext.getEdit();
+
+    if (edit == nullptr)
+        return;
+
+    const auto current = getTimeSignature (*edit);
+    const juce::Component::SafePointer<TopBar> safeThis (this);
+    juce::PopupMenu menu;
+
+    const auto addItem = [&menu, &current, safeThis] (TimeSignature timeSignature)
+    {
+        menu.addItem (formatTimeSignature (timeSignature.numerator, timeSignature.denominator), true, timeSignature == current,
+                      [safeThis, timeSignature]
+                      {
+                          if (safeThis != nullptr)
+                              if (auto* e = safeThis->projectContext.getEdit())
+                                  setTimeSignature (*e, timeSignature);
+                      });
+    };
+
+    // One the menu doesn't offer, from a project made elsewhere, comes first.
+    if (std::find (commonTimeSignatures.begin(), commonTimeSignatures.end(), current) == commonTimeSignatures.end())
+    {
+        addItem (current);
+        menu.addSeparator();
+    }
+
+    for (const auto timeSignature : commonTimeSignatures)
+        addItem (timeSignature);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (timeSignatureButton));
 }
 
 bool TopBar::isTicked (const juce::String& commandID) const
@@ -128,6 +216,10 @@ void TopBar::resized()
     loopButton.setBounds (area.removeFromLeft (44));
     metronomeButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::m);
+    tempoField.setBounds (area.removeFromLeft (96));
+    area.removeFromLeft (Space::xs);
+    timeSignatureButton.setBounds (area.removeFromLeft (52));
+    area.removeFromLeft (Space::m);
 
     searchButton.setBounds (area.removeFromRight (180));
     area.removeFromRight (Space::s);
@@ -138,12 +230,10 @@ void TopBar::resized()
     masterMeter.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 12));
     area.removeFromRight (Space::m);
 
-    // The readouts get what is left. In a narrow window the last ones give way first.
-    for (const auto& [label, width] : { std::pair { &tempoLabel, 90 }, std::pair { &cpuLabel, 80 } })
-    {
-        label->setVisible (area.getWidth() >= width);
-        label->setBounds (area.removeFromLeft (juce::jmin (width, area.getWidth())));
-    }
+    // The CPU readout gets what is left, and gives way in a narrow window.
+    constexpr int cpuWidth = 80;
+    cpuLabel.setVisible (area.getWidth() >= cpuWidth);
+    cpuLabel.setBounds (area.removeFromLeft (juce::jmin (cpuWidth, area.getWidth())));
 }
 
 void TopBar::timerCallback()
@@ -163,16 +253,8 @@ void TopBar::timerCallback()
     loopButton.setToggleState (edit != nullptr && edit->getTransport().looping.get(), juce::dontSendNotification);
     metronomeButton.setEnabled (edit != nullptr);
     metronomeButton.setToggleState (isTicked ("transport.metronome"), juce::dontSendNotification);
+    updateTempo();
 
-    juce::String tempo;
-
-    if (edit != nullptr)
-    {
-        const auto position = edit->getTransport().getPosition();
-        tempo = juce::String (edit->tempoSequence.getBpmAt (position), 1) + " BPM";
-    }
-
-    tempoLabel.setText (tempo, juce::dontSendNotification);
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",
                       juce::dontSendNotification);
     updateKeyboardButton();

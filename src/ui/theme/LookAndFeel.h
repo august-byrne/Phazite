@@ -31,6 +31,9 @@ public:
     void drawLinearSlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos, float minSliderPos, float maxSliderPos,
                            juce::Slider::SliderStyle, juce::Slider&) override;
     int getSliderThumbRadius (juce::Slider&) override;
+
+    // A bar slider is a number field (ui::NumberField): a box with its value, in the number font, typed in after a click.
+    juce::Label* createSliderTextBox (juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour, bool isHighlighted,
                                bool isDown) override;
 

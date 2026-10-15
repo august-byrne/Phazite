@@ -111,6 +111,31 @@ std::optional<double> parsePan (const juce::String& text)
 
     return {};
 }
+
+juce::String formatTempo (double bpm)
+{
+    auto number = juce::String (bpm, 2);
+
+    if (number.containsChar ('.'))
+        number = number.trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
+
+    return number + " BPM";
+}
+
+std::optional<double> parseTempo (const juce::String& text)
+{
+    auto t = text.trim();
+
+    if (t.endsWithIgnoreCase ("bpm"))
+        t = t.dropLastCharacters (3);
+
+    return parseNumber (t);
+}
+
+juce::String formatTimeSignature (int numerator, int denominator)
+{
+    return juce::String (numerator) + "/" + juce::String (denominator);
+}
 } // namespace phazite::ui
 
 namespace phazite::ui

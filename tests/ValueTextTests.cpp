@@ -121,3 +121,19 @@ TEST_CASE ("A device parameter's value reads as its unit says, and back")
         CHECK (parse (parameter, formatParameterValue (parameter, value).toRawUTF8()) == doctest::Approx (value).epsilon (0.005));
     }
 }
+
+TEST_CASE ("Tempos read in beats per minute, to a hundredth, and time signatures as beats over the note")
+{
+    CHECK (phazite::ui::formatTempo (120.0) == "120 BPM");
+    CHECK (phazite::ui::formatTempo (128.5) == "128.5 BPM");
+    CHECK (phazite::ui::formatTempo (87.25) == "87.25 BPM");
+    CHECK (phazite::ui::formatTempo (99.999) == "100 BPM");
+
+    CHECK (phazite::ui::parseTempo ("128").value_or (0.0) == doctest::Approx (128.0));
+    CHECK (phazite::ui::parseTempo (" 128.5 bpm ").value_or (0.0) == doctest::Approx (128.5));
+    CHECK (phazite::ui::parseTempo ("90BPM").value_or (0.0) == doctest::Approx (90.0));
+    CHECK_FALSE (phazite::ui::parseTempo ("fast").has_value());
+    CHECK_FALSE (phazite::ui::parseTempo ("").has_value());
+
+    CHECK (phazite::ui::formatTimeSignature (6, 8) == "6/8");
+}

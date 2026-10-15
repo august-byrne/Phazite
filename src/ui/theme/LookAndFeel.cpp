@@ -52,6 +52,10 @@ void LookAndFeel::setTheme (ThemeName newTheme)
     setColour (juce::TextEditor::highlightColourId, p.accent.withAlpha (0.4f));
     setColour (juce::TextEditor::outlineColourId, p.border);
     setColour (juce::TextEditor::focusedOutlineColourId, p.accent);
+    setColour (juce::Slider::textBoxTextColourId, p.text); // number fields' text (ui::NumberField)
+    setColour (juce::Slider::textBoxBackgroundColourId, p.surfaceRaised);
+    setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    setColour (juce::Slider::textBoxHighlightColourId, p.accent.withAlpha (0.4f));
     setColour (juce::ListBox::backgroundColourId, p.surface);
     setColour (juce::PopupMenu::backgroundColourId, p.surfaceRaised);
     setColour (juce::PopupMenu::textColourId, p.text);
@@ -154,6 +158,19 @@ void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, 
 void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float minSliderPos,
                                     float maxSliderPos, juce::Slider::SliderStyle style, juce::Slider& slider)
 {
+    // A number field (ui::NumberField): a box, outlined in the accent while it has the keyboard focus. Its text box,
+    // over it, shows the value.
+    if (slider.isBar())
+    {
+        const auto box = juce::Rectangle<int> (x, y, width, height).toFloat().reduced (0.5f);
+        const bool focused = slider.hasKeyboardFocus (true);
+        g.setColour (palette.surfaceRaised);
+        g.fillRoundedRectangle (box, cornerRadius);
+        g.setColour (focused ? palette.accent : palette.border);
+        g.drawRoundedRectangle (focused ? box.reduced (0.5f) : box, cornerRadius, focused ? 2.0f : 1.0f);
+        return;
+    }
+
     if (style != juce::Slider::LinearVertical && style != juce::Slider::LinearHorizontal)
     {
         juce::LookAndFeel_V4::drawLinearSlider (g, x, y, width, height, sliderPos, minSliderPos, maxSliderPos, style, slider);
@@ -193,6 +210,16 @@ int LookAndFeel::getSliderThumbRadius (juce::Slider& slider)
         return 6; // half the thumb, so it stays inside the fader at both ends
 
     return juce::LookAndFeel_V4::getSliderThumbRadius (slider);
+}
+
+juce::Label* LookAndFeel::createSliderTextBox (juce::Slider& slider)
+{
+    auto* label = juce::LookAndFeel_V4::createSliderTextBox (slider);
+
+    if (slider.isBar())
+        label->setFont (getNumberFont (TextSize::body));
+
+    return label;
 }
 
 void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour, bool isHighlighted,
