@@ -45,9 +45,20 @@ void setFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
 // Adds an empty MIDI clip, named after its track, and selects it if a selection manager is given.
 te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, te::SelectionManager*);
 
-// An empty MIDI clip a bar long (in the time signature there) from a beat, as one undo step, "Add MIDI Clip": a
-// double-click on a track with an instrument.
+// The same, a bar long (in the time signature there) from a beat.
+te::MidiClip* insertBarLongMidiClip (te::ClipTrack&, te::BeatPosition start, te::SelectionManager*);
+
+// The same, as one undo step, "Add MIDI Clip": a double-click on a track with an instrument.
 te::MidiClip* addMidiClipAt (te::ClipTrack&, te::BeatPosition, te::SelectionManager*);
+
+// What the Draw and Paint tools place at a beat on a track: a copy of the clip used last (of a MIDI clip, an alias that
+// stays linked to it, as FL Studio places the same pattern again), or, before any clip was used or once it is gone, an
+// empty MIDI clip a bar long on a track with an instrument. Returns it, or nullptr when there is nothing to place there.
+te::Clip* placeClip (te::ClipTrack&, te::BeatPosition start, te::Clip* lastUsed);
+
+// Slips what a clip plays, as the Slip tool does: its content moves later by a distance (earlier if negative), from the
+// offset it had when the drag began, while the clip stays where it is. Content can't start after the clip does.
+void slipClip (te::Clip&, te::TimeDuration startOffset, te::TimeDuration distance);
 
 //==============================================================================
 // Splits each clip that the beat falls inside into two there. Returns the new right-hand parts.

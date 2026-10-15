@@ -497,7 +497,7 @@ MuteSoloButtons::MuteSoloButtons()
             if (mods.isPopupMenu())
                 toggleSoloAlone (*t);
             else
-                t->setMute (! t->isMuted (false));
+                toggleTracksMuted ({ t });
         }
 
         update();
@@ -510,7 +510,7 @@ MuteSoloButtons::MuteSoloButtons()
             if (mods.isCommandDown())
                 toggleSoloAlone (*t);
             else
-                t->setSolo (! t->isSolo (false));
+                toggleTracksSoloed ({ t });
         }
 
         update();

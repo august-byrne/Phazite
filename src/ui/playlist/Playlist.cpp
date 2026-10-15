@@ -860,35 +860,14 @@ std::optional<Playlist::CrossfadeSpot> Playlist::findCrossfadeAt (juce::Point<in
 
 te::Clip* Playlist::placeClip (int row, te::BeatPosition beat, bool snapStart)
 {
-    auto* ed = getEdit();
     auto* track =
         juce::isPositiveAndBelow (row, (int) rows.size()) ? dynamic_cast<te::ClipTrack*> (rows[(size_t) row].track.get()) : nullptr;
 
-    if (ed == nullptr || track == nullptr)
+    if (track == nullptr)
         return nullptr;
 
     // From the grid line at or before the beat.
-    const auto start = snapStart ? snapDown (beat, {}) : beat;
-
-    // A copy of the last clip used: of a MIDI clip, an alias, as FL Studio places the same pattern again.
-    if (auto* source = lastClip.get();
-        source != nullptr && te::containsClip (*ed, source) && dynamic_cast<te::AudioTrack*> (source->getTrack()) != nullptr)
-    {
-        const auto copies = copyClips ({ source }, dynamic_cast<te::MidiClip*> (source) != nullptr);
-
-        if (copies.isEmpty())
-            return nullptr;
-
-        moveClip (*copies.getFirst(), start, *track);
-        return copies.getFirst();
-    }
-
-    // No clip used yet: an empty MIDI clip, a bar long, on a track with an instrument.
-    if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (track); audioTrack != nullptr && hasInstrument (*audioTrack))
-        return insertMidiClip (
-            *track, { start, start + te::BeatDuration::fromBeats (ed->tempoSequence.getTimeSigAt (start).numerator.get()) }, nullptr);
-
-    return nullptr;
+    return phazite::placeClip (*track, snapStart ? snapDown (beat, {}) : beat, lastClip.get());
 }
 
 void Playlist::muteOrDeleteClipAt (juce::Point<int> position, bool deleteIt)
@@ -907,7 +886,7 @@ void Playlist::muteOrDeleteClipAt (juce::Point<int> position, bool deleteIt)
     gesture->done.emplace_back (clip);
 
     if (deleteIt)
-        clip->removeFromParent();
+        deleteClips ({ clip }, false);
     else
         toggleClipsMuted ({ clip });
 }
@@ -1484,8 +1463,8 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
             {
                 // What is inside follows the mouse; the clip stays where it is.
                 const auto& tempo = ed->tempoSequence;
-                clip->setOffset (gesture->startOffset
-                                 - (tempo.toTime (snap (beat, e.mods)) - tempo.toTime (snap (gesture->startBeat, e.mods))));
+                slipClip (*clip, gesture->startOffset,
+                          tempo.toTime (snap (beat, e.mods)) - tempo.toTime (snap (gesture->startBeat, e.mods)));
             }
 
             break;

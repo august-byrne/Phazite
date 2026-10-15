@@ -533,3 +533,43 @@ TEST_CASE ("A double-click's MIDI clip lasts a bar of the time signature there, 
     phazite::undo (*e.edit);
     CHECK (e.tracks[0]->getClips().isEmpty());
 }
+
+TEST_CASE ("Draw places a copy of the clip used last, or a bar-long MIDI clip on a track with an instrument")
+{
+    ClipEdit e;
+    CHECK (phazite::placeClip (*e.tracks[0], beats (0.0), nullptr) == nullptr); // nothing used yet, and no instrument
+
+    // A MIDI clip's copy is an alias, which stays linked to it.
+    auto& source = e.addClip (0, 0.0, 2.0);
+    auto* placed = phazite::placeClip (*e.tracks[1], beats (8.0), &source);
+    REQUIRE (placed != nullptr);
+    CHECK (placed->getTrack() == e.tracks[1]);
+    CHECK (placed->getStartBeat().inBeats() == doctest::Approx (8.0));
+    CHECK (placed->getLengthInBeats().inBeats() == doctest::Approx (2.0));
+    CHECK (phazite::hasAliases ({ placed }));
+
+    // Once the clip used last is gone: an empty MIDI clip a bar long, on a track with an instrument only.
+    const te::SafeSelectable<te::Clip> used (&source);
+    phazite::deleteClips ({ &source }, false);
+    CHECK (phazite::placeClip (*e.tracks[0], beats (4.0), used.get()) == nullptr);
+
+    e.tracks[0]->pluginList.insertPlugin (e.edit->getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {}), 0, nullptr);
+    auto* empty = dynamic_cast<te::MidiClip*> (phazite::placeClip (*e.tracks[0], beats (4.0), used.get()));
+    REQUIRE (empty != nullptr);
+    CHECK (empty->getSequence().getNumNotes() == 0);
+    CHECK (empty->getStartBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (empty->getLengthInBeats().inBeats() == doctest::Approx (4.0)); // a bar of 4/4
+}
+
+TEST_CASE ("Slip moves what a clip plays, not the clip, and its content can't start after the clip")
+{
+    ClipEdit e;
+    auto& clip = e.addClip (0, 4.0, 4.0);
+
+    phazite::slipClip (clip, te::TimeDuration::fromSeconds (1.0), te::TimeDuration::fromSeconds (0.25));
+    CHECK (clip.getPosition().getOffset().inSeconds() == doctest::Approx (0.75));
+    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (4.0));
+
+    phazite::slipClip (clip, te::TimeDuration::fromSeconds (1.0), te::TimeDuration::fromSeconds (3.0));
+    CHECK (clip.getPosition().getOffset().inSeconds() == doctest::Approx (0.0));
+}

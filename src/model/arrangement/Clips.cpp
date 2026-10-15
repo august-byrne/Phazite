@@ -3,6 +3,7 @@
 #include "Tracks.h"
 #include "model/base/Toggles.h"
 #include "model/commands/Undo.h"
+#include "model/engine/LiveInput.h"
 
 #include <algorithm>
 #include <vector>
@@ -198,11 +199,41 @@ te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, te::Sel
     return clip.get();
 }
 
+te::MidiClip* insertBarLongMidiClip (te::ClipTrack& track, te::BeatPosition start, te::SelectionManager* selection)
+{
+    const auto bar = te::BeatDuration::fromBeats (track.edit.tempoSequence.getTimeSigAt (start).numerator.get());
+    return insertMidiClip (track, { start, start + bar }, selection);
+}
+
 te::MidiClip* addMidiClipAt (te::ClipTrack& track, te::BeatPosition start, te::SelectionManager* selection)
 {
     const UndoStep step (track.edit, "Add MIDI Clip");
-    const auto bar = te::BeatDuration::fromBeats (track.edit.tempoSequence.getTimeSigAt (start).numerator.get());
-    return insertMidiClip (track, { start, start + bar }, selection);
+    return insertBarLongMidiClip (track, start, selection);
+}
+
+te::Clip* placeClip (te::ClipTrack& track, te::BeatPosition start, te::Clip* lastUsed)
+{
+    // The clip used last counts while it is still on one of the song's tracks.
+    if (lastUsed != nullptr && te::containsClip (track.edit, lastUsed) && dynamic_cast<te::AudioTrack*> (lastUsed->getTrack()) != nullptr)
+    {
+        const auto copies = copyClips ({ lastUsed }, dynamic_cast<te::MidiClip*> (lastUsed) != nullptr);
+
+        if (copies.isEmpty())
+            return nullptr;
+
+        moveClip (*copies.getFirst(), start, track);
+        return copies.getFirst();
+    }
+
+    if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (&track); audioTrack != nullptr && hasInstrument (*audioTrack))
+        return insertBarLongMidiClip (track, start, nullptr);
+
+    return nullptr;
+}
+
+void slipClip (te::Clip& clip, te::TimeDuration startOffset, te::TimeDuration distance)
+{
+    clip.setOffset (startOffset - distance); // Tracktion keeps the offset at 0 or more
 }
 
 //==============================================================================

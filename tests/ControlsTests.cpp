@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "model/commands/Undo.h"
 #include "ui/components/Controls.h"
 
@@ -64,4 +64,33 @@ TEST_CASE ("A level meter outlives the measurer it shows")
     te::LevelMeasurer another;
     meter.setSource (&another);
     meter.setSource (nullptr);
+}
+
+TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    edit->ensureNumberOfAudioTracks (2);
+    const auto tracks = te::getAudioTracks (*edit);
+
+    phazite::ui::MuteSoloButtons buttons;
+    phazite::test::TestWindow window (buttons, 60, 24);
+    buttons.setTrack (tracks[0]);
+    phazite::test::Mouse mouse (buttons);
+    const juce::Point<int> muteButton (10, 12), soloButton (50, 12);
+
+    mouse.click (muteButton);
+    CHECK (tracks[0]->isMuted (false));
+    mouse.click (muteButton);
+    CHECK_FALSE (tracks[0]->isMuted (false));
+
+    // Solo plays the track along with the others soloed; with Ctrl, alone. Neither touches the mute switch.
+    tracks[1]->setSolo (true);
+    mouse.click (soloButton);
+    CHECK (tracks[0]->isSolo (false));
+    CHECK (tracks[1]->isSolo (false));
+
+    mouse.click (soloButton, juce::ModifierKeys::commandModifier);
+    CHECK (tracks[0]->isSolo (false));
+    CHECK_FALSE (tracks[1]->isSolo (false));
+    CHECK_FALSE (tracks[0]->isMuted (false));
 }

@@ -238,14 +238,11 @@ te::MidiClip* PianoRoll::makeClipForNewNotes()
     // A bar long from the time origin, on the track shown without clips; notes drawn after it make it longer, into the
     // empty space after it (Notes.h's addNote()).
     auto* track = getTrack();
-    auto* e = getEdit();
 
-    if (track == nullptr || e == nullptr || ! getClips().isEmpty())
+    if (track == nullptr || ! getClips().isEmpty())
         return nullptr;
 
-    const auto start = getTimeOrigin();
-    const auto bar = te::BeatDuration::fromBeats (e->tempoSequence.getTimeSigAt (start).numerator.get());
-    auto* clip = insertMidiClip (*track, { start, start + bar }, nullptr);
+    auto* clip = insertBarLongMidiClip (*track, getTimeOrigin(), nullptr);
 
     if (clip != nullptr)
         setClips ({ clip }, true); // shown from now on, where the view is
