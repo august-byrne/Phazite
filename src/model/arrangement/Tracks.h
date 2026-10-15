@@ -2,9 +2,9 @@
 // The playlist's tracks: which ones it shows, their colors, and the track commands.
 #pragma once
 
+#include "TrackColours.h"
 #include "model/base/Tracktion.h"
 
-#include <array>
 #include <optional>
 
 namespace phazite
@@ -12,16 +12,6 @@ namespace phazite
 class CommandRegistry;
 
 //==============================================================================
-// The colors tracks get, in turn: Okabe and Ito's palette (2008), which color-blind users can tell
-// apart, with grey instead of black so it shows on dark backgrounds.
-struct TrackColour
-{
-    juce::Colour colour;
-    const char* name; // for menus and screen readers
-};
-
-const std::array<TrackColour, 8>& getTrackColours();
-
 // A track's color: its own, or else the palette's color for its row, so every track has one.
 juce::Colour getTrackColour (const te::Track&, int row);
 

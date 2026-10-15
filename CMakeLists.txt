@@ -73,6 +73,8 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Sections.h
     src/model/arrangement/Selection.cpp
     src/model/arrangement/Selection.h
+    src/model/arrangement/TrackColours.cpp
+    src/model/arrangement/TrackColours.h
     src/model/arrangement/Tracks.cpp
     src/model/arrangement/Tracks.h
     src/model/base/Schema.cpp

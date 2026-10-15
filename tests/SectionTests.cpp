@@ -5,6 +5,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Selection.h"
+#include "model/arrangement/TrackColours.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
 
@@ -133,6 +134,14 @@ TEST_CASE ("The built-in outlines are the design's four and four more, with thei
     CHECK_FALSE (phazite::Outline::fromJSON (R"({ "id": "a", "name": "A", "sections": [ { "name": "A", "bars": 0 } ] })").has_value());
     CHECK_FALSE (phazite::Outline::fromJSON (R"({ "id": "a", "name": "A", "sections": [] })").has_value());
     CHECK (phazite::Outline::fromJSON (R"({ "id": "a", "name": "A", "sections": [ { "name": "A", "bars": 4 } ] })").has_value());
+
+    // A section's color is a palette color's name, whatever its case; another name gives none, so the role's is used.
+    const auto coloured = phazite::Outline::fromJSON (R"({ "id": "a", "name": "A", "sections": [
+        { "name": "A", "bars": 4, "colour": "sky BLUE" }, { "name": "B", "bars": 4, "colour": "Magenta" } ] })");
+    REQUIRE (coloured.has_value());
+    REQUIRE (coloured->sections.size() == 2);
+    CHECK (coloured->sections[0].colour == phazite::findTrackColour ("Sky blue"));
+    CHECK_FALSE (coloured->sections[1].colour.has_value());
 }
 
 TEST_CASE ("Applying the electronic outline creates its seven sections at the project tempo")
@@ -449,4 +458,49 @@ TEST_CASE ("Deleting and duplicating sections directly")
     song.selection.selectOnly (song.tracks[0]);
     CHECK (phazite::duplicateSections ({}, false, &song.selection).isEmpty());
     CHECK (song.selection.isSelected (song.tracks[0]));
+}
+
+TEST_CASE ("A new section goes after the last one, 8 bars long and named in turn")
+{
+    Song song; // seven sections, to beat 384
+    CHECK (phazite::getNewSectionName (*song.edit) == juce::String ("Section 8"));
+
+    auto* added = phazite::appendSection (*song.edit, &song.selection);
+    REQUIRE (added != nullptr);
+    CHECK (added->getName() == juce::String ("Section 8"));
+    CHECK (added->getStartBeat().inBeats() == doctest::Approx (384.0));
+    CHECK (added->getEndBeat().inBeats() == doctest::Approx (384.0 + 4 * phazite::barsPerNewSection));
+    CHECK (song.selection.isSelected (added));
+    CHECK (phazite::getNewSectionName (*song.edit) == juce::String ("Section 9"));
+
+    // In a song without sections, at its start.
+    auto empty = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto* first = phazite::appendSection (*empty, nullptr);
+    REQUIRE (first != nullptr);
+    CHECK (first->getName() == juce::String ("Section 1"));
+    CHECK (first->getStartBeat().inBeats() == doctest::Approx (0.0));
+}
+
+TEST_CASE ("The sections' time range")
+{
+    Song song; // a beat is half a second
+    CHECK (phazite::getSectionsTimeRange ({}).isEmpty());
+
+    // The intro (0-64) and the first drop (96-160), in any order: from 0 to 80 seconds.
+    const auto range = phazite::getSectionsTimeRange ({ &song.section (2), &song.section (0) });
+    CHECK (range.getStart().inSeconds() == doctest::Approx (0.0));
+    CHECK (range.getEnd().inSeconds() == doctest::Approx (80.0));
+}
+
+TEST_CASE ("Each role has its palette colour")
+{
+    const auto colourOf = [] (const char* name) { return phazite::findTrackColour (name).value_or (juce::Colours::black); };
+
+    CHECK (phazite::getRoleColour ("intro") == colourOf ("Gray"));
+    CHECK (phazite::getRoleColour ("verse") == colourOf ("Blue"));
+    CHECK (phazite::getRoleColour ("buildUp") == colourOf ("Yellow"));
+    CHECK (phazite::getRoleColour ("drop") == colourOf ("Vermilion"));
+    CHECK (phazite::getRoleColour ("bridge") == colourOf ("Reddish purple"));
+    CHECK (phazite::getRoleColour ("solo") == colourOf ("Bluish green"));
+    CHECK (phazite::getRoleColour ("something else") == colourOf ("Sky blue"));
 }

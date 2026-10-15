@@ -448,6 +448,11 @@ te::AudioTrack* findReturnTrack (const te::Edit& edit, int bus)
     return nullptr;
 }
 
+te::AudioTrack* addNewReturnTrack (te::Edit& edit, te::SelectionManager* selection)
+{
+    return addReturnTrack (edit, "Return " + juce::String (getReturnTracks (edit).size() + 1), selection);
+}
+
 te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, te::SelectionManager* selection)
 {
     // The first bus no return uses.
@@ -557,12 +562,7 @@ void addMixerCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .category = "Track",
                     .description = "Adds a return track, for an effect such as a reverb that several tracks send to.",
                     .synonyms = { "aux", "bus", "send", "fx return", "reverb" },
-                    .perform =
-                        [&selection]
-                    {
-                        if (auto* edit = selection.getEdit())
-                            addReturnTrack (*edit, "Return " + juce::String (getReturnTracks (*edit).size() + 1), &selection);
-                    },
+                    .perform = withEdit (selection, [&selection] (te::Edit& edit) { addNewReturnTrack (edit, &selection); }),
                     .isEnabled = [&selection] { return selection.getEdit() != nullptr; },
                     .undoTarget = [&selection] { return selection.getEdit(); } });
 }

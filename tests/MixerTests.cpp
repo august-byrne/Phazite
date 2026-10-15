@@ -311,3 +311,23 @@ TEST_CASE ("An effect's mix crossfades between the sound that comes in and the e
     CHECK_FALSE (phazite::hasMix (*synth));
     CHECK (phazite::getMix (*synth) == doctest::Approx (1.0f));
 }
+
+TEST_CASE ("New return tracks are numbered in turn")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    te::SelectionManager selection (phazite::test::getEngine());
+    selection.edit = edit.get();
+
+    auto* first = phazite::addNewReturnTrack (*edit, &selection);
+    REQUIRE (first != nullptr);
+    CHECK (first->getName() == juce::String ("Return 1"));
+    CHECK (selection.isSelected (first));
+
+    // Without a selection manager, the selection stays as it was.
+    auto* second = phazite::addNewReturnTrack (*edit, nullptr);
+    REQUIRE (second != nullptr);
+    CHECK (second->getName() == juce::String ("Return 2"));
+    CHECK (selection.isSelected (first));
+    CHECK (phazite::getReturnBus (*second) != phazite::getReturnBus (*first));
+    selection.deselectAll();
+}

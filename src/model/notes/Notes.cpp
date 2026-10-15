@@ -472,6 +472,12 @@ void setTrackKey (te::Track& track, const std::optional<Key>& key)
         writeKey (getPhaziteState (track.edit).getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
 }
 
+void setTrackKeys (const juce::Array<te::Track*>& tracks, const std::optional<Key>& key)
+{
+    for (auto* track : tracks)
+        setTrackKey (*track, key);
+}
+
 void applyLastKey (te::Track& track)
 {
     if (const auto last = readKey (findPhaziteState (track.edit).getChildWithName (schema::LASTKEY)))

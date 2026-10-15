@@ -34,6 +34,18 @@ void loopRange (te::Edit&, te::TimeRange);
 // Puts the loop around the song again if it follows the song and the song's end has moved.
 void updateSongLoop (te::Edit&);
 
+// What the loop commands do. Looping is on or off; turning it on puts the loop around the song again if it follows
+// the song. The song is looping when looping is on and the loop follows it.
+bool isLoopOn (const te::Edit&);
+void toggleLoop (te::Edit&);
+bool isLoopingSong (const te::Edit&);
+
+// Loops the time range selected in the playlist, or the song when none is.
+void loopSelection (te::Edit&, const RangeSelection&);
+
+// Loops around the sections, from the earliest start to the latest end, in their Edit. Nothing without sections.
+void loopSections (const juce::Array<te::ArrangerClip*>&);
+
 //==============================================================================
 // Where playback starts: where the playhead was last put (a click in a ruler, Home or End), or the song's start when a
 // project opens. Stopping goes back there, as in FL Studio and Ableton Live, so that a part can be heard again and

@@ -19,15 +19,6 @@ namespace
         return { section.getStartBeat(), section.getEndBeat() };
     }
 
-    juce::Colour getPaletteColour (const char* name)
-    {
-        for (const auto& colour : getTrackColours())
-            if (juce::String (colour.name) == name)
-                return colour.colour;
-
-        return getTrackColours()[1].colour;
-    }
-
     // The section that starts at a beat, other than one to leave out.
     te::ArrangerClip* findSectionStartingAt (const te::Edit& edit, te::BeatPosition beat, const te::Clip* except)
     {
@@ -131,11 +122,13 @@ juce::Colour getRoleColour (const juce::String& role)
                                                   { "breakdown", "Reddish purple" },
                                                   { "solo", "Bluish green" } };
 
+    const auto skyBlue = getTrackColours()[1].colour;
+
     for (const auto& entry : roleColours)
         if (role == entry.role)
-            return getPaletteColour (entry.colour);
+            return findTrackColour (entry.colour).value_or (skyBlue);
 
-    return getPaletteColour ("Sky blue");
+    return skyBlue;
 }
 
 te::ArrangerClip* insertSection (te::Edit& edit, te::BeatPosition start, const SectionInfo& info)
@@ -158,6 +151,39 @@ te::ArrangerClip* insertSection (te::Edit& edit, te::BeatPosition start, const S
     section->state.setProperty (schema::phaziteTip, info.tip, undoManager);
     section->state.setProperty (schema::phaziteEnergy, juce::jlimit (0.0f, 1.0f, info.energy), undoManager);
     return section;
+}
+
+juce::String getNewSectionName (const te::Edit& edit)
+{
+    return "Section " + juce::String (getSections (edit).size() + 1);
+}
+
+te::ArrangerClip* appendSection (te::Edit& edit, te::SelectionManager* selection)
+{
+    const auto sections = getSections (edit);
+    const auto start = sections.isEmpty() ? te::BeatPosition() : sections.getLast()->getEndBeat();
+    const auto& tempo = edit.tempoSequence;
+    const auto bar = tempo.toBarsAndBeats (tempo.toTime (start)).bars;
+    const auto end = tempo.toBeats (te::tempo::BarsAndBeats { bar + barsPerNewSection, {}, 0 });
+    auto* section = insertSection (edit, start, { getNewSectionName (edit), end - start });
+
+    if (section != nullptr && selection != nullptr)
+        selection->selectOnly (section);
+
+    return section;
+}
+
+te::TimeRange getSectionsTimeRange (const juce::Array<te::ArrangerClip*>& sections)
+{
+    if (sections.isEmpty())
+        return {};
+
+    auto range = sections.getFirst()->getEditTimeRange();
+
+    for (auto* section : sections)
+        range = range.getUnionWith (section->getEditTimeRange());
+
+    return range;
 }
 
 //==============================================================================
@@ -278,23 +304,7 @@ void addSectionCommands (CommandRegistry& registry, te::SelectionManager& select
                     .category = "Section",
                     .description = "Adds an 8-bar section after the last one, or at the start of the song if it has none.",
                     .synonyms = { "new section", "part", "arranger", "marker" },
-                    .perform =
-                        [&selection]
-                    {
-                        auto* edit = selection.getEdit();
-
-                        if (edit == nullptr)
-                            return;
-
-                        const auto sections = getSections (*edit);
-                        const auto start = sections.isEmpty() ? te::BeatPosition() : sections.getLast()->getEndBeat();
-                        const auto& tempo = edit->tempoSequence;
-                        const auto bar = tempo.toBarsAndBeats (tempo.toTime (start)).bars;
-                        const auto end = tempo.toBeats (te::tempo::BarsAndBeats { bar + 8, {}, 0 });
-
-                        if (auto* section = insertSection (*edit, start, { "Section " + juce::String (sections.size() + 1), end - start }))
-                            selection.selectOnly (section);
-                    },
+                    .perform = withEdit (selection, [&selection] (te::Edit& edit) { appendSection (edit, &selection); }),
                     .isEnabled = hasEdit,
                     .undoTarget = getEdit });
 }

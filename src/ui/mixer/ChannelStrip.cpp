@@ -722,7 +722,7 @@ void ChannelStrip::showSendMenu()
                           auto& edit = t->edit;
                           edit.getUndoManager().beginNewTransaction ("Add Send");
 
-                          if (auto* created = addReturnTrack (edit, "Return " + juce::String (getReturnTracks (edit).size() + 1), nullptr))
+                          if (auto* created = addNewReturnTrack (edit, nullptr))
                               addSend (*t, getReturnBus (*created), false);
                       }
                   });

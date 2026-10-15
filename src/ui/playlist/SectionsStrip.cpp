@@ -12,7 +12,6 @@ namespace
     constexpr int edgeWidth = 6; // dragging this close to a section's right edge resizes it
     constexpr int dragThreshold = 4;
     constexpr float corner = 3.0f;
-    constexpr int barsPerNewSection = 8;
 
     const juce::String emptyHint ("The song's sections. Double-click to add one here, or right-click to lay out the song from an outline.");
     const juce::String edgeHint ("Drag to make the section longer or shorter; what comes after it moves along. "
@@ -404,7 +403,7 @@ void SectionsStrip::addSectionAt (te::BeatPosition beat)
 
     e->getUndoManager().beginNewTransaction ("Add Section");
 
-    if (auto* section = insertSection (*e, start, { "Section " + juce::String (sections.size() + 1), end - start }))
+    if (auto* section = insertSection (*e, start, { getNewSectionName (*e), end - start }))
     {
         range.clear();
         selection.selectOnly (section);

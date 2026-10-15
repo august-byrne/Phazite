@@ -64,9 +64,8 @@ std::optional<juce::Colour> getColourForName (const juce::String& name)
     for (const auto& family : families)
         for (const auto& word : family.words)
             if (lower.contains (word))
-                for (const auto& colour : getTrackColours())
-                    if (juce::String (colour.name) == family.colourName)
-                        return colour.colour;
+                if (const auto colour = findTrackColour (family.colourName))
+                    return colour;
 
     return std::nullopt;
 }

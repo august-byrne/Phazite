@@ -941,8 +941,7 @@ void PianoRoll::addCommands (CommandRegistry& registry)
                         [this]
                     {
                         if (auto* e = getEdit())
-                            for (auto* track : getPlaylistTracks (*e))
-                                setTrackKey (*track, getKey());
+                            setTrackKeys (getPlaylistTracks (*e), getKey());
                     },
                     .isEnabled = [this] { return getKey().has_value(); },
                     .undoTarget = [this] { return getEdit(); } });

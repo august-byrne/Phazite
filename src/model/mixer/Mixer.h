@@ -106,6 +106,9 @@ te::AudioTrack* findReturnTrack (const te::Edit&, int bus);
 // Adds a return track after the last track, on a bus of its own, named as given, and selects it.
 te::AudioTrack* addReturnTrack (te::Edit&, const juce::String& name, te::SelectionManager*);
 
+// The same, named "Return" and its number, after the returns there are.
+te::AudioTrack* addNewReturnTrack (te::Edit&, te::SelectionManager*);
+
 // In one step, as Studio One does: a return track holding an effect, named after it, and a send to it from a track,
 // after the track's fader. A built-in reverb drops its dry sound, which reaches the master through the track itself.
 // Returns the return track, or nullptr if there was no room for it.

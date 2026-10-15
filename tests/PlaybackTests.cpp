@@ -306,3 +306,42 @@ TEST_CASE ("Go to End goes to the song's end, not to the end of its sections")
     CHECK (phazite::getPlayStart (*song.edit).inSeconds() == doctest::Approx (8.0)); // playback starts there
     CHECK (song.getSongLoop() == "0.000-8.000");                                     // where the loop ends
 }
+
+TEST_CASE ("The loop's functions")
+{
+    Song song;
+    song.addClip (0, 0.0, 6.0); // the song is two bars, 0-4 seconds
+
+    // Looping goes on and off; on, the loop goes around the song again while it follows the song.
+    CHECK_FALSE (phazite::isLoopOn (*song.edit));
+    phazite::toggleLoop (*song.edit);
+    CHECK (phazite::isLoopOn (*song.edit));
+    CHECK (phazite::isLoopingSong (*song.edit));
+    CHECK (song.getLoop() == "0.000-4.000");
+    phazite::toggleLoop (*song.edit);
+    CHECK_FALSE (phazite::isLoopOn (*song.edit));
+    CHECK_FALSE (phazite::isLoopingSong (*song.edit));
+
+    // The selected range, or the song while none is selected.
+    song.range.set ({ beats (2.0), beats (4.0) }, { song.tracks[0] });
+    phazite::loopSelection (*song.edit, song.range);
+    CHECK (song.getLoop() == "1.000-2.000");
+    CHECK (phazite::isLoopOn (*song.edit));
+    CHECK_FALSE (phazite::isLoopingSong (*song.edit));
+
+    song.range.clear();
+    phazite::loopSelection (*song.edit, song.range);
+    CHECK (phazite::isLoopingSong (*song.edit));
+    CHECK (song.getLoop() == "0.000-4.000");
+
+    // Around sections, from the earliest start to the latest end; without sections, the loop stays.
+    auto* first = phazite::insertSection (*song.edit, beats (0.0), { .name = "A", .length = te::BeatDuration::fromBeats (4.0) });
+    auto* third = phazite::insertSection (*song.edit, beats (8.0), { .name = "C", .length = te::BeatDuration::fromBeats (4.0) });
+    REQUIRE (first != nullptr);
+    REQUIRE (third != nullptr);
+    phazite::loopSections ({ third, first });
+    CHECK (song.getLoop() == "0.000-6.000");
+    CHECK_FALSE (phazite::isLoopingSong (*song.edit));
+    phazite::loopSections ({});
+    CHECK (song.getLoop() == "0.000-6.000");
+}

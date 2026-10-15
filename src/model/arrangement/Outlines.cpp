@@ -14,15 +14,6 @@ namespace phazite
 namespace
 {
     constexpr const char* outlineFileSuffix = ".outline.json";
-
-    std::optional<juce::Colour> findPaletteColour (const juce::String& name)
-    {
-        for (const auto& colour : getTrackColours())
-            if (name.equalsIgnoreCase (colour.name))
-                return colour.colour;
-
-        return {};
-    }
 } // namespace
 
 int Outline::getLengthInBars() const
@@ -57,7 +48,7 @@ std::optional<Outline> Outline::fromJSON (const juce::String& text)
             section.tip = entry["tip"].toString();
             section.bars = static_cast<int> (entry["bars"]);
             section.energy = juce::jlimit (0.0f, 1.0f, (float) static_cast<double> (entry.getProperty ("energy", 0.5)));
-            section.colour = findPaletteColour (entry["colour"].toString());
+            section.colour = findTrackColour (entry["colour"].toString());
 
             if (section.name.isEmpty() || section.bars <= 0)
                 return {};

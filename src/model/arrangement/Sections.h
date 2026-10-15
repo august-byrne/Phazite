@@ -45,6 +45,17 @@ juce::Colour getRoleColour (const juce::String& role);
 // Adds a section, without moving anything else. Returns nullptr if the Edit can't hold more clips.
 te::ArrangerClip* insertSection (te::Edit&, te::BeatPosition start, const SectionInfo&);
 
+// A new section is this long, and named "Section" and its number, after the sections there are.
+inline constexpr int barsPerNewSection = 8;
+juce::String getNewSectionName (const te::Edit&);
+
+// Adds a new section after the last one, or at the start of the song if there is none, and selects it alone if a
+// selection manager is given. Returns nullptr if the Edit can't hold more clips.
+te::ArrangerClip* appendSection (te::Edit&, te::SelectionManager*);
+
+// The time from the earliest section's start to the latest one's end.
+te::TimeRange getSectionsTimeRange (const juce::Array<te::ArrangerClip*>&);
+
 //==============================================================================
 // Edits of a section and everything in it, on every track. The destinations are section boundaries
 // (getSectionBoundaries()): positions in the song as it is before the edit.

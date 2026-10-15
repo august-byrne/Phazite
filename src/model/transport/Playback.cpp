@@ -81,6 +81,37 @@ void updateSongLoop (te::Edit& edit)
         transport.setLoopRange (song);
 }
 
+bool isLoopOn (const te::Edit& edit)
+{
+    return edit.getTransport().looping.get();
+}
+
+void toggleLoop (te::Edit& edit)
+{
+    auto& transport = edit.getTransport();
+    transport.looping = ! transport.looping.get();
+    updateSongLoop (edit);
+}
+
+bool isLoopingSong (const te::Edit& edit)
+{
+    return isLoopOn (edit) && doesLoopFollowSong (edit);
+}
+
+void loopSelection (te::Edit& edit, const RangeSelection& range)
+{
+    if (range.isEmpty())
+        loopSong (edit);
+    else
+        loopRange (edit, edit.tempoSequence.toTime (range.getRange()));
+}
+
+void loopSections (const juce::Array<te::ArrangerClip*>& sections)
+{
+    if (! sections.isEmpty())
+        loopRange (sections.getFirst()->edit, getSectionsTimeRange (sections));
+}
+
 te::TimePosition getPlayStart (const te::Edit& edit)
 {
     return edit.getTransport().startPosition.get();
@@ -244,40 +275,16 @@ void addLoopCommands (CommandRegistry& registry, te::SelectionManager& selection
                     .category = "Transport",
                     .description = "Plays the song over and over, or the part looped on purpose: at its end, playback starts again.",
                     .synonyms = { "repeat", "cycle", "loop playback" },
-                    .perform =
-                        [&selection]
-                    {
-                        if (auto* edit = selection.getEdit())
-                        {
-                            auto& transport = edit->getTransport();
-                            transport.looping = ! transport.looping.get();
-                            updateSongLoop (*edit);
-                        }
-                    },
+                    .perform = withEdit (selection, toggleLoop),
                     .isEnabled = hasEdit,
-                    .isTicked =
-                        [&selection]
-                    {
-                        auto* edit = selection.getEdit();
-                        return edit != nullptr && edit->getTransport().looping.get();
-                    } });
+                    .isTicked = ifEdit (selection, isLoopOn) });
 
     registry.add ({ .id = "transport.loopSelection",
                     .name = "Loop Selection",
                     .category = "Transport",
                     .description = "Loops the time range selected in the playlist, or the whole song when none is selected.",
                     .synonyms = { "loop range", "cycle region", "loop brace", "set loop" },
-                    .perform =
-                        [&selection, &range]
-                    {
-                        if (auto* edit = selection.getEdit())
-                        {
-                            if (range.isEmpty())
-                                loopSong (*edit);
-                            else
-                                loopRange (*edit, edit->tempoSequence.toTime (range.getRange()));
-                        }
-                    },
+                    .perform = withEdit (selection, [&range] (te::Edit& edit) { loopSelection (edit, range); }),
                     .isEnabled = hasEdit });
 
     registry.add ({ .id = "section.loop",
@@ -285,22 +292,8 @@ void addLoopCommands (CommandRegistry& registry, te::SelectionManager& selection
                     .category = "Section",
                     .description = "Loops the selected sections instead of the whole song.",
                     .synonyms = { "repeat section", "cycle", "practice" },
-                    .perform =
-                        [&selection]
-                    {
-                        const auto sections = getSelectedSections (selection);
-
-                        if (sections.isEmpty())
-                            return;
-
-                        auto loop = sections.getFirst()->getEditTimeRange();
-
-                        for (auto* section : sections)
-                            loop = loop.getUnionWith (section->getEditTimeRange());
-
-                        loopRange (sections.getFirst()->edit, loop);
-                    },
-                    .isEnabled = [&selection] { return ! getSelectedSections (selection).isEmpty(); } });
+                    .perform = [&selection] { loopSections (getSelectedSections (selection)); },
+                    .isEnabled = [&selection] { return hasSelectedSections (selection); } });
 
     registry.add (
         { .id = "transport.loopSong",
@@ -309,18 +302,8 @@ void addLoopCommands (CommandRegistry& registry, te::SelectionManager& selection
           .description =
               "Loops the whole song again, from its start to the end of the bar its last clip ends in; the loop grows as clips go later.",
           .synonyms = { "loop all", "whole song", "song mode" },
-          .perform =
-              [&selection]
-          {
-              if (auto* edit = selection.getEdit())
-                  loopSong (*edit);
-          },
+          .perform = withEdit (selection, loopSong),
           .isEnabled = hasEdit,
-          .isTicked =
-              [&selection]
-          {
-              auto* edit = selection.getEdit();
-              return edit != nullptr && edit->getTransport().looping.get() && doesLoopFollowSong (*edit);
-          } });
+          .isTicked = ifEdit (selection, isLoopingSong) });
 }
 } // namespace phazite

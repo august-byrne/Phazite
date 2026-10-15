@@ -597,3 +597,13 @@ TEST_CASE ("The selected tracks, or all of them")
     CHECK (phazite::getSelectedTracksOrAll (tracks.selection).isEmpty());
     tracks.selection.edit = tracks.edit.get();
 }
+
+TEST_CASE ("Palette colours are found by name, whatever the case")
+{
+    const auto& colours = phazite::getTrackColours();
+    CHECK (phazite::findTrackColour ("Sky blue") == colours[1].colour);
+    CHECK (phazite::findTrackColour ("sky BLUE") == colours[1].colour);
+    CHECK (phazite::findTrackColour ("GRAY") == colours[7].colour);
+    CHECK_FALSE (phazite::findTrackColour ("Magenta").has_value());
+    CHECK_FALSE (phazite::findTrackColour ("").has_value());
+}

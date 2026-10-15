@@ -136,6 +136,7 @@ std::optional<Key> getTrackKey (const te::Track&);
 // Sets a track's key (or none), with the Edit's undo manager. The song remembers it, and new tracks get it
 // (applyLastKey()).
 void setTrackKey (te::Track&, const std::optional<Key>&);
+void setTrackKeys (const juce::Array<te::Track*>&, const std::optional<Key>&); // the same key for each of them
 void applyLastKey (te::Track&); // the key set last on any of the song's tracks, if there is one
 
 // The pitch in the key nearest to a pitch (the lower one when two are as near).

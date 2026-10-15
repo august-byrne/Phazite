@@ -441,3 +441,23 @@ TEST_CASE ("Replacing the selected notes selects the new ones")
     CHECK (midiNotes[0] == added[0].note);
     CHECK (midiNotes[1] == added[1].note);
 }
+
+TEST_CASE ("Every track can get the same key")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    edit->ensureNumberOfAudioTracks (3);
+    const auto tracks = phazite::getPlaylistTracks (*edit);
+    REQUIRE (tracks.size() == 3);
+
+    phazite::setTrackKeys (tracks, phazite::Key { 2, te::Scale::minor });
+
+    for (auto* track : tracks)
+    {
+        const auto key = phazite::getTrackKey (*track);
+        REQUIRE (key.has_value());
+        CHECK (phazite::describeKey (*key) == juce::String ("D minor"));
+    }
+
+    phazite::setTrackKeys (tracks, std::nullopt);
+    CHECK (std::none_of (tracks.begin(), tracks.end(), [] (te::Track* track) { return phazite::getTrackKey (*track).has_value(); }));
+}
