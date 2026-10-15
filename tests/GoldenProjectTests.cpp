@@ -18,6 +18,7 @@
 #include "model/project/Project.h"
 #include "model/project/StarterProject.h"
 #include "model/transport/Playback.h"
+#include "ui/pianoroll/DrumRows.h"
 #include "ui/playlist/TrackHeights.h"
 
 using namespace tracktion::literals;
@@ -106,7 +107,9 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
         phazite::addNote (*beat, 38, beats (start), te::BeatDuration::fromBeats (0.25), 110);
 
     phazite::setDrumTrack (*drums, true);
-    phazite::moveDrumRow (*drums, phazite::getDrumRows (*drums, { beat }), 38, 0);
+    const auto drumRows = phazite::ui::getDrumRows (phazite::getSamplerSounds (*drums), phazite::getNoteNumbersPlayed ({ beat }),
+                                                    phazite::getDrumRowOrder (*drums), phazite::getHiddenDrumRows (*drums));
+    phazite::setDrumRowOrder (*drums, phazite::ui::getDrumOrderAfterMove (drumRows, 38, 0)); // the snare's row dragged to the top
     phazite::hideDrumRow (*drums, 49);
     phazite::setPinned (*drums, true);
     drums->setMute (true);

@@ -166,12 +166,16 @@ juce::String getDrumName (int note);
 bool isDrumTrack (const te::AudioTrack&);
 void setDrumTrack (te::AudioTrack&, bool);
 
-// The rows of a drum track: its sampler's pads if it has a sampler, otherwise the usual General MIDI drums,
-// with any other notes its clips use. In the order the track keeps, without the rows hidden.
-std::vector<DrumRow> getDrumRows (const te::AudioTrack&, const juce::Array<te::MidiClip*>&);
+// What a drum track's rows come from (the piano roll lays them out: ui/pianoroll/DrumRows.h). The sampler's sounds,
+// one row for each note it plays (its first sound for that note), in the sampler's order: nothing for a track without
+// a sampler, and no rows for a sampler without sounds.
+std::optional<std::vector<DrumRow>> getSamplerSounds (const te::AudioTrack&);
+std::vector<int> getNoteNumbersPlayed (const juce::Array<te::MidiClip*>&); // from low to high, each once
 
-// The track keeps the order and the hidden rows, as view settings without undo steps.
-void moveDrumRow (te::AudioTrack&, const std::vector<DrumRow>& shown, int note, int newIndex);
+// The track keeps its rows' order and the hidden rows, as view settings without undo steps.
+std::vector<int> getDrumRowOrder (const te::AudioTrack&);
+void setDrumRowOrder (te::AudioTrack&, const std::vector<int>& notes);
+std::vector<int> getHiddenDrumRows (const te::AudioTrack&);
 void hideDrumRow (te::AudioTrack&, int note);
 void showAllDrumRows (te::AudioTrack&);
 

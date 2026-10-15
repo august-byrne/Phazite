@@ -552,68 +552,55 @@ void setDrumTrack (te::AudioTrack& track, bool isDrums)
     track.state.setProperty (schema::phaziteDrumMode, isDrums, nullptr);
 }
 
-std::vector<DrumRow> getDrumRows (const te::AudioTrack& track, const juce::Array<te::MidiClip*>& clips)
+std::optional<std::vector<DrumRow>> getSamplerSounds (const te::AudioTrack& track)
 {
-    std::vector<DrumRow> rows;
-    const auto contains = [&rows] (int note)
-    { return std::any_of (rows.begin(), rows.end(), [note] (const DrumRow& row) { return row.note == note; }); };
+    auto* sampler = findSampler (track);
 
-    // The sampler's pads, or else the usual drums.
-    if (auto* sampler = findSampler (track))
+    if (sampler == nullptr)
+        return std::nullopt;
+
+    std::vector<DrumRow> sounds;
+
+    for (int i = 0; i < sampler->getNumSounds(); ++i)
     {
-        for (int i = 0; i < sampler->getNumSounds(); ++i)
-            if (const auto note = sampler->getKeyNote (i); ! contains (note))
-                rows.push_back ({ note, sampler->getSoundName (i) });
-    }
-    else
-    {
-        for (const auto note : { 36, 37, 38, 39, 42, 46, 41, 45, 48, 49, 51 })
-            rows.push_back ({ note, getDrumName (note) });
+        const auto note = sampler->getKeyNote (i);
+
+        if (std::none_of (sounds.begin(), sounds.end(), [note] (const DrumRow& row) { return row.note == note; }))
+            sounds.push_back ({ note, sampler->getSoundName (i) });
     }
 
-    // Any other notes the clips play.
-    std::set<int> used;
+    return sounds;
+}
+
+std::vector<int> getNoteNumbersPlayed (const juce::Array<te::MidiClip*>& clips)
+{
+    std::set<int> played;
 
     for (auto* clip : clips)
         for (auto* note : clip->getSequence().getNotes())
-            used.insert (note->getNoteNumber());
+            played.insert (note->getNoteNumber());
 
-    for (const auto note : used)
-        if (! contains (note))
-            rows.push_back ({ note, getDrumName (note) });
-
-    // The track's order first; rows it doesn't mention keep theirs, after them.
-    const auto order = parseNotes (track.state[schema::phaziteDrumOrder]);
-    const auto rank = [&order] (int note)
-    {
-        const auto found = std::find (order.begin(), order.end(), note);
-        return found != order.end() ? (int) (found - order.begin()) : (int) order.size();
-    };
-
-    std::stable_sort (rows.begin(), rows.end(), [&rank] (const DrumRow& a, const DrumRow& b) { return rank (a.note) < rank (b.note); });
-
-    const auto hidden = parseNotes (track.state[schema::phaziteDrumHidden]);
-    rows.erase (std::remove_if (rows.begin(), rows.end(), [&hidden] (const DrumRow& row)
-                                { return std::find (hidden.begin(), hidden.end(), row.note) != hidden.end(); }),
-                rows.end());
-    return rows;
+    return std::vector<int> (played.begin(), played.end());
 }
 
-void moveDrumRow (te::AudioTrack& track, const std::vector<DrumRow>& shown, int note, int newIndex)
+std::vector<int> getDrumRowOrder (const te::AudioTrack& track)
 {
-    std::vector<int> order;
+    return parseNotes (track.state[schema::phaziteDrumOrder]);
+}
 
-    for (const auto& row : shown)
-        if (row.note != note)
-            order.push_back (row.note);
+void setDrumRowOrder (te::AudioTrack& track, const std::vector<int>& notes)
+{
+    track.state.setProperty (schema::phaziteDrumOrder, joinNotes (notes), nullptr);
+}
 
-    order.insert (order.begin() + juce::jlimit (0, (int) order.size(), newIndex), note);
-    track.state.setProperty (schema::phaziteDrumOrder, joinNotes (order), nullptr);
+std::vector<int> getHiddenDrumRows (const te::AudioTrack& track)
+{
+    return parseNotes (track.state[schema::phaziteDrumHidden]);
 }
 
 void hideDrumRow (te::AudioTrack& track, int note)
 {
-    auto hidden = parseNotes (track.state[schema::phaziteDrumHidden]);
+    auto hidden = getHiddenDrumRows (track);
 
     if (std::find (hidden.begin(), hidden.end(), note) == hidden.end())
         hidden.push_back (note);

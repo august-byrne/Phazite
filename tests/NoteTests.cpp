@@ -341,22 +341,23 @@ TEST_CASE ("Chord stamps and drum rows")
     phazite::setDrumTrack (track, true);
     CHECK (phazite::isDrumTrack (track));
 
-    // The usual drums, with the other notes the clip plays after them.
+    // What the piano roll's rows come from (DrumRowTests): no sampler, so no sounds of its own, and the notes the clip
+    // plays.
     n.add (70, 4.0, 0.25);
-    auto rows = phazite::getDrumRows (track, { n.clip });
-    REQUIRE (rows.size() == 12);
-    CHECK (rows.front().note == 36);
-    CHECK (rows.back().note == 70);
+    CHECK_FALSE (phazite::getSamplerSounds (track).has_value());
+    CHECK (phazite::getNoteNumbersPlayed ({ n.clip }) == std::vector<int> { 70 });
 
-    // The order and the hidden rows are the track's.
-    phazite::moveDrumRow (track, rows, 70, 0);
+    // The track keeps the rows' order and the hidden rows, as view settings.
+    n.edit->getUndoManager().clearUndoHistory();
+    phazite::setDrumRowOrder (track, { 70, 36 });
+    CHECK (phazite::getDrumRowOrder (track) == std::vector<int> { 70, 36 });
     phazite::hideDrumRow (track, 37);
-    rows = phazite::getDrumRows (track, { n.clip });
-    CHECK (rows.front().note == 70);
-    CHECK (rows.size() == 11);
+    phazite::hideDrumRow (track, 37);
+    CHECK (phazite::getHiddenDrumRows (track) == std::vector<int> { 37 }); // once
+    CHECK_FALSE (n.edit->getUndoManager().canUndo());
 
     phazite::showAllDrumRows (track);
-    CHECK (phazite::getDrumRows (track, { n.clip }).size() == 12);
+    CHECK (phazite::getHiddenDrumRows (track).empty());
 }
 
 TEST_CASE ("The note commands act on the selected notes, and take the arrow keys while notes are selected")

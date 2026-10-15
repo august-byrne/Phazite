@@ -266,6 +266,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/mixer/ChannelStrip.h
     src/ui/mixer/MixerView.cpp
     src/ui/mixer/MixerView.h
+    src/ui/pianoroll/DrumRows.cpp
+    src/ui/pianoroll/DrumRows.h
     src/ui/pianoroll/PianoRoll.cpp
     src/ui/pianoroll/PianoRoll.h
     src/ui/pianoroll/PianoRollLanes.cpp
@@ -390,6 +392,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ComputerKeyboardTests.cpp
         tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
+        tests/DrumRowTests.cpp
         tests/EngineSetupTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h

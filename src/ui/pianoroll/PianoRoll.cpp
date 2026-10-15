@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "DrumRows.h"
 #include "PianoRollParts.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Tracks.h"
@@ -255,7 +256,8 @@ te::MidiClip* PianoRoll::makeClipForNewNotes()
 void PianoRoll::clipsChanged()
 {
     if (auto* track = getTrack(); drumMode && track != nullptr)
-        drumRows = getDrumRows (*track, getClips());
+        drumRows = getDrumRows (getSamplerSounds (*track), getNoteNumbersPlayed (getClips()), getDrumRowOrder (*track),
+                                getHiddenDrumRows (*track));
 
     updateVerticalScrollBar();
     updateScrollBar();

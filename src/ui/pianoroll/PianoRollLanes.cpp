@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll's keys, velocity lane and transform bar.
+#include "DrumRows.h"
 #include "PianoRollParts.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Tracks.h"
@@ -173,7 +174,7 @@ void PianoRoll::Keys::mouseUp (const juce::MouseEvent&)
     if (auto* track = roll.getTrack(); track != nullptr && roll.drumMode && draggedRow >= 0 && dropRow >= 0)
     {
         const auto note = roll.drumRows[(size_t) draggedRow].note;
-        moveDrumRow (*track, roll.drumRows, note, dropRow > draggedRow ? dropRow - 1 : dropRow);
+        setDrumRowOrder (*track, getDrumOrderAfterMove (roll.drumRows, note, dropRow > draggedRow ? dropRow - 1 : dropRow));
         roll.clipsChanged();
     }
 
