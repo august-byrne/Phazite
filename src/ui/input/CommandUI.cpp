@@ -11,6 +11,31 @@ juce::String withShortcut (const CommandBridge& commands, const juce::String& te
     return keys.isEmpty() ? text : text + " (" + keys.joinIntoString (" or ", 0, 2) + ")";
 }
 
+juce::String formatKey (const juce::String& description)
+{
+    auto parts = juce::StringArray::fromTokens (description, "+", {});
+    parts.trim();
+    parts.removeEmptyStrings();
+
+    for (auto& part : parts)
+    {
+        if (part == "spacebar")
+            part = "Space";
+        else if (part.startsWith ("cursor "))
+            part = part.fromFirstOccurrenceOf ("cursor ", false, false);
+
+        part = part.substring (0, 1).toUpperCase() + part.substring (1);
+    }
+
+    return parts.joinIntoString ("+");
+}
+
+juce::String getKeyText (const CommandBridge& commands, const juce::String& commandID)
+{
+    const auto keys = commands.getShortcutDescriptions (commandID);
+    return keys.isEmpty() ? juce::String() : formatKey (keys[0]);
+}
+
 void addCommandItem (juce::PopupMenu& menu, CommandBridge& commands, const juce::String& id)
 {
     if (const auto commandID = commands.getCommandID (id); commandID != 0)

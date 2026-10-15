@@ -37,6 +37,9 @@ public:
     // Shows the welcome window's Phazite Sounds page: after a download failed, or where Phazite can't download.
     std::function<void()> onShowSoundPack;
 
+    // An item went into the song, placed or dropped there.
+    std::function<void (const LibraryItem&)> onUsed;
+
     // Puts an item into the song with onPlace, and notes it as used, for the recent items.
     bool place (const LibraryItem&);
 

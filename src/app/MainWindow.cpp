@@ -277,9 +277,10 @@ void MainWindow::addCommands()
     registry.add ({ .id = "help.welcome",
                     .name = "Welcome",
                     .category = "Help",
-                    .description = "Opens the welcome window, which sets Phazite up. For now, it offers Phazite Sounds.",
-                    .synonyms = { "getting started", "onboarding", "setup", "first run", "start" },
-                    .perform = [this] { showWelcome (ui::WelcomePanel::sounds); } });
+                    .description = "Opens the welcome window: the shortcuts of the app you know, the audio output with a test sound, "
+                                   "and Phazite Sounds.",
+                    .synonyms = { "getting started", "onboarding", "setup", "first run", "start", "coming from", "test sound" },
+                    .perform = [this] { showWelcome (ui::WelcomePanel::comingFrom); } });
 
     registry.add (
         { .id = "help.phaziteSounds",
@@ -331,8 +332,9 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
         return;
     }
 
-    auto* panel = new ui::WelcomePanel (services.soundPack);
-    panel->setSize (560, 460);
+    auto* panel = new ui::WelcomePanel (services.soundPack, engine.getDeviceManager().deviceManager, commands.getKeymap().name,
+                                        [this] (const juce::String& name) { setKeymap (name); });
+    panel->setSize (600, 560);
     panel->showPage (page);
     welcomePanel = panel;
 
@@ -390,13 +392,12 @@ void MainWindow::showWelcomeOnFirstRun()
     services.settings.set (Settings::welcomeShown, true);
 
     // Once the window is on the screen.
-    if (! services.soundPack.isInstalled())
-        juce::MessageManager::callAsync (
-            [safeThis = juce::Component::SafePointer<MainWindow> (this)]
-            {
-                if (safeThis != nullptr)
-                    safeThis->showWelcome (ui::WelcomePanel::sounds);
-            });
+    juce::MessageManager::callAsync (
+        [safeThis = juce::Component::SafePointer<MainWindow> (this)]
+        {
+            if (safeThis != nullptr)
+                safeThis->showWelcome (ui::WelcomePanel::comingFrom);
+        });
 }
 
 void MainWindow::showPluginList()
@@ -667,7 +668,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
         }
 
         case 5: // Help: where to find things
-            add (menu, { "view.commandPalette", "options.keyboardShortcuts", "view.hoverHelp" });
+            add (menu, { "view.commandPalette", "options.keyboardShortcuts", "view.hoverHelp", "help.guide" });
             menu.addSeparator();
             add (menu, { "help.phaziteSounds", "help.welcome" });
             break;

@@ -661,6 +661,9 @@ void Browser::noteUsed (const LibraryItem& item)
 {
     library.noteUsed (item);
     refreshPlace (BrowserPlace::Kind::recent);
+
+    if (onUsed != nullptr)
+        onUsed (item);
 }
 
 void Browser::dragOperationEnded (const juce::DragAndDropTarget::SourceDetails& details)

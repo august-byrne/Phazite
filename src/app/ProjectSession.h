@@ -5,6 +5,7 @@
 
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
+#include "model/project/NewProject.h"
 #include "model/project/Project.h"
 #include "model/project/ProjectContext.h"
 #include "services/RecentProjects.h"
@@ -37,13 +38,20 @@ public:
     // Opens the most recent project (offering to restore its autosave), or makes a first project.
     void openAtStartup();
 
-    void newProject();
+    void newProject(); // the new-project window
     void openProject();
     void openProject (const juce::File&);
     void chooseRecentProject(); // a menu of the recent projects
     void saveProject();
     void saveProjectAs(); // a copy under a new name, which then stays open
     void exportSong();    // through onExport
+
+    // Makes the project <folder>/<name> with what the settings choose, and opens it, the computer keyboard on its synth
+    // track if it has one: the new-project window's Create. Fails, changing nothing, if that folder exists.
+    juce::Result createProject (const juce::File& folder, const juce::String& name, const NewProjectSettings&);
+
+    // The name the new-project window suggests: "Untitled", or "Untitled 2" and so on if a project has it in the folder.
+    static juce::String suggestNewName (const juce::File& folder);
 
     // Asks whether to save unsaved changes first. Calls back with false if the user cancelled.
     void closeThen (std::function<void (bool closed)>);
@@ -66,6 +74,7 @@ private:
     void openWithRestoreQuestion (const juce::File&);
     void open (const juce::File&, bool restoreAutosave);
     void createFirstProject();
+    void selectSynthTrack(); // in a new project that has one (findSynthTrack())
 
     // Opens the first of the recent projects after one that failed to open that this Phazite can open, or else makes a
     // first project.

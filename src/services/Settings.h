@@ -73,6 +73,8 @@ public:
     static constexpr BoolSetting exportNormalize { "phaziteExportNormalize", false, SaveTiming::now };
     static constexpr NumberSetting exportLoudnessTarget { "phaziteExportLoudnessTarget", -14.0, SaveTiming::now };  // LUFS
     static constexpr NumberSetting exportTruePeakCeiling { "phaziteExportTruePeakCeiling", -1.0, SaveTiming::now }; // dBTP
+    static constexpr BoolSetting guide { "phaziteGuide", true, SaveTiming::now };
+    static constexpr ListSetting guideStepsDone { "phaziteGuideStepsDone", SaveTiming::now }; // the guide's steps, by name
 
     // Kept in that file (the Engine's, which must outlive this), or, without one, in memory (tests). The parameter
     // isn't named 'file': it would hide the member (C4458, -Wshadow).

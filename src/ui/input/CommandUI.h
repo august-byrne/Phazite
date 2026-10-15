@@ -13,6 +13,13 @@ namespace phazite::ui
 // "Paint tool: ... (B or 3)".
 juce::String withShortcut (const CommandBridge&, const juce::String& text, const juce::String& commandID);
 
+// A key as a sentence names it, from JUCE's description of it: "Ctrl+Shift+R" for "ctrl + shift + R", "Space" for
+// "spacebar".
+juce::String formatKey (const juce::String& description);
+
+// The command's first key, as formatKey() writes it, or nothing if it has none.
+juce::String getKeyText (const CommandBridge&, const juce::String& commandID);
+
 // Adds commands to a menu, by id, with their shortcuts; ids that aren't registered are left out.
 void addCommandItem (juce::PopupMenu&, CommandBridge&, const juce::String& id);
 void addCommandItems (juce::PopupMenu&, CommandBridge&, std::initializer_list<const char*> ids);

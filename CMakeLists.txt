@@ -147,6 +147,8 @@ target_sources(phazite_core PRIVATE
     src/model/notes/Notes.h
     src/model/project/Export.cpp
     src/model/project/Export.h
+    src/model/project/NewProject.cpp
+    src/model/project/NewProject.h
     src/model/project/Project.cpp
     src/model/project/Project.h
     src/model/project/ProjectContext.cpp
@@ -383,8 +385,12 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/CommandPalette.h
     src/ui/shell/ExportPanel.cpp
     src/ui/shell/ExportPanel.h
+    src/ui/shell/Guide.cpp
+    src/ui/shell/Guide.h
     src/ui/shell/HintBar.cpp
     src/ui/shell/HintBar.h
+    src/ui/shell/NewProjectPanel.cpp
+    src/ui/shell/NewProjectPanel.h
     src/ui/shell/Panels.cpp
     src/ui/shell/Panels.h
     src/ui/shell/SettingsPanel.cpp
@@ -509,6 +515,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/GoldenFiles.h
         tests/GoldenProjectTests.cpp
         tests/GoldenRenderTests.cpp
+        tests/GuideTests.cpp
         tests/IconTests.cpp
         tests/ImportTests.cpp
         tests/LibraryTests.cpp
@@ -520,6 +527,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MigrationTests.cpp
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
+        tests/NewProjectTests.cpp
         tests/NoteTests.cpp
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp

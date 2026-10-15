@@ -12,14 +12,6 @@
 
 namespace phazite::ui
 {
-namespace
-{
-    // The time signatures the menu offers, as most DAWs do.
-    constexpr std::array<TimeSignature, 8> commonTimeSignatures {
-        { { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } }
-    };
-} // namespace
-
 TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard, const ProjectContext& context)
     : engine (e),
       commands (bridge),

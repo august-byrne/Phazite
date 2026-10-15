@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectSession.h"
-#include "model/arrangement/Outlines.h"
 #include "model/engine/LiveInput.h"
 #include "model/project/Export.h"
 #include "model/project/StarterProject.h"
+#include "ui/shell/NewProjectPanel.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace phazite
 {
@@ -63,6 +64,15 @@ void ProjectSession::createFirstProject()
     }
 
     setProject (std::move (created));
+    selectSynthTrack();
+}
+
+void ProjectSession::selectSynthTrack()
+{
+    // Live MIDI follows the selection, so the computer keyboard plays the synth, in its octave.
+    if (project != nullptr)
+        if (auto* synth = findSynthTrack (project->getEdit()))
+            context.getSelection().selectOnly (synth);
 }
 
 void ProjectSession::newProject()
@@ -74,51 +84,50 @@ void ProjectSession::newProject()
                 return;
 
             const auto folder = projectsFolder;
-            auto* window = new juce::AlertWindow ("New project",
-                                                  "Name the project. Phazite makes a folder for it in " + folder.getFullPathName()
-                                                      + ". A song outline lays out its sections, which you can change later.",
-                                                  juce::MessageBoxIconType::NoIcon, dialogParent);
-            window->addTextEditor ("name", "Untitled");
+            auto* panel = new ui::NewProjectPanel (suggestNewName (folder), folder,
+                                                   [this, folder] (const juce::String& name, const NewProjectSettings& settings)
+                                                   { return createProject (folder, name, settings); });
+            panel->setSize (540, 500);
 
-            juce::StringArray outlineNames { "No outline" };
-
-            for (const auto& outline : getBuiltInOutlines())
-                outlineNames.add (outline.name);
-
-            window->addComboBox ("outline", outlineNames, "Song outline");
-            window->addButton ("Create", 1, juce::KeyPress (juce::KeyPress::returnKey));
-            window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-
-            window->enterModalState (
-                true,
-                juce::ModalCallbackFunction::create (
-                    [this, window, folder] (int result)
-                    {
-                        if (result != 1)
-                            return;
-
-                        folder.createDirectory();
-
-                        // The outline is part of the new project: in its first save, not an undo step.
-                        const auto choice = window->getComboBoxComponent ("outline")->getSelectedItemIndex() - 1;
-                        std::function<void (te::Edit&)> addOutline;
-
-                        if (juce::isPositiveAndBelow (choice, (int) getBuiltInOutlines().size()))
-                            addOutline = [chosen = getBuiltInOutlines()[(size_t) choice]] (te::Edit& e) { applyOutline (e, chosen); };
-
-                        juce::String error;
-                        auto created = Project::create (engine, folder, window->getTextEditorContents ("name"), error, addOutline);
-
-                        if (created == nullptr)
-                        {
-                            showError ("Phazite couldn't create the project", error);
-                            return;
-                        }
-
-                        setProject (std::move (created));
-                    }),
-                true);
+            juce::DialogWindow::LaunchOptions o;
+            o.dialogTitle = "New Project";
+            o.dialogBackgroundColour = ui::getPalette (*panel).surface;
+            o.escapeKeyTriggersCloseButton = true;
+            o.useNativeTitleBar = true;
+            o.resizable = false;
+            o.componentToCentreAround = dialogParent;
+            o.content.setOwned (panel);
+            o.launchAsync();
         });
+}
+
+juce::String ProjectSession::suggestNewName (const juce::File& folder)
+{
+    juce::String name ("Untitled");
+
+    for (int n = 2; folder.getChildFile (name).exists(); ++n)
+        name = "Untitled " + juce::String (n);
+
+    return name;
+}
+
+juce::Result ProjectSession::createProject (const juce::File& folder, const juce::String& name, const NewProjectSettings& settings)
+{
+    folder.createDirectory();
+
+    // What the project starts with is part of its first save, not undo steps.
+    juce::String error;
+    auto created = Project::create (engine, folder, name, error, [settings] (te::Edit& edit) { addNewProjectContent (edit, settings); });
+
+    if (created == nullptr)
+        return juce::Result::fail (error);
+
+    setProject (std::move (created));
+
+    if (settings.withInstruments)
+        selectSynthTrack();
+
+    return juce::Result::ok();
 }
 
 void ProjectSession::openProject()

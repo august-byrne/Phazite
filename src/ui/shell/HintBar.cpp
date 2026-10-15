@@ -10,9 +10,9 @@ HintBar::HintBar()
     startTimerHz (10);
 }
 
-void HintBar::setDefaultHint (const juce::String& text)
+void HintBar::setDefaultHint (std::function<juce::String()> getText)
 {
-    defaultHint = text;
+    defaultHint = std::move (getText);
     timerCallback();
 }
 
@@ -43,8 +43,8 @@ void HintBar::timerCallback()
             text = c->getTitle().isNotEmpty() ? c->getTitle() + ": " + c->getDescription() : c->getDescription();
     }
 
-    if (text.isEmpty())
-        text = defaultHint;
+    if (text.isEmpty() && defaultHint != nullptr)
+        text = defaultHint();
 
     if (text != hint)
     {

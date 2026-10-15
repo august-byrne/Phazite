@@ -85,11 +85,13 @@ public:
     // The command palette's search: matches on the name, category and synonyms, best first.
     juce::Array<const Command*> search (const juce::String& query, int maxResults = 20) const;
 
-    // Told about each command added from then on. The ones added before are getCommand()'s.
+    // Told about each command added from then on (the ones added before are getCommand()'s), and about each command that
+    // invoke() ran, once it has run.
     struct Listener
     {
         virtual ~Listener() = default;
         virtual void commandAdded (const Command&) = 0;
+        virtual void commandInvoked (const Command&) {}
     };
 
     void addListener (Listener*);

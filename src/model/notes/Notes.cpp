@@ -559,6 +559,11 @@ void applyLastKey (te::Track& track)
         writeKey (track.state, last, nullptr);
 }
 
+void setLastKey (te::Edit& edit, const Key& key)
+{
+    writeKey (getPhaziteState (edit).getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
+}
+
 int snapToKey (int pitch, const Key& key)
 {
     for (int distance = 0; distance < 12; ++distance)

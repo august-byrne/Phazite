@@ -94,16 +94,17 @@ bool CommandRegistry::invoke (const juce::String& id)
     if (command == nullptr || ! isEnabled (*command))
         return false;
 
-    auto* edit = command->undoTarget != nullptr ? command->undoTarget() : nullptr;
-
-    if (edit == nullptr)
+    if (auto* edit = command->undoTarget != nullptr ? command->undoTarget() : nullptr)
+    {
+        const UndoStep step (*edit, getCurrentName (*command)); // e.g. "Delete 2 Tracks"
+        command->perform();
+    }
+    else
     {
         command->perform();
-        return true;
     }
 
-    const UndoStep step (*edit, getCurrentName (*command)); // e.g. "Delete 2 Tracks"
-    command->perform();
+    listeners.call ([command] (Listener& l) { l.commandInvoked (*command); });
     return true;
 }
 

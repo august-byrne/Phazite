@@ -66,6 +66,9 @@ bool ComputerKeyboard::update (const std::function<bool (int)>& isKeyDown, juce:
             held = lowestNote + (int) i;
             sendMessage (juce::MidiMessage::noteOn (midiChannel, held, (juce::uint8) velocity));
             used = true;
+
+            if (onNotePlayed != nullptr)
+                onNotePlayed();
         }
         else if (! down && held >= 0)
         {

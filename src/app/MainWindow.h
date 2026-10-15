@@ -31,7 +31,7 @@ public:
     // The window's commands ("options.", "input.", "help." and the shell's "view." commands).
     void addCommands();
 
-    // The welcome window, the first time Phazite opens, unless Phazite Sounds are installed already.
+    // The welcome window, the first time Phazite opens.
     void showWelcomeOnFirstRun();
 
     void closeButtonPressed() override;

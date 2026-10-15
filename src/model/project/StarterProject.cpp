@@ -54,12 +54,30 @@ namespace
         return edit.getPluginCache().createNewPlugin (type, {});
     }
 
-    void addDrums (te::AudioTrack& track)
+    void setUpDrums (te::AudioTrack& track)
     {
-        auto& edit = track.edit;
         track.setName ("Drums");
         track.setColour (getColourForName (track.getName()).value_or (getTrackColours()[1].colour));
-        setInstrument (track, createOwnDevice (edit, devices::DrumSampler::typeID));
+        setInstrument (track, createOwnDevice (track.edit, devices::DrumSampler::typeID));
+    }
+
+    void setUpSynth (te::AudioTrack& track)
+    {
+        track.setName ("Synth");
+        track.setColour (getTrackColours()[0].colour);
+        const auto synth = createOwnDevice (track.edit, devices::Synth::typeID);
+
+        if (auto* device = dynamic_cast<DevicePlugin*> (synth.get()))
+            for (const auto& setting : pluck)
+                if (auto* parameter = device->findParameter (setting.id))
+                    parameter->setParameter (setting.value, juce::sendNotification);
+
+        setInstrument (track, synth);
+    }
+
+    void addBeat (te::AudioTrack& track)
+    {
+        auto& edit = track.edit;
 
         if (auto clip = track.insertMIDIClip ("Beat", edit.tempoSequence.toTime (te::BeatRange (0_bp, 16_bp)), nullptr))
             for (int bar = 0; bar < 4; ++bar)
@@ -68,19 +86,9 @@ namespace
                                                  te::BeatDuration::fromBeats (0.25), hit.velocity, 0, nullptr);
     }
 
-    void addSynth (te::AudioTrack& track)
+    void addArpeggio (te::AudioTrack& track)
     {
         auto& edit = track.edit;
-        track.setName ("Synth");
-        track.setColour (getTrackColours()[0].colour);
-        const auto synth = createOwnDevice (edit, devices::Synth::typeID);
-
-        if (auto* device = dynamic_cast<DevicePlugin*> (synth.get()))
-            for (const auto& setting : pluck)
-                if (auto* parameter = device->findParameter (setting.id))
-                    parameter->setParameter (setting.value, juce::sendNotification);
-
-        setInstrument (track, synth);
 
         // A 4-bar MIDI clip at bar 1: 16 beats, 8 seconds at 120 BPM.
         if (auto clip = track.insertMIDIClip ("Arpeggio", edit.tempoSequence.toTime (te::BeatRange (0_bp, 16_bp)), nullptr))
@@ -91,6 +99,18 @@ namespace
     }
 } // namespace
 
+void addInstrumentTracks (te::Edit& edit)
+{
+    edit.ensureNumberOfAudioTracks (2);
+    const auto tracks = te::getAudioTracks (edit);
+
+    if (tracks.size() < 2)
+        return;
+
+    setUpDrums (*tracks[0]);
+    setUpSynth (*tracks[1]);
+}
+
 void addStarterContent (te::Edit& edit)
 {
     edit.ensureNumberOfAudioTracks (2);
@@ -99,12 +119,24 @@ void addStarterContent (te::Edit& edit)
     if (tracks.size() < 2)
         return;
 
-    addDrums (*tracks[0]);
-    addSynth (*tracks[1]);
+    // Each track whole before the next, in the order the golden files' item IDs record.
+    setUpDrums (*tracks[0]);
+    addBeat (*tracks[0]);
+    setUpSynth (*tracks[1]);
+    addArpeggio (*tracks[1]);
 
     // Playback loops the song, which grows as clips go later.
     loopSong (edit);
     edit.getTransport().setPosition (0_tp);
+}
+
+te::AudioTrack* findSynthTrack (te::Edit& edit)
+{
+    for (auto* track : te::getAudioTracks (edit))
+        if (auto* instrument = getInstrument (*track); instrument != nullptr && instrument->getPluginType() == devices::Synth::typeID)
+            return track;
+
+    return nullptr;
 }
 
 juce::File getDefaultProjectsFolder()

@@ -6,18 +6,23 @@
 namespace phazite::ui
 {
 // The strip along the bottom of the window. It says what the control under the pointer does (its
-// tooltip, or its description), and otherwise shows a general tip.
+// tooltip, or its description), and otherwise shows the default hint: the guide's next step, or a general tip.
 class HintBar : public juce::Component,
                 private juce::Timer
 {
 public:
     HintBar();
 
-    void setDefaultHint (const juce::String&);
+    // The hint for when the pointer is on nothing that explains itself, asked for each time the bar looks (ten times a
+    // second), so it follows the keys and the guide.
+    void setDefaultHint (std::function<juce::String()>);
+
+    juce::String getHint() const { return hint; } // what it shows now
     void paint (juce::Graphics&) override;
 
 private:
-    juce::String defaultHint, hint;
+    std::function<juce::String()> defaultHint;
+    juce::String hint;
 
     void timerCallback() override; // checks the component under the pointer; repaints only on change
 };

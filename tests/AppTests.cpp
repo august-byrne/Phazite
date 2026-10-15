@@ -5,7 +5,13 @@
 #include "TestHelpers.h"
 #include "app/AppServices.h"
 #include "app/ProjectSession.h"
+#include "model/arrangement/Outlines.h"
+#include "model/arrangement/Sections.h"
 #include "model/base/Schema.h"
+#include "model/mixer/Mixer.h"
+#include "model/notes/Notes.h"
+#include "model/project/StarterProject.h"
+#include "model/transport/Tempo.h"
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
 
@@ -88,10 +94,108 @@ TEST_CASE ("The first start makes My First Song")
     CHECK (te::getAudioTracks (*session.getContext().getEdit()).size() == 2); // the starter song: drums and a synth
     CHECK (recent.getProjects() == juce::Array<juce::File> { file });
 
+    // The computer keyboard plays the synth, in its octave: its track is selected, and live MIDI follows the selection.
+    auto* synth = phazite::findSynthTrack (*session.getContext().getEdit());
+    REQUIRE (synth != nullptr);
+    CHECK (synth->getName() == "Synth");
+    CHECK (session.getSelection().isSelected (synth));
+
     // It is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK_FALSE (session.getContext().getEdit()->getUndoManager().canUndo());
+}
+
+TEST_CASE ("A new project starts as the new-project window chooses, with the computer keyboard on its synth")
+{
+    auto& engine = phazite::test::getEngine();
+    phazite::test::TemporaryFolder temp;
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, temp.folder);
+    CHECK (phazite::ProjectSession::suggestNewName (temp.folder) == "Untitled");
+
+    phazite::NewProjectSettings choice;
+    choice.tempo = 90.0;
+    choice.timeSignature = { 6, 8 };
+    choice.keyRoot = 2; // D
+    choice.scale = "minor";
+    choice.outline = "hipHop";
+    REQUIRE (phazite::isValid (choice));
+    REQUIRE (session.createProject (temp.folder, "Untitled", choice).wasOk());
+
+    auto* edit = session.getContext().getEdit();
+    REQUIRE (edit != nullptr);
+    CHECK (phazite::getTempo (*edit) == doctest::Approx (90.0));
+    CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 6, 8 });
+    CHECK (phazite::getSections (*edit).size() == (int) phazite::findOutline ("hipHop")->sections.size());
+
+    const auto tracks = te::getAudioTracks (*edit);
+    REQUIRE (tracks.size() == 2);
+    CHECK (tracks[0]->getName() == "Drums");
+    CHECK (tracks[1]->getName() == "Synth");
+
+    for (auto* track : tracks)
+    {
+        CHECK (phazite::getInstrument (*track) != nullptr);
+        CHECK (track->getClips().isEmpty());
+        const auto key = phazite::getTrackKey (*track);
+        REQUIRE (key.has_value());
+        CHECK (key->root == 2);
+        CHECK (phazite::getSavedScaleName (key->scale) == "minor");
+    }
+
+    CHECK (session.getSelection().isSelected (tracks[1]));
+
+    // What it starts with is in its first save: no unsaved changes, nothing to undo.
+    phazite::test::settle();
+    CHECK_FALSE (session.getProject()->hasUnsavedChanges());
+    CHECK_FALSE (edit->getUndoManager().canUndo());
+    CHECK (phazite::ProjectSession::suggestNewName (temp.folder) == "Untitled 2");
+
+    // A folder of that name is there: nothing changes.
+    const auto again = session.createProject (temp.folder, "Untitled", {});
+    CHECK (again.failed());
+    CHECK (again.getErrorMessage().contains ("already"));
+    CHECK (session.getContext().getEdit() == edit);
+
+    // Without instruments, a key or an outline: an empty song at 120 BPM in 4/4.
+    phazite::NewProjectSettings plain;
+    plain.withInstruments = false;
+    REQUIRE (session.createProject (temp.folder, "Plain", plain).wasOk());
+    auto* plainEdit = session.getContext().getEdit();
+    REQUIRE (plainEdit != nullptr);
+    CHECK (phazite::getTempo (*plainEdit) == doctest::Approx (120.0));
+    CHECK (phazite::getSections (*plainEdit).isEmpty());
+    CHECK (phazite::findSynthTrack (*plainEdit) == nullptr);
+}
+
+TEST_CASE ("New-project settings are checked")
+{
+    phazite::NewProjectSettings settings;
+    CHECK (phazite::isValid (settings));
+
+    settings.tempo = 400.0;
+    CHECK_FALSE (phazite::isValid (settings));
+    settings.tempo = 120.0;
+
+    settings.timeSignature = { 4, 3 };
+    CHECK_FALSE (phazite::isValid (settings));
+    settings.timeSignature = { 7, 8 };
+    CHECK (phazite::isValid (settings));
+
+    settings.keyRoot = 12;
+    CHECK_FALSE (phazite::isValid (settings));
+    settings.keyRoot = 11;
+    settings.scale = "nonsense";
+    CHECK_FALSE (phazite::isValid (settings));
+    settings.scale = "dorian";
+    CHECK (phazite::isValid (settings));
+
+    settings.outline = "polka";
+    CHECK_FALSE (phazite::isValid (settings));
+    settings.outline = "techno";
+    CHECK (phazite::isValid (settings));
 }
 
 TEST_CASE ("Startup opens the most recent project")

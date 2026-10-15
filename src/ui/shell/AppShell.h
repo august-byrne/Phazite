@@ -2,6 +2,7 @@
 // The main window's content: top bar, browser, playlist, inspector, editor dock and hint bar.
 #pragma once
 
+#include "Guide.h"
 #include "HintBar.h"
 #include "Panels.h"
 #include "TopBar.h"
@@ -58,6 +59,10 @@ public:
     // Updates tooltips and hints that mention shortcuts, e.g. after the keymap changed.
     void refreshShortcutTexts();
 
+    // For tests.
+    HintBar& getHintBar() noexcept { return hintBar; }
+    Guide& getGuide() noexcept { return guide; }
+
     void paint (juce::Graphics&) override;
     void resized() override;
 
@@ -68,6 +73,7 @@ private:
     te::SelectionManager& selection; // the project's
     Library& library;                // what the browser and the plug-in picker show
     Previewer& previewer;            // the browser's
+    ComputerKeyboard& computerKeyboard;
 
     TopBar topBar;
     Browser browser;
@@ -77,6 +83,7 @@ private:
     MixerView mixer;
     EditorDock editorDock { pianoRoll, mixer };
     HintBar hintBar;
+    Guide guide; // the hint bar's next step for newcomers
 
     // The editor used last, which the time line's commands (zoom, grid, tools, nudge) act on.
     TimelineEditor* activeEditor = nullptr;
@@ -116,6 +123,7 @@ private:
     void placeDetachButtons();
     void setActiveEditor (TimelineEditor*);
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track
+    juce::String getDefaultHint() const;                 // the guide's next step, or how to search for commands
     void globalFocusChanged (juce::Component*) override; // makes the editor that has the focus the active one
 
     juce::Component& getPanel (DetachablePanel);

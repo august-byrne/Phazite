@@ -86,8 +86,8 @@ void checkPartsApart (juce::Component& shell)
 
 constexpr const char* aboutTheAppCatalogue =
     "# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps "
-    "and themes, view.interface*, view.hoverHelp, help.*, which come after these), in order, with their keys as Windows and "
-    "Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
+    "and themes, view.interface*, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), in order, with "
+    "their keys as Windows and Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
 } // namespace
 
 TEST_CASE ("The window's content works without a screen: a project opens, the panels and layouts change, and commands are found")
@@ -122,6 +122,27 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK (save->isEnabled());
     REQUIRE (screen.registry.invoke ("project.save"));
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
+}
+
+TEST_CASE ("The hint bar shows the guide's next step, which a note on the computer keyboard moves on")
+{
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& hints = screen.shell.getHintBar();
+
+    // With the pointer on nothing, the guide's first step.
+    CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().startsWith ("Try this: press Space to play"); }));
+
+    REQUIRE (screen.registry.invoke ("transport.playStop"));
+    REQUIRE (screen.registry.invoke ("transport.playStop"));
+    CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().contains ("on your computer keyboard"); }));
+
+    // A note played on the computer keyboard, as its keys reach it.
+    screen.keyboard.update ([] (int keyCode) { return keyCode == 'a'; }, {});
+    screen.keyboard.update ([] (int) { return false; }, {});
+    CHECK (screen.shell.getGuide().isDone (phazite::ui::Guide::Step::playNotes));
+    CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().contains ("drag a sound from the browser"); }));
 }
 
 TEST_SUITE ("golden")

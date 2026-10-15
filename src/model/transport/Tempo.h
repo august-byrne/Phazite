@@ -6,6 +6,8 @@
 
 #include "model/base/Tracktion.h"
 
+#include <array>
+
 namespace phazite
 {
 // Tracktion's limits, in beats per minute.
@@ -29,6 +31,11 @@ TimeSignature getTimeSignature (const te::Edit&);
 
 // Whether Phazite takes it: 1 to 32 beats of a half, quarter, eighth or sixteenth note.
 bool isValid (TimeSignature);
+
+// The time signatures that menus offer, as most DAWs do.
+inline constexpr std::array<TimeSignature, 8> commonTimeSignatures {
+    { { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } }
+};
 
 // Changes the time signature, as one undo step, "Change Time Signature". An invalid one changes nothing.
 void setTimeSignature (te::Edit&, TimeSignature);

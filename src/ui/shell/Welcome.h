@@ -1,15 +1,65 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The welcome window (docs/design.md, section 13): what Phazite offers when it first opens, a page at a time. For now
-// its one page offers Phazite Sounds, the free sounds that aren't part of Phazite's own download; later pages will set
-// up the keymap, the audio device and the look. Help > Welcome opens it again, and Help > Phazite Sounds at its page.
+// The welcome window (docs/design.md, section 13): what Phazite asks when it first opens, a page at a time, all of it
+// optional. Which app's shortcuts to use ("Coming from...?"), the audio output, with a test sound, and Phazite Sounds,
+// the free sounds that aren't part of Phazite's own download. Help > Welcome opens it again, and Help > Phazite Sounds
+// at its last page.
 #pragma once
 
 #include "services/SoundPack.h"
 
+#include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace phazite::ui
 {
+//==============================================================================
+// "Coming from...?": FL Studio's keymap for FL Studio's users, Phazite's own for everyone else. A choice takes effect at
+// once; Options > Keymap changes it later.
+class ComingFromPage : public juce::Component
+{
+public:
+    ComingFromPage (const juce::String& keymapName, std::function<void (const juce::String& keymapName)> chooseKeymap);
+
+    void resized() override;
+    void lookAndFeelChanged() override;
+
+    // The choices, in order: FL Studio, another app, and none. Nothing is chosen until one is clicked, unless FL Studio's
+    // keymap is in use already.
+    static constexpr int numChoices = 3;
+    juce::ToggleButton& getChoice (int index) noexcept { return *choices[index]; }
+    int getChosen() const; // -1 for none
+
+private:
+    const std::function<void (const juce::String&)> chooseKeymap;
+    juce::Label title, about;
+    juce::OwnedArray<juce::ToggleButton> choices;
+    juce::OwnedArray<juce::Label> descriptions;
+};
+
+//==============================================================================
+// The audio output: JUCE's device chooser (made when the page first shows: it scans the devices), a button that plays a
+// test sound through the output chosen, and what to do when nothing is heard.
+class SoundPage : public juce::Component
+{
+public:
+    explicit SoundPage (juce::AudioDeviceManager&);
+    ~SoundPage() override;
+
+    void resized() override;
+    void visibilityChanged() override;
+    void lookAndFeelChanged() override;
+
+    // For tests.
+    juce::TextButton& getTestButton() noexcept { return testButton; }
+    juce::Component* getDeviceChooser() noexcept { return deviceChooser.get(); }
+
+private:
+    juce::AudioDeviceManager& deviceManager;
+    juce::Label title, about, help;
+    juce::TextButton testButton { "Play a Test Sound" };
+    std::unique_ptr<juce::Component> deviceChooser;
+};
+
 //==============================================================================
 // The Phazite Sounds page: what they are, a button that downloads them (or, where Phazite can't download, opens their
 // page in a browser), how far the download is, and a button that installs them from a zip downloaded by hand.
@@ -50,13 +100,20 @@ public:
     // Its pages, in order.
     enum Page
     {
+        comingFrom,
+        sound,
         sounds
     };
 
-    explicit WelcomePanel (SoundPack&);
+    static constexpr int numPages = 3;
+
+    // keymapName: the keymap in use. chooseKeymap: switches to another (the main window's).
+    WelcomePanel (SoundPack&, juce::AudioDeviceManager&, const juce::String& keymapName,
+                  std::function<void (const juce::String& keymapName)> chooseKeymap);
     ~WelcomePanel() override;
 
     void showPage (Page);
+    Page getPage() const noexcept { return page; }
 
     // Not Now, or Done, which also closes the dialog window it is in.
     std::function<void()> onClose;
@@ -67,15 +124,22 @@ public:
 
     // For tests.
     juce::TextButton& getCloseButton() noexcept { return closeButton; }
+    juce::TextButton& getNextButton() noexcept { return nextButton; }
+    juce::TextButton& getBackButton() noexcept { return backButton; }
+    ComingFromPage& getComingFromPage() noexcept { return comingFromPage; }
+    SoundPage& getSoundPage() noexcept { return soundPage; }
     SoundPackPage& getSoundPackPage() noexcept { return soundPackPage; }
 
 private:
     SoundPack& soundPack;
-    juce::Label heading, intro;
+    Page page = comingFrom;
+    juce::Label heading, intro, stepLabel;
+    ComingFromPage comingFromPage;
+    SoundPage soundPage;
     SoundPackPage soundPackPage;
-    juce::TextButton closeButton;
+    juce::TextButton backButton { "Back" }, closeButton, nextButton { "Next" };
 
-    void updateCloseButton();
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { updateCloseButton(); }
+    void updateButtons();
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { updateButtons(); }
 };
 } // namespace phazite::ui

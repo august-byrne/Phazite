@@ -4,6 +4,7 @@
 #include "model/arrangement/Tracks.h"
 #include "model/mixer/Mixer.h"
 #include "ui/browser/PluginPicker.h"
+#include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -71,22 +72,29 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 };
 
 //==============================================================================
-AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& keys, ComputerKeyboard& computerKeyboard,
-                    ProjectContext& context, Settings& s, SoundPack& pack, Library& l, Previewer& p)
+AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& keys, ComputerKeyboard& keyboard, ProjectContext& context,
+                    Settings& s, SoundPack& pack, Library& l, Previewer& p)
     : commands (bridge),
       shortcutKeys (keys),
       projectContext (context),
       selection (context.getSelection()),
       library (l),
       previewer (p),
-      topBar (engine, bridge, computerKeyboard, context),
+      computerKeyboard (keyboard),
+      topBar (engine, bridge, keyboard, context),
       browser (library, previewer, pack, s, context),
       playlist (bridge, context.getSelection(), context.getRangeSelection()),
       inspector (engine, bridge, context),
       pianoRoll (bridge, context.getSelection()),
-      mixer (engine, bridge, context.getSelection())
+      mixer (engine, bridge, context.getSelection()),
+      guide (bridge, s)
 {
     setTitle ("Phazite");
+
+    // The guide's steps that no command does.
+    computerKeyboard.onNotePlayed = [this] { guide.markDone (Guide::Step::playNotes); };
+    browser.onUsed = [this] (const LibraryItem&) { guide.markDone (Guide::Step::addSound); };
+    hintBar.setDefaultHint ([this] { return getDefaultHint(); });
 
     // Double-clicking a MIDI clip opens it in the piano roll, which then has the keys.
     playlist.onOpenClip = [this] (te::MidiClip& clip)
@@ -133,6 +141,7 @@ AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& ke
 
 AppShell::~AppShell() // here, where PanelWindow is complete
 {
+    computerKeyboard.onNotePlayed = nullptr; // the keyboard is the main window's, and outlives this
     juce::Desktop::getInstance().removeFocusChangeListener (this);
 }
 
@@ -528,6 +537,7 @@ void AppShell::addCommands (CommandRegistry& registry)
     // The note commands use the piano roll's grid.
     addNoteCommands (registry, selection, [this] { return pianoRoll.getGridStepInBeats(); });
     pianoRoll.addCommands (registry);
+    guide.addCommands (registry);
     refreshShortcutTexts();
 }
 
@@ -536,9 +546,15 @@ void AppShell::refreshShortcutTexts()
     topBar.refreshTooltips();
     playlist.refreshShortcutTexts();
     pianoRoll.refreshShortcutTexts();
+}
 
-    const auto paletteKeys = commands.getShortcutDescriptions ("view.commandPalette");
-    hintBar.setDefaultHint (paletteKeys.isEmpty() ? juce::String ("Search for any command with \"Search commands\" at the top right.")
-                                                  : "Press " + paletteKeys[0] + " to search for any command.");
+juce::String AppShell::getDefaultHint() const
+{
+    if (auto next = guide.getHint(); next.isNotEmpty())
+        return next;
+
+    const auto paletteKey = getKeyText (commands, "view.commandPalette");
+    return paletteKey.isEmpty() ? juce::String ("Search for any command with \"Search commands\" at the top right.")
+                                : "Press " + paletteKey + " to search for any command.";
 }
 } // namespace phazite::ui

@@ -1,31 +1,112 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The welcome window, which offers Phazite Sounds when Phazite first opens (docs/design.md, section 13).
+// The welcome window, which Phazite opens the first time it starts (docs/design.md, section 13): the keymap of the app
+// the user comes from, the audio output with a test sound, and Phazite Sounds.
 #include "SoundPackTestHelpers.h"
 #include "UiTestHelpers.h"
 #include "ui/shell/Welcome.h"
 
+namespace
+{
+// A welcome window, as the main window makes it, that remembers the keymaps it chose.
+struct Welcome
+{
+    explicit Welcome (const phazite::SoundPack::Release& release, const juce::String& keymapName = "Phazite")
+        : soundPack (packs.folder, release),
+          panel (soundPack, deviceManager, keymapName, [this] (const juce::String& name) { chosenKeymaps.add (name); })
+    {
+    }
+
+    phazite::test::TemporaryFolder packs;
+    phazite::SoundPack soundPack;
+    juce::AudioDeviceManager deviceManager; // never opened
+    juce::StringArray chosenKeymaps;
+    phazite::ui::WelcomePanel panel;
+    phazite::test::TestWindow window { panel, 600, 560 };
+
+    void click (juce::Component& c) { phazite::test::Mouse (c).click (c.getLocalBounds().getCentre()); }
+};
+} // namespace
+
+TEST_CASE ("The welcome window asks which app the user comes from, and uses that app's keys")
+{
+    phazite::test::PackRelease source;
+    Welcome w (source.release);
+    auto& page = w.panel.getComingFromPage();
+    CHECK (w.panel.getPage() == phazite::ui::WelcomePanel::comingFrom);
+    CHECK (page.isVisible());
+    CHECK (page.getChosen() == -1); // Phazite's keys are in use, which two choices give
+    CHECK_FALSE (w.panel.getBackButton().isVisible());
+    CHECK (w.panel.getCloseButton().getButtonText() == juce::String ("Not Now"));
+    phazite::test::checkChildrenApart (page);
+    phazite::test::checkChildrenApart (w.panel);
+
+    w.click (page.getChoice (0));
+    CHECK (page.getChosen() == 0);
+    CHECK (w.chosenKeymaps.joinIntoString (", ") == "FL Studio");
+
+    w.click (page.getChoice (2));
+    CHECK (page.getChosen() == 2);
+    CHECK (w.chosenKeymaps.joinIntoString (", ") == "FL Studio, Phazite");
+
+    // FL Studio's keymap shows as chosen when the window opens again.
+    phazite::test::PackRelease again;
+    Welcome flStudio (again.release, "FL Studio");
+    CHECK (flStudio.panel.getComingFromPage().getChosen() == 0);
+}
+
+TEST_CASE ("The welcome window goes page by page, and its sound page plays a test sound through the chosen output")
+{
+    phazite::test::PackRelease source;
+    Welcome w (source.release);
+    CHECK (w.panel.getSoundPage().getDeviceChooser() == nullptr); // not until it shows: it scans the devices
+
+    w.click (w.panel.getNextButton());
+    CHECK (w.panel.getPage() == phazite::ui::WelcomePanel::sound);
+    CHECK (w.panel.getSoundPage().isVisible());
+    CHECK_FALSE (w.panel.getComingFromPage().isVisible());
+    CHECK (w.panel.getSoundPage().getDeviceChooser() != nullptr);
+    CHECK (w.panel.getBackButton().isVisible());
+    CHECK (w.panel.getSoundPage().getTestButton().isVisible());
+    phazite::test::checkChildrenApart (w.panel.getSoundPage());
+    w.click (w.panel.getSoundPage().getTestButton()); // no device is open here: nothing to hear, and nothing breaks
+
+    w.click (w.panel.getNextButton());
+    CHECK (w.panel.getPage() == phazite::ui::WelcomePanel::sounds);
+    CHECK (w.panel.getSoundPackPage().isVisible());
+    CHECK_FALSE (w.panel.getNextButton().isVisible());
+    CHECK (w.panel.getCloseButton().getButtonText() == juce::String ("Not Now"));
+    phazite::test::checkChildrenApart (w.panel);
+
+    w.click (w.panel.getBackButton());
+    CHECK (w.panel.getPage() == phazite::ui::WelcomePanel::sound);
+
+    bool closed = false;
+    w.panel.onClose = [&closed] { closed = true; };
+    w.click (w.panel.getCloseButton());
+    CHECK (closed);
+}
+
 TEST_CASE ("The welcome window offers Phazite Sounds, shows the download, and then says where they went")
 {
     phazite::test::PackRelease source;
-    phazite::test::TemporaryFolder packs;
-    phazite::SoundPack soundPack (packs.folder, source.release);
-    phazite::ui::WelcomePanel panel (soundPack);
-    phazite::test::TestWindow window (panel, 560, 460);
+    Welcome w (source.release);
+    w.panel.showPage (phazite::ui::WelcomePanel::sounds);
     bool closed = false;
-    panel.onClose = [&closed] { closed = true; };
+    w.panel.onClose = [&closed] { closed = true; };
 
-    auto& page = panel.getSoundPackPage();
+    auto& soundPack = w.soundPack;
+    auto& page = w.panel.getSoundPackPage();
     auto& mainButton = page.getMainButton();
-    auto& closeButton = panel.getCloseButton();
+    auto& closeButton = w.panel.getCloseButton();
     CHECK (closeButton.getButtonText() == juce::String ("Not Now"));
     phazite::test::checkChildrenApart (page);
 
     // Download where Phazite can; elsewhere, the page that downloads them in a browser, then the file.
     if (phazite::SoundPack::canDownload())
     {
-        CHECK (page.getStatus().endsWith (packs.folder.getFullPathName() + ".")); // where they will go
+        CHECK (page.getStatus().endsWith (w.packs.folder.getFullPathName() + ".")); // where they will go
         CHECK (mainButton.getButtonText().startsWith ("Download ("));
-        phazite::test::Mouse (mainButton).click (mainButton.getLocalBounds().getCentre());
+        w.click (mainButton);
     }
     else
     {
@@ -43,28 +124,26 @@ TEST_CASE ("The welcome window offers Phazite Sounds, shows the download, and th
     CHECK (closeButton.getButtonText() == juce::String ("Done"));
     phazite::test::checkChildrenApart (page);
 
-    phazite::test::Mouse (closeButton).click (closeButton.getLocalBounds().getCentre());
+    w.click (closeButton);
     CHECK (closed);
 }
 
 TEST_CASE ("The welcome window says why a download failed, and offers it again")
 {
     phazite::test::PackRelease source;
-    phazite::test::TemporaryFolder packs;
     auto release = source.release;
     release.sha256 = juce::String::repeatedString ("0", 64);
-    phazite::SoundPack soundPack (packs.folder, release);
-    phazite::ui::WelcomePanel panel (soundPack);
-    phazite::test::TestWindow window (panel, 560, 460);
+    Welcome w (release);
+    w.panel.showPage (phazite::ui::WelcomePanel::sounds);
 
-    auto& page = panel.getSoundPackPage();
-    soundPack.download();
-    REQUIRE (phazite::test::waitForSoundPack (soundPack));
+    auto& page = w.panel.getSoundPackPage();
+    w.soundPack.download();
+    REQUIRE (phazite::test::waitForSoundPack (w.soundPack));
     CHECK (phazite::test::dispatchMessagesUntil (
-        [&page, &soundPack] { return soundPack.getError().isNotEmpty() && page.getStatus() == soundPack.getError(); }));
+        [&page, &w] { return w.soundPack.getError().isNotEmpty() && page.getStatus() == w.soundPack.getError(); }));
 
-    CHECK (page.getStatus() == soundPack.getError());
+    CHECK (page.getStatus() == w.soundPack.getError());
     CHECK (page.getMainButton().getButtonText()
            == juce::String (phazite::SoundPack::canDownload() ? "Try Again" : "Open the Download Page"));
-    CHECK (panel.getCloseButton().getButtonText() == juce::String ("Not Now"));
+    CHECK (w.panel.getCloseButton().getButtonText() == juce::String ("Not Now"));
 }

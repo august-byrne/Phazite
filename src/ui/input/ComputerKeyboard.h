@@ -43,7 +43,8 @@ public:
     // key without Shift, Ctrl, Alt or Cmd.
     bool takesKey (const juce::KeyPress&) const;
 
-    std::function<void()> onChange; // isEnabled(), the octave or the velocity changed
+    std::function<void()> onChange;     // isEnabled(), the octave or the velocity changed
+    std::function<void()> onNotePlayed; // a note started, after its note-on was sent
 
     //==============================================================================
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;

@@ -154,6 +154,10 @@ void setTrackKeys (const juce::Array<te::Track*>&, const std::optional<Key>&); /
 void chooseTrackKey (te::Track&, const std::optional<Key>&);
 void applyLastKey (te::Track&); // the key set last on any of the song's tracks, if there is one
 
+// Makes a key the one new tracks get (applyLastKey()), as setting it on a track does, without an undo step: a new
+// project's key, before it has tracks.
+void setLastKey (te::Edit&, const Key&);
+
 // The pitch in the key nearest to a pitch (the lower one when two are as near).
 int snapToKey (int pitch, const Key&);
 

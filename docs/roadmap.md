@@ -319,6 +319,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - The starter project and the hint-bar guidance.
 - The new-project dialog with outlines.
 - *Done when:* a newcomer gets sound in under a minute without help.
+- *Status:* done (2026-10-15), pending the check by hand that its "done when" needs: a newcomer trying it. In: the welcome window's three pages, opened at every first launch ("Coming from another music app?", which picks FL Studio's keymap or Phazite's; the audio output with a test sound; and Phazite Sounds); the starter project with its Synth track selected, so the computer keyboard plays at once; the guide in the hint bar (`src/ui/shell/Guide.h`: play, play notes, add a sound, record, export, each gone once done, and Help > Getting Started Tips); and the new-project window (`src/ui/shell/NewProjectPanel.h`, with `src/model/project/NewProject.h`): name, tempo, time signature, key, song outline, and a Drums and a Synth track to start with.
 
 **Milestone 1 check:** a usability test with one newcomer and one FL Studio user.
 - **Task:** each makes an 8-bar beat from an outline, with drums, bass and chords, mixes it with built-ins and exports it.
@@ -492,7 +493,7 @@ Roughly in order of value:
 | Phase | Status |
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | In progress: steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser) done, with three rounds of fixes from trying them (2026-10-13), pending checks by hand; step 1.6 done (all six devices, and the starter project on them), step 1.7 done (metronome, tempo, recording and Capture) and step 1.8 done (export to WAV and FLAC, normalized to a loudness), pending checks by hand |
+| 1. Make a beat | Steps done, pending checks by hand and the milestone 1 check (a usability test with a newcomer and an FL Studio user): steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser), with three rounds of fixes from trying them (2026-10-13); step 1.6 (all six devices, and the starter project on them), step 1.7 (metronome, tempo, recording and Capture), step 1.8 (export to WAV and FLAC, normalized to a loudness) and step 1.9 (first launch, the guide and the new-project window), 2026-10-15 |
 | 2. Finish a track | Not started |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
