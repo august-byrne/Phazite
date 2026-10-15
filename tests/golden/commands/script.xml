@@ -209,14 +209,42 @@
       </MIDICLIP>
       <MIDICLIP colour="ff00ff00"
                 currentTake="0"
-                id="1053"
+                id="1050"
                 length="1"
                 linkID=""
                 mute="0"
                 name="One"
                 offset="1"
                 speed="1"
-                start="3"
+                start="1"
+                sync="0">
+        <AUTOMATIONCURVES/>
+        <GROOVE/>
+        <QUANTISATION/>
+        <SEQUENCE channelNumber="1"
+                  ver="1">
+          <NOTE b="0"
+                c="0"
+                l="0.5"
+                p="60"
+                v="100"/>
+          <NOTE b="1"
+                c="0"
+                l="0.5"
+                p="64"
+                v="100"/>
+        </SEQUENCE>
+      </MIDICLIP>
+      <MIDICLIP colour="ff00ff00"
+                currentTake="0"
+                id="1049"
+                length="1"
+                linkID=""
+                mute="0"
+                name="One"
+                offset="0"
+                speed="1"
+                start="2"
                 sync="0">
         <AUTOMATIONCURVES/>
         <GROOVE/>

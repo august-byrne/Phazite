@@ -58,4 +58,11 @@ void deleteClips (const juce::Array<te::Clip*>&, bool closeGap);
 // trimmed or split. With closeGap, what comes after on those tracks moves back to fill the gap. (Removing
 // time from the whole song, sections and automation too, is Arrangement.h's removeTime().)
 void deleteTimeRange (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&, bool closeGap);
+
+// Copies what lies in a time range on some tracks right after it, on the same tracks, and returns where the copy is.
+// The copy is cut at the range's edges, as Split cuts clips; the clips themselves aren't cut there. Each piece of the
+// copy replaces what lies under it (as REAPER's razor edits trim what is behind them), so nothing plays twice, and what
+// no piece lands on stays. The pieces are copies, not aliases. (Copying a range on every track, with room made for it,
+// is Arrangement.h's copyTime().)
+te::BeatRange duplicateTimeRange (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&);
 } // namespace phazite

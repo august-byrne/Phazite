@@ -59,6 +59,7 @@ edit.insertTime: Insert Time
 edit.removeTime: Remove Time
 transport.loopSelection: Remove Time
 edit.split: Split
+edit.duplicate: Duplicate Range
 edit.delete: Delete Range
 transport.loop: Delete Range
 transport.loop: Delete Range
@@ -68,7 +69,7 @@ transport.loopSelection: Delete Range
 edit.selectAll: Delete Range
 edit.selectAll: Delete Range
 edit.deselectAll: Delete Range
-edit.undo: Split
+edit.undo: Duplicate Range
 edit.redo: Delete Range
-edit.undoOrRedo: Split
+edit.undoOrRedo: Duplicate Range
 edit.undoOrRedo: Delete Range

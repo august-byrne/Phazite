@@ -5,6 +5,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
+#include "model/commands/Undo.h"
 #include "model/transport/Playback.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/playlist/TrackHeader.h"
@@ -345,4 +346,44 @@ TEST_CASE ("With FL Studio's keymap, a selected time range loops while it is sel
     CHECK (screen.range.isEmpty());
     CHECK (phazite::doesLoopFollowSong (*screen.edit));
     CHECK (screen.edit->tempoSequence.toBeats (transport.getLoopRange()).getEnd().inBeats() == doctest::Approx (16.0));
+}
+
+TEST_CASE ("With FL Studio's keymap, Ctrl+B repeats a selected time range, and the loop follows it")
+{
+    PlaylistScreen screen;
+    phazite::addSelectionCommands (screen.registry, screen.selection, screen.range);
+    screen.registry.setKeymap (*phazite::Keymap::findBuiltIn ("FL Studio"));
+    screen.addClip (0, 0.0, 4.0);
+    phazite::test::dispatchPendingMessages();
+
+    // Two bars on the first two tracks; in this keymap the range loops while it is selected.
+    screen.range.set ({ beats (0.0), beats (8.0) }, { screen.tracks[0], screen.tracks[1] });
+    phazite::test::dispatchPendingMessages();
+    auto& transport = screen.edit->getTransport();
+    REQUIRE (transport.looping.get());
+
+    screen.window.pressKey (juce::KeyPress::createFromDescription ("command + B"));
+    phazite::test::dispatchPendingMessages();
+
+    // What was in the range is there again right after it, the range is the copy, and the loop went with it.
+    const auto starts = screen.getClipStarts (0);
+    REQUIRE (starts.size() == 2);
+    CHECK (starts[1] == doctest::Approx (8.0));
+    CHECK (screen.getClipStarts (1).empty());
+    CHECK (screen.edit->getUndoManager().getUndoDescription() == juce::String ("Duplicate Range"));
+    CHECK (screen.range.getRange().getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (screen.range.getRange().getEnd().inBeats() == doctest::Approx (16.0));
+    const auto loop = screen.edit->tempoSequence.toBeats (transport.getLoopRange());
+    CHECK (loop.getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (loop.getEnd().inBeats() == doctest::Approx (16.0));
+
+    // Undo takes the copy back and puts the range back, and the loop follows the range there.
+    phazite::undo (*screen.edit);
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.getClipStarts (0).size() == 1);
+    CHECK (screen.range.getRange().getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (screen.range.getRange().getEnd().inBeats() == doctest::Approx (8.0));
+    const auto loopAfterUndo = screen.edit->tempoSequence.toBeats (transport.getLoopRange());
+    CHECK (loopAfterUndo.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (loopAfterUndo.getEnd().inBeats() == doctest::Approx (8.0));
 }

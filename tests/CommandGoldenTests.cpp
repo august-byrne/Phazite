@@ -483,7 +483,8 @@ TEST_SUITE ("golden")
         s.run ({ "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve", "clip.fadeLinear", "edit.deleteAndCloseGap" });
 
         // A time range on One, which ends inside a clip, so that Split cuts it there: time inserted and removed, the range
-        // looped, split and deleted.
+        // looped and split, duplicated (the copy replaces the part Split cut off, and becomes the range) and deleted (the
+        // copy goes).
         s.setup ("select beats 2 to 6 on One",
                  [&s, one]
                  {
@@ -491,7 +492,7 @@ TEST_SUITE ("golden")
                      s.range.set ({ beats (2.0), beats (6.0) }, { one });
                  });
 
-        s.run ({ "edit.insertTime", "edit.removeTime", "transport.loopSelection", "edit.split", "edit.delete" });
+        s.run ({ "edit.insertTime", "edit.removeTime", "transport.loopSelection", "edit.split", "edit.duplicate", "edit.delete" });
 
         // The range is looped: Loop turns looping off and on again, Loop the Song makes the loop follow the song again,
         // and, with looping off, Loop Selection without a range loops the song.

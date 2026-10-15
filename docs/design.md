@@ -213,7 +213,7 @@ Esc returns to the Smart Tool. The current tool and its key show on the toolbar 
 
 **Editing commands:**
 - split at the playhead or pointer;
-- duplicate, make alias, make unique;
+- duplicate, make alias, make unique. Duplicate with a time range selected copies what lies in it on its tracks right after it, cut at the range's edges as Split cuts (the clips in the range aren't cut there); each piece replaces what it lands on, as REAPER's razor edits trim what is behind them, and the range moves to the copy, so Duplicate again repeats it; Undo puts the range back, as REAPER's undo puts razor edit areas back (2026-10-14, [open question 19](#25-open-questions));
 - delete, with or without closing the gap (ripple);
 - insert or remove time across all tracks;
 - nudge, and quantize clip positions;
@@ -850,6 +850,10 @@ Raised by the architecture review (2026-10-14):
 17. **Projects from a newer Phazite:** with a schema version in every project (architecture phase A1), Phazite can tell that a newer version saved a project, whose data it might misread or drop when saving. Proposed: don't open it, say that a newer Phazite saved it, keep it in Open Recent, and at startup open the next recent project instead. The alternatives are opening it read-only, or after a warning. Until this is decided, Phazite does as proposed.
 18. **Choosing what loops:** where the loop is doesn't count as an unsaved change, but turning looping on or off, or switching between looping the song and a range, still does: the view state of [section 18](#18-projects-saving-and-export) doesn't include them. Proposed: treat them like the loop's position.
 
+Raised by the golden tests (2026-10-14):
+
+19. **What a duplicated time range does to what is after it:** Duplicate puts what lies in the range right after it, and each piece replaces what it lands on, as REAPER's razor edits do by default and as pasting in Ableton Live overwrites, so nothing plays twice. Alternatives: clear the whole stretch after the range on its tracks (an exact repeat, but it also deletes clips on tracks where the range was empty), or lay the copy over what is there, as FL Studio's playlist does. Until this is decided, each piece replaces what it lands on.
+
 ## 26. Decision log
 
 | Date | Decision |
@@ -891,6 +895,7 @@ Raised by the architecture review (2026-10-14):
 | 2026-10-14 | Designer workflow: the design tokens move into a file in the DTCG format, which a designer edits or exports from Figma, Penpot or Tokens Studio, and a gallery app shows every control and view in all three themes (architecture phase A4). A declarative layout tool (JIVE or foleys_gui_magic) only if dialogs become a bottleneck |
 | 2026-10-14 | Go to End goes to the song's end, where the loop ends: the end of the bar its last clip ends in, as FL Studio ends a song for export. Sections don't count, even in a song without clips |
 | 2026-10-14 | A note edit makes its clip longer only into the empty space after it, never over the next clip on its track, as Bitwig extends clips and as Studio One can keep events from overlapping; a note that doesn't fit stays in the clip without playing. A looped clip doesn't grow |
+| 2026-10-14 | Duplicate works on a selected time range, as in REAPER and Ableton Live and as FL Studio's Ctrl+B repeats its time selection: what lies in it on its tracks goes again right after it, each piece replacing what it lands on (open question 19), and the range moves to the copy so that Duplicate again repeats it, and back on Undo, as REAPER's undo puts razor edit areas back; the clips in the range aren't cut, and Duplicate as Alias stays for clips and sections |
 
 ## Appendix A. Research summary
 

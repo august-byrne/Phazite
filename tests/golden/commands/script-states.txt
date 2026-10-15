@@ -504,7 +504,7 @@ after edit.deleteAndCloseGap:
 after select beats 2 to 6 on One:
   edit.delete: on "Delete Range"
   edit.deleteAndCloseGap: on "Delete and Close Gap"
-  edit.duplicate: off "Duplicate Range"
+  edit.duplicate: on "Duplicate Range"
   edit.split: on "Split"
   edit.insertTime: on "Insert Time"
   edit.removeTime: on "Remove Time"
@@ -521,6 +521,10 @@ after transport.loopSelection:
 after edit.split:
   edit.undo: on "Undo Split"
   edit.undoOrRedo: on "Undo Split"
+after edit.duplicate:
+  edit.undo: on "Undo Duplicate Range"
+  edit.undoOrRedo: on "Undo Duplicate Range"
+  selected: range 6.000-10.000 beats on One
 after edit.delete:
   edit.undo: on "Undo Delete Range"
   edit.undoOrRedo: on "Undo Delete Range"
@@ -548,14 +552,14 @@ after transport.loopSelection:
   transport.loopSong: on, ticked "Loop the Song"
 after select nothing:
 after edit.selectAll:
-  edit.delete: on "Delete 2 Clips"
+  edit.delete: on "Delete 3 Clips"
   edit.deleteAndCloseGap: on "Delete and Close Gap"
-  edit.duplicate: on "Duplicate 2 Clips"
+  edit.duplicate: on "Duplicate 3 Clips"
   edit.duplicateAsAlias: on "Duplicate as Alias"
   edit.mute: on "Mute"
   edit.split: on "Split"
   edit.deselectAll: on "Deselect All"
-  selected: clip on One at 0.000, clip on One at 6.000
+  selected: clip on One at 0.000, clip on One at 4.000, clip on One at 2.000
 after select One:
   edit.delete: on "Delete Track"
   edit.deleteAndCloseGap: off "Delete and Close Gap"
@@ -591,7 +595,7 @@ after edit.deselectAll:
   track.solo: off "Solo Track"
   selected: nothing
 after edit.undo:
-  edit.undo: on "Undo Split"
+  edit.undo: on "Undo Duplicate Range"
   edit.redo: on "Redo Delete Range"
   edit.undoOrRedo: on "Redo Delete Range"
 after edit.redo:
@@ -599,7 +603,7 @@ after edit.redo:
   edit.redo: off "Redo"
   edit.undoOrRedo: on "Undo Delete Range"
 after edit.undoOrRedo:
-  edit.undo: on "Undo Split"
+  edit.undo: on "Undo Duplicate Range"
   edit.redo: on "Redo Delete Range"
   edit.undoOrRedo: on "Redo Delete Range"
 after edit.undoOrRedo:

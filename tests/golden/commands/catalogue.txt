@@ -8,7 +8,7 @@ transport.goToStart | Go to Start | Transport | Moves the playhead to the start 
 transport.goToEnd | Go to End | Transport | Moves the playhead to the end of the song: the end of the bar its last clip ends in. | end, last, fast forward | enabled-when
 edit.delete | Delete | Edit | Deletes the selected notes, time range, sections, clips or tracks. A section goes with what is in it. | remove, erase | enabled-when undo current-name
 edit.deleteAndCloseGap | Delete and Close Gap | Edit | Deletes the selected time range or clips, and moves what comes after them back to close the gap. | ripple delete, shuffle, remove gap | enabled-when undo
-edit.duplicate | Duplicate | Edit | Duplicates the selected sections or clips, right after them, or the selected tracks, each below its original. | copy, clone, repeat | enabled-when undo current-name
+edit.duplicate | Duplicate | Edit | Duplicates the selected notes, time range, sections or clips right after them, or the selected tracks, each below its original. A time range's copy replaces what it lands on, and the range moves to it. | copy, clone, repeat | enabled-when undo current-name
 edit.duplicateAsAlias | Duplicate as Alias | Edit | Duplicates the selected sections or clips right after them, as aliases: editing the notes of one edits them all. A section is copied with what is in it. | linked copy, ghost, pattern, clone, repeat section | enabled-when undo current-name
 clip.makeUnique | Make Unique | Clip | Turns the selected aliases into separate clips, which can be edited on their own. | unlink, independent | enabled-when undo
 edit.mute | Mute | Edit | Silences the selected notes or clips, or unmutes them. | deactivate, disable, silence | enabled-when undo ticked

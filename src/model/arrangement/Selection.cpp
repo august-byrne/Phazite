@@ -8,6 +8,7 @@
 #include "model/notes/Notes.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace phazite
 {
@@ -47,6 +48,68 @@ juce::Array<te::Track*> RangeSelection::getTracks() const
             result.add (t);
 
     return result;
+}
+
+namespace
+{
+    // RangeSelection::setInUndoStep()'s part of an undo step: performed or redone, it sets the range; undone, it puts
+    // back the range there was. It holds the range weakly, since a range can go before its Edit's undo history does
+    // (tests declare the range after the Edit), and the tracks by ID, since Undo gives a deleted track back as a new
+    // object.
+    class SetRange : public juce::UndoableAction
+    {
+    public:
+        SetRange (RangeSelection& selection, te::Edit& e, te::BeatRange newRange, const juce::Array<te::Track*>& newTracks)
+            : target (&selection),
+              edit (e),
+              before (selection.getRange()),
+              after (newRange),
+              tracksBefore (getIDs (selection.getTracks())),
+              tracksAfter (getIDs (newTracks))
+        {
+        }
+
+        bool perform() override { return apply (after, tracksAfter); }
+        bool undo() override { return apply (before, tracksBefore); }
+
+    private:
+        juce::WeakReference<RangeSelection> target;
+        te::Edit& edit;
+        te::BeatRange before, after;
+        std::vector<te::EditItemID> tracksBefore, tracksAfter;
+
+        static std::vector<te::EditItemID> getIDs (const juce::Array<te::Track*>& tracks)
+        {
+            std::vector<te::EditItemID> ids;
+
+            for (auto* track : tracks)
+                ids.push_back (track->itemID);
+
+            return ids;
+        }
+
+        // Always true: JUCE stops undoing a step at an action that fails, and clears the undo history.
+        bool apply (te::BeatRange newRange, const std::vector<te::EditItemID>& ids)
+        {
+            if (auto* selection = target.get())
+            {
+                juce::Array<te::Track*> tracks;
+
+                for (auto id : ids)
+                    if (auto* track = te::findTrackForID (edit, id))
+                        tracks.add (track);
+
+                selection->set (newRange, tracks);
+            }
+
+            return true;
+        }
+    };
+} // namespace
+
+void RangeSelection::setInUndoStep (te::Edit& edit, te::BeatRange newRange, const juce::Array<te::Track*>& newTracks)
+{
+    edit.getUndoManager().perform (new SetRange (*this, edit, newRange, newTracks)); // the undo manager owns it
 }
 
 //==============================================================================
@@ -115,7 +178,7 @@ namespace
             selection.selectOnly (remaining[juce::jmin (row, remaining.size() - 1)]);
     }
 
-    void duplicateSelection (te::SelectionManager& selection, bool asAliases)
+    void duplicateSelection (te::SelectionManager& selection, RangeSelection& range, bool asAliases)
     {
         auto* edit = selection.getEdit();
 
@@ -132,6 +195,17 @@ namespace
                 copies.add (copy.note);
 
             events->setSelected (selection, copies, false);
+            return;
+        }
+
+        // A time range, before sections, clips and tracks (the order Delete and the command's name take): what lies in
+        // it goes again right after it, on its tracks, and the copy becomes the range in the same undo step, so that
+        // Duplicate again repeats it and Undo puts the range back. What else is selected stays, as Delete leaves it.
+        if (! range.isEmpty() && ! asAliases)
+        {
+            const auto tracks = range.getTracks();
+            const auto copied = duplicateTimeRange (*edit, range.getRange(), tracks);
+            range.setInUndoStep (*edit, copied, tracks);
             return;
         }
 
@@ -299,17 +373,17 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .isEnabled = hasRangeOrClips,
                     .undoTarget = getEdit });
 
-    registry.add (
-        { .id = "edit.duplicate",
-          .name = "Duplicate",
-          .category = "Edit",
-          .description = "Duplicates the selected sections or clips, right after them, or the selected tracks, each below its original.",
-          .synonyms = { "copy", "clone", "repeat" },
-          .perform = [&selection] { duplicateSelection (selection, false); },
-          .isEnabled = [&selection, hasNotes, hasSections]
-          { return hasNotes() || hasSections() || ! getSelectedClips (selection).isEmpty() || ! getSelectedTracks (selection).isEmpty(); },
-          .undoTarget = getEdit,
-          .currentName = [&selection, &range] { return describeSelection (selection, range, "Duplicate"); } });
+    registry.add ({ .id = "edit.duplicate",
+                    .name = "Duplicate",
+                    .category = "Edit",
+                    .description =
+                        "Duplicates the selected notes, time range, sections or clips right after them, or the selected tracks, each "
+                        "below its original. A time range's copy replaces what it lands on, and the range moves to it.",
+                    .synonyms = { "copy", "clone", "repeat" },
+                    .perform = [&selection, &range] { duplicateSelection (selection, range, false); },
+                    .isEnabled = hasAnything,
+                    .undoTarget = getEdit,
+                    .currentName = [&selection, &range] { return describeSelection (selection, range, "Duplicate"); } });
 
     registry.add (
         { .id = "edit.duplicateAsAlias",
@@ -318,7 +392,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
           .description = "Duplicates the selected sections or clips right after them, as aliases: editing the notes of one edits "
                          "them all. A section is copied with what is in it.",
           .synonyms = { "linked copy", "ghost", "pattern", "clone", "repeat section" },
-          .perform = [&selection] { duplicateSelection (selection, true); },
+          .perform = [&selection, &range] { duplicateSelection (selection, range, true); },
           .isEnabled = [hasClips, hasSections] { return hasClips() || hasSections(); },
           .undoTarget = getEdit,
           .currentName = [hasSections] { return hasSections() ? juce::String ("Duplicate Section as Aliases") : juce::String(); } });

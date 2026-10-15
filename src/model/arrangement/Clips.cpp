@@ -3,12 +3,39 @@
 #include "Tracks.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace phazite
 {
 namespace
 {
     const auto minimumClipLength = te::BeatDuration::fromBeats (1.0 / 64.0);
+
+    // Positions this close count as the same: rounding between beats and seconds leaves differences this small.
+    const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
+
+    // A copy of the part of a clip that lies in a range, where that part is. The copy is cut at the range's edges as
+    // Split cuts clips (an audio clip loses its fades where it is cut); the clip itself stays whole.
+    te::Clip* copyPartOfClip (te::Clip& clip, te::BeatRange range)
+    {
+        const auto copies = copyClips ({ &clip }, false);
+
+        if (copies.isEmpty())
+            return nullptr;
+
+        auto* part = copies.getFirst();
+
+        if (const auto rest = splitClips ({ part }, range.getStart()); ! rest.isEmpty())
+        {
+            part->removeFromParent(); // what lies before the range
+            part = rest.getFirst();
+        }
+
+        for (auto* after : splitClips ({ part }, range.getEnd()))
+            after->removeFromParent();
+
+        return part;
+    }
 } // namespace
 
 juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager& selection)
@@ -235,5 +262,36 @@ void deleteTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te:
                 if (clip->getPosition().getStart() >= time.getEnd())
                     clip->setStart (clip->getPosition().getStart() - time.getLength(), false, true);
     }
+}
+
+te::BeatRange duplicateTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te::Track*>& tracks)
+{
+    const auto length = range.getLength();
+    const te::BeatRange copyRange (range.getEnd(), range.getEnd() + length);
+
+    if (length <= tinyBeats)
+        return copyRange;
+
+    // The part of each clip that lies in the range, copied where it is, before anything moves.
+    std::vector<te::Clip::Ptr> parts;
+
+    for (auto* track : tracks)
+        if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (track))
+            for (auto* clip : juce::Array<te::Clip*> (clipTrack->getClips())) // a copy: the parts join the list
+                if (clip->getStartBeat() < range.getEnd() - tinyBeats && clip->getEndBeat() > range.getStart() + tinyBeats)
+                    if (auto* part = copyPartOfClip (*clip, range))
+                        parts.emplace_back (part);
+
+    // Each part goes a range's length later, in place of what lies there. What is in the way goes first, so that no
+    // part cuts another.
+    for (const auto& part : parts)
+        if (auto* track = part->getTrack())
+            deleteTimeRange (edit, { part->getStartBeat() + length, part->getEndBeat() + length }, { track }, false);
+
+    for (const auto& part : parts)
+        if (auto* track = part->getClipTrack())
+            moveClip (*part, part->getStartBeat() + length, *track);
+
+    return copyRange;
 }
 } // namespace phazite

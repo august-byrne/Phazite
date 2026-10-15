@@ -4,6 +4,7 @@
 #include "model/arrangement/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
+#include "model/notes/Notes.h"
 #include "ui/timeline/SmartTool.h"
 
 namespace
@@ -317,6 +318,84 @@ TEST_CASE ("A time range is deleted, split, inserted and removed")
     // A range whose tracks are all gone is empty.
     e.edit->deleteTrack (e.tracks[0]);
     CHECK (e.range.isEmpty());
+}
+
+TEST_CASE ("Duplicate copies a time range right after it, and the range moves to the copy")
+{
+    ClipEdit e;
+    auto& crossing = e.addClip (0, 1.0, 2.0); // reaches into the range from before it
+    REQUIRE (phazite::addNote (crossing, 60, beats (2.5), te::BeatDuration::fromBeats (0.5), 100) != nullptr);
+    auto& after = e.addClip (0, 4.5, 3.5); // where the copy lands
+    e.addClip (1, 4.0, 2.0);               // after the range, on a track with nothing in it
+    e.range.set ({ beats (2.0), beats (4.0) }, { e.tracks[0], e.tracks[1] });
+
+    const auto* duplicate = e.registry.find ("edit.duplicate");
+    REQUIRE (duplicate != nullptr);
+    CHECK (duplicate->isEnabled());
+    CHECK (phazite::getCurrentName (*duplicate) == juce::String ("Duplicate Range"));
+    REQUIRE (e.registry.invoke ("edit.duplicate"));
+    CHECK (e.edit->getUndoManager().getUndoDescription() == juce::String ("Duplicate Range"));
+
+    // The part inside the range goes right after it, in place of what was there; the clip it came from stays whole.
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("4.00-6.00")); // nothing of the range landed there
+
+    te::MidiClip* copy = nullptr;
+
+    for (auto* clip : e.tracks[0]->getClips())
+        if (clip != &crossing && clip != &after)
+            copy = dynamic_cast<te::MidiClip*> (clip);
+
+    REQUIRE (copy != nullptr);
+    CHECK_FALSE (copy->isLinked());
+    REQUIRE (copy->getSequence().getNotes().size() == 1);
+    CHECK (phazite::getNoteStart (*copy, *copy->getSequence().getNotes().getFirst()).inBeats() == doctest::Approx (4.5));
+    CHECK (phazite::getNoteStart (crossing, *crossing.getSequence().getNotes().getFirst()).inBeats() == doctest::Approx (2.5));
+
+    // The copy is the range now, on both tracks, and nothing else got selected: Duplicate again repeats it.
+    CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (e.range.getRange().getEnd().inBeats() == doctest::Approx (6.0));
+    CHECK (e.range.getTracks().size() == 2);
+    CHECK (e.selection.getNumObjectsSelected() == 0);
+
+    REQUIRE (e.registry.invoke ("edit.duplicate"));
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-6.00 6.00-7.00 7.00-8.00"));
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("4.00-6.00 6.00-8.00"));
+    CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (6.0));
+
+    // Each was one undo step, and Undo puts the range back where that step found it, so Duplicate after Undo repeats
+    // the same part again.
+    phazite::undo (*e.edit);
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
+    CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (4.0));
+    phazite::undo (*e.edit);
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.50-8.00"));
+    CHECK (describeClips (*e.tracks[1]) == juce::String ("4.00-6.00"));
+    CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (2.0));
+    CHECK (e.range.getRange().getEnd().inBeats() == doctest::Approx (4.0));
+    CHECK (e.range.getTracks().size() == 2);
+
+    // Redo makes the copy again, and the range goes back to it.
+    phazite::redo (*e.edit);
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
+    CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (e.range.getRange().getEnd().inBeats() == doctest::Approx (6.0));
+}
+
+TEST_CASE ("With a time range and a track selected, Duplicate acts on the range, as its name and Delete do")
+{
+    ClipEdit e; // a click on a track's header selects the track and leaves the range (Playlist::trackClicked)
+    e.addClip (0, 0.0, 4.0);
+    e.range.set ({ beats (0.0), beats (4.0) }, { e.tracks[0] });
+    e.selection.selectOnly (e.tracks[1]);
+
+    CHECK (phazite::getCurrentName (*e.registry.find ("edit.duplicate")) == juce::String ("Duplicate Range"));
+    CHECK (phazite::getCurrentName (*e.registry.find ("edit.delete")) == juce::String ("Delete Range"));
+    REQUIRE (e.registry.invoke ("edit.duplicate"));
+    CHECK (te::getAudioTracks (*e.edit).size() == 2); // no track was copied
+    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-4.00 4.00-8.00"));
+    CHECK (e.selection.isSelected (e.tracks[1]));
+    CHECK_FALSE (e.registry.find ("edit.duplicateAsAlias")->isEnabled()); // still clips and sections only
 }
 
 TEST_CASE ("Each tool has a name, a command and a hint")

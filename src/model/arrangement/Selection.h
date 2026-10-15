@@ -11,12 +11,18 @@ class CommandRegistry;
 
 //==============================================================================
 // A time range across some tracks, as dragging empty space or a clip's upper half selects it in the
-// playlist, like REAPER's razor edits. Delete, Split and the time commands act on it. It tells its
-// listeners when it changes.
+// playlist, like REAPER's razor edits. Delete, Duplicate, Split and the time commands act on it. It tells
+// its listeners when it changes.
 class RangeSelection : public juce::ChangeBroadcaster
 {
 public:
     void set (te::BeatRange, const juce::Array<te::Track*>&);
+
+    // The same, as part of the undo step being made in the Edit, for a command that moves the range to what it made
+    // (Duplicate): Undo puts back the range there was, and Redo sets this one again, as REAPER's undo puts razor edit
+    // areas back. A range selected by hand isn't an undo step: that is set().
+    void setInUndoStep (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&);
+
     void clear();
 
     // Empty if nothing is selected, or if the tracks it was on have all been deleted.
@@ -27,6 +33,8 @@ public:
 private:
     te::BeatRange range;
     std::vector<te::SafeSelectable<te::Track>> tracks;
+
+    JUCE_DECLARE_WEAK_REFERENCEABLE (RangeSelection) // SetRange holds it weakly: an undo history can outlive it
 };
 
 //==============================================================================
