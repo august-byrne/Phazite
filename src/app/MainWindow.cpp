@@ -86,6 +86,9 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     pluginKeys = std::make_unique<ui::PluginKeys> (shortcutKeys, computerKeyboard);
     ui::setPluginKeys (pluginKeys.get());
 
+    // The playlist's clips draw their waveforms with Tracktion's thumbnails.
+    ui::setClipWaveformMaker (getClipWaveformMaker());
+
     session.dialogParent = this;
     session.onExport = [this] { showExport(); };
     session.onProjectClosing = [this]
@@ -120,6 +123,7 @@ MainWindow::~MainWindow()
     delete welcomeWindow.getComponent();
 
     ui::setPluginKeys (nullptr);
+    ui::setClipWaveformMaker ({});
     pluginKeys = nullptr;
     commands.getCommandManager().getKeyMappings()->removeChangeListener (this);
     windowKeys = nullptr;

@@ -4,6 +4,7 @@
 #include "model/arrangement/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
+#include "model/project/ProjectContext.h"
 #include "ui/playlist/TrackHeights.h"
 
 namespace
@@ -19,10 +20,10 @@ struct Tracks
             te::getAudioTracks (*edit)[i]->setName (juce::String::charToString ((juce::juce_wchar) ('A' + i)));
 
         edit->getUndoManager().clearUndoHistory();
-        selection.edit = edit.get();
+        context.setEdit (edit.get());
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addTrackCommands (registry, selection);
-        phazite::ui::addTrackViewCommands (registry, selection);
+        phazite::ui::addTrackViewCommands (registry, context);
     }
 
     ~Tracks() { selection.deselectAll(); }
@@ -66,9 +67,22 @@ struct Tracks
 
     juce::String getUndoName() const { return edit->getUndoManager().getUndoDescription(); }
 
+    // How the playlist shows a track's height, through the model's row of it.
+    phazite::TrackRow rowOf (const te::Track& track) const
+    {
+        return phazite::getTrackRow (context, phazite::getTrackID (track)).value_or (phazite::TrackRow());
+    }
+    int heightOf (const te::Track& track) const { return phazite::ui::getTrackHeight (rowOf (track)); }
+    int shownHeightOf (const te::Track& track) const { return phazite::ui::getShownTrackHeight (rowOf (track)); }
+    void setShownHeight (const te::Track& track, int height)
+    {
+        phazite::ui::setShownTrackHeight (context, phazite::getTrackID (track), height);
+    }
+
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    te::SelectionManager selection { phazite::test::getEngine() };
-    phazite::RangeSelection range;
+    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
+    te::SelectionManager& selection = context.getSelection();
+    phazite::RangeSelection& range = context.getRangeSelection();
     phazite::CommandRegistry registry;
 };
 } // namespace
@@ -242,28 +256,28 @@ TEST_CASE ("Track heights stay within limits, and change for the selection or al
     auto& b = *tracks["B"];
 
     CHECK_FALSE (phazite::getSavedTrackHeight (a).has_value()); // a new track has none, and shows the standard height
-    CHECK (phazite::ui::getTrackHeight (a) == phazite::ui::TrackHeight::standard);
-    phazite::ui::setTrackHeight (a, 100000);
-    CHECK (phazite::ui::getTrackHeight (a) == phazite::ui::TrackHeight::maximum);
+    CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::standard);
+    phazite::setSavedTrackHeight (a, 100000);
+    CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::maximum);
 
     // The project keeps a height as given, and the playlist shows it within its limits.
     phazite::setSavedTrackHeight (a, 100000);
     CHECK (phazite::getSavedTrackHeight (a).value_or (0) == 100000);
-    CHECK (phazite::ui::getTrackHeight (a) == phazite::ui::TrackHeight::maximum);
+    CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::maximum);
 
-    phazite::ui::setTrackHeight (a, 0);
-    CHECK (phazite::ui::getTrackHeight (a) == phazite::ui::TrackHeight::minimum);
+    phazite::setSavedTrackHeight (a, 0);
+    CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::minimum);
     CHECK_FALSE (tracks.edit->getUndoManager().canUndo()); // heights aren't undo steps
 
     tracks.select ({ "B" });
     REQUIRE (tracks.registry.invoke ("track.taller"));
-    CHECK (phazite::ui::getTrackHeight (b) == phazite::ui::TrackHeight::standard + phazite::ui::TrackHeight::step);
-    CHECK (phazite::ui::getTrackHeight (a) == phazite::ui::TrackHeight::minimum);
+    CHECK (tracks.heightOf (b) == phazite::ui::TrackHeight::standard + phazite::ui::TrackHeight::step);
+    CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::minimum);
 
     tracks.selection.deselectAll();
     REQUIRE (tracks.registry.invoke ("track.shorter"));
-    CHECK (phazite::ui::getTrackHeight (b) == phazite::ui::TrackHeight::standard);
-    CHECK (phazite::ui::getTrackHeight (a) == phazite::ui::TrackHeight::minimum);
+    CHECK (tracks.heightOf (b) == phazite::ui::TrackHeight::standard);
+    CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::minimum);
     CHECK (phazite::isCollapsed (a)); // past the minimum, a track collapses
     CHECK_FALSE (phazite::isCollapsed (b));
 }
@@ -272,17 +286,17 @@ TEST_CASE ("A track collapses to a thin row by its command, or by getting shorte
 {
     Tracks tracks (2);
     auto& a = *tracks["A"];
-    CHECK (phazite::ui::getShownTrackHeight (a) == phazite::ui::TrackHeight::standard);
+    CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::standard);
 
     tracks.select ({ "A" });
     REQUIRE (tracks.registry.invoke ("track.collapse"));
     CHECK (phazite::isCollapsed (a));
     CHECK (tracks.registry.find ("track.collapse")->isTicked());
-    CHECK (phazite::ui::getShownTrackHeight (a) == phazite::ui::TrackHeight::collapsed);
-    CHECK (phazite::ui::getTrackHeight (a) == phazite::ui::TrackHeight::standard); // kept for when it expands
+    CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::collapsed);
+    CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::standard); // kept for when it expands
     REQUIRE (tracks.registry.invoke ("track.collapse"));
     CHECK_FALSE (phazite::isCollapsed (a));
-    CHECK (phazite::ui::getShownTrackHeight (a) == phazite::ui::TrackHeight::standard);
+    CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::standard);
 
     // Shorter and shorter: 48, 32, then collapsed. Taller expands it again, from the thin row.
     for (int i = 0; i < 3; ++i)
@@ -291,14 +305,14 @@ TEST_CASE ("A track collapses to a thin row by its command, or by getting shorte
     CHECK (phazite::isCollapsed (a));
     REQUIRE (tracks.registry.invoke ("track.taller"));
     CHECK_FALSE (phazite::isCollapsed (a));
-    CHECK (phazite::ui::getShownTrackHeight (a) == phazite::ui::TrackHeight::collapsed + phazite::ui::TrackHeight::step);
+    CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::collapsed + phazite::ui::TrackHeight::step);
 
     // Dragging the edge: halfway between the thin row and the minimum, it snaps to one or the other.
-    phazite::ui::setShownTrackHeight (a, 27);
+    tracks.setShownHeight (a, 27);
     CHECK (phazite::isCollapsed (a));
-    phazite::ui::setShownTrackHeight (a, 29);
+    tracks.setShownHeight (a, 29);
     CHECK_FALSE (phazite::isCollapsed (a));
-    CHECK (phazite::ui::getShownTrackHeight (a) == phazite::ui::TrackHeight::minimum);
+    CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::minimum);
     CHECK_FALSE (tracks.edit->getUndoManager().canUndo()); // collapsing changes the view, as heights do
 
     // A collapsed folder keeps its height (its tracks are hidden instead), and doesn't collapse by resizing.
@@ -306,11 +320,11 @@ TEST_CASE ("A track collapses to a thin row by its command, or by getting shorte
     REQUIRE (tracks.registry.invoke ("track.groupIntoFolder"));
     auto& folder = *tracks["Folder"];
     phazite::setCollapsed (folder, true);
-    CHECK (phazite::ui::getShownTrackHeight (folder) == phazite::ui::TrackHeight::standard);
+    CHECK (tracks.shownHeightOf (folder) == phazite::ui::TrackHeight::standard);
     phazite::setCollapsed (folder, false);
-    phazite::ui::setShownTrackHeight (folder, 0);
+    tracks.setShownHeight (folder, 0);
     CHECK_FALSE (phazite::isCollapsed (folder));
-    CHECK (phazite::ui::getShownTrackHeight (folder) == phazite::ui::TrackHeight::minimum);
+    CHECK (tracks.shownHeightOf (folder) == phazite::ui::TrackHeight::minimum);
 }
 
 TEST_CASE ("Tracks group into a folder, which collapses, takes more tracks and ungroups")

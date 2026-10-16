@@ -98,10 +98,14 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Import.h
     src/model/arrangement/Outlines.cpp
     src/model/arrangement/Outlines.h
+    src/model/arrangement/PlaylistModel.cpp
+    src/model/arrangement/PlaylistModel.h
     src/model/arrangement/Sections.cpp
     src/model/arrangement/Sections.h
     src/model/arrangement/Selection.cpp
     src/model/arrangement/Selection.h
+    src/model/arrangement/SongRange.cpp
+    src/model/arrangement/SongRange.h
     src/model/arrangement/SongSelection.cpp
     src/model/arrangement/SongSelection.h
     src/model/arrangement/TimelineModel.cpp
@@ -110,6 +114,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/TrackColours.h
     src/model/arrangement/Tracks.cpp
     src/model/arrangement/Tracks.h
+    src/model/arrangement/internal/SongRange.h
     src/model/arrangement/internal/SongSelection.h
     src/model/base/Beats.h
     src/model/base/IDs.h
@@ -395,6 +400,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/pianoroll/PianoRollRows.cpp
     src/ui/playlist/ClipComponent.cpp
     src/ui/playlist/ClipComponent.h
+    src/ui/playlist/ClipWaveform.cpp
+    src/ui/playlist/ClipWaveform.h
     src/ui/playlist/Playlist.cpp
     src/ui/playlist/Playlist.h
     src/ui/playlist/PlaylistDrops.cpp
@@ -455,6 +462,8 @@ target_sources(phazite_app PRIVATE
     src/app/AppServices.h
     src/app/AppUIBehaviour.cpp
     src/app/AppUIBehaviour.h
+    src/app/ClipWaveforms.cpp
+    src/app/ClipWaveforms.h
     src/app/MainWindow.cpp
     src/app/MainWindow.h
     src/app/PluginWindow.cpp
@@ -565,6 +574,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp
+        tests/PlaylistModelTests.cpp
         tests/PluginKeysTests.cpp
         tests/PlaylistTests.cpp
         tests/ProjectContextTests.cpp

@@ -24,7 +24,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context)
     addTransportCommands (registry, selection);
     addSelectionCommands (registry, selection, range);
     addTrackCommands (registry, selection);
-    ui::addTrackViewCommands (registry, selection); // right after the model's: the order decides key ties and lists
+    ui::addTrackViewCommands (registry, context); // right after the model's: the order decides key ties and lists
     addSectionCommands (registry, selection);
     addOutlineCommands (registry, selection);
     addMixerCommands (registry, selection);

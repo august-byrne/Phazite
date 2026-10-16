@@ -73,8 +73,8 @@ struct Playlist::Gesture : public TimelineGesture
     // A clip being moved, and where it started.
     struct MovingClip
     {
-        te::SafeSelectable<te::Clip> clip;
-        te::BeatPosition start;
+        ClipID clip;
+        BeatPosition start;
         int row = -1;
     };
 
@@ -105,16 +105,20 @@ struct Playlist::Gesture : public TimelineGesture
     }
 
     Kind kind = Kind::pending;
-    te::SafeSelectable<te::Clip> clip; // the clip the mouse went down on, if any
-    std::optional<ClipZone> zone;      // and where on it
-    int startRow = -1;                 // the row it went down on
+    ClipID clip;                  // the clip the mouse went down on, if any
+    std::optional<ClipZone> zone; // and where on it
+    int startRow = -1;            // the row it went down on
 
     std::vector<MovingClip> moving;
-    te::BeatPosition anchorStart; // where the clip under the mouse (or its copy) started; it is the one that snaps
-    int rowOffset = 0;            // how many rows the moving clips have moved
+    BeatPosition anchorStart; // where the clip under the mouse (or its copy) started; it is the one that snaps
+    int rowOffset = 0;        // how many rows the moving clips have moved
 
-    std::optional<CrossfadeSpot> crossfade;                         // where the mouse went down to draw a crossfade
-    te::TimeDuration startOffset;                                   // Slip: the clip's offset when the drag began
-    std::vector<te::SafeSelectable<te::Selectable>> selectedBefore; // Select with Ctrl: what was selected already
+    std::optional<CrossfadeSpot> crossfade; // where the mouse went down to draw a crossfade
+    double startOffset = 0.0;               // Slip: the clip's offset when the drag began, in seconds
+
+    // Select with Ctrl: what was selected already.
+    std::vector<TrackID> tracksBefore;
+    std::vector<ClipID> clipsBefore;
+    std::vector<SectionID> sectionsBefore;
 };
 } // namespace phazite::ui

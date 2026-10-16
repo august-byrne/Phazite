@@ -31,6 +31,7 @@ public:
     // Shows these clips' notes. The piano roll follows the playlist's selection by itself; this is for
     // opening a clip, as double-clicking it in the playlist does.
     void showClips (const juce::Array<te::MidiClip*>&);
+    void showClip (ClipID);                      // the same, of one clip by its ID
     juce::Array<te::MidiClip*> getClips() const; // those still in the song
 
     // Shows a track's MIDI clip at the playhead, or the one nearest to it. Without one, the piano roll shows

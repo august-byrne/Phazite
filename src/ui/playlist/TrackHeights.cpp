@@ -1,29 +1,42 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TrackHeights.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/project/ProjectContext.h"
 
 namespace phazite::ui
 {
-int getTrackHeight (const te::Track& track)
+namespace
 {
-    return juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, getSavedTrackHeight (track).value_or (TrackHeight::standard));
-}
-
-void setTrackHeight (te::Track& track, int height)
-{
-    setSavedTrackHeight (track, juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, height));
-}
-
-int getShownTrackHeight (const te::Track& track)
-{
-    return isCollapsed (track) && ! track.isFolderTrack() ? TrackHeight::collapsed : getTrackHeight (track);
-}
-
-void setShownTrackHeight (te::Track& track, int height)
-{
-    if (track.isFolderTrack())
+    // The selected tracks, or all of the playlist's if none is selected.
+    std::vector<TrackID> getSelectedTracksOrAll (const ProjectContext& context)
     {
-        setTrackHeight (track, height);
+        const auto selected = context.getSongSelection().getTracks();
+        return selected.empty() ? getAllPlaylistTracks (context) : selected;
+    }
+} // namespace
+
+int getTrackHeight (const TrackRow& row)
+{
+    return juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, row.savedHeight.value_or (TrackHeight::standard));
+}
+
+int getShownTrackHeight (const TrackRow& row)
+{
+    return row.collapsed && row.kind != TrackType::folder ? TrackHeight::collapsed : getTrackHeight (row);
+}
+
+void setShownTrackHeight (ProjectContext& context, TrackID id, int height)
+{
+    const auto row = getTrackRow (context, id);
+
+    if (! row.has_value())
+        return;
+
+    const auto kept = juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, height);
+
+    if (row->kind == TrackType::folder)
+    {
+        setSavedTrackHeight (context, id, kept);
         return;
     }
 
@@ -31,33 +44,29 @@ void setShownTrackHeight (te::Track& track, int height)
     const auto collapse = height < (TrackHeight::collapsed + TrackHeight::minimum) / 2;
 
     if (! collapse)
-        setTrackHeight (track, height);
+        setSavedTrackHeight (context, id, kept);
 
-    setCollapsed (track, collapse);
+    setCollapsed (context, id, collapse);
 }
 
-void resizeTrack (te::Track& track, int change)
+void resizeTracks (ProjectContext& context, const std::vector<TrackID>& ids, int change)
 {
-    setShownTrackHeight (track, getShownTrackHeight (track) + change);
+    for (const auto id : ids)
+        if (const auto row = getTrackRow (context, id))
+            setShownTrackHeight (context, id, getShownTrackHeight (*row) + change);
 }
 
-void resizeTracks (const juce::Array<te::Track*>& tracks, int change)
+void addTrackViewCommands (CommandRegistry& registry, ProjectContext& context)
 {
-    for (auto* track : tracks)
-        resizeTrack (*track, change);
-}
-
-void addTrackViewCommands (CommandRegistry& registry, te::SelectionManager& selection)
-{
-    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+    const auto hasProject = [&context] { return context.hasProject(); };
 
     registry.add ({ .id = "track.taller",
                     .name = "Taller Tracks",
                     .category = "Track",
                     .description = "Makes the selected tracks taller, or all tracks if none is selected.",
                     .synonyms = { "height", "bigger", "vertical zoom", "expand" },
-                    .perform = [&selection] { resizeTracks (getSelectedTracksOrAll (selection), TrackHeight::step); },
-                    .isEnabled = hasEdit,
+                    .perform = [&context] { resizeTracks (context, getSelectedTracksOrAll (context), TrackHeight::step); },
+                    .isEnabled = hasProject,
                     .repeatsWhileHeld = true });
 
     registry.add (
@@ -67,8 +76,8 @@ void addTrackViewCommands (CommandRegistry& registry, te::SelectionManager& sele
           .description =
               "Makes the selected tracks shorter, or all tracks if none is selected. Past the shortest, a track collapses to its name.",
           .synonyms = { "height", "smaller", "vertical zoom", "compact" },
-          .perform = [&selection] { resizeTracks (getSelectedTracksOrAll (selection), -TrackHeight::step); },
-          .isEnabled = hasEdit,
+          .perform = [&context] { resizeTracks (context, getSelectedTracksOrAll (context), -TrackHeight::step); },
+          .isEnabled = hasProject,
           .repeatsWhileHeld = true });
 }
 } // namespace phazite::ui

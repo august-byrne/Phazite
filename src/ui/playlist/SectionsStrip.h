@@ -28,11 +28,13 @@ public:
     void setEdit (te::Edit*);
 
     // Shows the section's name in a text field, to rename it.
+    void startRenaming (SectionID);
     void startRenaming (te::ArrangerClip&);
 
     // The menu for a section (or none) at a place in the song: renaming and coloring it, adding one there,
     // and the song outlines. The time bar's bar numbers show it too.
     void showMenu (te::ArrangerClip*, te::BeatPosition where);
+    void showMenuAt (BeatPosition); // the menu of the section there, which it selects, or of none
 
     // While a section is dragged: where it would go (moving), or where its end would be (resizing). The
     // playlist draws it across the tracks too; onDragChanged says when to repaint.

@@ -97,9 +97,9 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     hintBar.setDefaultHint ([this] { return getDefaultHint(); });
 
     // Double-clicking a MIDI clip opens it in the piano roll, which then has the keys.
-    playlist.onOpenClip = [this] (te::MidiClip& clip)
+    playlist.onOpenClip = [this] (ClipID clip)
     {
-        pianoRoll.showClips ({ &clip });
+        pianoRoll.showClip (clip);
         revealEditor (EditorDock::pianoRoll);
         pianoRoll.grabKeyboardFocus();
         setActiveEditor (&pianoRoll);

@@ -2,9 +2,7 @@
 // The playlist's tools: what the mouse does in the lanes (ui/timeline/SmartTool.h), and the edits of the selected clips
 // that the time line's commands make.
 #include "PlaylistParts.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
-#include "model/engine/LiveInput.h"
+#include "model/arrangement/TimelineModel.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -58,7 +56,7 @@ namespace
 } // namespace
 
 //==============================================================================
-void Playlist::clipClicked (te::Clip& clip, const juce::ModifierKeys& mods)
+void Playlist::clipClicked (ClipID clip, const juce::ModifierKeys& mods)
 {
     range.clear();
 
@@ -66,9 +64,9 @@ void Playlist::clipClicked (te::Clip& clip, const juce::ModifierKeys& mods)
     if (! (mods.isCommandDown() || mods.isShiftDown()))
         selection.selectOnly (clip);
     else if (selection.isSelected (clip))
-        selection.deselect (&clip);
+        selection.remove (clip);
     else
-        selection.addToSelection (clip);
+        selection.add (clip);
 }
 
 void Playlist::showClipMenu()
@@ -88,152 +86,126 @@ void Playlist::showClipMenu()
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 
-void Playlist::selectRange (te::BeatPosition from, te::BeatPosition to, int fromRow, int toRow)
+void Playlist::selectRange (BeatPosition from, BeatPosition to, int fromRow, int toRow)
 {
-    juce::Array<te::Track*> tracks;
+    std::vector<TrackID> tracks;
 
     for (auto row = std::min (fromRow, toRow); row <= std::max (fromRow, toRow); ++row)
         if (juce::isPositiveAndBelow (row, (int) rows.size()))
-            if (auto* track = rows[(size_t) row].track.get())
-                tracks.add (track);
+            tracks.push_back (rows[(size_t) row].track.id);
 
-    range.set (te::BeatRange (std::min (from, to), std::max (from, to)), tracks);
+    range.set (BeatRange::between (from, to), tracks);
 }
 
-std::optional<Playlist::CrossfadeSpot> Playlist::findCrossfadeAt (juce::Point<int> position) const
+std::optional<CrossfadeSpot> Playlist::findCrossfadeAt (juce::Point<int> position) const
 {
-    auto* e = getEdit();
     const auto row = getRowAt (position.y);
 
-    if (e == nullptr || row < 0)
+    if (row < 0)
         return {};
 
     // Only the lower third of a row, so the upper part still trims.
     const auto& r = rows[(size_t) row];
-    auto* track = dynamic_cast<te::ClipTrack*> (r.track.get());
 
-    if (track == nullptr || position.y < getRowTop (r) + r.height * 2 / 3)
+    if (position.y < getRowTop (r) + r.height * 2 / 3)
         return {};
 
-    const auto xOf = [this, e] (te::TimePosition time) { return getView().beatToX (fromTracktion (e->tempoSequence.toBeats (time))); };
+    // Clips a pixel apart count as touching.
+    const auto pixel = BeatDuration::fromBeats (1.0 / getView().pixelsPerBeat);
 
-    for (auto* a : track->getClips())
-    {
-        for (auto* b : track->getClips())
-        {
-            auto* first = dynamic_cast<te::AudioClipBase*> (a);
-            auto* second = dynamic_cast<te::AudioClipBase*> (b);
-
-            if (first == nullptr || second == nullptr || first == second)
-                continue;
-
-            // The second starts after the first, where it ends or inside it (a crossfade already), and ends later.
-            const auto one = first->getEditTimeRange(), two = second->getEditTimeRange();
-
-            if (two.getStart() <= one.getStart() || two.getEnd() <= one.getEnd() || xOf (two.getStart()) > xOf (one.getEnd()) + 1.0)
-                continue;
-
-            const auto boundary = te::TimePosition::fromSeconds ((one.getEnd().inSeconds() + two.getStart().inSeconds()) / 2.0);
-
-            if (std::abs (xOf (boundary) - position.x) <= 6.0)
-                return CrossfadeSpot { first, second, boundary };
-        }
-    }
+    for (const auto& spot : getCrossfadeSpots (context, r.track.id, pixel))
+        if (std::abs (getView().beatToX (spot.boundary) - position.x) <= 6.0)
+            return spot;
 
     return {};
 }
 
-te::Clip* Playlist::placeClip (int row, te::BeatPosition beat, bool snapStart)
+ClipID Playlist::placeClip (int row, BeatPosition beat, bool snapStart)
 {
-    auto* track =
-        juce::isPositiveAndBelow (row, (int) rows.size()) ? dynamic_cast<te::ClipTrack*> (rows[(size_t) row].track.get()) : nullptr;
-
-    if (track == nullptr)
-        return nullptr;
+    if (! juce::isPositiveAndBelow (row, (int) rows.size()))
+        return {};
 
     // From the grid line at or before the beat.
-    return phazite::placeClip (*track, snapStart ? toTracktion (snapDown (fromTracktion (beat), {})) : beat, lastClip.get());
+    return phazite::placeClip (context, rows[(size_t) row].track.id, snapStart ? snapDown (beat, {}) : beat, lastClip);
 }
 
 void Playlist::muteOrDeleteClipAt (juce::Point<int> position, bool deleteIt)
 {
     auto* component = getClipComponentAt (position);
-    auto* clip = component != nullptr ? component->getClip() : nullptr;
 
-    if (clip == nullptr || gesture == nullptr)
+    if (component == nullptr || gesture == nullptr)
         return;
 
     // Each clip once per drag, however long the mouse stays on it.
-    if (! gesture->doOnce (clip->state))
+    const auto clip = component->getClip();
+
+    if (! gesture->doOnce (clip))
         return;
 
     if (deleteIt)
-        deleteClips ({ clip }, false);
+        deleteClips (context, { clip }, false);
     else
-        toggleClipsMuted ({ clip });
+        toggleClipsMuted (context, { clip });
 }
 
 void Playlist::selectClipsIn (juce::Rectangle<int> area, bool addToSelection)
 {
-    juce::Array<te::Selectable*> items;
+    range.clear();
+    selection.clear();
 
     if (addToSelection && gesture != nullptr)
-        for (const auto& before : gesture->selectedBefore)
-            if (auto* item = before.get())
-                items.add (item);
+    {
+        for (const auto track : gesture->tracksBefore)
+            selection.add (track);
+
+        for (const auto clip : gesture->clipsBefore)
+            selection.add (clip);
+
+        for (const auto section : gesture->sectionsBefore)
+            selection.add (section);
+    }
 
     for (auto* component : clipComponents)
-        if (auto* clip = component->getClip(); clip != nullptr && getClipBounds (*clip).intersects (area))
-            items.addIfNotAlreadyThere (clip);
-
-    range.clear();
-    selection.deselectAll();
-
-    for (auto* item : items)
-        selection.addToSelection (item);
+        if (getClipBounds (component->getInfo()).intersects (area))
+            selection.add (component->getClip());
 }
 
 //==============================================================================
 bool Playlist::canNudgeSelection() const
 {
-    return ! range.isEmpty() || ! getSelectedClips (selection).isEmpty();
+    return ! range.isEmpty() || ! selection.getClips().empty();
 }
 
 void Playlist::nudgeSelection (int direction)
 {
     // A step of the grid as it is now, so what is seen is what moves.
-    const auto step = te::BeatDuration::fromBeats (direction * getGridStepInBeats());
+    const auto step = BeatDuration::fromBeats (direction * getGridStepInBeats());
 
-    if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
+    if (const auto clips = selection.getClips(); ! clips.empty())
     {
-        nudgeClips (clips, step);
+        nudgeClips (context, clips, step);
         return;
     }
 
     if (! range.isEmpty())
     {
         const auto r = range.getRange();
-        const auto start = te::BeatPosition::fromBeats (std::max (0.0, (r.getStart() + step).inBeats()));
-        range.set ({ start, start + r.getLength() }, range.getTracks());
+        const auto start = BeatPosition::fromBeats (std::max (0.0, (r.getStart() + step).inBeats()));
+        range.set ({ start, r.getLength() }, range.getTracks());
     }
 }
 
 bool Playlist::canQuantizeSelection() const
 {
-    return ! getSelectedClips (selection).isEmpty();
+    return ! selection.getClips().empty();
 }
 
 void Playlist::quantizeSelection()
 {
-    auto* e = getEdit();
-
-    if (e == nullptr)
-        return;
-
     // To the grid as it is now, whether or not snapping is on: quantizing is asked for explicitly.
-    for (auto* clip : getSelectedClips (selection))
-        if (auto* track = clip->getClipTrack())
-            moveClip (*clip, toTracktion (snapToGrid (context, fromTracktion (clip->getStartBeat()), getGridStep())), *track);
+    for (const auto id : selection.getClips())
+        if (const auto clip = getClip (context, id))
+            moveClip (context, id, snapToGrid (context, clip->range.getStart(), getGridStep()), clip->track);
 }
 
 //==============================================================================
@@ -264,8 +236,8 @@ void Playlist::lanesMouseMove (const juce::MouseEvent& e)
 
     if (component != nullptr && (currentTool == Tool::smart || currentTool == Tool::draw))
     {
-        const auto zone = getClipZone (getClipBounds (*component->getClip()).toFloat(), e.position,
-                                       dynamic_cast<te::AudioClipBase*> (component->getClip()) != nullptr);
+        const auto& clip = component->getInfo();
+        const auto zone = getClipZone (getClipBounds (clip).toFloat(), e.position, clip.kind == ClipType::audio);
         lanes->setMouseCursor (getCursorFor (zone));
         lanes->setDescription (describeClipZone (zone));
         return;
@@ -278,9 +250,8 @@ void Playlist::lanesMouseMove (const juce::MouseEvent& e)
 void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 {
     gesture = nullptr;
-    auto* ed = getEdit();
 
-    if (ed == nullptr)
+    if (! context.hasProject())
         return;
 
     gesture = std::make_unique<Gesture>();
@@ -291,7 +262,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     beginDragAutoRepeat (autoRepeatInterval); // so the lanes go on scrolling while the mouse rests past an edge
 
     auto* component = getClipComponentAt (e.getPosition());
-    auto* clip = component != nullptr ? component->getClip() : nullptr;
+    const auto clip = component != nullptr ? component->getClip() : ClipID();
     auto currentTool = getTool();
 
     if (e.mods.isPopupMenu())
@@ -314,7 +285,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 
     // With FL Studio's keymap, the Smart Tool places the last clip used where empty space is clicked, as FL's Draw
     // tool does. Ctrl+drag still selects a time range there.
-    const auto placesForSmartTool = currentTool == Tool::smart && clip == nullptr && getCommands().getKeymap().clickPlacesClips
+    const auto placesForSmartTool = currentTool == Tool::smart && ! clip.isValid() && getCommands().getKeymap().clickPlacesClips
                                     && ! e.mods.isCommandDown() && ! findCrossfadeAt (e.getPosition()).has_value();
 
     if (placesForSmartTool)
@@ -326,7 +297,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
         case Tool::paint:
         {
             // Draw drags clips as the Smart Tool does; Paint selects them.
-            if (clip != nullptr)
+            if (clip.isValid())
             {
                 if (currentTool == Tool::draw)
                 {
@@ -334,7 +305,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
                 }
                 else
                 {
-                    clipClicked (*clip, e.mods);
+                    clipClicked (clip, e.mods);
                     gesture = nullptr;
                 }
 
@@ -343,9 +314,10 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 
             range.clear();
             gesture->beginStep (context, currentTool == Tool::draw ? "Place Clip" : "Paint Clips");
-            auto* placed = placeClip (gesture->startRow, toTracktion (gesture->startBeat), getGrid().snap && ! e.mods.isAltDown());
+            const auto placed = placeClip (gesture->startRow, gesture->startBeat, getGrid().snap && ! e.mods.isAltDown());
+            const auto placedClip = getClip (context, placed);
 
-            if (placed == nullptr)
+            if (! placedClip.has_value())
             {
                 gesture->endStep(); // nothing was placed, so a drag that follows begins a step of its own
 
@@ -367,40 +339,40 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
                 // A drag that follows moves the new clip.
                 gesture->kind = Gesture::Kind::move;
                 gesture->clip = placed;
-                gesture->anchorStart = placed->getStartBeat();
-                gesture->moving.push_back ({ placed, placed->getStartBeat(), gesture->startRow });
+                gesture->anchorStart = placedClip->range.getStart();
+                gesture->moving.push_back ({ placed, placedClip->range.getStart(), gesture->startRow });
             }
             else
             {
                 gesture->kind = Gesture::Kind::paint;
-                gesture->nextPaintStart = fromTracktion (placed->getEndBeat());
+                gesture->nextPaintStart = placedClip->range.getEnd();
             }
 
             return;
         }
 
         case Tool::slice:
-            if (clip != nullptr)
+            if (clip.isValid())
             {
                 gesture->beginStep (context, "Split Clip");
-                splitClips ({ clip }, toTracktion (snap (gesture->startBeat, e.mods)));
+                splitClips (context, { clip }, snap (gesture->startBeat, e.mods));
             }
 
             gesture = nullptr;
             return;
 
         case Tool::slip:
-            if (clip == nullptr)
+            if (! clip.isValid())
             {
                 gesture = nullptr;
                 return;
             }
 
-            clipClicked (*clip, {});
+            clipClicked (clip, {});
             gesture->beginStep (context, "Slip Clip");
             gesture->kind = Gesture::Kind::slip;
             gesture->clip = clip;
-            gesture->startOffset = clip->getPosition().getOffset();
+            gesture->startOffset = getSlipOffset (context, clip);
             return;
 
         case Tool::mute:
@@ -441,9 +413,10 @@ void Playlist::smartToolDown (const juce::MouseEvent& e)
     // On a clip: where it is clicked decides what a drag does.
     if (auto* component = getClipComponentAt (e.getPosition()))
     {
-        auto& clip = *component->getClip();
-        gesture->clip = &clip;
-        gesture->zone = getClipZone (getClipBounds (clip).toFloat(), e.position, dynamic_cast<te::AudioClipBase*> (&clip) != nullptr);
+        const auto& info = component->getInfo();
+        const auto clip = info.id;
+        gesture->clip = clip;
+        gesture->zone = getClipZone (getClipBounds (info).toFloat(), e.position, info.kind == ClipType::audio);
 
         if (e.mods.isPopupMenu())
         {
@@ -471,31 +444,28 @@ void Playlist::smartToolDown (const juce::MouseEvent& e)
 
     if (gesture->startRow < 0)
     {
-        selection.deselectAll();
+        selection.clear();
         return;
     }
 
-    if (auto* track = rows[(size_t) gesture->startRow].track.get())
+    const auto track = rows[(size_t) gesture->startRow].track.id;
+
+    if (e.mods.isPopupMenu())
     {
-        if (e.mods.isPopupMenu())
-        {
-            if (! selection.isSelected (track))
-                trackClicked (*track, {});
+        if (! selection.isSelected (track))
+            trackClicked (track, {});
 
-            gesture = nullptr;
-            showTrackMenu (*track);
-            return;
-        }
-
-        trackClicked (*track, e.mods);
+        gesture = nullptr;
+        showTrackMenu (track);
+        return;
     }
+
+    trackClicked (track, e.mods);
 }
 
 void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
 {
-    auto* ed = getEdit();
-
-    if (gesture == nullptr || ed == nullptr)
+    if (gesture == nullptr || ! context.hasProject())
         return;
 
     if (gesture->kind == Gesture::Kind::pending)
@@ -511,11 +481,9 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
     if (const auto directions = gesture->getAutoScrollDirections())
         autoScroll (e.getPosition(), lanes->getLocalBounds().withTrimmedTop (pinnedHeight), *directions);
 
-    // In Tracktion's beats, as the clips are, until the playlist works by IDs (architecture phase A3).
-    const auto beat = toTracktion (getView().xToBeat (e.position.x));
-    const auto snapped = [this, &e] (te::BeatPosition b) { return toTracktion (snap (fromTracktion (b), e.mods)); };
+    const auto beat = getView().xToBeat (e.position.x);
     const auto rowAtPointer = getRowAt (juce::jlimit (0, lanes->getHeight() - 1, e.y));
-    auto* clip = gesture->clip.get();
+    const auto clip = gesture->clip;
 
     switch (gesture->kind)
     {
@@ -523,10 +491,10 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
         {
             // The clip under the mouse snaps to the grid, and the others move with it, but no clip moves
             // before the start of the song.
-            auto delta = snapped (gesture->anchorStart + (beat - toTracktion (gesture->startBeat))) - gesture->anchorStart;
+            auto delta = snap (gesture->anchorStart + (beat - gesture->startBeat), e.mods) - gesture->anchorStart;
 
             for (const auto& moving : gesture->moving)
-                delta = std::max (delta, te::BeatPosition() - moving.start);
+                delta = std::max (delta, BeatPosition() - moving.start);
 
             // Up or down by whole rows, as long as every clip lands on a track that holds clips.
             if (const auto row = rowAtPointer; row >= 0 && gesture->startRow >= 0)
@@ -537,7 +505,7 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
                                                {
                                                    const auto target = moving.row + offset;
                                                    return juce::isPositiveAndBelow (target, (int) rows.size())
-                                                          && dynamic_cast<te::ClipTrack*> (rows[(size_t) target].track.get()) != nullptr;
+                                                          && rows[(size_t) target].track.kind != TrackType::folder;
                                                });
 
                 if (fits)
@@ -545,45 +513,30 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
             }
 
             for (const auto& moving : gesture->moving)
-            {
-                const auto row = moving.row + gesture->rowOffset;
-
-                if (auto* c = moving.clip.get(); c != nullptr && juce::isPositiveAndBelow (row, (int) rows.size()))
-                    if (auto* track = dynamic_cast<te::ClipTrack*> (rows[(size_t) row].track.get()))
-                        moveClip (*c, moving.start + delta, *track);
-            }
+                if (const auto row = moving.row + gesture->rowOffset; juce::isPositiveAndBelow (row, (int) rows.size()))
+                    moveClip (context, moving.clip, moving.start + delta, rows[(size_t) row].track.id);
 
             break;
         }
 
         case Gesture::Kind::trimStart:
-            if (clip != nullptr)
-                trimClipStart (*clip, snapped (beat));
-
+            trimClipStart (context, clip, snap (beat, e.mods));
             break;
 
         case Gesture::Kind::trimEnd:
-            if (clip != nullptr)
-                trimClipEnd (*clip, snapped (beat));
-
+            trimClipEnd (context, clip, snap (beat, e.mods));
             break;
 
         case Gesture::Kind::fadeIn:
         case Gesture::Kind::fadeOut:
-            if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
-            {
-                const auto time = ed->tempoSequence.toTime (beat);
-                const auto fadeIn = gesture->kind == Gesture::Kind::fadeIn;
-                setClipFade (*audio, fadeIn, fadeIn ? time - audio->getPosition().getStart() : audio->getPosition().getEnd() - time);
-            }
-
+            fadeClipTo (context, clip, gesture->kind == Gesture::Kind::fadeIn, beat);
             break;
 
         case Gesture::Kind::selectRange:
         {
             // From where the drag started to the pointer, across the rows between them.
             const auto lastRow = (int) rows.size() - 1;
-            const auto from = snapped (toTracktion (gesture->startBeat)), to = snapped (beat);
+            const auto from = snap (gesture->startBeat, e.mods), to = snap (beat, e.mods);
             const auto row = rowAtPointer >= 0 ? rowAtPointer : lastRow; // below the last row: up to it
 
             if (lastRow >= 0 && from != to)
@@ -593,43 +546,25 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
         }
 
         case Gesture::Kind::crossfade:
-        {
-            // As long as twice the distance from the boundary to the mouse: the boundary stays in the middle.
-            const auto& spot = *gesture->crossfade;
-            auto* first = dynamic_cast<te::AudioClipBase*> (spot.first.get());
-            auto* second = dynamic_cast<te::AudioClipBase*> (spot.second.get());
-
-            if (first != nullptr && second != nullptr)
-            {
-                const auto distance = ed->tempoSequence.toTime (beat) - spot.boundary;
-                setCrossfade (*first, *second, spot.boundary, te::TimeDuration::fromSeconds (2.0 * std::abs (distance.inSeconds())));
-            }
-
+            setCrossfade (context, *gesture->crossfade, beat);
             break;
-        }
 
         case Gesture::Kind::slip:
-            if (clip != nullptr)
-            {
-                // What is inside follows the mouse; the clip stays where it is.
-                const auto& tempo = ed->tempoSequence;
-                slipClip (*clip, gesture->startOffset,
-                          tempo.toTime (snapped (beat)) - tempo.toTime (snapped (toTracktion (gesture->startBeat))));
-            }
-
+            // What is inside follows the mouse; the clip stays where it is.
+            slipClip (context, clip, gesture->startOffset, snap (gesture->startBeat, e.mods), snap (beat, e.mods));
             break;
 
         case Gesture::Kind::paint:
             // Another copy each time the mouse passes the end of the last one.
-            while (beat >= toTracktion (gesture->nextPaintStart))
+            while (beat >= gesture->nextPaintStart)
             {
-                auto* placed = placeClip (gesture->startRow, toTracktion (gesture->nextPaintStart), false);
+                const auto placed = getClip (context, placeClip (gesture->startRow, gesture->nextPaintStart, false));
 
-                if (placed == nullptr)
+                if (! placed.has_value())
                     break;
 
-                selection.addToSelection (placed);
-                gesture->nextPaintStart = fromTracktion (placed->getEndBeat());
+                selection.add (placed->id);
+                gesture->nextPaintStart = placed->range.getEnd();
             }
 
             break;
@@ -658,7 +593,7 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
 
 void Playlist::beginDrag (const juce::MouseEvent& e)
 {
-    auto* clip = gesture->clip.get();
+    auto clip = gesture->clip;
     gesture->clickOnMouseUp = false;
 
     if (getTool() == Tool::select)
@@ -666,8 +601,11 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
         gesture->kind = Gesture::Kind::select;
 
         if (e.mods.isCommandDown())
-            for (auto* item : selection.getSelectedObjects())
-                gesture->selectedBefore.emplace_back (item);
+        {
+            gesture->tracksBefore = selection.getTracks();
+            gesture->clipsBefore = selection.getClips();
+            gesture->sectionsBefore = selection.getSections();
+        }
 
         return;
     }
@@ -685,12 +623,12 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
         return;
     }
 
-    if (clip == nullptr || ! gesture->zone.has_value() || *gesture->zone == ClipZone::selectRange)
+    if (! clip.isValid() || ! gesture->zone.has_value() || *gesture->zone == ClipZone::selectRange)
     {
         // The range is the selection now. (Nothing else stays selected, so Delete can't take a whole track
         // when a range was meant.)
         gesture->kind = Gesture::Kind::selectRange;
-        selection.deselectAll();
+        selection.clear();
         return;
     }
 
@@ -727,9 +665,9 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
     gesture->kind = Gesture::Kind::move;
 
     if (! selection.isSelected (clip))
-        selection.addToSelection (clip);
+        selection.add (clip);
 
-    auto clips = getSelectedClips (selection);
+    auto clips = selection.getClips();
     const auto alias = e.mods.isCommandDown() && e.mods.isShiftDown();
     const auto copy = e.mods.isCommandDown() && ! alias;
     const auto many = clips.size() > 1;
@@ -739,21 +677,23 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
 
     if (copy || alias)
     {
-        const auto anchorIndex = clips.indexOf (clip);
-        clips = copyClips (clips, alias);
-        clip = clips[anchorIndex];
+        const auto anchorIndex = (size_t) (std::find (clips.begin(), clips.end(), clip) - clips.begin());
+        clips = copyClips (context, clips, alias);
+        clip = anchorIndex < clips.size() ? clips[anchorIndex] : ClipID();
         gesture->clip = clip;
 
-        selection.deselectAll(); // the copies are what moves
+        selection.clear(); // the copies are what moves
 
-        for (auto* c : clips)
-            selection.addToSelection (c);
+        for (const auto c : clips)
+            selection.add (c);
     }
 
-    gesture->anchorStart = clip != nullptr ? clip->getStartBeat() : toTracktion (gesture->startBeat);
+    const auto anchor = getClip (context, clip);
+    gesture->anchorStart = anchor.has_value() ? anchor->range.getStart() : gesture->startBeat;
 
-    for (auto* c : clips)
-        gesture->moving.push_back ({ c, c->getStartBeat(), getRowOf (c->getTrack()) });
+    for (const auto id : clips)
+        if (const auto moving = getClip (context, id))
+            gesture->moving.push_back ({ id, moving->range.getStart(), getRowOf (moving->track) });
 }
 
 juce::Point<int> Playlist::getGestureStart() const
@@ -773,14 +713,14 @@ void Playlist::lanesMouseUp (const juce::MouseEvent& e)
         {
             zoomAround (e.position.x, e.mods.isAltDown() ? 0.5 : 2.0);
         }
-        else if (auto* clip = gesture->clip.get(); clip != nullptr && gesture->clickOnMouseUp)
+        else if (gesture->clip.isValid() && gesture->clickOnMouseUp)
         {
-            clipClicked (*clip, e.mods);
+            clipClicked (gesture->clip, e.mods);
         }
         else if (getTool() == Tool::select && ! e.mods.isCommandDown())
         {
             range.clear();
-            selection.deselectAll();
+            selection.clear();
         }
     }
     else if (gesture->kind == Gesture::Kind::zoom && rubberBand.getWidth() > TimelineGesture::dragThreshold)
@@ -802,10 +742,9 @@ void Playlist::lanesMouseUp (const juce::MouseEvent& e)
 
 void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
 {
-    auto* ed = getEdit();
     const auto row = getRowAt (e.y);
 
-    if (ed == nullptr || getTool() != Tool::smart)
+    if (! context.hasProject() || getTool() != Tool::smart)
         return;
 
     // Under the last track: a new one at the end, as in Logic, Cubase and REAPER.
@@ -820,18 +759,18 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
     // On a MIDI clip: open it in the piano roll.
     if (auto* component = getClipComponentAt (e.getPosition()))
     {
-        if (auto* midi = dynamic_cast<te::MidiClip*> (component->getClip()); midi != nullptr && onOpenClip != nullptr)
-            onOpenClip (*midi);
+        if (component->getInfo().kind == ClipType::midi && onOpenClip != nullptr)
+            onOpenClip (component->getClip());
 
         return;
     }
 
     // On a track with an instrument: an empty MIDI clip, a bar long, from the grid line before the click.
-    auto* track = dynamic_cast<te::AudioTrack*> (rows[(size_t) row].track.get());
+    const auto track = getTrackRow (context, rows[(size_t) row].track.id);
 
-    if (track == nullptr || ! hasInstrument (*track))
+    if (! track.has_value() || track->kind != TrackType::track || ! track->hasInstrument)
         return;
 
-    addMidiClipAt (*track, toTracktion (snapDown (getView().xToBeat (e.position.x), e.mods)), &selection);
+    addMidiClipAt (context, track->id, snapDown (getView().xToBeat (e.position.x), e.mods));
 }
 } // namespace phazite::ui

@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist's track headers: clicking, dragging and their menus; adding tracks at the end; and the playlist's commands.
 #include "PlaylistParts.h"
-#include "model/arrangement/Sections.h"
-#include "model/arrangement/Tracks.h"
 #include "ui/input/CommandUI.h"
 
 namespace phazite::ui
 {
 void Playlist::addTrackAtEnd (bool folder)
 {
-    auto* e = getEdit();
-
-    if (e == nullptr)
+    if (! context.hasProject())
         return;
 
-    auto* added = phazite::addTrackAtEnd (*e, folder, &selection);
-    handleUpdateNowIfNeeded(); // its row is there now
+    const auto added = phazite::addTrackAtEnd (context, folder);
+    rebuild(); // its row is there now
     scrollToShow (getRowOf (added));
 }
 
@@ -45,41 +41,31 @@ void Playlist::showAddTrackMenu()
 
 void Playlist::showRulerMenu (BeatPosition where)
 {
-    auto* e = getEdit();
-
-    if (e == nullptr)
-        return;
-
     // As a right-click on the section there would.
-    const auto beat = toTracktion (where);
-    auto* section = getSectionAt (*e, beat);
-
-    if (section != nullptr && ! selection.isSelected (section))
-        selection.selectOnly (section);
-
-    sectionsStrip.showMenu (section, beat);
+    if (context.hasProject())
+        sectionsStrip.showMenuAt (where);
 }
 
 void Playlist::setColourOfSelectedTracks (juce::Colour colour)
 {
-    setTrackColours (getSelectedTracks (selection), colour);
+    setTrackColours (context, selection.getTracks(), colour);
 }
 
 //==============================================================================
-void Playlist::trackClicked (te::Track& track, const juce::ModifierKeys& mods)
+void Playlist::trackClicked (TrackID track, const juce::ModifierKeys& mods)
 {
     // The arrow keys then step through the tracks, rather than move a slider that had the focus.
     lanes->grabKeyboardFocus();
 
     // Shift selects the tracks from the last one clicked to this one.
-    if (const auto anchorRow = getRowOf (selectionAnchor.get()); mods.isShiftDown() && anchorRow >= 0)
+    if (const auto anchorRow = getRowOf (selectionAnchor); mods.isShiftDown() && anchorRow >= 0)
     {
-        const auto row = getRowOf (&track);
-        selection.deselectAll();
+        const auto row = getRowOf (track);
+        selection.clear();
 
         for (auto i = std::min (anchorRow, row); i <= std::max (anchorRow, row); ++i)
-            if (auto* t = rows[(size_t) i].track.get())
-                selection.addToSelection (t);
+            if (juce::isPositiveAndBelow (i, (int) rows.size()))
+                selection.add (rows[(size_t) i].track.id);
 
         return;
     }
@@ -87,14 +73,14 @@ void Playlist::trackClicked (te::Track& track, const juce::ModifierKeys& mods)
     if (! mods.isCommandDown())
         selection.selectOnly (track);
     else if (selection.isSelected (track))
-        selection.deselect (&track);
+        selection.remove (track);
     else
-        selection.addToSelection (track);
+        selection.add (track);
 
-    selectionAnchor = &track;
+    selectionAnchor = track;
 }
 
-void Playlist::showTrackMenu (te::Track&)
+void Playlist::showTrackMenu (TrackID)
 {
     auto& bridge = getCommands();
     juce::PopupMenu menu;
@@ -112,9 +98,10 @@ void Playlist::showTrackMenu (te::Track&)
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 
-void Playlist::showColourMenu (te::Track& track, juce::Component& target)
+void Playlist::showColourMenu (TrackID track, juce::Component& target)
 {
-    ui::showColourMenu (target, getTrackColour (track, getRowOf (&track)),
+    const auto row = getRowOf (track);
+    ui::showColourMenu (target, row >= 0 ? rows[(size_t) row].track.colour : juce::Colours::grey,
                         [safeThis = juce::Component::SafePointer<Playlist> (this)] (juce::Colour colour)
                         {
                             if (safeThis != nullptr)
@@ -158,11 +145,10 @@ void Playlist::trackSelectionDragged (TrackHeader& header, const juce::MouseEven
     if (to < 0) // below the last row
         to = (int) rows.size() - 1;
 
-    selection.deselectAll();
+    selection.clear();
 
     for (auto i = std::min (from, to); i <= std::max (from, to); ++i)
-        if (auto* t = rows[(size_t) i].track.get())
-            selection.addToSelection (t);
+        selection.add (rows[(size_t) i].track.id);
 
     selectionAnchor = header.getTrack();
 }
@@ -173,28 +159,27 @@ void Playlist::trackDragEnded (TrackHeader&, const juce::MouseEvent&)
     dropRow = -1;
     repaint();
 
-    auto* e = getEdit();
-    const auto moving = getSelectedTracks (selection);
+    const auto moving = selection.getTracks();
 
-    if (e == nullptr || target < 0 || moving.isEmpty())
+    if (! context.hasProject() || target < 0 || moving.empty())
         return;
 
     // The tracks go, in order, after the nearest track above the drop point that isn't moving.
-    te::Track* previous = nullptr;
+    TrackID previous;
 
-    for (auto i = target - 1; i >= 0 && previous == nullptr; --i)
-        if (auto* t = rows[(size_t) i].track.get(); t != nullptr && ! selection.isSelected (t))
-            previous = t;
+    for (auto i = target - 1; i >= 0 && ! previous.isValid(); --i)
+        if (const auto id = rows[(size_t) i].track.id; ! selection.isSelected (id))
+            previous = id;
 
-    moveTracksAfter (moving, previous);
+    moveTracksAfter (context, moving, previous);
 }
 
 //==============================================================================
 void Playlist::addCommands (CommandRegistry& registry)
 {
-    const auto hasEdit = [this] { return getEdit() != nullptr; };
-    const auto hasSelectedTracks = [this] { return ! getSelectedTracks (selection).isEmpty(); };
-    const auto hasSelectedSections = [this] { return ! getSelectedSections (selection).isEmpty(); };
+    const auto hasProject = [this] { return context.hasProject(); };
+    const auto hasSelectedTracks = [this] { return ! selection.getTracks().empty(); };
+    const auto hasSelectedSections = [this] { return ! selection.getSections().empty(); };
 
     registry.add ({ .id = "edit.rename",
                     .name = "Rename",
@@ -204,19 +189,19 @@ void Playlist::addCommands (CommandRegistry& registry)
                     .perform =
                         [this]
                     {
-                        if (auto* section = getSelectedSections (selection).getFirst())
+                        if (const auto sections = selection.getSections(); ! sections.empty())
                         {
-                            sectionsStrip.startRenaming (*section);
+                            sectionsStrip.startRenaming (sections.front());
                             return;
                         }
 
-                        handleUpdateNowIfNeeded(); // a track added a moment ago has its header now
+                        rebuild(); // a track added a moment ago has its header now
 
-                        if (auto* track = getSelectedTracks (selection).getFirst())
+                        if (const auto tracks = selection.getTracks(); ! tracks.empty())
                         {
-                            scrollToShow (getRowOf (track));
+                            scrollToShow (getRowOf (tracks.front()));
 
-                            if (auto* header = getHeaderFor (track))
+                            if (auto* header = getHeaderFor (tracks.front()))
                                 header->startRenaming();
                         }
                     },
@@ -238,14 +223,14 @@ void Playlist::addCommands (CommandRegistry& registry)
                     .perform =
                         [this]
                     {
-                        handleUpdateNowIfNeeded();
+                        rebuild();
 
-                        if (auto* track = getSelectedTracks (selection).getFirst())
+                        if (const auto tracks = selection.getTracks(); ! tracks.empty())
                         {
-                            scrollToShow (getRowOf (track));
+                            scrollToShow (getRowOf (tracks.front()));
 
-                            if (auto* header = getHeaderFor (track))
-                                showColourMenu (*track, *header);
+                            if (auto* header = getHeaderFor (tracks.front()))
+                                showColourMenu (tracks.front(), *header);
                         }
                     },
                     .isEnabled = hasSelectedTracks });
@@ -261,7 +246,7 @@ void Playlist::addCommands (CommandRegistry& registry)
                         focusMode = ! focusMode;
                         layOutRows();
                     },
-                    .isEnabled = hasEdit,
+                    .isEnabled = hasProject,
                     .isTicked = [this] { return focusMode; } });
 }
 

@@ -93,6 +93,13 @@ void PianoRoll::setEdit (te::Edit* newEdit)
 }
 
 //==============================================================================
+void PianoRoll::showClip (ClipID id)
+{
+    if (auto* edit = context.getEdit())
+        if (auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))))
+            showClips ({ clip });
+}
+
 void PianoRoll::showClips (const juce::Array<te::MidiClip*>& toShow)
 {
     setClips (toShow);

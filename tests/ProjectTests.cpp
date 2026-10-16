@@ -466,8 +466,8 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
 
     // Every view setting: tracks' heights (one shown so short that it collapses), a collapsed folder, a pinned track, drum
     // mode and rows, and both editors' grids, which gives the piano roll's its element.
-    phazite::ui::setTrackHeight (*track, 200);
-    phazite::ui::setShownTrackHeight (*other, 20);
+    phazite::setSavedTrackHeight (*track, 200);
+    phazite::setCollapsed (*other, true); // as dragging its edge well below the minimum does
     phazite::setCollapsed (*folder, true);
     phazite::setPinned (*track, true);
     phazite::setDrumTrack (*track, true);
@@ -505,7 +505,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     REQUIRE (t != nullptr);
     REQUIRE (o != nullptr);
     REQUIRE (f != nullptr);
-    CHECK (phazite::ui::getTrackHeight (*t) == 200);
+    CHECK (phazite::getSavedTrackHeight (*t).value_or (0) == 200);
     CHECK (phazite::isCollapsed (*o));
     CHECK (phazite::isCollapsed (*f));
     CHECK (phazite::isPinned (*t));

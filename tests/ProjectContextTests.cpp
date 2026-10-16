@@ -155,13 +155,14 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
             all.clips = all.clips || changes.clips;
             all.sections = all.sections || changes.sections;
             all.tempo = all.tempo || changes.tempo;
+            all.view = all.view || changes.view;
         }
 
         juce::StringArray groups;
 
         for (const auto& [group, name] :
              { std::pair (all.tracks, "tracks"), std::pair (all.devices, "devices"), std::pair (all.clips, "clips"),
-               std::pair (all.sections, "sections"), std::pair (all.tempo, "tempo") })
+               std::pair (all.sections, "sections"), std::pair (all.tempo, "tempo"), std::pair (all.view, "view") })
             if (group)
                 groups.add (name);
 
@@ -200,10 +201,11 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     edit->tempoSequence.getTempo (0)->setBpm (100.0);
     CHECK (hear() == "clips sections tempo");
 
-    // What Tracktion writes as it plays, and view state such as how tall a track shows, are no change to the song.
+    // What Tracktion writes as it plays is no change to the song; view state, such as how tall a track shows, is a group of
+    // its own.
     edit->getTransport().setPosition (te::TimePosition::fromSeconds (1.0));
     phazite::setSavedTrackHeight (*track, 120);
-    CHECK (hear().empty());
+    CHECK (hear() == "view");
 
     // Changes not yet told are the closing project's: none come after another opens.
     track->setName ("Lead");

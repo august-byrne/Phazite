@@ -5,10 +5,12 @@
 #pragma once
 
 #include "TimelineView.h"
+#include "model/base/IDs.h"
 #include "model/commands/SongGesture.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -33,6 +35,15 @@ struct TimelineGesture
     // For tools that act once on each thing the mouse passes over (Delete and Mute): true the first time for each
     // thing, which then counts as done.
     bool doOnce (const juce::ValueTree& thing);
+    template <typename Kind>
+    bool doOnce (ItemID<Kind> thing)
+    {
+        if (std::find (doneIDs.begin(), doneIDs.end(), thing.getRaw()) != doneIDs.end())
+            return false;
+
+        doneIDs.push_back (thing.getRaw());
+        return true;
+    }
 
     juce::Point<int> startPosition; // where the mouse went down, in the component it went down in
     BeatPosition startBeat;         // the beat under it then
@@ -43,5 +54,6 @@ struct TimelineGesture
 private:
     std::unique_ptr<SongGesture> step;
     std::vector<juce::ValueTree> done;
+    std::vector<std::uint64_t> doneIDs;
 };
 } // namespace phazite::ui

@@ -1,42 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PlaylistParts.h"
 #include "TrackHeights.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Sections.h"
-#include "model/arrangement/Tracks.h"
-#include "model/transport/Playback.h"
+#include "model/arrangement/TimelineModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
 {
-namespace
-{
-    bool isTrackState (const juce::ValueTree& state)
-    {
-        return state.hasType (te::IDs::TRACK) || state.hasType (te::IDs::FOLDERTRACK);
-    }
-
-    // The clip a state belongs to (a note belongs to its clip, say), or an invalid tree.
-    juce::ValueTree findClipState (juce::ValueTree state)
-    {
-        while (state.isValid() && ! te::Clip::isClipState (state) && ! isTrackState (state))
-            state = state.getParent();
-
-        return te::Clip::isClipState (state) ? state : juce::ValueTree();
-    }
-
-    bool isTempoState (const juce::ValueTree& state)
-    {
-        return state.hasType (te::IDs::TEMPO) || state.hasType (te::IDs::TIMESIG);
-    }
-
-    // A clip on a track; sections are arranger clips, which the sections strip shows.
-    bool isContentClipState (const juce::ValueTree& state)
-    {
-        return te::Clip::isClipState (state) && ! state.hasType (te::IDs::ARRANGERCLIP);
-    }
-} // namespace
-
 //==============================================================================
 Playlist::Lanes::Lanes (Playlist& p)
     : playlist (p)
@@ -51,26 +20,24 @@ void Playlist::Lanes::paint (juce::Graphics& g)
     const auto clip = g.getClipBounds();
     g.fillAll (p.background);
 
-    auto* ed = playlist.getEdit();
-
-    if (ed == nullptr)
+    if (! playlist.context.hasProject())
         return;
 
     // The song's sections, as ghosts behind the tracks: a faint wash of each one's color.
-    const auto sections = getSections (*ed);
+    const auto sections = getSongSections (playlist.context);
     const auto& timeline = playlist.getView();
-    const auto xOf = [&timeline] (te::BeatPosition beat) { return juce::roundToInt (timeline.beatToX (fromTracktion (beat))); };
+    const auto xOf = [&timeline] (BeatPosition beat) { return juce::roundToInt (timeline.beatToX (beat)); };
 
-    for (auto* section : sections)
+    for (const auto& section : sections)
     {
-        const auto left = xOf (section->getStartBeat());
+        const auto left = xOf (section.range.getStart());
         const auto wash =
-            juce::Rectangle<int> (left, clip.getY(), xOf (section->getEndBeat()) - left, clip.getHeight()).getIntersection (clip);
+            juce::Rectangle<int> (left, clip.getY(), xOf (section.range.getEnd()) - left, clip.getHeight()).getIntersection (clip);
 
         if (! wash.isEmpty())
         {
-            g.setColour (getSectionColour (*section).withAlpha (playlist.selection.isSelected (section) ? SectionTint::selectedWash
-                                                                                                        : SectionTint::wash));
+            g.setColour (
+                section.colour.withAlpha (playlist.selection.isSelected (section.id) ? SectionTint::selectedWash : SectionTint::wash));
             g.fillRect (wash);
         }
     }
@@ -79,10 +46,9 @@ void Playlist::Lanes::paint (juce::Graphics& g)
     // carry them.
     for (const auto& row : playlist.rows)
     {
-        auto* track = row.track.get();
         const auto area = getRowArea (row).getIntersection (clip);
 
-        if (track == nullptr || area.isEmpty() || ! playlist.selection.isSelected (track))
+        if (area.isEmpty() || ! playlist.selection.isSelected (row.track.id))
             continue;
 
         g.setColour (p.text.withAlpha (TrackTint::selectedRow));
@@ -104,16 +70,16 @@ void Playlist::Lanes::paint (juce::Graphics& g)
     }
 
     // Where each section starts, and where the last one ends: lines in their colors, over the grid.
-    for (auto* section : sections)
+    for (const auto& section : sections)
     {
-        g.setColour (getSectionColour (*section).withAlpha (SectionTint::edge));
-        g.fillRect (xOf (section->getStartBeat()), clip.getY(), 1, clip.getHeight());
+        g.setColour (section.colour.withAlpha (SectionTint::edge));
+        g.fillRect (xOf (section.range.getStart()), clip.getY(), 1, clip.getHeight());
     }
 
-    if (auto* last = sections.getLast())
+    if (! sections.empty())
     {
-        g.setColour (getSectionColour (*last).withAlpha (SectionTint::edge));
-        g.fillRect (xOf (last->getEndBeat()), clip.getY(), 1, clip.getHeight());
+        g.setColour (sections.back().colour.withAlpha (SectionTint::edge));
+        g.fillRect (xOf (sections.back().range.getEnd()), clip.getY(), 1, clip.getHeight());
     }
 }
 
@@ -121,7 +87,7 @@ juce::Rectangle<int> Playlist::Lanes::getRowArea (const Row& row) const
 {
     const juce::Rectangle<int> rowArea (0, playlist.getRowTop (row), getWidth(), row.height);
     const auto band = getLocalBounds().withHeight (playlist.pinnedHeight);
-    return rowArea.getIntersection (row.pinned ? band : getLocalBounds().withTrimmedTop (playlist.pinnedHeight));
+    return rowArea.getIntersection (row.track.pinned ? band : getLocalBounds().withTrimmedTop (playlist.pinnedHeight));
 }
 
 void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
@@ -132,10 +98,11 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     // The range, on each of its tracks' rows.
     if (! playlist.range.isEmpty())
     {
-        const auto left = juce::roundToInt (timeline.beatToX (fromTracktion (playlist.range.getRange().getStart())));
-        const auto right = juce::roundToInt (timeline.beatToX (fromTracktion (playlist.range.getRange().getEnd())));
+        const auto shown = playlist.range.getRange();
+        const auto left = juce::roundToInt (timeline.beatToX (shown.getStart()));
+        const auto right = juce::roundToInt (timeline.beatToX (shown.getEnd()));
 
-        for (auto* track : playlist.range.getTracks())
+        for (const auto track : playlist.range.getTracks())
         {
             if (const auto row = playlist.getRowOf (track); row >= 0)
             {
@@ -152,7 +119,7 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     // Where dragged files would go: a line at that time, on that track or below the tracks.
     if (playlist.fileDropBeat.has_value())
     {
-        const auto x = juce::roundToInt (timeline.beatToX (fromTracktion (*playlist.fileDropBeat)));
+        const auto x = juce::roundToInt (timeline.beatToX (*playlist.fileDropBeat));
         const auto area = juce::isPositiveAndBelow (playlist.fileDropRow, (int) playlist.rows.size())
                               ? getRowArea (playlist.rows[(size_t) playlist.fileDropRow])
                               : getLocalBounds();
@@ -232,8 +199,9 @@ void Playlist::AddTrackRow::mouseDown (const juce::MouseEvent& e)
 Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     : TimelineEditor (bridge, projectContext, GridOwner::playlist),
       context (projectContext),
-      selection (projectContext.getSelection()),
-      range (projectContext.getRangeSelection()),
+      selection (projectContext.getSongSelection()),
+      range (projectContext.getSongRange()),
+      sectionsStrip (*this, projectContext.getSelection(), projectContext.getRangeSelection()),
       addTrackRow (std::make_unique<AddTrackRow> (*this)),
       lanes (std::make_unique<Lanes> (*this))
 {
@@ -266,7 +234,7 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     selection.addChangeListener (this);
     range.addChangeListener (this);
     context.addListener (this);
-    setEdit (context.getEdit());
+    showProject();
     toolChanged(); // the Smart Tool's pointer and hint
 }
 
@@ -275,38 +243,67 @@ Playlist::~Playlist()
     context.removeListener (this);
     range.removeChangeListener (this);
     selection.removeChangeListener (this);
-    editState.removeListener (this);
-    headers.clear();        // before headerContent, which holds them
+    headers.clear(); // before headerContent, which holds them
+    clipComponentFor.clear();
     clipComponents.clear(); // and the lanes
 }
 
-void Playlist::setEdit (te::Edit* newEdit)
+void Playlist::showProject()
 {
     // The same project again (after a save, say) keeps the view as it is.
-    if (editState == (newEdit != nullptr ? newEdit->state : juce::ValueTree()))
+    const auto* edit = context.getEdit();
+
+    if (editState == (edit != nullptr ? edit->state : juce::ValueTree()))
         return;
 
-    editState.removeListener (this);
-    editState = newEdit != nullptr ? newEdit->state : juce::ValueTree();
-    editState.addListener (this);
+    editState = edit != nullptr ? edit->state : juce::ValueTree();
+    const auto open = context.hasProject();
 
+    // Another project's tracks and clips can have the same IDs: nothing of what was shown stays.
     scrollY = 0;
     dropRow = -1;
-    selectionAnchor = nullptr;
-    lastClip = nullptr;
+    selectionAnchor = {};
+    lastClip = {};
     gesture = nullptr;
     rubberBand = {};
     fileDropBeat.reset();
     headers.clear();
+    clipComponentFor.clear();
     clipComponents.clear();
     rows.clear();
     cancelPendingUpdate();
 
-    showProject();
-    sectionsStrip.setEdit (newEdit);
-    addTrackButton.setEnabled (newEdit != nullptr);
-    addTrackRow->setVisible (newEdit != nullptr);
+    TimelineEditor::showProject();
+    sectionsStrip.setEdit (context.getEdit());
+    addTrackButton.setEnabled (open);
+    addTrackRow->setVisible (open);
     rebuild();
+}
+
+void Playlist::songChanged (const SongChanges& changes)
+{
+    if (changes.tracks)
+    {
+        rebuild(); // a name, color, mute or solo, or tracks added, deleted or moved
+        return;
+    }
+
+    if (changes.view)
+        trackHeightChanged(); // heights, collapsed and pinned tracks
+
+    // Clips are placed in time, and the time line is in beats: a tempo change moves them on it.
+    if (changes.clips || changes.tempo)
+    {
+        rebuildClips();
+        layOutClips();
+        updateClips();
+    }
+
+    if (changes.tempo)
+        ruler.repaint();
+
+    if (changes.clips || changes.tempo || changes.sections)
+        lanes->repaint();
 }
 
 //==============================================================================
@@ -317,15 +314,9 @@ juce::Rectangle<int> Playlist::getTimelineArea() const
 
 BeatRange Playlist::getContentRange() const
 {
-    auto end = 16.0; // an empty song still shows some bars
-
-    // Everything on the time line, sections included (Tracktion's Edit length counts them), so that an outline longer
-    // than the song so far can be scrolled to and fits Zoom to Fit. Not the song's end (getSongEnd()), which sections
-    // don't make longer.
-    if (auto* e = getEdit())
-        end = std::max (end, e->tempoSequence.toBeats (te::toPosition (e->getLength())).inBeats());
-
-    return { BeatPosition(), BeatPosition::fromBeats (end) };
+    // An empty song still shows some bars. Everything on the time line, sections included, so that an outline longer
+    // than the song so far can be scrolled to and fits Zoom to Fit.
+    return { BeatPosition(), std::max (BeatPosition::fromBeats (16.0), getTimelineEnd (context)) };
 }
 
 void Playlist::timelineChanged()
@@ -404,14 +395,11 @@ void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
     // Alt+wheel makes every track taller or shorter.
     if (e.mods.isAltDown())
     {
-        if (auto* ed = getEdit())
+        if (context.hasProject())
         {
-            const auto change = juce::roundToInt (getWheelNotches (wheel.deltaY) * TrackHeight::step / 2);
-
-            for (auto* track : getPlaylistTracks (*ed))
-                resizeTrack (*track, change);
-
-            layOutRows();
+            resizeTracks (context, getAllPlaylistTracks (context),
+                          juce::roundToInt (getWheelNotches (wheel.deltaY) * TrackHeight::step / 2));
+            trackHeightChanged();
         }
 
         return;
@@ -430,17 +418,17 @@ void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
 //==============================================================================
 void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
-    if (source == &range)
+    if (range.isSource (source))
     {
         lanes->repaint();
 
         // With FL Studio's keymap, the selected time range loops while it is selected, and then the song again.
-        if (auto* e = getEdit(); e != nullptr && getCommands().getKeymap().selectionLoops)
+        if (context.hasProject() && getCommands().getKeymap().selectionLoops)
         {
             if (! range.isEmpty())
-                loopRange (*e, e->tempoSequence.toTime (range.getRange()));
+                loopRange (context, range.getRange());
             else if (loopsSelection)
-                loopSong (*e);
+                loopSong (context);
 
             loopsSelection = ! range.isEmpty();
         }
@@ -456,50 +444,10 @@ void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
         layOutRows(); // what is in focus changed
 
     // The clip selected last is the one the Draw and Paint tools place (not a section, which is a clip too).
-    if (auto* clip = getSelectedClips (selection).getFirst())
-        lastClip = clip;
+    if (const auto clips = selection.getClips(); ! clips.empty())
+        lastClip = clips.front();
 
-    if (auto* track = selection.getFirstItemOfType<te::Track>())
-        scrollToShow (getRowOf (track));
-}
-
-void Playlist::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
-{
-    if (isTrackState (tree))
-    {
-        triggerAsyncUpdate(); // a name, color, height, mute or solo
-    }
-    else if (isTempoState (tree))
-    {
-        layOutClips(); // clips are placed in time, and the timeline is in beats
-        ruler.repaint();
-        lanes->repaint();
-    }
-    else if (const auto clipState = findClipState (tree); clipState.isValid())
-    {
-        clipChanged (clipState); // moved, trimmed or faded, or its notes changed
-    }
-}
-
-void Playlist::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    if (isTrackState (child) || isContentClipState (child))
-        triggerAsyncUpdate();
-    else if (const auto clipState = findClipState (parent); clipState.isValid())
-        clipChanged (clipState); // a note, say
-}
-
-void Playlist::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
-{
-    if (isTrackState (child) || isContentClipState (child))
-        triggerAsyncUpdate();
-    else if (const auto clipState = findClipState (parent); clipState.isValid())
-        clipChanged (clipState);
-}
-
-void Playlist::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
-{
-    if (parent == editState || isTrackState (parent))
-        triggerAsyncUpdate();
+    if (const auto tracks = selection.getTracks(); ! tracks.empty())
+        scrollToShow (getRowOf (tracks.front()));
 }
 } // namespace phazite::ui

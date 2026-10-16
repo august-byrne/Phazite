@@ -2,8 +2,6 @@
 // The playlist's tracks shown as rows, and their clips on them.
 #include "PlaylistParts.h"
 #include "TrackHeights.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
 
 namespace phazite::ui
 {
@@ -14,22 +12,14 @@ namespace
 
 void Playlist::rebuild()
 {
-    auto* e = getEdit();
-    const auto tracks = e != nullptr ? getPlaylistTracks (*e) : juce::Array<te::Track*>();
-
-    // The headers of tracks that are still shown are kept, in the tracks' new order. Tracks in
-    // collapsed folders aren't shown.
+    // The headers of tracks that are still shown are kept, in the tracks' new order. Tracks in collapsed folders
+    // aren't shown.
     juce::OwnedArray<TrackHeader> newHeaders;
     rows.clear();
 
-    for (int i = 0; i < tracks.size(); ++i)
+    for (const auto& track : getPlaylistRows (context))
     {
-        auto* track = tracks[i];
-
-        if (isHiddenInCollapsedFolder (*track))
-            continue;
-
-        auto* header = getHeaderFor (track);
+        auto* header = getHeaderFor (track.id);
 
         if (header != nullptr)
         {
@@ -37,12 +27,12 @@ void Playlist::rebuild()
         }
         else
         {
-            header = new TrackHeader (*this, context, *track);
+            header = new TrackHeader (*this, context, track);
             headerContent.addAndMakeVisible (header);
         }
 
         newHeaders.add (header);
-        rows.push_back ({ track, 0, 0, getTrackColour (*track, i), track->getTrackDepth(), isPinned (*track) });
+        rows.push_back ({ track });
     }
 
     headers.swapWith (newHeaders); // newHeaders now holds the hidden or deleted tracks' headers, and deletes them
@@ -62,14 +52,12 @@ void Playlist::layOutRows()
     for (size_t i = 0; i < rows.size(); ++i)
     {
         auto& row = rows[i];
-        auto& top = row.pinned ? pinnedTop : scrollingTop;
+        auto& top = row.track.pinned ? pinnedTop : scrollingTop;
         row.top = top;
-
-        if (auto* track = row.track.get())
-            row.height = isInFocus (*track) ? getShownTrackHeight (*track) : focusedOutHeight;
+        row.height = isInFocus (row.track.id) ? getShownTrackHeight (row.track) : focusedOutHeight;
 
         auto* header = headers[(int) i];
-        auto& parent = row.pinned ? pinnedHeaders : headerContent;
+        auto& parent = row.track.pinned ? pinnedHeaders : headerContent;
 
         if (header->getParentComponent() != &parent)
             parent.addAndMakeVisible (header);
@@ -91,37 +79,59 @@ void Playlist::layOutRows()
     setScrollY (scrollY); // keeps it in range, and moves the headers and clips with it
 }
 
+void Playlist::trackHeightChanged()
+{
+    // The same tracks, taller or shorter or collapsed: the rows as the model keeps them now. (A folder collapsed or
+    // opened shows other tracks: then the rows are built again.)
+    const auto fresh = getPlaylistRows (context);
+    const auto same =
+        fresh.size() == rows.size()
+        && std::equal (fresh.begin(), fresh.end(), rows.begin(), [] (const TrackRow& a, const Row& b) { return a.id == b.track.id; });
+
+    if (! same)
+    {
+        rebuild();
+        return;
+    }
+
+    for (size_t i = 0; i < rows.size(); ++i)
+        rows[i].track = fresh[i];
+
+    layOutRows();
+    updateHeaders();
+}
+
 void Playlist::updateHeaders()
 {
     for (int i = 0; i < headers.size(); ++i)
-        if (auto* track = rows[(size_t) i].track.get())
-            headers[i]->update (rows[(size_t) i].colour, selection.isSelected (track), rows[(size_t) i].depth);
+        headers[i]->update (rows[(size_t) i].track, selection.isSelected (rows[(size_t) i].track.id));
 }
 
 int Playlist::getRowTop (const Row& row) const
 {
-    return row.pinned ? row.top : pinnedHeight + row.top - scrollY;
+    return row.track.pinned ? row.top : pinnedHeight + row.top - scrollY;
 }
 
-bool Playlist::isInFocus (te::Track& track) const
+bool Playlist::isInFocus (TrackID track) const
 {
     if (! focusMode)
         return true;
 
     // The selected tracks, the tracks of the selected clips, and the folders they are in. With nothing
     // selected, everything.
-    const auto tracks = getSelectedTracks (selection);
-    const auto clips = getSelectedClips (selection);
+    const auto tracks = selection.getTracks();
+    const auto clips = selection.getClips();
 
-    if (tracks.isEmpty() && clips.isEmpty())
+    if (tracks.empty() && clips.empty())
         return true;
 
-    for (auto* selected : tracks)
-        if (selected == &track || selected->isAChildOf (track))
+    for (const auto selected : tracks)
+        if (selected == track || isInside (context, selected, track))
             return true;
 
-    for (auto* clip : clips)
-        if (auto* clipTrack = clip->getTrack(); clipTrack == &track || (clipTrack != nullptr && clipTrack->isAChildOf (track)))
+    for (const auto clipID : clips)
+        if (const auto clip = getClip (context, clipID);
+            clip.has_value() && (clip->track == track || isInside (context, clip->track, track)))
             return true;
 
     return false;
@@ -133,25 +143,25 @@ int Playlist::getRowAt (int y) const
     const auto inBand = y < pinnedHeight;
 
     for (size_t i = 0; i < rows.size(); ++i)
-        if (const auto top = getRowTop (rows[i]); rows[i].pinned == inBand && y >= top && y < top + rows[i].height)
+        if (const auto top = getRowTop (rows[i]); rows[i].track.pinned == inBand && y >= top && y < top + rows[i].height)
             return (int) i;
 
     return -1;
 }
 
-int Playlist::getRowOf (const te::Track* track) const
+int Playlist::getRowOf (TrackID track) const
 {
     for (size_t i = 0; i < rows.size(); ++i)
-        if (track != nullptr && rows[i].track.get() == track)
+        if (track.isValid() && rows[i].track.id == track)
             return (int) i;
 
     return -1;
 }
 
-TrackHeader* Playlist::getHeaderFor (const te::Track* track) const
+TrackHeader* Playlist::getHeaderFor (TrackID track) const
 {
     for (auto* header : headers)
-        if (track != nullptr && header->getTrack() == track)
+        if (track.isValid() && header->getTrack() == track)
             return header;
 
     return nullptr;
@@ -170,7 +180,7 @@ void Playlist::setScrollY (int newScrollY)
 
 void Playlist::scrollToShow (int row)
 {
-    if (! juce::isPositiveAndBelow (row, (int) rows.size()) || rows[(size_t) row].pinned)
+    if (! juce::isPositiveAndBelow (row, (int) rows.size()) || rows[(size_t) row].track.pinned)
         return; // pinned rows are always in view
 
     const auto& r = rows[(size_t) row];
@@ -193,19 +203,19 @@ void Playlist::updateVerticalScrollBar()
 //==============================================================================
 void Playlist::rebuildClips()
 {
-    // The components of clips that are still there are kept; the others go.
+    // The components of clips that are still there are kept, showing the clips as they are now; the others go.
     juce::OwnedArray<ClipComponent> kept;
+    std::unordered_map<ClipID, ClipComponent*> keptFor;
 
     for (const auto& row : rows)
     {
-        auto* clipTrack = dynamic_cast<te::ClipTrack*> (row.track.get());
-
-        if (clipTrack == nullptr)
-            continue;
-
-        for (auto* clip : clipTrack->getClips())
+        for (const auto& clip : getClips (context, row.track.id))
         {
-            auto* component = getClipComponentFor (clip->state);
+            auto* component = [this, &clip]() -> ClipComponent*
+            {
+                const auto found = clipComponentFor.find (clip.id);
+                return found != clipComponentFor.end() ? found->second : nullptr;
+            }();
 
             if (component != nullptr)
             {
@@ -213,15 +223,18 @@ void Playlist::rebuildClips()
             }
             else
             {
-                component = new ClipComponent (*clip);
+                component = new ClipComponent (context, clip.id);
                 scrollingClips.addAndMakeVisible (component); // positionClip() moves it to the right layer
             }
 
+            component->showClip (clip);
             kept.add (component);
+            keptFor[clip.id] = component;
         }
     }
 
-    clipComponents.swapWith (kept);
+    clipComponents.swapWith (kept); // kept now holds the components of clips that are gone, and deletes them
+    clipComponentFor = std::move (keptFor);
 }
 
 void Playlist::layOutClips()
@@ -232,8 +245,7 @@ void Playlist::layOutClips()
 
 void Playlist::positionClip (ClipComponent& component)
 {
-    auto* clip = component.getClip();
-    const auto row = clip != nullptr ? getRowOf (clip->getTrack()) : -1;
+    const auto row = getRowOf (component.getInfo().track);
     component.setVisible (row >= 0);
 
     if (row < 0)
@@ -241,38 +253,35 @@ void Playlist::positionClip (ClipComponent& component)
 
     // A pinned track's clips are in the pinned layer, the others in the scrolling one, which keeps them
     // out of the pinned band.
-    auto& layer = rows[(size_t) row].pinned ? pinnedClips : scrollingClips;
+    auto& layer = rows[(size_t) row].track.pinned ? pinnedClips : scrollingClips;
 
     if (component.getParentComponent() != &layer)
         layer.addAndMakeVisible (component);
 
-    component.setBounds (getClipBounds (*clip) - layer.getPosition());
+    component.setBounds (getClipBounds (component.getInfo()) - layer.getPosition());
 }
 
 void Playlist::updateClips()
 {
+    // A clip shows in its track's colour, as the track's header does.
     for (auto* component : clipComponents)
     {
-        if (auto* clip = component->getClip())
-        {
-            // A clip shows in its track's colour, as the track's header does.
-            const auto row = getRowOf (clip->getTrack());
-            component->update (row >= 0 ? rows[(size_t) row].colour : juce::Colours::grey, selection.isSelected (clip));
-        }
+        const auto row = getRowOf (component->getInfo().track);
+        component->showLook (row >= 0 ? rows[(size_t) row].track.colour : juce::Colours::grey, selection.isSelected (component->getClip()));
     }
 }
 
-juce::Rectangle<int> Playlist::getClipBounds (te::Clip& clip) const
+juce::Rectangle<int> Playlist::getClipBounds (const ClipInfo& clip) const
 {
-    const auto row = getRowOf (clip.getTrack());
+    const auto row = getRowOf (clip.track);
 
     if (row < 0)
         return {};
 
     const auto& r = rows[(size_t) row];
     const auto& timeline = getView();
-    const auto left = juce::roundToInt (timeline.beatToX (fromTracktion (clip.getStartBeat())));
-    const auto right = juce::roundToInt (timeline.beatToX (fromTracktion (clip.getEndBeat())));
+    const auto left = juce::roundToInt (timeline.beatToX (clip.range.getStart()));
+    const auto right = juce::roundToInt (timeline.beatToX (clip.range.getEnd()));
     return { left, getRowTop (r) + 1, std::max (2, right - left), std::max (1, r.height - 3) };
 }
 
@@ -285,35 +294,12 @@ ClipComponent* Playlist::getClipComponentAt (juce::Point<int> position) const
     for (auto i = clipComponents.size(); --i >= 0;)
     {
         auto* component = clipComponents.getUnchecked (i);
-        auto* clip = component->getClip();
-        const auto row = clip != nullptr ? getRowOf (clip->getTrack()) : -1;
+        const auto row = getRowOf (component->getInfo().track);
 
-        if (row >= 0 && rows[(size_t) row].pinned == inBand && getClipBounds (*clip).contains (position))
+        if (row >= 0 && rows[(size_t) row].track.pinned == inBand && getClipBounds (component->getInfo()).contains (position))
             return component;
     }
 
     return nullptr;
-}
-
-ClipComponent* Playlist::getClipComponentFor (const juce::ValueTree& clipState) const
-{
-    for (auto* component : clipComponents)
-        if (auto* clip = component->getClip(); clip != nullptr && clip->state == clipState)
-            return component;
-
-    return nullptr;
-}
-
-void Playlist::clipChanged (const juce::ValueTree& clipState)
-{
-    if (auto* component = getClipComponentFor (clipState))
-    {
-        if (auto* clip = component->getClip())
-        {
-            positionClip (*component);
-            const auto row = getRowOf (clip->getTrack());
-            component->update (row >= 0 ? rows[(size_t) row].colour : juce::Colours::grey, selection.isSelected (clip));
-        }
-    }
 }
 } // namespace phazite::ui

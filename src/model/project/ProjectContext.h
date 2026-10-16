@@ -11,6 +11,7 @@
 #pragma once
 
 #include "model/arrangement/Selection.h"
+#include "model/arrangement/SongRange.h"
 #include "model/arrangement/SongSelection.h"
 
 namespace phazite
@@ -19,8 +20,8 @@ class UIBehaviour;
 
 // What changed in the open project's song, in groups, for views to show it again. Changes made at once (in one turn of
 // the message loop) come together, after it. View state (model/base/Schema.h), such as how tall a track shows, is no
-// change to the song. A drag can change the song as often as the mouse moves: views that take long to show a change
-// show the last one at their next timer tick instead.
+// change to the song: it has a group of its own. A drag can change the song as often as the mouse moves: views that
+// take long to show a change show the last one at their next timer tick instead.
 struct SongChanges
 {
     bool tracks = false;   // tracks added, deleted, moved or changed
@@ -28,6 +29,7 @@ struct SongChanges
     bool clips = false;    // clips added, deleted or changed, their notes included
     bool sections = false; // sections added, deleted or changed
     bool tempo = false;    // the tempo or the time signature
+    bool view = false;     // how tracks show: their heights, collapsed and pinned ones, drum rows (view state)
 };
 
 class ProjectContext
@@ -55,6 +57,7 @@ public:
     SongSelection& getSongSelection() noexcept { return *songSelection; }
     const SongSelection& getSongSelection() const noexcept { return *songSelection; }
     RangeSelection& getRangeSelection() noexcept { return rangeSelection; }
+    SongRange& getSongRange() noexcept { return *songRange; } // a view of it, by IDs
 
     // The Edit open now, or none. Nothing of the previous Edit stays selected. Then tells the listeners.
     void setEdit (te::Edit*);
@@ -69,6 +72,7 @@ private:
     te::SelectionManager selection;
     std::unique_ptr<SongSelection> songSelection; // a view of selection, by IDs
     RangeSelection rangeSelection;
+    std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
     juce::ListenerList<Listener> listeners;
     std::unique_ptr<SongWatcher> songWatcher;
 

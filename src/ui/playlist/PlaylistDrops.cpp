@@ -1,66 +1,54 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What is dropped on the playlist: audio and MIDI files from Explorer, and the browser's sounds and devices.
 #include "PlaylistParts.h"
-#include "model/arrangement/Import.h"
-#include "model/arrangement/Tracks.h"
-#include "model/mixer/Mixer.h"
-#include "model/transport/Playback.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/input/LibraryDrag.h"
 
 namespace phazite::ui
 {
-te::BeatPosition Playlist::getFileDropBeat (int x) const
+BeatPosition Playlist::getFileDropBeat (int x) const
 {
-    const auto beat = te::BeatPosition::fromBeats (std::max (0.0, getView().xToBeat (x).inBeats()));
-    return toTracktion (snapDown (fromTracktion (beat), juce::ModifierKeys::currentModifiers));
+    const auto beat = BeatPosition::fromBeats (std::max (0.0, getView().xToBeat (x).inBeats()));
+    return snapDown (beat, juce::ModifierKeys::currentModifiers);
 }
 
 void Playlist::importFiles (const juce::StringArray& paths, juce::Point<int> position)
 {
     const auto row = getRowAt (position.y);
-    addFiles (paths, row >= 0 ? rows[(size_t) row].track.get() : nullptr, getFileDropBeat (position.x));
+    addFiles (paths, row >= 0 ? rows[(size_t) row].track.id : TrackID(), getFileDropBeat (position.x));
 }
 
 bool Playlist::placeFile (const juce::File& file)
 {
-    auto* e = getEdit();
-
-    if (e == nullptr)
+    if (! context.hasProject())
         return false;
 
-    return addFiles ({ file.getFullPathName() }, getSelectedTracks (selection).getFirst(), e->tempoSequence.toBeats (getPlayStart (*e)));
+    const auto tracks = selection.getTracks();
+    return addFiles ({ file.getFullPathName() }, tracks.empty() ? TrackID() : tracks.front(), getPlayStartBeat (context));
 }
 
-bool Playlist::addFiles (const juce::StringArray& paths, te::Track* target, te::BeatPosition start)
+bool Playlist::addFiles (const juce::StringArray& paths, TrackID target, BeatPosition start)
 {
-    auto* e = getEdit();
-
-    if (e == nullptr)
+    if (! context.hasProject())
         return false;
 
-    const auto added = phazite::importFiles (*e, paths, target, start);
+    const auto added = phazite::importFiles (context, paths, target, start);
     range.clear();
-    selection.deselectAll();
+    selection.clear();
 
-    for (auto* clip : added)
-        selection.addToSelection (clip);
+    for (const auto clip : added)
+        selection.add (clip);
 
-    if (added.isEmpty())
+    if (added.empty())
         return false;
 
-    lastClip = added.getFirst(); // what Draw and Paint place next
+    lastClip = added.front(); // what Draw and Paint place next
     return true;
 }
 
 bool Playlist::isInterestedInFileDrag (const juce::StringArray& paths)
 {
-    auto* e = getEdit();
-
-    if (e == nullptr)
-        return false;
-
-    return std::any_of (paths.begin(), paths.end(),
-                        [e] (const juce::String& path) { return getFileKind (e->engine, juce::File (path)) != FileKind::other; });
+    return std::any_of (paths.begin(), paths.end(), [this] (const juce::String& path) { return canImport (context, juce::File (path)); });
 }
 
 void Playlist::fileDragMove (const juce::StringArray&, int x, int y)
@@ -87,13 +75,11 @@ void Playlist::filesDropped (const juce::StringArray& paths, int x, int y)
 
 bool Playlist::isInterestedInDragSource (const SourceDetails& details)
 {
-    auto* e = getEdit();
-
-    if (e == nullptr)
+    if (! context.hasProject())
         return false;
 
     if (const auto file = getDraggedFile (details.description))
-        return getFileKind (e->engine, *file) != FileKind::other;
+        return canImport (context, *file);
 
     return getDraggedDevice (details.description).has_value();
 }
@@ -123,20 +109,20 @@ void Playlist::itemDragExit (const SourceDetails&)
 void Playlist::itemDropped (const SourceDetails& details)
 {
     itemDragExit (details);
-    auto* e = getEdit();
 
-    if (e == nullptr)
+    if (! context.hasProject())
         return;
 
+    // A device dropped below the tracks goes on a new track (an instrument), or on the master (an effect).
     const auto position = lanes->getLocalPoint (this, details.localPosition);
     const auto row = getRowAt (position.y);
-    auto* track = row >= 0 ? rows[(size_t) row].track.get() : nullptr;
+    const auto track = row >= 0 ? rows[(size_t) row].track.id : TrackID();
     auto placed = false;
 
     if (const auto file = getDraggedFile (details.description))
         placed = addFiles ({ file->getFullPathName() }, track, getFileDropBeat (std::max (0, position.x)));
     else if (const auto device = getDraggedDevice (details.description))
-        placed = addDeviceTo (*e, track, *device, &selection) != nullptr;
+        placed = addDeviceTo (context, track, *device);
 
     if (placed)
         markPlaced (details.description);

@@ -374,6 +374,30 @@ void SectionsStrip::addSectionAt (te::BeatPosition beat)
         range.clear();
 }
 
+void SectionsStrip::startRenaming (SectionID id)
+{
+    if (auto* e = edit.get())
+        if (auto* section = dynamic_cast<te::ArrangerClip*> (te::findClipForID (*e, toTracktion (id))))
+            startRenaming (*section);
+}
+
+void SectionsStrip::showMenuAt (BeatPosition where)
+{
+    auto* e = edit.get();
+
+    if (e == nullptr)
+        return;
+
+    // As a right-click on the section there would.
+    const auto beat = toTracktion (where);
+    auto* section = phazite::getSectionAt (*e, beat);
+
+    if (section != nullptr && ! selection.isSelected (section))
+        selection.selectOnly (section);
+
+    showMenu (section, beat);
+}
+
 void SectionsStrip::startRenaming (te::ArrangerClip& section)
 {
     nameLabel.hideEditor (false);

@@ -4,16 +4,14 @@
 // track, dragging the bottom edge resizes it, and dragging elsewhere selects the tracks the mouse passes.
 #pragma once
 
+#include "model/arrangement/PlaylistModel.h"
 #include "ui/components/Controls.h"
 #include "ui/theme/Icons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
-#include <tracktion_engine/tracktion_engine.h>
 
 namespace phazite::ui
 {
-namespace te = tracktion;
-
 class TrackHeader : public juce::Component
 {
 public:
@@ -22,22 +20,23 @@ public:
     {
         virtual ~Owner() = default;
 
-        virtual void trackClicked (te::Track&, const juce::ModifierKeys&) = 0; // selects it
-        virtual void showTrackMenu (te::Track&) = 0;
-        virtual void showColourMenu (te::Track&, juce::Component& target) = 0;
+        virtual void trackClicked (TrackID, const juce::ModifierKeys&) = 0; // selects it
+        virtual void showTrackMenu (TrackID) = 0;
+        virtual void showColourMenu (TrackID, juce::Component& target) = 0;
         virtual void trackDragged (TrackHeader&, const juce::MouseEvent&) = 0; // moving it to another row
         virtual void trackDragEnded (TrackHeader&, const juce::MouseEvent&) = 0;
         virtual void trackSelectionDragged (TrackHeader&, const juce::MouseEvent&) = 0; // selecting the tracks it passes
         virtual void trackHeightChanged() = 0;                                          // while its edge is dragged
     };
 
-    TrackHeader (Owner&, ProjectContext&, te::Track&);
+    TrackHeader (Owner&, ProjectContext&, const TrackRow&);
 
-    te::Track* getTrack() const { return track.get(); }
+    TrackID getTrack() const noexcept { return row.id; }
 
-    // Shows the track as it is now: its name, color, mute and solo, whether it is selected and collapsed, and how
-    // deep in folders it is (its name is indented as far).
-    void update (juce::Colour, bool isSelected, int depth);
+    // Shows the track as it is now (getPlaylistRows() in model/arrangement/PlaylistModel.h): its name, color, mute and
+    // solo, whether it is collapsed and how deep in folders it is (its name is indented as far), and whether it is
+    // selected.
+    void update (const TrackRow&, bool isSelected);
 
     void startRenaming(); // shows the name in a text field
 
@@ -65,16 +64,16 @@ private:
     };
 
     Owner& owner;
-    te::SafeSelectable<te::Track> track;
+    ProjectContext& context;
+    TrackRow row; // as it was shown last
     juce::Label nameLabel;
     MuteSoloButtons muteSolo;
     IconButton collapseButton { "Collapse track", Icon::expanded };
     std::unique_ptr<juce::Drawable> gripIcon;
     juce::Colour gripIconColour { juce::Colours::black }; // the color the drawing is in now
-    juce::Colour colour;
-    bool selected = false, isFolder = false, collapsed = false;
-    int depth = 0;
+    bool selected = false;
 
+    bool isFolder() const noexcept { return row.kind == TrackType::folder; }
     juce::Colour getBackground() const; // the surface, tinted with the track's color
     void updateColours();
     void updateCollapseButton();

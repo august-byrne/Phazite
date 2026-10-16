@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectContext.h"
+#include "model/arrangement/internal/SongRange.h"
 #include "model/arrangement/internal/SongSelection.h"
 #include "model/base/Schema.h"
 #include "model/engine/EngineSetup.h"
@@ -112,7 +113,9 @@ private:
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
     {
         // How tall a track shows, and the like, is view state (Schema.h), not the song.
-        if (! (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property)))
+        if (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property))
+            add (pending.view);
+        else
             mark (tree);
     }
 
@@ -129,6 +132,7 @@ ProjectContext::ProjectContext (te::Engine& engine, UIBehaviour* tracktionFocus)
     : focus (tracktionFocus),
       selection (engine),
       songSelection (createSongSelection (selection)),
+      songRange (createSongRange (rangeSelection, selection)),
       songWatcher (std::make_unique<SongWatcher> (*this))
 {
     if (focus != nullptr)

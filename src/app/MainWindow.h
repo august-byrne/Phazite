@@ -2,6 +2,7 @@
 #pragma once
 
 #include "AppServices.h"
+#include "ClipWaveforms.h"
 #include "ProjectSession.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/PluginKeys.h"

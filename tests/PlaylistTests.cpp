@@ -47,16 +47,22 @@ struct PlaylistScreen
         context.setEdit (nullptr);
     }
 
+    // How tall a track shows, through the model's row of it.
+    int heightOf (int track) const
+    {
+        return phazite::ui::getTrackHeight (
+            phazite::getTrackRow (context, phazite::getTrackID (*tracks[track])).value_or (phazite::TrackRow()));
+    }
+
     // Where a beat is on a track's row, in the lanes (the middle of the row).
     juce::Point<int> at (double beat, int track) const
     {
         auto y = 0;
 
         for (int i = 0; i < track; ++i)
-            y += phazite::ui::getTrackHeight (*tracks[i]);
+            y += heightOf (i);
 
-        return { juce::roundToInt (playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))),
-                 y + phazite::ui::getTrackHeight (*tracks[track]) / 2 };
+        return { juce::roundToInt (playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))), y + heightOf (track) / 2 };
     }
 
     std::vector<double> getClipStarts (int track) const
@@ -232,7 +238,7 @@ TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge
     auto headers = phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist);
     REQUIRE (headers.size() == 3);
     auto& header = *headers[0];
-    REQUIRE (header.getTrack() == screen.tracks[0]);
+    REQUIRE (header.getTrack() == phazite::getTrackID (*screen.tracks[0]));
 
     phazite::test::Mouse mouse (screen.playlist);
     const auto inPlaylist = [&screen, &header] (juce::Point<int> p) { return screen.playlist.getLocalPoint (&header, p); };

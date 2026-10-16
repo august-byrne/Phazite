@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TrackHeader.h"
 #include "TrackHeights.h"
-#include "model/arrangement/Tracks.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -19,10 +18,11 @@ namespace
     constexpr float gripAlpha = 0.6f; // the handle is drawn in the header's ink, a little muted
 } // namespace
 
-TrackHeader::TrackHeader (Owner& o, ProjectContext& context, te::Track& trackToShow)
+TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackRow& shown)
     : owner (o),
-      track (trackToShow),
-      muteSolo (context),
+      context (projectContext),
+      row (shown),
+      muteSolo (projectContext),
       gripIcon (createIcon (Icon::grip))
 {
     setDescription ("Click to select the track, Ctrl+click to add it to the selection, Shift+click to select up to it. "
@@ -33,68 +33,51 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& context, te::Track& trackToS
     nameLabel.setTitle ("Track name");
     nameLabel.setFont (juce::FontOptions (TextSize::body));
     nameLabel.setInterceptsMouseClicks (false, true);
-    nameLabel.onTextChange = [this]
-    {
-        if (auto* t = track.get())
-            renameTrack (*t, nameLabel.getText()); // an empty name gives the track its number back
-    };
+    nameLabel.setText (row.name, juce::dontSendNotification);
+    nameLabel.onTextChange = [this] { renameTrack (context, row.id, nameLabel.getText()); }; // an empty name gives its number back
 
-    muteSolo.setTrack (getTrackID (trackToShow));
+    muteSolo.setTrack (row.id);
 
     // The chevron collapses a track to a thin row, and hides a folder's tracks.
-    isFolder = trackToShow.isFolderTrack();
     collapseButton.setQuiet (true);
     collapseButton.setMouseClickGrabsKeyboardFocus (false);
     collapseButton.onClick = [this]
     {
-        auto* t = track.get();
-
-        if (t == nullptr)
-            return;
-
         // Alt+click: every track, as in Ableton Live.
-        const auto collapse = ! isCollapsed (*t);
+        const auto collapse = ! row.collapsed;
 
         if (juce::ModifierKeys::currentModifiers.isAltDown())
-            for (auto* other : getPlaylistTracks (t->edit))
-                setCollapsed (*other, collapse);
+            for (const auto id : getAllPlaylistTracks (context))
+                setCollapsed (context, id, collapse);
         else
-            setCollapsed (*t, collapse);
+            setCollapsed (context, row.id, collapse);
     };
 
     for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &muteSolo, &collapseButton })
         addAndMakeVisible (c);
 
+    setTitle (isFolder() ? row.name + " (folder)" : row.name); // what screen readers call the header
     updateCollapseButton();
     updateColours();
 }
 
-void TrackHeader::update (juce::Colour newColour, bool isSelected, int newDepth)
+void TrackHeader::update (const TrackRow& shown, bool isSelected)
 {
-    auto* t = track.get();
-
-    if (t == nullptr)
-        return;
-
-    const auto name = t->getName();
-    setTitle (isFolder ? name + " (folder)" : name); // what screen readers call the header
+    const auto before = row;
+    row = shown;
+    setTitle (isFolder() ? row.name + " (folder)" : row.name);
 
     if (! nameLabel.isBeingEdited())
-        nameLabel.setText (name, juce::dontSendNotification);
+        nameLabel.setText (row.name, juce::dontSendNotification);
 
     muteSolo.update(); // and whether other tracks' solos silence it
 
-    if (collapsed != isCollapsed (*t))
-    {
-        collapsed = ! collapsed;
+    if (row.collapsed != before.collapsed)
         updateCollapseButton();
-    }
 
-    if (colour != newColour || selected != isSelected || depth != newDepth)
+    if (row.colour != before.colour || selected != isSelected || row.depth != before.depth)
     {
-        colour = newColour;
         selected = isSelected;
-        depth = newDepth;
         updateColours();
         resized();
         repaint();
@@ -104,26 +87,26 @@ void TrackHeader::update (juce::Colour newColour, bool isSelected, int newDepth)
 void TrackHeader::updateCollapseButton()
 {
     // Pointing down while open, right while collapsed.
-    collapseButton.setIcon (collapsed ? Icon::folded : Icon::expanded);
+    collapseButton.setIcon (row.collapsed ? Icon::folded : Icon::expanded);
 
-    if (isFolder)
+    if (isFolder())
     {
-        collapseButton.setTitle (collapsed ? "Expand folder" : "Collapse folder");
-        collapseButton.setTooltip (collapsed ? "Shows the folder's tracks. Alt+click: every track"
-                                             : "Hides the folder's tracks. Alt+click: every track");
+        collapseButton.setTitle (row.collapsed ? "Expand folder" : "Collapse folder");
+        collapseButton.setTooltip (row.collapsed ? "Shows the folder's tracks. Alt+click: every track"
+                                                 : "Hides the folder's tracks. Alt+click: every track");
     }
     else
     {
-        collapseButton.setTitle (collapsed ? "Expand track" : "Collapse track");
-        collapseButton.setTooltip (collapsed ? "Shows the track at its full height. Alt+click: every track"
-                                             : "Makes the track a thin row that shows its name. Alt+click: every track");
+        collapseButton.setTitle (row.collapsed ? "Expand track" : "Collapse track");
+        collapseButton.setTooltip (row.collapsed ? "Shows the track at its full height. Alt+click: every track"
+                                                 : "Makes the track a thin row that shows its name. Alt+click: every track");
     }
 }
 
 juce::Colour TrackHeader::getBackground() const
 {
     // In the track's color, which runs on through its row in the playlist; more of it while selected.
-    return getPalette (*this).surface.interpolatedWith (colour, selected ? TrackTint::selectedHeader : TrackTint::header);
+    return getPalette (*this).surface.interpolatedWith (row.colour, selected ? TrackTint::selectedHeader : TrackTint::header);
 }
 
 void TrackHeader::updateColours()
@@ -163,7 +146,7 @@ void TrackHeader::paint (juce::Graphics& g)
     g.setColour (background);
     g.fillRect (area);
 
-    g.setColour (colour);
+    g.setColour (row.colour);
     g.fillRect (getColourArea());
 
     // The handle, lined up with the name.
@@ -187,7 +170,7 @@ void TrackHeader::paint (juce::Graphics& g)
 void TrackHeader::resized()
 {
     auto area = getLocalBounds()
-                    .withTrimmedLeft (colourStripWidth + gripWidth + depth * indentPerLevel)
+                    .withTrimmedLeft (colourStripWidth + gripWidth + row.depth * indentPerLevel)
                     .withTrimmedRight (Space::xs)
                     .withTrimmedBottom (1);
     auto top = area.removeFromTop (juce::jmin (area.getHeight(), controlHeight + Space::xs));
@@ -221,43 +204,39 @@ void TrackHeader::mouseMove (const juce::MouseEvent& e)
 
 void TrackHeader::mouseDown (const juce::MouseEvent& e)
 {
-    auto* t = track.get();
     drag = Drag::none;
     selectOnMouseUp = false;
-
-    if (t == nullptr)
-        return;
 
     if (isOnResizeEdge (e.getPosition()) && ! e.mods.isPopupMenu())
     {
         // Alt-click resets the height, as in FL Studio.
         if (e.mods.isAltDown())
         {
-            setShownTrackHeight (*t, TrackHeight::standard);
+            setShownTrackHeight (context, row.id, TrackHeight::standard);
             owner.trackHeightChanged();
             return;
         }
 
         drag = Drag::resize;
-        heightAtDragStart = getShownTrackHeight (*t);
+        heightAtDragStart = getShownTrackHeight (row);
         return;
     }
 
     if (e.mods.isPopupMenu())
     {
         if (! selected)
-            owner.trackClicked (*t, {});
+            owner.trackClicked (row.id, {});
 
-        owner.showTrackMenu (*t);
+        owner.showTrackMenu (row.id);
         return;
     }
 
     if (getColourArea().contains (e.getPosition()))
     {
         if (! selected)
-            owner.trackClicked (*t, {});
+            owner.trackClicked (row.id, {});
 
-        owner.showColourMenu (*t, *this);
+        owner.showColourMenu (row.id, *this);
         return;
     }
 
@@ -266,7 +245,7 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
     if (selected && ! (e.mods.isCommandDown() || e.mods.isShiftDown()))
         selectOnMouseUp = true;
     else
-        owner.trackClicked (*t, e.mods);
+        owner.trackClicked (row.id, e.mods);
 
     // Only the handle moves tracks, so that clicks elsewhere don't move them by accident: there, a drag selects.
     drag = getGripArea().contains (e.getPosition()) ? Drag::pending : Drag::selectPending;
@@ -274,14 +253,9 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
 
 void TrackHeader::mouseDrag (const juce::MouseEvent& e)
 {
-    auto* t = track.get();
-
-    if (t == nullptr)
-        return;
-
     if (drag == Drag::resize)
     {
-        setShownTrackHeight (*t, heightAtDragStart + e.getDistanceFromDragStartY());
+        setShownTrackHeight (context, row.id, heightAtDragStart + e.getDistanceFromDragStartY());
         owner.trackHeightChanged();
         return;
     }
@@ -309,8 +283,8 @@ void TrackHeader::mouseUp (const juce::MouseEvent& e)
 {
     if (drag == Drag::move)
         owner.trackDragEnded (*this, e);
-    else if (auto* t = track.get(); t != nullptr && selectOnMouseUp)
-        owner.trackClicked (*t, {});
+    else if (selectOnMouseUp)
+        owner.trackClicked (row.id, {});
 
     drag = Drag::none;
     selectOnMouseUp = false;
@@ -318,14 +292,9 @@ void TrackHeader::mouseUp (const juce::MouseEvent& e)
 
 void TrackHeader::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    auto* t = track.get();
-
-    if (t == nullptr)
-        return;
-
     if (isOnResizeEdge (e.getPosition()))
     {
-        setShownTrackHeight (*t, TrackHeight::standard);
+        setShownTrackHeight (context, row.id, TrackHeight::standard);
         owner.trackHeightChanged();
     }
     else if (nameLabel.getBounds().contains (e.getPosition()))

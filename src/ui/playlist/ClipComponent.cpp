@@ -11,67 +11,41 @@ namespace
     constexpr int minNoteRange = 12; // semitones: a note preview spans at least an octave
 } // namespace
 
-ClipComponent::ClipComponent (te::Clip& c)
-    : clip (c)
+ClipComponent::ClipComponent (ProjectContext& projectContext, ClipID clip)
+    : context (projectContext),
+      id (clip)
 {
     setInterceptsMouseClicks (false, false); // the playlist handles the mouse
-    setTitle (c.getName());
 }
 
 ClipComponent::~ClipComponent() = default;
 
-void ClipComponent::update (juce::Colour newColour, bool isSelected)
+void ClipComponent::showClip (const ClipInfo& shown)
 {
-    auto* c = clip.get();
+    info = shown;
+    setTitle (info.name); // what screen readers call it
 
-    if (c == nullptr)
-        return;
+    if (info.kind == ClipType::midi)
+        notes = getNoteShapes (context, id);
+    else if (waveform == nullptr)
+        waveform = makeClipWaveform (context, id, *this);
 
-    setTitle (c->getName()); // what screen readers call it
-
-    if (auto* audio = dynamic_cast<te::AudioClipBase*> (c))
-        updateThumbnail (*audio);
-
-    colour = newColour;
-    selected = isSelected;
     repaint();
 }
 
-void ClipComponent::updateThumbnail (te::AudioClipBase& audio)
+void ClipComponent::showLook (juce::Colour newColour, bool isSelected)
 {
-    const auto file = audio.getPlaybackFile();
-
-    if (thumbnail != nullptr && file.getFile() == thumbnailFile)
-        return;
-
-    thumbnailFile = file.getFile();
-
-    if (thumbnail == nullptr)
-        thumbnail = std::make_unique<te::SmartThumbnail> (audio.edit.engine, file, *this, &audio.edit); // repaints this as it loads
-    else
-        thumbnail->setNewFile (file);
-}
-
-double ClipComponent::xToTime (double x) const
-{
-    auto* c = clip.get();
-
-    if (c == nullptr)
-        return 0.0;
-
-    // The clip's width spans its beats; the tempo turns a beat into a time.
-    const auto beat = c->getStartBeat() + te::BeatDuration::fromBeats (c->getLengthInBeats().inBeats() * x / std::max (1, getWidth()));
-    return c->edit.tempoSequence.toTime (beat).inSeconds();
+    if (colour != newColour || selected != isSelected)
+    {
+        colour = newColour;
+        selected = isSelected;
+        repaint();
+    }
 }
 
 //==============================================================================
 void ClipComponent::paint (juce::Graphics& g)
 {
-    auto* c = clip.get();
-
-    if (c == nullptr)
-        return;
-
     const auto& p = getPalette (*this);
     const auto body = getLocalBounds().toFloat().reduced (0.5f);
     const auto fill = selected ? colour.brighter (0.3f) : colour;
@@ -87,18 +61,23 @@ void ClipComponent::paint (juce::Graphics& g)
     {
         g.setColour (ink);
         g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText (c->getName() + (c->isLinked() ? "*" : ""), content.removeFromTop (nameHeight).reduced (2, 0),
+        g.drawText (info.name + (info.linked ? "*" : ""), content.removeFromTop (nameHeight).reduced (2, 0),
                     juce::Justification::centredLeft, true);
     }
 
-    if (auto* audio = dynamic_cast<te::AudioClipBase*> (c))
+    if (info.kind == ClipType::audio)
     {
-        paintWaveform (g, *audio, content, ink.withAlpha (0.7f));
-        paintFades (g, *audio, getLocalBounds());
+        if (waveform != nullptr)
+        {
+            g.setColour (ink.withAlpha (0.7f));
+            waveform->paint (g, content, getWidth());
+        }
+
+        paintFades (g, getLocalBounds());
     }
-    else if (auto* midi = dynamic_cast<te::MidiClip*> (c))
+    else
     {
-        paintNotes (g, *midi, content, ink.withAlpha (0.8f));
+        paintNotes (g, content, ink.withAlpha (0.8f));
     }
 
     // A selected clip has an outline in the text color, which shows on any clip color.
@@ -106,38 +85,15 @@ void ClipComponent::paint (juce::Graphics& g)
     g.drawRoundedRectangle (body, corner, selected ? 2.0f : 1.0f);
 }
 
-void ClipComponent::paintWaveform (juce::Graphics& g, te::AudioClipBase& audio, juce::Rectangle<int> area, juce::Colour ink)
+void ClipComponent::paintFades (juce::Graphics& g, juce::Rectangle<int> area)
 {
-    const auto visible = area.getIntersection (g.getClipBounds());
-
-    if (thumbnail == nullptr || visible.isEmpty())
-        return;
-
-    // The time in the audio file at an x: from the clip's offset, at its speed. A time-stretched clip
-    // plays a proxy file that is already at the Edit's tempo.
-    const auto position = audio.getPosition();
-    const auto speed = audio.usesTimeStretchedProxy() ? 1.0 : audio.getSpeedRatio();
-    const auto sourceTime = [&] (int x)
-    { return te::TimePosition::fromSeconds ((xToTime (x) - position.getStart().inSeconds() + position.getOffset().inSeconds()) * speed); };
-
-    g.setColour (ink);
-    thumbnail->drawChannels (g, visible, { sourceTime (visible.getX()), sourceTime (visible.getRight()) }, audio.getGain());
-}
-
-void ClipComponent::paintFades (juce::Graphics& g, te::AudioClipBase& audio, juce::Rectangle<int> area)
-{
-    const auto length = audio.getPosition().getLength().inSeconds();
-
-    if (length <= 0.0)
-        return;
-
     // What a fade takes away is shaded, above its curve from silence to full volume.
     const auto width = (float) area.getWidth(), height = (float) area.getHeight();
-    const auto fadeIn = (float) (audio.getFadeIn().inSeconds() / length) * width;
-    const auto fadeOut = (float) (audio.getFadeOut().inSeconds() / length) * width;
+    const auto fadeIn = (float) info.fadeIn * width;
+    const auto fadeOut = (float) info.fadeOut * width;
 
     // The curve, from x0 (silence) to x1 (full volume), and the part of the clip above it.
-    const auto drawFade = [&g, height] (float x0, float x1, te::AudioFadeCurve::Type type)
+    const auto drawFade = [&g, height] (float x0, float x1, FadeShape shape)
     {
         juce::Path curve;
         constexpr int steps = 16;
@@ -145,8 +101,7 @@ void ClipComponent::paintFades (juce::Graphics& g, te::AudioClipBase& audio, juc
         for (int i = 0; i <= steps; ++i)
         {
             const auto alpha = (float) i / (float) steps;
-            const auto point =
-                juce::Point<float> (x0 + (x1 - x0) * alpha, height * (1.0f - te::AudioFadeCurve::alphaToGainForType (type, alpha)));
+            const auto point = juce::Point<float> (x0 + (x1 - x0) * alpha, height * (1.0f - getFadeGain (shape, alpha)));
 
             if (i == 0)
                 curve.startNewSubPath (point);
@@ -166,49 +121,44 @@ void ClipComponent::paintFades (juce::Graphics& g, te::AudioClipBase& audio, juc
     };
 
     if (fadeIn > 0.0f)
-        drawFade (0.0f, fadeIn, audio.getFadeInType());
+        drawFade (0.0f, fadeIn, info.fadeInShape);
 
     if (fadeOut > 0.0f)
-        drawFade (width, width - fadeOut, audio.getFadeOutType());
+        drawFade (width, width - fadeOut, info.fadeOutShape);
 }
 
-void ClipComponent::paintNotes (juce::Graphics& g, te::MidiClip& midi, juce::Rectangle<int> area, juce::Colour ink)
+void ClipComponent::paintNotes (juce::Graphics& g, juce::Rectangle<int> area, juce::Colour ink)
 {
-    const auto& notes = midi.getSequence().getNotes();
-
-    if (notes.isEmpty() || area.getHeight() < 4)
+    if (notes.empty() || area.getHeight() < 4)
         return;
 
     // The notes' pitches fill the height, over at least an octave so that a few notes don't fill it all.
     auto lowest = 127, highest = 0;
 
-    for (auto* note : notes)
+    for (const auto& note : notes)
     {
-        lowest = std::min (lowest, note->getNoteNumber());
-        highest = std::max (highest, note->getNoteNumber());
+        lowest = std::min (lowest, note.pitch);
+        highest = std::max (highest, note.pitch);
     }
 
     const auto range = std::max (minNoteRange, highest - lowest + 1);
     const auto bottomNote = (lowest + highest + 1 - range) / 2.0;
     const auto noteHeight = (float) area.getHeight() / (float) range;
 
-    const auto clipStart = midi.getStartBeat();
-    const auto clipLength = std::max (1.0e-6, midi.getLengthInBeats().inBeats());
-    const auto contentStart = midi.getContentStartBeat();
-    const auto beatToX = [&] (te::BeatPosition beat) { return (float) ((beat - clipStart).inBeats() / clipLength * getWidth()); };
+    const auto clipLength = std::max (1.0e-6, info.range.getLength().inBeats());
+    const auto beatToX = [&] (double beat) { return (float) (beat / clipLength * getWidth()); };
 
     g.setColour (ink);
 
-    for (auto* note : notes)
+    for (const auto& note : notes)
     {
-        const auto start = contentStart + te::toDuration (note->getStartBeat());
-        const auto left = std::max (0.0f, beatToX (start));
-        const auto right = std::min ((float) getWidth(), beatToX (start + note->getLengthBeats()));
+        const auto left = std::max (0.0f, beatToX (note.start));
+        const auto right = std::min ((float) getWidth(), beatToX (note.end));
 
         if (right <= left)
             continue; // outside the clip
 
-        const auto top = (float) area.getBottom() - (float) (note->getNoteNumber() - bottomNote + 1.0) * noteHeight;
+        const auto top = (float) area.getBottom() - (float) (note.pitch - bottomNote + 1.0) * noteHeight;
         g.fillRect (juce::Rectangle<float> (left, top, std::max (1.0f, right - left), std::max (1.0f, noteHeight - 1.0f)));
     }
 }

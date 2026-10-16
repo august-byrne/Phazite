@@ -3,39 +3,44 @@
 // and fades, a MIDI clip's notes). It only draws: the playlist handles the mouse, with the Smart Tool.
 #pragma once
 
+#include "ClipWaveform.h"
+#include "model/arrangement/PlaylistModel.h"
+
 #include <juce_gui_basics/juce_gui_basics.h>
-#include <tracktion_engine/tracktion_engine.h>
+
+#include <vector>
 
 namespace phazite::ui
 {
-namespace te = tracktion;
-
 class ClipComponent : public juce::Component
 {
 public:
-    explicit ClipComponent (te::Clip&);
+    ClipComponent (ProjectContext&, ClipID);
     ~ClipComponent() override;
 
-    te::Clip* getClip() const { return clip.get(); }
+    ClipID getClip() const noexcept { return id; }
+    const ClipInfo& getInfo() const noexcept { return info; } // as it was shown last
 
-    // Shows the clip as it is now, in this color, and whether it is selected.
-    void update (juce::Colour, bool isSelected);
+    // Shows the clip as it is now (getClip() in model/arrangement/PlaylistModel.h), with what it holds; call it when
+    // the song changes.
+    void showClip (const ClipInfo&);
+
+    // Shows it in its track's color, and whether it is selected.
+    void showLook (juce::Colour, bool isSelected);
     juce::Colour getColour() const noexcept { return colour; }
 
     void paint (juce::Graphics&) override;
 
 private:
-    te::SafeSelectable<te::Clip> clip;
+    ProjectContext& context;
+    const ClipID id;
+    ClipInfo info;
+    std::vector<NoteShape> notes; // a MIDI clip's
     juce::Colour colour;
     bool selected = false;
+    std::unique_ptr<ClipWaveform> waveform; // an audio clip's, made when it first shows
 
-    std::unique_ptr<te::SmartThumbnail> thumbnail; // an audio clip's waveform
-    juce::File thumbnailFile;                      // what it shows
-
-    void updateThumbnail (te::AudioClipBase&);
-    double xToTime (double x) const; // in seconds, in the Edit
-    void paintWaveform (juce::Graphics&, te::AudioClipBase&, juce::Rectangle<int>, juce::Colour);
-    void paintFades (juce::Graphics&, te::AudioClipBase&, juce::Rectangle<int>);
-    void paintNotes (juce::Graphics&, te::MidiClip&, juce::Rectangle<int>, juce::Colour);
+    void paintFades (juce::Graphics&, juce::Rectangle<int>);
+    void paintNotes (juce::Graphics&, juce::Rectangle<int>, juce::Colour);
 };
 } // namespace phazite::ui

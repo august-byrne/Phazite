@@ -137,7 +137,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     const auto alias = phazite::copyClips ({ chords }, true);
     REQUIRE (alias.size() == 1);
     phazite::moveClip (*alias[0], beats (8.0), *keys);
-    phazite::ui::setTrackHeight (*keys, 96);
+    phazite::setSavedTrackHeight (*keys, 96);
 
     auto* keysVolume = keys->getVolumePlugin();
     REQUIRE (keysVolume != nullptr);
