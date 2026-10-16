@@ -7,16 +7,19 @@
 
 #include "DeviceSlots.h"
 #include "StripParts.h"
+#include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 
+#include <optional>
 #include <vector>
 
 namespace phazite::ui
 {
 class ChannelStrip : public juce::Component,
                      public juce::DragAndDropTarget,
+                     private ProjectContext::Listener,
                      private juce::Timer
 {
 public:
@@ -25,13 +28,14 @@ public:
     // How tall the strip must be for its parts not to overlap; the mixer scrolls when it is shorter.
     static int getMinimumHeight();
 
-    ChannelStrip (te::Engine&, CommandBridge&, ProjectContext&);
+    ChannelStrip (CommandBridge&, ProjectContext&);
     ~ChannelStrip() override;
 
-    // The track to show: an audio track, a folder (a bus or a plain one) or a return; nullptr for none. The
-    // strip notices when the track is deleted, and when its devices or sends change.
-    void setTrack (te::Track*);
-    te::Track* getTrack() const { return track.get(); }
+    // The channel to show (model/mixer/MixerModel.h): a track, a folder (a bus or a plain one) or a return; an empty ID
+    // for none. The strip then shows what changes in it, and nothing once it is deleted. Set it again for a channel of
+    // another project, even one with the same ID.
+    void setTrack (TrackID);
+    TrackID getTrack() const noexcept { return track; }
 
     void setSelected (bool);
     void setRelated (bool); // its sound reaches the selected channel, or the selected channel's reaches it
@@ -50,36 +54,41 @@ public:
 private:
     struct SendSlot;
 
-    te::Engine& engine;
     CommandBridge& commands;
-    te::SelectionManager& selection;
-    te::SafeSelectable<te::Track> track;
+    ProjectContext& context;
+    TrackID track;
+    std::optional<Channel> channel; // the channel as it was when the song last changed; nothing once it is gone
     bool selected = false, related = false, dropping = false;
-    juce::Colour shownColour; // the track's color, as the bar along the top shows it
+    bool refreshDue = false, needDue = false; // the song changed: shown at the next tick (refresh(), refreshNeed())
 
     juce::Label nameLabel, inputLabel, outputLabel; // the name, what the channel is and what feeds it, and where it goes
     juce::TextButton busButton { "Bus" };           // a folder's: whether it mixes its tracks, or only scales them
     StripHeading instrumentHeading { "Instrument" }, effectsHeading { "Effects" }, sendsHeading { "Sends" };
-    DeviceSlots instrument { DeviceSlots::Kind::instrument }, effects { DeviceSlots::Kind::effects };
+    DeviceSlots instrument, effects;
     juce::OwnedArray<SendSlot> sendSlots;
     juce::TextButton addSendButton { "+ Send" };
-    std::vector<te::EditItemID> shownSends; // the sends the slots show
-    juce::Component slotHolder;             // the instrument, effects and sends, scrolling when they don't fit
+    std::vector<DeviceID> shownSends; // the sends the slots show
+    juce::Component slotHolder;       // the instrument, effects and sends, scrolling when they don't fit
     juce::Viewport slotView;
 
     LevelMeter meter { "Level" };
-    Fader volume { Fader::Direction::vertical, "Volume", te::decibelsToVolumeFaderPosition (0.0f) };
+    Fader volume { Fader::Direction::vertical, "Volume", decibelsToFaderPosition (0.0f) };
     Knob pan { "Pan", 0.0 };
     MuteSoloButtons muteSolo;
-    ParameterAttachment volumeAttachment { volume, "Change Volume" }, panAttachment { pan, "Change Pan" };
+    ParameterAttachment volumeAttachment { volume }, panAttachment { pan };
 
+    void refresh(); // shows the channel as it is now: its name, kind, devices and sends
+    void showChannel();
     void attachControls();
-    void rebuildSends();
+    void refreshSends();
     void layOutSlots();
     void showSendMenu();
     juce::String describeInput() const;
     juce::String describeOutput() const;
-    void timerCallback() override; // shows changes made elsewhere: names, devices, undo, automation
+
+    void projectChanged() override {} // the mixer or the inspector gives it a channel of the new project
+    void songChanged (const SongChanges&) override;
+    void timerCallback() override; // the song's changes, and the controls' values (undo, automation, devices' windows)
 };
 
 } // namespace phazite::ui

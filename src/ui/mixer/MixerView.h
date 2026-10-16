@@ -12,27 +12,21 @@
 namespace phazite::ui
 {
 class MixerView : public juce::Component,
-                  private juce::ValueTree::Listener,
                   private juce::ChangeListener,
-                  private juce::AsyncUpdater,
-                  private juce::Timer,
-                  private ProjectContext::Listener
+                  private ProjectContext::Listener,
+                  private juce::Timer
 {
 public:
     // Shows the open project's channels, and none while no project is open.
-    MixerView (te::Engine&, CommandBridge&, ProjectContext&);
+    MixerView (CommandBridge&, ProjectContext&);
     ~MixerView() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    te::Engine& engine;
     CommandBridge& commands;
     ProjectContext& context;
-    te::SelectionManager& selection; // the context's
-    te::SafeSelectable<te::Edit> edit;
-    juce::ValueTree editState; // listened to for tracks being added, deleted and moved
 
     // The tracks' strips side by side in a view that scrolls sideways, and the master on the right. When the mixer is
     // shorter than the strips need, the whole of it scrolls up and down.
@@ -44,18 +38,19 @@ private:
     MasterStrip master;
     juce::TextButton addReturnButton { "+ Return" };
 
-    void setEdit (te::Edit*); // the open project's, or nullptr while none is open
-    void projectChanged() override { setEdit (context.getEdit()); }
-
-    void rebuild(); // after tracks were added, deleted or moved
+    void showProject(); // the open project's channels, or none while no project is open
+    void rebuild();     // after tracks were added, deleted or moved
     void updateSelection();
 
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { updateSelection(); }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
-    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override;
-    void handleAsyncUpdate() override { rebuild(); }
-    void timerCallback() override { updateSelection(); } // sends added or removed change what is related
+    void projectChanged() override { showProject(); }
+    void songChanged (const SongChanges&) override;
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { updateSelection(); } // the selection changed
+
+    void timerCallback() override // a while after devices changed
+    {
+        stopTimer();
+        updateSelection();
+    }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerView)
 };

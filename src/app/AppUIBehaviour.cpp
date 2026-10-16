@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppUIBehaviour.h"
-#include "ui/devices/PluginWindow.h"
+#include "PluginWindow.h"
 
 namespace phazite
 {
 std::unique_ptr<juce::Component> AppUIBehaviour::createPluginWindow (te::PluginWindowState& state)
 {
-    return ui::createPluginWindow (state);
+    return phazite::createPluginWindow (state); // the free function, not this
 }
 
 void AppUIBehaviour::recreatePluginWindowContentAsync (te::Plugin& plugin)
@@ -24,7 +24,7 @@ void AppUIBehaviour::recreatePluginWindowContentAsync (te::Plugin& plugin)
         [window, safePlugin = te::Plugin::Ptr (&plugin)]
         {
             if (window != nullptr)
-                ui::recreatePluginWindowContent (*safePlugin);
+                phazite::recreatePluginWindowContent (*safePlugin);
         });
 }
 } // namespace phazite

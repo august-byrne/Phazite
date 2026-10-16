@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The open project as commands and panels find it (src/model/project/ProjectContext.h).
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Sections.h"
+#include "model/arrangement/Tracks.h"
 #include "model/engine/EngineSetup.h"
 #include "model/project/ProjectContext.h"
 
@@ -120,4 +122,92 @@ TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
     selection.clear();
     CHECK (selection.getSections().empty());
     context.setEdit (nullptr);
+}
+
+TEST_CASE ("Views hear what changed in the song, in groups, once for the changes made at once")
+{
+    struct View : phazite::ProjectContext::Listener
+    {
+        void projectChanged() override {}
+        void songChanged (const phazite::SongChanges& changes) override { heard.push_back (changes); }
+
+        std::vector<phazite::SongChanges> heard;
+    };
+
+    auto& engine = phazite::test::getEngine();
+    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto* track = te::getAudioTracks (*edit)[0];
+    phazite::ProjectContext context (engine);
+    context.setEdit (edit.get());
+    View view;
+    context.addListener (&view);
+
+    // The groups of what the view hears, a word each. (Tracktion follows some changes up with its own, a moment later.)
+    const auto hear = [&view]
+    {
+        phazite::test::dispatchPendingMessages();
+        phazite::SongChanges all;
+
+        for (const auto& changes : std::exchange (view.heard, {}))
+        {
+            all.tracks = all.tracks || changes.tracks;
+            all.devices = all.devices || changes.devices;
+            all.clips = all.clips || changes.clips;
+            all.sections = all.sections || changes.sections;
+            all.tempo = all.tempo || changes.tempo;
+        }
+
+        juce::StringArray groups;
+
+        for (const auto& [group, name] :
+             { std::pair (all.tracks, "tracks"), std::pair (all.devices, "devices"), std::pair (all.clips, "clips"),
+               std::pair (all.sections, "sections"), std::pair (all.tempo, "tempo") })
+            if (group)
+                groups.add (name);
+
+        return groups.joinIntoString (" ").toStdString();
+    };
+
+    // A track renamed and a device put on it at once: one notification of both.
+    track->setName ("Bass");
+    track->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}), 0, nullptr);
+    phazite::test::dispatchPendingMessages();
+    CHECK (view.heard.size() == 1);
+    CHECK (hear() == "tracks devices");
+
+    // Devices and tracks that change places.
+    const auto delay = edit->getPluginCache().createNewPlugin (te::DelayPlugin::xmlTypeName, {});
+    REQUIRE (delay != nullptr);
+    track->pluginList.insertPlugin (delay, 0, nullptr);
+    CHECK (hear() == "devices");
+    track->state.moveChild (track->state.indexOf (delay->state), track->state.getNumChildren() - 1, nullptr);
+    CHECK (hear() == "devices");
+    edit->ensureNumberOfAudioTracks (2);
+    CHECK (hear() == "tracks devices"); // a new track comes with its fader and meter
+    edit->state.moveChild (edit->state.indexOf (track->state), edit->state.indexOf (te::getAudioTracks (*edit)[1]->state), nullptr);
+    CHECK (hear() == "tracks");
+
+    // A clip, and its notes: no change to the track (Tracktion sorts the track's clips and parts after a clip is added).
+    auto* clip = track->insertMIDIClip ({ te::TimePosition(), te::TimePosition::fromSeconds (2.0) }, nullptr).get();
+    REQUIRE (clip != nullptr);
+    CHECK (hear() == "clips");
+    clip->getSequence().addNote (60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
+    CHECK (hear() == "clips");
+
+    // A section; and the tempo, which moves the clips and sections in time.
+    REQUIRE (phazite::insertSection (*edit, {}, { .name = "Verse", .length = te::BeatDuration::fromBeats (16.0) }) != nullptr);
+    CHECK (juce::String (hear()).contains ("sections"));
+    edit->tempoSequence.getTempo (0)->setBpm (100.0);
+    CHECK (hear() == "clips sections tempo");
+
+    // What Tracktion writes as it plays, and view state such as how tall a track shows, are no change to the song.
+    edit->getTransport().setPosition (te::TimePosition::fromSeconds (1.0));
+    phazite::setSavedTrackHeight (*track, 120);
+    CHECK (hear().empty());
+
+    // Changes not yet told are the closing project's: none come after another opens.
+    track->setName ("Lead");
+    context.setEdit (nullptr);
+    CHECK (hear().empty());
+    context.removeListener (&view);
 }

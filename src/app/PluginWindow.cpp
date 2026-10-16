@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginWindow.h"
-#include "DeviceEditors.h"
+#include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/ParameterHandle.h"
 #include "ui/components/Controls.h"
+#include "ui/devices/DeviceEditors.h"
 #include "ui/input/PluginKeys.h"
 #include "ui/theme/LookAndFeel.h"
 
-namespace phazite::ui
+namespace phazite
 {
 namespace
 {
@@ -16,51 +18,47 @@ namespace
                           private juce::Timer
     {
     public:
-        explicit GenericEditor (te::Plugin& p)
-            : plugin (p)
+        explicit GenericEditor (te::Plugin& plugin)
         {
             for (auto* parameter : plugin.getAutomatableParameters())
             {
-                auto* knob = knobs.add (new Knob (parameter->getParameterName(), parameter->getDefaultValue().value_or (0.0f)));
-                knob->textFromValueFunction = [shown = std::make_shared<ParameterHandle> (&plugin, parameter->paramID)] (double value)
-                { return shown->getText ((float) value); };
-
-                auto* attachment = attachments.add (new ParameterAttachment (*knob, "Change " + parameter->getParameterName()));
-                attachment->setParameter (&plugin, parameter->paramID);
+                auto* knob = knobs.add (new ui::Knob (parameter->getParameterName(), parameter->getDefaultValue().value_or (0.0f)));
+                auto* attachment = attachments.add (new ui::ParameterAttachment (*knob));
+                attachment->setParameter (makeParameterHandle (&plugin, parameter->paramID));
+                attachment->showDeviceText();
 
                 auto* label = labels.add (new juce::Label ({}, parameter->getParameterName()));
                 label->setJustificationType (juce::Justification::centred);
-                label->setFont (juce::FontOptions (TextSize::small));
+                label->setFont (juce::FontOptions (ui::TextSize::small));
 
                 addAndMakeVisible (knob);
                 addAndMakeVisible (label);
             }
 
             const auto rows = std::max (1, (knobs.size() + columns - 1) / columns);
-            setSize (columns * (knobSize + Space::l) + Space::l, rows * (knobSize + labelHeight + Space::s) + Space::l);
+            setSize (columns * (knobSize + ui::Space::l) + ui::Space::l, rows * (knobSize + labelHeight + ui::Space::s) + ui::Space::l);
             startTimerHz (10);
         }
 
         bool allowWindowResizing() override { return false; }
         juce::ComponentBoundsConstrainer* getBoundsConstrainer() override { return nullptr; }
 
-        void paint (juce::Graphics& g) override { g.fillAll (getPalette (*this).surface); }
+        void paint (juce::Graphics& g) override { g.fillAll (ui::getPalette (*this).surface); }
 
         void resized() override
         {
             for (int i = 0; i < knobs.size(); ++i)
             {
-                const auto x = Space::l + (i % columns) * (knobSize + Space::l);
-                const auto y = Space::l + (i / columns) * (knobSize + labelHeight + Space::s);
+                const auto x = ui::Space::l + (i % columns) * (knobSize + ui::Space::l);
+                const auto y = ui::Space::l + (i / columns) * (knobSize + labelHeight + ui::Space::s);
                 knobs[i]->setBounds (x, y, knobSize, knobSize);
-                labels[i]->setBounds (x - Space::s, y + knobSize, knobSize + 2 * Space::s, labelHeight);
+                labels[i]->setBounds (x - ui::Space::s, y + knobSize, knobSize + 2 * ui::Space::s, labelHeight);
             }
         }
 
     private:
-        te::Plugin& plugin;
-        juce::OwnedArray<Knob> knobs;
-        juce::OwnedArray<ParameterAttachment> attachments;
+        juce::OwnedArray<ui::Knob> knobs;
+        juce::OwnedArray<ui::ParameterAttachment> attachments;
         juce::OwnedArray<juce::Label> labels;
 
         void timerCallback() override // shows changes from automation, undo and the device's own knobs
@@ -71,7 +69,7 @@ namespace
     };
 
     //==============================================================================
-    // One of Phazite's devices' editors (DeviceEditors.h), as Tracktion's windows take editors.
+    // One of Phazite's devices' editors (ui/devices/DeviceEditors.h), as Tracktion's windows take editors.
     class DeviceEditor : public te::Plugin::EditorComponent
     {
     public:
@@ -99,7 +97,7 @@ namespace
             : juce::DocumentWindow (p.getName(), {}, juce::DocumentWindow::closeButton),
               plugin (p)
         {
-            setBackgroundColour (getPalette (*this).surface);
+            setBackgroundColour (ui::getPalette (*this).surface);
             setUsingNativeTitleBar (true);
             getConstrainer()->setMinimumOnscreenAmounts (0x10000, 50, 30, 50);
             recreateEditor();
@@ -115,7 +113,7 @@ namespace
 
         ~PluginWindow() override
         {
-            if (auto* keys = getPluginKeys())
+            if (auto* keys = ui::getPluginKeys())
                 keys->unwatch (*this);
 
             storeBounds = false;
@@ -132,7 +130,7 @@ namespace
 
             if (newEditor == nullptr)
             {
-                if (auto deviceEditor = createDeviceEditor (DeviceHandle (plugin))) // one of Phazite's own devices
+                if (auto deviceEditor = ui::createDeviceEditor (makeDeviceHandle (plugin))) // one of Phazite's own devices
                     newEditor = std::make_unique<DeviceEditor> (std::move (deviceEditor));
                 else if (dynamic_cast<te::ExternalPlugin*> (&plugin) == nullptr)
                     newEditor = std::make_unique<GenericEditor> (plugin);
@@ -146,7 +144,7 @@ namespace
         void lookAndFeelChanged() override // the theme changed
         {
             juce::DocumentWindow::lookAndFeelChanged();
-            setBackgroundColour (getPalette (*this).surface);
+            setBackgroundColour (ui::getPalette (*this).surface);
         }
 
         void moved() override
@@ -182,7 +180,7 @@ namespace
                 setConstrainer (editor->getBoundsConstrainer());
 
             // Play and stop, and the computer keyboard, work while the plug-in is being tweaked (ui/input/PluginKeys.h).
-            if (auto* keys = getPluginKeys())
+            if (auto* keys = ui::getPluginKeys())
                 keys->watch (*this);
         }
 
@@ -220,4 +218,4 @@ void recreatePluginWindowContent (te::Plugin& plugin)
     if (auto* window = dynamic_cast<PluginWindow*> (plugin.windowState->pluginWindow.get()))
         window->recreateEditor();
 }
-} // namespace phazite::ui
+} // namespace phazite

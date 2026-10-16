@@ -19,9 +19,10 @@ namespace
     constexpr float gripAlpha = 0.6f; // the handle is drawn in the header's ink, a little muted
 } // namespace
 
-TrackHeader::TrackHeader (Owner& o, te::Track& trackToShow)
+TrackHeader::TrackHeader (Owner& o, ProjectContext& context, te::Track& trackToShow)
     : owner (o),
       track (trackToShow),
+      muteSolo (context),
       gripIcon (createIcon (Icon::grip))
 {
     setDescription ("Click to select the track, Ctrl+click to add it to the selection, Shift+click to select up to it. "
@@ -38,7 +39,7 @@ TrackHeader::TrackHeader (Owner& o, te::Track& trackToShow)
             renameTrack (*t, nameLabel.getText()); // an empty name gives the track its number back
     };
 
-    muteSolo.setTrack (&trackToShow);
+    muteSolo.setTrack (getTrackID (trackToShow));
 
     // The chevron collapses a track to a thin row, and hides a folder's tracks.
     isFolder = trackToShow.isFolderTrack();

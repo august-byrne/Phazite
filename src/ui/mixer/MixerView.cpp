@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MixerView.h"
-#include "model/arrangement/Tracks.h"
-#include "model/mixer/Mixer.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -12,33 +11,12 @@ namespace
     constexpr int toolbarHeight = 36;
 
     constexpr int returnsGap = Space::m; // between the tracks' strips and the returns'
-
-    bool isTrackState (const juce::ValueTree& state)
-    {
-        return state.hasType (te::IDs::TRACK) || state.hasType (te::IDs::FOLDERTRACK);
-    }
-
-    // Whether a channel's sound reaches another's: through a send to a return, or by being in a bus folder.
-    bool feeds (const te::Track& from, const te::Track& to)
-    {
-        if (const auto bus = getReturnBus (to); bus >= 0)
-            for (auto* send : getSends (from))
-                if (send->getBusNumber() == bus)
-                    return true;
-
-        for (auto* parent = from.getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
-            if (parent == &to && isBus (*parent))
-                return true;
-
-        return false;
-    }
 } // namespace
 
-MixerView::MixerView (te::Engine& e, CommandBridge& bridge, ProjectContext& projectContext)
-    : engine (e),
-      commands (bridge),
+MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
+    : commands (bridge),
       context (projectContext),
-      selection (projectContext.getSelection())
+      master (projectContext)
 {
     setTitle ("Mixer");
     setDescription ("A channel for every track, in the playlist's order, and the return tracks next to the master. Click a channel to "
@@ -56,64 +34,53 @@ MixerView::MixerView (te::Engine& e, CommandBridge& bridge, ProjectContext& proj
     addAndMakeVisible (verticalView);
     addAndMakeVisible (addReturnButton);
 
-    selection.addChangeListener (this);
+    context.getSongSelection().addChangeListener (this);
     context.addListener (this);
-    setEdit (context.getEdit());
-    startTimerHz (4);
+    showProject();
 }
 
 MixerView::~MixerView()
 {
-    stopTimer();
     context.removeListener (this);
-    selection.removeChangeListener (this);
-    editState.removeListener (this);
+    context.getSongSelection().removeChangeListener (this);
     strips.clear(); // before stripHolder, which holds them
 }
 
-void MixerView::setEdit (te::Edit* newEdit)
+void MixerView::showProject()
 {
-    if (newEdit == edit.get() && editState.isValid() == (newEdit != nullptr))
-        return;
-
-    editState.removeListener (this);
-    edit = newEdit;
-    editState = newEdit != nullptr ? newEdit->state : juce::ValueTree();
-    editState.addListener (this);
-    cancelPendingUpdate();
-
+    // The strips of another project's channels go, even those with the same IDs.
     strips.clear();
-    master.setEdit (newEdit);
-    addReturnButton.setEnabled (newEdit != nullptr);
+    addReturnButton.setEnabled (context.hasProject());
     addReturnButton.setTooltip (
         withShortcut (commands, "Adds a return track, for an effect such as a reverb that tracks send to", "track.addReturn"));
     rebuild();
 }
 
+void MixerView::songChanged (const SongChanges& changes)
+{
+    if (changes.tracks)
+        rebuild();
+    else if (changes.devices && ! isTimerRunning())
+        startTimer (250); // sends added or removed change what is related; a fader's drag changes devices many times a second
+}
+
 void MixerView::rebuild()
 {
     // The tracks in the playlist's order, then the returns, together next to the master.
-    auto* e = edit.get();
-    auto tracks = e != nullptr ? getPlaylistTracks (*e) : juce::Array<te::Track*>();
-    juce::Array<te::Track*> returns;
-
-    for (auto* track : tracks)
-        if (getReturnBus (*track) >= 0)
-            returns.add (track);
-
-    tracks.removeValuesIn (returns);
-    firstReturn = tracks.size();
-    tracks.addArray (returns);
+    const auto channels = getMixerChannels (context);
+    auto ids = channels.tracks;
+    ids.insert (ids.end(), channels.returns.begin(), channels.returns.end());
+    firstReturn = (int) channels.tracks.size();
 
     // The strips of tracks that are still there are kept, in the tracks' new order.
     juce::OwnedArray<ChannelStrip> kept;
 
-    for (auto* track : tracks)
+    for (const auto id : ids)
     {
         ChannelStrip* strip = nullptr;
 
         for (auto* existing : strips)
-            if (existing->getTrack() == track)
+            if (existing->getTrack() == id)
                 strip = existing;
 
         if (strip != nullptr)
@@ -122,8 +89,8 @@ void MixerView::rebuild()
         }
         else
         {
-            strip = new ChannelStrip (engine, commands, context);
-            strip->setTrack (track);
+            strip = new ChannelStrip (commands, context);
+            strip->setTrack (id);
             stripHolder.addAndMakeVisible (strip);
         }
 
@@ -133,20 +100,22 @@ void MixerView::rebuild()
     strips.swapWith (kept); // kept now holds the strips of deleted tracks, and deletes them
     updateSelection();
     resized();
+    repaint(); // the hint while there are no tracks
 }
 
 void MixerView::updateSelection()
 {
-    const auto selected = getSelectedTracks (selection);
+    const auto& selection = context.getSongSelection();
+    const auto selected = selection.getTracks();
 
     for (auto* strip : strips)
     {
-        auto* t = strip->getTrack();
-        const auto isSelected = t != nullptr && selection.isSelected (t);
+        const auto id = strip->getTrack();
+        const auto isSelected = selection.isSelected (id);
         strip->setSelected (isSelected);
-        strip->setRelated (
-            t != nullptr && ! isSelected
-            && std::any_of (selected.begin(), selected.end(), [t] (te::Track* s) { return feeds (*s, *t) || feeds (*t, *s); }));
+        strip->setRelated (! isSelected
+                           && std::any_of (selected.begin(), selected.end(),
+                                           [this, id] (TrackID s) { return feeds (context, s, id) || feeds (context, id, s); }));
     }
 }
 
@@ -155,7 +124,7 @@ void MixerView::paint (juce::Graphics& g)
     const auto& p = getPalette (*this);
     g.fillAll (p.background);
 
-    if (strips.isEmpty() && edit.get() != nullptr)
+    if (strips.isEmpty() && context.hasProject())
     {
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::body));
@@ -187,23 +156,5 @@ void MixerView::resized()
 
     for (int i = 0; i < strips.size(); ++i)
         strips[i]->setBounds (i * ChannelStrip::width + (i >= firstReturn ? gap : 0), 0, ChannelStrip::width, height);
-}
-
-void MixerView::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
-{
-    if (isTrackState (child))
-        triggerAsyncUpdate();
-}
-
-void MixerView::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int)
-{
-    if (isTrackState (child))
-        triggerAsyncUpdate();
-}
-
-void MixerView::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
-{
-    if (parent == editState || isTrackState (parent))
-        triggerAsyncUpdate();
 }
 } // namespace phazite::ui

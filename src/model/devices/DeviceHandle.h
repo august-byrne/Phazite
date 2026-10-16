@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // One of Phazite's own devices as its editor uses it: its description, a handle to each of its parameters, and its DSP
 // for what an editor reads without waiting (an EQ's analyzer tap, a compressor's meter). It finds its device each
-// time, so it is safe to keep after the device is deleted: it then has none.
+// time, so it is safe to keep, and to copy, after the device is deleted: it then has none. The model hands handles out
+// (internal/DeviceHandle.h, for the app's device windows).
 #pragma once
 
 #include "ParameterHandle.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
-#include "model/base/Tracktion.h"
+#include "model/base/IDs.h"
 
-#include <cstdint>
+#include <memory>
 #include <string_view>
 #include <vector>
 
@@ -18,10 +19,7 @@ namespace phazite
 class DeviceHandle
 {
 public:
-    DeviceHandle() = default;
-
-    // Of a plug-in: empty unless it is one of Phazite's own devices.
-    explicit DeviceHandle (te::Plugin&);
+    DeviceHandle() = default; // of nothing
 
     bool isValid() const;
     const devices::DeviceInfo* getInfo() const; // nullptr without a device
@@ -29,17 +27,17 @@ public:
     // The parameter with that ID; its changes are undo steps named "Change" and its name, or undoName.
     ParameterHandle getParameter (std::string_view id, const juce::String& undoName = {}) const;
 
-    // A track a device's sidechain can listen to (model/mixer/Sidechain.h), by its ID, which stays the same while the
-    // project is open; 0 for none, the sound passing through the device.
+    // A track a device's sidechain can listen to (model/mixer/Sidechain.h), or none: the sound passing through the
+    // device.
     struct SidechainChoice
     {
-        std::uint64_t trackID = 0;
+        TrackID track;
         juce::String name;
     };
 
     std::vector<SidechainChoice> getSidechainChoices() const; // in the song's order
     SidechainChoice getSidechainSource() const;
-    void setSidechainSource (std::uint64_t trackID) const; // one of the choices, or 0; as one undo step
+    void setSidechainSource (TrackID) const; // one of the choices, or none; as one undo step
 
     // The drum sampler's pads (model/devices/DrumKit.h): what each plays, and putting a sound file on one, or the kit's
     // sound back, as undo steps. setPadSound() returns false for a file that isn't a sound.
@@ -56,8 +54,11 @@ public:
         return dynamic_cast<DeviceProcessor*> (getProcessorBase());
     }
 
+    struct Impl; // the device
+    explicit DeviceHandle (std::shared_ptr<const Impl>);
+
 private:
-    te::SafeSelectable<te::Plugin> plugin;
+    std::shared_ptr<const Impl> impl;
 
     devices::Processor* getProcessorBase() const;
 };

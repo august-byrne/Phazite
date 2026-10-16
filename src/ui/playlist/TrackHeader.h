@@ -31,7 +31,7 @@ public:
         virtual void trackHeightChanged() = 0;                                          // while its edge is dragged
     };
 
-    TrackHeader (Owner&, te::Track&);
+    TrackHeader (Owner&, ProjectContext&, te::Track&);
 
     te::Track* getTrack() const { return track.get(); }
 

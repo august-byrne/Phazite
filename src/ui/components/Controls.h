@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's base controls: knob, fader, level meter and a meter of a device's value, and the link between a slider
-// and a Tracktion parameter. ui::LookAndFeel draws them. They work from the keyboard (Tab moves the focus, the arrow
+// Phazite's base controls: knob, fader, level meter and a meter of a device's value, and the links between controls
+// and a device's parameters. ui::LookAndFeel draws them. They work from the keyboard (Tab moves the focus, the arrow
 // keys change the value) and tell screen readers their name and value.
 #pragma once
 
-#include "model/commands/CommandRegistry.h"
+#include "model/base/IDs.h"
 #include "model/devices/ParameterHandle.h"
+#include "model/mixer/LevelSource.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
-#include <tracktion_engine/tracktion_engine.h>
 
 #include <array>
 #include <optional>
+
+namespace phazite
+{
+class ProjectContext;
+}
 
 namespace phazite::ui
 {
@@ -78,7 +83,7 @@ private:
     double wheelNotches = 0.0; // a trackpad's movements, added up until they make a step
 };
 
-// Shows and reads a slider's value, a Tracktion volume fader position from 0 to 1, in decibels.
+// Shows and reads a slider's value, a volume fader's position from 0 to 1 (model/mixer/MixerModel.h), in decibels.
 void showAsDecibels (juce::Slider&);
 
 // Shows and reads a slider's value, from -1 (left) to 1 (right), as a pan position ("30% left").
@@ -96,28 +101,27 @@ void showAsTruePeak (juce::Slider&);
 void setPrimary (juce::TextButton&, bool primary);
 
 //==============================================================================
-// Links a slider to a parameter of a plug-in, such as a track's volume. Moving the slider sets the
-// parameter, as one named undo step per drag or key press, which the model's ParameterHandle owns;
-// update() shows changes made elsewhere, such as undo or automation. The plug-in may be deleted at any
-// time (when a project closes, for example): the slider then turns off.
+// Links a slider to a parameter of a device, such as a track's volume. Moving the slider sets the parameter, as one
+// named undo step per drag or key press, which the model's ParameterHandle owns; update() shows changes made
+// elsewhere, such as undo or automation. The device may be deleted at any time (when a project closes, for example):
+// the slider then turns off.
 class ParameterAttachment
 {
 public:
-    ParameterAttachment (juce::Slider&, juce::String undoName);
+    explicit ParameterAttachment (juce::Slider&);
 
-    // The parameter to control, by plug-in and parameter ID (take the ID from the parameter, such as
-    // a VolumeAndPanPlugin's volParam->paramID: the master's differs from a track's); nullptr for none.
-    void setParameter (te::Plugin*, const juce::String& parameterID);
-
-    // The parameter to control, as the model hands it out. Its undo steps keep the name the handle has.
+    // The parameter to control, as the model hands it out (an empty handle for none). Its undo steps have the name the
+    // handle gives them. A handle of the parameter it has already keeps that one, and a drag in progress with it.
     void setParameter (ParameterHandle);
+
+    // The slider shows values as the device writes them ("-6.0 dB"), for plug-ins that aren't Phazite's own.
+    void showDeviceText();
 
     // Shows the parameter's value. Call it regularly, from a timer.
     void update();
 
 private:
     juce::Slider& slider;
-    const juce::String undoName;
     ParameterHandle handle; // owns the undo steps: the slider only reports its drags and values
 
     void showRange (const ParameterHandle&);
@@ -155,7 +159,7 @@ private:
 
 //==============================================================================
 // A level meter: each channel's peak level from -60 to +6 dB, the highest peak of the last second as
-// a line, and red above 0 dB, where the sound clips. It reads a Tracktion LevelMeasurer 30 times a
+// a line, and red above 0 dB, where the sound clips. It reads its source (model/mixer/LevelSource.h) 30 times a
 // second on the message thread, never on the audio thread, and repaints only when the levels change.
 class LevelMeter : public juce::Component,
                    private juce::Timer
@@ -164,8 +168,8 @@ public:
     explicit LevelMeter (const juce::String& title);
     ~LevelMeter() override;
 
-    // The measurer to show, or nullptr. The meter notices when a measurer is deleted.
-    void setSource (te::LevelMeasurer*);
+    // What to show, as the model hands it out (an empty source for nothing). It follows what it measures.
+    void setSource (LevelSource);
 
     void paint (juce::Graphics&) override;
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
@@ -174,13 +178,11 @@ private:
     static constexpr int numChannels = 2;
     static constexpr float minDb = -60.0f, maxDb = 6.0f;
 
-    juce::WeakReference<te::LevelMeasurer> source;
-    te::LevelMeasurer::Client client;
+    LevelSource source;
     std::array<float, numChannels> levels, peaks;
     std::array<juce::uint32, numChannels> peakTimes {};
 
     juce::String getLevelText() const; // what screen readers read
-    void detach();
     void timerCallback() override;
 };
 
@@ -243,18 +245,19 @@ public:
 class MuteSoloButtons : public juce::Component
 {
 public:
-    MuteSoloButtons();
+    explicit MuteSoloButtons (ProjectContext&);
     ~MuteSoloButtons() override;
 
-    void setTrack (te::Track*);
-    void update(); // shows the track's mute and solo as they are now
+    void setTrack (TrackID); // an empty ID for none
+    void update();           // shows the track's mute and solo as they are now
 
     void resized() override;
 
 private:
     struct Button;
 
-    te::SafeSelectable<te::Track> track;
+    ProjectContext& context;
+    TrackID track;
     std::unique_ptr<Button> mute, solo;
 };
 } // namespace phazite::ui

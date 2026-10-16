@@ -56,8 +56,8 @@ private:
 
     ToggleAttachment onAttachment { onButton };
     ChoiceAttachment typeAttachment { typeBox }, slopeAttachment { slopeBox };
-    ParameterAttachment frequencyAttachment { frequencyKnob, {} }, gainAttachment { gainKnob, {} }, qAttachment { qKnob, {} },
-        mixAttachment { mixKnob, {} }, outputAttachment { outputKnob, {} };
+    ParameterAttachment frequencyAttachment { frequencyKnob }, gainAttachment { gainKnob }, qAttachment { qKnob },
+        mixAttachment { mixKnob }, outputAttachment { outputKnob };
 
     devices::Spectrum spectrum;
     std::vector<float> pulled;

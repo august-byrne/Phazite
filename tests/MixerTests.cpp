@@ -3,7 +3,9 @@
 #include "model/arrangement/Tracks.h"
 #include "model/commands/Undo.h"
 #include "model/engine/LoudnessMeterPlugin.h"
+#include "model/mixer/MixHandle.h"
 #include "model/mixer/Mixer.h"
+#include "model/mixer/internal/MixHandle.h"
 
 using namespace tracktion::literals;
 
@@ -419,7 +421,7 @@ TEST_CASE ("The mixer strip's edits are undo steps of their own, and a mix drag 
 
     // A drag of the mix knob is one step from its first move to its last; a key press is a step of its own.
     {
-        phazite::MixHandle handle (*eq);
+        auto handle = phazite::makeMixHandle (*eq);
         handle.beginGesture();
         handle.setValue (0.8f);
         handle.setValue (0.5f);

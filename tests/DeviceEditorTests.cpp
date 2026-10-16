@@ -5,6 +5,7 @@
 #include "devices/eq/Equalizer.h"
 #include "model/commands/Undo.h"
 #include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "ui/devices/DeviceEditors.h"
 
 namespace
@@ -23,7 +24,7 @@ TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     auto eq = addDevice (*edit, Equalizer::typeID);
-    const phazite::DeviceHandle device (*eq);
+    const auto device = phazite::makeDeviceHandle (*eq);
 
     REQUIRE (device.isValid());
     REQUIRE (device.getInfo() != nullptr);
@@ -35,7 +36,7 @@ TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
 
     // Tracktion's own devices aren't Phazite's.
     auto reverb = addDevice (*edit, te::ReverbPlugin::xmlTypeName);
-    const phazite::DeviceHandle notOurs (*reverb);
+    const auto notOurs = phazite::makeDeviceHandle (*reverb);
     CHECK_FALSE (notOurs.isValid());
     CHECK (notOurs.getInfo() == nullptr);
     CHECK (notOurs.getProcessor<Equalizer>() == nullptr);
@@ -55,7 +56,7 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
     const auto eq = addDevice (*edit, Equalizer::typeID);
     edit->getUndoManager().clearUndoHistory();
 
-    phazite::ui::DeviceKnobs knobs ((phazite::DeviceHandle (*eq)));
+    phazite::ui::DeviceKnobs knobs ((phazite::makeDeviceHandle (*eq)));
     REQUIRE (knobs.getNumKnobs() == 50);
 
     auto& frequency = knobs.getKnob (Equalizer::getParameterIndex (0, Equalizer::frequency));
@@ -69,6 +70,6 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
     CHECK (eq->getAutomatableParameterByID ("band3Gain")->getCurrentValue() == doctest::Approx (6.0f));
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Band 3 Gain"));
 
-    CHECK (phazite::ui::createDeviceEditor (phazite::DeviceHandle (*eq)) != nullptr);
+    CHECK (phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*eq)) != nullptr);
     CHECK (phazite::ui::createDeviceEditor (phazite::DeviceHandle()) == nullptr);
 }

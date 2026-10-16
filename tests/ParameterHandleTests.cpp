@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "model/commands/Undo.h"
 #include "model/devices/ParameterHandle.h"
+#include "model/devices/internal/ParameterHandle.h"
 
 namespace
 {
@@ -25,11 +26,13 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
 
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     auto reverb = addReverb (*edit);
-    phazite::ParameterHandle handle (reverb.get(), "room size");
+    auto handle = phazite::makeParameterHandle (reverb.get(), "room size");
 
     REQUIRE (handle.isValid());
-    CHECK (handle.refersTo (reverb.get(), "room size"));
-    CHECK_FALSE (handle.refersTo (reverb.get(), "damping"));
+    CHECK (handle.refersToSameParameter (phazite::makeParameterHandle (reverb.get(), "room size", "Another Name")));
+    CHECK_FALSE (handle.refersToSameParameter (phazite::makeParameterHandle (reverb.get(), "damping")));
+    CHECK_FALSE (handle.refersToSameParameter (empty));
+    CHECK (empty.refersToSameParameter (phazite::ParameterHandle()));
     CHECK (handle.getName() == juce::String ("Room Size"));
     CHECK (handle.getRange().start == doctest::Approx (0.0f));
     CHECK (handle.getRange().end == doctest::Approx (1.0f));
@@ -56,7 +59,7 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     phazite::test::settle();
     edit->getUndoManager().clearUndoHistory();
 
-    phazite::ParameterHandle handle (reverb.get(), "room size"); // its steps are called "Change Room Size"
+    auto handle = phazite::makeParameterHandle (reverb.get(), "room size"); // its steps are called "Change Room Size"
 
     // A drag: every value it passes through is one step, however long it takes.
     handle.beginGesture();
@@ -82,18 +85,18 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     CHECK (handle.getValue() == doctest::Approx (0.8f));
 
     // A name given for the steps.
-    phazite::ParameterHandle damping (reverb.get(), "damping", "Change Reverb Damping");
+    auto damping = phazite::makeParameterHandle (reverb.get(), "damping", "Change Reverb Damping");
     damping.setValue (0.9f);
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Reverb Damping"));
 
     // A handle that goes away during a drag keeps the drag's change.
     {
-        phazite::ParameterHandle width (reverb.get(), "width");
+        auto width = phazite::makeParameterHandle (reverb.get(), "width");
         width.beginGesture();
         width.setValue (0.25f);
     }
 
-    CHECK (phazite::ParameterHandle (reverb.get(), "width").getValue() == doctest::Approx (0.25f));
+    CHECK (phazite::makeParameterHandle (reverb.get(), "width").getValue() == doctest::Approx (0.25f));
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Width"));
 }
 
@@ -103,7 +106,7 @@ TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices
     te::Plugin::Ptr keep;
     auto& device = phazite::test::createTestDevice (*edit, phazite::test::TestGain::typeID, keep);
 
-    const phazite::ParameterHandle mode (&device, "mode");
+    const auto mode = phazite::makeParameterHandle (&device, "mode");
     const auto info = mode.getInfo();
     REQUIRE (info.has_value());
     CHECK (info->unit == phazite::devices::Unit::choice);
@@ -111,7 +114,7 @@ TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices
     CHECK (info->choices[1] == "Inverted");
     CHECK (mode.getRange().interval == doctest::Approx (1.0f));
 
-    const phazite::ParameterHandle gain (&device, "gain");
+    const auto gain = phazite::makeParameterHandle (&device, "gain");
     CHECK (gain.getRange().start == doctest::Approx (-60.0f));
     CHECK (gain.getInfo()->unit == phazite::devices::Unit::decibels);
 }
@@ -123,7 +126,8 @@ TEST_CASE ("A gesture begun during another for the same project joins it: a drag
     phazite::test::settle();
     edit->getUndoManager().clearUndoHistory();
 
-    phazite::ParameterHandle room (reverb.get(), "room size", "Move Both"), damping (reverb.get(), "damping");
+    auto room = phazite::makeParameterHandle (reverb.get(), "room size", "Move Both");
+    auto damping = phazite::makeParameterHandle (reverb.get(), "damping");
     room.beginGesture();
     damping.beginGesture();
     CHECK (room.isInGesture());

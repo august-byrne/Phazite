@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MasterStrip.h"
-#include "model/engine/LoudnessMeterPlugin.h"
-#include "model/mixer/Mixer.h"
-#include "services/Library.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -10,7 +8,9 @@ namespace phazite::ui
 {
 using namespace strip;
 
-MasterStrip::MasterStrip()
+MasterStrip::MasterStrip (ProjectContext& projectContext)
+    : context (projectContext),
+      effects (DeviceSlots::Kind::effects, projectContext)
 {
     setTitle ("Master");
     showAsDecibels (volume);
@@ -23,12 +23,7 @@ MasterStrip::MasterStrip()
                          "the reset, with the true peak. It measures the master's effects, before the master volume");
 
     resetButton.setTooltip ("Starts the integrated loudness and the true peak again");
-    resetButton.onClick = [this]
-    {
-        if (auto* e2 = edit.get())
-            if (auto* meterPlugin = findLoudnessMeter (*e2))
-                meterPlugin->resetReadings();
-    };
+    resetButton.onClick = [this] { resetLoudness (context); };
 
     deviceView.setViewedComponent (&effects, false);
     deviceView.setScrollBarsShown (true, false);
@@ -37,40 +32,54 @@ MasterStrip::MasterStrip()
     for (auto* c : std::initializer_list<juce::Component*> { &effectsHeading, &deviceView, &meter, &volume, &loudness, &resetButton })
         addAndMakeVisible (c);
 
+    context.addListener (this);
+    showProject();
     startTimerHz (5);
 }
 
-void MasterStrip::setEdit (te::Edit* newEdit)
+MasterStrip::~MasterStrip()
 {
-    edit = newEdit;
-    effects.setChannel (nullptr, newEdit);
+    context.removeListener (this);
+}
 
-    const auto volumePlugin = newEdit != nullptr ? newEdit->getMasterVolumePlugin() : nullptr;
-    volumeAttachment.setParameter (volumePlugin.get(), volumePlugin != nullptr ? volumePlugin->volParam->paramID : juce::String());
+void MasterStrip::showProject()
+{
+    effects.setMaster();
+    volumeAttachment.setParameter (getMasterVolume (context));
+    meter.setSource (getMasterLevel (context));
+    showEffects();
     timerCallback();
+}
+
+void MasterStrip::showEffects()
+{
+    effects.setSize (effects.getWidth(), effects.getPreferredHeight());
+}
+
+void MasterStrip::songChanged (const SongChanges& changes)
+{
+    if (changes.devices)
+    {
+        effects.refresh();
+        showEffects();
+    }
 }
 
 void MasterStrip::timerCallback()
 {
-    auto* e = edit.get();
     volumeAttachment.update();
-    effects.update();
-    effects.setSize (effects.getWidth(), effects.getPreferredHeight());
-
-    auto* context = e != nullptr ? e->getCurrentPlaybackContext() : nullptr;
-    meter.setSource (context != nullptr ? &context->masterLevels : nullptr);
+    effects.updateValues();
 
     // LUFS to one decimal, or a dash until enough has been measured.
     juce::String text;
 
-    if (auto* meterPlugin = e != nullptr ? findLoudnessMeter (*e) : nullptr)
+    if (const auto readings = getLoudness (context))
     {
-        const auto readings = meterPlugin->getReadings();
-        const auto format = [] (bool valid, float value) { return valid ? juce::String (value, 1) : juce::String ("-"); };
-        text << "M  " << format (readings.momentaryValid, readings.momentaryLufs) << " LUFS\n"
-             << "S  " << format (readings.shortTermValid, readings.shortTermLufs) << " LUFS\n"
-             << "I  " << format (readings.integratedValid, readings.integratedLufs) << " LUFS\n"
-             << "TP " << format (readings.truePeakDb > te::LoudnessMeter::silenceFloorDb, readings.truePeakDb) << " dB";
+        const auto format = [] (std::optional<float> value) { return value.has_value() ? juce::String (*value, 1) : juce::String ("-"); };
+        text << "M  " << format (readings->momentary) << " LUFS\n"
+             << "S  " << format (readings->shortTerm) << " LUFS\n"
+             << "I  " << format (readings->integrated) << " LUFS\n"
+             << "TP " << format (readings->truePeak) << " dB";
     }
 
     loudness.setText (text, juce::dontSendNotification);
@@ -97,7 +106,7 @@ void MasterStrip::paint (juce::Graphics& g)
 bool MasterStrip::isInterestedInDragSource (const SourceDetails& details)
 {
     const auto device = getDraggedDevice (details.description);
-    return edit.get() != nullptr && device.has_value() && ! device->isInstrument;
+    return context.hasProject() && device.has_value() && ! device->isInstrument;
 }
 
 void MasterStrip::setDropping (bool isDropping)
@@ -110,10 +119,9 @@ void MasterStrip::itemDropped (const SourceDetails& details)
 {
     setDropping (false);
 
-    if (auto* e = edit.get())
-        if (const auto device = getDraggedDevice (details.description))
-            if (addDeviceTo (*e, nullptr, *device, nullptr) != nullptr)
-                markPlaced (details.description);
+    if (const auto device = getDraggedDevice (details.description))
+        if (addDeviceTo (context, {}, *device))
+            markPlaced (details.description);
 }
 
 void MasterStrip::resized()

@@ -17,14 +17,30 @@ namespace phazite
 {
 class UIBehaviour;
 
+// What changed in the open project's song, in groups, for views to show it again. Changes made at once (in one turn of
+// the message loop) come together, after it. View state (model/base/Schema.h), such as how tall a track shows, is no
+// change to the song. A drag can change the song as often as the mouse moves: views that take long to show a change
+// show the last one at their next timer tick instead.
+struct SongChanges
+{
+    bool tracks = false;   // tracks added, deleted, moved or changed
+    bool devices = false;  // devices or sends added, deleted, moved or changed
+    bool clips = false;    // clips added, deleted or changed, their notes included
+    bool sections = false; // sections added, deleted or changed
+    bool tempo = false;    // the tempo or the time signature
+};
+
 class ProjectContext
 {
 public:
-    // Hears when another project is open, or none, at once: before a project that closes goes.
+    // Hears when another project is open, or none, at once: before a project that closes goes. And what changes in it.
+    // IDs (model/base/IDs.h) name the items of one project, and another project's items can have the same ones, so
+    // views forget what they show by ID when the project changes.
     struct Listener
     {
         virtual ~Listener() = default;
         virtual void projectChanged() = 0;
+        virtual void songChanged (const SongChanges&) {}
     };
 
     // Keeps Tracktion's focus (the Engine's UIBehaviour) in step, if given one.
@@ -47,11 +63,14 @@ public:
     void removeListener (Listener*);
 
 private:
+    struct SongWatcher; // tells the listeners what changes in the open Edit
+
     UIBehaviour* const focus;
     te::SelectionManager selection;
     std::unique_ptr<SongSelection> songSelection; // a view of selection, by IDs
     RangeSelection rangeSelection;
     juce::ListenerList<Listener> listeners;
+    std::unique_ptr<SongWatcher> songWatcher;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProjectContext)
 };

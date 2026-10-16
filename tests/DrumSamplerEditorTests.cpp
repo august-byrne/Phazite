@@ -7,6 +7,7 @@
 #include "devices/drums/DrumSampler.h"
 #include "model/commands/Undo.h"
 #include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/Mixer.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DrumSamplerEditor.h"
@@ -46,7 +47,7 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
 
-    const phazite::DeviceHandle device (*plugin);
+    const auto device = phazite::makeDeviceHandle (*plugin);
     CHECK (dynamic_cast<phazite::ui::DrumSamplerEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
     auto* sampler = device.getProcessor<DrumSampler>();
     REQUIRE (sampler != nullptr);

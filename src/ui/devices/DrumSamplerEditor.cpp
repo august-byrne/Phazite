@@ -179,7 +179,7 @@ DrumSamplerEditor::DrumSamplerEditor (const DeviceHandle& handle)
         const auto& parameter =
             i == outputKnob ? getInfo (DrumSampler::outputParameter) : getInfo (DrumSampler::getParameterIndex (0, knobFields[i]));
         knobs[(size_t) i] = std::make_unique<Knob> (toString (parameter.name), parameter.defaultValue);
-        attachments[(size_t) i] = std::make_unique<ParameterAttachment> (*knobs[(size_t) i], juce::String());
+        attachments[(size_t) i] = std::make_unique<ParameterAttachment> (*knobs[(size_t) i]);
         addAndMakeVisible (*knobs[(size_t) i]);
         addAndMakeVisible (*names.add (makeLabel (i == outputKnob ? juce::String ("Output") : getFieldName (parameter)).release()));
         addAndMakeVisible (*texts.add (makeLabel ({}).release()));

@@ -1,26 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "UiTestHelpers.h"
 #include "model/commands/Undo.h"
+#include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/LevelSource.h"
+#include "model/project/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/ValueText.h"
 
 TEST_CASE ("A slider linked to a track's volume sets it, one undo step per change")
 {
     juce::Slider slider;
-    phazite::ui::ParameterAttachment attachment (slider, "Change Volume");
+    phazite::ui::ParameterAttachment attachment (slider);
     CHECK_FALSE (slider.isEnabled()); // nothing to control yet
 
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    auto* volume = te::getAudioTracks (*edit)[0]->getVolumePlugin();
+    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
+    context.setEdit (edit.get());
+    auto* track = te::getAudioTracks (*edit)[0];
+    auto* volume = track->getVolumePlugin();
     REQUIRE (volume != nullptr);
 
-    attachment.setParameter (volume, volume->volParam->paramID);
+    attachment.setParameter (phazite::getVolume (context, phazite::getTrackID (*track)));
     CHECK (slider.isEnabled());
     CHECK (slider.getValue() == doctest::Approx (volume->volParam->getCurrentValue()));
 
     // Moving the slider sets the volume, as a named undo step.
     const auto before = volume->getVolumeDb();
-    slider.setValue (te::decibelsToVolumeFaderPosition (-12.0f), juce::sendNotificationSync);
+    slider.setValue (phazite::decibelsToFaderPosition (-12.0f), juce::sendNotificationSync);
     CHECK (volume->getVolumeDb() == doctest::Approx (-12.0f).epsilon (0.01));
     CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Change Volume"));
 
@@ -35,36 +41,59 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     // A change made elsewhere shows on the slider.
     volume->setVolumeDb (-3.0f);
     attachment.update();
-    CHECK (te::volumeFaderPositionToDB ((float) slider.getValue()) == doctest::Approx (-3.0f).epsilon (0.01));
+    CHECK (phazite::faderPositionToDecibels ((float) slider.getValue()) == doctest::Approx (-3.0f).epsilon (0.01));
+
+    // A drag is one step, even when the strip hands the slider a handle of the same parameter meanwhile.
+    edit->getUndoManager().clearUndoHistory();
+    slider.onDragStart();
+    slider.setValue (phazite::decibelsToFaderPosition (-6.0f), juce::sendNotificationSync);
+    attachment.setParameter (phazite::getVolume (context, phazite::getTrackID (*track)));
+    slider.setValue (phazite::decibelsToFaderPosition (-9.0f), juce::sendNotificationSync);
+    slider.onDragEnd();
+    CHECK (volume->getVolumeDb() == doctest::Approx (-9.0f).epsilon (0.01));
+    phazite::undo (*edit);
+    CHECK (volume->getVolumeDb() == doctest::Approx (-3.0f).epsilon (0.01));
+    CHECK_FALSE (edit->getUndoManager().canUndo());
 
     // The master volume's parameter has its own ID.
-    auto master = edit->getMasterVolumePlugin();
-    REQUIRE (master != nullptr);
-    attachment.setParameter (master.get(), master->volParam->paramID);
+    attachment.setParameter (phazite::getMasterVolume (context));
     CHECK (slider.isEnabled());
-    master = nullptr;
 
     // When the project closes, the slider turns off instead of reaching for a deleted plug-in.
+    context.setEdit (nullptr);
     edit = nullptr;
     attachment.update();
     CHECK_FALSE (slider.isEnabled());
 }
 
-TEST_CASE ("A level meter outlives the measurer it shows")
+TEST_CASE ("A level source follows what it measures, and outlives it")
 {
-    phazite::ui::LevelMeter meter ("Level");
+    auto measurer = std::make_unique<te::LevelMeasurer>();
+    te::LevelMeasurer* found = measurer.get();
+    auto source = phazite::makeLevelSource ([&found] { return found; });
+    CHECK (source.isMeasuring());
 
-    {
-        te::LevelMeasurer measurer;
-        meter.setSource (&measurer);
-    } // deleted while the meter still shows it
+    // Deleted while the source still reads it. Mustn't be touched: AddressSanitizer (the linux-asan preset) would report it.
+    measurer = nullptr;
+    found = nullptr;
+    CHECK_FALSE (source.isMeasuring());
+    CHECK (source.getAndClearLevel (0) == doctest::Approx (phazite::LevelSource::silenceDb));
 
-    // Mustn't touch the deleted measurer: AddressSanitizer (the linux-asan preset) would report it.
-    meter.setSource (nullptr);
-
+    // What it measures can come and go: a folder that becomes a bus, playback that is set up again.
     te::LevelMeasurer another;
-    meter.setSource (&another);
-    meter.setSource (nullptr);
+    found = &another;
+    source.refresh();
+    CHECK (source.isMeasuring());
+    found = nullptr;
+    source.refresh();
+    CHECK_FALSE (source.isMeasuring());
+
+    // A meter lets go of what it shows when it gets another source.
+    found = &another;
+    source.refresh();
+    phazite::ui::LevelMeter meter ("Level");
+    meter.setSource (std::move (source));
+    meter.setSource ({});
 }
 
 TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
@@ -72,10 +101,12 @@ TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     edit->ensureNumberOfAudioTracks (2);
     const auto tracks = te::getAudioTracks (*edit);
+    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
+    context.setEdit (edit.get());
 
-    phazite::ui::MuteSoloButtons buttons;
+    phazite::ui::MuteSoloButtons buttons (context);
     phazite::test::TestWindow window (buttons, 60, 24);
-    buttons.setTrack (tracks[0]);
+    buttons.setTrack (phazite::getTrackID (*tracks[0]));
     phazite::test::Mouse mouse (buttons);
     const juce::Point<int> muteButton (10, 12), soloButton (50, 12);
 

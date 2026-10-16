@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Controls.h"
 #include "ValueText.h"
-#include "model/arrangement/Tracks.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -166,11 +166,11 @@ std::unique_ptr<juce::AccessibilityHandler> NumberField::createAccessibilityHand
 
 void showAsDecibels (juce::Slider& slider)
 {
-    slider.textFromValueFunction = [] (double position) { return formatDecibels (te::volumeFaderPositionToDB ((float) position)); };
+    slider.textFromValueFunction = [] (double position) { return formatDecibels (faderPositionToDecibels ((float) position)); };
     slider.valueFromTextFunction = [&slider] (const juce::String& text)
     {
         if (const auto dB = parseDecibels (text))
-            return (double) te::decibelsToVolumeFaderPosition ((float) *dB);
+            return (double) decibelsToFaderPosition ((float) *dB);
 
         return slider.getValue();
     };
@@ -211,9 +211,8 @@ void setPrimary (juce::TextButton& button, bool primary)
 }
 
 //==============================================================================
-ParameterAttachment::ParameterAttachment (juce::Slider& s, juce::String name)
-    : slider (s),
-      undoName (std::move (name))
+ParameterAttachment::ParameterAttachment (juce::Slider& s)
+    : slider (s)
 {
     slider.setEnabled (false);
     slider.onDragStart = [this] { handle.beginGesture(); };
@@ -223,19 +222,25 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s, juce::String name)
     slider.onValueChange = [this] { handle.setValue ((float) slider.getValue()); };
 }
 
-void ParameterAttachment::setParameter (te::Plugin* newPlugin, const juce::String& newParameterID)
-{
-    if (! handle.refersTo (newPlugin, newParameterID))
-        setParameter (ParameterHandle (newPlugin, newParameterID, undoName));
-}
-
 void ParameterAttachment::setParameter (ParameterHandle newHandle)
 {
+    if (handle.refersToSameParameter (newHandle))
+    {
+        update();
+        return;
+    }
+
     // Without a parameter while the range changes, so that a value the slider clamps reaches none.
     handle = ParameterHandle();
     showRange (newHandle);
     handle = std::move (newHandle);
     update();
+}
+
+void ParameterAttachment::showDeviceText()
+{
+    slider.textFromValueFunction = [this] (double value) { return handle.getText ((float) value); };
+    slider.updateText();
 }
 
 void ParameterAttachment::showRange (const ParameterHandle& shown)
@@ -333,43 +338,25 @@ LevelMeter::LevelMeter (const juce::String& title)
     startTimerHz (meterRefreshRateHz);
 }
 
-LevelMeter::~LevelMeter()
+LevelMeter::~LevelMeter() = default;
+
+void LevelMeter::setSource (LevelSource newSource)
 {
-    detach();
-}
-
-void LevelMeter::setSource (te::LevelMeasurer* newSource)
-{
-    if (source.get() == newSource)
-        return;
-
-    detach();
-    source = newSource;
-
-    if (newSource != nullptr)
-        newSource->addClient (client);
-}
-
-void LevelMeter::detach()
-{
-    if (auto* oldSource = source.get())
-        oldSource->removeClient (client);
-
-    source = nullptr;
-    client.reset();
+    source = std::move (newSource);
 }
 
 void LevelMeter::timerCallback()
 {
-    const bool hasSource = source.get() != nullptr;
-    const bool mono = hasSource && client.getNumChannelsUsed() == 1;
+    source.refresh();
+    const bool hasSource = source.isMeasuring();
+    const bool mono = hasSource && source.getNumChannels() == 1;
     const auto now = juce::Time::getMillisecondCounter();
     bool changed = false;
 
     for (size_t ch = 0; ch < (size_t) numChannels; ++ch)
     {
         // Rises at once, falls steadily; a mono source shows on both bars.
-        const auto measured = hasSource ? client.getAndClearAudioLevel (mono ? 0 : (int) ch).dB : (float) silenceDb;
+        const auto measured = hasSource ? source.getAndClearLevel (mono ? 0 : (int) ch) : (float) silenceDb;
         const auto level = juce::jmax (measured, levels[ch] - meterFallDbPerTick, (float) silenceDb);
 
         if (level >= peaks[ch] || now - peakTimes[ch] > peakHoldMs)
@@ -594,8 +581,9 @@ struct MuteSoloButtons::Button : public juce::TextButton
     bool halfLit = false;
 };
 
-MuteSoloButtons::MuteSoloButtons()
-    : mute (std::make_unique<Button> ("M", "Mute")),
+MuteSoloButtons::MuteSoloButtons (ProjectContext& projectContext)
+    : context (projectContext),
+      mute (std::make_unique<Button> ("M", "Mute")),
       solo (std::make_unique<Button> ("S", "Solo"))
 {
     mute->setTooltip (getMuteTooltip (false));
@@ -603,26 +591,20 @@ MuteSoloButtons::MuteSoloButtons()
 
     mute->onClickWith = [this] (const juce::ModifierKeys& mods)
     {
-        if (auto* t = track.get())
-        {
-            if (mods.isPopupMenu())
-                toggleSoloAlone (*t);
-            else
-                toggleTracksMuted ({ t });
-        }
+        if (mods.isPopupMenu())
+            toggleSoloAlone (context, track);
+        else
+            toggleMute (context, track);
 
         update();
     };
 
     solo->onClickWith = [this] (const juce::ModifierKeys& mods)
     {
-        if (auto* t = track.get())
-        {
-            if (mods.isCommandDown())
-                toggleSoloAlone (*t);
-            else
-                toggleTracksSoloed ({ t });
-        }
+        if (mods.isCommandDown())
+            toggleSoloAlone (context, track);
+        else
+            toggleSolo (context, track);
 
         update();
     };
@@ -634,7 +616,7 @@ MuteSoloButtons::MuteSoloButtons()
 
 MuteSoloButtons::~MuteSoloButtons() = default;
 
-void MuteSoloButtons::setTrack (te::Track* newTrack)
+void MuteSoloButtons::setTrack (TrackID newTrack)
 {
     track = newTrack;
     update();
@@ -642,13 +624,13 @@ void MuteSoloButtons::setTrack (te::Track* newTrack)
 
 void MuteSoloButtons::update()
 {
-    auto* t = track.get();
-    const auto silenced = t != nullptr && isSilencedBySolo (*t);
+    const auto state = getMuteSolo (context, track);
+    const auto silenced = state.has_value() && state->silencedBySolo;
 
-    mute->setEnabled (t != nullptr);
-    solo->setEnabled (t != nullptr);
-    mute->setToggleState (t != nullptr && t->isMuted (false), juce::dontSendNotification);
-    solo->setToggleState (t != nullptr && t->isSolo (false), juce::dontSendNotification);
+    mute->setEnabled (state.has_value());
+    solo->setEnabled (state.has_value());
+    mute->setToggleState (state.has_value() && state->muted, juce::dontSendNotification);
+    solo->setToggleState (state.has_value() && state->soloed, juce::dontSendNotification);
 
     if (mute->halfLit != silenced)
     {

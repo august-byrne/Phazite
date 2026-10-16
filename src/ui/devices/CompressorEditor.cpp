@@ -193,7 +193,7 @@ public:
     {
         const auto source = editor.device.getSidechainSource();
 
-        if (source.trackID != shown.trackID || source.name != shown.name)
+        if (source.track != shown.track || source.name != shown.name)
             list();
     }
 
@@ -208,8 +208,8 @@ private:
         shown = editor.device.getSidechainSource();
 
         // A source that would now make a loop still shows, though it isn't offered.
-        if (shown.trackID != 0
-            && std::none_of (choices.begin(), choices.end(), [this] (const auto& choice) { return choice.trackID == shown.trackID; }))
+        if (shown.track.isValid()
+            && std::none_of (choices.begin(), choices.end(), [this] (const auto& choice) { return choice.track == shown.track; }))
             choices.insert (choices.begin(), shown);
 
         clear (juce::dontSendNotification);
@@ -220,7 +220,7 @@ private:
         {
             addItem (choices[i].name, (int) i + 2);
 
-            if (choices[i].trackID == shown.trackID)
+            if (choices[i].track == shown.track)
                 selected = (int) i + 2;
         }
 
@@ -230,7 +230,7 @@ private:
     void pick()
     {
         const auto index = getSelectedId() - 2;
-        editor.device.setSidechainSource (index >= 0 && index < (int) choices.size() ? choices[(size_t) index].trackID : 0);
+        editor.device.setSidechainSource (index >= 0 && index < (int) choices.size() ? choices[(size_t) index].track : TrackID());
         list();
     }
 };
@@ -251,7 +251,7 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle)
         const auto name = toString (parameter.name);
         auto* knob = knobs.add (new Knob (name, parameter.defaultValue));
         showAsParameter (*knob, parameter);
-        attachments.add (new ParameterAttachment (*knob, {}))->setParameter (device.getParameter (parameter.id));
+        attachments.add (new ParameterAttachment (*knob))->setParameter (device.getParameter (parameter.id));
         addAndMakeVisible (knob);
 
         for (auto* label : { names.add (new juce::Label ({}, getShortName (parameter))), texts.add (new juce::Label()) })

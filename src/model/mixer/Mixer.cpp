@@ -303,80 +303,10 @@ te::AutomatableParameter::Array getMixParameters (te::Plugin& device)
 }
 
 //==============================================================================
-namespace
-{
-    // As ParameterHandle does, the levels are stored first, without an undo step, so that undoing the first change plays
-    // the mix there was.
-    void storeMixWithoutUndo (te::Plugin& device)
-    {
-        for (auto* parameter : getMixParameters (device))
-            parameter->setParameter (parameter->getCurrentValue(), juce::sendNotification);
-    }
-} // namespace
-
-MixHandle::MixHandle (te::Plugin& device)
-    : plugin (&device)
-{
-}
-
-MixHandle::~MixHandle()
-{
-    endGesture();
-}
-
-bool MixHandle::isValid() const
-{
-    return plugin.get() != nullptr;
-}
-
-float MixHandle::getValue() const
-{
-    auto* device = plugin.get();
-    return device != nullptr ? getMix (*device) : 1.0f;
-}
-
-void MixHandle::beginGesture()
-{
-    auto* device = plugin.get();
-
-    if (device == nullptr || gesture != nullptr)
-        return;
-
-    storeMixWithoutUndo (*device);
-    gesture = std::make_unique<Gesture> (device->edit, "Change Mix");
-}
-
-void MixHandle::setValue (float mix)
-{
-    auto* device = plugin.get();
-
-    if (device == nullptr)
-        return;
-
-    if (gesture != nullptr)
-    {
-        setMix (*device, mix);
-        return;
-    }
-
-    storeMixWithoutUndo (*device);
-    const UndoStep step (device->edit, "Change Mix");
-    setMix (*device, mix);
-}
-
-void MixHandle::endGesture()
-{
-    if (gesture != nullptr)
-    {
-        gesture->commit();
-        gesture.reset();
-    }
-}
-
-//==============================================================================
 DeviceType makeDeviceType (const juce::PluginDescription& description)
 {
-    return { description.name, description.isInstrument ? "Instrument" : "Effect", description, description.isInstrument };
+    return { description.name, description.isInstrument ? "Instrument" : "Effect", description, description.isInstrument,
+             te::PluginManager::isBuiltInPlugin (description) };
 }
 
 std::vector<DeviceType> getDeviceTypes (te::Engine& engine)

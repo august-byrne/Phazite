@@ -7,6 +7,7 @@
 #include "devices/eq/Equalizer.h"
 #include "model/commands/Undo.h"
 #include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/EqEditor.h"
 
@@ -74,7 +75,7 @@ TEST_CASE ("The EQ's editor shows the selected band's controls, and its analyzer
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     const auto eq = addEq (*edit);
-    const phazite::DeviceHandle device (*eq);
+    const auto device = phazite::makeDeviceHandle (*eq);
     auto& tap = device.getProcessor<Eq>()->getOutputTap();
 
     {
@@ -101,7 +102,7 @@ TEST_CASE ("Dragging an EQ band's dot moves its frequency and gain as one undo s
     phazite::test::settle();
     edit->getUndoManager().clearUndoHistory();
 
-    phazite::ui::EqEditor editor ((phazite::DeviceHandle (*eq)));
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (*eq)));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     phazite::test::Mouse mouse (editor.getGraph());
 

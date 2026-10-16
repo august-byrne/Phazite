@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceSlots.h"
 #include "StripParts.h"
-#include "model/mixer/Mixer.h"
+#include "model/project/ProjectContext.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -16,9 +16,9 @@ namespace
     class MixAttachment
     {
     public:
-        MixAttachment (juce::Slider& s, te::Plugin& device)
+        MixAttachment (juce::Slider& s, MixHandle mix)
             : slider (s),
-              handle (device)
+              handle (std::move (mix))
         {
             slider.setRange (0.0, 1.0);
             slider.setDoubleClickReturnValue (true, 1.0);
@@ -55,37 +55,26 @@ namespace
 // A device: its name, which opens its window (right-click for more), an on/off switch, and its key controls.
 struct DeviceSlots::Slot : public juce::Component
 {
-    Slot (DeviceSlots& o, te::Plugin& device)
+    Slot (DeviceSlots& o, const DeviceSlot& device)
         : owner (o),
-          plugin (&device)
+          shown (device)
     {
-        nameButton.setButtonText (device.getName());
-        nameButton.setTitle (device.getName());
-        nameButton.setTooltip ("Opens " + device.getName() + "'s window. Right-click to turn it off, "
-                               + (owner.kind == Kind::instrument ? "replace or remove it" : "move or remove it"));
         nameButton.onClicked = [this] (bool isMenuClick)
         {
-            if (auto* d = plugin.get())
-            {
-                if (isMenuClick)
-                    owner.showSlotMenu (*d);
-                else
-                    d->showWindowExplicitly();
-            }
+            if (isMenuClick)
+                owner.showSlotMenu (shown);
+            else
+                showDeviceWindow (owner.context, shown.id);
         };
 
         power.setButtonText ("On");
         power.setTitle ("On");
         power.setTooltip ("Turns the device on or off");
         power.setClickingTogglesState (true);
-        power.onClick = [this]
-        {
-            if (auto* d = plugin.get())
-                setDeviceOn (*d, power.getToggleState());
-        };
+        power.onClick = [this] { setDeviceOn (owner.context, shown.id, power.getToggleState()); };
 
         // An effect's mix first, as FL Studio's mixer slots have it, then its key controls.
-        if (owner.kind == Kind::effects && hasMix (device))
+        if (owner.kind == Kind::effects && device.hasMix)
         {
             auto* knob = knobs.add (new Knob ("Mix", 1.0));
             knob->textFromValueFunction = [] (double value) { return juce::String (juce::roundToInt (value * 100.0)) + "% wet"; };
@@ -93,28 +82,36 @@ struct DeviceSlots::Slot : public juce::Component
                                   "that comes in through as well. Double-click for 100%");
 
             // Tracktion adds the dry sound back without waiting for the effect, as FL Studio's mix knob does.
-            if (const auto latency = device.getLatencySeconds(); latency > 0.0)
-                tooltip << ". This effect delays its sound by " << juce::jmax (1, juce::roundToInt (latency * 1000.0))
+            if (device.latencySeconds > 0.0)
+                tooltip << ". This effect delays its sound by " << juce::jmax (1, juce::roundToInt (device.latencySeconds * 1000.0))
                         << " ms, so below 100% the two blur together: use the effect's own mix control if it has one";
 
             knob->setTooltip (tooltip);
-            mixAttachment = std::make_unique<MixAttachment> (*knob, device);
+            mixAttachment = std::make_unique<MixAttachment> (*knob, getMix (owner.context, device.id));
             addAndMakeVisible (knob);
         }
 
-        for (const auto& id : getKeyControls (device, keyControlsPerDevice))
-            addParameterKnob (*this, knobs, attachments, device, id);
+        for (auto& control : getKeyControls (owner.context, device.id, keyControlsPerDevice))
+            addParameterKnob (*this, knobs, attachments, std::move (control));
 
         addAndMakeVisible (nameButton);
         addAndMakeVisible (power);
-        update();
+        show (device);
     }
 
-    void update()
+    // Its name and switch, as they are now.
+    void show (const DeviceSlot& device)
     {
-        if (auto* d = plugin.get())
-            power.setToggleState (d->isEnabled(), juce::dontSendNotification);
+        shown = device;
+        nameButton.setButtonText (device.name);
+        nameButton.setTitle (device.name);
+        nameButton.setTooltip ("Opens " + device.name + "'s window. Right-click to turn it off, "
+                               + (owner.kind == Kind::instrument ? "replace or remove it" : "move or remove it"));
+        power.setToggleState (device.isOn, juce::dontSendNotification);
+    }
 
+    void updateValues()
+    {
         for (auto* attachment : attachments)
             attachment->update();
 
@@ -139,7 +136,7 @@ struct DeviceSlots::Slot : public juce::Component
     }
 
     DeviceSlots& owner;
-    te::SafeSelectable<te::Plugin> plugin;
+    DeviceSlot shown;
     MenuButton nameButton;
     juce::TextButton power;
     juce::OwnedArray<Knob> knobs;
@@ -148,8 +145,9 @@ struct DeviceSlots::Slot : public juce::Component
 };
 
 //==============================================================================
-DeviceSlots::DeviceSlots (Kind k)
-    : kind (k)
+DeviceSlots::DeviceSlots (Kind k, ProjectContext& projectContext)
+    : kind (k),
+      context (projectContext)
 {
     setTitle (kind == Kind::instrument ? "Instrument" : "Effects");
     addButton.onClick = [this] { showAddMenu(); };
@@ -159,56 +157,70 @@ DeviceSlots::DeviceSlots (Kind k)
 
 DeviceSlots::~DeviceSlots() = default;
 
-void DeviceSlots::setChannel (te::Track* newTrack, te::Edit* newEdit)
+void DeviceSlots::setTrack (TrackID newTrack)
 {
     track = newTrack;
-    edit = newEdit;
-    shownDevices.clear();
-    rebuild();
+    master = false;
+    rebuild (getChannelDevices());
 }
 
-juce::Array<te::Plugin*> DeviceSlots::getChannelDevices() const
+void DeviceSlots::setMaster()
 {
-    if (auto* t = track.get())
-    {
-        if (kind == Kind::effects)
-            return getEffects (*t);
+    track = {};
+    master = true;
+    rebuild (getChannelDevices());
+}
 
-        if (auto* instrumentDevice = getInstrument (*t))
-            return { instrumentDevice };
-
+std::vector<DeviceSlot> DeviceSlots::getChannelDevices() const
+{
+    if (! master && ! track.isValid())
         return {};
-    }
 
-    if (auto* e = edit.get(); e != nullptr && kind == Kind::effects)
-        return getMasterDevices (*e);
+    if (kind == Kind::effects)
+        return getEffects (context, getEffectsChannel());
+
+    if (const auto instrument = getInstrument (context, track))
+        return { *instrument };
 
     return {};
 }
 
-void DeviceSlots::update()
+void DeviceSlots::refresh()
 {
     // The devices changed (added, removed or moved here or elsewhere, or by undo): new slots.
-    if (getIDs (getChannelDevices()) != shownDevices)
+    const auto devices = getChannelDevices();
+
+    if (getIDs (devices) != shownDevices)
     {
-        rebuild();
+        rebuild (devices);
         return;
     }
 
-    for (auto* slot : slots)
-        slot->update();
+    for (size_t i = 0; i < devices.size(); ++i)
+        slots[(int) i]->show (devices[i]);
 
     updateAddButton();
 }
 
-void DeviceSlots::rebuild()
+void DeviceSlots::refreshNeed()
+{
+    if (kind == Kind::instrument && slots.isEmpty())
+        updateAddButton();
+}
+
+void DeviceSlots::updateValues()
+{
+    for (auto* slot : slots)
+        slot->updateValues();
+}
+
+void DeviceSlots::rebuild (const std::vector<DeviceSlot>& devices)
 {
     slots.clear();
-    const auto channelDevices = getChannelDevices();
-    shownDevices = getIDs (channelDevices);
+    shownDevices = getIDs (devices);
 
-    for (auto* device : channelDevices)
-        addAndMakeVisible (slots.add (new Slot (*this, *device)));
+    for (const auto& device : devices)
+        addAndMakeVisible (slots.add (new Slot (*this, device)));
 
     shownNeed = -1;
     updateAddButton();
@@ -221,17 +233,17 @@ void DeviceSlots::updateAddButton()
     {
         addButton.setButtonText ("+ Effect");
         addButton.setTooltip ("Adds an effect, which changes the sound, such as a reverb: built in or a plug-in");
-        addButton.setEnabled (track.get() != nullptr || edit.get() != nullptr);
+        addButton.setEnabled (master ? context.hasProject() : track.isValid());
         return;
     }
 
     // A track has one instrument: the button shows while it has none, and asks for one, tinted, while the track has
     // notes that make no sound without it.
-    auto* t = track.get();
+    const auto channel = getChannel (context, track);
     addButton.setVisible (slots.isEmpty());
-    addButton.setEnabled (dynamic_cast<te::AudioTrack*> (t) != nullptr);
+    addButton.setEnabled (canHoldInstrument (context, track));
 
-    if (const auto need = t != nullptr && needsInstrument (*t) ? 1 : 0; need != shownNeed)
+    if (const auto need = channel.has_value() && channel->needsInstrument ? 1 : 0; need != shownNeed)
     {
         shownNeed = need;
         const auto& p = getPalette (*this);
@@ -276,47 +288,34 @@ void DeviceSlots::resized()
 void DeviceSlots::showAddMenu()
 {
     if (kind == Kind::instrument)
-    {
-        if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (track.get()))
-            showInstrumentMenu (*audioTrack, addButton);
-    }
-    else if (auto* e = track.get() != nullptr ? &track->edit : edit.get())
-    {
-        showEffectMenu (*e, track.get(), addButton);
-    }
+        showInstrumentMenu (context, track, addButton);
+    else if (master || track.isValid())
+        showEffectMenu (context, getEffectsChannel(), addButton);
 }
 
-void DeviceSlots::showSlotMenu (te::Plugin& device)
+void DeviceSlots::showSlotMenu (const DeviceSlot& device)
 {
-    // Effects move among the channel's effects, which follow its instrument among all its devices.
-    const auto shown = getChannelDevices();
-    const auto index = shown.indexOf (&device);
-    const auto all = track.get() != nullptr ? getDevices (*track.get()) : (edit.get() != nullptr ? getMasterDevices (*edit.get()) : shown);
-    const auto position = all.indexOf (&device);
-    const te::SafeSelectable<te::Plugin> safeDevice (&device);
+    // Effects move among the channel's effects.
+    const auto index = (int) (std::find (shownDevices.begin(), shownDevices.end(), device.id) - shownDevices.begin());
+    const auto id = device.id;
     const juce::Component::SafePointer<DeviceSlots> safeThis (this);
 
-    // Each a model function that is an undo step of its own.
-    const auto act = [safeDevice, safeThis] (std::function<void (te::Plugin&)> action)
+    // Each a model function that is an undo step of its own; the slots show what it did at once.
+    const auto act = [safeThis] (std::function<void()> action)
     {
-        return [safeDevice, safeThis, action]
+        return [safeThis, action]
         {
-            if (auto* d = safeDevice.get())
-                action (*d);
+            action();
 
             if (safeThis != nullptr)
-                safeThis->update();
+                safeThis->refresh();
         };
     };
 
+    auto& projectContext = context;
     juce::PopupMenu menu;
-    menu.addItem ("Open Window",
-                  [safeDevice]
-                  {
-                      if (auto* d = safeDevice.get())
-                          d->showWindowExplicitly();
-                  });
-    menu.addItem ("On", true, device.isEnabled(), act ([] (te::Plugin& d) { setDeviceOn (d, ! d.isEnabled()); }));
+    menu.addItem ("Open Window", [&projectContext, id] { showDeviceWindow (projectContext, id); });
+    menu.addItem ("On", true, device.isOn, act ([&projectContext, id, on = device.isOn] { setDeviceOn (projectContext, id, ! on); }));
     menu.addSeparator();
 
     if (kind == Kind::instrument)
@@ -325,18 +324,18 @@ void DeviceSlots::showSlotMenu (te::Plugin& device)
                       [safeThis]
                       {
                           if (safeThis != nullptr)
-                              if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (safeThis->track.get()))
-                                  showInstrumentMenu (*audioTrack, *safeThis);
+                              showInstrumentMenu (safeThis->context, safeThis->track, *safeThis);
                       });
     }
     else
     {
-        menu.addItem ("Move Up", index > 0, false, act ([position] (te::Plugin& d) { moveDevice (d, position - 1); }));
-        menu.addItem ("Move Down", index < shown.size() - 1, false, act ([position] (te::Plugin& d) { moveDevice (d, position + 1); }));
+        menu.addItem ("Move Up", index > 0, false, act ([&projectContext, id] { moveEffect (projectContext, id, -1); }));
+        menu.addItem ("Move Down", index < (int) shownDevices.size() - 1, false,
+                      act ([&projectContext, id] { moveEffect (projectContext, id, 1); }));
     }
 
     menu.addSeparator();
-    menu.addItem ("Remove", act ([] (te::Plugin& d) { removeDevice (d); }));
+    menu.addItem ("Remove", act ([&projectContext, id] { removeDevice (projectContext, id); }));
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 } // namespace phazite::ui

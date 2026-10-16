@@ -76,7 +76,7 @@ DeviceKnobs::DeviceKnobs (const DeviceHandle& device)
             const auto name = toString (parameter.name);
             auto* knob = knobs.add (new Knob (name, parameter.defaultValue));
             showAsParameter (*knob, parameter);
-            attachments.add (new ParameterAttachment (*knob, "Change " + name))->setParameter (device.getParameter (parameter.id));
+            attachments.add (new ParameterAttachment (*knob))->setParameter (device.getParameter (parameter.id));
 
             auto* label = labels.add (new juce::Label ({}, name));
             label->setJustificationType (juce::Justification::centred);

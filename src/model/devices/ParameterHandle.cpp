@@ -1,12 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ParameterHandle.h"
 #include "DevicePlugin.h"
+#include "internal/ParameterHandle.h"
 #include "model/commands/Undo.h"
-
-#include <utility>
 
 namespace phazite
 {
+struct ParameterHandle::Impl
+{
+    te::SafeSelectable<te::Plugin> plugin;
+    juce::String parameterID, undoName;
+    std::unique_ptr<Gesture> gesture; // the gesture it began,
+    bool joined = false;              // or whether it joined another change's
+
+    te::AutomatableParameter::Ptr find() const
+    {
+        if (auto* p = plugin.get())
+            return p->getAutomatableParameterByID (parameterID);
+
+        return {};
+    }
+};
+
 namespace
 {
     // Tracktion stores a parameter's value only once it first changes, so undoing that first change would remove the
@@ -19,34 +34,33 @@ namespace
     }
 } // namespace
 
+ParameterHandle makeParameterHandle (te::Plugin* plugin, const juce::String& parameterID, const juce::String& undoName)
+{
+    if (plugin == nullptr)
+        return {};
+
+    auto impl = std::make_unique<ParameterHandle::Impl>();
+    impl->plugin = plugin;
+    impl->parameterID = parameterID;
+    impl->undoName = undoName;
+    return ParameterHandle (std::move (impl));
+}
+
 ParameterHandle::ParameterHandle() = default;
 
-ParameterHandle::ParameterHandle (te::Plugin* p, const juce::String& id, const juce::String& name)
-    : plugin (p),
-      parameterID (id),
-      undoName (name)
+ParameterHandle::ParameterHandle (std::unique_ptr<Impl> i)
+    : impl (std::move (i))
 {
 }
 
-ParameterHandle::ParameterHandle (ParameterHandle&& other) noexcept
-    : plugin (std::move (other.plugin)),
-      parameterID (std::move (other.parameterID)),
-      undoName (std::move (other.undoName)),
-      gesture (std::move (other.gesture)),
-      joined (std::exchange (other.joined, false))
-{
-}
+ParameterHandle::ParameterHandle (ParameterHandle&& other) noexcept = default;
 
 ParameterHandle& ParameterHandle::operator= (ParameterHandle&& other) noexcept
 {
     if (this != &other)
     {
         endGesture();
-        plugin = std::move (other.plugin);
-        parameterID = std::move (other.parameterID);
-        undoName = std::move (other.undoName);
-        gesture = std::move (other.gesture);
-        joined = std::exchange (other.joined, false);
+        impl = std::move (other.impl);
     }
 
     return *this;
@@ -57,27 +71,22 @@ ParameterHandle::~ParameterHandle()
     endGesture();
 }
 
-te::AutomatableParameter::Ptr ParameterHandle::find() const
-{
-    if (auto* p = plugin.get())
-        return p->getAutomatableParameterByID (parameterID);
-
-    return {};
-}
-
 bool ParameterHandle::isValid() const
 {
-    return find() != nullptr;
+    return impl != nullptr && impl->find() != nullptr;
 }
 
-bool ParameterHandle::refersTo (const te::Plugin* other, const juce::String& otherID) const
+bool ParameterHandle::refersToSameParameter (const ParameterHandle& other) const
 {
-    return plugin.get() == other && parameterID == otherID;
+    if (impl == nullptr || other.impl == nullptr)
+        return impl == other.impl;
+
+    return impl->plugin.get() == other.impl->plugin.get() && impl->parameterID == other.impl->parameterID;
 }
 
 juce::String ParameterHandle::getName() const
 {
-    if (const auto parameter = find())
+    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->getParameterName();
 
     return {};
@@ -85,7 +94,7 @@ juce::String ParameterHandle::getName() const
 
 juce::NormalisableRange<float> ParameterHandle::getRange() const
 {
-    if (const auto parameter = find())
+    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->valueRange;
 
     return {};
@@ -93,7 +102,7 @@ juce::NormalisableRange<float> ParameterHandle::getRange() const
 
 std::optional<float> ParameterHandle::getDefaultValue() const
 {
-    if (const auto parameter = find())
+    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->getDefaultValue();
 
     return {};
@@ -101,7 +110,7 @@ std::optional<float> ParameterHandle::getDefaultValue() const
 
 float ParameterHandle::getValue() const
 {
-    if (const auto parameter = find())
+    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->getCurrentValue();
 
     return 0.0f;
@@ -109,7 +118,7 @@ float ParameterHandle::getValue() const
 
 juce::String ParameterHandle::getText (float value) const
 {
-    if (const auto parameter = find())
+    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->valueToString (value);
 
     return {};
@@ -117,10 +126,10 @@ juce::String ParameterHandle::getText (float value) const
 
 std::optional<devices::ParameterInfo> ParameterHandle::getInfo() const
 {
-    if (auto* device = dynamic_cast<DevicePlugin*> (plugin.get()))
+    if (auto* device = impl != nullptr ? dynamic_cast<DevicePlugin*> (impl->plugin.get()) : nullptr)
     {
         const auto& info = device->getDeviceInfo();
-        const auto id = parameterID.toStdString();
+        const auto id = impl->parameterID.toStdString();
 
         if (const auto index = devices::findParameter (info, id); index >= 0)
             return info.parameters[(size_t) index];
@@ -131,7 +140,7 @@ std::optional<devices::ParameterInfo> ParameterHandle::getInfo() const
 
 void ParameterHandle::beginGesture()
 {
-    const auto parameter = find();
+    const auto parameter = impl != nullptr ? impl->find() : nullptr;
 
     if (parameter == nullptr || isInGesture())
         return;
@@ -140,17 +149,17 @@ void ParameterHandle::beginGesture()
 
     // Within another change's gesture (a drag that moves two parameters), it joins that gesture's step.
     if (Gesture::isInProgress (parameter->getEdit()))
-        joined = true;
+        impl->joined = true;
     else
-        gesture =
-            std::make_unique<Gesture> (parameter->getEdit(), undoName.isNotEmpty() ? undoName : "Change " + parameter->getParameterName());
+        impl->gesture = std::make_unique<Gesture> (
+            parameter->getEdit(), impl->undoName.isNotEmpty() ? impl->undoName : "Change " + parameter->getParameterName());
 
     parameter->parameterChangeGestureBegin(); // for automation recording
 }
 
 void ParameterHandle::setValue (float value)
 {
-    const auto parameter = find();
+    const auto parameter = impl != nullptr ? impl->find() : nullptr;
 
     if (parameter == nullptr)
         return;
@@ -162,7 +171,7 @@ void ParameterHandle::setValue (float value)
     }
 
     storeValueWithoutUndo (*parameter);
-    const UndoStep step (parameter->getEdit(), undoName.isNotEmpty() ? undoName : "Change " + parameter->getParameterName());
+    const UndoStep step (parameter->getEdit(), impl->undoName.isNotEmpty() ? impl->undoName : "Change " + parameter->getParameterName());
     parameter->setParameter (value, juce::sendNotification);
 }
 
@@ -171,20 +180,20 @@ void ParameterHandle::endGesture()
     if (! isInGesture())
         return;
 
-    if (const auto parameter = find())
+    if (const auto parameter = impl->find())
         parameter->parameterChangeGestureEnd();
 
-    if (gesture != nullptr)
+    if (impl->gesture != nullptr)
     {
-        gesture->commit();
-        gesture.reset();
+        impl->gesture->commit();
+        impl->gesture.reset();
     }
 
-    joined = false;
+    impl->joined = false;
 }
 
 bool ParameterHandle::isInGesture() const
 {
-    return gesture != nullptr || joined;
+    return impl != nullptr && (impl->gesture != nullptr || impl->joined);
 }
 } // namespace phazite

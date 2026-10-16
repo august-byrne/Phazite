@@ -5,6 +5,7 @@
 #pragma once
 
 #include "Buses.h"
+#include "DeviceType.h"
 #include "model/base/Tracktion.h"
 
 #include <memory>
@@ -63,42 +64,8 @@ float getMix (te::Plugin&); // 1 for a device without a mix
 void setMix (te::Plugin&, float mix);
 te::AutomatableParameter::Array getMixParameters (te::Plugin&); // the dry and wet levels, or none
 
-// An effect's mix as a knob changes it: a drag is one undo step, "Change Mix", from its first move to its last (a
-// Gesture, model/commands/Undo.h), and a change outside a drag, such as a key press, is one of its own. It forgets a
-// device that is deleted.
-class MixHandle
-{
-public:
-    explicit MixHandle (te::Plugin&);
-    ~MixHandle();
-
-    bool isValid() const;
-    float getValue() const; // 1 without a device
-
-    void beginGesture();
-    void setValue (float mix);
-    void endGesture();
-
-private:
-    te::SafeSelectable<te::Plugin> plugin;
-    std::unique_ptr<Gesture> gesture;
-
-    JUCE_DECLARE_NON_COPYABLE (MixHandle)
-};
-
 //==============================================================================
-// The devices that can be added: Phazite's own (model/devices/Devices.h) and the plug-ins found by scanning.
-struct DeviceType
-{
-    juce::String name;
-    juce::String category; // "Instrument" or "Effect"
-    juce::PluginDescription description;
-    bool isInstrument = false;
-};
-
-// A plug-in description's device: an instrument or an effect, named as the description names it.
-DeviceType makeDeviceType (const juce::PluginDescription&);
-
+// The devices that can be added (DeviceType.h): Phazite's own and the plug-ins found by scanning.
 std::vector<DeviceType> getDeviceTypes (te::Engine&);
 te::Plugin::Ptr createDevice (te::Edit&, const DeviceType&);
 

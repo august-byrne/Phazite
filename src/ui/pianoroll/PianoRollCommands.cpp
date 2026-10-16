@@ -3,7 +3,7 @@
 #include "PianoRollParts.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Tracks.h"
-#include "model/mixer/Mixer.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -117,10 +117,11 @@ void PianoRoll::updateToolbar()
 
     // The instrument that plays the notes, or a request for one: without it they make no sound.
     const auto& p = getPalette (*this);
-    auto* instrument = track != nullptr ? getInstrument (*track) : nullptr;
-    const auto silent = track != nullptr && instrument == nullptr;
-    instrumentButton.setButtonText (instrument != nullptr ? instrument->getName() : juce::String ("Choose instrument"));
-    instrumentButton.setEnabled (track != nullptr && getReturnBus (*track) < 0);
+    const auto trackID = track != nullptr ? getTrackID (*track) : TrackID();
+    const auto instrument = getInstrument (context, trackID);
+    const auto silent = track != nullptr && ! instrument.has_value();
+    instrumentButton.setButtonText (instrument.has_value() ? instrument->name : juce::String ("Choose instrument"));
+    instrumentButton.setEnabled (canHoldInstrument (context, trackID));
     instrumentButton.setColour (juce::TextButton::buttonColourId,
                                 silent ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint) : p.surfaceRaised);
     instrumentButton.setTooltip (silent
@@ -154,31 +155,24 @@ void PianoRoll::instrumentClicked()
     if (track == nullptr)
         return;
 
-    auto* instrument = getInstrument (*track);
+    const auto trackID = getTrackID (*track);
+    const auto instrument = getInstrument (context, trackID);
 
-    if (instrument == nullptr)
+    if (! instrument.has_value())
     {
-        showInstrumentMenu (*track, instrumentButton);
+        showInstrumentMenu (context, trackID, instrumentButton);
         return;
     }
 
-    const te::SafeSelectable<te::Plugin> safeInstrument (instrument);
-    const te::SafeSelectable<te::AudioTrack> safeTrack (track);
+    auto& projectContext = context;
     const juce::Component::SafePointer<juce::Component> safeButton (&instrumentButton);
     juce::PopupMenu menu;
-
-    menu.addItem ("Open " + instrument->getName(),
-                  [safeInstrument]
-                  {
-                      if (auto* opened = safeInstrument.get())
-                          opened->showWindowExplicitly();
-                  });
-
+    menu.addItem ("Open " + instrument->name, [&projectContext, id = instrument->id] { showDeviceWindow (projectContext, id); });
     menu.addItem ("Replace Instrument...",
-                  [safeTrack, safeButton]
+                  [&projectContext, trackID, safeButton]
                   {
-                      if (auto* t = safeTrack.get(); t != nullptr && safeButton != nullptr)
-                          showInstrumentMenu (*t, *safeButton);
+                      if (safeButton != nullptr)
+                          showInstrumentMenu (projectContext, trackID, *safeButton);
                   });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&instrumentButton));

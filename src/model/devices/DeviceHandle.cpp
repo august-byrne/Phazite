@@ -2,23 +2,48 @@
 #include "DeviceHandle.h"
 #include "DevicePlugin.h"
 #include "DrumKit.h"
+#include "internal/DeviceHandle.h"
+#include "internal/ParameterHandle.h"
 #include "model/mixer/Sidechain.h"
 
 namespace phazite
 {
-DeviceHandle::DeviceHandle (te::Plugin& p)
-    : plugin (dynamic_cast<DevicePlugin*> (&p) != nullptr ? &p : nullptr)
+struct DeviceHandle::Impl
+{
+    te::SafeSelectable<te::Plugin> plugin;
+};
+
+namespace
+{
+    te::Plugin* pluginOf (const std::shared_ptr<const DeviceHandle::Impl>& impl)
+    {
+        return impl != nullptr ? impl->plugin.get() : nullptr;
+    }
+} // namespace
+
+DeviceHandle makeDeviceHandle (te::Plugin& p)
+{
+    if (dynamic_cast<DevicePlugin*> (&p) == nullptr)
+        return {};
+
+    auto impl = std::make_shared<DeviceHandle::Impl>();
+    impl->plugin = &p;
+    return DeviceHandle (std::move (impl));
+}
+
+DeviceHandle::DeviceHandle (std::shared_ptr<const Impl> i)
+    : impl (std::move (i))
 {
 }
 
 bool DeviceHandle::isValid() const
 {
-    return plugin.get() != nullptr;
+    return impl != nullptr && impl->plugin.get() != nullptr;
 }
 
 const devices::DeviceInfo* DeviceHandle::getInfo() const
 {
-    if (auto* device = dynamic_cast<DevicePlugin*> (plugin.get()))
+    if (auto* device = dynamic_cast<DevicePlugin*> (pluginOf (impl)))
         return &device->getDeviceInfo();
 
     return nullptr;
@@ -26,8 +51,8 @@ const devices::DeviceInfo* DeviceHandle::getInfo() const
 
 ParameterHandle DeviceHandle::getParameter (std::string_view id, const juce::String& undoName) const
 {
-    if (auto* device = plugin.get())
-        return ParameterHandle (device, juce::String (id.data(), id.size()), undoName);
+    if (auto* device = pluginOf (impl))
+        return makeParameterHandle (device, juce::String (id.data(), id.size()), undoName);
 
     return {};
 }
@@ -36,58 +61,58 @@ std::vector<DeviceHandle::SidechainChoice> DeviceHandle::getSidechainChoices() c
 {
     std::vector<SidechainChoice> choices;
 
-    if (auto* device = plugin.get())
+    if (auto* device = pluginOf (impl))
         for (auto* track : getSidechainSources (*device))
-            choices.push_back ({ track->itemID.getRawID(), track->getName() });
+            choices.push_back ({ getTrackID (*track), track->getName() });
 
     return choices;
 }
 
 DeviceHandle::SidechainChoice DeviceHandle::getSidechainSource() const
 {
-    if (auto* device = plugin.get())
+    if (auto* device = pluginOf (impl))
         if (auto* track = phazite::getSidechainSource (*device))
-            return { track->itemID.getRawID(), track->getName() };
+            return { getTrackID (*track), track->getName() };
 
     return {};
 }
 
-void DeviceHandle::setSidechainSource (std::uint64_t trackID) const
+void DeviceHandle::setSidechainSource (TrackID id) const
 {
-    if (auto* device = plugin.get())
+    if (auto* device = pluginOf (impl))
     {
-        auto* track = trackID != 0 ? te::findTrackForID (device->edit, te::EditItemID::fromRawID (trackID)) : nullptr;
+        auto* track = id.isValid() ? te::findTrackForID (device->edit, toTracktion (id)) : nullptr;
         phazite::setSidechainSource (*device, dynamic_cast<te::AudioTrack*> (track));
     }
 }
 
 juce::String DeviceHandle::getPadName (int pad) const
 {
-    auto* device = plugin.get();
+    auto* device = pluginOf (impl);
     return device != nullptr ? phazite::getPadName (*device, pad) : juce::String();
 }
 
 bool DeviceHandle::hasPadSound (int pad) const
 {
-    auto* device = plugin.get();
+    auto* device = pluginOf (impl);
     return device != nullptr && phazite::hasPadSound (*device, pad);
 }
 
 bool DeviceHandle::setPadSound (int pad, const juce::File& file) const
 {
-    auto* device = plugin.get();
+    auto* device = pluginOf (impl);
     return device != nullptr && phazite::setPadSound (*device, pad, file);
 }
 
 void DeviceHandle::clearPadSound (int pad) const
 {
-    if (auto* device = plugin.get())
+    if (auto* device = pluginOf (impl))
         phazite::clearPadSound (*device, pad);
 }
 
 devices::Processor* DeviceHandle::getProcessorBase() const
 {
-    if (auto* device = dynamic_cast<DevicePlugin*> (plugin.get()))
+    if (auto* device = dynamic_cast<DevicePlugin*> (pluginOf (impl)))
         return &device->getProcessor();
 
     return nullptr;

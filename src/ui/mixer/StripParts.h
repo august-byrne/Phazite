@@ -23,14 +23,14 @@ namespace strip
     // The fader's height: half of what there is, at least the minimum, but leaving the rest of the strip what it needs.
     int getFaderHeight (int available, int forTheRest);
 
-    // What a channel's slots show, so that a timer can tell when it changes.
+    // The devices or sends a channel's slots show (model/mixer/MixerModel.h), to tell when they change.
     template <typename Item>
-    std::vector<te::EditItemID> getIDs (const juce::Array<Item*>& items)
+    std::vector<DeviceID> getIDs (const std::vector<Item>& items)
     {
-        std::vector<te::EditItemID> ids;
+        std::vector<DeviceID> ids;
 
-        for (auto* item : items)
-            ids.push_back (item->itemID);
+        for (const auto& item : items)
+            ids.push_back (item.id);
 
         return ids;
     }
@@ -48,9 +48,9 @@ namespace strip
         }
     };
 
-    // A knob for a parameter of a plug-in, attached to it.
+    // A knob for a parameter of a device, attached to it; nullptr for a handle of nothing.
     Knob* addParameterKnob (juce::Component& parent, juce::OwnedArray<Knob>& knobs, juce::OwnedArray<ParameterAttachment>& attachments,
-                            te::Plugin& plugin, const juce::String& parameterID);
+                            ParameterHandle);
 } // namespace strip
 
 //==============================================================================

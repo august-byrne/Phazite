@@ -2,7 +2,7 @@
 #include "AppShell.h"
 #include "CommandPalette.h"
 #include "model/arrangement/Tracks.h"
-#include "model/mixer/Mixer.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/browser/PluginPicker.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -84,9 +84,9 @@ AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& ke
       topBar (engine, bridge, keyboard, context),
       browser (library, previewer, pack, s, context),
       playlist (bridge, context),
-      inspector (engine, bridge, context),
+      inspector (bridge, context),
       pianoRoll (bridge, context),
-      mixer (engine, bridge, context),
+      mixer (bridge, context),
       guide (bridge, s)
 {
     setTitle ("Phazite");
@@ -172,6 +172,9 @@ void AppShell::setActiveEditor (TimelineEditor* editor)
 void AppShell::projectChanged()
 {
     previewer.stop(); // which may be in time with the project that closes
+
+    // A menu's choices name the items of the project that was open, and the new one's can have the same IDs.
+    juce::PopupMenu::dismissAllActiveMenus();
 }
 
 void AppShell::setLayout (Layout layout)
@@ -239,14 +242,15 @@ void AppShell::showPluginPicker()
 
 bool AppShell::placeItem (const LibraryItem& item)
 {
-    auto* edit = projectContext.getEdit();
-
-    if (edit == nullptr)
+    if (! projectContext.hasProject())
         return false;
 
     // A device goes onto the selected track (or a new one: phazite::addDeviceTo()), a sound at the play start.
     if (item.device.has_value())
-        return addDeviceTo (*edit, getSelectedTracks (selection).getFirst(), *item.device, &selection) != nullptr;
+    {
+        const auto tracks = projectContext.getSongSelection().getTracks();
+        return addDeviceTo (projectContext, tracks.empty() ? TrackID() : tracks.front(), *item.device);
+    }
 
     return playlist.placeFile (item.file);
 }

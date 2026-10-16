@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Tracktion's UI callbacks as the app answers them: phazite::UIBehaviour's, plus devices' windows, which the UI makes
-// (src/ui/devices/PluginWindow.h). Main passes one to createEngine().
+// (PluginWindow.h). Main passes one to createEngine().
 #pragma once
 
 #include "model/engine/EngineSetup.h"

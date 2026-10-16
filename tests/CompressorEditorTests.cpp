@@ -7,6 +7,7 @@
 #include "devices/dynamics/Compressor.h"
 #include "model/commands/Undo.h"
 #include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/Mixer.h"
 #include "model/mixer/Sidechain.h"
 #include "ui/devices/CompressorEditor.h"
@@ -67,7 +68,7 @@ void play (Compressor& compressor, float decibels, int numSamples)
 TEST_CASE ("The compressor's editor shows its knobs, and dragging across its curve moves the threshold as one undo step")
 {
     Song song;
-    const phazite::DeviceHandle device (*song.compressor);
+    const auto device = phazite::makeDeviceHandle (*song.compressor);
     CHECK (dynamic_cast<phazite::ui::CompressorEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::CompressorEditor editor (device);
@@ -93,7 +94,7 @@ TEST_CASE ("The compressor's editor shows its knobs, and dragging across its cur
 TEST_CASE ("The compressor's editor picks the track its sidechain listens to")
 {
     Song song;
-    phazite::ui::CompressorEditor editor ((phazite::DeviceHandle (*song.compressor)));
+    phazite::ui::CompressorEditor editor ((phazite::makeDeviceHandle (*song.compressor)));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
 
     // Off, then the tracks other than the bass.
@@ -119,7 +120,7 @@ TEST_CASE ("The compressor's editor picks the track its sidechain listens to")
 TEST_CASE ("The compressor's editor shows the level it hears and how far it turns the sound down")
 {
     Song song;
-    const phazite::DeviceHandle device (*song.compressor);
+    const auto device = phazite::makeDeviceHandle (*song.compressor);
     auto* compressor = device.getProcessor<Compressor>();
     REQUIRE (compressor != nullptr);
     compressor->prepare (48000.0, 24000);

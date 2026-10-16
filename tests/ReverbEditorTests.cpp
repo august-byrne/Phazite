@@ -6,6 +6,7 @@
 #include "devices/reverb/Reverb.h"
 #include "model/commands/Undo.h"
 #include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/Mixer.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/ReverbEditor.h"
@@ -19,7 +20,7 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
     REQUIRE (phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
 
-    const phazite::DeviceHandle device (*plugin);
+    const auto device = phazite::makeDeviceHandle (*plugin);
     CHECK (dynamic_cast<phazite::ui::ReverbEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::ReverbEditor editor (device);

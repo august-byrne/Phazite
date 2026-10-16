@@ -86,7 +86,7 @@ DevicePanel::DevicePanel (const DeviceHandle& device, const std::vector<std::vec
                 {
                     control->knob = std::make_unique<Knob> (fullName, parameter.defaultValue);
                     showAsParameter (*control->knob, parameter);
-                    control->knobAttachment = std::make_unique<ParameterAttachment> (*control->knob, juce::String());
+                    control->knobAttachment = std::make_unique<ParameterAttachment> (*control->knob);
                     control->knobAttachment->setParameter (device.getParameter (parameter.id));
                     control->value = makeLabel ({});
                     control->value->setColour (juce::Label::textColourId, getPalette (*this).textMuted);

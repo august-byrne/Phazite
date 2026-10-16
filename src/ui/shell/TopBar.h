@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include "model/mixer/MixerModel.h"
+#include "model/project/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
@@ -12,7 +14,6 @@
 namespace phazite
 {
 class Gesture;
-class ProjectContext;
 } // namespace phazite
 
 namespace phazite::ui
@@ -20,10 +21,11 @@ namespace phazite::ui
 // The bar along the top: play, loop, the metronome, the tempo and time signature, CPU, the master level and volume,
 // the computer keyboard and the command search. (A key is a track's, so the piano roll shows it.)
 class TopBar : public juce::Component,
+               private ProjectContext::Listener,
                private juce::Timer
 {
 public:
-    TopBar (te::Engine&, CommandBridge&, ComputerKeyboard&, const ProjectContext&);
+    TopBar (te::Engine&, CommandBridge&, ComputerKeyboard&, ProjectContext&);
     ~TopBar() override;
 
     void paint (juce::Graphics&) override;
@@ -39,7 +41,7 @@ private:
     te::Engine& engine;
     CommandBridge& commands;
     ComputerKeyboard& computerKeyboard;
-    const ProjectContext& projectContext;
+    ProjectContext& projectContext;
 
     // A transport button whose right-click opens its options, rather than clicking it.
     struct OptionsButton : public IconButton
@@ -63,11 +65,12 @@ private:
     juce::TextButton timeSignatureButton;        // a menu of time signatures
     juce::Label cpuLabel;
     LevelMeter masterMeter { "Master level" };
-    Fader masterVolume { Fader::Direction::horizontal, "Master volume", te::decibelsToVolumeFaderPosition (0.0f) };
-    ParameterAttachment masterVolumeAttachment { masterVolume, "Change Master Volume" };
+    Fader masterVolume { Fader::Direction::horizontal, "Master volume", decibelsToFaderPosition (0.0f) };
+    ParameterAttachment masterVolumeAttachment { masterVolume };
     int shownKeyboardState = -1; // what the keyboard button shows, to update it only on changes
 
-    void timerCallback() override; // updates the readouts a few times a second; only changes repaint
+    void projectChanged() override; // the master volume and meter follow the open project
+    void timerCallback() override;  // updates the readouts a few times a second; only changes repaint
     void updateKeyboardButton();
     void updateTempo();
     void showRecordMenu();

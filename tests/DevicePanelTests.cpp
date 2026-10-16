@@ -6,6 +6,7 @@
 #include "devices/synth/Synth.h"
 #include "model/commands/Undo.h"
 #include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/Mixer.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DevicePanel.h"
@@ -19,7 +20,7 @@ TEST_CASE ("The synth's editor has a control for each parameter, in groups, and 
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
 
-    auto editor = phazite::ui::createDeviceEditor (phazite::DeviceHandle (*plugin));
+    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*plugin));
     auto* panel = dynamic_cast<phazite::ui::DevicePanel*> (editor.get());
     REQUIRE (panel != nullptr);
     phazite::test::TestWindow window (*panel, panel->getWidth(), panel->getHeight());

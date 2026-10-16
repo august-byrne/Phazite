@@ -1,50 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Inspector.h"
-#include "model/arrangement/Tracks.h"
-#include "model/engine/LiveInput.h"
-#include "model/project/ProjectContext.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
 {
-Inspector::Inspector (te::Engine& engine, CommandBridge& bridge, ProjectContext& context)
-    : projectContext (context),
-      selection (context.getSelection()),
-      strip (engine, bridge, context)
+Inspector::Inspector (CommandBridge& bridge, ProjectContext& projectContext)
+    : context (projectContext),
+      strip (bridge, projectContext)
 {
     setTitle ("Inspector");
     setDescription ("The channel of the selected track.");
     stripView.setViewedComponent (&strip, false);
     stripView.setScrollBarsShown (true, false);
     addAndMakeVisible (stripView);
-    selection.addChangeListener (this);
+    context.addListener (this);
+    context.getSongSelection().addChangeListener (this);
+    strip.setTrack (getInspectedChannel (context));
     startTimerHz (2);
 }
 
 Inspector::~Inspector()
 {
-    selection.removeChangeListener (this);
+    context.getSongSelection().removeChangeListener (this);
+    context.removeListener (this);
 }
 
 void Inspector::showTrack()
 {
-    te::Track* track = nullptr;
-
-    if (auto* edit = projectContext.getEdit())
-    {
-        track = getSelectedTracks (selection).getFirst();
-
-        if (track == nullptr)
-            track = getSelectedAudioTrack (selection);
-
-        if (track == nullptr)
-            track = getLiveMidiTrack (*edit);
-
-        if (track == nullptr)
-            track = getPlaylistTracks (*edit).getFirst();
-    }
-
-    if (strip.getTrack() != track)
+    if (const auto track = getInspectedChannel (context); track != strip.getTrack())
         strip.setTrack (track);
 }
 

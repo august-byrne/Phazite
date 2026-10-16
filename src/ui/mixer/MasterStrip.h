@@ -4,21 +4,23 @@
 
 #include "DeviceSlots.h"
 #include "StripParts.h"
+#include "model/project/ProjectContext.h"
 #include "ui/components/Controls.h"
 
 namespace phazite::ui
 {
 class MasterStrip : public juce::Component,
                     public juce::DragAndDropTarget,
+                    private ProjectContext::Listener,
                     private juce::Timer
 {
 public:
     static constexpr int width = 156;
     static int getMinimumHeight(); // as ChannelStrip's
 
-    MasterStrip();
-
-    void setEdit (te::Edit*);
+    // Shows the open project's master, and nothing while none is open.
+    explicit MasterStrip (ProjectContext&);
+    ~MasterStrip() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -30,20 +32,24 @@ public:
     void itemDropped (const SourceDetails&) override;
 
 private:
-    te::SafeSelectable<te::Edit> edit;
+    ProjectContext& context;
     bool dropping = false;
 
     void setDropping (bool);
     StripHeading effectsHeading { "Effects" };
-    DeviceSlots effects { DeviceSlots::Kind::effects };
+    DeviceSlots effects;
     juce::Viewport deviceView;
     LevelMeter meter { "Master level" };
-    Fader volume { Fader::Direction::vertical, "Master volume", te::decibelsToVolumeFaderPosition (0.0f) };
-    ParameterAttachment volumeAttachment { volume, "Change Master Volume" };
+    Fader volume { Fader::Direction::vertical, "Master volume", decibelsToFaderPosition (0.0f) };
+    ParameterAttachment volumeAttachment { volume };
     juce::Label loudness;
     juce::TextButton resetButton { "Reset" };
 
-    void timerCallback() override; // the loudness readout, the meter and the fader
+    void showProject(); // the open project's master
+    void showEffects();
+    void projectChanged() override { showProject(); }
+    void songChanged (const SongChanges&) override;
+    void timerCallback() override; // the loudness readout and the controls' values
 };
 
 } // namespace phazite::ui

@@ -134,6 +134,8 @@ target_sources(phazite_core PRIVATE
     src/model/devices/Devices.h
     src/model/devices/ParameterHandle.cpp
     src/model/devices/ParameterHandle.h
+    src/model/devices/internal/DeviceHandle.h
+    src/model/devices/internal/ParameterHandle.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
     src/model/engine/EngineSetup.cpp
@@ -146,10 +148,19 @@ target_sources(phazite_core PRIVATE
     src/model/engine/Preview.h
     src/model/mixer/Buses.cpp
     src/model/mixer/Buses.h
+    src/model/mixer/DeviceType.h
+    src/model/mixer/LevelSource.cpp
+    src/model/mixer/LevelSource.h
+    src/model/mixer/MixHandle.cpp
+    src/model/mixer/MixHandle.h
     src/model/mixer/Mixer.cpp
     src/model/mixer/Mixer.h
+    src/model/mixer/MixerModel.cpp
+    src/model/mixer/MixerModel.h
     src/model/mixer/Sidechain.cpp
     src/model/mixer/Sidechain.h
+    src/model/mixer/internal/LevelSource.h
+    src/model/mixer/internal/MixHandle.h
     src/model/notes/Notes.cpp
     src/model/notes/Notes.h
     src/model/project/Export.cpp
@@ -329,8 +340,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/EqEditor.h
     src/ui/devices/LimiterEditor.cpp
     src/ui/devices/LimiterEditor.h
-    src/ui/devices/PluginWindow.cpp
-    src/ui/devices/PluginWindow.h
     src/ui/devices/ReverbEditor.cpp
     src/ui/devices/ReverbEditor.h
     src/ui/input/CommandBridge.cpp
@@ -437,6 +446,8 @@ target_sources(phazite_app PRIVATE
     src/app/AppUIBehaviour.h
     src/app/MainWindow.cpp
     src/app/MainWindow.h
+    src/app/PluginWindow.cpp
+    src/app/PluginWindow.h
     src/app/ProjectSession.cpp
     src/app/ProjectSession.h)
 
@@ -535,6 +546,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MessageQueueTests.cpp
         tests/MetronomeTests.cpp
         tests/MigrationTests.cpp
+        tests/MixerModelTests.cpp
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
         tests/NewProjectTests.cpp

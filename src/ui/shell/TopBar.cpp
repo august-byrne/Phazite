@@ -12,7 +12,7 @@
 
 namespace phazite::ui
 {
-TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard, const ProjectContext& context)
+TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContext& context)
     : engine (e),
       commands (bridge),
       computerKeyboard (keyboard),
@@ -92,11 +92,22 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
         addAndMakeVisible (c);
 
     lookAndFeelChanged();
-    timerCallback();
+    projectContext.addListener (this);
+    projectChanged();
     startTimerHz (4);
 }
 
-TopBar::~TopBar() = default;
+TopBar::~TopBar()
+{
+    projectContext.removeListener (this);
+}
+
+void TopBar::projectChanged()
+{
+    masterVolumeAttachment.setParameter (getMasterVolume (projectContext));
+    masterMeter.setSource (getMasterLevel (projectContext));
+    timerCallback();
+}
 
 void TopBar::refreshTooltips()
 {
@@ -295,13 +306,6 @@ void TopBar::timerCallback()
                       juce::dontSendNotification);
     updateKeyboardButton();
 
-    // The master volume and meter follow the open project and its playback.
-    const auto masterVolumePlugin = edit != nullptr ? edit->getMasterVolumePlugin() : nullptr;
-    masterVolumeAttachment.setParameter (masterVolumePlugin.get(),
-                                         masterVolumePlugin != nullptr ? masterVolumePlugin->volParam->paramID : juce::String());
     masterVolumeAttachment.update();
-
-    auto* context = edit != nullptr ? edit->getCurrentPlaybackContext() : nullptr;
-    masterMeter.setSource (context != nullptr ? &context->masterLevels : nullptr);
 }
 } // namespace phazite::ui

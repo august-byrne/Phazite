@@ -3,6 +3,7 @@
 // effects, each in a slot.
 #pragma once
 
+#include "model/mixer/MixerModel.h"
 #include "ui/components/Controls.h"
 
 #include <vector>
@@ -21,14 +22,22 @@ public:
         effects
     };
 
-    explicit DeviceSlots (Kind);
+    DeviceSlots (Kind, ProjectContext&);
     ~DeviceSlots() override;
 
-    // The track whose devices to show, or with nullptr the master's of the Edit.
-    void setChannel (te::Track*, te::Edit*);
+    // The track whose devices to show (an empty ID for none), or the master's. Either shows them anew, so call it again
+    // for a channel of another project, even one with the same ID.
+    void setTrack (TrackID);
+    void setMaster();
 
-    // Rebuilds the slots if the devices changed, and shows the controls' values. Call it from a timer.
-    void update();
+    // Shows the channel's devices as they are now: new slots if they changed. Call it when the song changes.
+    void refresh();
+
+    // Shows whether a track without an instrument has notes that need one. Call it when clips change.
+    void refreshNeed();
+
+    // Shows the knobs' values. Call it from a timer.
+    void updateValues();
 
     int getPreferredHeight() const;
     void resized() override;
@@ -38,18 +47,20 @@ private:
     struct Slot;
 
     const Kind kind;
-    te::SafeSelectable<te::Track> track;
-    te::SafeSelectable<te::Edit> edit;
+    ProjectContext& context;
+    TrackID track;
+    bool master = false;
     juce::OwnedArray<Slot> slots;
     juce::TextButton addButton;
-    std::vector<te::EditItemID> shownDevices; // the devices the slots show
-    int shownNeed = -1;                       // whether the add button asks for an instrument, as it shows now
+    std::vector<DeviceID> shownDevices; // the devices the slots show
+    int shownNeed = -1;                 // whether the add button asks for an instrument, as it shows now
 
-    juce::Array<te::Plugin*> getChannelDevices() const;
-    void rebuild();
+    std::vector<DeviceSlot> getChannelDevices() const;
+    TrackID getEffectsChannel() const noexcept { return master ? TrackID() : track; } // the master's, by an empty ID
+    void rebuild (const std::vector<DeviceSlot>&);
     void updateAddButton();
     void showAddMenu();
-    void showSlotMenu (te::Plugin&);
+    void showSlotMenu (const DeviceSlot&);
 };
 
 } // namespace phazite::ui

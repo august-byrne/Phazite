@@ -6,6 +6,7 @@
 #include "devices/dynamics/Limiter.h"
 #include "model/commands/Undo.h"
 #include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/Mixer.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/LimiterEditor.h"
@@ -66,7 +67,7 @@ TEST_CASE ("The limiter's editor shows its knobs and meters, with the ceiling ma
     REQUIRE (phazite::insertMasterDevice (*edit, plugin) != nullptr);
     phazite::test::settle();
 
-    const phazite::DeviceHandle device (*plugin);
+    const auto device = phazite::makeDeviceHandle (*plugin);
     CHECK (dynamic_cast<phazite::ui::LimiterEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     auto* limiter = device.getProcessor<Limiter>();

@@ -37,7 +37,7 @@ void Playlist::rebuild()
         }
         else
         {
-            header = new TrackHeader (*this, *track);
+            header = new TrackHeader (*this, context, *track);
             headerContent.addAndMakeVisible (header);
         }
 
