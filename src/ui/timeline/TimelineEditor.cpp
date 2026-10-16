@@ -302,15 +302,18 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, GridOwner owner)
         addChildComponent (button);
     }
 
+    // The vertical scroll bar hides while everything fits; the horizontal one always shows (the time line goes on).
     for (auto* scrollBar : { &horizontalScrollBar, &verticalScrollBar })
     {
         scrollBar->addListener (this);
-        scrollBar->setAutoHide (false);
+        scrollBar->setAutoHide (scrollBar == &verticalScrollBar);
     }
 
     for (auto* c : std::initializer_list<juce::Component*> { &snapButton, &gridButton, &ruler, &horizontalScrollBar, &verticalScrollBar,
                                                              playhead.get() })
         addAndMakeVisible (c);
+
+    verticalScrollBar.addComponentListener (this);
 
     snapButton.setEnabled (false); // until a project is open
     gridButton.setEnabled (false);
@@ -321,8 +324,35 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, GridOwner owner)
 TimelineEditor::~TimelineEditor()
 {
     removeMouseListener (useListener.get());
+    verticalScrollBar.removeComponentListener (this);
     horizontalScrollBar.removeListener (this);
     verticalScrollBar.removeListener (this);
+}
+
+void TimelineEditor::componentVisibilityChanged (juce::Component& component)
+{
+    if (&component != &verticalScrollBar)
+        return;
+
+    // The time line takes the scroll bar's room, or gives it back. Laying out sets the bar's range again, which can
+    // show or hide it once more (it showed while the rows had no room yet, say): then it lays out again. Whether the
+    // bar is needed doesn't depend on its own room, so this settles at once.
+    if (layingOutForScrollBar)
+    {
+        scrollBarChangedMeanwhile = true;
+        return;
+    }
+
+    const juce::ScopedValueSetter<bool> layingOut (layingOutForScrollBar, true);
+
+    for (int pass = 0; pass < 3; ++pass)
+    {
+        scrollBarChangedMeanwhile = false;
+        resized();
+
+        if (! scrollBarChangedMeanwhile)
+            break;
+    }
 }
 
 void TimelineEditor::setTimelineEdit (te::Edit* newEdit)

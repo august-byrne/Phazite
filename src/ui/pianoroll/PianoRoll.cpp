@@ -492,18 +492,19 @@ void PianoRoll::resized()
 
     clipLabel.setBounds (toolbar.withTrimmedLeft (Space::s));
 
-    horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (keysWidth).withTrimmedRight (scrollBarSize));
+    const auto verticalBarWidth = getVerticalScrollBarWidth();
+    horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (keysWidth).withTrimmedRight (verticalBarWidth));
 
     if (transformOpen)
         transformBar->setBounds (area.removeFromBottom (transformBarHeight));
 
     auto velocityArea = area.removeFromBottom (velocityLaneHeight);
     auto rulerArea = area.removeFromTop (rulerHeight);
-    verticalScrollBar.setBounds (area.removeFromRight (scrollBarSize));
+    verticalScrollBar.setBounds (area.removeFromRight (verticalBarWidth));
     keys->setBounds (area.removeFromLeft (keysWidth));
     grid->setBounds (area);
-    ruler.setBounds (rulerArea.withTrimmedLeft (keysWidth).withTrimmedRight (scrollBarSize));
-    velocityLane->setBounds (velocityArea.withTrimmedLeft (keysWidth).withTrimmedRight (scrollBarSize));
+    ruler.setBounds (rulerArea.withTrimmedLeft (keysWidth).withTrimmedRight (verticalBarWidth));
+    velocityLane->setBounds (velocityArea.withTrimmedLeft (keysWidth).withTrimmedRight (verticalBarWidth));
 
     setScrollY (scrollY);
     setViewStart (getView().start);

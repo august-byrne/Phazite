@@ -391,3 +391,30 @@ TEST_CASE ("With FL Studio's keymap, Ctrl+B repeats a selected time range, and t
     CHECK (loopAfterUndo.getStart().inBeats() == doctest::Approx (0.0));
     CHECK (loopAfterUndo.getEnd().inBeats() == doctest::Approx (8.0));
 }
+
+TEST_CASE ("The playlist's vertical scroll bar shows only while its tracks don't fit, and its room goes to the tracks otherwise")
+{
+    PlaylistScreen screen; // three tracks, which fit
+    juce::ScrollBar* vertical = nullptr;
+
+    for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
+        if (bar->isVertical())
+            vertical = bar;
+
+    REQUIRE (vertical != nullptr);
+    CHECK_FALSE (vertical->isVisible());
+    CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
+
+    screen.edit->ensureNumberOfAudioTracks (30);
+    phazite::test::dispatchPendingMessages();
+    CHECK (vertical->isVisible());
+    CHECK (screen.lanes->getRight() == screen.playlist.getWidth() - phazite::ui::TimelineEditor::scrollBarSize);
+
+    for (auto* track : te::getAudioTracks (*screen.edit))
+        if (! screen.tracks.contains (track))
+            screen.edit->deleteTrack (track);
+
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (vertical->isVisible());
+    CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
+}

@@ -373,16 +373,17 @@ void Playlist::resized()
     auto area = getLocalBounds();
     layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
 
-    horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (headerWidth).withTrimmedRight (scrollBarSize));
+    const auto verticalBarWidth = getVerticalScrollBarWidth();
+    horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (headerWidth).withTrimmedRight (verticalBarWidth));
 
     // The time bar: the song's sections over the bar numbers. Left of it, over the track headers, the button
     // that adds a track.
-    auto timeBar = area.removeFromTop (SectionsStrip::preferredHeight + rulerHeight).withTrimmedRight (scrollBarSize);
+    auto timeBar = area.removeFromTop (SectionsStrip::preferredHeight + rulerHeight).withTrimmedRight (verticalBarWidth);
     addTrackButton.setBounds (timeBar.removeFromLeft (headerWidth).reduced (Space::s, Space::s).withWidth (96));
     sectionsStrip.setBounds (timeBar.removeFromTop (SectionsStrip::preferredHeight));
     ruler.setBounds (timeBar);
 
-    verticalScrollBar.setBounds (area.removeFromRight (scrollBarSize));
+    verticalScrollBar.setBounds (area.removeFromRight (verticalBarWidth));
     headerColumn.setBounds (area.removeFromLeft (headerWidth));
     lanes->setBounds (area);
 

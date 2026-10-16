@@ -35,6 +35,7 @@ private:
 //==============================================================================
 class TimelineEditor : public juce::Component,
                        private juce::ScrollBar::Listener,
+                       private juce::ComponentListener,
                        private juce::Timer
 {
 public:
@@ -158,6 +159,10 @@ protected:
     TimelineRuler ruler { *this };
     juce::ScrollBar horizontalScrollBar { false }, verticalScrollBar { true };
 
+    // The room the vertical scroll bar takes: none while everything fits, when it hides (the editor is laid out again
+    // when it shows or hides). The horizontal one always shows, as the time line goes on past the song.
+    int getVerticalScrollBarWidth() const noexcept { return verticalScrollBar.isVisible() ? scrollBarSize : 0; }
+
     // Lays out the snap and grid buttons and the tools from the left of the toolbar; returns what is left.
     juce::Rectangle<int> layOutToolbarControls (juce::Rectangle<int> toolbar);
 
@@ -186,6 +191,7 @@ private:
     std::optional<Tool> toolAfterDrag; // the key was let go during a drag: the tool to go back to when it ends
     bool mouseIsDown = false;
     bool followPlayback = true, wasPlaying = false, active = false;
+    bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;
     double contentEnd = 0.0;         // in beats, as the scroll bar knows it
     te::BeatRange shownLoop;         // the loop the ruler shows (empty while playback doesn't loop), to repaint it on changes
     double lastAutoScrollTime = 0.0; // milliseconds (juce::Time::getMillisecondCounterHiRes())
@@ -193,7 +199,8 @@ private:
     std::unique_ptr<UseListener> useListener;
 
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
-    void timerCallback() override; // moves the playhead, and follows it while playing
+    void componentVisibilityChanged (juce::Component&) override; // the vertical scroll bar showed or hid itself
+    void timerCallback() override;                               // moves the playhead, and follows it while playing
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TimelineEditor)
 };
