@@ -12,7 +12,7 @@ namespace
     constexpr int fieldWidth = 112;
     constexpr int boxWidth = 176;
     constexpr int buttonWidth = 96;
-    constexpr int folderTextHeight = 40;  // two lines
+    constexpr int saveTextHeight = 40;    // two lines
     constexpr int outlineTextHeight = 56; // three lines
     constexpr int errorHeight = 40;
 
@@ -27,7 +27,7 @@ namespace
     }
 } // namespace
 
-NewProjectPanel::NewProjectPanel (const juce::String& suggestedName, const juce::File& folder, Create createProject)
+NewProjectPanel::NewProjectPanel (Create createProject)
     : create (std::move (createProject)),
       tempoField ("Tempo", minTempo, maxTempo, 1.0, NewProjectSettings().tempo)
 {
@@ -35,30 +35,19 @@ NewProjectPanel::NewProjectPanel (const juce::String& suggestedName, const juce:
 
     heading.setText ("New Project", juce::dontSendNotification);
     heading.setFont (juce::FontOptions (TextSize::heading, juce::Font::bold));
-    folderLabel.setText ("Phazite makes a folder for it in " + folder.getFullPathName() + ". Everything here can change later.",
-                         juce::dontSendNotification);
+    saveText.setText ("Its first save asks what to call it and where its folder goes. Everything here can change later.",
+                      juce::dontSendNotification);
 
-    for (auto* label : { &folderLabel, &outlineText, &error })
+    for (auto* label : { &saveText, &outlineText, &error })
         label->setJustificationType (juce::Justification::topLeft);
 
-    const std::pair<juce::Label*, const char*> labelTexts[] { { &nameLabel, "Name" },
-                                                              { &tempoLabel, "Tempo" },
+    const std::pair<juce::Label*, const char*> labelTexts[] { { &tempoLabel, "Tempo" },
                                                               { &timeSignatureLabel, "Time signature" },
                                                               { &keyLabel, "Key" },
                                                               { &outlineLabel, "Song outline" } };
 
     for (const auto& [label, text] : labelTexts)
         label->setText (text, juce::dontSendNotification);
-
-    nameEditor.setTitle ("Name");
-    nameEditor.setText (suggestedName, false);
-    nameEditor.setSelectAllWhenFocused (true);
-    nameEditor.onReturnKey = [this] { createClicked(); };
-    nameEditor.onTextChange = [this]
-    {
-        error.setText ({}, juce::dontSendNotification);
-        createButton.setEnabled (getProjectName().isNotEmpty());
-    };
 
     tempoField.textFromValueFunction = [] (double bpm) { return formatTempo (bpm); };
     tempoField.valueFromTextFunction = [this] (const juce::String& typed) { return parseTempo (typed).value_or (tempoField.getValue()); };
@@ -110,21 +99,31 @@ NewProjectPanel::NewProjectPanel (const juce::String& suggestedName, const juce:
     cancelButton.onClick = [this] { close(); };
     createButton.onClick = [this] { createClicked(); };
 
-    for (auto* c : std::initializer_list<juce::Component*> {
-             &heading, &folderLabel, &nameLabel, &nameEditor, &tempoLabel, &tempoField, &timeSignatureLabel, &timeSignatureBox, &keyLabel,
-             &keyBox, &scaleBox, &outlineLabel, &outlineBox, &outlineText, &instrumentsButton, &error, &cancelButton, &createButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &heading, &saveText, &tempoLabel, &tempoField, &timeSignatureLabel,
+                                                             &timeSignatureBox, &keyLabel, &keyBox, &scaleBox, &outlineLabel, &outlineBox,
+                                                             &outlineText, &instrumentsButton, &error, &cancelButton, &createButton })
         addAndMakeVisible (c);
 
     updateOutlineText();
     lookAndFeelChanged();
 
-    // Once its window is on the screen: typing replaces the suggested name.
+    // Once its window is on the screen, Enter makes the project (keyPressed()), until a control takes the keys.
+    setWantsKeyboardFocus (true);
     juce::MessageManager::callAsync (
         [safeThis = juce::Component::SafePointer<NewProjectPanel> (this)]
         {
             if (safeThis != nullptr && safeThis->isShowing())
-                safeThis->nameEditor.grabKeyboardFocus();
+                safeThis->grabKeyboardFocus();
         });
+}
+
+bool NewProjectPanel::keyPressed (const juce::KeyPress& key)
+{
+    if (key != juce::KeyPress (juce::KeyPress::returnKey))
+        return false;
+
+    createClicked();
+    return true;
 }
 
 NewProjectSettings NewProjectPanel::getSettings() const
@@ -166,16 +165,10 @@ void NewProjectPanel::updateOutlineText()
 
 void NewProjectPanel::createClicked()
 {
-    if (getProjectName().isEmpty())
-    {
-        error.setText ("The project needs a name.", juce::dontSendNotification);
-        return;
-    }
-
     if (create == nullptr)
         return;
 
-    if (const auto result = create (getProjectName(), getSettings()); result.failed())
+    if (const auto result = create (getSettings()); result.failed())
     {
         error.setText (result.getErrorMessage(), juce::dontSendNotification);
         return;
@@ -196,7 +189,7 @@ void NewProjectPanel::close()
 void NewProjectPanel::lookAndFeelChanged()
 {
     const auto& p = getPalette (*this);
-    folderLabel.setColour (juce::Label::textColourId, p.textMuted);
+    saveText.setColour (juce::Label::textColourId, p.textMuted);
     outlineText.setColour (juce::Label::textColourId, p.textMuted);
     error.setColour (juce::Label::textColourId, p.danger);
     setPrimary (createButton, true);
@@ -211,7 +204,7 @@ void NewProjectPanel::resized()
 {
     auto area = getLocalBounds().reduced (Space::xl);
     heading.setBounds (area.removeFromTop (32));
-    folderLabel.setBounds (area.removeFromTop (folderTextHeight));
+    saveText.setBounds (area.removeFromTop (saveTextHeight));
     area.removeFromTop (Space::m);
 
     const auto row = [&area] (juce::Label& label)
@@ -222,7 +215,6 @@ void NewProjectPanel::resized()
         return line;
     };
 
-    nameEditor.setBounds (row (nameLabel));
     tempoField.setBounds (row (tempoLabel).removeFromLeft (fieldWidth));
     timeSignatureBox.setBounds (row (timeSignatureLabel).removeFromLeft (fieldWidth));
 

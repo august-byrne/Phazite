@@ -363,9 +363,10 @@ void MainWindow::showExport()
     if (project == nullptr)
         return;
 
-    // The song goes into the project's Renders folder, named after the project, unless the user chooses another file.
+    // The song goes into the project's Renders folder (or, while it is untitled, Documents/Phazite/Exports), named after
+    // the project, unless the user chooses another file.
     auto& edit = project->getEdit();
-    const auto defaultFile = project->getRendersFolder().getChildFile (project->getFile().getFileNameWithoutExtension() + ".wav");
+    const auto defaultFile = session.getExportFolder().getChildFile (project->getFile().getFileNameWithoutExtension() + ".wav");
     auto* panel = new ui::ExportPanel (
         services.settings, defaultFile, getExportRange (edit).getLength().inSeconds(),
         [&edit] (const ExportSettings& settings, const juce::File& file, std::function<void (const ExportReport&)> onFinished)

@@ -80,6 +80,13 @@ public:
     // File (if that folder exists, for example).
     juce::File saveCopyAs (const juce::File& parentFolder, const juce::String& name, juce::String& error);
 
+    // Saves the project, unsaved changes included, as <parentFolder>/<name> with copies of its Audio, Generated and
+    // Renders folders, and goes on there with its undo history: the first save of a project kept with the unsaved ones
+    // until then (model/project/UnsavedProjects.h), which asks where it goes. The folder it was in stays as it is, for
+    // its owner to delete once the project has closed (files in it may be open until then). Fails, changing nothing, if
+    // that folder exists or can't be written.
+    juce::Result moveTo (const juce::File& parentFolder, const juce::String& name);
+
 private:
     Project (std::unique_ptr<te::Edit>, const juce::File&);
 
@@ -96,6 +103,12 @@ private:
     // or change it.
     juce::ValueTree savedState;
     bool mayHaveChanged = false;
+
+    // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated and Renders folders, and returns
+    // the project file that goes in it. If the name is empty, the folder exists or something can't be written, sets error
+    // and returns nothing, leaving nothing behind.
+    juce::File makeFolderWithFiles (const juce::File& parentFolder, const juce::String& name, juce::String& error) const;
+    void setFile (const juce::File&); // the project file from now on, the Edit's too
 
     void backUpProjectFile();
     void rememberSavedState();

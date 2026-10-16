@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The new-project window (roadmap step 1.9, src/ui/shell/NewProjectPanel.h): the name, tempo, time signature, key, song
-// outline and starting tracks it shows are what it asks the app to make the project with.
+// The new-project window (roadmap step 1.9, src/ui/shell/NewProjectPanel.h): the tempo, time signature, key, song outline
+// and starting tracks it shows are what it asks the app to make the project with. Its name comes with its first save.
 #include "UiTestHelpers.h"
 #include "model/arrangement/Outlines.h"
 #include "ui/shell/NewProjectPanel.h"
@@ -14,18 +14,15 @@ struct NewProjectWindow
         panel.onClose = [this] { closed = true; };
     }
 
-    juce::StringArray names; // what the window asked to make
-    juce::Array<phazite::NewProjectSettings> settings;
-    juce::Result answer = juce::Result::ok(); // what making it gives back
+    juce::Array<phazite::NewProjectSettings> settings; // what the window asked to make
+    juce::Result answer = juce::Result::ok();          // what making it gives back
     bool closed = false;
-    phazite::ui::NewProjectPanel panel { "Untitled", juce::File::getSpecialLocation (juce::File::tempDirectory),
-                                         [this] (const juce::String& name, const phazite::NewProjectSettings& chosen)
+    phazite::ui::NewProjectPanel panel { [this] (const phazite::NewProjectSettings& chosen)
                                          {
-                                             names.add (name);
                                              settings.add (chosen);
                                              return answer;
                                          } };
-    phazite::test::TestWindow window { panel, 540, 500 };
+    phazite::test::TestWindow window { panel, 540, 460 };
 
     void click (juce::Component& c) { phazite::test::Mouse (c).click (c.getLocalBounds().getCentre()); }
 };
@@ -46,7 +43,6 @@ TEST_CASE ("The new-project window makes a project with the choices it shows")
 {
     NewProjectWindow w;
     phazite::test::checkChildrenApart (w.panel);
-    CHECK (w.panel.getProjectName() == "Untitled");
 
     // Its defaults: 120 BPM in 4/4, no key, no outline, and the two instrument tracks.
     const auto defaults = w.panel.getSettings();
@@ -59,7 +55,6 @@ TEST_CASE ("The new-project window makes a project with the choices it shows")
     CHECK_FALSE (w.panel.getScaleBox().isEnabled());
     CHECK (w.panel.getOutlineText().startsWith ("The song starts without sections."));
 
-    w.panel.getNameEditor().setText ("Beat", true);
     w.panel.getTempoField().setValue (90.0, juce::sendNotificationSync);
     w.panel.getTimeSignatureBox().setSelectedId (5, juce::sendNotificationSync); // 2/4, 3/4, 4/4, 5/4, 6/8
     w.panel.getKeyBox().setSelectedId (4, juce::sendNotificationSync);           // None, C, C#, D
@@ -76,7 +71,6 @@ TEST_CASE ("The new-project window makes a project with the choices it shows")
 
     w.click (w.panel.getCreateButton());
     REQUIRE (w.settings.size() == 1);
-    CHECK (w.names == juce::StringArray { "Beat" });
     const auto& made = w.settings.getReference (0);
     CHECK (made.tempo == doctest::Approx (90.0));
     CHECK (made.timeSignature == phazite::TimeSignature { 6, 8 });
@@ -88,29 +82,27 @@ TEST_CASE ("The new-project window makes a project with the choices it shows")
     CHECK (w.closed);
 }
 
-TEST_CASE ("The new-project window needs a name, and says why a project couldn't be made")
+TEST_CASE ("The new-project window says why a project couldn't be made, and Enter makes it")
 {
     NewProjectWindow w;
 
-    w.panel.getNameEditor().setText ("  ", true);
-    phazite::test::dispatchPendingMessages();
-    CHECK_FALSE (w.panel.getCreateButton().isEnabled());
-    w.panel.getNameEditor().onReturnKey();
-    CHECK (w.panel.getError() == "The project needs a name.");
-    CHECK (w.settings.isEmpty());
-
-    w.panel.getNameEditor().setText ("Beat", true);
-    phazite::test::dispatchPendingMessages();
-    CHECK (w.panel.getCreateButton().isEnabled());
-    CHECK (w.panel.getError().isEmpty());
-
-    w.answer = juce::Result::fail ("There is already a folder called \"Beat\" here.");
+    w.answer = juce::Result::fail ("Phazite couldn't make a folder for a new project.");
     w.click (w.panel.getCreateButton());
     CHECK (w.settings.size() == 1);
-    CHECK (w.panel.getError() == "There is already a folder called \"Beat\" here.");
+    CHECK (w.panel.getError() == "Phazite couldn't make a folder for a new project.");
     CHECK_FALSE (w.closed);
 
+    w.answer = juce::Result::ok();
+    w.panel.grabKeyboardFocus(); // as it does once its window is on the screen
+    w.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (w.settings.size() == 2);
+    CHECK (w.closed);
+}
+
+TEST_CASE ("The new-project window's Cancel makes nothing")
+{
+    NewProjectWindow w;
     w.click (w.panel.getCancelButton());
     CHECK (w.closed);
-    CHECK (w.settings.size() == 1);
+    CHECK (w.settings.isEmpty());
 }

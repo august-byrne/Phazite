@@ -8,6 +8,7 @@
 #include "model/project/NewProject.h"
 #include "model/project/Project.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/UnsavedProjects.h"
 #include "services/RecentProjects.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -17,11 +18,16 @@ namespace phazite
 class ProjectSession : private juce::ChangeListener
 {
 public:
-    // New projects go into projectsFolder, and the Open dialog starts there.
-    ProjectSession (te::Engine&, UIBehaviour&, RecentProjects&, juce::File projectsFolder);
+    // New projects are kept in unsavedFolder (getUnsavedProjectsFolder() in the app) until their first save asks where
+    // they go, starting in projectsFolder, where the Open dialog starts too.
+    ProjectSession (te::Engine&, UIBehaviour&, RecentProjects&, juce::File projectsFolder, juce::File unsavedFolder);
     ~ProjectSession() override;
 
     Project* getProject() const noexcept { return project.get(); }
+
+    // Whether the open project is a new one that hasn't been saved yet: its first save asks what it is called and where
+    // it goes (model/project/UnsavedProjects.h).
+    bool isUntitled() const;
 
     // The open project's Edit and what is selected in it: tracks and clips (live MIDI input follows the selected
     // track), and a time range across tracks.
@@ -35,23 +41,37 @@ public:
     juce::Component* dialogParent = nullptr; // dialogs appear over this
     std::function<void (const juce::String& title, const juce::String& message)> onError; // shows an error; unset, a dialog
 
-    // Opens the most recent project (offering to restore its autosave), or makes a first project.
+    // Asks what to call the project and where it goes, from a suggested file, for its first save and Save As, and calls
+    // back with the file chosen, <folder>/<name> (the project's own folder is made there), or with no file if the user
+    // cancelled. Unset, a file chooser asks; tests answer themselves.
+    std::function<void (const juce::File& suggested, std::function<void (const juce::File&)>)> chooseSaveFile;
+
+    // Asks whether to restore a project's changes that Phazite saved automatically before it didn't close properly, and
+    // calls back with the answer; untitled if the project was never saved. Unset, a dialog asks; tests answer themselves.
+    std::function<void (const juce::File& projectFile, bool untitled, std::function<void (bool restore)>)> askToRestore;
+
+    // Restores the untitled project an earlier Phazite didn't close properly, if the user wants it, or opens the most
+    // recent project (offering to restore its autosave), or makes a first project.
     void openAtStartup();
 
     void newProject(); // the new-project window
     void openProject();
     void openProject (const juce::File&);
     void chooseRecentProject(); // a menu of the recent projects
-    void saveProject();
-    void saveProjectAs(); // a copy under a new name, which then stays open
-    void exportSong();    // through onExport
+    void saveProject();         // asks where first if the project is untitled
+    void saveProjectAs();       // a copy under a new name, which then stays open; the first save if untitled
+    void exportSong();          // through onExport
 
-    // Makes the project <folder>/<name> with what the settings choose, and opens it, the computer keyboard on its synth
-    // track if it has one: the new-project window's Create. Fails, changing nothing, if that folder exists.
-    juce::Result createProject (const juce::File& folder, const juce::String& name, const NewProjectSettings&);
+    // Makes an untitled project with what the settings choose, and opens it, the computer keyboard on its synth track if
+    // it has one: the new-project window's Create.
+    juce::Result createProject (const NewProjectSettings&);
 
-    // The name the new-project window suggests: "Untitled", or "Untitled 2" and so on if a project has it in the folder.
-    static juce::String suggestNewName (const juce::File& folder);
+    // The name the save dialog suggests: the project's own, or with " 2" and so on if a project has it in the folder.
+    static juce::String suggestName (const juce::File& folder, const juce::String& name);
+
+    // Where Export Song puts the song unless another file is chosen: the project's Renders folder, or, while it is
+    // untitled, Exports next to the projects folder (the untitled project's own folder goes when it closes).
+    juce::File getExportFolder() const;
 
     // Asks whether to save unsaved changes first. Calls back with false if the user cancelled.
     void closeThen (std::function<void (bool closed)>);
@@ -63,18 +83,29 @@ public:
 
 private:
     te::Engine& engine;
-    const juce::File projectsFolder;
+    const juce::File projectsFolder, unsavedFolder;
     RecentProjects& recent;
-    ProjectContext context; // keeps Tracktion's focus in step
+    ProjectContext context;                              // keeps Tracktion's focus in step
+    std::unique_ptr<UnsavedFolder> projectUnsavedFolder; // where the project was made while untitled, until it closes
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
-    void setProject (std::unique_ptr<Project>);
+    // The project, and the folder it was made in if it was untitled, deleted once the project has closed.
+    void setProject (std::unique_ptr<Project>, std::unique_ptr<UnsavedFolder> = {});
+    juce::Result createUntitled (const juce::String& name, const std::function<void (te::Edit&)>& addContent);
+    void openRecentOrFirst();
     void openWithRestoreQuestion (const juce::File&);
     void open (const juce::File&, bool restoreAutosave);
+    void restoreUntitled (const juce::File&, bool restore);
+    void askWhetherToRestore (const juce::File&, bool untitled, std::function<void (bool restore)>);
     void createFirstProject();
     void selectSynthTrack(); // in a new project that has one (findSynthTrack())
+
+    // Saves the project, asking where first if it is untitled, and calls back with whether it was saved.
+    void saveThen (std::function<void (bool saved)>);
+    void chooseWhereToSave (const juce::File& suggested, std::function<void (const juce::File&)>);
+    bool moveUntitledTo (const juce::File& chosen);
 
     // Opens the first of the recent projects after one that failed to open that this Phazite can open, or else makes a
     // first project.

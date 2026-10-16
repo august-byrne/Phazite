@@ -26,6 +26,11 @@ struct Screen
         shell.addCommands (registry);
         session.onProjectClosing = [this] { shell.setEdit (nullptr); };
         session.onProjectChanged = [this] { shell.setEdit (session.getContext().getEdit()); };
+
+        // The dialogs answer themselves: the save dialog with what it suggests, the restore question with no.
+        session.chooseSaveFile = [] (const juce::File& suggested, std::function<void (const juce::File&)> callback)
+        { callback (suggested); };
+        session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (false); };
         phazite::test::dispatchPendingMessages();
     }
 
@@ -45,7 +50,7 @@ struct Screen
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::KeyDispatcher shortcutKeys { commands };
     phazite::ProjectSession session { engine, phazite::getUIBehaviour (engine), services.recentProjects,
-                                      temp.folder.getChildFile ("Projects") };
+                                      temp.folder.getChildFile ("Projects"), temp.folder.getChildFile ("Unsaved") };
     phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
     phazite::ui::AppShell shell {
         engine,           commands,          shortcutKeys, keyboard, session.getContext(), services.settings, services.soundPack,
@@ -117,10 +122,13 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     REQUIRE_FALSE (found.isEmpty());
     CHECK (found.getFirst()->id == "view.mixer");
 
+    // Its first save goes where the save dialog says (here, what it suggests).
     const auto* save = screen.registry.find ("project.save");
     REQUIRE (save != nullptr);
     CHECK (save->isEnabled());
     REQUIRE (screen.registry.invoke ("project.save"));
+    CHECK_FALSE (screen.session.isUntitled());
+    CHECK (screen.session.getProject()->getFile() == screen.temp.folder.getChildFile ("Projects/My First Song/My First Song.phazite"));
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 }
 

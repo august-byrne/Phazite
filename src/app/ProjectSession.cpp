@@ -8,9 +8,19 @@
 
 namespace phazite
 {
-ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui, RecentProjects& recentProjects, juce::File folder)
+namespace
+{
+    // The name typed in the save dialog, without the project file's extension if the dialog added it.
+    juce::String getChosenName (const juce::File& chosen)
+    {
+        return chosen.hasFileExtension (Project::fileExtension) ? chosen.getFileNameWithoutExtension() : chosen.getFileName();
+    }
+} // namespace
+
+ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui, RecentProjects& recentProjects, juce::File projects, juce::File unsaved)
     : engine (e),
-      projectsFolder (std::move (folder)),
+      projectsFolder (std::move (projects)),
+      unsavedFolder (std::move (unsaved)),
       recent (recentProjects),
       context (e, &ui)
 {
@@ -36,7 +46,22 @@ void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster* source)
         routeLiveMidiInput (project->getEdit()); // MIDI inputs show up a moment after startup, and when plugged in
 }
 
+bool ProjectSession::isUntitled() const
+{
+    return project != nullptr && projectUnsavedFolder != nullptr && project->getFile().isAChildOf (projectUnsavedFolder->getFolder());
+}
+
 void ProjectSession::openAtStartup()
+{
+    // An untitled project that an earlier Phazite didn't close properly, such as in a crash, comes first: its changes are
+    // nowhere else.
+    if (const auto leftover = UnsavedFolder::findProjectToRestore (engine, unsavedFolder); leftover != juce::File())
+        askWhetherToRestore (leftover, true, [this, leftover] (bool restore) { restoreUntitled (leftover, restore); });
+    else
+        openRecentOrFirst();
+}
+
+void ProjectSession::openRecentOrFirst()
 {
     if (const auto projects = recent.getProjects(); ! projects.isEmpty())
         openWithRestoreQuestion (projects.getFirst());
@@ -44,26 +69,50 @@ void ProjectSession::openAtStartup()
         createFirstProject();
 }
 
-void ProjectSession::createFirstProject()
+void ProjectSession::restoreUntitled (const juce::File& file, bool restore)
 {
-    auto folder = projectsFolder;
-    folder.createDirectory();
+    // Restored, it goes on untitled in its folder; discarded, the folder goes.
+    if (auto folder = UnsavedFolder::takeOver (engine, file); folder != nullptr && restore)
+    {
+        juce::String error;
 
-    juce::String name ("My First Song");
+        if (auto restored = Project::open (engine, file, true, error))
+        {
+            setProject (std::move (restored), std::move (folder));
+            return;
+        }
 
-    for (int n = 2; folder.getChildFile (name).exists(); ++n)
-        name = "My First Song " + juce::String (n);
+        showError ("Phazite couldn't restore the project", error);
+    }
+
+    openRecentOrFirst();
+}
+
+juce::Result ProjectSession::createUntitled (const juce::String& name, const std::function<void (te::Edit&)>& addContent)
+{
+    auto folder = UnsavedFolder::create (engine, unsavedFolder);
+
+    if (folder == nullptr)
+        return juce::Result::fail ("Phazite couldn't make a folder for a new project in " + unsavedFolder.getFullPathName() + ".");
 
     juce::String error;
-    auto created = Project::create (engine, folder, name, error, addStarterContent);
+    auto created = Project::create (engine, folder->getFolder(), name, error, addContent);
 
     if (created == nullptr)
+        return juce::Result::fail (error);
+
+    setProject (std::move (created), std::move (folder));
+    return juce::Result::ok();
+}
+
+void ProjectSession::createFirstProject()
+{
+    if (const auto result = createUntitled ("My First Song", addStarterContent); result.failed())
     {
-        showError ("Phazite couldn't create a project", error);
+        showError ("Phazite couldn't create a project", result.getErrorMessage());
         return;
     }
 
-    setProject (std::move (created));
     selectSynthTrack();
 }
 
@@ -83,11 +132,8 @@ void ProjectSession::newProject()
             if (! closed)
                 return;
 
-            const auto folder = projectsFolder;
-            auto* panel = new ui::NewProjectPanel (suggestNewName (folder), folder,
-                                                   [this, folder] (const juce::String& name, const NewProjectSettings& settings)
-                                                   { return createProject (folder, name, settings); });
-            panel->setSize (540, 500);
+            auto* panel = new ui::NewProjectPanel ([this] (const NewProjectSettings& settings) { return createProject (settings); });
+            panel->setSize (540, 460);
 
             juce::DialogWindow::LaunchOptions o;
             o.dialogTitle = "New Project";
@@ -101,33 +147,35 @@ void ProjectSession::newProject()
         });
 }
 
-juce::String ProjectSession::suggestNewName (const juce::File& folder)
+juce::String ProjectSession::suggestName (const juce::File& folder, const juce::String& name)
 {
-    juce::String name ("Untitled");
+    auto suggested = name;
 
-    for (int n = 2; folder.getChildFile (name).exists(); ++n)
-        name = "Untitled " + juce::String (n);
+    for (int n = 2; folder.getChildFile (suggested).exists(); ++n)
+        suggested = name + " " + juce::String (n);
 
-    return name;
+    return suggested;
 }
 
-juce::Result ProjectSession::createProject (const juce::File& folder, const juce::String& name, const NewProjectSettings& settings)
+juce::Result ProjectSession::createProject (const NewProjectSettings& settings)
 {
-    folder.createDirectory();
-
     // What the project starts with is part of its first save, not undo steps.
-    juce::String error;
-    auto created = Project::create (engine, folder, name, error, [settings] (te::Edit& edit) { addNewProjectContent (edit, settings); });
-
-    if (created == nullptr)
-        return juce::Result::fail (error);
-
-    setProject (std::move (created));
+    if (const auto result = createUntitled ("Untitled", [settings] (te::Edit& edit) { addNewProjectContent (edit, settings); });
+        result.failed())
+        return result;
 
     if (settings.withInstruments)
         selectSynthTrack();
 
     return juce::Result::ok();
+}
+
+juce::File ProjectSession::getExportFolder() const
+{
+    if (project == nullptr || isUntitled())
+        return projectsFolder.getSiblingFile ("Exports");
+
+    return project->getRendersFolder();
 }
 
 void ProjectSession::openProject()
@@ -184,48 +232,105 @@ void ProjectSession::saveProjectAs()
     if (project == nullptr)
         return;
 
+    if (isUntitled())
+    {
+        saveThen ([] (bool) {}); // its first save asks where it goes anyway
+        return;
+    }
+
+    // A copy, next to the project at first, in a folder of its own; the project keeps its last saved version.
     const auto parentFolder = project->getFolder().getParentDirectory();
-    auto* window = new juce::AlertWindow ("Save project as",
-                                          "Name the copy. Phazite saves it in a folder of its own in " + parentFolder.getFullPathName()
-                                              + " and continues in it. This project keeps its last saved version.",
-                                          juce::MessageBoxIconType::NoIcon, dialogParent);
-    window->addTextEditor ("name", project->getFile().getFileNameWithoutExtension() + " copy");
-    window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    const auto suggested =
+        parentFolder.getChildFile (suggestName (parentFolder, project->getFile().getFileNameWithoutExtension() + " copy"));
 
-    window->enterModalState (true,
-                             juce::ModalCallbackFunction::create (
-                                 [this, window, parentFolder] (int result)
-                                 {
-                                     if (result != 1 || project == nullptr)
-                                         return;
+    chooseWhereToSave (suggested,
+                       [this] (const juce::File& chosen)
+                       {
+                           if (chosen == juce::File() || project == nullptr)
+                               return;
 
-                                     juce::String error;
-                                     const auto newFile = project->saveCopyAs (parentFolder, window->getTextEditorContents ("name"), error);
+                           juce::String error;
+                           const auto newFile = project->saveCopyAs (chosen.getParentDirectory(), getChosenName (chosen), error);
 
-                                     if (newFile == juce::File())
-                                     {
-                                         showError ("Phazite couldn't save the project", error);
-                                         return;
-                                     }
+                           if (newFile == juce::File())
+                           {
+                               showError ("Phazite couldn't save the project", error);
+                               return;
+                           }
 
-                                     // Continue in the copy; the unsaved changes went into it.
-                                     setProject (nullptr);
-                                     open (newFile, false);
-                                 }),
-                             true);
+                           // Continue in the copy; the unsaved changes went into it.
+                           setProject (nullptr);
+                           open (newFile, false);
+                       });
 }
 
 void ProjectSession::saveProject()
 {
-    if (project == nullptr)
-        return;
+    saveThen ([] (bool) {});
+}
 
-    if (const auto result = project->save(); result.failed())
+void ProjectSession::saveThen (std::function<void (bool saved)> callback)
+{
+    if (project == nullptr)
+    {
+        callback (false);
+        return;
+    }
+
+    // A new project is named and placed by its first save, from Documents/Phazite/Projects.
+    if (isUntitled())
+    {
+        const auto name = project->getFile().getFileNameWithoutExtension();
+        chooseWhereToSave (projectsFolder.getChildFile (suggestName (projectsFolder, name)),
+                           [this, callback] (const juce::File& chosen) { callback (chosen != juce::File() && moveUntitledTo (chosen)); });
+        return;
+    }
+
+    const auto result = project->save();
+
+    if (result.failed())
         showError ("Phazite couldn't save the project", result.getErrorMessage());
 
     if (onProjectChanged != nullptr)
         onProjectChanged();
+
+    callback (result.wasOk());
+}
+
+bool ProjectSession::moveUntitledTo (const juce::File& chosen)
+{
+    if (! isUntitled())
+        return false;
+
+    if (const auto result = project->moveTo (chosen.getParentDirectory(), getChosenName (chosen)); result.failed())
+    {
+        showError ("Phazite couldn't save the project", result.getErrorMessage());
+        return false;
+    }
+
+    // Its folder from now on; the untitled one goes when the project closes.
+    recent.add (project->getFile());
+
+    if (onProjectChanged != nullptr)
+        onProjectChanged();
+
+    return true;
+}
+
+void ProjectSession::chooseWhereToSave (const juce::File& suggested, std::function<void (const juce::File&)> callback)
+{
+    if (chooseSaveFile != nullptr)
+    {
+        chooseSaveFile (suggested, std::move (callback));
+        return;
+    }
+
+    suggested.getParentDirectory().createDirectory();
+    fileChooser = std::make_unique<juce::FileChooser> ("Save the project: Phazite makes a folder of this name for it", suggested,
+                                                       juce::String ("*") + Project::fileExtension);
+
+    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                              [callback] (const juce::FileChooser& chooser) { callback (chooser.getResult()); });
 }
 
 void ProjectSession::exportSong()
@@ -251,49 +356,47 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
                              .withButton ("Cancel")
                              .withAssociatedComponent (dialogParent);
 
-    // With three buttons, JUCE reports the first as 1, the second as 2 and the third as 0.
+    // With three buttons, JUCE reports the first as 1, the second as 2 and the third as 0. A save that fails, or an
+    // untitled project's save dialog cancelled, leaves the project open.
     juce::AlertWindow::showAsync (options,
                                   [this, callback] (int result)
                                   {
                                       if (result == 1)
-                                      {
-                                          if (project != nullptr)
-                                          {
-                                              if (const auto saved = project->save(); saved.failed())
-                                              {
-                                                  showError ("Phazite couldn't save the project", saved.getErrorMessage());
-                                                  callback (false);
-                                                  return;
-                                              }
-                                          }
-
-                                          callback (true);
-                                      }
+                                          saveThen (callback);
                                       else
-                                      {
                                           callback (result == 2); // "Don't save" closes; "Cancel" doesn't
-                                      }
                                   });
 }
 
 void ProjectSession::openWithRestoreQuestion (const juce::File& file)
 {
     if (! Project::hasNewerAutosave (file))
-    {
         open (file, false);
+    else
+        askWhetherToRestore (file, false, [this, file] (bool restore) { open (file, restore); });
+}
+
+void ProjectSession::askWhetherToRestore (const juce::File& file, bool untitled, std::function<void (bool restore)> callback)
+{
+    if (askToRestore != nullptr)
+    {
+        askToRestore (file, untitled, std::move (callback));
         return;
     }
 
-    const auto options = juce::MessageBoxOptions()
-                             .withIconType (juce::MessageBoxIconType::QuestionIcon)
-                             .withTitle ("Restore unsaved changes?")
-                             .withMessage ("Phazite didn't close properly the last time \"" + file.getFileNameWithoutExtension()
-                                           + "\" was open, but it had saved your changes automatically. Restore them?")
-                             .withButton ("Restore")
-                             .withButton ("Open the last saved version")
-                             .withAssociatedComponent (dialogParent);
+    const auto name = "\"" + file.getFileNameWithoutExtension() + "\"";
+    const auto options =
+        juce::MessageBoxOptions()
+            .withIconType (juce::MessageBoxIconType::QuestionIcon)
+            .withTitle ("Restore unsaved changes?")
+            .withMessage ("Phazite didn't close properly the last time " + name + " was open" + (untitled ? ", before it was saved" : "")
+                          + ", but it had saved your changes automatically. Restore them?")
+            .withButton ("Restore")
+            .withButton (untitled ? "Discard them" : "Open the last saved version")
+            .withAssociatedComponent (dialogParent);
 
-    juce::AlertWindow::showAsync (options, [this, file] (int result) { open (file, result == 1); });
+    // With two buttons, JUCE reports the first as 1 and the second as 0.
+    juce::AlertWindow::showAsync (options, [callback] (int result) { callback (result == 1); });
 }
 
 void ProjectSession::open (const juce::File& file, bool restoreAutosave)
@@ -339,7 +442,7 @@ void ProjectSession::openNextRecentProject (const juce::File& failed)
     createFirstProject();
 }
 
-void ProjectSession::setProject (std::unique_ptr<Project> newProject)
+void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::unique_ptr<UnsavedFolder> newUnsavedFolder)
 {
     autosaveTimer = nullptr;
     context.setEdit (nullptr);
@@ -347,13 +450,17 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject)
     if (project != nullptr && onProjectClosing != nullptr)
         onProjectClosing();
 
-    project = std::move (newProject); // the previous project closes here, deleting its autosave
+    project = std::move (newProject);                    // the previous project closes here, deleting its autosave
+    projectUnsavedFolder = std::move (newUnsavedFolder); // and then the folder it was made in, if it was untitled
 
     if (project != nullptr)
     {
         context.setEdit (&project->getEdit());
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
-        recent.add (project->getFile());
+
+        if (! isUntitled()) // it is in Open Recent once it is saved
+            recent.add (project->getFile());
+
         routeLiveMidiInput (project->getEdit()); // MIDI keyboards and the computer keyboard play it
     }
 
@@ -383,7 +490,7 @@ void ProjectSession::addCommands (CommandRegistry& registry)
     registry.add ({ .id = "project.new",
                     .name = "New Project",
                     .category = "Project",
-                    .description = "Makes a new project in its own folder.",
+                    .description = "Starts a new project, which its first save names and puts in a folder of its own.",
                     .synonyms = { "create", "song" },
                     .perform = [this] { newProject(); } });
 
@@ -404,9 +511,8 @@ void ProjectSession::addCommands (CommandRegistry& registry)
     registry.add ({ .id = "project.saveAs",
                     .name = "Save Project As",
                     .category = "Project",
-                    .description =
-                        "Saves the project under a new name, in a folder of its own, and continues in it. The original keeps its last "
-                        "saved version.",
+                    .description = "Saves the project under a new name, in a folder of its own where you choose, and continues in it. "
+                                   "The original keeps its last saved version.",
                     .synonyms = { "copy", "duplicate", "rename", "version" },
                     .perform = [this] { saveProjectAs(); },
                     .isEnabled = [this] { return project != nullptr; } });
@@ -414,7 +520,8 @@ void ProjectSession::addCommands (CommandRegistry& registry)
     registry.add ({ .id = "project.save",
                     .name = "Save Project",
                     .category = "Project",
-                    .description = "Saves the project. The previous version goes into its Backups folder.",
+                    .description = "Saves the project; the previous version goes into its Backups folder. A new project's first save "
+                                   "asks what to call it and where its folder goes.",
                     .synonyms = { "store", "write" },
                     .perform = [this] { saveProject(); },
                     .isEnabled = [this] { return project != nullptr; } });

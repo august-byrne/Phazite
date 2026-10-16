@@ -155,6 +155,8 @@ target_sources(phazite_core PRIVATE
     src/model/project/ProjectContext.h
     src/model/project/StarterProject.cpp
     src/model/project/StarterProject.h
+    src/model/project/UnsavedProjects.cpp
+    src/model/project/UnsavedProjects.h
     src/model/transport/Capture.cpp
     src/model/transport/Capture.h
     src/model/transport/Metronome.cpp

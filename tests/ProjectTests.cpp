@@ -3,6 +3,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Grid.h"
+#include "model/arrangement/Import.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Tracks.h"
@@ -202,6 +203,57 @@ TEST_CASE ("Save As makes a copy with the unsaved changes, and leaves the origin
     error.clear();
     CHECK (project->saveCopyAs (temp.folder, "Copy", error) == juce::File());
     CHECK (error.isNotEmpty());
+}
+
+TEST_CASE ("A project's first save moves it to a folder of its own, where it goes on with its audio and its undo history")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder.getChildFile ("Unsaved"), "Untitled");
+    const auto oldFile = project->getFile();
+    auto& edit = project->getEdit();
+    edit.ensureNumberOfAudioTracks (1);
+
+    // Audio imported into it (the project's own copy, by its path relative to the project), unsaved and autosaved.
+    const auto kick = phazite::test::writeSound (temp.folder.getChildFile ("Samples").getChildFile ("Kick.wav"), 0.5);
+    auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (*te::getAudioTracks (edit)[0], kick, beats (0.0)));
+    REQUIRE (clip != nullptr);
+    REQUIRE (clip->getAudioFile().getFile().isAChildOf (project->getAudioFolder()));
+    REQUIRE (edit.getUndoManager().canUndo());
+    REQUIRE (project->autosave().wasOk());
+    REQUIRE (phazite::Project::getAutosaveFile (oldFile).existsAsFile());
+
+    // A folder of that name is there already: nothing changes.
+    const auto projects = temp.folder.getChildFile ("Projects");
+    REQUIRE (projects.getChildFile ("Taken").createDirectory().wasOk());
+    CHECK (project->moveTo (projects, "Taken").failed());
+    CHECK (project->getFile() == oldFile);
+    CHECK (project->hasUnsavedChanges());
+
+    REQUIRE (project->moveTo (projects, "Beat").wasOk());
+    const auto newFile = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
+    CHECK (project->getFile() == newFile);
+    CHECK (newFile.existsAsFile());
+    CHECK_FALSE (project->hasUnsavedChanges());
+    CHECK (edit.getUndoManager().canUndo());
+
+    // The clip plays the new folder's copy of its audio. The old folder stays, for its owner to delete once the project
+    // has closed, without the autosave, whose changes are saved now.
+    CHECK (clip->getAudioFile().getFile() == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
+    CHECK (clip->getAudioFile().getFile().existsAsFile());
+    CHECK (oldFile.existsAsFile());
+    CHECK_FALSE (phazite::Project::getAutosaveFile (oldFile).exists());
+
+    // It saves there from now on, and opens from there with its audio.
+    project->getPhaziteState().setProperty (phazite::schema::outline, "pop", nullptr);
+    REQUIRE (project->save().wasOk());
+    project = nullptr;
+    auto reopened = openProject (newFile);
+    CHECK (reopened->getPhaziteState()[phazite::schema::outline].toString() == juce::String ("pop"));
+    const auto clips = te::getAudioTracks (reopened->getEdit())[0]->getClips();
+    REQUIRE (clips.size() == 1);
+    auto* reopenedClip = dynamic_cast<te::WaveAudioClip*> (clips.getFirst());
+    REQUIRE (reopenedClip != nullptr);
+    CHECK (reopenedClip->getAudioFile().getFile() == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
 }
 
 TEST_CASE ("A project opens with the playhead at the song's start, where playback starts")

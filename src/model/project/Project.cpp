@@ -42,6 +42,34 @@ namespace
             edit.resetChangedStatus();
     }
 
+    // Makes the folder <parentFolder>/<name>, named as files can be, for a project of that name, or sets error and
+    // returns nothing if the name is empty, the folder exists or it can't be made.
+    juce::File makeProjectFolder (const juce::File& parentFolder, const juce::String& name, juce::String& error)
+    {
+        const auto safeName = juce::File::createLegalFileName (name.trim());
+
+        if (safeName.isEmpty())
+        {
+            error = "The project needs a name.";
+            return {};
+        }
+
+        const auto folder = parentFolder.getChildFile (safeName);
+
+        if (folder.exists())
+        {
+            error = "There is already a folder called \"" + safeName + "\" in " + parentFolder.getFullPathName() + ".";
+            return {};
+        }
+
+        if (const auto result = folder.createDirectory(); result.failed())
+        {
+            error = "Phazite couldn't create the project folder: " + result.getErrorMessage();
+            return {};
+        }
+
+        return folder;
+    }
 } // namespace
 
 //==============================================================================
@@ -50,29 +78,12 @@ std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& 
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    const auto safeName = juce::File::createLegalFileName (name.trim());
+    const auto folder = makeProjectFolder (parentFolder, name, error);
 
-    if (safeName.isEmpty())
-    {
-        error = "The project needs a name.";
+    if (folder == juce::File())
         return {};
-    }
 
-    const auto folder = parentFolder.getChildFile (safeName);
-
-    if (folder.exists())
-    {
-        error = "There is already a folder called \"" + safeName + "\" in " + parentFolder.getFullPathName() + ".";
-        return {};
-    }
-
-    if (const auto result = folder.createDirectory(); result.failed())
-    {
-        error = "Phazite couldn't create the project folder: " + result.getErrorMessage();
-        return {};
-    }
-
-    const auto file = folder.getChildFile (safeName + fileExtension);
+    const auto file = folder.getChildFile (folder.getFileName() + fileExtension);
     auto edit = te::createEmptyEdit (engine, file);
 
     if (edit == nullptr)
@@ -257,64 +268,85 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    const auto safeName = juce::File::createLegalFileName (name.trim());
+    const auto newFile = makeFolderWithFiles (parentFolder, name, error);
 
-    if (safeName.isEmpty())
+    if (newFile == juce::File())
+        return {};
+
+    const juce::ScopedValueSetter<bool> writing (isWriting, true);
+    edit->flushState(); // the plug-ins' current states, as a save writes them
+
+    // The copy is a project of its own, so it gets an ID of its own.
+    auto state = edit->state.createCopy();
+    state.setProperty (te::IDs::projectID, te::ProjectItemID::createNewID (te::ProjectID {}).toString(), nullptr);
+
+    if (const auto xml = state.createXml(); xml == nullptr || ! xml->writeTo (newFile))
     {
-        error = "The project needs a name.";
+        newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
+        error = "Phazite couldn't write the project file " + newFile.getFullPathName() + ".";
         return {};
     }
 
-    const auto folder = parentFolder.getChildFile (safeName);
+    return newFile;
+}
 
-    if (folder.exists())
+juce::Result Project::moveTo (const juce::File& parentFolder, const juce::String& name)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    juce::String error;
+    const auto newFile = makeFolderWithFiles (parentFolder, name, error);
+
+    if (newFile == juce::File())
+        return juce::Result::fail (error);
+
+    const auto oldFile = file;
+    setFile (newFile);
+
+    if (const auto result = save(); result.failed())
     {
-        error = "There is already a folder called \"" + safeName + "\" in " + parentFolder.getFullPathName() + ".";
-        return {};
+        setFile (oldFile);
+        newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
+        return result;
     }
 
-    if (const auto result = folder.createDirectory(); result.failed())
-    {
-        error = "Phazite couldn't create the project folder: " + result.getErrorMessage();
+    getAutosaveFile (oldFile).deleteFile(); // what it held is saved now
+    return juce::Result::ok();
+}
+
+juce::File Project::makeFolderWithFiles (const juce::File& parentFolder, const juce::String& name, juce::String& error) const
+{
+    const auto folder = makeProjectFolder (parentFolder, name, error);
+
+    if (folder == juce::File())
         return {};
-    }
 
-    // From here on, a failure removes the half-made copy (the folder is new), so the name can be
-    // tried again.
-    const auto fail = [&folder, &error] (const juce::String& message)
-    {
-        folder.deleteRecursively();
-        error = message;
-        return juce::File();
-    };
-
-    // The files the project uses come along; its earlier versions (Backups) don't.
+    // The files the project uses come along; its earlier versions (Backups) don't. A failure removes the half-made copy
+    // (the folder is new), so that the name can be tried again.
     for (const auto* subfolderName : { "Audio", "Generated", "Renders" })
     {
         const auto source = getFolder().getChildFile (subfolderName);
         const auto target = folder.getChildFile (subfolderName);
-        const bool copied = source.isDirectory() ? source.copyDirectoryTo (target) : target.createDirectory().wasOk();
 
-        if (! copied)
-            return fail ("Phazite couldn't copy the project's " + juce::String (subfolderName) + " folder.");
+        if (! (source.isDirectory() ? source.copyDirectoryTo (target) : target.createDirectory().wasOk()))
+        {
+            folder.deleteRecursively();
+            error = "Phazite couldn't copy the project's " + juce::String (subfolderName) + " folder.";
+            return {};
+        }
     }
 
     folder.getChildFile ("Backups").createDirectory();
-    const auto newFile = folder.getChildFile (safeName + fileExtension);
+    return folder.getChildFile (folder.getFileName() + fileExtension);
+}
 
-    {
-        const juce::ScopedValueSetter<bool> writing (isWriting, true);
-        edit->flushState(); // the plug-ins' current states, as a save writes them
-
-        // The copy is a project of its own, so it gets an ID of its own.
-        auto state = edit->state.createCopy();
-        state.setProperty (te::IDs::projectID, te::ProjectItemID::createNewID (te::ProjectID {}).toString(), nullptr);
-
-        if (const auto xml = state.createXml(); xml == nullptr || ! xml->writeTo (newFile))
-            return fail ("Phazite couldn't write the project file " + newFile.getFullPathName() + ".");
-    }
-
-    return newFile;
+void Project::setFile (const juce::File& newFile)
+{
+    // The Edit finds its file through editFileRetriever, and through it the files it uses, by their paths relative to it;
+    // its clips keep the files they found until told to look again.
+    file = newFile;
+    edit->editFileRetriever = [newFile] { return newFile; };
+    edit->sendSourceFileUpdate();
 }
 
 void Project::backUpProjectFile()

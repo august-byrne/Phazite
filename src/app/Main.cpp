@@ -10,6 +10,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineSetup.h"
 #include "model/project/StarterProject.h"
+#include "model/project/UnsavedProjects.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/theme/LookAndFeel.h"
@@ -51,8 +52,8 @@ public:
 
         commands = std::make_unique<CommandRegistry>();
         commandBridge = std::make_unique<ui::CommandBridge> (*commands); // the commands' keys and menus, from here on
-        session =
-            std::make_unique<ProjectSession> (*engine, getUIBehaviour (*engine), services->recentProjects, getDefaultProjectsFolder());
+        session = std::make_unique<ProjectSession> (*engine, getUIBehaviour (*engine), services->recentProjects, getDefaultProjectsFolder(),
+                                                    getUnsavedProjectsFolder());
         mainWindow = std::make_unique<MainWindow> (*engine, *commandBridge, *session, *lookAndFeel, *services);
 
         addSongCommands (*commands, session->getContext());
