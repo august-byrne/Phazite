@@ -17,17 +17,15 @@
 namespace phazite::ui
 {
 class AppShell : public juce::Component,
-                 private juce::FocusChangeListener
+                 private juce::FocusChangeListener,
+                 private ProjectContext::Listener
 {
 public:
     // The commands, as menus and keys see them, the open project and the services (settings, Phazite Sounds, the library
     // and the previewer: app/AppServices.h) are the app's, and outlive this. Detached panels' windows run shortcuts through
-    // the dispatcher.
+    // the dispatcher. The views show the project the context has open, and none while it has none.
     AppShell (te::Engine&, CommandBridge&, KeyDispatcher&, ComputerKeyboard&, ProjectContext&, Settings&, SoundPack&, Library&, Previewer&);
     ~AppShell() override;
-
-    // The open project's Edit, or nullptr while none is open (call this before it closes, too).
-    void setEdit (te::Edit*);
 
     // The panels that can move to a window of their own, for example on a second monitor. Closing
     // that window puts the panel back.
@@ -126,6 +124,7 @@ private:
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track
     juce::String getDefaultHint() const;                 // the guide's next step, or how to search for commands
     void globalFocusChanged (juce::Component*) override; // makes the editor that has the focus the active one
+    void projectChanged() override;                      // stops a preview, which may be in time with the project
 
     IconButton& getDetachButton (DetachablePanel);
     std::unique_ptr<PanelWindow>& getWindow (DetachablePanel);

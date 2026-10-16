@@ -30,11 +30,10 @@ struct PlaylistScreen
         edit->ensureNumberOfAudioTracks (3);
         tracks = te::getAudioTracks (*edit);
         edit->getUndoManager().clearUndoHistory();
-        selection.edit = edit.get();
 
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
         playlist.addCommands (registry);
-        playlist.setEdit (edit.get());
+        context.setEdit (edit.get());
         window.addKeyListener (&shortcutKeys); // as the main window does
         phazite::test::dispatchPendingMessages();
 
@@ -45,8 +44,7 @@ struct PlaylistScreen
     ~PlaylistScreen()
     {
         window.removeKeyListener (&shortcutKeys);
-        playlist.setEdit (nullptr);
-        selection.deselectAll();
+        context.setEdit (nullptr);
     }
 
     // Where a beat is on a track's row, in the lanes (the middle of the row).
@@ -80,12 +78,13 @@ struct PlaylistScreen
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
-    te::SelectionManager selection { phazite::test::getEngine() };
-    phazite::RangeSelection range;
+    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
+    te::SelectionManager& selection = context.getSelection();
+    phazite::RangeSelection& range = context.getRangeSelection();
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry }; // with the default keymap
     phazite::ui::KeyDispatcher shortcutKeys { commands };
-    phazite::ui::Playlist playlist { commands, selection, range };
+    phazite::ui::Playlist playlist { commands, context };
     phazite::test::TestWindow window { playlist, 1000, 600 };
     juce::Component* lanes = nullptr;
 };

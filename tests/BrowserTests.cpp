@@ -233,14 +233,13 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
 {
     auto& engine = phazite::test::getEngine();
     auto edit = te::Edit::createSingleTrackEdit (engine); // 120 BPM, 4/4
-    te::SelectionManager selection (engine);
-    selection.edit = edit.get();
-    phazite::RangeSelection range;
+    phazite::ProjectContext context (engine);             // the open project, as the app has it
+    auto& selection = context.getSelection();
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands (registry);
-    phazite::ui::Playlist playlist (commands, selection, range);
+    phazite::ui::Playlist playlist (commands, context);
     phazite::test::TestWindow window (playlist, 1000, 600);
-    playlist.setEdit (edit.get());
+    context.setEdit (edit.get());
     phazite::test::dispatchPendingMessages();
 
     auto* lanes = phazite::test::findComponentWithTitle (playlist, "Tracks");
@@ -302,8 +301,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     CHECK (std::any_of (track->getClips().begin(), track->getClips().end(),
                         [] (te::Clip* clip) { return std::abs (clip->getStartBeat().inBeats() - 8.0) < 0.001; }));
 
-    playlist.setEdit (nullptr);
-    selection.deselectAll();
+    context.setEdit (nullptr);
 }
 
 TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lists them once a click has downloaded them")

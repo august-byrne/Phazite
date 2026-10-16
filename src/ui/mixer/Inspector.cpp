@@ -10,7 +10,7 @@ namespace phazite::ui
 Inspector::Inspector (te::Engine& engine, CommandBridge& bridge, ProjectContext& context)
     : projectContext (context),
       selection (context.getSelection()),
-      strip (engine, bridge, context.getSelection())
+      strip (engine, bridge, context)
 {
     setTitle ("Inspector");
     setDescription ("The channel of the selected track.");

@@ -7,6 +7,7 @@
 
 #include "DeviceSlots.h"
 #include "StripParts.h"
+#include "model/project/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 
@@ -24,7 +25,7 @@ public:
     // How tall the strip must be for its parts not to overlap; the mixer scrolls when it is shorter.
     static int getMinimumHeight();
 
-    ChannelStrip (te::Engine&, CommandBridge&, te::SelectionManager&);
+    ChannelStrip (te::Engine&, CommandBridge&, ProjectContext&);
     ~ChannelStrip() override;
 
     // The track to show: an audio track, a folder (a bus or a plain one) or a return; nullptr for none. The

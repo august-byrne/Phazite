@@ -23,9 +23,10 @@ namespace
 } // namespace
 
 //==============================================================================
-PianoRoll::PianoRoll (CommandBridge& bridge, te::SelectionManager& selectionManager)
+PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     : TimelineEditor (bridge, GridOwner::pianoRoll),
-      selection (selectionManager),
+      context (projectContext),
+      selection (projectContext.getSelection()),
       keys (std::make_unique<Keys> (*this)),
       grid (std::make_unique<NoteGrid> (*this)),
       velocityLane (std::make_unique<VelocityLane> (*this)),
@@ -59,6 +60,8 @@ PianoRoll::PianoRoll (CommandBridge& bridge, te::SelectionManager& selectionMana
 
     addChildComponent (*transformBar);
     selection.addChangeListener (this);
+    context.addListener (this);
+    setEdit (context.getEdit());
     updateToolbar();
 }
 
@@ -66,6 +69,7 @@ PianoRoll::~PianoRoll()
 {
     stopAudition();
     cancelPendingUpdate();
+    context.removeListener (this);
     selection.removeChangeListener (this);
     editState.removeListener (this);
     setClips ({}); // lets go of the note selection, and of the clips' listeners

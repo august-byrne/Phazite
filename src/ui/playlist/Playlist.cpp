@@ -229,10 +229,11 @@ void Playlist::AddTrackRow::mouseDown (const juce::MouseEvent& e)
 }
 
 //==============================================================================
-Playlist::Playlist (CommandBridge& bridge, te::SelectionManager& selectionManager, RangeSelection& rangeSelection)
+Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     : TimelineEditor (bridge, GridOwner::playlist),
-      selection (selectionManager),
-      range (rangeSelection),
+      context (projectContext),
+      selection (projectContext.getSelection()),
+      range (projectContext.getRangeSelection()),
       addTrackRow (std::make_unique<AddTrackRow> (*this)),
       lanes (std::make_unique<Lanes> (*this))
 {
@@ -264,11 +265,14 @@ Playlist::Playlist (CommandBridge& bridge, te::SelectionManager& selectionManage
 
     selection.addChangeListener (this);
     range.addChangeListener (this);
+    context.addListener (this);
+    setEdit (context.getEdit());
     toolChanged(); // the Smart Tool's pointer and hint
 }
 
 Playlist::~Playlist()
 {
+    context.removeListener (this);
     range.removeChangeListener (this);
     selection.removeChangeListener (this);
     editState.removeListener (this);

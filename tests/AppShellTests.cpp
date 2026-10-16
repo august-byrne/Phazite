@@ -24,8 +24,6 @@ struct Screen
         phazite::addSongCommands (registry, session.getContext());
         session.addCommands (registry);
         shell.addCommands (registry);
-        session.onProjectClosing = [this] { shell.setEdit (nullptr); };
-        session.onProjectChanged = [this] { shell.setEdit (session.getContext().getEdit()); };
 
         // The dialogs answer themselves: the save dialog with what it suggests, the restore question with no.
         session.chooseSaveFile = [] (const juce::File& suggested, std::function<void (const juce::File&)> callback)
@@ -36,10 +34,6 @@ struct Screen
 
     ~Screen()
     {
-        // As MainWindow's destructor does.
-        session.onProjectClosing = nullptr;
-        session.onProjectChanged = nullptr;
-        shell.setEdit (nullptr);
         phazite::test::runTimersUntil ([this] { return ! services.library.isIndexing(); }, 10000);
     }
 

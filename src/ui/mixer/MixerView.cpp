@@ -34,10 +34,11 @@ namespace
     }
 } // namespace
 
-MixerView::MixerView (te::Engine& e, CommandBridge& bridge, te::SelectionManager& selectionManager)
+MixerView::MixerView (te::Engine& e, CommandBridge& bridge, ProjectContext& projectContext)
     : engine (e),
       commands (bridge),
-      selection (selectionManager)
+      context (projectContext),
+      selection (projectContext.getSelection())
 {
     setTitle ("Mixer");
     setDescription ("A channel for every track, in the playlist's order, and the return tracks next to the master. Click a channel to "
@@ -56,12 +57,15 @@ MixerView::MixerView (te::Engine& e, CommandBridge& bridge, te::SelectionManager
     addAndMakeVisible (addReturnButton);
 
     selection.addChangeListener (this);
+    context.addListener (this);
+    setEdit (context.getEdit());
     startTimerHz (4);
 }
 
 MixerView::~MixerView()
 {
     stopTimer();
+    context.removeListener (this);
     selection.removeChangeListener (this);
     editState.removeListener (this);
     strips.clear(); // before stripHolder, which holds them
@@ -118,7 +122,7 @@ void MixerView::rebuild()
         }
         else
         {
-            strip = new ChannelStrip (engine, commands, selection);
+            strip = new ChannelStrip (engine, commands, context);
             strip->setTrack (track);
             stripHolder.addAndMakeVisible (strip);
         }

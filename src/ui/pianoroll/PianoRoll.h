@@ -9,6 +9,7 @@
 #pragma once
 
 #include "model/notes/Notes.h"
+#include "model/project/ProjectContext.h"
 #include "ui/timeline/TimelineEditor.h"
 
 #include <optional>
@@ -19,14 +20,13 @@ class PianoRoll : public TimelineEditor,
                   private juce::ChangeListener,
                   private juce::ValueTree::Listener,
                   private juce::AsyncUpdater,
-                  private te::SelectableListener
+                  private te::SelectableListener,
+                  private ProjectContext::Listener
 {
 public:
-    PianoRoll (CommandBridge&, te::SelectionManager&);
+    // Shows the open project's notes, and none while no project is open.
+    PianoRoll (CommandBridge&, ProjectContext&);
     ~PianoRoll() override;
-
-    // The open project's Edit, or nullptr while none is open.
-    void setEdit (te::Edit*);
 
     // Shows these clips' notes. The piano roll follows the playlist's selection by itself; this is for
     // opening a clip, as double-clicking it in the playlist does.
@@ -80,8 +80,9 @@ private:
         bool transposeInKey = true;
     };
 
-    te::SelectionManager& selection;
-    juce::ValueTree editState; // listened to for changes to notes and clips
+    ProjectContext& context;
+    te::SelectionManager& selection; // the context's
+    juce::ValueTree editState;       // listened to for changes to notes and clips
     std::vector<te::SafeSelectable<te::MidiClip>> clips;
     std::unique_ptr<te::SelectedMidiEvents> selectedEvents; // the selection of these clips' notes
     te::SafeSelectable<te::MidiClip> targetClip;            // where new notes go, if the click isn't in a clip
@@ -111,6 +112,9 @@ private:
     te::SafeSelectable<te::AudioTrack> auditionTrack; // the track a note is being auditioned on
 
     //==============================================================================
+    void setEdit (te::Edit*); // the open project's, or nullptr while none is open
+    void projectChanged() override { setEdit (context.getEdit()); }
+
     // The clips and their notes. New clips open at bar 1 with their notes in view, unless keepView is set.
     void setClips (const juce::Array<te::MidiClip*>&, bool keepView = false);
     void clipsChanged(); // the notes or the clips moved: repaint, and update the drum rows

@@ -7,7 +7,7 @@
 #include "ClipComponent.h"
 #include "SectionsStrip.h"
 #include "TrackHeader.h"
-#include "model/arrangement/Selection.h"
+#include "model/project/ProjectContext.h"
 #include "ui/timeline/TimelineEditor.h"
 
 #include <optional>
@@ -20,14 +20,13 @@ class Playlist : public TimelineEditor,
                  private TrackHeader::Owner,
                  private juce::ChangeListener,
                  private juce::ValueTree::Listener,
-                 private juce::AsyncUpdater
+                 private juce::AsyncUpdater,
+                 private ProjectContext::Listener
 {
 public:
-    Playlist (CommandBridge&, te::SelectionManager&, RangeSelection&);
+    // Shows the open project's tracks and clips, and none while no project is open.
+    Playlist (CommandBridge&, ProjectContext&);
     ~Playlist() override;
-
-    // The open project's Edit, or nullptr while none is open.
-    void setEdit (te::Edit*);
 
     // Called when a MIDI clip is double-clicked, to open it in the piano roll.
     std::function<void (te::MidiClip&)> onOpenClip;
@@ -80,9 +79,10 @@ private:
         te::TimePosition boundary;
     };
 
-    te::SelectionManager& selection;
-    RangeSelection& range;     // a time range across tracks
-    juce::ValueTree editState; // listened to for changes to the tracks and the tempo
+    ProjectContext& context;
+    te::SelectionManager& selection; // the context's
+    RangeSelection& range;           // a time range across tracks
+    juce::ValueTree editState;       // listened to for changes to the tracks and the tempo
     int scrollY = 0;
 
     SectionsStrip sectionsStrip { *this, selection, range }; // in the time bar, above the ruler
@@ -112,6 +112,9 @@ private:
     int dropRow = -1;                              // while a track is dragged: the row it would go before (rows.size() for the end)
     std::unique_ptr<Gesture> gesture;              // what the mouse is doing in the lanes, from mouse down to mouse up
     juce::Rectangle<int> rubberBand;               // the Select and Zoom tools' rectangle, in the lanes
+
+    void setEdit (te::Edit*); // the open project's, or nullptr while none is open
+    void projectChanged() override { setEdit (context.getEdit()); }
 
     // The rows of tracks.
     void rebuild(); // after tracks were added, deleted, moved or changed

@@ -83,10 +83,10 @@ AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& ke
       computerKeyboard (keyboard),
       topBar (engine, bridge, keyboard, context),
       browser (library, previewer, pack, s, context),
-      playlist (bridge, context.getSelection(), context.getRangeSelection()),
+      playlist (bridge, context),
       inspector (engine, bridge, context),
-      pianoRoll (bridge, context.getSelection()),
-      mixer (engine, bridge, context.getSelection()),
+      pianoRoll (bridge, context),
+      mixer (engine, bridge, context),
       guide (bridge, s)
 {
     setTitle ("Phazite");
@@ -137,11 +137,13 @@ AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& ke
     pianoRoll.onUsed = [this] { setActiveEditor (&pianoRoll); };
     setActiveEditor (&playlist);
     juce::Desktop::getInstance().addFocusChangeListener (this);
+    projectContext.addListener (this);
     setLayout (Layout::full);
 }
 
 AppShell::~AppShell() // here, where PanelWindow is complete
 {
+    projectContext.removeListener (this);
     computerKeyboard.onNotePlayed = nullptr; // the keyboard is the main window's, and outlives this
     juce::Desktop::getInstance().removeFocusChangeListener (this);
 }
@@ -167,12 +169,9 @@ void AppShell::setActiveEditor (TimelineEditor* editor)
         each->setActive (each == editor);
 }
 
-void AppShell::setEdit (te::Edit* edit)
+void AppShell::projectChanged()
 {
     previewer.stop(); // which may be in time with the project that closes
-    playlist.setEdit (edit);
-    pianoRoll.setEdit (edit);
-    mixer.setEdit (edit);
 }
 
 void AppShell::setLayout (Layout layout)

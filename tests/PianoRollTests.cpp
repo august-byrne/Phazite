@@ -26,22 +26,17 @@ struct PianoRollScreen
         edit->ensureNumberOfAudioTracks (2);
         tracks = te::getAudioTracks (*edit);
         edit->getUndoManager().clearUndoHistory();
-        selection.edit = edit.get();
 
         phazite::ui::addTimelineCommands (registry, [this] { return &pianoRoll; });
         pianoRoll.addCommands (registry);
-        pianoRoll.setEdit (edit.get());
+        context.setEdit (edit.get());
         phazite::test::dispatchPendingMessages();
 
         notes = phazite::test::findComponentWithTitle (pianoRoll, "Notes");
         REQUIRE (notes != nullptr);
     }
 
-    ~PianoRollScreen()
-    {
-        pianoRoll.setEdit (nullptr);
-        selection.deselectAll();
-    }
+    ~PianoRollScreen() { context.setEdit (nullptr); }
 
     te::MidiClip& addClip (int track, double start, double length)
     {
@@ -64,10 +59,11 @@ struct PianoRollScreen
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
-    te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
+    te::SelectionManager& selection = context.getSelection();
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
-    phazite::ui::PianoRoll pianoRoll { commands, selection };
+    phazite::ui::PianoRoll pianoRoll { commands, context };
     phazite::test::TestWindow window { pianoRoll, 1000, 600 };
     juce::Component* notes = nullptr;
 };

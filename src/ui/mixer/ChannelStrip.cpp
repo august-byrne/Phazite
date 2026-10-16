@@ -105,10 +105,10 @@ struct ChannelStrip::SendSlot : public juce::Component
 };
 
 //==============================================================================
-ChannelStrip::ChannelStrip (te::Engine& e, CommandBridge& bridge, te::SelectionManager& selectionManager)
+ChannelStrip::ChannelStrip (te::Engine& e, CommandBridge& bridge, ProjectContext& projectContext)
     : engine (e),
       commands (bridge),
-      selection (selectionManager)
+      selection (projectContext.getSelection())
 {
     setTitle ("Channel");
 

@@ -7,6 +7,7 @@
 
 #include "ChannelStrip.h"
 #include "MasterStrip.h"
+#include "model/project/ProjectContext.h"
 
 namespace phazite::ui
 {
@@ -14,14 +15,13 @@ class MixerView : public juce::Component,
                   private juce::ValueTree::Listener,
                   private juce::ChangeListener,
                   private juce::AsyncUpdater,
-                  private juce::Timer
+                  private juce::Timer,
+                  private ProjectContext::Listener
 {
 public:
-    MixerView (te::Engine&, CommandBridge&, te::SelectionManager&);
+    // Shows the open project's channels, and none while no project is open.
+    MixerView (te::Engine&, CommandBridge&, ProjectContext&);
     ~MixerView() override;
-
-    // The open project's Edit, or nullptr while none is open.
-    void setEdit (te::Edit*);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -29,7 +29,8 @@ public:
 private:
     te::Engine& engine;
     CommandBridge& commands;
-    te::SelectionManager& selection;
+    ProjectContext& context;
+    te::SelectionManager& selection; // the context's
     te::SafeSelectable<te::Edit> edit;
     juce::ValueTree editState; // listened to for tracks being added, deleted and moved
 
@@ -42,6 +43,9 @@ private:
     int firstReturn = 0;                   // the index of the first return's strip
     MasterStrip master;
     juce::TextButton addReturnButton { "+ Return" };
+
+    void setEdit (te::Edit*); // the open project's, or nullptr while none is open
+    void projectChanged() override { setEdit (context.getEdit()); }
 
     void rebuild(); // after tracks were added, deleted or moved
     void updateSelection();

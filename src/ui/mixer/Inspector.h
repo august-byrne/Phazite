@@ -4,11 +4,6 @@
 
 #include "ChannelStrip.h"
 
-namespace phazite
-{
-class ProjectContext;
-} // namespace phazite
-
 namespace phazite::ui
 {
 // The panel on the right. It shows the channel of the selected track; with none selected, that of the

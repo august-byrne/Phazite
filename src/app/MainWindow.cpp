@@ -91,11 +91,10 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     session.onProjectClosing = [this]
     {
         delete exportWindow.getComponent(); // its export holds the Edit
-        shell->setEdit (nullptr);
     };
     session.onProjectChanged = [this]
     {
-        shell->setEdit (session.getContext().getEdit());
+        // The views follow the project context by themselves.
         updateTitle();
         menuItemsChanged(); // the recent projects
     };
@@ -112,7 +111,6 @@ MainWindow::~MainWindow()
     session.onProjectChanged = nullptr;
     session.onExport = nullptr;
     session.dialogParent = nullptr;
-    shell->setEdit (nullptr);
 
     // Close the dialogs: they point into the Engine and the commands, which are destroyed after
     // this window, and an export into the project's Edit.
