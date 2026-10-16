@@ -89,6 +89,26 @@ void loopRange (te::Edit& edit, te::TimeRange range)
     transport.looping = true;
 }
 
+std::optional<std::pair<double, double>> getLoopBeatRange (const te::Edit& edit)
+{
+    const auto& transport = edit.getTransport();
+
+    if (! transport.looping.get())
+        return {};
+
+    const auto beats = edit.tempoSequence.toBeats (transport.getLoopRange());
+    return std::pair { beats.getStart().inBeats(), beats.getEnd().inBeats() };
+}
+
+void loopBeatRange (te::Edit& edit, double startBeat, double endBeat)
+{
+    if (endBeat <= startBeat)
+        return;
+
+    const auto toTime = [&edit] (double beat) { return edit.tempoSequence.toTime (te::BeatPosition::fromBeats (std::max (0.0, beat))); };
+    loopRange (edit, { toTime (startBeat), toTime (endBeat) });
+}
+
 void updateSongLoop (te::Edit& edit)
 {
     // Not during a recording, which runs on past the song's end (Recording.h).

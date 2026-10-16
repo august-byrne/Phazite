@@ -156,6 +156,33 @@ TEST_CASE ("Looping a range on purpose stops the loop following the song, until 
     CHECK (song.getLoop() == "0.000-12.000");
 }
 
+TEST_CASE ("A ruler reads and sets the loop in beats")
+{
+    Song song;
+    song.addClip (0, 0.0, 8.0);
+    phazite::loopSong (*song.edit);
+
+    const auto loop = phazite::getLoopBeatRange (*song.edit);
+    REQUIRE (loop.has_value());
+    CHECK (loop->first == doctest::Approx (0.0));
+    CHECK (loop->second == doctest::Approx (8.0));
+
+    phazite::loopBeatRange (*song.edit, 2.0, 6.0); // a beat is half a second
+    CHECK (song.getLoop() == "1.000-3.000");
+    CHECK (song.isLooping());
+    CHECK_FALSE (phazite::doesLoopFollowSong (*song.edit));
+
+    // Nothing for an empty or backwards range; before the song's start is its start.
+    phazite::loopBeatRange (*song.edit, 6.0, 6.0);
+    phazite::loopBeatRange (*song.edit, 6.0, 2.0);
+    CHECK (song.getLoop() == "1.000-3.000");
+    phazite::loopBeatRange (*song.edit, -2.0, 2.0);
+    CHECK (song.getLoop() == "0.000-1.000");
+
+    phazite::toggleLoop (*song.edit);
+    CHECK_FALSE (phazite::getLoopBeatRange (*song.edit).has_value());
+}
+
 TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, sections or the song")
 {
     Song song;

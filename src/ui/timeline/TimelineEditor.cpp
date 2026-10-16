@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TimelineEditor.h"
+#include "TimelineGesture.h"
 #include "model/transport/Playback.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -118,8 +119,10 @@ TimelineRuler::TimelineRuler (TimelineEditor& e)
     : editor (e)
 {
     setTitle ("Timeline");
-    setDescription ("Click or drag to move the playhead. It snaps to the grid; hold Alt to place it freely. "
-                    "Roll the mouse wheel to zoom.");
+    setDescription ("Drag along the top to loop part of the song, or the loop's edges or middle to change it; click there to "
+                    "turn looping on or off, double-click for the whole song. Lower down, click or drag to move the playhead. "
+                    "Ctrl+drag makes a loop anywhere. It all snaps to the grid; hold Alt to place things freely. Roll the mouse "
+                    "wheel to zoom.");
 }
 
 void TimelineRuler::paint (juce::Graphics& g)
@@ -143,7 +146,11 @@ void TimelineRuler::paint (juce::Graphics& g)
     const te::BeatRange visible (view.xToBeat (clip.getX() - 1) - origin, view.xToBeat (clip.getRight() + 1) - origin);
     const auto xOf = [&view, origin] (te::BeatPosition beat) { return view.beatToX (beat + origin); };
 
-    // The loop, under the ticks: song beats, not counted from the origin.
+    // The loop's lane along the top, and the loop in it, over a wash of the part that loops, under the ticks: song beats,
+    // not counted from the origin.
+    g.setColour (p.text.withAlpha (LoopTint::lane));
+    g.fillRect (getLoopLane());
+
     if (const auto loop = getLoopBeats (*edit); ! loop.isEmpty())
     {
         const auto loopStart = (float) view.beatToX (loop.getStart()), loopEnd = (float) view.beatToX (loop.getEnd());
@@ -151,7 +158,7 @@ void TimelineRuler::paint (juce::Graphics& g)
         g.setColour (p.loop.withAlpha (LoopTint::wash));
         g.fillRect (area);
         g.setColour (p.loop.withAlpha (LoopTint::bar));
-        g.fillRect (area.withHeight ((float) LoopTint::barHeight));
+        g.fillRect (area.withHeight ((float) LoopTint::laneHeight));
     }
 
     // Ticks: tall for bars, shorter for beats, shortest between them.
@@ -187,8 +194,66 @@ void TimelineRuler::paint (juce::Graphics& g)
         if (x > (float) clip.getRight())
             break;
 
-        g.drawText (juce::String (bar + 1), juce::Rectangle<float> (x + 4.0f, 2.0f, 48.0f, (float) getHeight() / 2.0f),
-                    juce::Justification::centredLeft, false);
+        g.drawText (
+            juce::String (bar + 1),
+            juce::Rectangle<float> (x + 4.0f, (float) LoopTint::laneHeight, 48.0f, (float) (getHeight() - LoopTint::laneHeight) / 2.0f),
+            juce::Justification::centredLeft, false);
+    }
+}
+
+juce::Rectangle<int> TimelineRuler::getLoopLane() const
+{
+    return getLocalBounds().removeFromTop (LoopTint::laneHeight);
+}
+
+double TimelineRuler::getBeatAt (const juce::MouseEvent& e) const
+{
+    return editor.snap (editor.getView().xToBeat (std::max (0.0f, e.position.x)), e.mods).inBeats();
+}
+
+TimelineRuler::LoopDrag TimelineRuler::getLoopDragAt (const juce::MouseEvent& e) const
+{
+    // Ctrl+drag makes a loop anywhere, as FL Studio's does; in the lane, a press on the loop changes it.
+    auto* edit = editor.getEdit();
+    const auto inLane = getLoopLane().contains (e.getPosition());
+
+    if (edit == nullptr || ! (inLane || e.mods.isCommandDown()))
+        return LoopDrag::none;
+
+    const auto loop = getLoopBeatRange (*edit);
+
+    if (! loop.has_value() || ! inLane || e.mods.isCommandDown())
+        return LoopDrag::create;
+
+    const auto& view = editor.getView();
+    const auto xOf = [&view] (double beat) { return (beat - view.start.inBeats()) * view.pixelsPerBeat; };
+    const auto startX = xOf (loop->first), endX = xOf (loop->second);
+    const auto x = (double) e.position.x;
+
+    if (std::abs (x - startX) <= LoopTint::edgeGrab)
+        return LoopDrag::moveStart;
+
+    if (std::abs (x - endX) <= LoopTint::edgeGrab)
+        return LoopDrag::moveEnd;
+
+    return x > startX && x < endX ? LoopDrag::move : LoopDrag::create;
+}
+
+void TimelineRuler::mouseMove (const juce::MouseEvent& e)
+{
+    switch (getLoopDragAt (e))
+    {
+        case LoopDrag::moveStart:
+        case LoopDrag::moveEnd:
+            setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+            break;
+        case LoopDrag::move:
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            break;
+        case LoopDrag::create:
+        case LoopDrag::none:
+            setMouseCursor (juce::MouseCursor::NormalCursor);
+            break;
     }
 }
 
@@ -201,7 +266,22 @@ void TimelineRuler::mouseDown (const juce::MouseEvent& e)
     }
 
     beginDragAutoRepeat (TimelineEditor::autoRepeatInterval);
-    movePlayhead (e);
+    loopDrag = getLoopDragAt (e);
+    loopDragged = false;
+
+    if (loopDrag == LoopDrag::none)
+    {
+        movePlayhead (e);
+        return;
+    }
+
+    loopAnchor = getBeatAt (e);
+
+    if (const auto loop = getLoopBeatRange (*editor.getEdit()))
+    {
+        loopStartAtPress = loop->first;
+        loopEndAtPress = loop->second;
+    }
 }
 
 void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
@@ -210,7 +290,73 @@ void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
         return;
 
     editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
-    movePlayhead (e);
+
+    if (loopDrag == LoopDrag::none)
+    {
+        movePlayhead (e);
+        return;
+    }
+
+    if (! loopDragged && ! TimelineGesture::isPastDragThreshold (e))
+        return;
+
+    loopDragged = true;
+    dragLoop (e);
+}
+
+void TimelineRuler::dragLoop (const juce::MouseEvent& e)
+{
+    auto* edit = editor.getEdit();
+
+    if (edit == nullptr)
+        return;
+
+    const auto beat = getBeatAt (e);
+
+    switch (loopDrag)
+    {
+        case LoopDrag::create:
+            loopBeatRange (*edit, std::min (loopAnchor, beat), std::max (loopAnchor, beat));
+            break;
+        case LoopDrag::moveStart:
+            loopBeatRange (*edit, std::min (beat, loopEndAtPress), loopEndAtPress);
+            break;
+        case LoopDrag::moveEnd:
+            loopBeatRange (*edit, loopStartAtPress, std::max (beat, loopStartAtPress));
+            break;
+        case LoopDrag::move:
+        {
+            // By whole steps of the grid from where it was, and not before the song's start.
+            const auto distance = std::max (beat - loopAnchor, -loopStartAtPress);
+            loopBeatRange (*edit, loopStartAtPress + distance, loopEndAtPress + distance);
+            break;
+        }
+        case LoopDrag::none:
+            break;
+    }
+
+    repaint();
+}
+
+void TimelineRuler::mouseUp (const juce::MouseEvent& e)
+{
+    // A click in the lane, without a drag, turns looping on or off, as Logic Pro's does.
+    if (loopDrag != LoopDrag::none && ! loopDragged && ! e.mods.isCommandDown() && ! e.mods.isPopupMenu())
+        if (auto* edit = editor.getEdit())
+            toggleLoop (*edit);
+
+    loopDrag = LoopDrag::none;
+    repaint();
+}
+
+void TimelineRuler::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    // The whole song again: the clicks before it turned looping off and on.
+    if (getLoopLane().contains (e.getPosition()))
+        if (auto* edit = editor.getEdit())
+            loopSong (*edit);
+
+    repaint();
 }
 
 void TimelineRuler::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

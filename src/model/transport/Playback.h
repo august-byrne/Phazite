@@ -9,6 +9,7 @@
 #include "model/base/Tracktion.h"
 
 #include <optional>
+#include <utility>
 
 namespace phazite
 {
@@ -30,6 +31,11 @@ bool doesLoopFollowSong (const te::Edit&);
 // Loops the song, or a range of it. Both turn looping on.
 void loopSong (te::Edit&);
 void loopRange (te::Edit&, te::TimeRange);
+
+// The loop as a time line's ruler shows and changes it, in song beats: where it is while playback loops (nothing while
+// it doesn't), and a range to loop, which turns looping on (an empty range changes nothing).
+std::optional<std::pair<double, double>> getLoopBeatRange (const te::Edit&);
+void loopBeatRange (te::Edit&, double startBeat, double endBeat);
 
 // Puts the loop around the song again if it follows the song and the song's end has moved. Not during a recording, for
 // which the song's loop is set aside (Recording.h).

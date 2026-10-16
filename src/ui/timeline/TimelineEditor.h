@@ -16,20 +16,46 @@ class TimelineEditor;
 
 //==============================================================================
 // The bar numbers above an editor's time line. Clicking or dragging there moves the playhead.
+// The ruler over a time line. Its lane along the top holds the loop, as Logic Pro's cycle strip does: a drag there
+// loops what it covers, a drag on the loop's edges or middle changes or moves it, a click turns looping on or off and
+// a double-click loops the whole song. Ctrl+drag anywhere makes a loop too, as FL Studio's does. Lower down, a click or
+// a drag moves the playhead.
 class TimelineRuler : public juce::Component
 {
 public:
     explicit TimelineRuler (TimelineEditor&);
 
     void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
+    juce::Rectangle<int> getLoopLane() const; // along the top
+
 private:
+    // What a press in the loop's lane does once it drags.
+    enum class LoopDrag
+    {
+        none,
+        create, // loops from where it began to the pointer
+        moveStart,
+        moveEnd,
+        move
+    };
+
     TimelineEditor& editor;
+    LoopDrag loopDrag = LoopDrag::none;
+    bool loopDragged = false; // past the threshold: not a click
+    double loopAnchor = 0.0;  // the beat where the press was, snapped
+    double loopStartAtPress = 0.0, loopEndAtPress = 0.0;
 
     void movePlayhead (const juce::MouseEvent&);
+    double getBeatAt (const juce::MouseEvent&) const; // snapped, unless Alt is held
+    LoopDrag getLoopDragAt (const juce::MouseEvent&) const;
+    void dragLoop (const juce::MouseEvent&);
 };
 
 //==============================================================================

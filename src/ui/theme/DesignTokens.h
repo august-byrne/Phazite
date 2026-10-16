@@ -127,13 +127,16 @@ namespace SectionTint
     inline constexpr float edge = 0.6f;
 } // namespace SectionTint
 
-// How the loop shows in a ruler: a wash of the loop color over the part that loops, and a bar along its top
-// (alphas, and the bar's height in pixels).
+// How the loop shows in a ruler: its lane along the top, which a drag loops (a shade of the text color), a bar of
+// the loop color in that lane over the part that loops, and a wash of it below (alphas); the lane's height, and how
+// near the loop's edge a press takes the edge (pixels).
 namespace LoopTint
 {
-    inline constexpr float wash = 0.14f;
+    inline constexpr float lane = 0.06f;
     inline constexpr float bar = 0.9f;
-    inline constexpr int barHeight = 3;
+    inline constexpr float wash = 0.14f;
+    inline constexpr int laneHeight = 8;
+    inline constexpr int edgeGrab = 4;
 } // namespace LoopTint
 
 // WCAG 2.2's contrast ratio between two colours, from 1 (none) to 21 (black on white). Text needs at

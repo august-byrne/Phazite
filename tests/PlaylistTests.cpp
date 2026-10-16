@@ -438,3 +438,57 @@ TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren'
     const auto point = screen.lanes->getBounds().getPosition() + screen.at (10.37, 1);
     CHECK (image.getPixelAt (point.x, point.y) == phazite::ui::getPalette (screen.playlist).background);
 }
+
+TEST_CASE ("Dragging along the top of the ruler loops part of the song, and the loop's edges and middle change it")
+{
+    PlaylistScreen screen;
+    screen.addClip (0, 0.0, 16.0); // four bars
+    phazite::test::dispatchPendingMessages();
+
+    auto* ruler = dynamic_cast<phazite::ui::TimelineRuler*> (phazite::test::findComponentWithTitle (screen.playlist, "Timeline"));
+    REQUIRE (ruler != nullptr);
+    const auto lane = ruler->getLoopLane().getCentreY(), lower = ruler->getHeight() - 4;
+    const auto x = [&screen] (double beat) { return juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
+    const auto isLoop = [&screen] (double start, double end)
+    {
+        const auto loop = phazite::getLoopBeatRange (*screen.edit);
+        return loop.has_value() && std::abs (loop->first - start) < 1.0e-6 && std::abs (loop->second - end) < 1.0e-6;
+    };
+
+    phazite::test::Mouse mouse (*ruler);
+
+    // A drag along the top loops what it covers, on the grid.
+    mouse.press ({ x (4.1), lane });
+    mouse.dragTo ({ x (8.1), lane });
+    mouse.release();
+    CHECK (isLoop (4.0, 8.0));
+    CHECK_FALSE (phazite::doesLoopFollowSong (*screen.edit));
+
+    // Its end, then its middle.
+    mouse.press ({ x (8.0), lane });
+    mouse.dragTo ({ x (12.0), lane });
+    mouse.release();
+    CHECK (isLoop (4.0, 12.0));
+    mouse.press ({ x (6.0), lane });
+    mouse.dragTo ({ x (8.0), lane });
+    mouse.release();
+    CHECK (isLoop (6.0, 14.0));
+    mouse.pause();
+
+    // A click there turns looping off and on again; a double-click loops the whole song.
+    mouse.click ({ x (20.0), lane });
+    CHECK_FALSE (phazite::getLoopBeatRange (*screen.edit).has_value());
+    mouse.click ({ x (20.0), lane });
+    CHECK (isLoop (6.0, 14.0));
+    mouse.doubleClick ({ x (20.0), lane });
+    CHECK (phazite::isLoopingSong (*screen.edit));
+
+    // Lower down, a click moves the playhead and leaves the loop alone; Ctrl+drag there makes a loop, as in FL Studio.
+    mouse.click ({ x (3.0), lower });
+    CHECK (screen.playlist.getPlayheadBeat().inBeats() == doctest::Approx (3.0));
+    CHECK (phazite::isLoopingSong (*screen.edit));
+    mouse.press ({ x (1.0), lower }, juce::ModifierKeys::commandModifier);
+    mouse.dragTo ({ x (2.0), lower });
+    mouse.release();
+    CHECK (isLoop (1.0, 2.0));
+}
