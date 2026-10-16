@@ -10,6 +10,8 @@
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
 
+#include <optional>
+
 namespace phazite::ui
 {
 class TimelineEditor;
@@ -88,6 +90,7 @@ public:
     void centreOnPlayhead();
     void movePlayheadTo (te::BeatPosition); // playback starts there from now on (phazite::movePlayhead())
     te::BeatPosition getPlayheadBeat() const;
+    bool isPlayheadShowingLinkedClip() const; // where a linked clip plays elsewhere (getLinkedPlayheadBeat()), for tests
 
     // While playing, turn the page when the playhead reaches the right edge.
     bool isFollowingPlayback() const noexcept { return followPlayback; }
@@ -175,6 +178,9 @@ protected:
     virtual void verticalScrollBarMoved (double /*newRangeStart*/) {}
     // Scrolls the content up (negative) or down by some pixels, for autoScroll(); returns true if it moved.
     virtual bool scrollVerticallyBy (int /*pixels*/) { return false; }
+    // Where the playhead shows instead of the song's position, in song beats: the piano roll shows there where the
+    // notes it edits are playing while a clip linked to its own plays elsewhere in the song. Nothing as a rule.
+    virtual std::optional<double> getLinkedPlayheadBeat (double /*songBeat*/) const { return {}; }
     // What a tool does here, for its button's tooltip.
     virtual juce::String describeToolHere (Tool toolToDescribe) const { return describeTool (toolToDescribe); }
 

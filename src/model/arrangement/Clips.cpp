@@ -6,6 +6,7 @@
 #include "model/engine/LiveInput.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace phazite
@@ -93,6 +94,53 @@ bool hasFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type
     }
 
     return any;
+}
+
+namespace
+{
+    // The song beat in a clip whose notes play while a clip linked to it plays at a song beat, if one does.
+    std::optional<double> getLinkedPlayBeat (const te::Clip& shown, te::BeatPosition beat)
+    {
+        if (! shown.isLinked())
+            return {};
+
+        auto& edit = shown.edit;
+        const auto time = edit.tempoSequence.toTime (beat);
+
+        for (auto* other : edit.findClipsInLinkGroup (shown.getLinkGroupID()))
+        {
+            if (other == &shown || ! other->getEditBeatRange().contains (beat))
+                continue;
+
+            // The place in their shared notes: from the start of the notes, and within its loop if it loops.
+            auto content = other->getContentBeatAtTime (time).inBeats();
+
+            if (other->isLooping() && other->getLoopLengthBeats() > te::BeatDuration())
+            {
+                const auto loopStart = other->getLoopStartBeats().inBeats(), loopLength = other->getLoopLengthBeats().inBeats();
+                const auto intoLoop = content - loopStart;
+                content = loopStart + intoLoop - loopLength * std::floor (intoLoop / loopLength);
+            }
+
+            return edit.tempoSequence.toBeats (shown.getTimeOfContentBeat (te::BeatPosition::fromBeats (content))).inBeats();
+        }
+
+        return {};
+    }
+} // namespace
+
+std::optional<double> getLinkedPlayBeat (const juce::Array<te::MidiClip*>& shown, double songBeat)
+{
+    const auto beat = te::BeatPosition::fromBeats (songBeat);
+
+    if (std::any_of (shown.begin(), shown.end(), [beat] (te::MidiClip* clip) { return clip->getEditBeatRange().contains (beat); }))
+        return {};
+
+    for (auto* clip : shown)
+        if (const auto linkedBeat = getLinkedPlayBeat (*clip, beat))
+            return linkedBeat;
+
+    return {};
 }
 
 juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAliases)

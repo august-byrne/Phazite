@@ -573,3 +573,29 @@ TEST_CASE ("Slip moves what a clip plays, not the clip, and its content can't st
     phazite::slipClip (clip, te::TimeDuration::fromSeconds (1.0), te::TimeDuration::fromSeconds (3.0));
     CHECK (clip.getPosition().getOffset().inSeconds() == doctest::Approx (0.0));
 }
+
+TEST_CASE ("Where linked clips play, an editor showing one of them sees its notes playing")
+{
+    ClipEdit e;
+    auto& original = e.addClip (0, 0.0, 4.0);
+    const auto aliases = phazite::copyClips ({ &original, &original }, true);
+    REQUIRE (aliases.size() == 2);
+    const auto seconds = [] (double b) { return te::TimePosition::fromSeconds (b / 2.0); }; // 120 BPM
+
+    // One alias later in the song, whole; one that plays only beats 2 to 4 of the notes (a snippet), from beat 16.
+    aliases[0]->setPosition ({ { seconds (8.0), seconds (12.0) }, {} });
+    aliases[1]->setPosition ({ { seconds (16.0), seconds (18.0) }, te::TimeDuration::fromSeconds (1.0) });
+    const juce::Array<te::MidiClip*> shown { &original };
+
+    CHECK (phazite::getLinkedPlayBeat (shown, 9.5) == std::optional<double> (1.5));
+    CHECK (phazite::getLinkedPlayBeat (shown, 16.5) == std::optional<double> (2.5));
+
+    // The clip shown plays there itself, or nothing does: nothing to show in it.
+    CHECK_FALSE (phazite::getLinkedPlayBeat (shown, 2.0).has_value());
+    CHECK_FALSE (phazite::getLinkedPlayBeat (shown, 6.0).has_value());
+    CHECK_FALSE (phazite::getLinkedPlayBeat ({ &original, dynamic_cast<te::MidiClip*> (aliases[0]) }, 9.5).has_value());
+
+    // A clip made unique has no linked clips.
+    phazite::makeClipsUnique ({ &original });
+    CHECK_FALSE (phazite::getLinkedPlayBeat (shown, 9.5).has_value());
+}

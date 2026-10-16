@@ -106,6 +106,10 @@ namespace GraphTint
 // warning color.
 inline constexpr float attentionTint = 0.35f;
 
+// The playhead's alpha while it shows the notes being edited playing in a linked clip elsewhere in the song, rather
+// than the song's own position.
+inline constexpr float linkedPlayheadAlpha = 0.5f;
+
 // Track colors are saved in projects, so their palette is in the model: phazite::getTrackColours().
 
 // How strongly a track's color tints its header: how far the header's surface is mixed with it. The track's clips

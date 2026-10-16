@@ -4,6 +4,8 @@
 
 #include "model/base/Tracktion.h"
 
+#include <optional>
+
 namespace phazite
 {
 // The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).
@@ -20,6 +22,12 @@ bool hasFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
 // A copy of each clip, on the same track and in the same place, for the caller to move. As aliases,
 // the copies stay linked to their originals: editing the notes of one edits them all.
 juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>&, bool asAliases);
+
+// While a clip linked to one of these (an alias, which shares its notes) plays at a song beat, the song beat in that
+// one whose notes play then: where an editor showing these clips shows that their notes are playing, as FL Studio's
+// piano roll shows where its pattern is wherever the pattern plays. Nothing while one of these plays there itself (the
+// playhead is there already), or no clip linked to them does.
+std::optional<double> getLinkedPlayBeat (const juce::Array<te::MidiClip*>& shown, double songBeat);
 
 // Moves a clip to start at a beat (not before the song does) on a track, keeping its length.
 void moveClip (te::Clip&, te::BeatPosition start, te::ClipTrack&);

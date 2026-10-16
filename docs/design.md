@@ -253,6 +253,7 @@ Esc returns to the Smart Tool. The current tool and its key show on the toolbar 
 This is the editor the target users spend most time in, and FL Studio's is its most-praised feature: "designed… like a paint program" ([B11](#appendix-b-sources)). Gaps here are what sent FL Studio users away from Bitwig and Reason ([appendix A](#appendix-a-research-summary)).
 
 - **Time counts from the clip (2026-10-13),** as in FL Studio and Live: bar 1 is where the clip's content starts, and a clip opens there. The grid and snapping count from it too; the header says where the clip is in the song, and the playhead shows when the clip plays. With several clips it counts from the first. Later, a switch to song time like Bitwig 6's could edit a whole track.
+- **The playhead follows the notes, not only the clip (2026-10-16):** while an alias of a clip shown (a linked copy, which shares its notes) plays elsewhere in the song, the playhead shows, fainter, which of the notes are playing, as FL Studio's piano roll follows its pattern wherever the playlist plays it. Edits change every alias, so the playhead shows every time they play. The view doesn't turn pages while the song plays, so the notes being edited stay in view; View > Follow Playback turns that on.
 - **What it shows:** the MIDI clips selected in the playlist, or, when a track is selected, its clip at the playhead or the nearest one. A track without clips shows from the bar the playhead is in, and the first note drawn starts a clip there.
 - **Clips grow with their notes, into empty space only (2026-10-14):** a note drawn, moved, lengthened or duplicated past its clip's end makes the clip end at the end of that bar, as FL Studio's patterns grow, but never past where the next clip on the track starts; a note that doesn't fit stays in the clip without playing, as outside a trimmed clip, until the clip's end is dragged out. A looped clip doesn't grow.
 - **Mouse model from FL Studio:**
@@ -275,7 +276,7 @@ This is the editor the target users spend most time in, and FL Studio's is its m
   - Each shows a preview before it is applied.
   - Its settings stay editable until you commit, which avoids Live 12's gotcha where arpeggiated notes become permanent once you select another clip.
   - Each has a hotkey.
-- **Several clips at once:** edit the notes of several selected clips together, each in its own color.
+- **Several clips at once:** edit the notes of several selected clips together, each in its track's color.
 - **Lanes under the notes:** velocity is always shown. CC, pitch-bend and per-note expression lanes appear on demand.
 - **Drum mode:** for drum-sampler tracks, rows show pad names instead of piano keys and notes are drawn as hits without length. Rows can be reordered or hidden. It comes on by itself with such tracks, and the grid's menu and the command palette turn it on or off; it has no button (2026-10-13).
 - **Slides:** pitch glides between notes are sent as MPE note expression to plug-ins that support it. FL Studio's slide notes only work with its own instruments.

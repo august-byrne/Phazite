@@ -375,14 +375,27 @@ struct TimelineEditor::Playhead : public juce::Component
 {
     Playhead()
     {
+        setTitle ("Playhead");
         setInterceptsMouseClicks (false, false);
         setAlwaysOnTop (true);
     }
 
+    // Fainter while it shows the notes being edited playing in a linked clip elsewhere, not the song's own position.
+    void setLinked (bool shouldBeLinked)
+    {
+        if (linked != shouldBeLinked)
+        {
+            linked = shouldBeLinked;
+            repaint();
+        }
+    }
+
+    bool linked = false;
+
     void paint (juce::Graphics& g) override
     {
         const auto centre = (float) getWidth() / 2.0f;
-        g.setColour (getPalette (*this).text);
+        g.setColour (getPalette (*this).text.withMultipliedAlpha (linked ? linkedPlayheadAlpha : 1.0f));
         g.fillRect (juce::Rectangle<float> (centre - 0.75f, 0.0f, 1.5f, (float) getHeight()));
 
         juce::Path marker; // a triangle pointing down, at the bottom of the ruler
@@ -602,6 +615,11 @@ te::BeatPosition TimelineEditor::getPlayheadBeat() const
     return {};
 }
 
+bool TimelineEditor::isPlayheadShowingLinkedClip() const
+{
+    return playhead->linked;
+}
+
 void TimelineEditor::updatePlayhead()
 {
     if (edit.get() == nullptr)
@@ -610,9 +628,13 @@ void TimelineEditor::updatePlayhead()
         return;
     }
 
+    // At the song's position, or where a linked clip's playing shows in this editor's notes.
     const auto area = getTimelineArea();
-    const auto x = view.beatToX (getPlayheadBeat());
+    const auto songBeat = getPlayheadBeat().inBeats();
+    const auto linkedBeat = getLinkedPlayheadBeat (songBeat);
+    const auto x = (linkedBeat.value_or (songBeat) - view.start.inBeats()) * view.pixelsPerBeat;
     const auto isInView = x >= -1.0 && x <= area.getWidth() + 1.0;
+    playhead->setLinked (linkedBeat.has_value());
     playhead->setVisible (isInView);
 
     if (isInView)

@@ -8,6 +8,7 @@
 #include "model/commands/Undo.h"
 #include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"
+#include "model/transport/Playback.h"
 #include "ui/pianoroll/PianoRoll.h"
 
 namespace
@@ -78,9 +79,37 @@ TEST_CASE ("The piano roll keeps the notes being edited in view while the song p
     CHECK_FALSE (screen.pianoRoll.isFollowingPlayback());
 
     // View > Follow Playback turns it on for the editor used last, as the playlist has it from the start.
-    phazite::ui::addTimelineCommands (screen.registry, [&screen] { return &screen.pianoRoll; });
     REQUIRE (screen.registry.invoke ("view.followPlayback"));
     CHECK (screen.pianoRoll.isFollowingPlayback());
+}
+
+TEST_CASE ("While a clip linked to the one shown plays, the piano roll's playhead shows where its notes are playing")
+{
+    PianoRollScreen screen;
+    auto& clip = screen.addClip (0, 0.0, 4.0);
+    const auto aliases = phazite::copyClips ({ &clip }, true);
+    REQUIRE (aliases.size() == 1);
+    aliases[0]->setPosition ({ { te::TimePosition::fromSeconds (4.0), te::TimePosition::fromSeconds (6.0) }, {} }); // beats 8 to 12
+    screen.select (clip);
+
+    auto* playhead = phazite::test::findComponentWithTitle (screen.pianoRoll, "Playhead");
+    REQUIRE (playhead != nullptr);
+    const auto playheadAt = [&screen, playhead] (double beat)
+    {
+        return std::abs (playhead->getBounds().getCentreX() - (screen.notes->getX() + screen.pianoRoll.getView().beatToX (beats (beat))))
+               <= 1.0;
+    };
+
+    // At beat 9.5 the alias plays beat 1.5 of the notes.
+    phazite::movePlayhead (*screen.edit, te::TimePosition::fromSeconds (4.75));
+    CHECK (phazite::test::dispatchMessagesUntil ([&screen] { return screen.pianoRoll.isPlayheadShowingLinkedClip(); }));
+    CHECK (playhead->isVisible());
+    CHECK (playheadAt (1.5));
+
+    // In the clip itself, it is the song's own position again.
+    phazite::movePlayhead (*screen.edit, te::TimePosition::fromSeconds (0.5));
+    CHECK (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.pianoRoll.isPlayheadShowingLinkedClip(); }));
+    CHECK (playheadAt (1.0));
 }
 
 TEST_CASE ("The piano roll counts bars from the start of the clip it shows")

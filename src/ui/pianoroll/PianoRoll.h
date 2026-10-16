@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll (docs/design.md, section 7; roadmap step 1.3): the notes of the MIDI clips selected in the
-// playlist, several at once, each in its clip's color, or of the selected track's clip nearest the playhead.
+// playlist, several at once, each in its track's color, or of the selected track's clip nearest the playhead.
 // Bar 1 is where the (first) clip starts, as in FL Studio and Live. FL Studio's mouse model: a click adds a
 // note with the last length and velocity, a right-click deletes, dragging a note moves it and dragging its
 // edge resizes it. It has the playlist's tools and grid (TimelineEditor), a velocity lane, ghost notes from
@@ -158,6 +158,7 @@ private:
     juce::Rectangle<int> getTimelineArea() const override;
     te::BeatRange getContentRange() const override;
     void timelineChanged() override;
+    std::optional<double> getLinkedPlayheadBeat (double songBeat) const override; // a linked clip of a shown one plays
     void toolChanged() override;
     void gridChanged() override;
     void verticalScrollBarMoved (double newRangeStart) override;
