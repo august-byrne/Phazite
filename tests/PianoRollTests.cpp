@@ -54,7 +54,7 @@ struct PianoRollScreen
     // Where a beat is in the note grid, halfway down.
     juce::Point<int> at (double beat) const
     {
-        return { juce::roundToInt (pianoRoll.getView().beatToX (beats (beat))), notes->getHeight() / 2 };
+        return { juce::roundToInt (pianoRoll.getView().beatToX (phazite::fromTracktion (beats (beat)))), notes->getHeight() / 2 };
     }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
@@ -92,7 +92,8 @@ TEST_CASE ("While a clip linked to the one shown plays, the piano roll's playhea
     REQUIRE (playhead != nullptr);
     const auto playheadAt = [&screen, playhead] (double beat)
     {
-        return std::abs (playhead->getBounds().getCentreX() - (screen.notes->getX() + screen.pianoRoll.getView().beatToX (beats (beat))))
+        return std::abs (playhead->getBounds().getCentreX()
+                         - (screen.notes->getX() + screen.pianoRoll.getView().beatToX (phazite::fromTracktion (beats (beat)))))
                <= 1.0;
     };
 
@@ -136,8 +137,8 @@ TEST_CASE ("The piano roll's grid counts from the start of its clip")
     grid.fixedLevel = 9; // a beat
     screen.pianoRoll.setGrid (grid);
 
-    CHECK (screen.pianoRoll.snap (beats (2.7), {}).inBeats() == doctest::Approx (2.5));
-    CHECK (screen.pianoRoll.snapDown (beats (2.4), {}).inBeats() == doctest::Approx (1.5));
+    CHECK (screen.pianoRoll.snap (phazite::BeatPosition::fromBeats (2.7), {}).inBeats() == doctest::Approx (2.5));
+    CHECK (screen.pianoRoll.snapDown (phazite::BeatPosition::fromBeats (2.4), {}).inBeats() == doctest::Approx (1.5));
 }
 
 TEST_CASE ("Selecting a track shows its clip nearest the playhead, or lets the first note start one")

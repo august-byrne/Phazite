@@ -71,8 +71,8 @@ void SectionsStrip::setEdit (te::Edit* newEdit)
 juce::Rectangle<int> SectionsStrip::getBlockArea (const te::Clip& section) const
 {
     const auto& view = editor.getView();
-    const auto left = juce::roundToInt (view.beatToX (section.getStartBeat()));
-    const auto right = juce::roundToInt (view.beatToX (section.getEndBeat()));
+    const auto left = juce::roundToInt (view.beatToX (fromTracktion (section.getStartBeat())));
+    const auto right = juce::roundToInt (view.beatToX (fromTracktion (section.getEndBeat())));
     return { left, 0, std::max (2, right - left), getHeight() };
 }
 
@@ -102,7 +102,7 @@ te::BeatPosition SectionsStrip::findNearestBoundary (const te::ArrangerClip& sec
         const auto& view = editor.getView();
 
         for (const auto boundary : getSectionBoundaries (*e))
-            if (std::abs (view.beatToX (boundary) - x) < std::abs (view.beatToX (nearest) - x))
+            if (std::abs (view.beatToX (fromTracktion (boundary)) - x) < std::abs (view.beatToX (fromTracktion (nearest)) - x))
                 nearest = boundary;
     }
 
@@ -165,7 +165,7 @@ void SectionsStrip::paint (juce::Graphics& g)
     // While dragging: where the section would go, or where its end would be.
     if (const auto target = getDragTarget())
     {
-        const auto x = juce::roundToInt (editor.getView().beatToX (*target));
+        const auto x = juce::roundToInt (editor.getView().beatToX (fromTracktion (*target)));
 
         if (auto* section = drag->section.get(); section != nullptr && drag->kind == Drag::Kind::resize)
         {
@@ -247,7 +247,7 @@ void SectionsStrip::mouseDown (const juce::MouseEvent& e)
         if (section != nullptr && ! selection.isSelected (section))
             selection.selectOnly (section);
 
-        showMenu (section, editor.getView().xToBeat (e.position.x));
+        showMenu (section, toTracktion (editor.getView().xToBeat (e.position.x)));
         return;
     }
 
@@ -293,7 +293,7 @@ void SectionsStrip::mouseDrag (const juce::MouseEvent& e)
 
     if (drag->kind == Drag::Kind::resize)
         drag->target = std::max (section->getStartBeat() + te::BeatDuration::fromBeats (1.0),
-                                 editor.snap (editor.getView().xToBeat (e.position.x), e.mods));
+                                 toTracktion (editor.snap (editor.getView().xToBeat (e.position.x), e.mods)));
     else
         drag->target = findNearestBoundary (*section, e.position.x);
 
@@ -364,7 +364,7 @@ void SectionsStrip::mouseDoubleClick (const juce::MouseEvent& e)
         return;
     }
 
-    addSectionAt (editor.getView().xToBeat (e.position.x));
+    addSectionAt (toTracktion (editor.getView().xToBeat (e.position.x)));
 }
 
 //==============================================================================

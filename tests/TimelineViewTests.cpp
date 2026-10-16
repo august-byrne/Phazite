@@ -3,15 +3,15 @@
 #include "TestHelpers.h"
 #include "ui/timeline/TimelineView.h"
 
-using namespace tracktion::literals; // 4_bp: beat positions
+using phazite::BeatPosition;
 
 TEST_CASE ("The timeline converts between beats and pixels, and zooms around a point")
 {
     phazite::ui::TimelineView view;
-    view.start = 4_bp;
+    view.start = BeatPosition::fromBeats (4.0);
     view.pixelsPerBeat = 10.0;
 
-    CHECK (view.beatToX (6_bp) == doctest::Approx (20.0));
+    CHECK (view.beatToX (BeatPosition::fromBeats (6.0)) == doctest::Approx (20.0));
     CHECK (view.xToBeat (20.0).inBeats() == doctest::Approx (6.0));
 
     // The beat under the pointer stays where it is.
@@ -26,7 +26,7 @@ TEST_CASE ("The timeline converts between beats and pixels, and zooms around a p
     CHECK (view.pixelsPerBeat == doctest::Approx (phazite::ui::TimelineView::minPixelsPerBeat));
     CHECK (view.start.inBeats() == doctest::Approx (0.0));
 
-    view.start = 4_bp;
+    view.start = BeatPosition::fromBeats (4.0);
     view.scrollBy (-1.0e6);
     CHECK (view.start.inBeats() == doctest::Approx (0.0));
 }

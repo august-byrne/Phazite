@@ -40,6 +40,10 @@ public:
     void addCommands (CommandRegistry&);
     void refreshShortcutTexts() override;
 
+    // The open project's Edit, for the code that still works on Tracktion's tracks and clips. Transitional: it goes when
+    // the playlist works by IDs (architecture phase A3).
+    te::Edit* getEdit() const noexcept { return context.getEdit(); }
+
     // TimelineEditor
     bool canUseTool (Tool) const override { return true; }
     bool canNudgeSelection() const override;
@@ -173,7 +177,7 @@ private:
     te::BeatPosition getFileDropBeat (int x) const; // at the grid line at or before x, unless Alt is held
 
     void setColourOfSelectedTracks (juce::Colour);
-    void showRulerMenu (te::BeatPosition) override; // the sections there, the song outlines and the loop
+    void showRulerMenu (BeatPosition) override; // the sections there, the song outlines and the loop
 
     // After the last track: a track or a folder (and it shows), and the menu of what can be added there.
     void addTrackAtEnd (bool folder);
@@ -181,7 +185,7 @@ private:
 
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;
-    te::BeatRange getContentRange() const override;
+    BeatRange getContentRange() const override;
     void timelineChanged() override;
     void toolChanged() override;
     void gridChanged() override;

@@ -6,7 +6,8 @@
 
 #include "SmartTool.h"
 #include "TimelineView.h"
-#include "model/arrangement/Grid.h"
+#include "model/arrangement/TimelineModel.h"
+#include "model/project/ProjectContext.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
 
@@ -70,10 +71,11 @@ public:
     static constexpr int toolbarHeight = 36, rulerHeight = 28, scrollBarSize = 12;
 
     // The editor keeps its grid in the project as that GridOwner's (loadGridSettings()).
-    TimelineEditor (CommandBridge&, GridOwner);
+    TimelineEditor (CommandBridge&, ProjectContext&, GridOwner);
     ~TimelineEditor() override;
 
-    te::Edit* getEdit() const noexcept { return edit.get(); }
+    ProjectContext& getContext() const noexcept { return timelineContext; }
+    bool hasProject() const noexcept { return timelineContext.hasProject(); }
     CommandBridge& getCommands() const noexcept { return commands; }
 
     //==============================================================================
@@ -81,15 +83,15 @@ public:
     // playlist's is the start of the song, and the piano roll's the start of its clip, so that bar 1 is where
     // the clip starts, as in FL Studio and Live. The view doesn't scroll back past it.
     const TimelineView& getView() const noexcept { return view; }
-    te::BeatPosition getTimeOrigin() const noexcept { return timeOrigin; }
-    void setViewStart (te::BeatPosition);
+    BeatPosition getTimeOrigin() const noexcept { return timeOrigin; }
+    void setViewStart (BeatPosition);
     void zoomAround (double x, double factor); // x from the left of the time line
     void zoom (double factor);                 // around the playhead if it is in view, otherwise the middle
-    void zoomTo (te::BeatRange);
+    void zoomTo (BeatRange);
     void zoomToFit(); // shows getContentRange()
     void centreOnPlayhead();
-    void movePlayheadTo (te::BeatPosition); // playback starts there from now on (phazite::movePlayhead())
-    te::BeatPosition getPlayheadBeat() const;
+    void movePlayheadTo (BeatPosition); // playback starts there from now on (phazite::movePlayhead())
+    BeatPosition getPlayheadBeat() const;
     bool isPlayheadShowingLinkedClip() const; // where a linked clip plays elsewhere (getLinkedPlayheadBeat()), for tests
 
     // While playing, turn the page when the playhead reaches the right edge.
@@ -114,11 +116,11 @@ public:
     //==============================================================================
     // The grid.
     const GridSettings& getGrid() const noexcept { return grid; }
-    void setGrid (const GridSettings&);       // and keeps it in the project
-    te::TimecodeSnapType getSnapType() const; // the grid's size at the current zoom
+    void setGrid (const GridSettings&); // and keeps it in the project
+    GridStep getGridStep() const;       // the grid's size at the current zoom
     double getGridStepInBeats() const;
-    te::BeatPosition snap (te::BeatPosition, juce::ModifierKeys) const;     // to the nearest line; Alt places freely
-    te::BeatPosition snapDown (te::BeatPosition, juce::ModifierKeys) const; // to the line at or before it
+    BeatPosition snap (BeatPosition, juce::ModifierKeys) const;     // to the nearest line; Alt places freely
+    BeatPosition snapDown (BeatPosition, juce::ModifierKeys) const; // to the line at or before it
     void showGridMenu();
 
     //==============================================================================
@@ -154,22 +156,23 @@ public:
 
     // A right-click on the ruler, at a place in the song: the loop's commands. The playlist offers the song's
     // sections there too.
-    virtual void showRulerMenu (te::BeatPosition);
+    virtual void showRulerMenu (BeatPosition);
 
 protected:
     // Fills the editor's background, with the toolbar's border and, while active, the accent line.
     void paintEditorBackground (juce::Graphics&);
 
-    // Call from the derived class's setEdit(): resets the view and loads the grid the project keeps.
-    void setTimelineEdit (te::Edit*);
+    // Call when another project opens, or none (the derived class's projectChanged()): resets the view and loads the grid
+    // the project keeps.
+    void showProject();
 
     // Moves the time origin; the view stays where it is in the song, unless that is before the new origin.
-    void setTimeOrigin (te::BeatPosition);
+    void setTimeOrigin (BeatPosition);
 
     // Where beats are drawn, in this component's coordinates: x starts from beat view.start at the left.
     virtual juce::Rectangle<int> getTimelineArea() const = 0;
     // What zoom to fit shows; the scroll bar covers it and some room after it.
-    virtual te::BeatRange getContentRange() const = 0;
+    virtual BeatRange getContentRange() const = 0;
     // The view moved or zoomed: lay out and repaint what depends on it.
     virtual void timelineChanged() = 0;
     virtual void toolChanged() {}
@@ -213,9 +216,9 @@ private:
 
     CommandBridge& commands;
     const GridOwner gridOwner;
-    te::SafeSelectable<te::Edit> edit;
+    ProjectContext& timelineContext;
     TimelineView view;
-    te::BeatPosition timeOrigin;
+    BeatPosition timeOrigin;
     GridSettings grid;
     Tool tool = Tool::smart;
     std::optional<Tool> toolBeforeKey; // while a tool's key is down: the tool to spring back to
@@ -224,9 +227,9 @@ private:
     bool mouseIsDown = false;
     bool followPlayback = true, wasPlaying = false, active = false;
     bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;
-    double contentEnd = 0.0;         // in beats, as the scroll bar knows it
-    te::BeatRange shownLoop;         // the loop the ruler shows (empty while playback doesn't loop), to repaint it on changes
-    double lastAutoScrollTime = 0.0; // milliseconds (juce::Time::getMillisecondCounterHiRes())
+    double contentEnd = 0.0;            // in beats, as the scroll bar knows it
+    std::optional<BeatRange> shownLoop; // the loop the ruler shows (none while playback doesn't loop), to repaint it on changes
+    double lastAutoScrollTime = 0.0;    // milliseconds (juce::Time::getMillisecondCounterHiRes())
     std::unique_ptr<Playhead> playhead;
     std::unique_ptr<UseListener> useListener;
 

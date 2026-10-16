@@ -11,10 +11,10 @@ juce::Point<int> TimelineGesture::getStart (const TimelineView& view, int scroll
     return { juce::roundToInt (view.beatToX (startBeat)), y };
 }
 
-void TimelineGesture::beginStep (te::Edit& edit, const juce::String& name)
+void TimelineGesture::beginStep (ProjectContext& context, const juce::String& name)
 {
     if (step == nullptr)
-        step = std::make_unique<phazite::Gesture> (edit, name);
+        step = std::make_unique<SongGesture> (context, name);
 }
 
 bool TimelineGesture::doOnce (const juce::ValueTree& thing)

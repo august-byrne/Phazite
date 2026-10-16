@@ -59,7 +59,7 @@ void Playlist::Lanes::paint (juce::Graphics& g)
     // The song's sections, as ghosts behind the tracks: a faint wash of each one's color.
     const auto sections = getSections (*ed);
     const auto& timeline = playlist.getView();
-    const auto xOf = [&timeline] (te::BeatPosition beat) { return juce::roundToInt (timeline.beatToX (beat)); };
+    const auto xOf = [&timeline] (te::BeatPosition beat) { return juce::roundToInt (timeline.beatToX (fromTracktion (beat))); };
 
     for (auto* section : sections)
     {
@@ -132,8 +132,8 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     // The range, on each of its tracks' rows.
     if (! playlist.range.isEmpty())
     {
-        const auto left = juce::roundToInt (timeline.beatToX (playlist.range.getRange().getStart()));
-        const auto right = juce::roundToInt (timeline.beatToX (playlist.range.getRange().getEnd()));
+        const auto left = juce::roundToInt (timeline.beatToX (fromTracktion (playlist.range.getRange().getStart())));
+        const auto right = juce::roundToInt (timeline.beatToX (fromTracktion (playlist.range.getRange().getEnd())));
 
         for (auto* track : playlist.range.getTracks())
         {
@@ -152,7 +152,7 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     // Where dragged files would go: a line at that time, on that track or below the tracks.
     if (playlist.fileDropBeat.has_value())
     {
-        const auto x = juce::roundToInt (timeline.beatToX (*playlist.fileDropBeat));
+        const auto x = juce::roundToInt (timeline.beatToX (fromTracktion (*playlist.fileDropBeat)));
         const auto area = juce::isPositiveAndBelow (playlist.fileDropRow, (int) playlist.rows.size())
                               ? getRowArea (playlist.rows[(size_t) playlist.fileDropRow])
                               : getLocalBounds();
@@ -187,7 +187,7 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     if (const auto target = playlist.sectionsStrip.getDragTarget())
     {
         g.setColour (p.accent);
-        g.fillRect (juce::roundToInt (timeline.beatToX (*target)) - 1, 0, 3, getHeight());
+        g.fillRect (juce::roundToInt (timeline.beatToX (fromTracktion (*target))) - 1, 0, 3, getHeight());
     }
 }
 
@@ -230,7 +230,7 @@ void Playlist::AddTrackRow::mouseDown (const juce::MouseEvent& e)
 
 //==============================================================================
 Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
-    : TimelineEditor (bridge, GridOwner::playlist),
+    : TimelineEditor (bridge, projectContext, GridOwner::playlist),
       context (projectContext),
       selection (projectContext.getSelection()),
       range (projectContext.getRangeSelection()),
@@ -283,7 +283,7 @@ Playlist::~Playlist()
 void Playlist::setEdit (te::Edit* newEdit)
 {
     // The same project again (after a save, say) keeps the view as it is.
-    if (newEdit == getEdit() && editState.isValid() == (newEdit != nullptr))
+    if (editState == (newEdit != nullptr ? newEdit->state : juce::ValueTree()))
         return;
 
     editState.removeListener (this);
@@ -302,7 +302,7 @@ void Playlist::setEdit (te::Edit* newEdit)
     rows.clear();
     cancelPendingUpdate();
 
-    setTimelineEdit (newEdit);
+    showProject();
     sectionsStrip.setEdit (newEdit);
     addTrackButton.setEnabled (newEdit != nullptr);
     addTrackRow->setVisible (newEdit != nullptr);
@@ -315,7 +315,7 @@ juce::Rectangle<int> Playlist::getTimelineArea() const
     return lanes->getBounds();
 }
 
-te::BeatRange Playlist::getContentRange() const
+BeatRange Playlist::getContentRange() const
 {
     auto end = 16.0; // an empty song still shows some bars
 
@@ -325,7 +325,7 @@ te::BeatRange Playlist::getContentRange() const
     if (auto* e = getEdit())
         end = std::max (end, e->tempoSequence.toBeats (te::toPosition (e->getLength())).inBeats());
 
-    return { te::BeatPosition(), te::BeatPosition::fromBeats (end) };
+    return { BeatPosition(), BeatPosition::fromBeats (end) };
 }
 
 void Playlist::timelineChanged()

@@ -12,7 +12,7 @@ namespace phazite::ui
 te::BeatPosition Playlist::getFileDropBeat (int x) const
 {
     const auto beat = te::BeatPosition::fromBeats (std::max (0.0, getView().xToBeat (x).inBeats()));
-    return snapDown (beat, juce::ModifierKeys::currentModifiers);
+    return toTracktion (snapDown (fromTracktion (beat), juce::ModifierKeys::currentModifiers));
 }
 
 void Playlist::importFiles (const juce::StringArray& paths, juce::Point<int> position)

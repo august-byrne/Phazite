@@ -42,6 +42,10 @@ public:
     void addCommands (CommandRegistry&);
     void refreshShortcutTexts() override;
 
+    // The open project's Edit, for the code that still works on Tracktion's clips and notes. Transitional: it goes when
+    // the piano roll works by IDs (architecture phase A3).
+    te::Edit* getEdit() const noexcept { return context.getEdit(); }
+
     // TimelineEditor
     bool canUseTool (Tool) const override; // all but Slip
     bool canNudgeSelection() const override;
@@ -160,7 +164,7 @@ private:
 
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;
-    te::BeatRange getContentRange() const override;
+    BeatRange getContentRange() const override;
     void timelineChanged() override;
     std::optional<double> getLinkedPlayheadBeat (double songBeat) const override; // a linked clip of a shown one plays
     void toolChanged() override;

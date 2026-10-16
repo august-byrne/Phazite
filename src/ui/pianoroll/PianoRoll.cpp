@@ -24,7 +24,7 @@ namespace
 
 //==============================================================================
 PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
-    : TimelineEditor (bridge, GridOwner::pianoRoll),
+    : TimelineEditor (bridge, projectContext, GridOwner::pianoRoll),
       context (projectContext),
       selection (projectContext.getSelection()),
       keys (std::make_unique<Keys> (*this)),
@@ -77,7 +77,8 @@ PianoRoll::~PianoRoll()
 
 void PianoRoll::setEdit (te::Edit* newEdit)
 {
-    if (newEdit == getEdit() && editState.isValid() == (newEdit != nullptr))
+    // The same project again (after a save, say) keeps the view as it is.
+    if (editState == (newEdit != nullptr ? newEdit->state : juce::ValueTree()))
         return;
 
     stopAudition();
@@ -87,7 +88,7 @@ void PianoRoll::setEdit (te::Edit* newEdit)
     editState.removeListener (this);
     editState = newEdit != nullptr ? newEdit->state : juce::ValueTree();
     editState.addListener (this);
-    setTimelineEdit (newEdit);
+    showProject();
     updateToolbar();
 }
 
@@ -120,7 +121,7 @@ te::AudioTrack* PianoRoll::getTrack() const
 void PianoRoll::showTrack (te::AudioTrack& track)
 {
     // The track's MIDI clip at the playhead, or the one nearest to it.
-    const auto playheadBeat = getPlayheadBeat();
+    const auto playheadBeat = toTracktion (getPlayheadBeat());
     te::MidiClip* nearest = nullptr;
     auto nearestDistance = std::numeric_limits<double>::max();
     auto holdsAudio = false;
@@ -218,16 +219,14 @@ void PianoRoll::updateTimeOrigin (bool scrollToStart)
 
     if (const auto shown = getClips(); ! shown.isEmpty())
     {
-        origin = shown.getFirst()->getContentStartBeat();
+        origin = fromTracktion (shown.getFirst()->getContentStartBeat());
 
         for (auto* clip : shown)
-            origin = std::min (origin, clip->getContentStartBeat());
+            origin = std::min (origin, fromTracktion (clip->getContentStartBeat()));
     }
-    else if (auto* e = getEdit(); e != nullptr && getTrack() != nullptr)
+    else if (hasProject() && getTrack() != nullptr)
     {
-        const auto& tempo = e->tempoSequence;
-        const auto bar = tempo.toBarsAndBeats (tempo.toTime (getPlayheadBeat())).bars;
-        origin = tempo.toBeats (te::tempo::BarsAndBeats { std::max (0, bar), {}, 0 });
+        origin = getBarStart (context, std::max (0, getBarAt (context, getPlayheadBeat())));
     }
 
     // A newly shown clip opens at bar 1. Otherwise the view stays on the same notes when the clip moves in the song.
@@ -245,7 +244,7 @@ te::MidiClip* PianoRoll::makeClipForNewNotes()
     if (track == nullptr || ! getClips().isEmpty())
         return nullptr;
 
-    auto* clip = insertBarLongMidiClip (*track, getTimeOrigin(), nullptr);
+    auto* clip = insertBarLongMidiClip (*track, toTracktion (getTimeOrigin()), nullptr);
 
     if (clip != nullptr)
         setClips ({ clip }, true); // shown from now on, where the view is
@@ -428,12 +427,12 @@ std::optional<double> PianoRoll::getLinkedPlayheadBeat (double songBeat) const
     return getLinkedPlayBeat (getClips(), songBeat);
 }
 
-te::BeatRange PianoRoll::getContentRange() const
+BeatRange PianoRoll::getContentRange() const
 {
     const auto shown = getClips();
 
     if (shown.isEmpty())
-        return { getTimeOrigin(), getTimeOrigin() + te::BeatDuration::fromBeats (16.0) };
+        return { getTimeOrigin(), getTimeOrigin() + BeatDuration::fromBeats (16.0) };
 
     auto start = shown.getFirst()->getStartBeat(), end = shown.getFirst()->getEndBeat();
 
@@ -443,7 +442,7 @@ te::BeatRange PianoRoll::getContentRange() const
         end = std::max (end, clip->getEndBeat());
     }
 
-    return { start, end };
+    return fromTracktion (te::BeatRange (start, end));
 }
 
 void PianoRoll::timelineChanged()

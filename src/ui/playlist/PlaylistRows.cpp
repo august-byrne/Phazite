@@ -271,8 +271,8 @@ juce::Rectangle<int> Playlist::getClipBounds (te::Clip& clip) const
 
     const auto& r = rows[(size_t) row];
     const auto& timeline = getView();
-    const auto left = juce::roundToInt (timeline.beatToX (clip.getStartBeat()));
-    const auto right = juce::roundToInt (timeline.beatToX (clip.getEndBeat()));
+    const auto left = juce::roundToInt (timeline.beatToX (fromTracktion (clip.getStartBeat())));
+    const auto right = juce::roundToInt (timeline.beatToX (fromTracktion (clip.getEndBeat())));
     return { left, getRowTop (r) + 1, std::max (2, right - left), std::max (1, r.height - 3) };
 }
 

@@ -123,7 +123,7 @@ std::vector<std::pair<te::MidiClip*, NoteData>> PianoRoll::NoteGrid::getGhostNot
     // The other tracks' MIDI clips that are in view.
     const auto shown = roll.getClips();
     const auto& timeline = roll.getView();
-    const te::BeatRange visible (timeline.xToBeat (0), timeline.xToBeat (getWidth()));
+    const auto visible = toTracktion (BeatRange (timeline.xToBeat (0), timeline.xToBeat (getWidth())));
     juce::Array<te::Track*> shownTracks { roll.getTrack() };
 
     for (auto* clip : shown)
@@ -178,8 +178,8 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
 
     for (auto* clip : roll.getClips())
     {
-        const auto left = juce::roundToInt (timeline.beatToX (clip->getStartBeat()));
-        const auto right = juce::roundToInt (timeline.beatToX (clip->getEndBeat()));
+        const auto left = juce::roundToInt (timeline.beatToX (fromTracktion (clip->getStartBeat())));
+        const auto right = juce::roundToInt (timeline.beatToX (fromTracktion (clip->getEndBeat())));
         const auto colour = getNoteColour (*clip);
         g.setColour (colour.withAlpha (0.06f));
         g.fillRect (left, area.getY(), right - left, area.getHeight());

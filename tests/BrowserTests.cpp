@@ -253,7 +253,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     kick.name = "Kick";
     kick.file = phazite::test::writeSound (temp.folder.getChildFile ("Kick.wav"), 0.3);
     const auto sound = phazite::ui::toDragDescription (kick);
-    const auto beat4 = juce::roundToInt (playlist.getView().beatToX (te::BeatPosition::fromBeats (4.0)));
+    const auto beat4 = juce::roundToInt (playlist.getView().beatToX (phazite::BeatPosition::fromBeats (4.0)));
     const juce::DragAndDropTarget::SourceDetails onTrack (sound, &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat4, 10)));
 
     REQUIRE (target.isInterestedInDragSource (onTrack));
@@ -283,7 +283,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     phazite::LibraryItem breakLoop;
     breakLoop.name = "Break 120 BPM";
     breakLoop.file = phazite::test::writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
-    const auto beat16 = juce::roundToInt (playlist.getView().beatToX (te::BeatPosition::fromBeats (16.0)));
+    const auto beat16 = juce::roundToInt (playlist.getView().beatToX (phazite::BeatPosition::fromBeats (16.0)));
     target.itemDropped (
         { phazite::ui::toDragDescription (breakLoop), &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat16, 10)) });
     REQUIRE (track->getClips().size() == 2);

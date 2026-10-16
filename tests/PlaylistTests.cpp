@@ -55,7 +55,8 @@ struct PlaylistScreen
         for (int i = 0; i < track; ++i)
             y += phazite::ui::getTrackHeight (*tracks[i]);
 
-        return { juce::roundToInt (playlist.getView().beatToX (beats (beat))), y + phazite::ui::getTrackHeight (*tracks[track]) / 2 };
+        return { juce::roundToInt (playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))),
+                 y + phazite::ui::getTrackHeight (*tracks[track]) / 2 };
     }
 
     std::vector<double> getClipStarts (int track) const
@@ -447,7 +448,8 @@ TEST_CASE ("Dragging along the top of the ruler loops part of the song, and the 
     auto* ruler = dynamic_cast<phazite::ui::TimelineRuler*> (phazite::test::findComponentWithTitle (screen.playlist, "Timeline"));
     REQUIRE (ruler != nullptr);
     const auto lane = ruler->getLoopLane().getCentreY(), lower = ruler->getHeight() - 4;
-    const auto x = [&screen] (double beat) { return juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
+    const auto x = [&screen] (double beat)
+    { return juce::roundToInt (screen.playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))); };
     const auto isLoop = [&screen] (double start, double end)
     {
         const auto loop = phazite::getLoopBeatRange (*screen.edit);

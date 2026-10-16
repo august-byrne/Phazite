@@ -129,17 +129,13 @@ void PianoRoll::updateToolbar()
                                      : "The instrument that plays this track's notes. Click to open or replace it");
 
     // Which clips are shown, and where in the song: the ruler counts from the clip.
-    const auto songBar = [this] (te::BeatPosition beat)
-    {
-        const auto& tempo = getEdit()->tempoSequence;
-        return juce::String (tempo.toBarsAndBeats (tempo.toTime (beat)).bars + 1);
-    };
+    const auto songBar = [this] (BeatPosition beat) { return juce::String (getBarAt (context, beat) + 1); };
 
     juce::String text ("Select a MIDI clip or a track in the playlist to edit notes");
 
     if (const auto shown = getClips(); shown.size() == 1)
         text = shown.getFirst()->getName() + (track != nullptr ? " on " + track->getName() : juce::String()) + ", at bar "
-               + songBar (shown.getFirst()->getStartBeat()) + " of the song";
+               + songBar (fromTracktion (shown.getFirst()->getStartBeat())) + " of the song";
     else if (shown.size() > 1)
         text = juce::String (shown.size()) + " clips, from bar " + songBar (getTimeOrigin()) + " of the song";
     else if (track != nullptr)
@@ -164,15 +160,14 @@ void PianoRoll::instrumentClicked()
         return;
     }
 
-    auto& projectContext = context;
     const juce::Component::SafePointer<juce::Component> safeButton (&instrumentButton);
     juce::PopupMenu menu;
-    menu.addItem ("Open " + instrument->name, [&projectContext, id = instrument->id] { showDeviceWindow (projectContext, id); });
+    menu.addItem ("Open " + instrument->name, [&c = context, id = instrument->id] { showDeviceWindow (c, id); });
     menu.addItem ("Replace Instrument...",
-                  [&projectContext, trackID, safeButton]
+                  [&c = context, trackID, safeButton]
                   {
                       if (safeButton != nullptr)
-                          showInstrumentMenu (projectContext, trackID, *safeButton);
+                          showInstrumentMenu (c, trackID, *safeButton);
                   });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&instrumentButton));

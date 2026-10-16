@@ -16,7 +16,7 @@ model-undo-steps               0
 model-include-loops            0
 devices-tracktion              0
 ui-tracktion-includes          2
-ui-tracktion-references      356
+ui-tracktion-references      279
 ui-tracktion-aliases           0
 ui-undo-steps                  0
 flat-files                     0

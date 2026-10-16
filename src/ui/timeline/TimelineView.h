@@ -2,7 +2,7 @@
 // What an editor shows of the time line: which part of the song is on screen, and how wide a beat is.
 #pragma once
 
-#include "model/arrangement/Grid.h"
+#include "model/base/Beats.h"
 
 namespace phazite::ui
 {
@@ -13,11 +13,11 @@ struct TimelineView
     static constexpr double maxPixelsPerBeat = 1024.0; // a 1/64 beat is 16 pixels wide
     static constexpr double defaultPixelsPerBeat = 24.0;
 
-    te::BeatPosition start;
+    BeatPosition start;
     double pixelsPerBeat = defaultPixelsPerBeat;
 
-    double beatToX (te::BeatPosition) const;
-    te::BeatPosition xToBeat (double x) const;
+    double beatToX (BeatPosition) const;
+    BeatPosition xToBeat (double x) const;
 
     // Zooms in (a factor above 1) or out, keeping the beat at x where it is. The zoom stays within its
     // limits, and the view doesn't start before the song does.

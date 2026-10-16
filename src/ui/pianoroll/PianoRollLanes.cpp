@@ -214,7 +214,7 @@ void PianoRoll::VelocityLane::paint (juce::Graphics& g)
 
     for (const auto& n : roll.getAllNotes())
     {
-        const auto x = (float) timeline.beatToX (getNoteStart (*n.clip, *n.note));
+        const auto x = (float) timeline.beatToX (fromTracktion (getNoteStart (*n.clip, *n.note)));
 
         if (x < -4.0f || x > (float) getWidth() + 4.0f)
             continue;
@@ -245,7 +245,8 @@ void PianoRoll::VelocityLane::setVelocitiesAt (const juce::MouseEvent& e)
 
     for (const auto& n : roll.getAllNotes())
     {
-        if (std::abs ((float) timeline.beatToX (getNoteStart (*n.clip, *n.note)) - e.position.x) <= (float) velocityHitDistance)
+        if (std::abs ((float) timeline.beatToX (fromTracktion (getNoteStart (*n.clip, *n.note))) - e.position.x)
+            <= (float) velocityHitDistance)
         {
             atMouse.push_back (n);
 
@@ -307,9 +308,7 @@ PianoRoll::TransformBar::TransformBar (PianoRoll& r)
 
 void PianoRoll::TransformBar::show (const Transform& shown)
 {
-    auto* ed = roll.getEdit();
-    const auto gridName =
-        ed != nullptr ? getGridDescription (roll.getSnapType(), ed->tempoSequence, roll.getGrid().triplets) : juce::String();
+    const auto gridName = roll.hasProject() ? describeGridStep (roll.context, roll.getGridStep()) : juce::String();
 
     // Each kind uses the controls it needs; the values come from the settings used last.
     const auto setUp = [] (ValueSlider& slider, const juce::String& name, double min, double max, double step, double value,

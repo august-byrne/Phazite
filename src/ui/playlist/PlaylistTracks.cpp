@@ -43,7 +43,7 @@ void Playlist::showAddTrackMenu()
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 
-void Playlist::showRulerMenu (te::BeatPosition beat)
+void Playlist::showRulerMenu (BeatPosition where)
 {
     auto* e = getEdit();
 
@@ -51,6 +51,7 @@ void Playlist::showRulerMenu (te::BeatPosition beat)
         return;
 
     // As a right-click on the section there would.
+    const auto beat = toTracktion (where);
     auto* section = getSectionAt (*e, beat);
 
     if (section != nullptr && ! selection.isSelected (section))

@@ -56,7 +56,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
-        gesture->beginStep (*ed, "Delete Notes");
+        gesture->beginStep (roll.context, "Delete Notes");
         gesture->kind = Gesture::Kind::erase;
         eraseOrMuteAt (e.position, true);
         return;
@@ -100,7 +100,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
                 return;
             }
 
-            gesture->beginStep (*ed, "Paint Notes");
+            gesture->beginStep (roll.context, "Paint Notes");
             gesture->kind = Gesture::Kind::paint;
             gesture->paintPitch = roll.getPitchForRow (roll.getRowAt (e.y));
             gesture->nextPaintStart = roll.snapDown (gesture->startBeat, e.mods);
@@ -111,7 +111,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
             if (hit.has_value())
             {
                 const auto data = getNoteData (*hit->clip, *hit->note);
-                const auto at = roll.snap (gesture->startBeat, e.mods);
+                const auto at = toTracktion (roll.snap (gesture->startBeat, e.mods));
 
                 if (at > data.start + getMinimumNoteLength() && at < data.getEnd() - getMinimumNoteLength())
                 {
@@ -119,7 +119,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
                     first.length = at - data.start;
                     second.start = at;
                     second.length = data.getEnd() - at;
-                    gesture->beginStep (*ed, "Split Note");
+                    gesture->beginStep (roll.context, "Split Note");
                     replaceNotes ({ *hit }, { first, second });
                 }
             }
@@ -131,7 +131,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
         case Tool::erase:
         {
             const auto erase = roll.getTool() == Tool::erase;
-            gesture->beginStep (*ed, erase ? "Delete Notes" : "Mute Notes");
+            gesture->beginStep (roll.context, erase ? "Delete Notes" : "Mute Notes");
             gesture->kind = erase ? Gesture::Kind::erase : Gesture::Kind::mute;
             eraseOrMuteAt (e.position, erase);
             return;
@@ -167,7 +167,7 @@ void PianoRoll::NoteGrid::addNoteAt (const juce::MouseEvent& e)
 
     // From the grid line at or before the click, in the clip it is in. On a track without clips, the note
     // starts one.
-    const auto start = roll.snapDown (roll.getView().xToBeat (e.position.x), e.mods);
+    const auto start = toTracktion (roll.snapDown (roll.getView().xToBeat (e.position.x), e.mods));
     auto* clip = roll.getClipForNewNote (start);
 
     if (clip == nullptr && ! roll.getClips().isEmpty())
@@ -182,7 +182,7 @@ void PianoRoll::NoteGrid::addNoteAt (const juce::MouseEvent& e)
     if (roll.chordStamp.has_value() && ! roll.drumMode)
         pitches = getChordPitches (pitch, *roll.chordStamp);
 
-    gesture->beginStep (*ed, pitches.size() > 1 ? "Stamp Chord" : "Add Note");
+    gesture->beginStep (roll.context, pitches.size() > 1 ? "Stamp Chord" : "Add Note");
 
     if (clip == nullptr)
         clip = roll.makeClipForNewNotes();
@@ -238,13 +238,13 @@ void PianoRoll::NoteGrid::paintAt (const juce::MouseEvent& e)
         return;
 
     // A note at each step of the grid the mouse has passed, on the row the drag began on.
-    const auto step = te::BeatDuration::fromBeats (roll.getGridStepInBeats());
+    const auto step = BeatDuration::fromBeats (roll.getGridStepInBeats());
     const auto beat = roll.getView().xToBeat (e.position.x);
 
     while (gesture->nextPaintStart <= beat)
     {
-        const auto start = gesture->nextPaintStart;
-        gesture->nextPaintStart = start + step;
+        const auto start = toTracktion (gesture->nextPaintStart);
+        gesture->nextPaintStart = gesture->nextPaintStart + step;
 
         const auto notes = roll.getAllNotes();
         const auto taken = std::any_of (notes.begin(), notes.end(),
@@ -264,7 +264,7 @@ void PianoRoll::NoteGrid::paintAt (const juce::MouseEvent& e)
             clip = roll.makeClipForNewNotes();
 
         if (clip != nullptr)
-            if (auto* note = addNote (*clip, gesture->paintPitch, start, step, roll.lastVelocity))
+            if (auto* note = addNote (*clip, gesture->paintPitch, start, toTracktion (step), roll.lastVelocity))
                 roll.selectNotes ({ note }, true);
     }
 }
@@ -301,7 +301,7 @@ void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
     const auto copy = gesture->zone == Zone::body && e.mods.isShiftDown();
 
     // A note added by this click and the drag that moves it are one step, the click's.
-    gesture->beginStep (*ed, gesture->zone != Zone::body ? "Resize Notes" : (copy ? "Copy Notes" : "Move Notes"));
+    gesture->beginStep (roll.context, gesture->zone != Zone::body ? "Resize Notes" : (copy ? "Copy Notes" : "Move Notes"));
 
     // Shift+drag copies the notes first, as in FL Studio, and the copies move.
     if (copy)
@@ -340,7 +340,10 @@ void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
 
 void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
 {
-    const auto beat = roll.getView().xToBeat (e.position.x);
+    // In Tracktion's beats, as the notes are, until the piano roll works by IDs (architecture phase A3).
+    const auto beat = toTracktion (roll.getView().xToBeat (e.position.x));
+    const auto startBeat = toTracktion (gesture->startBeat);
+    const auto snapped = [this, &e] (te::BeatPosition b) { return toTracktion (roll.snap (fromTracktion (b), e.mods)); };
     const auto& anchor = gesture->anchor;
     const auto findNote = [] (const Gesture::Original& original) -> te::MidiNote*
     {
@@ -352,7 +355,7 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
     {
         // The note under the mouse snaps to the grid, and the others keep their distance from it; none goes
         // before its clip's start.
-        auto delta = roll.snap (anchor.start + (beat - gesture->startBeat), e.mods) - anchor.start;
+        auto delta = snapped (anchor.start + (beat - startBeat)) - anchor.start;
 
         for (const auto& original : gesture->originals)
             if (auto* clip = original.clip.get())
@@ -398,7 +401,7 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
 
     if (gesture->kind == Gesture::Kind::resizeEnd)
     {
-        const auto end = roll.snap (anchor.start + anchor.length + (beat - gesture->startBeat), e.mods);
+        const auto end = snapped (anchor.start + anchor.length + (beat - startBeat));
         const auto change = end - (anchor.start + anchor.length);
 
         for (const auto& original : gesture->originals)
@@ -414,7 +417,7 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
     if (gesture->kind == Gesture::Kind::resizeStart)
     {
         // The starts move and the ends stay, but no note gets shorter than the minimum or starts before its clip.
-        auto change = roll.snap (anchor.start + (beat - gesture->startBeat), e.mods) - anchor.start;
+        auto change = snapped (anchor.start + (beat - startBeat)) - anchor.start;
 
         for (const auto& original : gesture->originals)
         {

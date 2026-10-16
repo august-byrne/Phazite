@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TimelineEditor.h"
 #include "TimelineGesture.h"
-#include "model/transport/Playback.h"
+#include "model/transport/TransportModel.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -36,16 +36,18 @@ namespace
         return 0.0;
     }
 
-    // Where playback loops, in song beats, or an empty range while it doesn't loop.
-    te::BeatRange getLoopBeats (const te::Edit& edit)
+    // How far a place is from the song's start, as a length: the time origin's, which the grid and the ruler count from.
+    BeatDuration fromSongStart (BeatPosition position)
     {
-        const auto& transport = edit.getTransport();
-        return transport.looping.get() ? edit.tempoSequence.toBeats (transport.getLoopRange()) : te::BeatRange();
+        return position - BeatPosition();
     }
 
-    bool isNear (te::BeatRange a, te::BeatRange b)
+    bool isNear (std::optional<BeatRange> a, std::optional<BeatRange> b)
     {
-        return std::abs ((a.getStart() - b.getStart()).inBeats()) < 1.0e-6 && std::abs ((a.getEnd() - b.getEnd()).inBeats()) < 1.0e-6;
+        if (! a.has_value() || ! b.has_value())
+            return a.has_value() == b.has_value();
+
+        return std::abs ((a->getStart() - b->getStart()).inBeats()) < 1.0e-6 && std::abs ((a->getEnd() - b->getEnd()).inBeats()) < 1.0e-6;
     }
 
     juce::StringArray getToolSynonyms (Tool tool)
@@ -132,28 +134,26 @@ void TimelineRuler::paint (juce::Graphics& g)
     g.setColour (p.border);
     g.fillRect (0, getHeight() - 1, getWidth(), 1);
 
-    auto* edit = editor.getEdit();
-
-    if (edit == nullptr)
+    if (! editor.hasProject())
         return;
 
-    const auto& tempo = edit->tempoSequence;
+    const auto& context = editor.getContext();
     const auto& view = editor.getView();
     const auto clip = g.getClipBounds();
 
     // Bars count from the time origin: the beats here are from there.
-    const auto origin = te::toDuration (editor.getTimeOrigin());
-    const te::BeatRange visible (view.xToBeat (clip.getX() - 1) - origin, view.xToBeat (clip.getRight() + 1) - origin);
-    const auto xOf = [&view, origin] (te::BeatPosition beat) { return view.beatToX (beat + origin); };
+    const auto origin = fromSongStart (editor.getTimeOrigin());
+    const BeatRange visible (view.xToBeat (clip.getX() - 1) - origin, view.xToBeat (clip.getRight() + 1) - origin);
+    const auto xOf = [&view, origin] (BeatPosition beat) { return view.beatToX (beat + origin); };
 
     // The loop's lane along the top, and the loop in it, over a wash of the part that loops, under the ticks: song beats,
     // not counted from the origin.
     g.setColour (p.text.withAlpha (LoopTint::lane));
     g.fillRect (getLoopLane());
 
-    if (const auto loop = getLoopBeats (*edit); ! loop.isEmpty())
+    if (const auto loop = getLoop (context); loop.has_value() && ! loop->isEmpty())
     {
-        const auto loopStart = (float) view.beatToX (loop.getStart()), loopEnd = (float) view.beatToX (loop.getEnd());
+        const auto loopStart = (float) view.beatToX (loop->getStart()), loopEnd = (float) view.beatToX (loop->getEnd());
         const juce::Rectangle<float> area (loopStart, 0.0f, loopEnd - loopStart, (float) getHeight() - 1.0f);
         g.setColour (p.loop.withAlpha (LoopTint::wash));
         g.fillRect (area);
@@ -162,10 +162,10 @@ void TimelineRuler::paint (juce::Graphics& g)
     }
 
     // Ticks: tall for bars, shorter for beats, shortest between them.
-    const auto tickType = getAdaptiveSnapType (tempo, visible.getStart(), view.pixelsPerBeat, false, minLineSpacing);
+    const auto tickStep = getAdaptiveGridStep (context, visible.getStart(), view.pixelsPerBeat, false, minLineSpacing);
 
-    forEachGridLine (tempo, tickType, false, visible,
-                     [&] (te::BeatPosition beat, GridLineType type)
+    forEachGridLine (context, tickStep, visible,
+                     [&] (BeatPosition beat, GridLineType type)
                      {
                          const auto isBar = type == GridLineType::bar;
                          const auto tick = isBar ? getHeight() / 2 : (type == GridLineType::beat ? getHeight() / 4 : getHeight() / 8);
@@ -174,14 +174,14 @@ void TimelineRuler::paint (juce::Graphics& g)
                      });
 
     // Bar numbers, as far apart as they need to be to read: every bar, or every 2nd, 4th, ...
-    const auto barWidth = view.pixelsPerBeat * tempo.getTimeSigAt (visible.getStart()).numerator.get();
+    const auto barWidth = view.pixelsPerBeat * getBeatsPerBar (context, visible.getStart());
     auto every = 1;
 
     while (every * barWidth < 32.0 && every < (1 << 20))
         every *= 2;
 
     // From a little before the area being drawn, so a number its edge cuts is drawn whole.
-    auto bar = std::max (0, tempo.toBarsAndBeats (tempo.toTime (view.xToBeat (clip.getX() - 48) - origin)).bars);
+    auto bar = std::max (0, getBarAt (context, view.xToBeat (clip.getX() - 48) - origin));
     bar -= bar % every;
 
     g.setColour (p.textMuted);
@@ -189,7 +189,7 @@ void TimelineRuler::paint (juce::Graphics& g)
 
     for (;; bar += every)
     {
-        const auto x = (float) xOf (tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 }));
+        const auto x = (float) xOf (getBarStart (context, bar));
 
         if (x > (float) clip.getRight())
             break;
@@ -214,20 +214,18 @@ double TimelineRuler::getBeatAt (const juce::MouseEvent& e) const
 TimelineRuler::LoopDrag TimelineRuler::getLoopDragAt (const juce::MouseEvent& e) const
 {
     // Ctrl+drag makes a loop anywhere, as FL Studio's does; in the lane, a press on the loop changes it.
-    auto* edit = editor.getEdit();
     const auto inLane = getLoopLane().contains (e.getPosition());
 
-    if (edit == nullptr || ! (inLane || e.mods.isCommandDown()))
+    if (! editor.hasProject() || ! (inLane || e.mods.isCommandDown()))
         return LoopDrag::none;
 
-    const auto loop = getLoopBeatRange (*edit);
+    const auto loop = getLoop (editor.getContext());
 
     if (! loop.has_value() || ! inLane || e.mods.isCommandDown())
         return LoopDrag::create;
 
     const auto& view = editor.getView();
-    const auto xOf = [&view] (double beat) { return (beat - view.start.inBeats()) * view.pixelsPerBeat; };
-    const auto startX = xOf (loop->first), endX = xOf (loop->second);
+    const auto startX = view.beatToX (loop->getStart()), endX = view.beatToX (loop->getEnd());
     const auto x = (double) e.position.x;
 
     if (std::abs (x - startX) <= LoopTint::edgeGrab)
@@ -277,10 +275,10 @@ void TimelineRuler::mouseDown (const juce::MouseEvent& e)
 
     loopAnchor = getBeatAt (e);
 
-    if (const auto loop = getLoopBeatRange (*editor.getEdit()))
+    if (const auto loop = getLoop (editor.getContext()))
     {
-        loopStartAtPress = loop->first;
-        loopEndAtPress = loop->second;
+        loopStartAtPress = loop->getStart().inBeats();
+        loopEndAtPress = loop->getEnd().inBeats();
     }
 }
 
@@ -306,29 +304,29 @@ void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
 
 void TimelineRuler::dragLoop (const juce::MouseEvent& e)
 {
-    auto* edit = editor.getEdit();
-
-    if (edit == nullptr)
+    if (! editor.hasProject())
         return;
 
     const auto beat = getBeatAt (e);
+    const auto loop = [this] (double start, double end)
+    { loopRange (editor.getContext(), { BeatPosition::fromBeats (start), BeatPosition::fromBeats (end) }); };
 
     switch (loopDrag)
     {
         case LoopDrag::create:
-            loopBeatRange (*edit, std::min (loopAnchor, beat), std::max (loopAnchor, beat));
+            loop (std::min (loopAnchor, beat), std::max (loopAnchor, beat));
             break;
         case LoopDrag::moveStart:
-            loopBeatRange (*edit, std::min (beat, loopEndAtPress), loopEndAtPress);
+            loop (std::min (beat, loopEndAtPress), loopEndAtPress);
             break;
         case LoopDrag::moveEnd:
-            loopBeatRange (*edit, loopStartAtPress, std::max (beat, loopStartAtPress));
+            loop (loopStartAtPress, std::max (beat, loopStartAtPress));
             break;
         case LoopDrag::move:
         {
             // By whole steps of the grid from where it was, and not before the song's start.
             const auto distance = std::max (beat - loopAnchor, -loopStartAtPress);
-            loopBeatRange (*edit, loopStartAtPress + distance, loopEndAtPress + distance);
+            loop (loopStartAtPress + distance, loopEndAtPress + distance);
             break;
         }
         case LoopDrag::none:
@@ -342,8 +340,7 @@ void TimelineRuler::mouseUp (const juce::MouseEvent& e)
 {
     // A click in the lane, without a drag, turns looping on or off, as Logic Pro's does.
     if (loopDrag != LoopDrag::none && ! loopDragged && ! e.mods.isCommandDown() && ! e.mods.isPopupMenu())
-        if (auto* edit = editor.getEdit())
-            toggleLoop (*edit);
+        toggleLoop (editor.getContext());
 
     loopDrag = LoopDrag::none;
     repaint();
@@ -353,8 +350,7 @@ void TimelineRuler::mouseDoubleClick (const juce::MouseEvent& e)
 {
     // The whole song again: the clicks before it turned looping off and on.
     if (getLoopLane().contains (e.getPosition()))
-        if (auto* edit = editor.getEdit())
-            loopSong (*edit);
+        loopSong (editor.getContext());
 
     repaint();
 }
@@ -439,9 +435,10 @@ struct TimelineEditor::UseListener : public juce::MouseListener
 };
 
 //==============================================================================
-TimelineEditor::TimelineEditor (CommandBridge& bridge, GridOwner owner)
+TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, GridOwner owner)
     : commands (bridge),
       gridOwner (owner),
+      timelineContext (context),
       playhead (std::make_unique<Playhead>()),
       useListener (std::make_unique<UseListener> (*this))
 {
@@ -514,26 +511,26 @@ void TimelineEditor::componentVisibilityChanged (juce::Component& component)
     }
 }
 
-void TimelineEditor::setTimelineEdit (te::Edit* newEdit)
+void TimelineEditor::showProject()
 {
-    edit = newEdit;
+    const auto open = timelineContext.hasProject();
     view = {};
     timeOrigin = {};
-    grid = newEdit != nullptr ? loadGridSettings (*newEdit, gridOwner) : GridSettings();
-    snapButton.setEnabled (newEdit != nullptr);
-    gridButton.setEnabled (newEdit != nullptr);
+    grid = loadGridSettings (timelineContext, gridOwner);
+    snapButton.setEnabled (open);
+    gridButton.setEnabled (open);
 
     updateGridControls();
     setViewStart ({});
 
-    if (newEdit != nullptr)
+    if (open)
         startTimerHz (5);
     else
         stopTimer();
 }
 
 //==============================================================================
-void TimelineEditor::setViewStart (te::BeatPosition start)
+void TimelineEditor::setViewStart (BeatPosition start)
 {
     view.start = std::max (timeOrigin, start);
     ruler.repaint();
@@ -542,9 +539,9 @@ void TimelineEditor::setViewStart (te::BeatPosition start)
     updateScrollBar();
 }
 
-void TimelineEditor::setTimeOrigin (te::BeatPosition newOrigin)
+void TimelineEditor::setTimeOrigin (BeatPosition newOrigin)
 {
-    timeOrigin = std::max (te::BeatPosition(), newOrigin);
+    timeOrigin = std::max (BeatPosition(), newOrigin);
     updateGridControls(); // the grid's size can depend on where bars start
     setViewStart (view.start);
 }
@@ -567,9 +564,9 @@ void TimelineEditor::zoom (double factor)
     zoomAround (x, factor);
 }
 
-void TimelineEditor::zoomTo (te::BeatRange range)
+void TimelineEditor::zoomTo (BeatRange range)
 {
-    if (range.getLength() <= te::BeatDuration())
+    if (range.getLength() <= BeatDuration())
         return;
 
     view.pixelsPerBeat = juce::jlimit (TimelineView::minPixelsPerBeat, TimelineView::maxPixelsPerBeat,
@@ -583,7 +580,7 @@ void TimelineEditor::zoomToFit()
     // The content fills the width but for a margin at the right.
     const auto content = getContentRange();
 
-    if (content.getLength() <= te::BeatDuration())
+    if (content.getLength() <= BeatDuration())
         return;
 
     const auto width = std::max (1, getTimelineArea().getWidth() - Space::l);
@@ -595,24 +592,19 @@ void TimelineEditor::zoomToFit()
 
 void TimelineEditor::centreOnPlayhead()
 {
-    setViewStart (getPlayheadBeat() - te::BeatDuration::fromBeats (getTimelineArea().getWidth() / 2.0 / view.pixelsPerBeat));
+    setViewStart (getPlayheadBeat() - BeatDuration::fromBeats (getTimelineArea().getWidth() / 2.0 / view.pixelsPerBeat));
 }
 
-void TimelineEditor::movePlayheadTo (te::BeatPosition beat)
+void TimelineEditor::movePlayheadTo (BeatPosition beat)
 {
     // Playback starts there from now on, and Space comes back there when it stops.
-    if (auto* e = edit.get())
-        movePlayhead (*e, e->tempoSequence.toTime (beat));
-
+    phazite::movePlayhead (timelineContext, beat);
     updatePlayhead();
 }
 
-te::BeatPosition TimelineEditor::getPlayheadBeat() const
+BeatPosition TimelineEditor::getPlayheadBeat() const
 {
-    if (auto* e = edit.get())
-        return e->tempoSequence.toBeats (e->getTransport().getPosition());
-
-    return {};
+    return phazite::getPlayheadBeat (timelineContext);
 }
 
 bool TimelineEditor::isPlayheadShowingLinkedClip() const
@@ -622,7 +614,7 @@ bool TimelineEditor::isPlayheadShowingLinkedClip() const
 
 void TimelineEditor::updatePlayhead()
 {
-    if (edit.get() == nullptr)
+    if (! timelineContext.hasProject())
     {
         playhead->setVisible (false);
         return;
@@ -698,54 +690,39 @@ bool TimelineEditor::autoScroll (juce::Point<int> position, juce::Rectangle<int>
 }
 
 //==============================================================================
-te::TimecodeSnapType TimelineEditor::getSnapType() const
+GridStep TimelineEditor::getGridStep() const
 {
-    if (auto* e = edit.get())
-        return getGridSnapType (grid, e->tempoSequence, view.start, view.pixelsPerBeat, minGridSpacing);
-
-    return te::TimecodeSnapType::get1BeatSnapType();
+    return phazite::getGridStep (timelineContext, grid, view.start, view.pixelsPerBeat, minGridSpacing);
 }
 
 double TimelineEditor::getGridStepInBeats() const
 {
-    if (auto* e = edit.get())
-        return phazite::getGridStepInBeats (getSnapType(), e->tempoSequence, view.start, grid.triplets);
-
-    return 1.0;
+    return getStepInBeats (timelineContext, getGridStep(), view.start);
 }
 
-te::BeatPosition TimelineEditor::snap (te::BeatPosition beat, juce::ModifierKeys mods) const
+BeatPosition TimelineEditor::snap (BeatPosition beat, juce::ModifierKeys mods) const
 {
-    auto* e = edit.get();
-
-    if (e == nullptr || ! grid.snap || mods.isAltDown())
+    if (! timelineContext.hasProject() || ! grid.snap || mods.isAltDown())
         return beat;
 
     // The grid counts from the time origin, as the ruler does.
-    const auto origin = te::toDuration (timeOrigin);
-    return snapToGrid (std::max (te::BeatPosition(), beat - origin), getSnapType(), e->tempoSequence, grid.triplets) + origin;
+    const auto origin = fromSongStart (timeOrigin);
+    return snapToGrid (timelineContext, std::max (BeatPosition(), beat - origin), getGridStep()) + origin;
 }
 
-te::BeatPosition TimelineEditor::snapDown (te::BeatPosition beat, juce::ModifierKeys mods) const
+BeatPosition TimelineEditor::snapDown (BeatPosition beat, juce::ModifierKeys mods) const
 {
-    auto* e = edit.get();
-
-    if (e == nullptr || ! grid.snap || mods.isAltDown())
+    if (! timelineContext.hasProject() || ! grid.snap || mods.isAltDown())
         return beat;
 
-    const auto& tempo = e->tempoSequence;
-    const auto origin = te::toDuration (timeOrigin);
-    const auto relative = std::max (te::BeatPosition(), beat - origin);
-    return tempo.toBeats (getSnapType().roundTimeDown (tempo.toTime (relative), tempo, grid.triplets)) + origin;
+    const auto origin = fromSongStart (timeOrigin);
+    return snapDownToGrid (timelineContext, std::max (BeatPosition(), beat - origin), getGridStep()) + origin;
 }
 
 void TimelineEditor::setGrid (const GridSettings& newGrid)
 {
     grid = newGrid;
-
-    if (auto* e = edit.get())
-        saveGridSettings (*e, gridOwner, grid);
-
+    saveGridSettings (timelineContext, gridOwner, grid);
     updateGridControls();
     gridChanged();
 }
@@ -756,17 +733,15 @@ void TimelineEditor::updateGridControls()
 
     juce::String text ("Grid: ");
 
-    if (auto* e = edit.get())
-        text << getGridDescription (getSnapType(), e->tempoSequence, grid.triplets);
+    if (timelineContext.hasProject())
+        text << describeGridStep (timelineContext, getGridStep());
 
     gridButton.setButtonText (grid.adaptive ? text + " (auto)" : text);
 }
 
 void TimelineEditor::showGridMenu()
 {
-    auto* e = edit.get();
-
-    if (e == nullptr)
+    if (! timelineContext.hasProject())
         return;
 
     juce::PopupMenu menu;
@@ -777,7 +752,7 @@ void TimelineEditor::showGridMenu()
 
     // Item IDs are the levels plus one, as an ID can't be 0; command items have much larger IDs.
     for (auto level = GridSettings::minFixedLevel; level <= GridSettings::maxFixedLevel; ++level)
-        menu.addItem (level + 1, getGridDescription ({ te::TimecodeType::barsBeats, level }, e->tempoSequence, grid.triplets), true,
+        menu.addItem (level + 1, describeGridStep (timelineContext, { level, grid.triplets }), true,
                       ! grid.adaptive && grid.fixedLevel == level);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridButton),
@@ -888,7 +863,7 @@ void TimelineEditor::refreshShortcutTexts()
                                                         getToolCommandID (allTools[i])));
 }
 
-void TimelineEditor::showRulerMenu (te::BeatPosition)
+void TimelineEditor::showRulerMenu (BeatPosition)
 {
     juce::PopupMenu menu;
     addCommandItems (menu, commands, { "transport.loop", "transport.loopSong" });
@@ -899,20 +874,18 @@ void TimelineEditor::showRulerMenu (te::BeatPosition)
 void TimelineEditor::scrollBarMoved (juce::ScrollBar* scrollBar, double newRangeStart)
 {
     if (scrollBar == &horizontalScrollBar)
-        setViewStart (te::BeatPosition::fromBeats (newRangeStart));
+        setViewStart (BeatPosition::fromBeats (newRangeStart));
     else
         verticalScrollBarMoved (newRangeStart);
 }
 
 void TimelineEditor::timerCallback()
 {
-    auto* e = edit.get();
-
-    if (e == nullptr)
+    if (! timelineContext.hasProject())
         return;
 
     // Smooth while playing; otherwise only often enough to notice moves made elsewhere.
-    const auto playing = e->getTransport().isPlaying();
+    const auto playing = isPlaying (timelineContext);
 
     if (playing != wasPlaying)
     {
@@ -927,13 +900,13 @@ void TimelineEditor::timerCallback()
         const auto width = getTimelineArea().getWidth();
 
         if (const auto x = view.beatToX (beat); x < 0.0 || x > width - 4.0)
-            setViewStart (beat - te::BeatDuration::fromBeats (width * 0.05 / view.pixelsPerBeat));
+            setViewStart (beat - BeatDuration::fromBeats (width * 0.05 / view.pixelsPerBeat));
     }
 
     if (std::abs (getContentRange().getEnd().inBeats() - contentEnd) > 1.0e-6)
         updateScrollBar();
 
-    if (const auto loop = getLoopBeats (*e); ! isNear (loop, shownLoop))
+    if (const auto loop = getLoop (timelineContext); ! isNear (loop, shownLoop))
     {
         shownLoop = loop;
         ruler.repaint();
@@ -945,29 +918,26 @@ void TimelineEditor::timerCallback()
 //==============================================================================
 void paintGridLines (juce::Graphics& g, const TimelineEditor& editor, juce::Rectangle<int> area)
 {
-    auto* edit = editor.getEdit();
-
-    if (edit == nullptr)
+    if (! editor.hasProject())
         return;
 
     const auto& p = getPalette (editor);
-    const auto& tempo = edit->tempoSequence;
+    const auto& context = editor.getContext();
     const auto& view = editor.getView();
-    const auto triplets = editor.getGrid().triplets;
 
     // The grid counts from the time origin: the beats here are from there.
-    const auto origin = te::toDuration (editor.getTimeOrigin());
-    const te::BeatRange visible (view.xToBeat (area.getX() - 1) - origin, view.xToBeat (area.getRight() + 1) - origin);
-    auto type = editor.getSnapType();
+    const auto origin = fromSongStart (editor.getTimeOrigin());
+    const BeatRange visible (view.xToBeat (area.getX() - 1) - origin, view.xToBeat (area.getRight() + 1) - origin);
+    auto step = editor.getGridStep();
 
-    if (getGridStepInBeats (type, tempo, visible.getStart(), triplets) * view.pixelsPerBeat < minLineSpacing)
-        type = getAdaptiveSnapType (tempo, visible.getStart(), view.pixelsPerBeat, triplets, minLineSpacing);
+    if (getStepInBeats (context, step, visible.getStart()) * view.pixelsPerBeat < minLineSpacing)
+        step = getAdaptiveGridStep (context, visible.getStart(), view.pixelsPerBeat, step.triplets, minLineSpacing);
 
     const auto barColour = p.border.interpolatedWith (p.textMuted, 0.3f);
     const auto subdivisionColour = p.border.withMultipliedAlpha (0.5f);
 
-    forEachGridLine (tempo, type, triplets, visible,
-                     [&] (te::BeatPosition beat, GridLineType lineType)
+    forEachGridLine (context, step, visible,
+                     [&] (BeatPosition beat, GridLineType lineType)
                      {
                          g.setColour (lineType == GridLineType::bar ? barColour
                                                                     : (lineType == GridLineType::beat ? p.border : subdivisionColour));
@@ -991,7 +961,7 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
     const auto hasEdit = [getActiveEditor]
     {
         auto* editor = getActiveEditor();
-        return editor != nullptr && editor->getEdit() != nullptr;
+        return editor != nullptr && editor->hasProject();
     };
 
     const auto ticked = [getActiveEditor] (std::function<bool (const TimelineEditor&)> isOn)
@@ -1077,8 +1047,8 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
 
                             // A fixed grid starts at the size the adaptive one had.
                             if (grid.adaptive)
-                                grid.fixedLevel = juce::jlimit (GridSettings::minFixedLevel, GridSettings::maxFixedLevel,
-                                                                editor.getSnapType().getLevel());
+                                grid.fixedLevel =
+                                    juce::jlimit (GridSettings::minFixedLevel, GridSettings::maxFixedLevel, editor.getGridStep().level);
 
                             grid.adaptive = ! grid.adaptive;
                             editor.setGrid (grid);
@@ -1135,10 +1105,10 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
 
     // Nudging and quantizing act on what is selected in the editor: clips or a time range in the playlist,
     // notes in the piano roll.
-    const auto getUndoTarget = [getActiveEditor]() -> te::Edit*
+    const auto getUndoTarget = [getActiveEditor]
     {
         auto* editor = getActiveEditor();
-        return editor != nullptr ? editor->getEdit() : nullptr;
+        return editor != nullptr ? editor->getContext().getEdit() : nullptr;
     };
 
     const auto canNudge = ticked ([] (const TimelineEditor& editor) { return editor.canNudgeSelection(); });

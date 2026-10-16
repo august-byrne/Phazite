@@ -93,6 +93,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Clips.h
     src/model/arrangement/Grid.cpp
     src/model/arrangement/Grid.h
+    src/model/arrangement/GridSettings.h
     src/model/arrangement/Import.cpp
     src/model/arrangement/Import.h
     src/model/arrangement/Outlines.cpp
@@ -103,6 +104,8 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Selection.h
     src/model/arrangement/SongSelection.cpp
     src/model/arrangement/SongSelection.h
+    src/model/arrangement/TimelineModel.cpp
+    src/model/arrangement/TimelineModel.h
     src/model/arrangement/TrackColours.cpp
     src/model/arrangement/TrackColours.h
     src/model/arrangement/Tracks.cpp
@@ -118,6 +121,8 @@ target_sources(phazite_core PRIVATE
     src/model/base/Tracktion.h
     src/model/commands/CommandRegistry.cpp
     src/model/commands/CommandRegistry.h
+    src/model/commands/SongGesture.cpp
+    src/model/commands/SongGesture.h
     src/model/commands/Undo.cpp
     src/model/commands/Undo.h
     src/model/commands/UndoCommands.cpp
@@ -580,6 +585,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestDevices.h
         tests/TempoTests.cpp
         tests/TimelineGestureTests.cpp
+        tests/TimelineModelTests.cpp
         tests/TimelineTests.cpp
         tests/TimelineViewTests.cpp
         tests/ToggleTests.cpp
