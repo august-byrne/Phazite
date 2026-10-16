@@ -40,6 +40,7 @@ public:
 
     void setDetached (DetachablePanel, bool);
     bool isDetached (DetachablePanel) const;
+    juce::Component& getPanel (DetachablePanel); // docked here, or in its own window
 
     // Layouts arrange the panels; they don't hide features.
     enum class Layout
@@ -126,7 +127,6 @@ private:
     juce::String getDefaultHint() const;                 // the guide's next step, or how to search for commands
     void globalFocusChanged (juce::Component*) override; // makes the editor that has the focus the active one
 
-    juce::Component& getPanel (DetachablePanel);
     IconButton& getDetachButton (DetachablePanel);
     std::unique_ptr<PanelWindow>& getWindow (DetachablePanel);
     const std::unique_ptr<PanelWindow>& getWindow (DetachablePanel) const;

@@ -124,6 +124,36 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 }
 
+#if JUCE_WINDOWS
+// A panel's own window is a real one, which Linux CI can't open without a display.
+TEST_CASE ("A panel moved to a window of its own fills it at once, and keeps filling it")
+{
+    using Panel = phazite::ui::AppShell::DetachablePanel;
+    Screen screen;
+
+    for (const auto which : { Panel::browser, Panel::inspector, Panel::editor })
+    {
+        auto& panel = screen.shell.getPanel (which);
+        screen.shell.setDetached (which, true);
+        REQUIRE (screen.shell.isDetached (which));
+
+        auto* window = panel.getParentComponent();
+        REQUIRE (window != nullptr);
+        CHECK (panel.isVisible());
+        CHECK (panel.getWidth() > 0);
+        CHECK (panel.getHeight() > 0);
+        const auto bounds = panel.getBounds();
+
+        // The main window laying itself out again leaves the panel as its window has it.
+        screen.shell.setSize (screen.shell.getWidth() - 10, screen.shell.getHeight());
+        CHECK (panel.getBounds() == bounds);
+
+        screen.shell.setDetached (which, false);
+        CHECK_FALSE (screen.shell.isDetached (which));
+    }
+}
+#endif
+
 TEST_CASE ("The hint bar shows the guide's next step, which a note on the computer keyboard moves on")
 {
     Screen screen;

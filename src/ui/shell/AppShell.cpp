@@ -118,7 +118,8 @@ AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& ke
 
     centre.onResize = [this]
     {
-        juce::Component* items[] = { &playlist, &editorDivider, &editorDock };
+        // A panel in its own window is that window's to lay out: an empty space here.
+        juce::Component* items[] = { &playlist, &editorDivider, editorWindow == nullptr ? &editorDock : nullptr };
         rows.layOutComponents (items, 3, 0, 0, centre.getWidth(), centre.getHeight(), true, true);
         placeDetachButtons();
     };
@@ -398,7 +399,9 @@ void AppShell::resized()
     topBar.setBounds (area.removeFromTop (topBarHeight));
     hintBar.setBounds (area.removeFromBottom (hintBarHeight));
 
-    juce::Component* items[] = { &browser, &browserDivider, &centre, &inspectorDivider, &inspector };
+    // A panel in its own window is that window's to lay out: an empty space here.
+    juce::Component* items[] = { browserWindow == nullptr ? &browser : nullptr, &browserDivider, &centre, &inspectorDivider,
+                                 inspectorWindow == nullptr ? &inspector : nullptr };
     columns.layOutComponents (items, 5, area.getX(), area.getY(), area.getWidth(), area.getHeight(), false, true);
     placeDetachButtons();
 }
