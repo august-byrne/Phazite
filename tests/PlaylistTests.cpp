@@ -6,6 +6,7 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
+#include "model/arrangement/internal/Outlines.h"
 #include "model/commands/Undo.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"

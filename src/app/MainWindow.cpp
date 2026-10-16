@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "model/arrangement/Outlines.h"
 #include "model/engine/LiveInput.h"
+#include "model/project/internal/Export.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/ExportPanel.h"
 
@@ -372,7 +373,7 @@ void MainWindow::showExport()
     auto* panel = new ui::ExportPanel (
         services.settings, defaultFile, getExportRange (edit).getLength().inSeconds(),
         [&edit] (const ExportSettings& settings, const juce::File& file, std::function<void (const ExportReport&)> onFinished)
-        { return std::make_unique<SongExport> (edit, file, settings, std::move (onFinished)); });
+        { return startExport (edit, file, settings, std::move (onFinished)); });
     panel->setSize (560, 600);
 
     juce::DialogWindow::LaunchOptions o;

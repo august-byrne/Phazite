@@ -4,6 +4,8 @@
 #include "ui/components/ValueText.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <juce_audio_basics/juce_audio_basics.h> // MidiMessage
+
 namespace phazite::ui
 {
 namespace

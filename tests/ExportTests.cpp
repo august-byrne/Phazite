@@ -3,6 +3,7 @@
 // written whole or not at all (src/model/project/Export.h), and the window that does it (src/ui/shell/ExportPanel.h).
 #include "UiTestHelpers.h"
 #include "model/project/Export.h"
+#include "model/project/internal/Export.h"
 #include "services/Settings.h"
 #include "ui/shell/ExportPanel.h"
 
@@ -36,7 +37,7 @@ struct SineSong
 ExportReport exportAndWait (te::Edit& edit, const juce::File& file, const ExportSettings& settings)
 {
     std::optional<ExportReport> report;
-    phazite::SongExport running (edit, file, settings, [&report] (const ExportReport& r) { report = r; });
+    const auto running = phazite::startExport (edit, file, settings, [&report] (const ExportReport& r) { report = r; });
     REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
     return *report;
 }
@@ -223,7 +224,8 @@ TEST_CASE ("An export replaces a file only once it is complete")
 
     // Cancelled: the file stays as it was, and nothing else is left in the folder.
     {
-        phazite::SongExport running (*song.edit, file, {}, [] (const ExportReport&) { FAIL ("a cancelled export reports nothing"); });
+        const auto running =
+            phazite::startExport (*song.edit, file, {}, [] (const ExportReport&) { FAIL ("a cancelled export reports nothing"); });
     }
 
     phazite::test::dispatchPendingMessages();
@@ -245,16 +247,15 @@ TEST_CASE ("The song plays again after an export")
     REQUIRE (transport.isPlayContextActive());
 
     std::optional<ExportReport> report;
-    auto running = std::make_unique<phazite::SongExport> (*song.edit, song.renders.getChildFile ("Song.wav"), ExportSettings {},
-                                                          [&report] (const ExportReport& r) { report = r; });
+    auto running = phazite::startExport (*song.edit, song.renders.getChildFile ("Song.wav"), ExportSettings {},
+                                         [&report] (const ExportReport& r) { report = r; });
     CHECK_FALSE (transport.isPlayContextActive()); // the render has it
     REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
     CHECK (report->result.wasOk());
     CHECK (transport.isPlayContextActive());
 
     // And after one that is cancelled.
-    running = std::make_unique<phazite::SongExport> (*song.edit, song.renders.getChildFile ("Again.wav"), ExportSettings {},
-                                                     [] (const ExportReport&) {});
+    running = phazite::startExport (*song.edit, song.renders.getChildFile ("Again.wav"), ExportSettings {}, [] (const ExportReport&) {});
     CHECK_FALSE (transport.isPlayContextActive());
     running = nullptr;
     CHECK (transport.isPlayContextActive());
@@ -280,7 +281,7 @@ struct ExportWindow
     phazite::ui::ExportPanel panel { settings, file, 2.0,
                                      [this] (const ExportSettings& chosen, const juce::File& to,
                                              std::function<void (const ExportReport&)> onFinished)
-                                     { return std::make_unique<phazite::SongExport> (*song.edit, to, chosen, std::move (onFinished)); } };
+                                     { return phazite::startExport (*song.edit, to, chosen, std::move (onFinished)); } };
     phazite::test::TestWindow window { panel, 560, 600 };
     phazite::test::Mouse mouse { panel };
     juce::Array<juce::File> asked; // the files the window asked to replace

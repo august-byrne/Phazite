@@ -6,7 +6,7 @@
 // file is then measured again, for the report.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include <juce_core/juce_core.h>
 
 #include <functional>
 #include <memory>
@@ -56,35 +56,26 @@ struct ExportReport
 // normalizing does: it never limits), or 0 when it met the target, within half an LU, or had none.
 double getLoudnessShortfall (const ExportSettings&, const ExportReport&);
 
-// The song's time that an export covers: from its start to its end. The tails after it last until they fall silent
-// (under -70 dB for a block of 512 samples), up to tailSeconds.
+// The song's time that an export covers is from its start to its end; the tails after it last until they fall silent
+// (under -70 dB for a block of 512 samples), up to tailSeconds (internal/Export.h: getExportRange()).
 inline constexpr double tailSeconds = 10.0;
-te::TimeRange getExportRange (const te::Edit&);
 
-// Whether the song can be exported: it has clips, and isn't recording.
-bool canExport (const te::Edit&);
-
-// An export in progress, rendering on a thread of its own while this lives (Tracktion's EditRenderer). It stops playback
-// first, and lets the Edit play again when it is done. The report comes on the message thread, once, after the render
-// thread has finished; deleting this first cancels the export, without a report, and leaves any file that was there.
-// Create and delete it on the message thread; the Edit must outlive it.
+// An export in progress, rendering on a thread of its own while this lives (Tracktion's EditRenderer; internal/Export.h
+// starts one). It stops playback first, and lets the project play again when it is done. The report comes on the message
+// thread, once, after the render thread has finished; deleting this first cancels the export, without a report, and
+// leaves any file that was there. Delete it on the message thread; the project must outlive it.
 class SongExport
 {
 public:
-    SongExport (te::Edit&, const juce::File&, const ExportSettings&, std::function<void (const ExportReport&)> onFinished);
     ~SongExport();
 
     float getProgress() const; // from 0 to 1
 
-private:
-    struct State; // what the render thread shares with this
-    te::Edit& edit;
-    std::shared_ptr<State> state;
-    std::shared_ptr<te::EditRenderer::Handle> handle;
-    bool restorePlayback = false;
+    struct Impl; // the render, and what its thread shares with this (internal/Export.h)
+    explicit SongExport (std::unique_ptr<Impl>);
 
-    void finish (const ExportReport&);
-    void endRender();
+private:
+    std::unique_ptr<Impl> impl;
 
     JUCE_DECLARE_NON_COPYABLE (SongExport)
 };

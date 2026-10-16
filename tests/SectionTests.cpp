@@ -6,6 +6,7 @@
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/TrackColours.h"
+#include "model/arrangement/internal/Outlines.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
 

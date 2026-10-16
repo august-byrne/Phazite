@@ -5,15 +5,13 @@
 // CMakeLists.txt.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include <juce_graphics/juce_graphics.h>
 
 #include <optional>
 #include <vector>
 
 namespace phazite
 {
-class CommandRegistry;
-
 struct Outline
 {
     struct Section
@@ -39,23 +37,6 @@ struct Outline
 const std::vector<Outline>& getBuiltInOutlines();
 const Outline* findOutline (const juce::String& id);
 
-// Replaces the song's sections with the outline's, from the start of the song, in bars of the song's time
-// signature (so they last as long as the tempo makes them). What is on the tracks stays where it is.
-void applyOutline (te::Edit&, const Outline&);
-
-// Applies the built-in outline with that id (findOutline()). Returns false, and changes nothing, if there is none.
-bool applyOutline (te::Edit&, const juce::String& outlineID);
-
-// The id of the outline applied last, or an empty string.
-juce::String getAppliedOutline (const te::Edit&);
-
-// Whether the outline with that id was applied last and the song still has sections.
-bool isOutlineApplied (const te::Edit&, const juce::String& outlineID);
-
 // The id of the command that applies an outline: "section.outline.<outline's id>".
 juce::String getOutlineCommandID (const juce::String& outlineID);
-
-// The outline commands: one for each built-in outline, so the palette finds them by name, each one undo step and
-// ticked while its outline is applied (isOutlineApplied()). The app registers them right after the section commands.
-void addOutlineCommands (CommandRegistry&, te::SelectionManager&);
 } // namespace phazite

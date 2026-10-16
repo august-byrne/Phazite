@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Export.h"
+#include "internal/Export.h"
 #include "model/transport/Playback.h"
 #include "model/transport/Recording.h"
 
@@ -134,9 +135,26 @@ bool canExport (const te::Edit& edit)
 }
 
 //==============================================================================
-struct SongExport::State
+struct SongExport::Impl
 {
-    State (SongExport& e, te::Engine& en, const juce::File& file, std::function<void (const ExportReport&)> callback)
+    Impl (te::Edit&, const juce::File&, const ExportSettings&, std::function<void (const ExportReport&)> onFinished);
+    ~Impl();
+
+    struct State; // what the render thread shares with this
+    te::Edit& edit;
+    std::shared_ptr<State> state;
+    std::shared_ptr<te::EditRenderer::Handle> handle;
+    bool restorePlayback = false;
+
+    void finish (const ExportReport&);
+    void endRender();
+
+    JUCE_DECLARE_NON_COPYABLE (Impl)
+};
+
+struct SongExport::Impl::State
+{
+    State (Impl& e, te::Engine& en, const juce::File& file, std::function<void (const ExportReport&)> callback)
         : owner (e),
           engine (en),
           temporary (file),
@@ -150,20 +168,20 @@ struct SongExport::State
         juce::MessageManager::callAsync (
             [weakState, report]
             {
-                // Here, where the export is deleted, it is alive while this is: ~SongExport waits for the render thread,
-                // the only other owner, before it lets go.
+                // Here, where the export is deleted, it is alive while this is: ~Impl waits for the render thread, the only
+                // other owner, before it lets go.
                 if (const auto locked = weakState.lock())
                     locked->owner.finish (report);
             });
     }
 
-    SongExport& owner;
+    Impl& owner;
     te::Engine& engine;
     juce::TemporaryFile temporary; // the render, until it replaces the chosen file; deleted if it never does
     const std::function<void (const ExportReport&)> onFinished;
 };
 
-SongExport::SongExport (te::Edit& e, const juce::File& file, const ExportSettings& settings,
+SongExport::Impl::Impl (te::Edit& e, const juce::File& file, const ExportSettings& settings,
                         std::function<void (const ExportReport&)> onFinished)
     : edit (e),
       state (std::make_shared<State> (*this, e.engine, file, std::move (onFinished)))
@@ -200,17 +218,12 @@ SongExport::SongExport (te::Edit& e, const juce::File& file, const ExportSetting
                                        });
 }
 
-SongExport::~SongExport()
+SongExport::Impl::~Impl()
 {
     endRender(); // cancels it, if it is still rendering
 }
 
-float SongExport::getProgress() const
-{
-    return handle != nullptr ? handle->getProgress() : 0.0f;
-}
-
-void SongExport::endRender()
+void SongExport::Impl::endRender()
 {
     handle.reset(); // waits for the render thread
 
@@ -218,7 +231,7 @@ void SongExport::endRender()
         edit.getTransport().ensureContextAllocated(); // live MIDI and the meters play again
 }
 
-void SongExport::finish (const ExportReport& rendered)
+void SongExport::Impl::finish (const ExportReport& rendered)
 {
     endRender();
     auto report = rendered;
@@ -228,5 +241,23 @@ void SongExport::finish (const ExportReport& rendered)
 
     if (const auto callback = state->onFinished; callback != nullptr)
         callback (report); // last: it may delete this
+}
+
+std::unique_ptr<SongExport> startExport (te::Edit& edit, const juce::File& file, const ExportSettings& settings,
+                                         std::function<void (const ExportReport&)> onFinished)
+{
+    return std::make_unique<SongExport> (std::make_unique<SongExport::Impl> (edit, file, settings, std::move (onFinished)));
+}
+
+SongExport::SongExport (std::unique_ptr<Impl> i)
+    : impl (std::move (i))
+{
+}
+
+SongExport::~SongExport() = default;
+
+float SongExport::getProgress() const
+{
+    return impl->handle != nullptr ? impl->handle->getProgress() : 0.0f;
 }
 } // namespace phazite

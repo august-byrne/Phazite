@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppCommands.h"
-#include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Tracks.h"
+#include "model/arrangement/internal/Outlines.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/UndoCommands.h"
 #include "model/mixer/Mixer.h"

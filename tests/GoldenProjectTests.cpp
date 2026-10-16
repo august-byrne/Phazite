@@ -14,6 +14,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/Sections.h"
 #include "model/arrangement/Tracks.h"
+#include "model/arrangement/internal/Outlines.h"
 #include "model/base/Schema.h"
 #include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"

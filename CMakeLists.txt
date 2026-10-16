@@ -114,6 +114,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/TrackColours.h
     src/model/arrangement/Tracks.cpp
     src/model/arrangement/Tracks.h
+    src/model/arrangement/internal/Outlines.h
     src/model/arrangement/internal/SongRange.h
     src/model/arrangement/internal/SongSelection.h
     src/model/base/Beats.h
@@ -188,6 +189,8 @@ target_sources(phazite_core PRIVATE
     src/model/project/Project.h
     src/model/project/ProjectContext.cpp
     src/model/project/ProjectContext.h
+    src/model/project/internal/Export.h
+    src/model/project/internal/NewProject.h
     src/model/project/internal/ProjectContext.h
     src/model/project/StarterProject.cpp
     src/model/project/StarterProject.h

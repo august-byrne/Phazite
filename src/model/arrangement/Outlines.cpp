@@ -2,6 +2,7 @@
 #include "Outlines.h"
 #include "Sections.h"
 #include "Tracks.h"
+#include "internal/Outlines.h"
 #include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"

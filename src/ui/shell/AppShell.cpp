@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppShell.h"
 #include "CommandPalette.h"
-#include "model/arrangement/Tracks.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/browser/PluginPicker.h"
 #include "ui/input/CommandUI.h"

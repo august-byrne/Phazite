@@ -4,8 +4,9 @@
 // synth track that the computer keyboard can play at once.
 #pragma once
 
-#include "model/transport/Tempo.h"
+#include "model/transport/TempoValues.h"
 
+#include <juce_core/juce_core.h>
 #include <optional>
 
 namespace phazite
@@ -23,9 +24,4 @@ struct NewProjectSettings
 // Whether a new project can start so: a tempo within the limits, a time signature Phazite takes, a root and a scale it
 // knows, and an outline it has.
 bool isValid (const NewProjectSettings&);
-
-// Adds what the settings choose to a new project's Edit, as Project::create()'s content function, so that it is part of
-// the first save: the tempo and time signature, the instrument tracks, the key (each track's, and new tracks') and the
-// outline's sections, in bars of that time signature.
-void addNewProjectContent (te::Edit&, const NewProjectSettings&);
 } // namespace phazite

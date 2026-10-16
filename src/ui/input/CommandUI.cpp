@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "CommandUI.h"
-#include "model/arrangement/Tracks.h"
+#include "model/arrangement/TrackColours.h"
 
 namespace phazite::ui
 {
