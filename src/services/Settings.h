@@ -55,7 +55,7 @@ public:
     // Every setting Phazite keeps. A key is part of Settings.xml's format: never rename one.
     static constexpr TextSetting theme { "phaziteTheme", "dark", SaveTiming::now }; // dark, light, highContrast
     static constexpr BoolSetting hoverHelp { "phaziteHoverHelp", true, SaveTiming::now };
-    static constexpr BoolSetting computerKeyboard { "phaziteComputerKeyboard", true, SaveTiming::now };
+    static constexpr BoolSetting computerKeyboard { "phaziteComputerKeyboard", false, SaveTiming::now }; // off at first (question 10)
     static constexpr NumberSetting interfaceScale { "phaziteInterfaceScale", 1.0, SaveTiming::now };
     static constexpr BoolSetting welcomeShown { "phaziteWelcomeShown", false, SaveTiming::now };
     static constexpr TextSetting keymap { "phaziteKeymap", "Phazite", SaveTiming::now };

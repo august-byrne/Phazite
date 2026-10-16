@@ -847,8 +847,8 @@ The roadmap's [architecture track](roadmap.md#architecture-track) gets there in 
 6. **Airwindows:** ship its 186 MIT-licensed effects as extra devices? They also lock on the audio thread today.
 7. **Plug-in sandboxing:** first update after v1 (proposed), or before v1?
 8. **Ableton Live keymap:** in v1, or soon after?
-9. ~~Single-key tools and the computer keyboard~~ **Decided:** Ableton Live's way. The computer keyboard plays notes by default, and Shift and a letter run that letter's single-key shortcut ([section 12](#12-commands-keys-and-help)).
-10. **The computer keyboard at startup (raised 2026-10-13):** while it plays notes, 7 of the 9 tool letters (P, S, T, D, E, C, Z) play notes or change the octave or velocity instead, unless Shift is held, and the owner found tool keys that "don't work". Proposed: start with it off, as Ableton Live does when a Set loads so that shortcuts work, and turn it on with M or the top bar's button. The digits 1 to 9 pick the tools either way.
+9. ~~Single-key tools and the computer keyboard~~ **Decided:** Ableton Live's way. While the computer keyboard plays notes, Shift and a letter run that letter's single-key shortcut ([section 12](#12-commands-keys-and-help)).
+10. ~~The computer keyboard at startup~~ **Decided (2026-10-16):** it starts off, so that the tools' letters (P, S, T, D, E, C, Z) work; M or the top bar's button turns it on, and Phazite remembers the choice. The digits 1 to 9 pick the tools either way.
 
 Raised by the mixer research (2026-10-13), each with what the research recommends:
 

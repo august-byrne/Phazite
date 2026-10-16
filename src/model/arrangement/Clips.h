@@ -17,9 +17,6 @@ bool hasAudioClips (const juce::Array<te::Clip*>&); // whether any of them holds
 // clips don't count.
 bool hasFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
 
-// The color a clip shows: its own, if it was given one, otherwise its track's.
-juce::Colour getClipColour (const te::Clip&, juce::Colour trackColour);
-
 // A copy of each clip, on the same track and in the same place, for the caller to move. As aliases,
 // the copies stay linked to their originals: editing the notes of one edits them all.
 juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>&, bool asAliases);

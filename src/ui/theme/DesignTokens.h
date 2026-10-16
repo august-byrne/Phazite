@@ -108,13 +108,12 @@ inline constexpr float attentionTint = 0.35f;
 
 // Track colors are saved in projects, so their palette is in the model: phazite::getTrackColours().
 
-// How strongly a track's color tints what belongs to the track, so that its color runs through its row: the
-// alpha of the color over the playlist's background, or how far a header's surface is mixed with it.
+// How strongly a track's color tints its header: how far the header's surface is mixed with it. The track's clips
+// are in its color; its row in the playlist isn't (the owner's choice, 2026-10-16): a selected track's row is only a
+// shade lighter, the alpha of the text color over the background.
 namespace TrackTint
 {
-    inline constexpr float row = 0.12f;
-    inline constexpr float folderRow = 0.18f;
-    inline constexpr float selectedRow = 0.24f;
+    inline constexpr float selectedRow = 0.06f;
     inline constexpr float header = 0.3f;
     inline constexpr float selectedHeader = 0.5f;
 } // namespace TrackTint

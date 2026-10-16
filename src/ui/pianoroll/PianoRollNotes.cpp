@@ -40,7 +40,7 @@ juce::Colour getNoteColour (te::MidiClip& clip)
 {
     auto* track = clip.getTrack();
     const auto row = track != nullptr ? getPlaylistTracks (clip.edit).indexOf (track) : 0;
-    return getClipColour (clip, track != nullptr ? getTrackColour (*track, row) : juce::Colours::grey);
+    return track != nullptr ? getTrackColour (*track, row) : juce::Colours::grey; // its track's, as in the playlist
 }
 
 //==============================================================================

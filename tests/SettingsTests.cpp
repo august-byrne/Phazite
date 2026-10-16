@@ -67,7 +67,7 @@ TEST_CASE ("Settings have their defaults, and are stored as before")
 
     CHECK (settings.get (Settings::theme) == "dark");
     CHECK (settings.get (Settings::hoverHelp));
-    CHECK (settings.get (Settings::computerKeyboard));
+    CHECK_FALSE (settings.get (Settings::computerKeyboard)); // single-key shortcuts work until it is turned on
     CHECK (settings.get (Settings::interfaceScale) == doctest::Approx (1.0));
     CHECK_FALSE (settings.get (Settings::welcomeShown));
     CHECK (settings.get (Settings::keymap) == "Phazite");

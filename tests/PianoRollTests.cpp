@@ -72,6 +72,17 @@ struct PianoRollScreen
 };
 } // namespace
 
+TEST_CASE ("The piano roll keeps the notes being edited in view while the song plays, unless asked to follow it")
+{
+    PianoRollScreen screen;
+    CHECK_FALSE (screen.pianoRoll.isFollowingPlayback());
+
+    // View > Follow Playback turns it on for the editor used last, as the playlist has it from the start.
+    phazite::ui::addTimelineCommands (screen.registry, [&screen] { return &screen.pianoRoll; });
+    REQUIRE (screen.registry.invoke ("view.followPlayback"));
+    CHECK (screen.pianoRoll.isFollowingPlayback());
+}
+
 TEST_CASE ("The piano roll counts bars from the start of the clip it shows")
 {
     PianoRollScreen screen;

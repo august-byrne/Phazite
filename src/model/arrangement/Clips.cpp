@@ -95,11 +95,6 @@ bool hasFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type
     return any;
 }
 
-juce::Colour getClipColour (const te::Clip& clip, juce::Colour trackColour)
-{
-    return clip.state.hasProperty (te::IDs::colour) ? clip.getColour() : trackColour;
-}
-
 juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAliases)
 {
     juce::Array<te::Clip*> copies;

@@ -8,9 +8,11 @@
 #include "model/commands/Undo.h"
 #include "model/transport/Playback.h"
 #include "ui/input/KeyDispatcher.h"
+#include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/playlist/TrackHeader.h"
 #include "ui/playlist/TrackHeights.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace
 {
@@ -394,7 +396,8 @@ TEST_CASE ("With FL Studio's keymap, Ctrl+B repeats a selected time range, and t
 
 TEST_CASE ("The playlist's vertical scroll bar shows only while its tracks don't fit, and its room goes to the tracks otherwise")
 {
-    PlaylistScreen screen; // three tracks, which fit
+    PlaylistScreen screen;                         // three tracks, which fit
+    CHECK (screen.playlist.isFollowingPlayback()); // unlike the piano roll
     juce::ScrollBar* vertical = nullptr;
 
     for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
@@ -417,4 +420,21 @@ TEST_CASE ("The playlist's vertical scroll bar shows only while its tracks don't
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (vertical->isVisible());
     CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
+}
+
+TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren't colored")
+{
+    PlaylistScreen screen;
+    auto& clip = screen.addClip (0, 0.0, 4.0);
+    clip.setColour (juce::Colours::red); // a color of its own, as Tracktion gives some clips
+    phazite::test::dispatchPendingMessages();
+
+    const auto clipComponents = phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist);
+    REQUIRE (clipComponents.size() == 1);
+    CHECK (clipComponents[0]->getColour() == phazite::getTrackColour (*screen.tracks[0], 0));
+
+    // An empty stretch of an unselected track's row is the playlist's background, between grid lines.
+    const auto image = screen.window.paintEverything();
+    const auto point = screen.lanes->getBounds().getPosition() + screen.at (10.37, 1);
+    CHECK (image.getPixelAt (point.x, point.y) == phazite::ui::getPalette (screen.playlist).background);
 }

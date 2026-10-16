@@ -255,9 +255,9 @@ void Playlist::updateClips()
     {
         if (auto* clip = component->getClip())
         {
+            // A clip shows in its track's colour, as the track's header does.
             const auto row = getRowOf (clip->getTrack());
-            const auto trackColour = row >= 0 ? rows[(size_t) row].colour : juce::Colours::grey;
-            component->update (getClipColour (*clip, trackColour), selection.isSelected (clip));
+            component->update (row >= 0 ? rows[(size_t) row].colour : juce::Colours::grey, selection.isSelected (clip));
         }
     }
 }
@@ -312,8 +312,7 @@ void Playlist::clipChanged (const juce::ValueTree& clipState)
         {
             positionClip (*component);
             const auto row = getRowOf (clip->getTrack());
-            component->update (getClipColour (*clip, row >= 0 ? rows[(size_t) row].colour : juce::Colours::grey),
-                               selection.isSelected (clip));
+            component->update (row >= 0 ? rows[(size_t) row].colour : juce::Colours::grey, selection.isSelected (clip));
         }
     }
 }

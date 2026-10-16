@@ -20,6 +20,7 @@ public:
 
     // Shows the clip as it is now, in this color, and whether it is selected.
     void update (juce::Colour, bool isSelected);
+    juce::Colour getColour() const noexcept { return colour; }
 
     void paint (juce::Graphics&) override;
 

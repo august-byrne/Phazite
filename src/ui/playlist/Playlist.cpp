@@ -75,20 +75,17 @@ void Playlist::Lanes::paint (juce::Graphics& g)
         }
     }
 
-    // Each row in its track's color, as the track's header is: more of it for folders, and for the
-    // selected tracks.
+    // The selected tracks' rows a shade lighter. The rows aren't in their tracks' colors: the headers and the clips
+    // carry them.
     for (const auto& row : playlist.rows)
     {
         auto* track = row.track.get();
         const auto area = getRowArea (row).getIntersection (clip);
 
-        if (track == nullptr || area.isEmpty())
+        if (track == nullptr || area.isEmpty() || ! playlist.selection.isSelected (track))
             continue;
 
-        const auto tint = playlist.selection.isSelected (track) ? TrackTint::selectedRow
-                          : track->isFolderTrack()              ? TrackTint::folderRow
-                                                                : TrackTint::row;
-        g.setColour (row.colour.withAlpha (tint));
+        g.setColour (p.text.withAlpha (TrackTint::selectedRow));
         g.fillRect (area);
     }
 

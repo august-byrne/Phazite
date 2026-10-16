@@ -33,6 +33,10 @@ PianoRoll::PianoRoll (CommandBridge& bridge, te::SelectionManager& selectionMana
 {
     setTitle ("Piano roll");
 
+    // The notes being edited stay in view while the song plays (the owner's choice, 2026-10-16); View > Follow
+    // Playback turns following on, as the playlist has it.
+    setFollowingPlayback (false);
+
     instrumentButton.setTitle ("Instrument");
     instrumentButton.onClick = [this] { instrumentClicked(); };
     chordButton.setTitle ("Chord stamp");
