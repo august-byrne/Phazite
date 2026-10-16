@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SettingsPanel.h"
-#include "model/engine/LiveInput.h"
-#include "model/project/ProjectContext.h"
+#include "model/mixer/MixerModel.h"
+#include "model/transport/TransportModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // AudioDeviceSelectorComponent
@@ -20,7 +20,7 @@ namespace
 } // namespace
 
 //==============================================================================
-MidiSettings::MidiSettings (te::Engine& e, ComputerKeyboard& keyboard, const ProjectContext& context)
+MidiSettings::MidiSettings (EngineContext& e, ComputerKeyboard& keyboard, const ProjectContext& context)
     : engine (e),
       computerKeyboard (keyboard),
       projectContext (context)
@@ -46,35 +46,25 @@ MidiSettings::MidiSettings (te::Engine& e, ComputerKeyboard& keyboard, const Pro
                                                              &keyboardHelp, &routingLabel })
         addAndMakeVisible (c);
 
-    engine.getDeviceManager().addChangeListener (this);
+    engine.addChangeListener (this);
     rebuild();
 }
 
 MidiSettings::~MidiSettings()
 {
-    engine.getDeviceManager().removeChangeListener (this);
+    engine.removeChangeListener (this);
 }
 
 void MidiSettings::rebuild()
 {
     inputButtons.clear();
 
-    for (const auto& device : engine.getDeviceManager().getMidiInDevices())
+    for (const auto& input : engine.getMidiInputs())
     {
-        if (device->getDeviceType() != te::InputDevice::physicalMidiDevice)
-            continue;
-
-        auto* button = inputButtons.add (std::make_unique<juce::ToggleButton> (device->getName()));
-        button->setToggleState (device->isEnabled(), juce::dontSendNotification);
+        auto* button = inputButtons.add (std::make_unique<juce::ToggleButton> (input.name));
+        button->setToggleState (input.isOn, juce::dontSendNotification);
         button->setTooltip ("Turns this MIDI input on or off. Everything it plays goes to the track that live MIDI plays.");
-
-        // Tracktion may replace its device objects when devices change, so keep only a weak reference.
-        button->onClick = [weakDevice = std::weak_ptr<te::MidiInputDevice> (device), button]
-        {
-            if (auto d = weakDevice.lock())
-                d->setEnabled (button->getToggleState());
-        };
-
+        button->onClick = [this, id = input.id, button] { engine.setMidiInputOn (id, button->getToggleState()); };
         addAndMakeVisible (button);
     }
 
@@ -83,9 +73,8 @@ void MidiSettings::rebuild()
 
     juce::String routing ("Live MIDI plays no track yet: it goes to the first track with an instrument.");
 
-    if (auto* edit = projectContext.getEdit())
-        if (auto* track = getLiveMidiTrack (*edit))
-            routing = "Live MIDI plays the track \"" + track->getName() + "\".";
+    if (const auto track = getChannel (projectContext, getLiveMidiTrack (projectContext)))
+        routing = "Live MIDI plays the track \"" + track->name + "\".";
 
     routingLabel.setText (routing, juce::dontSendNotification);
     resized();
@@ -152,7 +141,7 @@ void ShortcutSettings::resized()
 }
 
 //==============================================================================
-SettingsPanel::SettingsPanel (te::Engine& engine, CommandBridge& commands, ComputerKeyboard& computerKeyboard,
+SettingsPanel::SettingsPanel (EngineContext& engine, CommandBridge& commands, ComputerKeyboard& computerKeyboard,
                               const ProjectContext& context, std::function<void (const juce::String&)> chooseKeymap)
     : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop)
 {
@@ -167,8 +156,7 @@ SettingsPanel::SettingsPanel (te::Engine& engine, CommandBridge& commands, Compu
     // inputs are in their own tab, because Tracktion (not JUCE's device manager) opens them. The
     // Engine saves changes in its settings.
     addTab ("Audio", background,
-            new juce::AudioDeviceSelectorComponent (engine.getDeviceManager().deviceManager, 0, 512, 1, 512, false, false, true, true),
-            true);
+            new juce::AudioDeviceSelectorComponent (engine.getAudioDeviceManager(), 0, 512, 1, 512, false, false, true, true), true);
     addTab ("MIDI", background, new MidiSettings (engine, computerKeyboard, context), true);
     addTab ("Shortcuts", background, new ShortcutSettings (commands, std::move (chooseKeymap)), true);
 }

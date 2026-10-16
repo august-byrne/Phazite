@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TopBar.h"
-#include "model/commands/Undo.h"
-#include "model/project/ProjectContext.h"
-#include "model/transport/Tempo.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -12,7 +9,7 @@
 
 namespace phazite::ui
 {
-TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContext& context)
+TopBar::TopBar (EngineContext& e, CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContext& context)
     : engine (e),
       commands (bridge),
       computerKeyboard (keyboard),
@@ -55,17 +52,9 @@ TopBar::TopBar (te::Engine& e, CommandBridge& bridge, ComputerKeyboard& keyboard
     tempoField.textFromValueFunction = [] (double bpm) { return formatTempo (bpm); };
     tempoField.valueFromTextFunction = [this] (const juce::String& text) { return parseTempo (text).value_or (tempoField.getValue()); };
     tempoField.updateText();
-    tempoField.onDragStart = [this]
-    {
-        if (auto* edit = projectContext.getEdit())
-            tempoDrag = std::make_unique<phazite::Gesture> (*edit, "Change Tempo");
-    };
-    tempoField.onDragEnd = [this] { tempoDrag = nullptr; };
-    tempoField.onValueChange = [this]
-    {
-        if (auto* edit = projectContext.getEdit())
-            setTempo (*edit, tempoField.getValue());
-    };
+    tempoField.onDragStart = [this] { tempo.beginGesture(); };
+    tempoField.onDragEnd = [this] { tempo.endGesture(); };
+    tempoField.onValueChange = [this] { tempo.setValue (tempoField.getValue()); };
     tempoField.setTooltip ("Tempo, in beats per minute: drag it up or down, scroll, or click it and type");
 
     timeSignatureButton.setTitle ("Time signature");
@@ -104,6 +93,7 @@ TopBar::~TopBar()
 
 void TopBar::projectChanged()
 {
+    tempo = getTempoHandle (projectContext); // ends a drag of the closing project's tempo
     masterVolumeAttachment.setParameter (getMasterVolume (projectContext));
     masterMeter.setSource (getMasterLevel (projectContext));
     timerCallback();
@@ -158,22 +148,21 @@ void TopBar::updateKeyboardButton()
 
 void TopBar::updateTempo()
 {
-    auto* edit = projectContext.getEdit();
-    tempoField.setEnabled (edit != nullptr);
-    timeSignatureButton.setEnabled (edit != nullptr);
+    const auto timeSignature = getTimeSignature (projectContext);
+    tempoField.setEnabled (tempo.isValid());
+    timeSignatureButton.setEnabled (timeSignature.has_value());
 
-    if (edit == nullptr)
+    if (! tempo.isValid() || ! timeSignature.has_value())
         return;
 
     // Not while it is dragged or typed in. (Its text box keeps the keyboard focus after a click, typing or not.)
     const auto* focused = juce::Component::getCurrentlyFocusedComponent();
     const auto typing = dynamic_cast<const juce::TextEditor*> (focused) != nullptr && tempoField.isParentOf (focused);
 
-    if (tempoDrag == nullptr && ! typing)
-        tempoField.setValue (getTempo (*edit), juce::dontSendNotification);
+    if (! tempo.isInGesture() && ! typing)
+        tempoField.setValue (tempo.getValue(), juce::dontSendNotification);
 
-    const auto timeSignature = getTimeSignature (*edit);
-    timeSignatureButton.setButtonText (formatTimeSignature (timeSignature.numerator, timeSignature.denominator));
+    timeSignatureButton.setButtonText (formatTimeSignature (timeSignature->numerator, timeSignature->denominator));
 }
 
 void TopBar::showRecordMenu()
@@ -192,12 +181,12 @@ void TopBar::showMetronomeMenu()
 
 void TopBar::showTimeSignatureMenu()
 {
-    auto* edit = projectContext.getEdit();
+    const auto shown = getTimeSignature (projectContext);
 
-    if (edit == nullptr)
+    if (! shown.has_value())
         return;
 
-    const auto current = getTimeSignature (*edit);
+    const auto current = *shown;
     const juce::Component::SafePointer<TopBar> safeThis (this);
     juce::PopupMenu menu;
 
@@ -207,8 +196,7 @@ void TopBar::showTimeSignatureMenu()
                       [safeThis, timeSignature]
                       {
                           if (safeThis != nullptr)
-                              if (auto* e = safeThis->projectContext.getEdit())
-                                  setTimeSignature (*e, timeSignature);
+                              setTimeSignature (safeThis->projectContext, timeSignature);
                       });
     };
 
@@ -282,8 +270,8 @@ void TopBar::resized()
 
 void TopBar::timerCallback()
 {
-    auto* edit = projectContext.getEdit();
-    const bool playing = edit != nullptr && edit->getTransport().isPlaying();
+    const auto open = projectContext.hasProject();
+    const bool playing = isPlaying (projectContext);
 
     // The play button shows what clicking it does, and screen readers say so.
     if (const auto title = juce::String (playing ? "Stop" : "Play"); playButton.getTitle() != title)
@@ -292,18 +280,17 @@ void TopBar::timerCallback()
         playButton.setIcon (playing ? Icon::stop : Icon::play);
     }
 
-    playButton.setEnabled (edit != nullptr);
+    playButton.setEnabled (open);
     recordButton.setEnabled (isCommandEnabled ("transport.record"));
     recordButton.setToggleState (isCommandTicked ("transport.record"), juce::dontSendNotification);
     captureButton.setEnabled (isCommandEnabled ("transport.capture"));
-    loopButton.setEnabled (edit != nullptr);
-    loopButton.setToggleState (edit != nullptr && edit->getTransport().looping.get(), juce::dontSendNotification);
-    metronomeButton.setEnabled (edit != nullptr);
+    loopButton.setEnabled (open);
+    loopButton.setToggleState (isLoopOn (projectContext), juce::dontSendNotification);
+    metronomeButton.setEnabled (open);
     metronomeButton.setToggleState (isCommandTicked ("transport.metronome"), juce::dontSendNotification);
     updateTempo();
 
-    cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",
-                      juce::dontSendNotification);
+    cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getCpuUsage() * 100.0)) + "%", juce::dontSendNotification);
     updateKeyboardButton();
 
     masterVolumeAttachment.update();

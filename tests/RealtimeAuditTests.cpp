@@ -298,6 +298,19 @@ Measurement recordAndMeasure (te::Edit& edit)
     std::thread midiThread (
         [&edit, &measuring, &notesBegun]
         {
+            // A chord first. Tracktion's pooled MIDI buffers grow to the most messages a block has carried, and on a busy
+            // machine the notes this thread plays can bunch into one block late in the measured second: the chord grows
+            // them during the warm-up, to more than that.
+            constexpr int chordSize = 12;
+
+            for (int note = 0; note < chordSize; ++note)
+                phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOn (1, 72 + note, 0.8f));
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (50));
+
+            for (int note = 0; note < chordSize; ++note)
+                phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOff (1, 72 + note));
+
             for (int note = 0; measuring.load(); ++note)
             {
                 phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOn (1, 48 + note % 24, 0.8f));

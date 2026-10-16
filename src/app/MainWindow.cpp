@@ -56,8 +56,8 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     setUsingNativeTitleBar (true);
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
-    auto content = std::make_unique<ui::AppShell> (engine, commands, shortcutKeys, computerKeyboard, s.getContext(), services.settings,
-                                                   services.soundPack, services.library, services.previewer);
+    auto content = std::make_unique<ui::AppShell> (*services.engineContext, commands, shortcutKeys, computerKeyboard, s.getContext(),
+                                                   services.settings, services.soundPack, services.library, services.previewer);
     shell = content.get();
     setContentOwned (content.release(), false);
 
@@ -301,7 +301,7 @@ void MainWindow::showSettings (std::optional<ui::SettingsPanel::Tab> tab)
         return;
     }
 
-    auto* panel = new ui::SettingsPanel (engine, commands, computerKeyboard, session.getContext(),
+    auto* panel = new ui::SettingsPanel (*services.engineContext, commands, computerKeyboard, session.getContext(),
                                          [this] (const juce::String& name) { setKeymap (name); });
     panel->setSize (640, 600);
     panel->showTab (tab.value_or (ui::SettingsPanel::audio));

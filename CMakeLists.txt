@@ -138,6 +138,8 @@ target_sources(phazite_core PRIVATE
     src/model/devices/internal/ParameterHandle.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
+    src/model/engine/EngineContext.cpp
+    src/model/engine/EngineContext.h
     src/model/engine/EngineSetup.cpp
     src/model/engine/EngineSetup.h
     src/model/engine/LiveInput.cpp
@@ -146,6 +148,7 @@ target_sources(phazite_core PRIVATE
     src/model/engine/LoudnessMeterPlugin.h
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
+    src/model/engine/internal/EngineContext.h
     src/model/mixer/Buses.cpp
     src/model/mixer/Buses.h
     src/model/mixer/DeviceType.h
@@ -185,6 +188,9 @@ target_sources(phazite_core PRIVATE
     src/model/transport/Recording.h
     src/model/transport/Tempo.cpp
     src/model/transport/Tempo.h
+    src/model/transport/TempoValues.h
+    src/model/transport/TransportModel.cpp
+    src/model/transport/TransportModel.h
     # services: what the whole app shares (they use the model; the model never uses them)
     src/services/BrowserModel.cpp
     src/services/BrowserModel.h
@@ -579,6 +585,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ToggleTests.cpp
         tests/TopBarTests.cpp
         tests/TrackTests.cpp
+        tests/TransportModelTests.cpp
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h
         tests/UndoTests.cpp

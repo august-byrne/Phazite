@@ -4,6 +4,7 @@
 #pragma once
 
 #include "model/base/Tracktion.h"
+#include "model/engine/EngineContext.h"
 #include "model/engine/Preview.h"
 #include "services/Library.h"
 #include "services/RecentProjects.h"
@@ -27,7 +28,8 @@ struct AppServices
 
     // In this order: each may use those before it. The browser's library indexes Phazite Sounds' folder, and writes its
     // settings until the window that shows it goes; the previewer's Edit goes before the Engine.
-    Settings settings; // in the Engine's settings file
+    std::unique_ptr<EngineContext> engineContext; // the Engine as the UI reaches it
+    Settings settings;                            // in the Engine's settings file
     RecentProjects recentProjects;
     SoundPack soundPack; // Phazite Sounds, downloaded when the user asks
     Library library;     // what the browser and the plug-in picker show

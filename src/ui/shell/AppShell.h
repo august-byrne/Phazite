@@ -24,7 +24,8 @@ public:
     // The commands, as menus and keys see them, the open project and the services (settings, Phazite Sounds, the library
     // and the previewer: app/AppServices.h) are the app's, and outlive this. Detached panels' windows run shortcuts through
     // the dispatcher. The views show the project the context has open, and none while it has none.
-    AppShell (te::Engine&, CommandBridge&, KeyDispatcher&, ComputerKeyboard&, ProjectContext&, Settings&, SoundPack&, Library&, Previewer&);
+    AppShell (EngineContext&, CommandBridge&, KeyDispatcher&, ComputerKeyboard&, ProjectContext&, Settings&, SoundPack&, Library&,
+              Previewer&);
     ~AppShell() override;
 
     // The panels that can move to a window of their own, for example on a second monitor. Closing

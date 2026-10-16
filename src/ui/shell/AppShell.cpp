@@ -72,7 +72,7 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 };
 
 //==============================================================================
-AppShell::AppShell (te::Engine& engine, CommandBridge& bridge, KeyDispatcher& keys, ComputerKeyboard& keyboard, ProjectContext& context,
+AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher& keys, ComputerKeyboard& keyboard, ProjectContext& context,
                     Settings& s, SoundPack& pack, Library& l, Previewer& p)
     : commands (bridge),
       shortcutKeys (keys),

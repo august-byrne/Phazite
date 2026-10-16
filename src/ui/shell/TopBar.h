@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include "model/engine/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/transport/TransportModel.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/theme/Icons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
-#include <tracktion_engine/tracktion_engine.h>
-
-namespace phazite
-{
-class Gesture;
-} // namespace phazite
 
 namespace phazite::ui
 {
@@ -25,7 +21,7 @@ class TopBar : public juce::Component,
                private juce::Timer
 {
 public:
-    TopBar (te::Engine&, CommandBridge&, ComputerKeyboard&, ProjectContext&);
+    TopBar (EngineContext&, CommandBridge&, ComputerKeyboard&, ProjectContext&);
     ~TopBar() override;
 
     void paint (juce::Graphics&) override;
@@ -38,7 +34,7 @@ public:
     void refreshTooltips();
 
 private:
-    te::Engine& engine;
+    EngineContext& engine;
     CommandBridge& commands;
     ComputerKeyboard& computerKeyboard;
     ProjectContext& projectContext;
@@ -60,16 +56,16 @@ private:
     IconButton playButton { "Play", Icon::play }, captureButton { "Capture", Icon::capture }, loopButton { "Loop", Icon::loop },
         keyboardButton { "Computer keyboard", Icon::keyboard }, searchButton { "Search commands", Icon::search };
     OptionsButton recordButton { "Record", Icon::record }, metronomeButton { "Metronome", Icon::metronome };
-    NumberField tempoField;                      // dragged, scrolled or typed, a drag being one undo step
-    std::unique_ptr<phazite::Gesture> tempoDrag; // while the tempo is dragged
-    juce::TextButton timeSignatureButton;        // a menu of time signatures
+    NumberField tempoField;               // dragged, scrolled or typed, a drag being one undo step
+    TempoHandle tempo;                    // the open project's, which owns those steps
+    juce::TextButton timeSignatureButton; // a menu of time signatures
     juce::Label cpuLabel;
     LevelMeter masterMeter { "Master level" };
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", decibelsToFaderPosition (0.0f) };
     ParameterAttachment masterVolumeAttachment { masterVolume };
     int shownKeyboardState = -1; // what the keyboard button shows, to update it only on changes
 
-    void projectChanged() override; // the master volume and meter follow the open project
+    void projectChanged() override; // the tempo, the master volume and the meter follow the open project
     void timerCallback() override;  // updates the readouts a few times a second; only changes repaint
     void updateKeyboardButton();
     void updateTempo();

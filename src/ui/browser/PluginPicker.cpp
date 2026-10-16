@@ -15,9 +15,7 @@ namespace
         if (! item.device.has_value())
             return {};
 
-        const auto& description = item.device->description;
-        const auto maker = description.pluginFormatName == te::PluginManager::builtInPluginFormatName ? juce::String ("Built in")
-                                                                                                      : description.manufacturerName;
+        const auto maker = item.device->isBuiltIn ? juce::String ("Built in") : item.device->description.manufacturerName;
         return item.device->category + (maker.isNotEmpty() ? " - " + maker : juce::String());
     }
 } // namespace

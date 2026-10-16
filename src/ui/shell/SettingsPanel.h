@@ -2,11 +2,11 @@
 // The settings window's content: the Audio, MIDI and Shortcuts tabs.
 #pragma once
 
+#include "model/engine/EngineContext.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
-#include <tracktion_engine/tracktion_engine.h>
 
 namespace phazite
 {
@@ -22,14 +22,14 @@ class MidiSettings : public juce::Component,
                      private juce::ChangeListener
 {
 public:
-    MidiSettings (te::Engine&, ComputerKeyboard&, const ProjectContext&);
+    MidiSettings (EngineContext&, ComputerKeyboard&, const ProjectContext&);
     ~MidiSettings() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    te::Engine& engine;
+    EngineContext& engine;
     ComputerKeyboard& computerKeyboard;
     const ProjectContext& projectContext;
 
@@ -68,7 +68,7 @@ public:
         shortcuts
     };
 
-    SettingsPanel (te::Engine&, CommandBridge&, ComputerKeyboard&, const ProjectContext&,
+    SettingsPanel (EngineContext&, CommandBridge&, ComputerKeyboard&, const ProjectContext&,
                    std::function<void (const juce::String& keymapName)> chooseKeymap);
 
     void showTab (Tab tab) { setCurrentTabIndex (tab); }
