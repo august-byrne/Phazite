@@ -8,6 +8,7 @@
 #pragma once
 
 #include "model/engine/Preview.h"
+#include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
 #include "services/BrowserModel.h"
 #include "ui/components/Controls.h"
@@ -86,7 +87,7 @@ private:
     std::unique_ptr<Tree> tree;
     std::unique_ptr<RootNode> placesRoot, searchRoot;
     IconButton previewButton { "Preview sounds when selected", Icon::preview };
-    Fader volumeFader { Fader::Direction::horizontal, "Preview volume", te::decibelsToVolumeFaderPosition (-6.0f) };
+    Fader volumeFader { Fader::Direction::horizontal, "Preview volume", decibelsToFaderPosition (-6.0f) };
     std::unique_ptr<juce::FileChooser> folderChooser;
     juce::Rectangle<int> statusArea; // under the tree: what plays
     bool wasPlaying = false;
@@ -96,7 +97,6 @@ private:
     std::map<std::tuple<Icon, bool, juce::uint32>, std::unique_ptr<juce::Drawable>> icons;
     void drawIcon (juce::Graphics&, Icon, juce::Rectangle<float>, juce::Colour, bool filled = false);
 
-    te::Edit* getProject() const { return projectContext.getEdit(); }
     void rebuildPlaces();
     void refreshPlace (BrowserPlace::Kind); // after what places of that kind list changed
     void addRows (juce::TreeViewItem& parent, const BrowserContents&);

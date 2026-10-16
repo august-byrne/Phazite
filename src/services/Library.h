@@ -6,13 +6,15 @@
 #pragma once
 
 #include "Settings.h"
-#include "model/mixer/Mixer.h"
+#include "model/mixer/DeviceType.h"
 
 #include <optional>
 #include <vector>
 
 namespace phazite
 {
+class EngineContext;
+
 //==============================================================================
 // A sound's tempo, from its name ("Break 120 BPM", "loop_128bpm"): 50 to 250 BPM.
 std::optional<double> getTempoFromName (const juce::String&);
@@ -52,7 +54,7 @@ class Library : private juce::AsyncUpdater
 public:
     // The user's folders, favorites and recent items are kept in the settings. The factory library is Phazite Sounds'
     // folder (SoundPack::getFolder()), whether it is installed yet or not; tests give none.
-    Library (te::Engine&, Settings&, juce::File factorySounds = {});
+    Library (EngineContext&, Settings&, juce::File factorySounds = {});
     ~Library() override;
 
     // The folders the browser shows besides the factory library, in the order added.
@@ -112,10 +114,10 @@ public:
 private:
     struct Indexer;
 
-    te::Engine& engine;
+    EngineContext& engine;
     Settings& settings;
     const juce::File factorySounds;
-    juce::StringArray audioExtensions; // of the formats Tracktion reads, as ".wav"
+    juce::StringArray audioExtensions; // of the formats the engine reads, as ".wav"
     std::unique_ptr<Indexer> indexer;
     mutable juce::CriticalSection indexLock;
     std::vector<LibraryItem> index; // the sounds in the roots, guarded by indexLock

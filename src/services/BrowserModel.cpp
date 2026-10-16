@@ -126,8 +126,7 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place) const
     const auto showHint =
         items.empty()
         || ((place.kind == Kind::instruments || place.kind == Kind::effects)
-            && std::all_of (items.begin(), items.end(), [] (const LibraryItem& i)
-                            { return i.device.has_value() && te::PluginManager::isBuiltInPlugin (i.device->description); }));
+            && std::all_of (items.begin(), items.end(), [] (const LibraryItem& i) { return i.device.has_value() && i.device->isBuiltIn; }));
 
     if (showHint && hint.isNotEmpty())
         contents.messages.add (hint);

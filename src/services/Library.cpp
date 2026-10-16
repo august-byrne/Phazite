@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Library.h"
+#include "model/engine/EngineContext.h"
 
 #include <algorithm>
 #include <set>
@@ -311,18 +312,12 @@ struct Library::Indexer : public juce::Thread
 };
 
 //==============================================================================
-Library::Library (te::Engine& e, Settings& s, juce::File factory)
+Library::Library (EngineContext& e, Settings& s, juce::File factory)
     : engine (e),
       settings (s),
-      factorySounds (std::move (factory))
+      factorySounds (std::move (factory)),
+      audioExtensions (engine.getAudioFileExtensions()) // which the index can check on its own thread
 {
-    // The formats' extensions, which the index can check on its own thread.
-    auto& formats = engine.getAudioFileFormatManager().readFormatManager;
-
-    for (int i = 0; i < formats.getNumKnownFormats(); ++i)
-        for (const auto& extension : formats.getKnownFormat (i)->getFileExtensions())
-            audioExtensions.addIfNotAlreadyThere (extension.toLowerCase());
-
     reindex();
 }
 
@@ -441,7 +436,7 @@ std::vector<LibraryItem> Library::listDevices (LibraryItem::Kind kind) const
 {
     std::vector<LibraryItem> items;
 
-    for (const auto& type : getDeviceTypes (engine))
+    for (const auto& type : engine.getDeviceTypes())
     {
         if (type.isInstrument != (kind == LibraryItem::Kind::instrument))
             continue;
@@ -495,8 +490,7 @@ std::vector<LibraryItem> Library::searchDevices (const juce::String& query) cons
     // Instruments, then effects, each with the built-in ones first, then by name.
     const auto byName = [] (const LibraryItem& a, const LibraryItem& b)
     {
-        const auto isBuiltIn = [] (const LibraryItem& i)
-        { return i.device.has_value() && te::PluginManager::isBuiltInPlugin (i.device->description); };
+        const auto isBuiltIn = [] (const LibraryItem& i) { return i.device.has_value() && i.device->isBuiltIn; };
 
         if (isBuiltIn (a) != isBuiltIn (b))
             return isBuiltIn (a);

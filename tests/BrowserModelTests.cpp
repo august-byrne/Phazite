@@ -2,6 +2,7 @@
 // What the browser shows, without its window (src/services/BrowserModel.h): its places, what each holds, what search
 // finds, the Phazite Sounds row, and what an item's row says.
 #include "SoundPackTestHelpers.h"
+#include "model/engine/internal/Preview.h"
 #include "services/BrowserModel.h"
 
 #include <algorithm>
@@ -62,7 +63,7 @@ struct Libraries
     phazite::SoundPack pack;
     const juce::File userFolder = temp.folder.getChildFile ("My Sounds");
     phazite::Settings settings;
-    phazite::Library library { phazite::test::getEngine(), settings, pack.getFolder() };
+    phazite::Library library { phazite::test::getEngineContext(), settings, pack.getFolder() };
     phazite::BrowserModel model { library, pack };
 };
 } // namespace
@@ -159,7 +160,8 @@ TEST_CASE ("An item's row says what it is and what it does, and the line under t
     CHECK (phazite::BrowserModel::getTooltip (folder).isEmpty());
     CHECK (phazite::BrowserModel::getDetail (folder).isEmpty());
 
-    phazite::Previewer previewer (phazite::test::getEngine());
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
+    auto& previewer = *previewerOwner;
     CHECK (phazite::BrowserModel::getPreviewStatus (false, previewer) == juce::String ("Previews are off"));
     CHECK (phazite::BrowserModel::getPreviewStatus (true, previewer) == juce::String ("Click a sound to hear it, drag it into the song"));
 }

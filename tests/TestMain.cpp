@@ -5,11 +5,14 @@
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "TestHelpers.h"
+#include "model/engine/EngineContext.h"
 #include "model/engine/EngineSetup.h"
+#include "model/engine/internal/EngineContext.h"
 
 namespace
 {
 te::Engine* testEngine = nullptr;
+phazite::EngineContext* testEngineContext = nullptr;
 
 // Phazite's settings storage, kept in a temporary folder instead of the user's settings folder.
 class TestPropertyStorage final : public phazite::PropertyStorage
@@ -40,6 +43,12 @@ te::Engine& phazite::test::getEngine()
 {
     jassert (testEngine != nullptr);
     return *testEngine;
+}
+
+phazite::EngineContext& phazite::test::getEngineContext()
+{
+    jassert (testEngineContext != nullptr);
+    return *testEngineContext;
 }
 
 bool phazite::test::runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds)
@@ -76,10 +85,13 @@ int main (int argc, char** argv)
                                      .behaviour = { .openAudioDevice = false, .scanPluginsOutOfProcess = false, .numAudioThreads = 1 },
                                      .propertyStorage = std::make_unique<TestPropertyStorage> (settingsFolder) });
         testEngine = engine.get();
+        const auto engineContext = phazite::createEngineContext (*engine);
+        testEngineContext = engineContext.get();
 
         doctest::Context context (argc, argv);
         result = context.run();
 
+        testEngineContext = nullptr;
         testEngine = nullptr;
     } // the Engine is destroyed here, before JUCE shuts down
 

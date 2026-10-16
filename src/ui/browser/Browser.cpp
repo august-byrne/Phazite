@@ -677,7 +677,7 @@ void Browser::dragOperationEnded (const juce::DragAndDropTarget::SourceDetails& 
 void Browser::preview (const LibraryItem& item)
 {
     if (BrowserModel::canPreview (item) && isPreviewOn())
-        previewer.play (item.file, getProject(), BrowserModel::previewsInTime (item));
+        previewer.play (item.file, projectContext, BrowserModel::previewsInTime (item));
     else
         previewer.stop();
 
@@ -835,7 +835,7 @@ void Browser::lookAndFeelChanged()
 
 void Browser::timerCallback()
 {
-    previewer.keepInTime (getProject());
+    previewer.keepInTime (projectContext);
 
     // A one-shot ends by itself.
     if (const auto playing = previewer.isPlaying(); playing != wasPlaying)

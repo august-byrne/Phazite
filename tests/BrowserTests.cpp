@@ -4,6 +4,7 @@
 #include "SoundPackTestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/engine/Preview.h"
+#include "model/engine/internal/Preview.h"
 #include "model/mixer/Mixer.h"
 #include "model/transport/Playback.h"
 #include "services/Library.h"
@@ -79,8 +80,9 @@ struct BrowserScreen
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngine() }; // with the Edit open
     phazite::Settings settings;
-    phazite::Library library { phazite::test::getEngine(), settings, soundPack.getFolder() };
-    phazite::Previewer previewer { phazite::test::getEngine() };
+    phazite::Library library { phazite::test::getEngineContext(), settings, soundPack.getFolder() };
+    std::unique_ptr<phazite::Previewer> previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
+    phazite::Previewer& previewer = *previewerOwner;
     phazite::ui::Browser browser { library, previewer, soundPack, settings, context };
     phazite::test::TestWindow window { browser, 320, 700 };
     std::vector<phazite::LibraryItem> placed;
@@ -196,7 +198,7 @@ TEST_CASE ("The browser's search finds sounds and devices, and the star keeps fa
 TEST_CASE ("The plug-in picker finds a device as its name is typed, and Enter adds it")
 {
     phazite::Settings settings;
-    phazite::Library library (phazite::test::getEngine(), settings, {});
+    phazite::Library library (phazite::test::getEngineContext(), settings, {});
     std::optional<phazite::LibraryItem> chosen;
     phazite::ui::PluginPicker picker (library, [&chosen] (const phazite::LibraryItem& item) { chosen = item; });
     phazite::test::TestWindow window (picker, 520, 400);
@@ -310,8 +312,9 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     phazite::test::TemporaryFolder packs;
     phazite::SoundPack soundPack (packs.folder, source.release);
     phazite::Settings settings;
-    phazite::Library library (phazite::test::getEngine(), settings, soundPack.getFolder());
-    phazite::Previewer previewer (phazite::test::getEngine());
+    phazite::Library library (phazite::test::getEngineContext(), settings, soundPack.getFolder());
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
+    auto& previewer = *previewerOwner;
     const phazite::ProjectContext noProject (phazite::test::getEngine());
     phazite::ui::Browser browser (library, previewer, soundPack, settings, noProject);
     phazite::test::TestWindow window (browser, 320, 700);

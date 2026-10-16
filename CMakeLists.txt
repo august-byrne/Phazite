@@ -159,6 +159,7 @@ target_sources(phazite_core PRIVATE
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
     src/model/engine/internal/EngineContext.h
+    src/model/engine/internal/Preview.h
     src/model/mixer/Buses.cpp
     src/model/mixer/Buses.h
     src/model/mixer/DeviceType.h

@@ -4,6 +4,8 @@
 // with internal/EngineContext.h). Message thread only.
 #pragma once
 
+#include "model/mixer/DeviceType.h"
+
 #include <juce_audio_devices/juce_audio_devices.h>
 
 #include <memory>
@@ -32,6 +34,11 @@ public:
 
     std::vector<MidiInput> getMidiInputs() const;
     void setMidiInputOn (const juce::String& id, bool); // an ID that is gone changes nothing
+
+    // The extensions of the audio files the engine reads, as ".wav"; and the devices that can be added (Mixer.h's
+    // getDeviceTypes()), as the browser lists them.
+    juce::StringArray getAudioFileExtensions() const;
+    std::vector<DeviceType> getDeviceTypes() const;
 
     // Hears when audio or MIDI devices come, go or change.
     void addChangeListener (juce::ChangeListener*);

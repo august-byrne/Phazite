@@ -31,9 +31,9 @@ struct AppServices
     std::unique_ptr<EngineContext> engineContext; // the Engine as the UI reaches it
     Settings settings;                            // in the Engine's settings file
     RecentProjects recentProjects;
-    SoundPack soundPack; // Phazite Sounds, downloaded when the user asks
-    Library library;     // what the browser and the plug-in picker show
-    Previewer previewer; // the browser's
+    SoundPack soundPack;                  // Phazite Sounds, downloaded when the user asks
+    Library library;                      // what the browser and the plug-in picker show
+    std::unique_ptr<Previewer> previewer; // the browser's
 
     JUCE_DECLARE_NON_COPYABLE (AppServices)
 };

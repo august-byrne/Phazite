@@ -46,8 +46,8 @@ struct Screen
     phazite::ProjectSession session { engine, phazite::getUIBehaviour (engine), services.recentProjects,
                                       temp.folder.getChildFile ("Projects"), temp.folder.getChildFile ("Unsaved") };
     phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
-    phazite::ui::AppShell shell { *services.engineContext, commands,           shortcutKeys,     keyboard,          session.getContext(),
-                                  services.settings,       services.soundPack, services.library, services.previewer };
+    phazite::ui::AppShell shell { *services.engineContext, commands,           shortcutKeys,     keyboard,           session.getContext(),
+                                  services.settings,       services.soundPack, services.library, *services.previewer };
     phazite::test::TestWindow window { shell, 1280, 800 };
 };
 

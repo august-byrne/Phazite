@@ -2,6 +2,8 @@
 // The browser's model: sounds by folder and by search, tags from names, favorites and recent items, and previews.
 #include "TestHelpers.h"
 #include "model/engine/Preview.h"
+#include "model/engine/internal/Preview.h"
+#include "model/project/ProjectContext.h"
 #include "services/Library.h"
 
 using phazite::test::TemporaryFolder;
@@ -42,7 +44,7 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
     temp.folder.getChildFile ("Drums/notes.txt").replaceWithText ("not a sound");
 
     phazite::Settings settings;
-    phazite::Library library (phazite::test::getEngine(), settings, {});
+    phazite::Library library (phazite::test::getEngineContext(), settings, {});
     library.addUserFolder (temp.folder);
     CHECK (library.getUserFolders() == juce::Array<juce::File> { temp.folder });
 
@@ -70,7 +72,7 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
     library.noteUsed (drums[1]);
     library.noteUsed (kicks[0]);
 
-    phazite::Library again (phazite::test::getEngine(), settings, {});
+    phazite::Library again (phazite::test::getEngineContext(), settings, {});
     REQUIRE (again.getFavorites().size() == 1);
     CHECK (again.getFavorites()[0].name == juce::String ("Deep Kick"));
     REQUIRE (again.getRecent().size() == 2);
@@ -88,22 +90,26 @@ TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")
     TemporaryFolder temp;
     auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     project->tempoSequence.getTempos()[0]->setBpm (100.0);
+    phazite::ProjectContext context (phazite::test::getEngine()); // with the project open
+    context.setEdit (project.get());
 
     // Two bars at the tempo in its name.
     const auto loop = writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
     const auto kick = writeSound (temp.folder.getChildFile ("Kick.wav"), 0.4);
 
-    phazite::Previewer previewer (phazite::test::getEngine());
-    REQUIRE (previewer.play (loop, project.get()));
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
+    auto& previewer = *previewerOwner;
+    REQUIRE (previewer.play (loop, context));
     CHECK (previewer.isInTime());
     CHECK (previewer.getFile() == loop);
 
-    REQUIRE (previewer.play (kick, project.get()));
+    REQUIRE (previewer.play (kick, context));
     CHECK_FALSE (previewer.isInTime());
 
     previewer.stop();
     CHECK (previewer.getFile() == juce::File());
-    CHECK_FALSE (previewer.play (temp.folder.getChildFile ("Missing.wav"), project.get()));
+    CHECK_FALSE (previewer.play (temp.folder.getChildFile ("Missing.wav"), context));
+    context.setEdit (nullptr);
 }
 
 TEST_CASE ("Sounds named as Phazite Sounds names them get their folders' tags, and those with a tempo play in time")

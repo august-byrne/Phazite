@@ -57,7 +57,7 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
     auto content = std::make_unique<ui::AppShell> (*services.engineContext, commands, shortcutKeys, computerKeyboard, s.getContext(),
-                                                   services.settings, services.soundPack, services.library, services.previewer);
+                                                   services.settings, services.soundPack, services.library, *services.previewer);
     shell = content.get();
     setContentOwned (content.release(), false);
 

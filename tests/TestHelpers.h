@@ -10,11 +10,17 @@
 
 namespace te = tracktion;
 
+namespace phazite
+{
+class EngineContext;
+}
+
 namespace phazite::test
 {
 // The Engine that all tests share, made by TestMain.cpp like the app's (no audio device, no plug-in
 // scanning). Its settings live in a temporary folder, so tests never touch Phazite's real settings.
 te::Engine& getEngine();
+EngineContext& getEngineContext(); // the Engine as the UI reaches it, as the app's services make it
 
 // The tests have no message loop, but some engine work happens on the message thread's timers (finding
 // MIDI devices, for example). This runs the timers that are due, as the loop would, until the
