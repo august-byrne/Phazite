@@ -1105,10 +1105,10 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
 
     // Nudging and quantizing act on what is selected in the editor: clips or a time range in the playlist,
     // notes in the piano roll.
-    const auto getUndoTarget = [getActiveEditor]
+    const auto getUndoTarget = [getActiveEditor]() -> juce::UndoManager*
     {
         auto* editor = getActiveEditor();
-        return editor != nullptr ? editor->getContext().getEdit() : nullptr;
+        return editor != nullptr ? editor->getContext().getUndoManager() : nullptr;
     };
 
     const auto canNudge = ticked ([] (const TimelineEditor& editor) { return editor.canNudgeSelection(); });

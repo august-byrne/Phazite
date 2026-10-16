@@ -613,6 +613,6 @@ void addMixerCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "aux", "bus", "send", "fx return", "reverb" },
                     .perform = withEdit (selection, [&selection] (te::Edit& edit) { addNewReturnTrack (edit, &selection); }),
                     .isEnabled = [&selection] { return selection.getEdit() != nullptr; },
-                    .undoTarget = [&selection] { return selection.getEdit(); } });
+                    .undoTarget = undoTargetOf (selection) });
 }
 } // namespace phazite

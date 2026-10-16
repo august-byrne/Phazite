@@ -53,6 +53,10 @@ public:
     te::Edit* getEdit() const noexcept { return selection.getEdit(); } // nullptr while no project is open
     bool hasProject() const noexcept { return getEdit() != nullptr; }
 
+    // The open project's undo manager, for the commands that change it (Command::undoTarget): none while no project is
+    // open.
+    juce::UndoManager* getUndoManager() const noexcept;
+
     te::SelectionManager& getSelection() noexcept { return selection; }
     const te::SelectionManager& getSelection() const noexcept { return selection; }
     SongSelection& getSongSelection() noexcept { return *songSelection; }

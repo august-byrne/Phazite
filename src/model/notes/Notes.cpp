@@ -936,7 +936,7 @@ void showAllDrumRows (te::AudioTrack& track)
 //==============================================================================
 void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection, std::function<double()> getGridStepInBeats)
 {
-    const auto getEdit = [&selection] { return selection.getEdit(); };
+    const auto undoTarget = undoTargetOf (selection);
 
     struct Simple
     {
@@ -988,7 +988,7 @@ void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection
                         .synonyms = simple.synonyms,
                         .perform = [&selection, action = simple.action] { action (getSelectedNotes (selection)); },
                         .isEnabled = [&selection] { return hasSelectedNotes (selection); },
-                        .undoTarget = getEdit,
+                        .undoTarget = undoTarget,
                         .keyPriority = Command::notePriority,
                         .repeatsWhileHeld = true });
     }
@@ -1001,7 +1001,7 @@ void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection
                     .perform = [&selection]
                     { replaceSelectedNotes (selection, [] (std::vector<NoteData> notes) { return legato (std::move (notes)); }); },
                     .isEnabled = [&selection] { return hasSelectedNotes (selection); },
-                    .undoTarget = getEdit,
+                    .undoTarget = undoTarget,
                     .keyPriority = Command::notePriority });
 
     registry.add ({ .id = "note.chop",
@@ -1016,7 +1016,7 @@ void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection
                                               { return chop (std::move (notes), getGridStepInBeats()); });
                     },
                     .isEnabled = [&selection] { return hasSelectedNotes (selection); },
-                    .undoTarget = getEdit,
+                    .undoTarget = undoTarget,
                     .keyPriority = Command::notePriority });
 }
 } // namespace phazite

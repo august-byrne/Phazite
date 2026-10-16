@@ -521,7 +521,7 @@ void deleteTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* 
 //==============================================================================
 void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selection)
 {
-    const auto getEdit = [&selection] { return selection.getEdit(); };
+    const auto undoTarget = undoTargetOf (selection);
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
 
     registry.add ({ .id = "track.add",
@@ -531,7 +531,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "new track", "insert track", "create" },
                     .perform = [&selection] { insertTrackAfterSelection (selection); },
                     .isEnabled = hasEdit,
-                    .undoTarget = getEdit });
+                    .undoTarget = undoTarget });
 
     // Folders.
     registry.add ({ .id = "track.addFolder",
@@ -541,7 +541,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "new folder", "group", "bus" },
                     .perform = [&selection] { insertFolderAfterSelection (selection); },
                     .isEnabled = hasEdit,
-                    .undoTarget = getEdit });
+                    .undoTarget = undoTarget });
 
     registry.add ({ .id = "track.groupIntoFolder",
                     .name = "Group into Folder",
@@ -550,7 +550,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "group", "folder", "bus", "submix" },
                     .perform = [&selection] { groupIntoFolder (getSelectedOutermostTracks (selection), &selection); },
                     .isEnabled = [&selection] { return hasSelectedTracks (selection); },
-                    .undoTarget = getEdit });
+                    .undoTarget = undoTarget });
 
     registry.add ({ .id = "track.ungroup",
                     .name = "Ungroup Folder",
@@ -559,7 +559,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "remove folder", "ungroup", "unfolder" },
                     .perform = [&selection] { ungroupFolders (getSelectedFolders (selection)); },
                     .isEnabled = [&selection] { return hasSelectedFolders (selection); },
-                    .undoTarget = getEdit });
+                    .undoTarget = undoTarget });
 
     // Collapsing and pinning change the view, so they aren't undo steps.
     registry.add ({ .id = "track.collapse",
@@ -606,7 +606,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "reorder", "raise" },
                     .perform = [&selection] { moveSelectedTracks (selection, -1); },
                     .isEnabled = [&selection] { return hasSelectedTracks (selection); },
-                    .undoTarget = getEdit,
+                    .undoTarget = undoTarget,
                     .repeatsWhileHeld = true });
 
     registry.add ({ .id = "track.moveDown",
@@ -616,7 +616,7 @@ void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selectio
                     .synonyms = { "reorder", "lower" },
                     .perform = [&selection] { moveSelectedTracks (selection, 1); },
                     .isEnabled = [&selection] { return hasSelectedTracks (selection); },
-                    .undoTarget = getEdit,
+                    .undoTarget = undoTarget,
                     .repeatsWhileHeld = true });
 
     // Tracktion keeps mute and solo out of the undo history, as many DAWs do.

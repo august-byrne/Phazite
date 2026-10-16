@@ -2,6 +2,7 @@
 #include "Recording.h"
 #include "Playback.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 #include "model/engine/LiveInput.h"
 
 namespace phazite

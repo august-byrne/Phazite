@@ -93,7 +93,12 @@ juce::String describeUndoOrRedo (te::Edit* edit)
 
 //==============================================================================
 UndoStep::UndoStep (te::Edit& edit, const juce::String& name)
-    : undoManager (edit.getUndoManager()),
+    : UndoStep (edit.getUndoManager(), name)
+{
+}
+
+UndoStep::UndoStep (juce::UndoManager& manager, const juce::String& name)
+    : undoManager (manager),
       outer (current)
 {
     // Within a gesture, or another step for the same Edit, it joins that one.
@@ -152,5 +157,33 @@ void Gesture::rollBack()
     edit.getUndoManager().undoCurrentTransactionOnly();
     playStoredParameterValues (edit);
     commit();
+}
+
+//==============================================================================
+std::function<void()> withEdit (const te::SelectionManager& selection, std::function<void (te::Edit&)> action)
+{
+    return [&selection, action]
+    {
+        if (auto* edit = selection.getEdit())
+            action (*edit);
+    };
+}
+
+std::function<bool()> ifEdit (const te::SelectionManager& selection, std::function<bool (te::Edit&)> test)
+{
+    return [&selection, test]
+    {
+        auto* edit = selection.getEdit();
+        return edit != nullptr && test (*edit);
+    };
+}
+
+std::function<juce::UndoManager*()> undoTargetOf (const te::SelectionManager& selection)
+{
+    return [&selection]() -> juce::UndoManager*
+    {
+        auto* edit = selection.getEdit();
+        return edit != nullptr ? &edit->getUndoManager() : nullptr;
+    };
 }
 } // namespace phazite

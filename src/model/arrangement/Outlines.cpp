@@ -4,6 +4,7 @@
 #include "Tracks.h"
 #include "model/base/Schema.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 
 #include <PhaziteData.h>
 
@@ -160,7 +161,7 @@ void addOutlineCommands (CommandRegistry& registry, te::SelectionManager& select
                         .synonyms = { "song outline", "structure", "template", "arrangement", "form" },
                         .perform = withEdit (selection, [id] (te::Edit& edit) { applyOutline (edit, id); }),
                         .isEnabled = [&selection] { return selection.getEdit() != nullptr; },
-                        .undoTarget = [&selection] { return selection.getEdit(); },
+                        .undoTarget = undoTargetOf (selection),
                         .isTicked = ifEdit (selection, [id] (te::Edit& edit) { return isOutlineApplied (edit, id); }) });
     }
 }

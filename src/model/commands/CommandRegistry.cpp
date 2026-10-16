@@ -42,8 +42,8 @@ bool CommandRegistry::addMacro (const juce::String& id, const juce::String& name
                 runWithoutUndoStep (*command);
     };
 
-    // The macro is one undo step, in the Edit its first Edit-changing command uses.
-    macro.undoTarget = [this, commandIDs]() -> te::Edit*
+    // The macro is one undo step, in the project its first project-changing command uses.
+    macro.undoTarget = [this, commandIDs]() -> juce::UndoManager*
     {
         for (const auto& commandID : commandIDs)
             if (auto* command = find (commandID); command != nullptr && command->undoTarget != nullptr)
@@ -94,9 +94,9 @@ bool CommandRegistry::invoke (const juce::String& id)
     if (command == nullptr || ! isEnabled (*command))
         return false;
 
-    if (auto* edit = command->undoTarget != nullptr ? command->undoTarget() : nullptr)
+    if (auto* undoManager = command->undoTarget != nullptr ? command->undoTarget() : nullptr)
     {
-        const UndoStep step (*edit, getCurrentName (*command)); // e.g. "Delete 2 Tracks"
+        const UndoStep step (*undoManager, getCurrentName (*command)); // e.g. "Delete 2 Tracks"
         command->perform();
     }
     else
@@ -159,24 +159,6 @@ juce::String getCurrentName (const Command& command)
             return name;
 
     return command.name;
-}
-
-std::function<void()> withEdit (const te::SelectionManager& selection, std::function<void (te::Edit&)> action)
-{
-    return [&selection, action]
-    {
-        if (auto* edit = selection.getEdit())
-            action (*edit);
-    };
-}
-
-std::function<bool()> ifEdit (const te::SelectionManager& selection, std::function<bool (te::Edit&)> test)
-{
-    return [&selection, test]
-    {
-        auto* edit = selection.getEdit();
-        return edit != nullptr && test (*edit);
-    };
 }
 
 //==============================================================================

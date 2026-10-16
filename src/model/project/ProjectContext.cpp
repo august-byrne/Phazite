@@ -171,6 +171,12 @@ void ProjectContext::setEdit (te::Edit* edit)
     listeners.call ([] (Listener& l) { l.projectChanged(); });
 }
 
+juce::UndoManager* ProjectContext::getUndoManager() const noexcept
+{
+    auto* edit = getEdit();
+    return edit != nullptr ? &edit->getUndoManager() : nullptr;
+}
+
 void ProjectContext::addListener (Listener* listener)
 {
     listeners.add (listener);

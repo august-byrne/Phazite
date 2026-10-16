@@ -20,7 +20,7 @@ phazite::Command makeCommand (const juce::String& id, const juce::String& name, 
 phazite::Command makeEditChange (const juce::String& id, const juce::String& name, te::Edit& edit, int value)
 {
     auto command = makeCommand (id, name, [&edit, value] { edit.state.setProperty ("testValue", value, &edit.getUndoManager()); });
-    command.undoTarget = [&edit] { return &edit; };
+    command.undoTarget = [&edit] { return &edit.getUndoManager(); };
     return command;
 }
 
@@ -156,7 +156,7 @@ TEST_CASE ("A model function that begins its own undo step is part of the step o
                                     setValueInOwnStep (*edit, 1);
                                     setValueInOwnStep (*edit, 2);
                                 });
-    command.undoTarget = [&edit] { return edit.get(); };
+    command.undoTarget = [&edit] { return &edit->getUndoManager(); };
     registry.add (std::move (command));
 
     // Run by the command, both changes are the command's one step.

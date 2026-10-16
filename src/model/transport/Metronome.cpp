@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Metronome.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 
 namespace phazite
 {

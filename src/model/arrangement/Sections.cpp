@@ -347,7 +347,7 @@ juce::Array<te::BeatPosition> getSectionBoundaries (const te::Edit& edit)
 //==============================================================================
 void addSectionCommands (CommandRegistry& registry, te::SelectionManager& selection)
 {
-    const auto getEdit = [&selection] { return selection.getEdit(); };
+    const auto undoTarget = undoTargetOf (selection);
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
 
     registry.add ({ .id = "section.add",
@@ -357,6 +357,6 @@ void addSectionCommands (CommandRegistry& registry, te::SelectionManager& select
                     .synonyms = { "new section", "part", "arranger", "marker" },
                     .perform = withEdit (selection, [&selection] (te::Edit& edit) { appendSection (edit, &selection); }),
                     .isEnabled = hasEdit,
-                    .undoTarget = getEdit });
+                    .undoTarget = undoTarget });
 }
 } // namespace phazite

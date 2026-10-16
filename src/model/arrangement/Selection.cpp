@@ -5,6 +5,7 @@
 #include "Sections.h"
 #include "Tracks.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/Undo.h"
 #include "model/notes/Notes.h"
 
 #include <algorithm>
@@ -305,7 +306,7 @@ juce::String describeSelection (const te::SelectionManager& selection, const Ran
 
 void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& selection, RangeSelection& range)
 {
-    const auto getEdit = [&selection] { return selection.getEdit(); };
+    const auto undoTarget = undoTargetOf (selection);
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
 
     registry.add ({ .id = "edit.delete",
@@ -315,7 +316,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .synonyms = { "remove", "erase" },
                     .perform = [&selection, &range] { deleteSelection (selection, range, false); },
                     .isEnabled = [&selection, &range] { return canDeleteSelection (selection, range); },
-                    .undoTarget = getEdit,
+                    .undoTarget = undoTarget,
                     .currentName = [&selection, &range] { return describeSelection (selection, range, "Delete"); } });
 
     registry.add ({ .id = "edit.deleteAndCloseGap",
@@ -325,7 +326,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .synonyms = { "ripple delete", "shuffle", "remove gap" },
                     .perform = [&selection, &range] { deleteSelection (selection, range, true); },
                     .isEnabled = [&selection, &range] { return hasSelectedRangeOrClips (selection, range); },
-                    .undoTarget = getEdit });
+                    .undoTarget = undoTarget });
 
     registry.add ({ .id = "edit.duplicate",
                     .name = "Duplicate",
@@ -336,7 +337,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .synonyms = { "copy", "clone", "repeat" },
                     .perform = [&selection, &range] { duplicateSelection (selection, range, false); },
                     .isEnabled = [&selection, &range] { return canDeleteSelection (selection, range); },
-                    .undoTarget = getEdit,
+                    .undoTarget = undoTarget,
                     .currentName = [&selection, &range] { return describeSelection (selection, range, "Duplicate"); } });
 
     registry.add ({ .id = "edit.duplicateAsAlias",
@@ -347,7 +348,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .synonyms = { "linked copy", "ghost", "pattern", "clone", "repeat section" },
                     .perform = [&selection, &range] { duplicateSelection (selection, range, true); },
                     .isEnabled = [&selection] { return canDuplicateAsAliases (selection); },
-                    .undoTarget = getEdit,
+                    .undoTarget = undoTarget,
                     .currentName = [&selection]
                     { return hasSelectedSections (selection) ? juce::String ("Duplicate Section as Aliases") : juce::String(); } });
 
@@ -358,7 +359,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .synonyms = { "unlink", "independent" },
                     .perform = [&selection] { makeClipsUnique (getSelectedClips (selection)); },
                     .isEnabled = [&selection] { return hasAliases (getSelectedClips (selection)); },
-                    .undoTarget = getEdit });
+                    .undoTarget = undoTarget });
 
     registry.add ({ .id = "edit.mute",
                     .name = "Mute",
@@ -367,7 +368,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .synonyms = { "deactivate", "disable", "silence" },
                     .perform = [&selection] { toggleSelectionMuted (selection); },
                     .isEnabled = [&selection] { return canMuteSelection (selection); },
-                    .undoTarget = getEdit,
+                    .undoTarget = undoTarget,
                     .isTicked = [&selection] { return isSelectionMuted (selection); } });
 
     // Fade shapes, for the selected audio clips' fade-ins and fade-outs.
@@ -395,7 +396,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                         .synonyms = { "fade shape", "fade curve", "crossfade" },
                         .perform = [&selection, type] { setFadeShape (getSelectedClips (selection), type); },
                         .isEnabled = [&selection] { return hasAudioClips (getSelectedClips (selection)); },
-                        .undoTarget = getEdit,
+                        .undoTarget = undoTarget,
                         .isTicked = [&selection, type] { return hasFadeShape (getSelectedClips (selection), type); } });
     }
 
@@ -406,7 +407,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .synonyms = { "cut", "slice", "divide", "razor" },
                     .perform = [&selection, &range] { splitSelection (selection, range); },
                     .isEnabled = [&selection, &range] { return hasSelectedRangeOrClips (selection, range); },
-                    .undoTarget = getEdit });
+                    .undoTarget = undoTarget });
 
     registry.add (
         { .id = "edit.insertTime",
@@ -418,7 +419,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
           .perform = withEdit (selection,
                                [&range] (te::Edit& edit) { insertTime (edit, range.getRange().getStart(), range.getRange().getLength()); }),
           .isEnabled = [&range] { return ! range.isEmpty(); },
-          .undoTarget = getEdit });
+          .undoTarget = undoTarget });
 
     registry.add (
         { .id = "edit.removeTime",
@@ -429,7 +430,7 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
           .synonyms = { "delete time", "remove bars", "cut time" },
           .perform = withEdit (selection, [&range] (te::Edit& edit) { removeTime (edit, range.getRange()); }),
           .isEnabled = [&range] { return ! range.isEmpty(); },
-          .undoTarget = getEdit });
+          .undoTarget = undoTarget });
 
     registry.add ({ .id = "edit.selectAll",
                     .name = "Select All",

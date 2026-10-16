@@ -5,6 +5,7 @@
 
 #include "model/base/Tracktion.h"
 
+#include <functional>
 #include <memory>
 
 namespace phazite
@@ -39,6 +40,7 @@ class UndoStep
 {
 public:
     UndoStep (te::Edit&, const juce::String& name);
+    UndoStep (juce::UndoManager&, const juce::String& name); // an Edit's, as a command's undo target names it
     ~UndoStep();
 
 private:
@@ -74,4 +76,12 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE (Gesture)
 };
+
+//==============================================================================
+// For registering commands (CommandRegistry.h) that act on a selection manager's Edit, the open project's: the action
+// runs, or the test answers, with that Edit (without one, the action does nothing and the test is false); and the Edit's
+// undo manager as the undo target of a command that changes it.
+std::function<void()> withEdit (const te::SelectionManager&, std::function<void (te::Edit&)> action);
+std::function<bool()> ifEdit (const te::SelectionManager&, std::function<bool (te::Edit&)> test);
+std::function<juce::UndoManager*()> undoTargetOf (const te::SelectionManager&);
 } // namespace phazite
