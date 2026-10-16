@@ -19,10 +19,10 @@ namespace phazite
 // A note as the piano roll shows it and the transforms change it.
 struct NoteData
 {
-    ClipID clip; // the clip it is in, or is to go in
-    NoteID id;   // which of the clip's notes it is: none for one still to be added, such as a transform's
+    ClipID clip {}; // the clip it is in, or is to go in
+    NoteID id {};   // which of the clip's notes it is: none for one still to be added, such as a transform's
     int pitch = 60;
-    BeatPosition start; // in the song
+    BeatPosition start {}; // in the song
     BeatDuration length = BeatDuration::fromBeats (1.0);
     int velocity = 100;
     bool muted = false;

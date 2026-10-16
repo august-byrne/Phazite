@@ -23,12 +23,12 @@ class ProjectContext;
 // MIDI clips, as the piano roll shows them.
 struct NoteClip
 {
-    ClipID id;
-    TrackID track;
-    juce::String name;
-    BeatRange range;           // where it is in the song
-    BeatPosition contentStart; // where its notes count from: bar 1 while the piano roll shows it
-    juce::Colour colour;       // its notes' color: its track's, as the playlist shows it
+    ClipID id {};
+    TrackID track {};
+    juce::String name {};
+    BeatRange range {};           // where it is in the song
+    BeatPosition contentStart {}; // where its notes count from: bar 1 while the piano roll shows it
+    juce::Colour colour {};       // its notes' color: its track's, as the playlist shows it
 };
 
 // The MIDI clips among these that are still in the song, in the order given.

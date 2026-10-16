@@ -128,7 +128,7 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
 
     Kind kind = Kind::pending;
     Zone zone = Zone::body;
-    NoteRef note; // the note the mouse went down on, if any
+    NoteRef note {}; // the note the mouse went down on, if any
 
     std::vector<Original> originals;
     Original anchor;                            // the note the mouse went down on, as it was

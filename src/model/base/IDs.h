@@ -45,8 +45,8 @@ using NoteID = ItemID<struct NoteKind>;
 // A note by its clip and its ID in it.
 struct NoteRef
 {
-    ClipID clip;
-    NoteID note;
+    ClipID clip {};
+    NoteID note {};
 
     constexpr bool isValid() const noexcept { return clip.isValid() && note.isValid(); }
     constexpr auto operator<=> (const NoteRef&) const noexcept = default;

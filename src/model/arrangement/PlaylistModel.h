@@ -30,9 +30,9 @@ enum class TrackType
 
 struct TrackRow
 {
-    TrackID id;
-    juce::String name;
-    juce::Colour colour; // its own, or else its row's in the palette
+    TrackID id {};
+    juce::String name {};
+    juce::Colour colour {}; // its own, or else its row's in the palette
     TrackType kind = TrackType::track;
     int depth = 0;                  // how many folders it is in
     bool pinned = false;            // it stays in view while the others scroll
@@ -78,11 +78,11 @@ enum class FadeShape
 
 struct ClipInfo
 {
-    ClipID id;
-    TrackID track;
+    ClipID id {};
+    TrackID track {};
     ClipType kind = ClipType::midi;
-    juce::String name;
-    BeatRange range; // where it is in the song
+    juce::String name {};
+    BeatRange range {}; // where it is in the song
     bool muted = false;
     bool linked = false; // an alias: what it plays is another clip's too
 
@@ -141,8 +141,8 @@ ClipID addMidiClipAt (ProjectContext&, TrackID, BeatPosition start);
 // Clips a little apart (gap: a pixel of the time line, say) count as touching.
 struct CrossfadeSpot
 {
-    ClipID first, second;
-    BeatPosition boundary;
+    ClipID first {}, second {};
+    BeatPosition boundary {};
 };
 
 std::vector<CrossfadeSpot> getCrossfadeSpots (const ProjectContext&, TrackID, BeatDuration gap);
@@ -157,12 +157,12 @@ std::vector<ClipID> importFiles (ProjectContext&, const juce::StringArray& paths
 // The song's sections (Sections.h), in its order, as the playlist draws them in its time bar and behind the tracks.
 struct SongSection
 {
-    SectionID id;
-    juce::String name;
-    BeatRange range;
-    juce::Colour colour; // its own, or its role's
-    juce::String tip;    // a one-line suggestion of what to put in it, for the hint bar
-    float energy = 0.5f; // how intense it is, from 0 to 1, for the energy curve
+    SectionID id {};
+    juce::String name {};
+    BeatRange range {};
+    juce::Colour colour {}; // its own, or its role's
+    juce::String tip;       // a one-line suggestion of what to put in it, for the hint bar
+    float energy = 0.5f;    // how intense it is, from 0 to 1, for the energy curve
 };
 
 std::vector<SongSection> getSongSections (const ProjectContext&);
