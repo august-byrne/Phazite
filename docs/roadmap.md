@@ -34,11 +34,13 @@ Done before this plan (progress since then is under [Status](#status)):
 | 2. First outline styles | **Decided:** pop, rock, electronic, hip-hop/trap |
 | 3. UI font and its licence | **Decided:** Inter, bundled, SIL OFL 1.1 |
 | 4. Engine fixes: workarounds or a fork | **Decided:** simple workarounds first, a fork if they get awkward; replacing a part of the engine is a separate decision for each part (A5) |
-| 5. MP3 export | Before v1 (proposed: WAV and FLAC only in step 1.8) |
-| 6. Airwindows effects | Step 2.8 |
-| 7. Sandboxing before or after v1 | Phase 3 |
-| 8. Ableton Live keymap in v1 | Step 3.7 |
+| 5. MP3 export | **Decided:** none; WAV and FLAC |
+| 6. Airwindows effects | **Decided:** plug-ins that aren't Phazite's own are never built in; optional downloads (step 2.8) |
+| 7. Sandboxing before or after v1 | **Decided:** before v1, on by default, unless it costs a lot of performance (step 3.3) |
+| 8. Ableton Live keymap in v1 | **Decided:** yes (step 3.7) |
 | 9. Single-key tools and the computer keyboard | **Decided:** Ableton's way, Shift and a letter for the shortcut while the keyboard plays notes |
+| 10. The computer keyboard at startup | **Decided:** off until turned on |
+| 11 to 19 (the mixer, plug-in windows, newer projects, loops, duplicated ranges) | **Decided** by Claude, for the owner to review (2026-10-16): folders are buses (done), a strip's Out menu and a send knob for every return (step 2.7), empty new tracks and no reverb return (as now), keys to plug-ins per plug-in (step 2.10), newer projects not opened and duplicates replacing (as now), the loop's and metronome's switches not unsaved changes (done) |
 
 ## Architecture track
 
@@ -312,7 +314,7 @@ Done before this plan (progress since then is under [Status](#status)):
 **1.8 Export (S)**
 - Render to WAV and FLAC with loudness normalization.
 - *Done when:* an exported file plays correctly and meets the chosen loudness target.
-- *Status:* done (2026-10-15), pending a check by hand. In: File > Export Song (Ctrl+Shift+R; Ctrl+R in FL Studio's keymap) and its window (`src/ui/shell/ExportPanel.h`), which keeps its choices: WAV or FLAC, 44.1 to 96 kHz, 16-bit dithered, 24-bit or 32-bit float, and Normalize to a loudness under a true-peak ceiling. The model (`src/model/project/Export.h`) renders the song to its end with its tails on Tracktion's renderer, in the background with progress and Cancel, into a file that replaces the chosen one only once it is complete, then measures it again for the report, which says when the ceiling kept it under its target. Tests export WAV and FLAC files and check that they play the song, meet -14 and -23 LUFS within 0.07 LU, keep under the ceiling, and leave an older file alone when cancelled. MP3 waits for [question 5](design.md#25-open-questions).
+- *Status:* done (2026-10-15), pending a check by hand. In: File > Export Song (Ctrl+Shift+R; Ctrl+R in FL Studio's keymap) and its window (`src/ui/shell/ExportPanel.h`), which keeps its choices: WAV or FLAC, 44.1 to 96 kHz, 16-bit dithered, 24-bit or 32-bit float, and Normalize to a loudness under a true-peak ceiling. The model (`src/model/project/Export.h`) renders the song to its end with its tails on Tracktion's renderer, in the background with progress and Cancel, into a file that replaces the chosen one only once it is complete, then measures it again for the report, which says when the ceiling kept it under its target. Tests export WAV and FLAC files and check that they play the song, meet -14 and -23 LUFS within 0.07 LU, keep under the ceiling, and leave an older file alone when cancelled. No MP3 ([question 5](design.md#25-open-questions), decided 2026-10-16).
 
 **1.9 First launch and starter project (M)**
 - The first-run flow: "Coming from…?" and audio setup.
@@ -366,19 +368,23 @@ Done before this plan (progress since then is under [Status](#status)):
 
 **2.7 Mixer depth (M)**
 - The sidechain source picker, the routing view, and a per-track CPU meter.
-- *Done when:* a kick-to-bass sidechain is set up from the picker and shows as a cable in the routing view.
+- A strip's Out line as a menu: Master, the folder buses (choosing one moves the track into that folder) and a new bus from the selected tracks ([question 12](design.md#25-open-questions)).
+- A send knob for every return on every strip, off until first touched ([question 13](design.md#25-open-questions)).
+- *Done when:* a kick-to-bass sidechain is set up from the picker and shows as a cable in the routing view, and a track is sent to a reverb return with one drag.
 
 **2.8 More devices (XL)**
 - Multiband dynamics and a maximizer in the style of Maximus and OTT.
 - A tempo-synced delay, a saturator, a filter and a utility.
 - A better synth.
+- Phazite's own devices only: plug-ins that aren't, such as Airwindows' effects and Surge XT, may be offered as optional downloads next to Phazite Sounds, never built in ([question 6](design.md#25-open-questions)).
 - *Done when:* each device passes its DSP and real-time tests and holds up in A/B listening against reference tools.
 
 **2.9 Freeze, bounce in place and stems (M)**
 - *Done when:* a heavy plug-in track can be frozen and unfrozen, and exporting stems produces one file per track or bus.
 
 **2.10 Plug-in windows and plug-in presets (M)**
-- *Done when:* plug-in windows remember their positions and plug-in states save as presets.
+- A "Send All Keys to the Plug-in" switch in each plug-in window's menu, off at first and remembered for that plug-in ([question 16](design.md#25-open-questions)).
+- *Done when:* plug-in windows remember their positions, plug-in states save as presets, and a name can be typed into a plug-in that draws its own text fields.
 
 **Milestone 2 check:** produce a complete track, from first idea to master, with automation and modulation, using Phazite and your own plug-ins.
 
@@ -401,11 +407,12 @@ Done before this plan (progress since then is under [Status](#status)):
 - Automatic tags.
 - *Done when:* breeding two favorite kicks produces new kicks with traits of both.
 
-**3.3 Stability (M)**
+**3.3 Stability (XL)**
 - A scan timeout.
 - A plug-in that crashed while loading is disabled on the next start.
 - Polished crash recovery.
-- *Done when:* a deliberately hanging or crashing test plug-in can't stall the scan or lose the project.
+- **Plug-in sandboxing, on by default** ([question 7](design.md#25-open-questions), moved before v1 on 2026-10-16): plug-ins run in helper processes, and one that crashes leaves its slot saying so, with Reload, while Phazite plays on. First measure what it costs (CPU, latency per block, memory) against hosting in Phazite's own process; if the cost is large, it is a choice per plug-in instead, and the owner decides.
+- *Done when:* a deliberately hanging or crashing test plug-in can't stall the scan, crash Phazite or lose the project.
 
 **3.4 Audio recording (L)**
 - Record-arm, monitoring, punch-in and basic takes.
@@ -420,7 +427,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Done when:* core tasks can be done with Narrator and the keyboard alone, and the themes pass WCAG 2.2 contrast.
 
 **3.7 Keymaps and help (M)**
-- The FL Studio keymap completed, and the Ableton Live keymap if decided.
+- The FL Studio keymap completed, and an Ableton Live keymap ([question 8](design.md#25-open-questions), decided 2026-10-16).
 - Hover-help texts and short in-app lessons.
 - *Done when:* every command has help text, and the keymap presets cover all the core actions.
 
@@ -452,16 +459,17 @@ Done before this plan (progress since then is under [Status](#status)):
 
 Roughly in order of value:
 
-1. Plug-in sandboxing, on by default (XL).
-2. CLAP hosting (L).
-3. The clip launcher, as a jam panel that records into the playlist (L).
-4. The AI assistant, acting through commands (L).
-5. Audio take lanes and comping (L).
-6. DAWproject import and export (M).
-7. Neural sound generation with our own model, trained on public-domain audio (XL).
-8. Audio-to-MIDI, automatic sample tags and "find similar" (L).
-9. macOS, with Audio Units (L).
-10. MPE controllers, Linux screen readers (AT-SPI), translations and a scripting API (M–L each).
+1. CLAP hosting (L).
+2. The clip launcher, as a jam panel that records into the playlist (L).
+3. The AI assistant, acting through commands (L).
+4. Audio take lanes and comping (L).
+5. DAWproject import and export (M).
+6. Neural sound generation with our own model, trained on public-domain audio (XL).
+7. Audio-to-MIDI, automatic sample tags and "find similar" (L).
+8. macOS, with Audio Units (L).
+9. MPE controllers, Linux screen readers (AT-SPI), translations and a scripting API (M–L each).
+
+(Plug-in sandboxing moved before v1, into step 3.3, on 2026-10-16.)
 
 ## Cross-cutting work
 
@@ -482,7 +490,7 @@ Roughly in order of value:
 | The UI is by far the largest piece of work | Build vertical slices, run usability tests at each milestone, and use engine features instead of reinventing them |
 | Engine code breaks the real-time rules | Measured in step 0.3; workarounds or a fork are decided then |
 | Built-in effects fall short of FL Studio's | Listening and A/B tests against references, plus DSP tests |
-| Sandboxing and CLAP are complex | Scheduled after v1; v1 gets the stability basics |
+| Sandboxing and CLAP are complex | Sandboxing is measured first (step 3.3) and becomes a choice per plug-in if it costs too much; CLAP waits until after v1 |
 | Scope creep | v1 scope is fixed in [design section 1](design.md#1-vision-and-scope); new ideas go under "After v1" |
 | Restructuring changes behavior by accident | Golden tests of saved projects, renders and commands (A0); every step builds and passes the tests, one commit each |
 | The architecture work holds up features | Only A0 and A1 pause features; A2 to A4 move each area when a feature touches it; A5 only after a dated decision |

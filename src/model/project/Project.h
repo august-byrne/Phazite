@@ -38,7 +38,7 @@ public:
     // saving then still writes to the project file. A project saved by a newer Phazite isn't opened.
     static std::unique_ptr<Project> open (te::Engine&, const juce::File& projectFile, bool restoreAutosave, juce::String& error);
 
-    // Whether the file was saved by a newer Phazite, which open() doesn't open (design question 17's proposal).
+    // Whether the file was saved by a newer Phazite, which open() doesn't open (design question 17).
     static bool isFromNewerPhazite (te::Engine&, const juce::File& projectFile);
 
     // True if the project has an autosave from a session that ended without saving or closing the

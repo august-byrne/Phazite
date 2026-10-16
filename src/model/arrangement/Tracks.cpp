@@ -4,6 +4,7 @@
 #include "model/base/Toggles.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
+#include "model/mixer/Buses.h"
 #include "model/mixer/Sidechain.h"
 #include "model/notes/Notes.h"
 
@@ -207,6 +208,7 @@ te::FolderTrack* insertFolder (te::Edit& edit, te::Track* after, te::SelectionMa
         return nullptr;
 
     folder->setName ("Folder");
+    mixAsBus (*folder); // a bus from the start (design question 11)
     folder->setColour (colour);
 
     if (selection != nullptr)
@@ -229,6 +231,7 @@ te::FolderTrack* groupIntoFolder (const juce::Array<te::Track*>& tracks, te::Sel
         return nullptr;
 
     folder->setName ("Folder");
+    mixAsBus (*folder); // a bus from the start (design question 11)
     folder->setColour (colour);
 
     for (auto* track : tracks)

@@ -43,7 +43,7 @@
   <ARRANGERTRACK id="1006"
                  name="Arranger">
     <ARRANGERCLIP colour="ff999999"
-                  id="1038"
+                  id="1042"
                   length="16"
                   name="Intro"
                   offset="0"
@@ -52,7 +52,7 @@
                   phaziteTip="Open with the main riff or a drum fill, to set the tempo and the sound."
                   start="0"/>
     <ARRANGERCLIP colour="ff0072b2"
-                  id="1039"
+                  id="1043"
                   length="32"
                   name="Verse"
                   offset="0"
@@ -61,7 +61,7 @@
                   phaziteTip="Riff and rhythm section, with room for the vocal to tell the story."
                   start="16"/>
     <ARRANGERCLIP colour="ffd55e00"
-                  id="1040"
+                  id="1044"
                   length="16"
                   name="Chorus"
                   offset="0"
@@ -70,7 +70,7 @@
                   phaziteTip="Open up: bigger chords, crash cymbals and the line everyone sings."
                   start="48"/>
     <ARRANGERCLIP colour="ff0072b2"
-                  id="1041"
+                  id="1045"
                   length="32"
                   name="Verse"
                   offset="0"
@@ -79,7 +79,7 @@
                   phaziteTip="The same groove with something new: another guitar part, or heavier drums."
                   start="64"/>
     <ARRANGERCLIP colour="ffd55e00"
-                  id="1042"
+                  id="1046"
                   length="16"
                   name="Chorus"
                   offset="0"
@@ -88,7 +88,7 @@
                   phaziteTip="The chorus again, at least as big as the first."
                   start="96"/>
     <ARRANGERCLIP colour="ff009e73"
-                  id="1043"
+                  id="1047"
                   length="16"
                   name="Solo"
                   offset="0"
@@ -97,7 +97,7 @@
                   phaziteTip="Let the lead guitar, or another instrument, take over the melody."
                   start="112"/>
     <ARRANGERCLIP colour="ffcc79a7"
-                  id="1044"
+                  id="1048"
                   length="16"
                   name="Bridge"
                   offset="0"
@@ -106,7 +106,7 @@
                   phaziteTip="A change of chords or feel that builds the tension for the last chorus."
                   start="128"/>
     <ARRANGERCLIP colour="ffd55e00"
-                  id="1045"
+                  id="1049"
                   length="32"
                   name="Chorus"
                   offset="0"
@@ -115,7 +115,7 @@
                   phaziteTip="The last chorus, twice through: everything in, maybe up a key."
                   start="144"/>
     <ARRANGERCLIP colour="ff999999"
-                  id="1046"
+                  id="1050"
                   length="16"
                   name="Outro"
                   offset="0"
@@ -137,16 +137,22 @@
     <MODIFIERS/>
   </MASTERTRACK>
   <FOLDERTRACK colour="ffe69f00"
-               id="1016"
+               id="1018"
                mute="0"
-               name="Group">
+               name="Group"
+               phaziteBus="1">
     <MODIFIERS/>
     <PLUGIN enabled="1"
-            id="1017"
+            id="1020"
             remapOnTempoChange="1"
-            type="vca">
+            type="volume"
+            volume="0.7408182">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1021"
+            remapOnTempoChange="1"
+            type="level"/>
     <TRACK id="1003"
            mute="0"
            name="One"
@@ -156,7 +162,7 @@
            solo="0">
       <MIDICLIP colour="ff00ff00"
                 currentTake="0"
-                id="1047"
+                id="1051"
                 length="1"
                 linkID=""
                 mute="0"
@@ -210,7 +216,7 @@
       </MIDICLIP>
       <MIDICLIP colour="ff00ff00"
                 currentTake="0"
-                id="1050"
+                id="1054"
                 length="1"
                 linkID=""
                 mute="0"
@@ -238,7 +244,7 @@
       </MIDICLIP>
       <MIDICLIP colour="ff00ff00"
                 currentTake="0"
-                id="1049"
+                id="1053"
                 length="1"
                 linkID=""
                 mute="0"
@@ -301,7 +307,7 @@
     </TRACK>
   </FOLDERTRACK>
   <TRACK colour="ff009e73"
-         id="1018"
+         id="1022"
          name="Return 1"
          soloIsolate="1">
     <CLIPSLOTS/>
@@ -311,17 +317,17 @@
     </OUTPUTDEVICES>
     <PLUGIN busNum="0"
             enabled="1"
-            id="1021"
+            id="1025"
             remapOnTempoChange="1"
             type="auxreturn"/>
     <PLUGIN enabled="1"
-            id="1019"
+            id="1023"
             remapOnTempoChange="1"
             type="volume">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"
-            id="1020"
+            id="1024"
             type="level"/>
   </TRACK>
   <TRACKCOMPS/>

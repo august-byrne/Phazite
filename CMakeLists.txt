@@ -139,6 +139,8 @@ target_sources(phazite_core PRIVATE
     src/model/engine/LoudnessMeterPlugin.h
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
+    src/model/mixer/Buses.cpp
+    src/model/mixer/Buses.h
     src/model/mixer/Mixer.cpp
     src/model/mixer/Mixer.h
     src/model/mixer/Sidechain.cpp

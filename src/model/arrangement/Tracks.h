@@ -42,8 +42,8 @@ void setSavedTrackHeight (te::Track&, int height);         // as given: the play
 te::AudioTrack* insertTrack (te::Edit&, te::Track* after, te::SelectionManager*);
 
 //==============================================================================
-// Folders group tracks. A folder starts out plain (its volume control scales its tracks', as a VCA does)
-// and becomes a bus when it holds an effect (docs/design.md, section 5).
+// Folders group tracks, and every new one is a bus, which mixes them through its own devices and fader
+// (model/mixer/Buses.h; docs/design.md, section 5).
 
 // Inserts an empty folder after a track (at the end if that is nullptr), and selects it alone.
 te::FolderTrack* insertFolder (te::Edit&, te::Track* after, te::SelectionManager*);

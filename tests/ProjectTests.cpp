@@ -528,11 +528,11 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (isUnsavedChange ([&project] { project->getPhaziteState().setProperty (schema::outline, "rock", nullptr); }));
     CHECK (isUnsavedChange ([&project] { project->getPhaziteState().getOrCreateChildWithName (schema::LASTKEY, nullptr); }));
     CHECK (isUnsavedChange ([t] { phazite::setTrackKey (*t, phazite::Key { 2, te::Scale::dorian }); }));
-    CHECK (isUnsavedChange ([f] { phazite::setMixedAsBus (*f, true); }));
+    CHECK (isUnsavedChange ([f] { phazite::setMixedAsBus (*f, false); })); // a new folder is a bus
 
     // Those two are undo steps, which Tracktion counts by itself; written without one, they count too.
     CHECK (isUnsavedChange ([t] { t->state.setProperty (schema::phaziteKeyScale, "lydian", nullptr); }));
-    CHECK (isUnsavedChange ([f] { f->state.removeProperty (schema::phaziteBus, nullptr); }));
+    CHECK (isUnsavedChange ([f] { f->state.setProperty (schema::phaziteBus, true, nullptr); }));
 
     auto* section = phazite::insertSection (reopened, {}, { .name = "Verse", .length = te::BeatDuration::fromBeats (16.0) });
     REQUIRE (section != nullptr);

@@ -92,11 +92,20 @@ TEST_CASE ("A track's instrument plays its notes, and its effects come after it"
     CHECK (phazite::getInstrument (*mix.a) == other);
 }
 
-TEST_CASE ("A folder becomes a bus with its first device, and plain again without one")
+TEST_CASE ("A new folder is a bus; a plain one becomes a bus with its first device, and plain again without one")
 {
     Mix mix;
     auto* folder = phazite::groupIntoFolder ({ mix.a, mix.b }, nullptr);
     REQUIRE (folder != nullptr);
+
+    // A bus from the start (design question 11): its tracks' sound goes through its own fader and meter.
+    CHECK (phazite::isBus (*folder));
+    CHECK (folder->getVCAPlugin() == nullptr);
+    CHECK (phazite::getLevelMeasurer (*folder) != nullptr);
+    CHECK (phazite::isBus (*phazite::insertFolder (*mix.edit, nullptr, nullptr)));
+
+    // Made plain with its switch, its volume scales its tracks' volumes instead, as a VCA does.
+    phazite::setMixedAsBus (*folder, false);
     CHECK_FALSE (phazite::isBus (*folder));
     REQUIRE (folder->getVCAPlugin() != nullptr);
     folder->getVCAPlugin()->setVolumeDb (-3.0f);
@@ -448,11 +457,11 @@ TEST_CASE ("The mixer strip's edits are undo steps of their own, and a mix drag 
     CHECK (phazite::getReturnTracks (*mix.edit).size() == returnsBefore + 1);
     CHECK (undo.getUndoDescription() == juce::String ("Add Send"));
 
-    // The bus switch.
+    // The bus switch, on a folder that starts as a bus.
     auto* folder = phazite::groupIntoFolder ({ mix.b }, nullptr);
     REQUIRE (folder != nullptr);
-    phazite::setMixedAsBus (*folder, true);
-    CHECK (undo.getUndoDescription() == juce::String ("Mix Folder as Bus"));
     phazite::setMixedAsBus (*folder, false);
     CHECK (undo.getUndoDescription() == juce::String ("Make Folder Plain"));
+    phazite::setMixedAsBus (*folder, true);
+    CHECK (undo.getUndoDescription() == juce::String ("Mix Folder as Bus"));
 }

@@ -409,7 +409,7 @@ void ProjectSession::open (const juce::File& file, bool restoreAutosave)
         return;
     }
 
-    // A newer Phazite's project stays in Open Recent, for the version that opens it (design question 17's proposal).
+    // A newer Phazite's project stays in Open Recent, for the version that opens it (design question 17).
     const auto tooNew = Project::isFromNewerPhazite (engine, file);
 
     if (! tooNew)

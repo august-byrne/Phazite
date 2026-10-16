@@ -393,10 +393,9 @@ TEST_SUITE ("realtime-audit")
         auto& tone = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
 
-        auto* folder = phazite::insertFolder (*edit, &tone, nullptr); // a plain folder, until it becomes a bus
+        auto* folder = phazite::insertFolder (*edit, &tone, nullptr); // a bus, as every new folder is
         REQUIRE (folder != nullptr);
         edit->moveTrack (&tone, te::TrackInsertPoint (folder, nullptr));
-        phazite::makeBus (*folder);
         REQUIRE (phazite::isBus (*folder));
 
         auto* reverbReturn = phazite::addReturnTrack (*edit, "Reverb", nullptr);

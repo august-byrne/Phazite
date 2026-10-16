@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer's model (docs/design.md, section 8): a channel for every track, in the playlist's order; devices on
-// tracks, folders and the master (a folder becomes a bus when it holds one); return tracks, and sends to them
-// from any track, before or after its fader.
+// tracks, folders and the master (folders are buses, Buses.h); return tracks, and sends to them from any track,
+// before or after its fader.
 #pragma once
 
+#include "Buses.h"
 #include "model/base/Tracktion.h"
 
 #include <memory>
@@ -117,14 +118,9 @@ te::Plugin* addEffect (te::Edit&, te::Track*, const DeviceType&);
 te::AudioTrack* addReturnWith (te::Track& sender, const DeviceType&);
 
 //==============================================================================
-// Folders. A plain folder's volume scales its tracks' volumes, as a VCA does; a bus mixes its tracks
-// together, through its devices, its own fader and meter.
-bool isBus (const te::Track&);
-void makeBus (te::FolderTrack&);
-void makePlainFolder (te::FolderTrack&);
-
-// The bus switch on a folder's strip, as an undo step. A folder made a bus with it stays one when its last effect
-// goes, while one that became a bus by getting an effect turns plain again then. A bus with effects stays a bus.
+// Folders (Buses.h). The bus switch on a folder's strip, as an undo step. A folder made a bus with it, as every new
+// folder is, stays one when its last effect goes, while a plain folder that became a bus by getting an effect (in a
+// project made before folders started as buses) turns plain again then. A bus with effects stays a bus.
 void setMixedAsBus (te::FolderTrack&, bool);
 
 // The plug-in whose volume a channel's fader moves: a track's or a bus's volume, or a plain folder's VCA.

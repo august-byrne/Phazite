@@ -11,7 +11,7 @@
   <CLICKTRACK level="0.6"/>
   <MASTERPLUGINS>
     <PLUGIN enabled="1"
-            id="1043"
+            id="1045"
             remapOnTempoChange="1"
             type="phaziteReverb">
       <MODIFIERASSIGNMENTS/>
@@ -166,12 +166,20 @@
   <FOLDERTRACK colour="ff56b4e9"
                id="1030"
                name="Group"
+               phaziteBus="1"
                phaziteCollapsed="1">
     <MODIFIERS/>
     <PLUGIN enabled="1"
-            id="1031"
+            id="1032"
             remapOnTempoChange="1"
-            type="vca">
+            type="volume"
+            volume="0.7408182">
+      <MODIFIERASSIGNMENTS/>
+    </PLUGIN>
+    <PLUGIN enabled="1"
+            id="1033"
+            remapOnTempoChange="1"
+            type="level">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <TRACK colour="ff56b4e9"
@@ -277,7 +285,7 @@
       <PLUGIN auxSendSliderPos="0.5488116"
               busNum="0"
               enabled="1"
-              id="1042"
+              id="1044"
               quickParamName="send level"
               remapOnTempoChange="1"
               type="auxsend">
@@ -327,19 +335,19 @@
     </TRACK>
   </FOLDERTRACK>
   <FOLDERTRACK colour="fff0e442"
-               id="1032"
+               id="1034"
                name="Bus"
                phaziteBus="1">
     <MODIFIERS/>
     <PLUGIN enabled="1"
-            id="1034"
+            id="1036"
             remapOnTempoChange="1"
             type="volume"
             volume="0.6376281">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"
-            id="1035"
+            id="1037"
             remapOnTempoChange="1"
             type="level">
       <MODIFIERASSIGNMENTS/>
@@ -390,7 +398,7 @@
       <PLUGIN auxSendSliderPos="0.5488116"
               busNum="0"
               enabled="1"
-              id="1041"
+              id="1043"
               quickParamName="send level"
               remapOnTempoChange="1"
               type="auxsend">
@@ -404,7 +412,7 @@
     </TRACK>
   </FOLDERTRACK>
   <TRACK colour="ff0072b2"
-         id="1037"
+         id="1039"
          name="Reverb"
          phaziteKeyRoot="2"
          phaziteKeyScale="minor"
@@ -416,26 +424,26 @@
     </OUTPUTDEVICES>
     <PLUGIN busNum="0"
             enabled="1"
-            id="1040"
+            id="1042"
             remapOnTempoChange="1"
             type="auxreturn">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"
-            id="1036"
+            id="1038"
             mix="1"
             remapOnTempoChange="1"
             type="phaziteReverb">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"
-            id="1038"
+            id="1040"
             remapOnTempoChange="1"
             type="volume">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"
-            id="1039"
+            id="1041"
             type="level">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
