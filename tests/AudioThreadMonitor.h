@@ -30,8 +30,11 @@ public:
     static void reset();
     static Counts getCounts();
 
-    // Where the recorded events came from (the first 512 after reset()), grouped by call stack and
-    // most frequent first, e.g. "12 x  te::Foo::bar <- te::Baz::process <- ...".
-    static juce::StringArray describeCallSites (int framesPerSite = 6);
+    // How many allocations and frees have happened since reset(): the number of the next one, for describeCallSites().
+    static int getNumEvents();
+
+    // Where the recorded events came from (the first 512 after reset(), from the one numbered firstEvent on), grouped by
+    // call stack and most frequent first, e.g. "12 x  te::Foo::bar <- te::Baz::process <- ...".
+    static juce::StringArray describeCallSites (int framesPerSite = 6, int firstEvent = 0);
 };
 } // namespace phazite::test

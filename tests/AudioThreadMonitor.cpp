@@ -128,7 +128,12 @@ AudioThreadMonitor::Counts AudioThreadMonitor::getCounts()
     return { numAllocations.load(), numFrees.load() };
 }
 
-juce::StringArray AudioThreadMonitor::describeCallSites ([[maybe_unused]] int framesPerSite)
+int AudioThreadMonitor::getNumEvents()
+{
+    return numAllocations.load() + numFrees.load();
+}
+
+juce::StringArray AudioThreadMonitor::describeCallSites ([[maybe_unused]] int framesPerSite, [[maybe_unused]] int firstEvent)
 {
     juce::StringArray lines;
 
@@ -136,12 +141,16 @@ juce::StringArray AudioThreadMonitor::describeCallSites ([[maybe_unused]] int fr
     const auto process = GetCurrentProcess();
     SymSetOptions (SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
 
-    if (! SymInitialize (process, nullptr, TRUE))
+    // JUCE's SystemStats::getStackBacktrace() initialises the symbol handler without cleaning it up, and a second
+    // SymInitialize() then fails: the symbols are there to use, but aren't this function's to clean up.
+    const auto initialised = SymInitialize (process, nullptr, TRUE) != FALSE;
+
+    if (! initialised && GetLastError() != ERROR_INVALID_PARAMETER)
         return { "(symbols unavailable)" };
 
     std::map<juce::String, int> sites;
 
-    for (int i = 0; i < juce::jmin (numRecordedEvents.load(), maxRecordedEvents); ++i)
+    for (int i = juce::jmax (0, firstEvent); i < juce::jmin (numRecordedEvents.load(), maxRecordedEvents); ++i)
     {
         juce::StringArray frames;
         const auto& event = recordedEvents[i];
@@ -159,7 +168,8 @@ juce::StringArray AudioThreadMonitor::describeCallSites ([[maybe_unused]] int fr
         ++sites[frames.joinIntoString (" <- ")];
     }
 
-    SymCleanup (process);
+    if (initialised)
+        SymCleanup (process);
 
     std::vector<std::pair<int, juce::String>> sorted;
 

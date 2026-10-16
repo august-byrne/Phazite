@@ -19,6 +19,7 @@ Replacing a part of the engine outright is a separate decision, made one capabil
   - The engine's worker threads are off in the tests, so all audio processing happens on that one thread.
   - Like the app, the device opens no audio inputs unless a scenario asks for them.
 - **Allocations (Windows Debug):** [tests/AudioThreadMonitor.cpp](../tests/AudioThreadMonitor.cpp) hooks the debug C runtime and counts every `malloc`, `realloc` and `free` on the audio thread. That includes `operator new` and JUCE's `HeapBlock`. It also records each one's call stack, which DbgHelp turns into function names.
+- **Warm-up, then steady playback:** each scenario plays at least 0.25 s, and on until the audio thread has gone 0.25 s without allocating or freeing, 2 s at most; then it measures one second of steady playback. Tracktion swaps MIDI buffers between its graph's nodes and pools them, so a buffer can be used for the first time, and allocate, some way into playback, depending on when notes arrive: with a fixed 0.25 s warm-up the recording scenario failed now and then (2026-10-16). Something that keeps allocating still shows in the steady second. The recording scenario's warm-up starts once recording has begun and its first note was played.
 - **Memory errors and data races (Linux CI):** the same playback runs under AddressSanitizer and ThreadSanitizer (the `linux-asan` and `linux-tsan` presets).
 - **Locks, and posting to the message thread, are not measured yet.** Those findings come from reading the engine's source. Clang's RealtimeSanitizer could measure them on Linux later.
 - **To run it:**
@@ -31,28 +32,28 @@ Replacing a part of the engine outright is a separate decision, made one capabil
 
 ## Results (Windows Debug)
 
-The first column covers the first 0.25 s after playback starts; the second covers the next second.
+The first column covers the warm-up after playback starts (0.5 s for every scenario but 4OSC, which never settles and so warms up for the longest, 2 s); the second covers the next second. Measured on 2026-10-16; the counts vary a little from run to run, with timing and the file cache.
 
-| Scenario | First 0.25 s | Next 1 s |
+| Scenario | Warm-up | Next 1 s |
 |---|---|---|
 | One empty track | 3 allocations | 0 |
-| The metronome, clicking louder on each bar's first beat | 3 allocations | 0 |
+| The metronome, clicking louder on each bar's first beat | 2 allocations | 0 |
 | Built-in EQ, compressor, and a send to a reverb return | 4 allocations | 0 |
 | Volume automation and an LFO on pan | 2 allocations | 0 |
 | A tone through a bus, with a send to a reverb return, into the loudness meter | 6 allocations | 0 |
 | Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |
 | Phazite's compressor, ducked by another track at 70 % mix, with its meters read | 4 allocations | 0 |
 | Phazite's limiter on the master, pushed 12 dB, with its meters read | 2 allocations | 0 |
-| Phazite's reverb on a return, with an 8-second decay | 5 allocations | 0 |
-| MIDI into Phazite's synth, notes overlapping, with noise and its LFO | 25 allocations (Tracktion's MIDI message arrays growing in their first blocks) | 0 |
-| Notes recorded from the computer keyboard onto Phazite's synth | 21 allocations (the same) | 0 |
-| A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor | 25 allocations (the same) | 0 |
-| An audio clip | 2 allocations (more if the file cache misses) | 0 |
-| Two tracks in a folder bus with a compressor | 7 allocations, 1 free | 0 |
-| MIDI into Tracktion's 4OSC synth | 29 allocations, 3 frees | 10 allocations, 8 frees |
+| Phazite's reverb on a return, with an 8-second decay | 4 allocations | 0 |
+| MIDI into Phazite's synth, notes overlapping, with noise and its LFO | 24 allocations (Tracktion's MIDI message arrays, used for the first time as Tracktion passes them between its nodes) | 0 |
+| Notes recorded from the computer keyboard onto Phazite's synth | 20 allocations (the same) | 0 |
+| A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor | 24 allocations (the same) | 0 |
+| An audio clip | 6 allocations, 3 frees (fewer if the file cache hits) | 0 |
+| Two tracks in a folder bus with a compressor | 10 allocations, 3 frees | 0 |
+| MIDI into Tracktion's 4OSC synth | 43 allocations, 15 frees | 1 allocation, 1 free, or more |
 | One empty track with two audio inputs enabled | 8 allocations, 4 frees | 0 |
-| A loop at 120 BPM stretched to 100 BPM, played from its rendered proxy (a loop dropped from the browser) | 7 allocations, 3 frees (from a file cache miss) | 0 |
-| A loop at 120 BPM previewed at 100 BPM, stretched as it plays (the browser's preview) | 22 allocations, 14 frees | 0 |
+| A loop at 120 BPM stretched to 100 BPM, played from its rendered proxy (a loop dropped from the browser) | 12 allocations, 9 frees (from a file cache miss) | 0 |
+| A loop at 120 BPM previewed at 100 BPM, stretched as it plays (the browser's preview) | 21 allocations, 14 frees | 0 |
 
 Steady playback is clean everywhere except in 4OSC. Every scenario allocates something in its first blocks, though.
 
@@ -77,8 +78,8 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 **3. JUCE's device callback** (measured): `juce::AudioDeviceManager` sizes a temporary buffer on its first callback, once per device. Accept it.
 
 **4. MIDI message arrays** (measured).
-- **What:** the arrays that carry MIDI through the playback graph grow on the audio thread when a block carries more events than any block before. This happens in `PluginNode`, `SummingNode`, `CombiningNode`, `TrackMutingNode` and others.
-- **Why it is mostly harmless:** it stops once their capacity covers the busiest block.
+- **What:** the arrays that carry MIDI through the playback graph grow on the audio thread when a block carries more events than any block before. This happens in `PluginNode`, `SummingNode`, `CombiningNode`, `TrackMutingNode` and others. `PluginNode` also swaps its array with its output's, and the graph pools those buffers, so an array can carry MIDI for the first time, and allocate, well into playback, depending on when notes arrive (found 2026-10-16, when it made the recording scenario fail now and then; the audit's warm-up now waits for a quiet stretch).
+- **Why it is mostly harmless:** it stops once every pooled array has been used and their capacity covers the busiest block.
 - **Action:** re-measure with MIDI-heavy projects when MIDI recording lands (step 1.7); reserving capacity up front needs the fork. Report upstream.
 
 **5. 4OSC** (measured and source): allocates for every note (a `juce::MidiBuffer` per block, the MPE note list) and locks on every block. Don't use it: Phazite's own synth replaced it in the starter project and the device list (step 1.6, 2026-10-15).

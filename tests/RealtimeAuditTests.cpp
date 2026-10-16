@@ -39,8 +39,35 @@ namespace
 {
 constexpr double auditSampleRate = 48000.0;
 constexpr int auditBlockSize = 256;
-constexpr double warmUpSeconds = 0.25; // the first blocks after starting playback
-constexpr double steadySeconds = 1.0;  // then steady playback
+constexpr double warmUpSeconds = 0.25;   // the first blocks after starting playback, at least,
+constexpr double quietSeconds = 0.25;    // and on until the audio thread has gone this long without allocating or freeing,
+constexpr double maxWarmUpSeconds = 2.0; // but no longer
+constexpr double steadySeconds = 1.0;    // then steady playback
+
+// Runs the warm-up through processFor (seconds) and returns how long it took. Tracktion swaps MIDI buffers between its
+// graph's nodes and pools them, so a buffer can first be used, and allocate, some way into playback: steady playback
+// starts once each has been used, which a quiet stretch shows. Something that keeps allocating still shows in the
+// steady second after the longest warm-up.
+template <typename ProcessFor>
+double warmUp (ProcessFor& processFor)
+{
+    processFor (warmUpSeconds);
+    auto elapsed = warmUpSeconds, quietFor = 0.0;
+    auto events = AudioThreadMonitor::getNumEvents();
+
+    while (quietFor < quietSeconds && elapsed < maxWarmUpSeconds)
+    {
+        constexpr double step = 0.05;
+        processFor (step);
+        elapsed += step;
+
+        const auto now = AudioThreadMonitor::getNumEvents();
+        quietFor = now == events ? quietFor + step : 0.0;
+        events = now;
+    }
+
+    return elapsed;
+}
 
 //==============================================================================
 // A two-second stereo sine wave file, so audio clips have something to play.
@@ -106,7 +133,10 @@ te::Plugin::Ptr createToneGenerator (te::Edit& edit)
 struct Measurement
 {
     AudioThreadMonitor::Counts warmUp, steady;
-    juce::StringArray callSites;
+    juce::StringArray callSites;       // of every allocation and free measured
+    juce::StringArray steadyCallSites; // of those after the warm-up
+    int firstSteadyEvent = 0;
+    double warmUpTaken = 0.0; // how long the warm-up took, in seconds (warmUp())
     float peakLevel = 0.0f;
 };
 
@@ -164,8 +194,9 @@ Measurement playAndMeasure (te::Edit& edit, int numInputChannels = 0)
                 }
             };
 
-            processFor (warmUpSeconds);
+            m.warmUpTaken = warmUp (processFor);
             m.warmUp = AudioThreadMonitor::getCounts();
+            m.firstSteadyEvent = AudioThreadMonitor::getNumEvents();
 
             processFor (steadySeconds);
             const auto total = AudioThreadMonitor::getCounts();
@@ -175,6 +206,7 @@ Measurement playAndMeasure (te::Edit& edit, int numInputChannels = 0)
 
     transport.stop (false, false);
     m.callSites = AudioThreadMonitor::describeCallSites();
+    m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
 
     // Remove the hosted device again, as Tracktion's own tests do, so later tests start without one.
     deviceManager.closeDevices();
@@ -246,8 +278,9 @@ Measurement recordAndMeasure (te::Edit& edit)
             while (! notesBegun.load())
                 processFor (0.01);
 
-            processFor (warmUpSeconds);
+            m.warmUpTaken = warmUp (processFor);
             m.warmUp = AudioThreadMonitor::getCounts();
+            m.firstSteadyEvent = AudioThreadMonitor::getNumEvents();
 
             processFor (steadySeconds);
             const auto total = AudioThreadMonitor::getCounts();
@@ -280,6 +313,7 @@ Measurement recordAndMeasure (te::Edit& edit)
     running = false;
     audioThread.join();
     m.callSites = AudioThreadMonitor::describeCallSites();
+    m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
 
     deviceManager.closeDevices();
     deviceManager.removeHostedAudioDeviceInterface();
@@ -295,13 +329,21 @@ void report (const juce::String& scenario, const Measurement& m)
 
     if (AudioThreadMonitor::isAvailable())
     {
-        text << "  audio thread, first " << warmUpSeconds << " s: " << m.warmUp.allocations << " allocations, " << m.warmUp.frees
+        text << "  audio thread, warm-up of " << m.warmUpTaken << " s: " << m.warmUp.allocations << " allocations, " << m.warmUp.frees
              << " frees\n";
         text << "  audio thread, next " << steadySeconds << " s: " << m.steady.allocations << " allocations, " << m.steady.frees
              << " frees\n";
 
         for (const auto& site : m.callSites)
             text << "    " << site << "\n";
+
+        if (! m.steadyCallSites.isEmpty())
+        {
+            text << "  of those, in the next " << steadySeconds << " s:\n";
+
+            for (const auto& site : m.steadyCallSites)
+                text << "    " << site << "\n";
+        }
     }
     else
     {
