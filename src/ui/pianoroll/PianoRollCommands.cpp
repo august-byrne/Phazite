@@ -89,7 +89,7 @@ void PianoRoll::applyTransform()
     const auto result = getPreview();
     juce::Array<te::MidiNote*> added;
 
-    for (const auto& n : replaceNotes (notes, result, describeTransform()))
+    for (const auto& n : replaceNotes (*e, notes, result, describeTransform()))
         added.add (n.note);
 
     closeTransform();
@@ -218,7 +218,7 @@ void PianoRoll::showKeyMenu()
         for (const auto scale : getKeyScales())
         {
             const Key choice { root, scale };
-            scales.addItem (te::Scale::getNameForType (scale), true, key.has_value() && key->root == root && key->scale == scale,
+            scales.addItem (getScaleName (scale), true, key.has_value() && key->root == root && key->scale == scale,
                             [this, choice] { setKey (choice); });
         }
 

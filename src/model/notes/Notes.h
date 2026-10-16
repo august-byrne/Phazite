@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Notes in MIDI clips, as the piano roll edits them (docs/design.md, section 7). Positions are song beats
-// (the clip's content start plus the note's own beat), so the notes of several clips line up. The
-// transforms (quantize, legato, chop, transpose) work on copies of the notes, so that the piano roll can
-// show what one would do before it is applied with replaceNotes().
+// Notes in MIDI clips, as the piano roll edits them (docs/design.md, section 7): the Tracktion side of NoteValues.h, which
+// holds notes as plain values with the transforms, keys, chords and drums' names. Positions are song beats (the clip's
+// content start plus the note's own beat), so the notes of several clips line up.
 #pragma once
 
+#include "NoteValues.h"
 #include "model/base/Tracktion.h"
 
 #include <functional>
@@ -15,19 +15,6 @@ namespace phazite
 {
 class CommandRegistry;
 
-// A note as the piano roll shows it and the transforms change it.
-struct NoteData
-{
-    te::MidiClip* clip = nullptr;
-    int pitch = 60;
-    te::BeatPosition start {}; // in the song
-    te::BeatDuration length = te::BeatDuration::fromBeats (1.0);
-    int velocity = 100;
-    bool muted = false;
-
-    te::BeatPosition getEnd() const { return start + length; }
-};
-
 // A note, with the clip it is in.
 struct ClipNote
 {
@@ -36,11 +23,14 @@ struct ClipNote
 };
 
 te::BeatPosition getNoteStart (const te::MidiClip&, const te::MidiNote&); // in the song
-NoteData getNoteData (te::MidiClip&, const te::MidiNote&);
+NoteData getNoteData (const te::MidiClip&, const te::MidiNote&);
 std::vector<NoteData> getNoteData (const std::vector<ClipNote>&);
 
-// Notes are at least this long.
-te::BeatDuration getMinimumNoteLength();
+// A scale and a chord as Tracktion has them, and a scale back (Tracktion's ionian and aeolian are major and minor, which
+// have the same notes).
+te::Scale::ScaleType toTracktion (Scale);
+Scale toScale (te::Scale::ScaleType);
+te::Chord::ChordType toTracktion (ChordType);
 
 //==============================================================================
 // Notes' IDs (schema::phaziteNoteID): each note's, which no other note of its clip has. A copy of a clip keeps them.
@@ -114,12 +104,12 @@ void changeNoteVelocities (const std::vector<ClipNote>&, int change);
 // addNote() says. Returns the copies.
 std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>&);
 
-// Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to
-// the clips they name. Returns the new notes.
-std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements);
+// Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to the Edit's
+// clips they name. Returns the new notes.
+std::vector<ClipNote> replaceNotes (te::Edit&, const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements);
 
 // The same, as one undo step with the name given (a transform's, such as "Quantize Notes").
-std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements,
+std::vector<ClipNote> replaceNotes (te::Edit&, const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements,
                                     const juce::String& undoName);
 
 // Replaces the selected notes with what a transform makes of them (legato, chop), and selects the new notes. Returns
@@ -128,46 +118,10 @@ std::vector<ClipNote> replaceSelectedNotes (te::SelectionManager&,
                                             const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform);
 
 //==============================================================================
-// Transforms: what a change would make of some notes.
-
-struct QuantizeSettings
-{
-    double gridBeats = 0.25; // the step of the grid to quantize to
-    float strength = 1.0f;   // how far toward the grid line each note moves, from 0 to 1
-    float swing = 0.0f;      // how late every other grid line is, from 0 to 1, where 1 is a triplet feel
-    bool ends = false;       // the ends too, not only the starts
-};
-
-std::vector<NoteData> quantize (std::vector<NoteData>, const QuantizeSettings&);
-
-// Each note lasts until the next starts (notes that start together are a chord and end together), less a
-// gap. Notes with nothing after them keep their length.
-std::vector<NoteData> legato (std::vector<NoteData>, double gapBeats = 0.0);
-
-// Cuts each note into pieces of a length; the last piece is shorter if the note doesn't divide evenly.
-std::vector<NoteData> chop (std::vector<NoteData>, double pieceBeats);
-
-//==============================================================================
-// Keys and scales.
-
-struct Key
-{
-    int root = 0; // 0 is C, 1 C sharp, ..., 11 B
-    te::Scale::ScaleType scale = te::Scale::major;
-};
+// Keys.
 
 // The song's key at a beat, from Tracktion's pitch sequence (which holds its key changes).
 Key getKeyAt (const te::Edit&, te::BeatPosition);
-juce::String describeKey (const Key&); // "C major"
-bool isInKey (int pitch, const Key&);
-
-// The scales offered for a key, without Tracktion's duplicates (ionian is major, aeolian minor).
-juce::Array<te::Scale::ScaleType> getKeyScales();
-
-// A scale as projects save it ("major", "dorian", "harmonicMinor"...; ionian as "major" and aeolian as "minor", which
-// have the same notes), and back: nothing for a name that isn't one of them.
-juce::String getSavedScaleName (te::Scale::ScaleType);
-std::optional<te::Scale::ScaleType> findScale (const juce::String& savedName);
 
 // A track's key, which the piano roll shades its rows by and can snap notes to. A track has none until one
 // is chosen: Phazite keeps it per track, since Tracktion's pitch sequence is one key for the whole song.
@@ -186,36 +140,8 @@ void applyLastKey (te::Track&); // the key set last on any of the song's tracks,
 // project's key, before it has tracks.
 void setLastKey (te::Edit&, const Key&);
 
-// The pitch in the key nearest to a pitch (the lower one when two are as near).
-int snapToKey (int pitch, const Key&);
-
-// Transposes by semitones, or with a key, by steps of its scale (a note outside the scale first goes to the
-// nearest one in it). Pitches stay within the MIDI range.
-std::vector<NoteData> transpose (std::vector<NoteData>, int steps, const std::optional<Key>& diatonicIn);
-
 //==============================================================================
-// Chords the piano roll stamps with one click.
-
-struct ChordShape
-{
-    const char* name; // "Major", "m7"
-    te::Chord::ChordType type;
-};
-
-const std::vector<ChordShape>& getChordShapes();
-std::vector<int> getChordPitches (int root, te::Chord::ChordType); // those in the MIDI range
-
-//==============================================================================
-// Drum mode: rows named after the drums instead of piano keys (docs/design.md, section 7).
-
-struct DrumRow
-{
-    int note = 36;
-    juce::String name;
-};
-
-// General MIDI's drum for a note ("Kick", "Snare", "Closed Hat"...), or the note's name outside that map.
-juce::String getDrumName (int note);
+// Drum mode (docs/design.md, section 7).
 
 // Whether the piano roll shows the track's clips in drum mode: on for a track whose instrument is
 // Phazite's drum sampler or Tracktion's sampler, unless it was turned off, and for any track it was turned on for.

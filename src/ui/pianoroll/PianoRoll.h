@@ -102,7 +102,7 @@ private:
     // What new notes get: the length and velocity used last, a chord, and the song's key.
     te::BeatDuration lastLength = te::BeatDuration::fromBeats (0.25);
     int lastVelocity = 100;
-    std::optional<te::Chord::ChordType> chordStamp;
+    std::optional<ChordType> chordStamp;
     bool snapToKey = false, showGhostNotes = true;
     Transform transform;        // the transform the bar shows, with the settings used last
     bool transformOpen = false; // while its preview shows

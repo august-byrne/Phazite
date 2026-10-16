@@ -24,6 +24,15 @@ te::BeatDuration length (double b)
     return te::BeatDuration::fromBeats (b);
 }
 
+// A note's values, in no clip yet.
+phazite::NoteData noteData (int pitch, double start, double noteLength, int velocity)
+{
+    return { .pitch = pitch,
+             .start = phazite::BeatPosition::fromBeats (start),
+             .length = phazite::BeatDuration::fromBeats (noteLength),
+             .velocity = velocity };
+}
+
 // An Edit with a MIDI clip from beat 4 to 8 (one bar, 4/4), the note selection for it, and the selection
 // and note commands, with a grid of a quarter beat.
 struct Notes
@@ -86,7 +95,7 @@ TEST_CASE ("Notes are placed in song beats, and their clip grows to hold them")
     CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (16.0));
 
     phazite::setNoteLength (*n.clip, note, length (0.0));
-    CHECK (note.getLengthBeats() == phazite::getMinimumNoteLength());
+    CHECK (note.getLengthBeats().inBeats() == doctest::Approx (phazite::getMinimumNoteLength().inBeats()));
 }
 
 TEST_CASE ("Transposing and nudging keep the notes together, within their limits")
@@ -222,8 +231,7 @@ TEST_CASE ("Duplicating notes past their clip grows it only up to the next clip,
 TEST_CASE ("Quantize moves notes toward the grid, with strength and swing")
 {
     using phazite::NoteData;
-    const std::vector<NoteData> notes { { nullptr, 60, beats (0.1), length (0.3), 100, false },
-                                        { nullptr, 62, beats (0.6), length (0.3), 100, false } };
+    const std::vector<NoteData> notes { noteData (60, 0.1, 0.3, 100), noteData (62, 0.6, 0.3, 100) };
 
     phazite::QuantizeSettings settings;
     settings.gridBeats = 0.5;
@@ -253,9 +261,8 @@ TEST_CASE ("Quantize moves notes toward the grid, with strength and swing")
 TEST_CASE ("Legato and chop")
 {
     using phazite::NoteData;
-    std::vector<NoteData> notes { { nullptr, 60, beats (0.0), length (0.25), 100, false },
-                                  { nullptr, 64, beats (0.0), length (0.5), 100, false }, // a chord with the first
-                                  { nullptr, 67, beats (1.0), length (0.25), 100, false } };
+    std::vector<NoteData> notes { noteData (60, 0.0, 0.25, 100), noteData (64, 0.0, 0.5, 100), // a chord with the first
+                                  noteData (67, 1.0, 0.25, 100) };
 
     const auto connected = phazite::legato (notes);
     CHECK (connected[0].length.inBeats() == doctest::Approx (1.0));
@@ -264,7 +271,7 @@ TEST_CASE ("Legato and chop")
 
     CHECK (phazite::legato (notes, 0.25)[0].length.inBeats() == doctest::Approx (0.75));
 
-    const auto pieces = phazite::chop ({ { nullptr, 60, beats (2.0), length (1.1), 90, false } }, 0.25);
+    const auto pieces = phazite::chop ({ noteData (60, 2.0, 1.1, 90) }, 0.25);
     REQUIRE (pieces.size() == 5);
     CHECK (pieces[1].start.inBeats() == doctest::Approx (2.25));
     CHECK (pieces[4].length.inBeats() == doctest::Approx (0.1));
@@ -273,26 +280,26 @@ TEST_CASE ("Legato and chop")
 
 TEST_CASE ("Keys: shading, snapping and transposing in the key")
 {
-    const phazite::Key cMajor { 0, te::Scale::major };
+    const phazite::Key cMajor { 0, phazite::Scale::major };
     CHECK (phazite::isInKey (60, cMajor));
     CHECK_FALSE (phazite::isInKey (61, cMajor));
     CHECK (phazite::snapToKey (61, cMajor) == 60); // the lower one when both are as near
     CHECK (phazite::snapToKey (66, cMajor) == 65);
     CHECK (phazite::describeKey (cMajor) == juce::String ("C major"));
 
-    const phazite::Key aMinor { 9, te::Scale::minor };
+    const phazite::Key aMinor { 9, phazite::Scale::minor };
     CHECK (phazite::isInKey (60, aMinor));
     CHECK_FALSE (phazite::isInKey (61, aMinor));
 
     using phazite::NoteData;
-    const std::vector<NoteData> notes { { nullptr, 64, beats (0.0), length (1.0), 100, false } };
+    const std::vector<NoteData> notes { noteData (64, 0.0, 1.0, 100) };
 
     // E up two steps of C major is G; up a semitone, F; down 3 steps, B below.
     CHECK (phazite::transpose (notes, 2, cMajor)[0].pitch == 67);
     CHECK (phazite::transpose (notes, 1, std::nullopt)[0].pitch == 65);
     CHECK (phazite::transpose (notes, -3, cMajor)[0].pitch == 59);
     CHECK (phazite::transpose (notes, 7, cMajor)[0].pitch == 76); // an octave
-    CHECK (phazite::transpose ({ { nullptr, 125, beats (0.0), length (1.0), 100, false } }, 12, std::nullopt)[0].pitch == 127);
+    CHECK (phazite::transpose ({ noteData (125, 0.0, 1.0, 100) }, 12, std::nullopt)[0].pitch == 127);
 
     // A new Edit is in C major.
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
@@ -307,7 +314,7 @@ TEST_CASE ("A track has no key until one is chosen, and new tracks get the key c
     CHECK_FALSE (phazite::getTrackKey (*track).has_value());
 
     edit->getUndoManager().beginNewTransaction();
-    phazite::setTrackKey (*track, phazite::Key { 9, te::Scale::minor });
+    phazite::setTrackKey (*track, phazite::Key { 9, phazite::Scale::minor });
     const auto key = phazite::getTrackKey (*track);
     REQUIRE (key.has_value());
     CHECK (phazite::describeKey (*key) == juce::String ("A minor"));
@@ -318,7 +325,7 @@ TEST_CASE ("A track has no key until one is chosen, and new tracks get the key c
     REQUIRE (added != nullptr);
     REQUIRE (phazite::getTrackKey (*added).has_value());
     CHECK (phazite::getTrackKey (*added)->root == 9);
-    CHECK (phazite::getTrackKey (*added)->scale == te::Scale::minor);
+    CHECK (phazite::getTrackKey (*added)->scale == phazite::Scale::minor);
 
     // Turning it off is an undo step.
     edit->getUndoManager().beginNewTransaction();
@@ -330,9 +337,9 @@ TEST_CASE ("A track has no key until one is chosen, and new tracks get the key c
 
 TEST_CASE ("Chord stamps and drum rows")
 {
-    CHECK (phazite::getChordPitches (60, te::Chord::majorTriad) == std::vector<int> { 60, 64, 67 });
-    CHECK (phazite::getChordPitches (57, te::Chord::minorSeventhChord) == std::vector<int> { 57, 60, 64, 67 });
-    CHECK (phazite::getChordPitches (125, te::Chord::majorTriad) == std::vector<int> { 125 }); // the rest are out of range
+    CHECK (phazite::getChordPitches (60, phazite::ChordType::major) == std::vector<int> { 60, 64, 67 });
+    CHECK (phazite::getChordPitches (57, phazite::ChordType::minorSeventh) == std::vector<int> { 57, 60, 64, 67 });
+    CHECK (phazite::getChordPitches (125, phazite::ChordType::major) == std::vector<int> { 125 }); // the rest are out of range
     CHECK_FALSE (phazite::getChordShapes().empty());
 
     CHECK (phazite::getDrumName (36) == juce::String ("Kick"));
@@ -451,7 +458,7 @@ TEST_CASE ("Every track can get the same key")
     const auto tracks = phazite::getPlaylistTracks (*edit);
     REQUIRE (tracks.size() == 3);
 
-    phazite::setTrackKeys (tracks, phazite::Key { 2, te::Scale::minor });
+    phazite::setTrackKeys (tracks, phazite::Key { 2, phazite::Scale::minor });
 
     for (auto* track : tracks)
     {
@@ -472,11 +479,12 @@ TEST_CASE ("Scales are saved by name")
     for (const auto type : phazite::getKeyScales())
         CHECK (phazite::findScale (phazite::getSavedScaleName (type)) == type);
 
-    CHECK (phazite::getSavedScaleName (te::Scale::harmonicMinor) == juce::String ("harmonicMinor"));
+    CHECK (phazite::getSavedScaleName (phazite::Scale::harmonicMinor) == juce::String ("harmonicMinor"));
 
     // Tracktion's ionian and aeolian, which Phazite doesn't offer, as the scales with their notes.
-    CHECK (phazite::getSavedScaleName (te::Scale::ionian) == juce::String ("major"));
-    CHECK (phazite::getSavedScaleName (te::Scale::aeolian) == juce::String ("minor"));
+    CHECK (phazite::toScale (te::Scale::ionian) == phazite::Scale::major);
+    CHECK (phazite::toScale (te::Scale::aeolian) == phazite::Scale::minor);
+    CHECK (phazite::toScale (phazite::toTracktion (phazite::Scale::dorian)) == phazite::Scale::dorian);
 
     // Names are exact: no numbers, no other spelling.
     CHECK_FALSE (phazite::findScale ("3").has_value());
@@ -495,7 +503,7 @@ TEST_CASE ("The piano roll's key menu, Alt and the wheel, and an applied transfo
     auto& undo = edit->getUndoManager();
     undo.clearUndoHistory();
 
-    phazite::chooseTrackKey (*track, phazite::Key { 9, te::Scale::minor });
+    phazite::chooseTrackKey (*track, phazite::Key { 9, phazite::Scale::minor });
     CHECK (undo.getUndoDescription() == juce::String ("Set Key"));
     phazite::chooseTrackKey (*track, std::nullopt);
     CHECK (undo.getUndoDescription() == juce::String ("Turn Key Off"));
@@ -506,7 +514,7 @@ TEST_CASE ("The piano roll's key menu, Alt and the wheel, and an applied transfo
 
     auto data = phazite::getNoteData ({ { clip, note } });
     data.front().pitch = 67;
-    const auto replaced = phazite::replaceNotes ({ { clip, note } }, data, "Transpose Notes");
+    const auto replaced = phazite::replaceNotes (*edit, { { clip, note } }, data, "Transpose Notes");
     REQUIRE (replaced.size() == 1);
     CHECK (replaced.front().note->getNoteNumber() == 67);
     CHECK (undo.getUndoDescription() == juce::String ("Transpose Notes"));

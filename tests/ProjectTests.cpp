@@ -358,7 +358,7 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
         const auto aliases = phazite::copyClips ({ clip }, true);
         REQUIRE (aliases.size() == 1);
         phazite::moveClip (*aliases[0], beats (4.0), *track);
-        phazite::setTrackKey (*track, phazite::Key { 2, te::Scale::minor });
+        phazite::setTrackKey (*track, phazite::Key { 2, phazite::Scale::minor });
         phazite::test::settle();
         REQUIRE (project->save().wasOk());
     }
@@ -527,7 +527,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
 
     CHECK (isUnsavedChange ([&project] { project->getPhaziteState().setProperty (schema::outline, "rock", nullptr); }));
     CHECK (isUnsavedChange ([&project] { project->getPhaziteState().getOrCreateChildWithName (schema::LASTKEY, nullptr); }));
-    CHECK (isUnsavedChange ([t] { phazite::setTrackKey (*t, phazite::Key { 2, te::Scale::dorian }); }));
+    CHECK (isUnsavedChange ([t] { phazite::setTrackKey (*t, phazite::Key { 2, phazite::Scale::dorian }); }));
     CHECK (isUnsavedChange ([f] { phazite::setMixedAsBus (*f, false); })); // a new folder is a bus
 
     // Those two are undo steps, which Tracktion counts by itself; written without one, they count too.

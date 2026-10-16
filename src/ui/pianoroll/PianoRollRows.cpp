@@ -100,13 +100,13 @@ juce::Rectangle<float> PianoRoll::getNoteBounds (const NoteData& note) const
     const auto& timeline = getView();
     const auto top = (float) getRowTop (row) + 1.0f;
     const auto height = (float) getRowHeight() - 2.0f;
-    const auto left = (float) timeline.beatToX (fromTracktion (note.start));
+    const auto left = (float) timeline.beatToX (note.start);
 
     // In drum mode a note is a hit, drawn as a diamond where it starts.
     if (drumMode)
         return { left - height / 2.0f, top, height, height };
 
-    const auto right = (float) timeline.beatToX (fromTracktion (note.getEnd()));
+    const auto right = (float) timeline.beatToX (note.getEnd());
     return { left, top, std::max (3.0f, right - left), height };
 }
 } // namespace phazite::ui

@@ -185,7 +185,7 @@ TEST_CASE ("The piano roll paints notes, with and without a key")
     CHECK_FALSE (screen.pianoRoll.getTrack() == nullptr);
     CHECK (screen.window.paintEverything().getWidth() == 1000);
 
-    phazite::setTrackKey (*screen.tracks[0], phazite::Key { 2, te::Scale::dorian });
+    phazite::setTrackKey (*screen.tracks[0], phazite::Key { 2, phazite::Scale::dorian });
     phazite::test::dispatchPendingMessages();
     CHECK (screen.window.paintEverything().getWidth() == 1000);
 }

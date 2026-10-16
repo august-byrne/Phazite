@@ -125,7 +125,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     auto* reverb = phazite::insertDevice (*keys, createBuiltInDevice (edit, phazite::devices::Reverb::typeID));
     REQUIRE (reverb != nullptr);
     phazite::setMix (*reverb, 0.25f);
-    phazite::setTrackKey (*keys, phazite::Key { 2, te::Scale::minor });
+    phazite::setTrackKey (*keys, phazite::Key { 2, phazite::Scale::minor });
 
     auto* chords = phazite::insertMidiClip (*keys, { beats (0.0), beats (8.0) }, nullptr);
     REQUIRE (chords != nullptr);

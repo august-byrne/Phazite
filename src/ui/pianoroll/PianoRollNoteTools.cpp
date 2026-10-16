@@ -111,7 +111,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
             if (hit.has_value())
             {
                 const auto data = getNoteData (*hit->clip, *hit->note);
-                const auto at = toTracktion (roll.snap (gesture->startBeat, e.mods));
+                const auto at = roll.snap (gesture->startBeat, e.mods);
 
                 if (at > data.start + getMinimumNoteLength() && at < data.getEnd() - getMinimumNoteLength())
                 {
@@ -120,7 +120,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
                     second.start = at;
                     second.length = data.getEnd() - at;
                     gesture->beginStep (roll.context, "Split Note");
-                    replaceNotes ({ *hit }, { first, second });
+                    replaceNotes (*roll.getEdit(), { *hit }, { first, second });
                 }
             }
 
@@ -309,7 +309,7 @@ void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
         const auto anchorIndex =
             std::find_if (notes.begin(), notes.end(), [this] (const ClipNote& n) { return n.note->state == gesture->noteState; })
             - notes.begin();
-        const auto copies = replaceNotes ({}, getNoteData (notes));
+        const auto copies = replaceNotes (*ed, {}, getNoteData (notes));
         juce::Array<te::MidiNote*> copied;
 
         for (const auto& n : copies)
@@ -397,7 +397,7 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
         return;
     }
 
-    const auto minimum = getMinimumNoteLength();
+    const auto minimum = toTracktion (getMinimumNoteLength());
 
     if (gesture->kind == Gesture::Kind::resizeEnd)
     {

@@ -234,3 +234,29 @@ TEST_CASE ("Notes' IDs are saved with the project and the same when it opens aga
     CHECK (idsOf (*clipOf (*project)) == saved);
     CHECK_FALSE (project->hasUnsavedChanges());
 }
+
+TEST_CASE ("Notes that replace others keep their IDs: a quantized note, a chopped note's first piece; a copy gets its own")
+{
+    Song song;
+    auto& clip = *song.clip;
+    auto& note = addNote (clip, 60, 0.3);
+    const auto id = phazite::getNoteID (note);
+    REQUIRE (id.isValid());
+
+    const auto quantized =
+        phazite::replaceNotes (*song.edit, { { &clip, &note } }, phazite::quantize (phazite::getNoteData ({ { &clip, &note } }), {}));
+    REQUIRE (quantized.size() == 1);
+    CHECK (phazite::getNoteID (*quantized[0].note) == id);
+    CHECK (phazite::getNoteStart (clip, *quantized[0].note).inBeats() == doctest::Approx (0.25));
+
+    const auto pieces = phazite::replaceNotes (*song.edit, quantized, phazite::chop (phazite::getNoteData (quantized), 0.25));
+    REQUIRE (pieces.size() == 4);
+    CHECK (phazite::getNoteID (*pieces[0].note) == id);
+    CHECK (allDifferent (idsOf (clip)));
+
+    // A copy, while its original is still there.
+    const auto copies = phazite::duplicateNotes ({ pieces[0] });
+    REQUIRE (copies.size() == 1);
+    CHECK (phazite::getNoteID (*copies[0].note) != id);
+    CHECK (allDifferent (idsOf (clip)));
+}

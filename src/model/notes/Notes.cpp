@@ -15,22 +15,55 @@ namespace phazite
 {
 namespace
 {
-    // The scales Phazite offers, in the order its menus show them, with the names projects save them by.
+    // The scales Phazite offers, in the order its menus show them, with Tracktion's and the names projects save them by.
     struct SavedScale
     {
+        Scale scale;
         te::Scale::ScaleType type;
         const char* name;
     };
 
-    constexpr SavedScale savedScales[] = { { te::Scale::major, "major" },
-                                           { te::Scale::minor, "minor" },
-                                           { te::Scale::dorian, "dorian" },
-                                           { te::Scale::phrygian, "phrygian" },
-                                           { te::Scale::lydian, "lydian" },
-                                           { te::Scale::mixolydian, "mixolydian" },
-                                           { te::Scale::locrian, "locrian" },
-                                           { te::Scale::harmonicMinor, "harmonicMinor" },
-                                           { te::Scale::melodicMinor, "melodicMinor" } };
+    constexpr SavedScale savedScales[] = { { Scale::major, te::Scale::major, "major" },
+                                           { Scale::minor, te::Scale::minor, "minor" },
+                                           { Scale::dorian, te::Scale::dorian, "dorian" },
+                                           { Scale::phrygian, te::Scale::phrygian, "phrygian" },
+                                           { Scale::lydian, te::Scale::lydian, "lydian" },
+                                           { Scale::mixolydian, te::Scale::mixolydian, "mixolydian" },
+                                           { Scale::locrian, te::Scale::locrian, "locrian" },
+                                           { Scale::harmonicMinor, te::Scale::harmonicMinor, "harmonicMinor" },
+                                           { Scale::melodicMinor, te::Scale::melodicMinor, "melodicMinor" } };
+
+    const SavedScale& findSavedScale (Scale scale)
+    {
+        for (const auto& saved : savedScales)
+            if (saved.scale == scale)
+                return saved;
+
+        return savedScales[0];
+    }
+
+    // The chords the piano roll stamps, with Tracktion's.
+    struct ChordStamp
+    {
+        ChordType type;
+        te::Chord::ChordType tracktionType;
+        const char* name;
+    };
+
+    constexpr ChordStamp chords[] = { { ChordType::major, te::Chord::majorTriad, "Major" },
+                                      { ChordType::minor, te::Chord::minorTriad, "Minor" },
+                                      { ChordType::dominantSeventh, te::Chord::dominatSeventhChord, "7" },
+                                      { ChordType::majorSeventh, te::Chord::majorSeventhChord, "Maj7" },
+                                      { ChordType::minorSeventh, te::Chord::minorSeventhChord, "m7" },
+                                      { ChordType::suspendedSecond, te::Chord::suspendedSecond, "Sus2" },
+                                      { ChordType::suspendedFourth, te::Chord::suspendedFourth, "Sus4" },
+                                      { ChordType::diminished, te::Chord::diminishedTriad, "Dim" },
+                                      { ChordType::augmented, te::Chord::augmentedTriad, "Aug" },
+                                      { ChordType::majorSixth, te::Chord::majorSixthChord, "6" },
+                                      { ChordType::minorSixth, te::Chord::minorSixthChord, "m6" },
+                                      { ChordType::dominantNinth, te::Chord::dominantNinthChord, "9" },
+                                      { ChordType::majorNinth, te::Chord::majorNinthChord, "Maj9" },
+                                      { ChordType::power, te::Chord::powerChord, "Power" } };
 
     // A key, on a track's state or on LASTKEY in the song's Phazite state (model/base/Schema.h). A key exists exactly when
     // its root does.
@@ -40,7 +73,7 @@ namespace
             return std::nullopt;
 
         return Key { juce::jlimit (0, 11, (int) state[schema::phaziteKeyRoot]),
-                     findScale (state[schema::phaziteKeyScale].toString()).value_or (te::Scale::major) };
+                     findScale (state[schema::phaziteKeyScale].toString()).value_or (Scale::major) };
     }
 
     void writeKey (juce::ValueTree state, const std::optional<Key>& key, juce::UndoManager* undo)
@@ -119,11 +152,11 @@ namespace
         return juce::jlimit (0, 127, pitch);
     }
 
-    std::vector<int> getScaleSteps (te::Scale::ScaleType type)
+    std::vector<int> getScaleSteps (Scale scale)
     {
         std::vector<int> steps;
 
-        for (const auto step : te::Scale (type).getSteps())
+        for (const auto step : te::Scale (toTracktion (scale)).getSteps())
             steps.push_back (step);
 
         return steps;
@@ -177,9 +210,43 @@ te::BeatPosition getNoteStart (const te::MidiClip& clip, const te::MidiNote& not
     return clip.getContentStartBeat() + te::toDuration (note.getStartBeat());
 }
 
-NoteData getNoteData (te::MidiClip& clip, const te::MidiNote& note)
+NoteData getNoteData (const te::MidiClip& clip, const te::MidiNote& note)
 {
-    return { &clip, note.getNoteNumber(), getNoteStart (clip, note), note.getLengthBeats(), note.getVelocity(), note.isMute() };
+    return { getClipID (clip),
+             getNoteID (note),
+             note.getNoteNumber(),
+             fromTracktion (getNoteStart (clip, note)),
+             fromTracktion (note.getLengthBeats()),
+             note.getVelocity(),
+             note.isMute() };
+}
+
+te::Scale::ScaleType toTracktion (Scale scale)
+{
+    return findSavedScale (scale).type;
+}
+
+Scale toScale (te::Scale::ScaleType type)
+{
+    if (type == te::Scale::ionian)
+        return Scale::major; // the same notes
+    if (type == te::Scale::aeolian)
+        return Scale::minor;
+
+    for (const auto& saved : savedScales)
+        if (saved.type == type)
+            return saved.scale;
+
+    return Scale::major;
+}
+
+te::Chord::ChordType toTracktion (ChordType type)
+{
+    for (const auto& chord : chords)
+        if (chord.type == type)
+            return chord.tracktionType;
+
+    return te::Chord::majorTriad;
 }
 
 std::vector<NoteData> getNoteData (const std::vector<ClipNote>& notes)
@@ -193,9 +260,9 @@ std::vector<NoteData> getNoteData (const std::vector<ClipNote>& notes)
     return data;
 }
 
-te::BeatDuration getMinimumNoteLength()
+BeatDuration getMinimumNoteLength()
 {
-    return te::BeatDuration::fromBeats (1.0 / 64.0);
+    return BeatDuration::fromBeats (1.0 / 64.0);
 }
 
 //==============================================================================
@@ -347,7 +414,7 @@ juce::Array<te::MidiNote*> toMidiNotes (const std::vector<ClipNote>& notes)
 te::MidiNote* addNote (te::MidiClip& clip, int pitch, te::BeatPosition start, te::BeatDuration length, int velocity)
 {
     start = std::max (start, clip.getStartBeat());
-    length = std::max (length, getMinimumNoteLength());
+    length = std::max (length, toTracktion (getMinimumNoteLength()));
     growToHold (clip, start + length);
     return clip.getSequence().addNote (clampPitch (pitch), toClipBeat (clip, start), length, juce::jlimit (1, 127, velocity), 0,
                                        getUndoManager (clip));
@@ -365,7 +432,7 @@ void moveNote (te::MidiClip& clip, te::MidiNote& note, te::BeatPosition start, i
 
 void setNoteLength (te::MidiClip& clip, te::MidiNote& note, te::BeatDuration length)
 {
-    length = std::max (length, getMinimumNoteLength());
+    length = std::max (length, toTracktion (getMinimumNoteLength()));
     growToHold (clip, getNoteStart (clip, note) + length);
     note.setStartAndLength (note.getStartBeat(), length, getUndoManager (clip));
 }
@@ -452,43 +519,50 @@ std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>& notes)
     auto copies = getNoteData (notes);
 
     for (auto& copy : copies)
-        copy.start = copy.start + (end - start);
+        copy.start = copy.start + fromTracktion (end - start);
 
-    return replaceNotes ({}, copies);
+    return replaceNotes (notes.front().clip->edit, {}, copies);
 }
 
-std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements)
+std::vector<ClipNote> replaceNotes (te::Edit& edit, const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements)
 {
     deleteNotes (old);
     std::vector<ClipNote> added;
+    te::MidiClip* clip = nullptr;
 
     for (const auto& data : replacements)
     {
-        if (data.clip == nullptr)
+        if (clip == nullptr || getClipID (*clip) != data.clip)
+            clip = data.clip.isValid() ? dynamic_cast<te::MidiClip*> (te::findClipForID (edit, toTracktion (data.clip))) : nullptr;
+
+        if (clip == nullptr)
             continue;
 
-        if (auto* note = addNote (*data.clip, data.pitch, data.start, data.length, data.velocity))
+        if (auto* note = addNote (*clip, data.pitch, toTracktion (data.start), toTracktion (data.length), data.velocity))
         {
             if (data.muted)
-                note->setMute (true, getUndoManager (*data.clip));
+                note->setMute (true, getUndoManager (*clip));
 
-            added.push_back ({ data.clip, note });
+            // A note that replaces one of the old ones (a quantized or transposed note, a chopped note's first piece) keeps
+            // that one's ID, if no other note of the clip has it now; a copy, whose original is still there, gets its own.
+            if (data.id.isValid() && findNote (*clip, data.id) == nullptr)
+                note->state.setProperty (schema::phaziteNoteID, (juce::int64) data.id.getRaw(), nullptr);
+
+            added.push_back ({ clip, note });
         }
     }
 
     return added;
 }
 
-std::vector<ClipNote> replaceNotes (const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements,
+std::vector<ClipNote> replaceNotes (te::Edit& edit, const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements,
                                     const juce::String& undoName)
 {
-    auto* clip = ! old.empty() ? old.front().clip : (! replacements.empty() ? replacements.front().clip : nullptr);
-
-    if (clip == nullptr)
+    if (old.empty() && replacements.empty())
         return {};
 
-    const UndoStep step (clip->edit, undoName);
-    return replaceNotes (old, replacements);
+    const UndoStep step (edit, undoName);
+    return replaceNotes (edit, old, replacements);
 }
 
 std::vector<ClipNote> replaceSelectedNotes (te::SelectionManager& selection,
@@ -501,7 +575,7 @@ std::vector<ClipNote> replaceSelectedNotes (te::SelectionManager& selection,
     if (events == nullptr || notes.empty())
         return {};
 
-    auto added = replaceNotes (notes, transform (getNoteData (notes)));
+    auto added = replaceNotes (notes.front().clip->edit, notes, transform (getNoteData (notes)));
     events->setSelected (selection, toMidiNotes (added), false);
     return added;
 }
@@ -532,10 +606,10 @@ std::vector<NoteData> quantize (std::vector<NoteData> notes, const QuantizeSetti
     for (auto& note : notes)
     {
         const auto end = note.getEnd().inBeats();
-        note.start = te::BeatPosition::fromBeats (quantizeBeat (note.start.inBeats()));
+        note.start = BeatPosition::fromBeats (quantizeBeat (note.start.inBeats()));
 
         if (settings.ends)
-            note.length = std::max (getMinimumNoteLength(), te::BeatDuration::fromBeats (quantizeBeat (end) - note.start.inBeats()));
+            note.length = std::max (getMinimumNoteLength(), BeatDuration::fromBeats (quantizeBeat (end) - note.start.inBeats()));
     }
 
     return notes;
@@ -544,7 +618,7 @@ std::vector<NoteData> quantize (std::vector<NoteData> notes, const QuantizeSetti
 std::vector<NoteData> legato (std::vector<NoteData> notes, double gapBeats)
 {
     // The starts in each clip, in order; a note lasts until the next start after its own.
-    std::map<te::MidiClip*, std::vector<double>> starts;
+    std::map<ClipID, std::vector<double>> starts;
 
     for (const auto& note : notes)
         starts[note.clip].push_back (note.start.inBeats());
@@ -558,7 +632,7 @@ std::vector<NoteData> legato (std::vector<NoteData> notes, double gapBeats)
         const auto next = std::upper_bound (clipStarts.begin(), clipStarts.end(), note.start.inBeats() + 1.0e-6);
 
         if (next != clipStarts.end())
-            note.length = std::max (getMinimumNoteLength(), te::BeatDuration::fromBeats (*next - note.start.inBeats() - gapBeats));
+            note.length = std::max (getMinimumNoteLength(), BeatDuration::fromBeats (*next - note.start.inBeats() - gapBeats));
     }
 
     return notes;
@@ -578,9 +652,9 @@ std::vector<NoteData> chop (std::vector<NoteData> notes, double pieceBeats)
 
         for (int i = 0; offset < length - 1.0e-6 && i < maxPiecesPerNote; ++i, offset += pieceBeats)
         {
-            auto piece = note;
-            piece.start = note.start + te::BeatDuration::fromBeats (offset);
-            piece.length = te::BeatDuration::fromBeats (std::min (pieceBeats, length - offset));
+            auto piece = note; // the first piece replaces the note (replaceNotes() keeps its ID), and the rest are new
+            piece.start = note.start + BeatDuration::fromBeats (offset);
+            piece.length = BeatDuration::fromBeats (std::min (pieceBeats, length - offset));
             pieces.push_back (piece);
         }
     }
@@ -592,12 +666,17 @@ std::vector<NoteData> chop (std::vector<NoteData> notes, double pieceBeats)
 Key getKeyAt (const te::Edit& edit, te::BeatPosition beat)
 {
     const auto& pitch = edit.pitchSequence.getPitchAtBeat (beat);
-    return { floorModulo (pitch.getPitch(), 12), pitch.getScale() };
+    return { floorModulo (pitch.getPitch(), 12), toScale (pitch.getScale()) };
+}
+
+juce::String getScaleName (Scale scale)
+{
+    return te::Scale::getNameForType (toTracktion (scale));
 }
 
 juce::String describeKey (const Key& key)
 {
-    return juce::MidiMessage::getMidiNoteName (key.root, true, false, 0) + " " + te::Scale::getNameForType (key.scale).toLowerCase();
+    return juce::MidiMessage::getMidiNoteName (key.root, true, false, 0) + " " + getScaleName (key.scale).toLowerCase();
 }
 
 bool isInKey (int pitch, const Key& key)
@@ -606,35 +685,31 @@ bool isInKey (int pitch, const Key& key)
     return std::find (steps.begin(), steps.end(), floorModulo (pitch - key.root, 12)) != steps.end();
 }
 
-juce::Array<te::Scale::ScaleType> getKeyScales()
+const std::vector<Scale>& getKeyScales()
 {
-    juce::Array<te::Scale::ScaleType> types;
+    static const auto scales = []
+    {
+        std::vector<Scale> all;
 
-    for (const auto& scale : savedScales)
-        types.add (scale.type);
+        for (const auto& saved : savedScales)
+            all.push_back (saved.scale);
 
-    return types;
+        return all;
+    }();
+
+    return scales;
 }
 
-juce::String getSavedScaleName (te::Scale::ScaleType type)
+juce::String getSavedScaleName (Scale scale)
 {
-    if (type == te::Scale::ionian)
-        type = te::Scale::major; // the same notes
-    else if (type == te::Scale::aeolian)
-        type = te::Scale::minor;
-
-    for (const auto& scale : savedScales)
-        if (scale.type == type)
-            return scale.name;
-
-    return savedScales[0].name;
+    return findSavedScale (scale).name;
 }
 
-std::optional<te::Scale::ScaleType> findScale (const juce::String& savedName)
+std::optional<Scale> findScale (const juce::String& savedName)
 {
-    for (const auto& scale : savedScales)
-        if (savedName == scale.name)
-            return scale.type;
+    for (const auto& saved : savedScales)
+        if (savedName == saved.name)
+            return saved.scale;
 
     return std::nullopt;
 }
@@ -718,21 +793,24 @@ std::vector<NoteData> transpose (std::vector<NoteData> notes, int steps, const s
 //==============================================================================
 const std::vector<ChordShape>& getChordShapes()
 {
-    static const std::vector<ChordShape> shapes { { "Major", te::Chord::majorTriad },      { "Minor", te::Chord::minorTriad },
-                                                  { "7", te::Chord::dominatSeventhChord }, { "Maj7", te::Chord::majorSeventhChord },
-                                                  { "m7", te::Chord::minorSeventhChord },  { "Sus2", te::Chord::suspendedSecond },
-                                                  { "Sus4", te::Chord::suspendedFourth },  { "Dim", te::Chord::diminishedTriad },
-                                                  { "Aug", te::Chord::augmentedTriad },    { "6", te::Chord::majorSixthChord },
-                                                  { "m6", te::Chord::minorSixthChord },    { "9", te::Chord::dominantNinthChord },
-                                                  { "Maj9", te::Chord::majorNinthChord },  { "Power", te::Chord::powerChord } };
+    static const auto shapes = []
+    {
+        std::vector<ChordShape> all;
+
+        for (const auto& chord : chords)
+            all.push_back ({ chord.name, chord.type });
+
+        return all;
+    }();
+
     return shapes;
 }
 
-std::vector<int> getChordPitches (int root, te::Chord::ChordType type)
+std::vector<int> getChordPitches (int root, ChordType type)
 {
     std::vector<int> pitches;
 
-    for (const auto step : te::Chord (type).getSteps())
+    for (const auto step : te::Chord (toTracktion (type)).getSteps())
         if (juce::isPositiveAndBelow (root + step, 128))
             pitches.push_back (root + step);
 

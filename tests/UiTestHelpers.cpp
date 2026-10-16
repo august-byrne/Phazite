@@ -242,6 +242,11 @@ void Mouse::send (juce::Point<int> where, juce::ModifierKeys mods)
     peer->handleMouseEvent (juce::MouseInputSource::InputSourceType::mouse,
                             peer->getComponent().getLocalPoint (&relativeTo, where).toFloat(), mods,
                             juce::MouseInputSource::defaultPressure, juce::MouseInputSource::defaultOrientation, time);
+
+    // A drag's auto-repeat (juce::Desktop::beginDragAutoRepeat(), which the editors start so that they go on scrolling while
+    // the mouse rests past an edge) repeats it at the real pointer's position, wherever that is on the screen, while a test
+    // waits with the button down. Tests move the mouse themselves.
+    juce::Desktop::getInstance().beginDragAutoRepeat (0);
 }
 
 void Mouse::press (juce::Point<int> where, juce::ModifierKeys mods)

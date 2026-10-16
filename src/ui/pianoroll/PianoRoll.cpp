@@ -417,7 +417,7 @@ void PianoRoll::quantizeSelection()
 
     juce::Array<te::MidiNote*> added;
 
-    for (const auto& n : replaceNotes (notes, quantize (getNoteData (notes), settings)))
+    for (const auto& n : replaceNotes (*getEdit(), notes, quantize (getNoteData (notes), settings)))
         added.add (n.note);
 
     selectNotes (added, false);

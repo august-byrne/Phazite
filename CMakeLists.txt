@@ -175,6 +175,7 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/internal/LevelSource.h
     src/model/mixer/internal/MixHandle.h
     src/model/notes/Notes.cpp
+    src/model/notes/NoteValues.h
     src/model/notes/Notes.h
     src/model/project/Export.cpp
     src/model/project/Export.h

@@ -243,7 +243,7 @@ TEST_CASE ("Old grid levels and scale numbers upgrade to what the old version re
 
         const auto type = phazite::findScale (name);
         REQUIRE (type.has_value());
-        CHECK (te::Scale (*type).getSteps() == te::Scale ((te::Scale::ScaleType) number).getSteps());
+        CHECK (te::Scale (phazite::toTracktion (*type)).getSteps() == te::Scale ((te::Scale::ScaleType) number).getSteps());
     }
 
     CHECK (upgrade (5, 11).second == juce::String ("harmonicMinor"));
@@ -395,7 +395,7 @@ TEST_CASE ("An old project opens upgraded, without unsaved changes or undo steps
         const auto key = phazite::getTrackKey (*te::getAudioTracks (edit).getFirst());
         REQUIRE (key.has_value());
         CHECK (key->root == 2);
-        CHECK (key->scale == te::Scale::dorian);
+        CHECK (key->scale == phazite::Scale::dorian);
         CHECK (phazite::loadGridSettings (edit, phazite::GridOwner::playlist).fixedLevel == 12);
     };
 

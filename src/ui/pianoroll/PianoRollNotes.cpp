@@ -230,7 +230,7 @@ void PianoRoll::NoteGrid::paintRows (juce::Graphics& g, juce::Rectangle<int> are
     // Rows outside the track's key are darker; without a key, those of the black keys, as on a piano. In drum mode
     // the rows alternate.
     const auto& p = getPalette (*this);
-    const auto key = roll.getKey().value_or (Key { 0, te::Scale::major }); // C major has the white keys
+    const auto key = roll.getKey().value_or (Key { 0, Scale::major }); // C major has the white keys
     const auto height = roll.getRowHeight();
     const auto first = std::max (0, roll.getRowAt (area.getY()));
     const auto last = roll.getRowAt (area.getBottom() - 1) >= 0 ? roll.getRowAt (area.getBottom() - 1) : roll.getNumRows() - 1;
