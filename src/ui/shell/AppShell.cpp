@@ -77,7 +77,6 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     : commands (bridge),
       shortcutKeys (keys),
       projectContext (context),
-      selection (context.getSelection()),
       library (l),
       previewer (p),
       computerKeyboard (keyboard),
@@ -541,7 +540,7 @@ void AppShell::addCommands (CommandRegistry& registry)
     playlist.addCommands (registry);
 
     // The note commands use the piano roll's grid.
-    addNoteCommands (registry, selection, [this] { return pianoRoll.getGridStepInBeats(); });
+    addNoteCommands (registry, projectContext, [this] { return pianoRoll.getGridStepInBeats(); });
     pianoRoll.addCommands (registry);
     guide.addCommands (registry);
     refreshShortcutTexts();

@@ -176,6 +176,8 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/internal/MixHandle.h
     src/model/notes/Notes.cpp
     src/model/notes/NoteValues.h
+    src/model/notes/NotesModel.cpp
+    src/model/notes/NotesModel.h
     src/model/notes/Notes.h
     src/model/project/Export.cpp
     src/model/project/Export.h
@@ -573,6 +575,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/NewProjectTests.cpp
         tests/NoteIDTests.cpp
         tests/NoteTests.cpp
+        tests/NotesModelTests.cpp
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp

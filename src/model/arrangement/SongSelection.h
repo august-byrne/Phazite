@@ -38,6 +38,13 @@ public:
     void remove (SectionID);
     void clear();
 
+    // Notes, of the clips an editor shows (the piano roll's: setNoteClips()). Selecting notes selects nothing else with
+    // them, and selecting anything else deselects them; deleted notes, or notes of deleted clips, are no longer selected.
+    void setNoteClips (const std::vector<ClipID>&); // other clips than before: their notes are deselected
+    std::vector<NoteRef> getNotes() const;
+    bool isSelected (NoteRef) const;
+    void selectNotes (const std::vector<NoteRef>&, bool addToSelection = false); // those of the note clips
+
     // Tells a listener after each change, on the message thread.
     void addChangeListener (juce::ChangeListener*);
     void removeChangeListener (juce::ChangeListener*);

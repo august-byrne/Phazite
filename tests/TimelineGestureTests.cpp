@@ -33,10 +33,13 @@ TEST_CASE ("A gesture's changes are one undo step, the first one's, however many
 TEST_CASE ("A gesture does each thing once, and finds where it began after the content scrolled")
 {
     phazite::ui::TimelineGesture gesture;
-    const juce::ValueTree first ("CLIP"), second ("CLIP");
+    const phazite::NoteRef first { phazite::ClipID::fromRaw (1), phazite::NoteID::fromRaw (1) };
+    const phazite::NoteRef second { phazite::ClipID::fromRaw (1), phazite::NoteID::fromRaw (2) };
     CHECK (gesture.doOnce (first));
     CHECK_FALSE (gesture.doOnce (first));
     CHECK (gesture.doOnce (second));
+    CHECK (gesture.doOnce (phazite::ClipID::fromRaw (1))); // a clip, not a note of it
+    CHECK_FALSE (gesture.doOnce (phazite::ClipID::fromRaw (1)));
 
     phazite::ui::TimelineView view;
     view.pixelsPerBeat = 10.0;

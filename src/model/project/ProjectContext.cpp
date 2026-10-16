@@ -157,6 +157,7 @@ void ProjectContext::setEdit (te::Edit* edit)
     if (focus != nullptr)
         focus->setFocusedEdit (nullptr);
 
+    songSelection->setNoteClips ({}); // the editors show the new project's clips, or none
     selection.deselectAll();
     selection.edit = nullptr;
     rangeSelection.clear();

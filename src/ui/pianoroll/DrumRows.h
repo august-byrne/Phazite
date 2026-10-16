@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // How the piano roll lays out a drum track: which rows it shows, and in what order. The track keeps the order and the
-// hidden rows (model/notes/Notes.h); these functions take them, and the facts the rows come from, as plain values.
+// hidden rows (model/notes/NotesModel.h); these functions take them, and the facts the rows come from, as plain values.
 #pragma once
 
-#include "model/notes/Notes.h"
+#include "model/notes/NoteValues.h"
 
 #include <optional>
 #include <vector>

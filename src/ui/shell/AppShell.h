@@ -70,9 +70,8 @@ private:
     CommandBridge& commands;
     KeyDispatcher& shortcutKeys; // for the windows of detached panels
     ProjectContext& projectContext;
-    te::SelectionManager& selection; // the project's
-    Library& library;                // what the browser and the plug-in picker show
-    Previewer& previewer;            // the browser's
+    Library& library;     // what the browser and the plug-in picker show
+    Previewer& previewer; // the browser's
     ComputerKeyboard& computerKeyboard;
 
     TopBar topBar;

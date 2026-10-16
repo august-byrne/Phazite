@@ -34,7 +34,7 @@ struct TimelineGesture
 
     // For tools that act once on each thing the mouse passes over (Delete and Mute): true the first time for each
     // thing, which then counts as done.
-    bool doOnce (const juce::ValueTree& thing);
+    bool doOnce (NoteRef);
     template <typename Kind>
     bool doOnce (ItemID<Kind> thing)
     {
@@ -53,7 +53,7 @@ struct TimelineGesture
 
 private:
     std::unique_ptr<SongGesture> step;
-    std::vector<juce::ValueTree> done;
+    std::vector<NoteRef> doneNotes;
     std::vector<std::uint64_t> doneIDs;
 };
 } // namespace phazite::ui

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumRows.h"
 #include "PianoRollParts.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
-#include "model/engine/LiveInput.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -15,18 +12,13 @@ namespace
     constexpr int transformBarHeight = 40;
     constexpr int minRowHeight = 6, maxRowHeight = 32;
     constexpr int velocityPerNotch = 4; // Alt+wheel
-
-    bool isClipStateOfType (const juce::ValueTree& state)
-    {
-        return state.hasType (te::IDs::MIDICLIP);
-    }
 } // namespace
 
 //==============================================================================
 PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     : TimelineEditor (bridge, projectContext, GridOwner::pianoRoll),
       context (projectContext),
-      selection (projectContext.getSelection()),
+      selection (projectContext.getSongSelection()),
       keys (std::make_unique<Keys> (*this)),
       grid (std::make_unique<NoteGrid> (*this)),
       velocityLane (std::make_unique<VelocityLane> (*this)),
@@ -61,153 +53,123 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     addChildComponent (*transformBar);
     selection.addChangeListener (this);
     context.addListener (this);
-    setEdit (context.getEdit());
-    updateToolbar();
+    projectChanged();
 }
 
 PianoRoll::~PianoRoll()
 {
     stopAudition();
-    cancelPendingUpdate();
     context.removeListener (this);
     selection.removeChangeListener (this);
-    editState.removeListener (this);
-    setClips ({}); // lets go of the note selection, and of the clips' listeners
+    setClips ({}); // lets go of the note selection
 }
 
-void PianoRoll::setEdit (te::Edit* newEdit)
+void PianoRoll::projectChanged()
 {
     // The same project again (after a save, say) keeps the view as it is.
-    if (editState == (newEdit != nullptr ? newEdit->state : juce::ValueTree()))
+    auto* edit = context.getEdit();
+
+    if (editState == (edit != nullptr ? edit->state : juce::ValueTree()))
         return;
 
     stopAudition();
     closeTransform();
     setClips ({});
-    emptyTrack = nullptr;
-    editState.removeListener (this);
-    editState = newEdit != nullptr ? newEdit->state : juce::ValueTree();
-    editState.addListener (this);
+    emptyTrack = {};
+    editState = edit != nullptr ? edit->state : juce::ValueTree();
     showProject();
     updateToolbar();
+}
+
+void PianoRoll::songChanged (const SongChanges& changes)
+{
+    // Notes and clips, where they are in time, a track's key or drum rows, and its instrument (the toolbar shows it, and a
+    // drum sampler names the rows).
+    if (! (changes.clips || changes.tempo || changes.tracks || changes.view || changes.devices))
+        return;
+
+    // Clips that left the song go, and the rest repaints. Bar 1 follows a clip moved in the song.
+    if (const auto shown = getClips(); shown.size() != clips.size())
+        setClips (shown, true);
+
+    updateTimeOrigin (false);
+    clipsChanged();
 }
 
 //==============================================================================
 void PianoRoll::showClip (ClipID id)
 {
-    if (auto* edit = context.getEdit())
-        if (auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))))
-            showClips ({ clip });
+    showClips ({ id });
 }
 
-void PianoRoll::showClips (const juce::Array<te::MidiClip*>& toShow)
+void PianoRoll::showClips (const std::vector<ClipID>& toShow)
 {
-    setClips (toShow);
+    std::vector<ClipID> midi;
+
+    for (const auto& clip : getNoteClips (context, toShow))
+        midi.push_back (clip.id);
+
+    setClips (midi);
 }
 
-juce::Array<te::MidiClip*> PianoRoll::getClips() const
+std::vector<ClipID> PianoRoll::getClips() const
 {
-    juce::Array<te::MidiClip*> shown;
+    std::vector<ClipID> shown;
 
-    for (const auto& c : clips)
-        if (auto* clip = c.get(); clip != nullptr && clip->state.isAChildOf (editState))
-            shown.add (clip);
+    for (const auto& clip : getShownClips())
+        shown.push_back (clip.id);
 
     return shown;
 }
 
-te::AudioTrack* PianoRoll::getTrack() const
+std::vector<NoteClip> PianoRoll::getShownClips() const
 {
-    if (auto* first = getClips().getFirst())
-        return dynamic_cast<te::AudioTrack*> (first->getTrack());
-
-    auto* track = emptyTrack.get();
-    return track != nullptr && track->state.isAChildOf (editState) ? track : nullptr;
+    return getNoteClips (context, clips);
 }
 
-void PianoRoll::showTrack (te::AudioTrack& track)
+TrackID PianoRoll::getTrack() const
+{
+    if (const auto shown = getShownClips(); ! shown.empty())
+        return shown.front().track;
+
+    return canHoldNotes (context, emptyTrack) ? emptyTrack : TrackID();
+}
+
+void PianoRoll::showTrack (TrackID track)
 {
     // The track's MIDI clip at the playhead, or the one nearest to it.
-    const auto playheadBeat = toTracktion (getPlayheadBeat());
-    te::MidiClip* nearest = nullptr;
-    auto nearestDistance = std::numeric_limits<double>::max();
-    auto holdsAudio = false;
-
-    for (auto* clip : track.getClips())
+    if (const auto nearest = getMidiClipNearest (context, track, getPlayheadBeat()))
     {
-        holdsAudio = holdsAudio || dynamic_cast<te::AudioClipBase*> (clip) != nullptr;
-
-        if (auto* midi = dynamic_cast<te::MidiClip*> (clip))
-        {
-            const auto range = midi->getEditBeatRange();
-            const auto distance = range.contains (playheadBeat) ? 0.0
-                                                                : std::min (std::abs ((range.getStart() - playheadBeat).inBeats()),
-                                                                            std::abs ((range.getEnd() - playheadBeat).inBeats()));
-
-            if (distance < nearestDistance)
-            {
-                nearest = midi;
-                nearestDistance = distance;
-            }
-        }
-    }
-
-    if (nearest != nullptr)
-    {
-        setClips ({ nearest });
+        setClips ({ *nearest });
         return;
     }
 
     // None: the track from the bar the playhead is in, where the first note drawn makes a clip. Audio and notes
     // don't share a track (docs/design.md, section 5).
+    const auto holdsAudio = hasAudioClips (context, track);
     setClips ({});
-    emptyTrack = holdsAudio ? nullptr : &track;
-    drumMode = ! holdsAudio && isDrumTrack (track);
+    emptyTrack = holdsAudio ? TrackID() : track;
+    drumMode = ! holdsAudio && isDrumTrack (context, track);
     updateTimeOrigin (true);
     clipsChanged();
     scrollToNotes();
 }
 
-void PianoRoll::setClips (const juce::Array<te::MidiClip*>& newClips, bool keepView)
+void PianoRoll::setClips (const std::vector<ClipID>& newClips, bool keepView)
 {
-    // The same clips, all still there, change nothing.
-    const auto same = clips.size() == (size_t) newClips.size()
-                      && std::equal (clips.begin(), clips.end(), newClips.begin(),
-                                     [] (const te::SafeSelectable<te::MidiClip>& a, te::MidiClip* b) { return a.get() == b; });
-
-    if (same && (newClips.isEmpty() || selectedEvents != nullptr))
+    // The same clips change nothing.
+    if (newClips == clips && ! newClips.empty())
         return;
 
     stopAudition();
-
-    // The note selection points to the old clips, so it goes first.
-    if (selectedEvents != nullptr)
-    {
-        selectedEvents->deselect();
-        selectedEvents = nullptr;
-    }
-
-    for (auto& c : clips)
-        if (auto* clip = c.get())
-            clip->removeSelectableListener (this);
-
-    clips.clear();
-
-    for (auto* clip : newClips)
-    {
-        clips.emplace_back (clip);
-        clip->addSelectableListener (this);
-    }
-
-    if (! newClips.isEmpty())
-        selectedEvents = std::make_unique<te::SelectedMidiEvents> (newClips);
-
-    targetClip = newClips.getFirst();
-    emptyTrack = nullptr;
+    clips = newClips;
+    selection.setNoteClips (clips); // the notes of the clips shown before are no longer selected
+    targetClip = clips.empty() ? ClipID() : clips.front();
+    emptyTrack = {};
 
     // Drum mode follows the track.
-    auto* track = getTrack();
-    drumMode = track != nullptr && isDrumTrack (*track);
+    const auto track = getTrack();
+    drumMode = track.isValid() && isDrumTrack (context, track);
 
     if (transformOpen)
         closeTransform();
@@ -224,14 +186,14 @@ void PianoRoll::updateTimeOrigin (bool scrollToStart)
     // Bar 1 is where the first clip's notes count from, or for a track without clips, the bar the playhead is in.
     auto origin = getTimeOrigin();
 
-    if (const auto shown = getClips(); ! shown.isEmpty())
+    if (const auto shown = getShownClips(); ! shown.empty())
     {
-        origin = fromTracktion (shown.getFirst()->getContentStartBeat());
+        origin = shown.front().contentStart;
 
-        for (auto* clip : shown)
-            origin = std::min (origin, fromTracktion (clip->getContentStartBeat()));
+        for (const auto& clip : shown)
+            origin = std::min (origin, clip.contentStart);
     }
-    else if (hasProject() && getTrack() != nullptr)
+    else if (hasProject() && getTrack().isValid())
     {
         origin = getBarStart (context, std::max (0, getBarAt (context, getPlayheadBeat())));
     }
@@ -242,18 +204,18 @@ void PianoRoll::updateTimeOrigin (bool scrollToStart)
     setViewStart (scrollToStart ? origin : origin + offset);
 }
 
-te::MidiClip* PianoRoll::makeClipForNewNotes()
+ClipID PianoRoll::makeClipForNewNotes()
 {
     // A bar long from the time origin, on the track shown without clips; notes drawn after it make it longer, into the
     // empty space after it (Notes.h's addNote()).
-    auto* track = getTrack();
+    const auto track = getTrack();
 
-    if (track == nullptr || ! getClips().isEmpty())
-        return nullptr;
+    if (! track.isValid() || ! getShownClips().empty())
+        return {};
 
-    auto* clip = insertBarLongMidiClip (*track, toTracktion (getTimeOrigin()), nullptr);
+    const auto clip = addClipForNotes (context, track, getTimeOrigin());
 
-    if (clip != nullptr)
+    if (clip.isValid())
         setClips ({ clip }, true); // shown from now on, where the view is
 
     return clip;
@@ -261,9 +223,9 @@ te::MidiClip* PianoRoll::makeClipForNewNotes()
 
 void PianoRoll::clipsChanged()
 {
-    if (auto* track = getTrack(); drumMode && track != nullptr)
-        drumRows = getDrumRows (getSamplerSounds (*track), getNoteNumbersPlayed (getClips()), getDrumRowOrder (*track),
-                                getHiddenDrumRows (*track));
+    if (const auto track = getTrack(); drumMode && track.isValid())
+        drumRows = getDrumRows (getSamplerSounds (context, track), getNoteNumbersPlayed (context, clips), getDrumRowOrder (context, track),
+                                getHiddenDrumRows (context, track));
 
     updateVerticalScrollBar();
     updateScrollBar();
@@ -273,118 +235,103 @@ void PianoRoll::clipsChanged()
     velocityLane->repaint();
 }
 
-std::vector<ClipNote> PianoRoll::getAllNotes() const
+std::vector<NoteData> PianoRoll::getAllNotes() const
 {
-    std::vector<ClipNote> notes;
+    return getNotes (context, clips);
+}
 
-    for (auto* clip : getClips())
-        for (auto* note : clip->getSequence().getNotes())
-            notes.push_back ({ clip, note });
+std::unordered_set<NoteRef> PianoRoll::getSelectedNoteRefs() const
+{
+    std::unordered_set<NoteRef> selected;
+
+    for (const auto& ref : selection.getNotes())
+        if (std::find (clips.begin(), clips.end(), ref.clip) != clips.end())
+            selected.insert (ref);
+
+    return selected;
+}
+
+std::vector<NoteData> PianoRoll::getSelectedNotesHere() const
+{
+    const auto selected = getSelectedNoteRefs();
+    std::vector<NoteData> notes;
+
+    if (! selected.empty())
+        for (const auto& note : getAllNotes())
+            if (selected.contains (note.getRef()))
+                notes.push_back (note);
 
     return notes;
 }
 
-std::vector<ClipNote> PianoRoll::getSelectedNotesHere() const
+std::vector<NoteRef> PianoRoll::getSelectedRefsHere() const
 {
-    if (selectedEvents == nullptr || getSelectedMidiEvents (selection) != selectedEvents.get())
-        return {};
-
-    return getSelectedNotes (selection);
+    return getRefs (getSelectedNotesHere());
 }
 
-bool PianoRoll::isSelected (const te::MidiNote& note) const
+void PianoRoll::selectNotes (const std::vector<NoteRef>& notes, bool addToSelection)
 {
-    return selectedEvents != nullptr && getSelectedMidiEvents (selection) == selectedEvents.get() && selectedEvents->isSelected (&note);
-}
-
-void PianoRoll::selectNotes (const juce::Array<te::MidiNote*>& notes, bool addToSelection)
-{
-    if (selectedEvents == nullptr)
-        return;
-
-    // Adding to a selection that isn't these notes' starts a new one.
-    const auto adding = addToSelection && getSelectedMidiEvents (selection) == selectedEvents.get();
-    selectedEvents->setSelected (selection, notes, adding);
+    selection.selectNotes (notes, addToSelection);
     grid->repaint();
     velocityLane->repaint();
 }
 
 void PianoRoll::selectAllNotes()
 {
-    juce::Array<te::MidiNote*> notes;
-
-    for (const auto& n : getAllNotes())
-        notes.add (n.note);
-
-    selectNotes (notes, false);
+    selectNotes (getRefs (getAllNotes()), false);
 }
 
-te::MidiClip* PianoRoll::getClipForNewNote (te::BeatPosition beat) const
+ClipID PianoRoll::getClipForNewNote (BeatPosition beat) const
 {
-    const auto shown = getClips();
+    const auto shown = getShownClips();
+    const auto target = std::find_if (shown.begin(), shown.end(), [this] (const NoteClip& clip) { return clip.id == targetClip; });
 
     // The target clip if the beat is in it, then any clip it is in, then the target clip if the beat comes after its start.
-    if (auto* target = targetClip.get();
-        target != nullptr && shown.contains (target) && beat >= target->getStartBeat() && beat < target->getEndBeat())
-        return target;
+    if (target != shown.end() && target->range.contains (beat))
+        return target->id;
 
-    for (auto* clip : shown)
-        if (beat >= clip->getStartBeat() && beat < clip->getEndBeat())
-            return clip;
+    for (const auto& clip : shown)
+        if (clip.range.contains (beat))
+            return clip.id;
 
-    if (auto* target = targetClip.get(); target != nullptr && shown.contains (target) && beat >= target->getStartBeat())
-        return target;
+    if (target != shown.end() && beat >= target->range.getStart())
+        return target->id;
 
-    return nullptr;
+    return {};
 }
 
 std::optional<Key> PianoRoll::getKey() const
 {
-    if (auto* track = getTrack())
-        return getTrackKey (*track);
-
-    return std::nullopt;
+    return getTrackKey (context, getTrack());
 }
 
 void PianoRoll::setKey (const std::optional<Key>& key)
 {
-    if (auto* track = getTrack())
-        chooseTrackKey (*track, key);
+    if (const auto track = getTrack(); track.isValid())
+        chooseTrackKey (context, track, key);
 
     updateToolbar();
     grid->repaint();
 }
 
 //==============================================================================
-void PianoRoll::audition (te::MidiClip& clip, int pitch, int velocity)
+void PianoRoll::audition (ClipID clip, int pitch, int velocity)
 {
     audition (clip, std::vector<int> { pitch }, velocity);
 }
 
-void PianoRoll::audition (te::MidiClip& clip, const std::vector<int>& pitches, int velocity)
+void PianoRoll::audition (ClipID clip, const std::vector<int>& pitches, int velocity)
 {
     stopAudition();
-    auto* track = dynamic_cast<te::AudioTrack*> (clip.getTrack());
-
-    if (track == nullptr || ! hasInstrument (*track))
-        return;
-
-    // Guide notes go into the track as live MIDI does, so the playback graph has to be running.
-    clip.edit.getTransport().ensureContextAllocated();
-    const auto channel = clip.getMidiChannel().isValid() ? clip.getMidiChannel() : te::MidiChannel (1);
-
-    for (const auto pitch : pitches)
-        track->playGuideNote (pitch, channel, juce::jlimit (1, 127, velocity), false, true, false);
-
-    auditionTrack = track;
+    auditionTrack = auditionNotes (context, clip, pitches, velocity);
 }
 
 void PianoRoll::stopAudition()
 {
-    if (auto* track = auditionTrack.get())
-        track->turnOffGuideNotes();
+    if (auditionTrack.isValid())
+        stopAuditioning (context, auditionTrack);
 
-    auditionTrack = nullptr;
+    auditionTrack = {};
 }
 
 //==============================================================================
@@ -395,17 +342,17 @@ bool PianoRoll::canUseTool (Tool toolToUse) const
 
 bool PianoRoll::canNudgeSelection() const
 {
-    return ! getSelectedNotesHere().empty();
+    return ! getSelectedNoteRefs().empty();
 }
 
 void PianoRoll::nudgeSelection (int direction)
 {
-    nudgeNotes (getSelectedNotesHere(), te::BeatDuration::fromBeats (direction * getGridStepInBeats()));
+    nudgeNotes (context, getSelectedRefsHere(), BeatDuration::fromBeats (direction * getGridStepInBeats()));
 }
 
 bool PianoRoll::canQuantizeSelection() const
 {
-    return ! getSelectedNotesHere().empty();
+    return ! getSelectedNoteRefs().empty();
 }
 
 void PianoRoll::quantizeSelection()
@@ -414,13 +361,7 @@ void PianoRoll::quantizeSelection()
     auto settings = transform.quantize;
     settings.gridBeats = getGridStepInBeats();
     const auto notes = getSelectedNotesHere();
-
-    juce::Array<te::MidiNote*> added;
-
-    for (const auto& n : replaceNotes (*getEdit(), notes, quantize (getNoteData (notes), settings)))
-        added.add (n.note);
-
-    selectNotes (added, false);
+    selectNotes (replaceNotes (context, getRefs (notes), quantize (notes, settings)), false);
 }
 
 juce::Rectangle<int> PianoRoll::getTimelineArea() const
@@ -431,25 +372,22 @@ juce::Rectangle<int> PianoRoll::getTimelineArea() const
 std::optional<double> PianoRoll::getLinkedPlayheadBeat (double songBeat) const
 {
     // The notes shown play wherever a clip linked to theirs plays: the playhead shows where, in the clip shown.
-    return getLinkedPlayBeat (getClips(), songBeat);
+    return getLinkedPlayBeat (context, clips, songBeat);
 }
 
 BeatRange PianoRoll::getContentRange() const
 {
-    const auto shown = getClips();
+    const auto shown = getShownClips();
 
-    if (shown.isEmpty())
+    if (shown.empty())
         return { getTimeOrigin(), getTimeOrigin() + BeatDuration::fromBeats (16.0) };
 
-    auto start = shown.getFirst()->getStartBeat(), end = shown.getFirst()->getEndBeat();
+    auto range = shown.front().range;
 
-    for (auto* clip : shown)
-    {
-        start = std::min (start, clip->getStartBeat());
-        end = std::max (end, clip->getEndBeat());
-    }
+    for (const auto& clip : shown)
+        range = { std::min (range.getStart(), clip.range.getStart()), std::max (range.getEnd(), clip.range.getEnd()) };
 
-    return fromTracktion (te::BeatRange (start, end));
+    return range;
 }
 
 void PianoRoll::timelineChanged()
@@ -557,10 +495,8 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
     // Alt+wheel changes the selected notes' velocity, as in FL Studio.
     if (e.mods.isAltDown())
     {
-        if (const auto notes = getSelectedNotesHere(); ! notes.empty())
-        {
-            changeNoteVelocities (notes, notches > 0.0 ? velocityPerNotch : -velocityPerNotch);
-        }
+        if (const auto notes = getSelectedRefsHere(); ! notes.empty())
+            changeNoteVelocities (context, notes, notches > 0.0 ? velocityPerNotch : -velocityPerNotch);
 
         return;
     }
@@ -580,87 +516,22 @@ void PianoRoll::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     // The MIDI clips selected in the playlist, or a newly selected track's clip. With notes or anything else
     // selected, what is shown stays.
-    juce::Array<te::MidiClip*> selectedClips;
+    std::vector<ClipID> selectedClips;
 
-    for (auto* clip : getSelectedClips (selection))
-        if (auto* midi = dynamic_cast<te::MidiClip*> (clip))
-            selectedClips.add (midi);
+    for (const auto& clip : getNoteClips (context, selection.getClips()))
+        selectedClips.push_back (clip.id);
 
-    if (! selectedClips.isEmpty())
+    if (! selectedClips.empty())
+    {
         setClips (selectedClips);
-    else if (auto* track = dynamic_cast<te::AudioTrack*> (getSelectedTracks (selection).getFirst());
-             track != nullptr && track != getTrack())
-        showTrack (*track);
+    }
+    else if (const auto tracks = selection.getTracks(); ! tracks.empty())
+    {
+        if (const auto track = tracks.front(); canHoldNotes (context, track) && track != getTrack())
+            showTrack (track);
+    }
 
     grid->repaint();
     velocityLane->repaint();
-}
-
-void PianoRoll::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
-{
-    // The shown track's key, say.
-    if (auto* track = getTrack(); track != nullptr && tree == track->state)
-    {
-        triggerAsyncUpdate();
-        return;
-    }
-
-    // Notes are inside their clip's state; the tempo places clips in time.
-    for (auto t = tree; t.isValid(); t = t.getParent())
-    {
-        if (isClipStateOfType (t) || t.hasType (te::IDs::TEMPOSEQUENCE) || t.hasType (te::IDs::PITCHSEQUENCE))
-        {
-            triggerAsyncUpdate();
-            return;
-        }
-    }
-}
-
-void PianoRoll::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&)
-{
-    valueTreePropertyChanged (parent, {});
-}
-
-void PianoRoll::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
-{
-    // A clip shown here left the song: its notes can't stay selected.
-    if (isClipStateOfType (child))
-    {
-        for (const auto& c : clips)
-        {
-            if (auto* clip = c.get(); clip != nullptr && clip->state == child && selectedEvents != nullptr)
-            {
-                selectedEvents->deselect();
-                selectedEvents = nullptr;
-            }
-        }
-    }
-
-    valueTreePropertyChanged (parent, {});
-}
-
-void PianoRoll::selectableObjectAboutToBeDeleted (te::Selectable*)
-{
-    // The note selection holds pointers to its clips, so it goes now; the clips are sorted out after.
-    if (selectedEvents != nullptr)
-    {
-        selectedEvents->deselect();
-        selectedEvents = nullptr;
-    }
-
-    triggerAsyncUpdate();
-}
-
-void PianoRoll::handleAsyncUpdate()
-{
-    // Clips that left the song go (a new note selection comes with the rest), and the rest repaints. Bar 1
-    // follows a clip moved in the song.
-    const auto shown = getClips();
-
-    if ((selectedEvents == nullptr && ! shown.isEmpty()) || shown.size() != (int) clips.size())
-        setClips (shown, true);
-
-    updateTimeOrigin (false);
-    clipsChanged();
 }
 } // namespace phazite::ui

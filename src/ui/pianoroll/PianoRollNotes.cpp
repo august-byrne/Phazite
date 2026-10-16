@@ -2,11 +2,7 @@
 // The piano roll's note grid: finding the notes under the mouse, the hint for what it does there, and drawing the rows and
 // notes. What the tools do with the mouse is PianoRollNoteTools.cpp's.
 #include "PianoRollParts.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
 #include "ui/theme/LookAndFeel.h"
-
-#include <map>
 
 namespace phazite::ui
 {
@@ -36,11 +32,21 @@ namespace
 } // namespace
 
 //==============================================================================
-juce::Colour getNoteColour (te::MidiClip& clip)
+std::map<ClipID, juce::Colour> getNoteColours (const ProjectContext& context, const std::vector<NoteData>& notes)
 {
-    auto* track = clip.getTrack();
-    const auto row = track != nullptr ? getPlaylistTracks (clip.edit).indexOf (track) : 0;
-    return track != nullptr ? getTrackColour (*track, row) : juce::Colours::grey; // its track's, as in the playlist
+    // Each clip's notes in its track's color, as in the playlist.
+    std::vector<ClipID> ids;
+
+    for (const auto& note : notes)
+        if (std::find (ids.begin(), ids.end(), note.clip) == ids.end())
+            ids.push_back (note.clip);
+
+    std::map<ClipID, juce::Colour> colours;
+
+    for (const auto& clip : getNoteClips (context, ids))
+        colours[clip.id] = clip.colour;
+
+    return colours;
 }
 
 //==============================================================================
@@ -83,14 +89,21 @@ PianoRoll::NoteGrid::NoteGrid (PianoRoll& r)
 }
 
 //==============================================================================
-std::optional<ClipNote> PianoRoll::NoteGrid::getNoteAt (juce::Point<float> position) const
+std::optional<NoteData> PianoRoll::NoteGrid::getNoteAt (juce::Point<float> position) const
 {
-    // The last drawn is on top.
+    // A note in the row the mouse is in, the row a click there adds a note to: notes are drawn a pixel inside their rows,
+    // and a click on a row's edge would otherwise miss the note there and stack a new one on it. The last drawn is on top.
+    const auto row = roll.getRowAt (juce::roundToInt (std::floor (position.y)));
     const auto notes = roll.getAllNotes();
 
     for (auto it = notes.rbegin(); it != notes.rend(); ++it)
-        if (roll.getNoteBounds (getNoteData (*it->clip, *it->note)).contains (position))
+    {
+        if (row < 0 || roll.getRowForPitch (it->pitch) != row)
+            continue;
+
+        if (const auto bounds = roll.getNoteBounds (*it); position.x >= bounds.getX() && position.x < bounds.getRight())
             return *it;
+    }
 
     return {};
 }
@@ -112,44 +125,29 @@ PianoRoll::NoteGrid::Zone PianoRoll::NoteGrid::getZone (const NoteData& note, ju
     return Zone::body;
 }
 
-std::vector<std::pair<te::MidiClip*, NoteData>> PianoRoll::NoteGrid::getGhostNotes() const
+std::vector<NoteData> PianoRoll::NoteGrid::getGhostNotes() const
 {
-    std::vector<std::pair<te::MidiClip*, NoteData>> ghosts;
-    auto* ed = roll.getEdit();
-
-    if (ed == nullptr || ! roll.showGhostNotes)
-        return ghosts;
+    if (! roll.hasProject() || ! roll.showGhostNotes)
+        return {};
 
     // The other tracks' MIDI clips that are in view.
-    const auto shown = roll.getClips();
+    std::vector<TrackID> shownTracks { roll.getTrack() };
+
+    for (const auto& clip : roll.getShownClips())
+        if (std::find (shownTracks.begin(), shownTracks.end(), clip.track) == shownTracks.end())
+            shownTracks.push_back (clip.track);
+
     const auto& timeline = roll.getView();
-    const auto visible = toTracktion (BeatRange (timeline.xToBeat (0), timeline.xToBeat (getWidth())));
-    juce::Array<te::Track*> shownTracks { roll.getTrack() };
-
-    for (auto* clip : shown)
-        shownTracks.addIfNotAlreadyThere (clip->getTrack());
-
-    for (auto* track : te::getAudioTracks (*ed))
-    {
-        if (shownTracks.contains (track))
-            continue;
-
-        for (auto* c : track->getClips())
-            if (auto* midi = dynamic_cast<te::MidiClip*> (c); midi != nullptr && midi->getEditBeatRange().overlaps (visible))
-                for (auto* note : midi->getSequence().getNotes())
-                    ghosts.emplace_back (midi, getNoteData (*midi, *note));
-    }
-
-    return ghosts;
+    return getNotesOfOtherTracks (roll.context, shownTracks, { timeline.xToBeat (0), timeline.xToBeat (getWidth()) });
 }
 
-te::MidiClip* PianoRoll::NoteGrid::getGhostClipAt (juce::Point<float> position) const
+ClipID PianoRoll::NoteGrid::getGhostClipAt (juce::Point<float> position) const
 {
-    for (const auto& [clip, note] : getGhostNotes())
+    for (const auto& note : getGhostNotes())
         if (roll.getNoteBounds (note).contains (position))
-            return clip;
+            return note.clip;
 
-    return nullptr;
+    return {};
 }
 
 //==============================================================================
@@ -158,12 +156,12 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
     const auto& p = getPalette (*this);
     g.fillAll (p.background);
 
-    if (roll.getEdit() == nullptr)
+    if (! roll.hasProject())
         return;
 
     const auto area = g.getClipBounds();
 
-    if (roll.getTrack() == nullptr)
+    if (! roll.getTrack().isValid())
     {
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::body));
@@ -175,15 +173,15 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
 
     // Where the clips are: a line in the clip's color at each end, and a tint between.
     const auto& timeline = roll.getView();
+    const auto shown = roll.getShownClips();
 
-    for (auto* clip : roll.getClips())
+    for (const auto& clip : shown)
     {
-        const auto left = juce::roundToInt (timeline.beatToX (fromTracktion (clip->getStartBeat())));
-        const auto right = juce::roundToInt (timeline.beatToX (fromTracktion (clip->getEndBeat())));
-        const auto colour = getNoteColour (*clip);
-        g.setColour (colour.withAlpha (0.06f));
+        const auto left = juce::roundToInt (timeline.beatToX (clip.range.getStart()));
+        const auto right = juce::roundToInt (timeline.beatToX (clip.range.getEnd()));
+        g.setColour (clip.colour.withAlpha (0.06f));
         g.fillRect (left, area.getY(), right - left, area.getHeight());
-        g.setColour (colour.withAlpha (0.6f));
+        g.setColour (clip.colour.withAlpha (0.6f));
         g.fillRect (left, area.getY(), 1, area.getHeight());
         g.fillRect (right - 1, area.getY(), 1, area.getHeight());
     }
@@ -191,7 +189,7 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
     paintGridLines (g, roll, area);
 
     // A track without clips yet: the first note drawn starts one.
-    if (roll.getClips().isEmpty())
+    if (shown.empty())
     {
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::body));
@@ -199,13 +197,21 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
     }
 
     // Other tracks' notes, faintly.
-    for (const auto& [clip, note] : getGhostNotes())
+    const auto ghosts = getGhostNotes();
+    const auto ghostColours = getNoteColours (roll.context, ghosts);
+    const auto colourOf = [&ghostColours, &p] (ClipID clip)
+    {
+        const auto found = ghostColours.find (clip);
+        return found != ghostColours.end() ? found->second : p.textMuted;
+    };
+
+    for (const auto& note : ghosts)
     {
         const auto bounds = roll.getNoteBounds (note);
 
         if (! bounds.isEmpty() && bounds.intersects (area.toFloat()))
         {
-            g.setColour (getNoteColour (*clip).withAlpha (0.22f));
+            g.setColour (colourOf (note.clip).withAlpha (0.22f));
 
             if (roll.drumMode)
                 g.fillPath (makeDiamond (bounds));
@@ -257,29 +263,29 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
     const auto area = g.getClipBounds().toFloat();
     const auto preview = roll.getPreview();
     const auto previewing = roll.transformOpen;
-    std::map<te::MidiClip*, juce::Colour> colours;
+    const auto notes = roll.getAllNotes();
+    const auto colours = getNoteColours (roll.context, notes);
+    const auto selected = roll.getSelectedNoteRefs();
 
-    for (const auto& n : roll.getAllNotes())
+    for (const auto& note : notes)
     {
-        const auto data = getNoteData (*n.clip, *n.note);
-        const auto bounds = roll.getNoteBounds (data);
+        const auto bounds = roll.getNoteBounds (note);
 
         if (bounds.isEmpty() || ! bounds.intersects (area))
             continue;
 
-        if (! colours.contains (n.clip))
-            colours[n.clip] = getNoteColour (*n.clip);
+        const auto isSelected = selected.contains (note.getRef());
+        const auto found = colours.find (note.clip);
+        const auto colour = found != colours.end() ? found->second : p.textMuted;
+        auto fill = isSelected ? colour.brighter (0.35f) : colour;
 
-        const auto selected = roll.isSelected (*n.note);
-        auto fill = selected ? colours[n.clip].brighter (0.35f) : colours[n.clip];
-
-        if (data.muted)
+        if (note.muted)
             fill = fill.withMultipliedSaturation (0.2f).withAlpha (0.45f);
 
-        if (previewing && selected)
+        if (previewing && isSelected)
             fill = fill.withAlpha (0.3f); // what the transform replaces
 
-        const auto outline = selected ? p.text : colours[n.clip].darker (0.6f);
+        const auto outline = isSelected ? p.text : colour.darker (0.6f);
 
         if (roll.drumMode)
         {
@@ -287,21 +293,21 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
             g.setColour (fill);
             g.fillPath (diamond);
             g.setColour (outline);
-            g.strokePath (diamond, juce::PathStrokeType (selected ? 2.0f : 1.0f));
+            g.strokePath (diamond, juce::PathStrokeType (isSelected ? 2.0f : 1.0f));
             continue;
         }
 
         g.setColour (fill);
         g.fillRoundedRectangle (bounds, noteCorner);
         g.setColour (outline);
-        g.drawRoundedRectangle (bounds, noteCorner, selected ? 2.0f : 1.0f);
+        g.drawRoundedRectangle (bounds, noteCorner, isSelected ? 2.0f : 1.0f);
 
         // The note's name, where it fits.
         if (bounds.getHeight() >= 11.0f && bounds.getWidth() >= 30.0f)
         {
             g.setColour (getInkFor (fill).withAlpha (0.85f));
             g.setFont (juce::FontOptions (std::min (TextSize::small, bounds.getHeight() - 2.0f)));
-            g.drawText (juce::MidiMessage::getMidiNoteName (data.pitch, true, true, 4), bounds.reduced (3.0f, 0.0f),
+            g.drawText (juce::MidiMessage::getMidiNoteName (note.pitch, true, true, 4), bounds.reduced (3.0f, 0.0f),
                         juce::Justification::centredLeft, false);
         }
     }
@@ -333,7 +339,7 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
 //==============================================================================
 void PianoRoll::NoteGrid::updateHint (juce::Point<float> position)
 {
-    if (roll.getTrack() == nullptr)
+    if (! roll.getTrack().isValid())
     {
         setMouseCursor (juce::MouseCursor::NormalCursor);
         setDescription (noClipsHint);
@@ -346,13 +352,13 @@ void PianoRoll::NoteGrid::updateHint (juce::Point<float> position)
     {
         if (const auto note = getNoteAt (position))
         {
-            const auto zone = getZone (getNoteData (*note->clip, *note->note), position);
+            const auto zone = getZone (*note, position);
             setMouseCursor (zone == Zone::body ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::LeftRightResizeCursor);
             setDescription (zone == Zone::body ? bodyHint : (zone == Zone::end ? endHint : startHint));
             return;
         }
 
-        if (getGhostClipAt (position) != nullptr)
+        if (getGhostClipAt (position).isValid())
         {
             setMouseCursor (juce::MouseCursor::NormalCursor);
             setDescription ("A ghost note, from another track's clip: double-right-click it to edit that clip. A click adds a note here.");

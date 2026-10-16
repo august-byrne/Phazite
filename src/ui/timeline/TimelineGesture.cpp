@@ -17,12 +17,12 @@ void TimelineGesture::beginStep (ProjectContext& context, const juce::String& na
         step = std::make_unique<SongGesture> (context, name);
 }
 
-bool TimelineGesture::doOnce (const juce::ValueTree& thing)
+bool TimelineGesture::doOnce (NoteRef note)
 {
-    if (std::find (done.begin(), done.end(), thing) != done.end())
+    if (std::find (doneNotes.begin(), doneNotes.end(), note) != doneNotes.end())
         return false;
 
-    done.push_back (thing);
+    doneNotes.push_back (note);
     return true;
 }
 } // namespace phazite::ui

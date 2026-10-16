@@ -68,8 +68,8 @@ void PianoRoll::scrollToNotes()
 
     for (const auto& n : getAllNotes())
     {
-        lowest = std::min (lowest, n.note->getNoteNumber());
-        highest = std::max (highest, n.note->getNoteNumber());
+        lowest = std::min (lowest, n.pitch);
+        highest = std::max (highest, n.pitch);
     }
 
     if (drumMode)

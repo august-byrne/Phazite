@@ -4,12 +4,86 @@
 #include "Sections.h"
 #include "Tracks.h"
 #include "internal/SongSelection.h"
+#include "model/notes/Notes.h"
+
+#include <unordered_map>
 
 namespace phazite
 {
-struct SongSelection::Impl
+struct SongSelection::Impl : private te::SelectableListener
 {
+    explicit Impl (te::SelectionManager& m)
+        : manager (m)
+    {
+    }
+
+    ~Impl() override { setNoteClips ({}); }
+
     te::SelectionManager& manager;
+
+    // The note clips, and their notes as Tracktion selects them: made for the clips while they are all there.
+    std::vector<ClipID> noteClipIDs;
+    std::vector<te::SafeSelectable<te::MidiClip>> noteClips;
+    std::unique_ptr<te::SelectedMidiEvents> noteEvents;
+
+    void setNoteClips (const std::vector<ClipID>& ids)
+    {
+        forgetNoteEvents();
+
+        for (auto& c : noteClips)
+            if (auto* clip = c.get())
+                clip->removeSelectableListener (this);
+
+        noteClips.clear();
+        noteClipIDs = ids;
+
+        if (auto* edit = manager.getEdit())
+        {
+            for (const auto id : ids)
+            {
+                if (auto* clip = id.isValid() ? dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr)
+                {
+                    noteClips.emplace_back (clip);
+                    clip->addSelectableListener (this);
+                }
+            }
+        }
+    }
+
+    juce::Array<te::MidiClip*> getLiveNoteClips() const
+    {
+        juce::Array<te::MidiClip*> clips;
+
+        for (const auto& c : noteClips)
+            if (auto* clip = c.get())
+                clips.add (clip);
+
+        return clips;
+    }
+
+    // Made again for the clips left after one of them went.
+    te::SelectedMidiEvents* getNoteEvents()
+    {
+        if (noteEvents == nullptr)
+            if (const auto clips = getLiveNoteClips(); ! clips.isEmpty())
+                noteEvents = std::make_unique<te::SelectedMidiEvents> (clips);
+
+        return noteEvents.get();
+    }
+
+    void forgetNoteEvents()
+    {
+        if (noteEvents != nullptr)
+        {
+            noteEvents->deselect();
+            noteEvents = nullptr;
+        }
+    }
+
+    void selectableObjectChanged (te::Selectable*) override {}
+
+    // The note selection holds pointers to its clips, so it goes when one of them does.
+    void selectableObjectAboutToBeDeleted (te::Selectable*) override { forgetNoteEvents(); }
 };
 
 namespace
@@ -54,7 +128,7 @@ namespace
 
 std::unique_ptr<SongSelection> createSongSelection (te::SelectionManager& manager)
 {
-    return std::make_unique<SongSelection> (std::make_unique<SongSelection::Impl> (SongSelection::Impl { manager }));
+    return std::make_unique<SongSelection> (std::make_unique<SongSelection::Impl> (manager));
 }
 
 SongSelection::SongSelection (std::unique_ptr<Impl> i)
@@ -160,6 +234,66 @@ void SongSelection::remove (SectionID id)
 void SongSelection::clear()
 {
     impl->manager.deselectAll();
+}
+
+//==============================================================================
+void SongSelection::setNoteClips (const std::vector<ClipID>& ids)
+{
+    // The same clips, all still there, change nothing.
+    if (ids == impl->noteClipIDs && (ids.empty() || impl->noteEvents != nullptr))
+        return;
+
+    impl->setNoteClips (ids);
+}
+
+std::vector<NoteRef> SongSelection::getNotes() const
+{
+    std::vector<NoteRef> refs;
+
+    for (const auto& n : getSelectedNotes (impl->manager))
+        refs.push_back (getNoteRef (*n.clip, *n.note));
+
+    return refs;
+}
+
+bool SongSelection::isSelected (NoteRef ref) const
+{
+    const auto notes = getNotes();
+    return std::find (notes.begin(), notes.end(), ref) != notes.end();
+}
+
+void SongSelection::selectNotes (const std::vector<NoteRef>& refs, bool addToSelection)
+{
+    auto* events = impl->getNoteEvents();
+
+    if (events == nullptr)
+        return;
+
+    // Each note clip's notes by ID, found once.
+    juce::Array<te::MidiNote*> notes;
+
+    for (auto* clip : impl->getLiveNoteClips())
+    {
+        const auto clipID = getClipID (*clip);
+        std::unordered_map<NoteID, te::MidiNote*> byID;
+
+        for (const auto& ref : refs)
+        {
+            if (ref.clip != clipID)
+                continue;
+
+            if (byID.empty())
+                for (auto* note : clip->getSequence().getNotes())
+                    byID.emplace (getNoteID (*note), note);
+
+            if (const auto found = byID.find (ref.note); found != byID.end())
+                notes.add (found->second);
+        }
+    }
+
+    // Adding to a selection that isn't of these clips' notes starts a new one.
+    const auto adding = addToSelection && getSelectedMidiEvents (impl->manager) == events;
+    events->setSelected (impl->manager, notes, adding);
 }
 
 void SongSelection::addChangeListener (juce::ChangeListener* listener)

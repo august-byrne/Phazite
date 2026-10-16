@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll's transforms (quantize, legato, chop and transpose, with a preview), its toolbar's menus, and its commands.
 #include "PianoRollParts.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandUI.h"
@@ -15,7 +14,7 @@ std::vector<NoteData> PianoRoll::getPreview() const
     if (! transformOpen)
         return {};
 
-    const auto notes = getNoteData (getSelectedNotesHere());
+    const auto notes = getSelectedNotesHere();
 
     switch (transform.kind)
     {
@@ -56,7 +55,7 @@ juce::String PianoRoll::describeTransform() const
 
 void PianoRoll::openTransform (Transform::Kind kind)
 {
-    if (getSelectedNotesHere().empty())
+    if (getSelectedNoteRefs().empty())
         return;
 
     transform.kind = kind;
@@ -80,18 +79,12 @@ void PianoRoll::closeTransform()
 
 void PianoRoll::applyTransform()
 {
-    auto* e = getEdit();
     const auto notes = getSelectedNotesHere();
 
-    if (e == nullptr || ! transformOpen || notes.empty())
+    if (! hasProject() || ! transformOpen || notes.empty())
         return;
 
-    const auto result = getPreview();
-    juce::Array<te::MidiNote*> added;
-
-    for (const auto& n : replaceNotes (*e, notes, result, describeTransform()))
-        added.add (n.note);
-
+    const auto added = replaceNotes (context, getRefs (notes), getPreview(), describeTransform());
     closeTransform();
     selectNotes (added, false);
 }
@@ -99,7 +92,8 @@ void PianoRoll::applyTransform()
 //==============================================================================
 void PianoRoll::updateToolbar()
 {
-    auto* track = getTrack();
+    const auto track = getTrack();
+    const auto trackRow = getTrackRow (context, track);
     const auto key = getKey();
 
     juce::String chordName ("Off");
@@ -113,15 +107,14 @@ void PianoRoll::updateToolbar()
     ghostButton.setToggleState (showGhostNotes, juce::dontSendNotification);
 
     for (auto* c : std::initializer_list<juce::Component*> { &chordButton, &keyButton, &ghostButton, &transformButton })
-        c->setEnabled (track != nullptr);
+        c->setEnabled (track.isValid());
 
     // The instrument that plays the notes, or a request for one: without it they make no sound.
     const auto& p = getPalette (*this);
-    const auto trackID = track != nullptr ? getTrackID (*track) : TrackID();
-    const auto instrument = getInstrument (context, trackID);
-    const auto silent = track != nullptr && ! instrument.has_value();
+    const auto instrument = getInstrument (context, track);
+    const auto silent = track.isValid() && ! instrument.has_value();
     instrumentButton.setButtonText (instrument.has_value() ? instrument->name : juce::String ("Choose instrument"));
-    instrumentButton.setEnabled (canHoldInstrument (context, trackID));
+    instrumentButton.setEnabled (canHoldInstrument (context, track));
     instrumentButton.setColour (juce::TextButton::buttonColourId,
                                 silent ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint) : p.surfaceRaised);
     instrumentButton.setTooltip (silent
@@ -133,25 +126,24 @@ void PianoRoll::updateToolbar()
 
     juce::String text ("Select a MIDI clip or a track in the playlist to edit notes");
 
-    if (const auto shown = getClips(); shown.size() == 1)
-        text = shown.getFirst()->getName() + (track != nullptr ? " on " + track->getName() : juce::String()) + ", at bar "
-               + songBar (fromTracktion (shown.getFirst()->getStartBeat())) + " of the song";
+    if (const auto shown = getShownClips(); shown.size() == 1)
+        text = shown.front().name + (trackRow.has_value() ? " on " + trackRow->name : juce::String()) + ", at bar "
+               + songBar (shown.front().range.getStart()) + " of the song";
     else if (shown.size() > 1)
-        text = juce::String (shown.size()) + " clips, from bar " + songBar (getTimeOrigin()) + " of the song";
-    else if (track != nullptr)
-        text = track->getName() + ": draw a note to start a clip at bar " + songBar (getTimeOrigin()) + " of the song";
+        text = juce::String ((int) shown.size()) + " clips, from bar " + songBar (getTimeOrigin()) + " of the song";
+    else if (trackRow.has_value())
+        text = trackRow->name + ": draw a note to start a clip at bar " + songBar (getTimeOrigin()) + " of the song";
 
     clipLabel.setText (text, juce::dontSendNotification);
 }
 
 void PianoRoll::instrumentClicked()
 {
-    auto* track = getTrack();
+    const auto trackID = getTrack();
 
-    if (track == nullptr)
+    if (! trackID.isValid())
         return;
 
-    const auto trackID = getTrackID (*track);
     const auto instrument = getInstrument (context, trackID);
 
     if (! instrument.has_value())
@@ -200,15 +192,15 @@ void PianoRoll::showChordMenu()
 
 void PianoRoll::showKeyMenu()
 {
-    auto* track = getTrack();
+    const auto track = getTrackRow (context, getTrack());
 
-    if (track == nullptr)
+    if (! track.has_value())
         return;
 
     // Off, or a root and a scale. Rows outside the key are shaded, and notes can snap to it.
     const auto key = getKey();
     juce::PopupMenu menu;
-    menu.addSectionHeader ("The key of " + track->getName());
+    menu.addSectionHeader ("The key of " + track->name);
     menu.addItem ("Off: no shading or snapping", true, ! key.has_value(), [this] { setKey (std::nullopt); });
 
     for (int root = 0; root < 12; ++root)
@@ -244,12 +236,12 @@ void PianoRoll::showTransformMenu()
 
 void PianoRoll::setDrumMode (bool on)
 {
-    auto* track = getTrack();
+    const auto track = getTrack();
 
-    if (track != nullptr)
-        setDrumTrack (*track, on);
+    if (track.isValid())
+        setDrumTrack (context, track, on);
 
-    drumMode = on && track != nullptr;
+    drumMode = on && track.isValid();
     clipsChanged();
     scrollToNotes();
 }
@@ -257,7 +249,7 @@ void PianoRoll::setDrumMode (bool on)
 //==============================================================================
 void PianoRoll::addCommands (CommandRegistry& registry)
 {
-    const auto hasNotes = [this] { return ! getSelectedNotesHere().empty(); };
+    const auto hasNotes = [this] { return ! getSelectedNoteRefs().empty(); };
 
     registry.add ({ .id = "note.selectAll",
                     .name = "Select All Notes",
@@ -265,7 +257,7 @@ void PianoRoll::addCommands (CommandRegistry& registry)
                     .description = "Selects every note of the clips in the piano roll.",
                     .synonyms = { "all notes", "everything" },
                     .perform = [this] { selectAllNotes(); },
-                    .isEnabled = [this] { return isActive() && ! getClips().isEmpty(); },
+                    .isEnabled = [this] { return isActive() && ! getClips().empty(); },
                     .keyPriority = Command::notePriority });
 
     struct TransformCommand
@@ -322,7 +314,7 @@ void PianoRoll::addCommands (CommandRegistry& registry)
                     .description = "Shows the rows as drums, named after them, with notes as hits. Drum tracks start in it.",
                     .synonyms = { "drums", "beats", "pads", "drum map" },
                     .perform = [this] { setDrumMode (! drumMode); },
-                    .isEnabled = [this] { return getTrack() != nullptr; },
+                    .isEnabled = [this] { return getTrack().isValid(); },
                     .isTicked = [this] { return drumMode; } });
 
     registry.add ({ .id = "pianoRoll.ghostNotes",
@@ -358,14 +350,8 @@ void PianoRoll::addCommands (CommandRegistry& registry)
                     .category = "Piano Roll",
                     .description = "Gives every track the key of the track in the piano roll.",
                     .synonyms = { "song key", "global key", "scale for all", "same key" },
-                    .perform =
-                        [this]
-                    {
-                        if (auto* e = getEdit())
-                            setTrackKeys (getPlaylistTracks (*e), getKey());
-                    },
-                    .isEnabled = [this] { return getKey().has_value(); },
-                    .undoTarget = [this] { return getEdit(); } });
+                    .perform = [this] { useKeyOnEveryTrack (context, getKey()); },
+                    .isEnabled = [this] { return getKey().has_value(); } });
 
     refreshShortcutTexts();
 }

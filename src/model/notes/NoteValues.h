@@ -31,6 +31,17 @@ struct NoteData
     BeatPosition getEnd() const noexcept { return start + length; }
 };
 
+// The notes' references, in their order.
+inline std::vector<NoteRef> getRefs (const std::vector<NoteData>& notes)
+{
+    std::vector<NoteRef> refs;
+
+    for (const auto& note : notes)
+        refs.push_back (note.getRef());
+
+    return refs;
+}
+
 // Notes are at least this long.
 BeatDuration getMinimumNoteLength();
 

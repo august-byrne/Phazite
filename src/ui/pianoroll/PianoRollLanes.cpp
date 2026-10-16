@@ -2,8 +2,6 @@
 // The piano roll's keys, velocity lane and transform bar.
 #include "DrumRows.h"
 #include "PianoRollParts.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <map>
@@ -93,36 +91,35 @@ void PianoRoll::Keys::mouseDown (const juce::MouseEvent& e)
 {
     const auto row = roll.getRowAt (e.y);
     const auto pitch = roll.getPitchForRow (row);
-    auto* clip = roll.getClips().getFirst();
+    const auto shown = roll.getClips();
 
-    if (pitch < 0 || clip == nullptr)
+    if (pitch < 0 || shown.empty())
         return;
 
     if (e.mods.isPopupMenu())
     {
         // Drum mode: hide this drum's row, or show them all again.
-        if (auto* track = roll.getTrack(); track != nullptr && roll.drumMode)
+        if (const auto track = roll.getTrack(); track.isValid() && roll.drumMode)
         {
             juce::PopupMenu menu;
-            const te::SafeSelectable<te::AudioTrack> safeTrack (track);
             const juce::Component::SafePointer<Keys> safeThis (this);
 
             menu.addItem ("Hide " + roll.drumRows[(size_t) row].name,
-                          [safeThis, safeTrack, pitch]
+                          [safeThis, track, pitch]
                           {
-                              if (safeThis != nullptr && safeTrack.get() != nullptr)
+                              if (safeThis != nullptr)
                               {
-                                  hideDrumRow (*safeTrack.get(), pitch);
+                                  hideDrumRow (safeThis->roll.context, track, pitch);
                                   safeThis->roll.clipsChanged();
                               }
                           });
 
             menu.addItem ("Show All Rows",
-                          [safeThis, safeTrack]
+                          [safeThis, track]
                           {
-                              if (safeThis != nullptr && safeTrack.get() != nullptr)
+                              if (safeThis != nullptr)
                               {
-                                  showAllDrumRows (*safeTrack.get());
+                                  showAllDrumRows (safeThis->roll.context, track);
                                   safeThis->roll.clipsChanged();
                               }
                           });
@@ -134,7 +131,7 @@ void PianoRoll::Keys::mouseDown (const juce::MouseEvent& e)
     }
 
     playingPitch = pitch;
-    roll.audition (*clip, pitch, roll.lastVelocity);
+    roll.audition (shown.front(), pitch, roll.lastVelocity);
 
     if (roll.drumMode)
         draggedRow = row;
@@ -158,10 +155,10 @@ void PianoRoll::Keys::mouseDrag (const juce::MouseEvent& e)
     // Piano: sliding along the keys plays each one.
     if (const auto pitch = roll.getPitchForRow (row); pitch >= 0 && pitch != playingPitch)
     {
-        if (auto* clip = roll.getClips().getFirst())
+        if (const auto shown = roll.getClips(); ! shown.empty())
         {
             playingPitch = pitch;
-            roll.audition (*clip, pitch, roll.lastVelocity);
+            roll.audition (shown.front(), pitch, roll.lastVelocity);
             repaint();
         }
     }
@@ -171,10 +168,10 @@ void PianoRoll::Keys::mouseUp (const juce::MouseEvent&)
 {
     roll.stopAudition();
 
-    if (auto* track = roll.getTrack(); track != nullptr && roll.drumMode && draggedRow >= 0 && dropRow >= 0)
+    if (const auto track = roll.getTrack(); track.isValid() && roll.drumMode && draggedRow >= 0 && dropRow >= 0)
     {
         const auto note = roll.drumRows[(size_t) draggedRow].note;
-        setDrumRowOrder (*track, getDrumOrderAfterMove (roll.drumRows, note, dropRow > draggedRow ? dropRow - 1 : dropRow));
+        setDrumRowOrder (roll.context, track, getDrumOrderAfterMove (roll.drumRows, note, dropRow > draggedRow ? dropRow - 1 : dropRow));
         roll.clipsChanged();
     }
 
@@ -210,25 +207,23 @@ void PianoRoll::VelocityLane::paint (juce::Graphics& g)
 
     const auto& timeline = roll.getView();
     const auto usable = (float) getHeight() - 4.0f;
-    std::map<te::MidiClip*, juce::Colour> colours;
+    const auto notes = roll.getAllNotes();
+    const auto colours = getNoteColours (roll.context, notes);
+    const auto selected = roll.getSelectedNoteRefs();
 
-    for (const auto& n : roll.getAllNotes())
+    for (const auto& note : notes)
     {
-        const auto x = (float) timeline.beatToX (fromTracktion (getNoteStart (*n.clip, *n.note)));
+        const auto x = (float) timeline.beatToX (note.start);
 
         if (x < -4.0f || x > (float) getWidth() + 4.0f)
             continue;
 
-        const auto height = usable * (float) n.note->getVelocity() / 127.0f;
+        const auto height = usable * (float) note.velocity / 127.0f;
         const auto top = 2.0f + usable - height;
-        const auto selected = roll.isSelected (*n.note);
+        const auto found = colours.find (note.clip);
+        auto colour = selected.contains (note.getRef()) ? p.accent : (found != colours.end() ? found->second : p.textMuted);
 
-        if (! selected && ! colours.contains (n.clip))
-            colours[n.clip] = getNoteColour (*n.clip);
-
-        auto colour = selected ? p.accent : colours[n.clip];
-
-        if (n.note->isMute())
+        if (note.muted)
             colour = colour.withAlpha (0.4f);
 
         g.setColour (colour);
@@ -241,34 +236,32 @@ void PianoRoll::VelocityLane::setVelocitiesAt (const juce::MouseEvent& e)
 {
     const auto velocity = velocityAt (e.position.y);
     const auto& timeline = roll.getView();
-    std::vector<ClipNote> atMouse, selectedAtMouse;
+    const auto selected = roll.getSelectedNoteRefs();
+    std::vector<NoteRef> atMouse, selectedAtMouse;
 
-    for (const auto& n : roll.getAllNotes())
+    for (const auto& note : roll.getAllNotes())
     {
-        if (std::abs ((float) timeline.beatToX (fromTracktion (getNoteStart (*n.clip, *n.note))) - e.position.x)
-            <= (float) velocityHitDistance)
+        if (std::abs ((float) timeline.beatToX (note.start) - e.position.x) <= (float) velocityHitDistance)
         {
-            atMouse.push_back (n);
+            atMouse.push_back (note.getRef());
 
-            if (roll.isSelected (*n.note))
-                selectedAtMouse.push_back (n);
+            if (selected.contains (note.getRef()))
+                selectedAtMouse.push_back (note.getRef());
         }
     }
 
-    setNoteVelocities (selectedAtMouse.empty() ? atMouse : selectedAtMouse, velocity);
+    setNoteVelocities (roll.context, selectedAtMouse.empty() ? atMouse : selectedAtMouse, velocity);
     roll.lastVelocity = velocity;
     repaint();
 }
 
 void PianoRoll::VelocityLane::mouseDown (const juce::MouseEvent& e)
 {
-    auto* ed = roll.getEdit();
-
-    if (ed == nullptr || roll.getClips().isEmpty())
+    if (! roll.hasProject() || roll.getClips().empty())
         return;
 
     dragging = true;
-    step = std::make_unique<phazite::Gesture> (*ed, "Change Velocity");
+    step = std::make_unique<SongGesture> (roll.context, "Change Velocity");
     setVelocitiesAt (e);
 }
 

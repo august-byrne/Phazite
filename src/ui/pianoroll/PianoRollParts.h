@@ -6,14 +6,15 @@
 #pragma once
 
 #include "PianoRoll.h"
-#include "model/commands/Undo.h"
 #include "ui/components/Controls.h"
 #include "ui/timeline/TimelineGesture.h"
 
+#include <map>
+
 namespace phazite::ui
 {
-// The color a clip's notes are drawn in: the clip's, or its track's.
-juce::Colour getNoteColour (te::MidiClip&);
+// The colors the notes of these clips are drawn in: each clip's, its track's.
+std::map<ClipID, juce::Colour> getNoteColours (const ProjectContext&, const std::vector<NoteData>&);
 
 //==============================================================================
 // Down the left: the piano keys, which play their note while held, or in drum mode the drums' names, which
@@ -59,10 +60,10 @@ struct PianoRoll::NoteGrid : public juce::Component
     std::unique_ptr<Gesture> gesture; // from mouse down to mouse up
     juce::Rectangle<int> rubberBand;  // the Select and Zoom tools' rectangle
 
-    std::optional<ClipNote> getNoteAt (juce::Point<float>) const;
+    std::optional<NoteData> getNoteAt (juce::Point<float>) const;
     Zone getZone (const NoteData&, juce::Point<float>) const;
-    te::MidiClip* getGhostClipAt (juce::Point<float>) const;
-    std::vector<std::pair<te::MidiClip*, NoteData>> getGhostNotes() const; // other tracks' notes in view
+    ClipID getGhostClipAt (juce::Point<float>) const;
+    std::vector<NoteData> getGhostNotes() const; // other tracks' notes in view
 
     void paintRows (juce::Graphics&, juce::Rectangle<int> area);
     void paintNotes (juce::Graphics&);
@@ -94,14 +95,14 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
         zoom
     };
 
-    // A note as it was when the drag began, found again by its state (it may be moved, not replaced).
+    // A note as it was when the drag began, and where its clip starts (no note goes before it).
     struct Original
     {
-        te::SafeSelectable<te::MidiClip> clip;
-        juce::ValueTree state;
-        te::BeatPosition start;
-        te::BeatDuration length;
+        NoteRef note;
+        BeatPosition start;
+        BeatDuration length;
         int pitch = 60;
+        BeatPosition clipStart;
     };
 
     // Which ways the grid scrolls when this drags past its edges, if at all.
@@ -127,12 +128,11 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
 
     Kind kind = Kind::pending;
     Zone zone = Zone::body;
-    te::SafeSelectable<te::MidiClip> clip; // the note the mouse went down on, if any
-    juce::ValueTree noteState;
+    NoteRef note; // the note the mouse went down on, if any
 
     std::vector<Original> originals;
-    Original anchor;                             // the note the mouse went down on, as it was
-    std::vector<juce::ValueTree> selectedBefore; // a rectangle with Ctrl adds to these
+    Original anchor;                            // the note the mouse went down on, as it was
+    std::unordered_set<NoteRef> selectedBefore; // a rectangle with Ctrl adds to these
     int paintPitch = -1;
     int auditionedPitch = -1;
 };
@@ -151,7 +151,7 @@ struct PianoRoll::VelocityLane : public juce::Component
 
     PianoRoll& roll;
     bool dragging = false;
-    std::unique_ptr<phazite::Gesture> step; // a drag's undo step, from mouse down to mouse up
+    std::unique_ptr<SongGesture> step; // a drag's undo step, from mouse down to mouse up
 
     int velocityAt (float y) const;
     void setVelocitiesAt (const juce::MouseEvent&);

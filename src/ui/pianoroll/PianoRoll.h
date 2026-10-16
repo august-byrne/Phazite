@@ -5,22 +5,21 @@
 // note with the last length and velocity, a right-click deletes, dragging a note moves it and dragging its
 // edge resizes it. It has the playlist's tools and grid (TimelineEditor), a velocity lane, ghost notes from
 // other tracks, shading for notes outside the track's key, chord stamps, drum mode for drum tracks, and
-// transforms that show what they would do before they are applied.
+// transforms that show what they would do before they are applied. It works by IDs, through the model's
+// NotesModel.h, and selects notes through the song's selection.
 #pragma once
 
-#include "model/notes/Notes.h"
+#include "model/notes/NotesModel.h"
 #include "model/project/ProjectContext.h"
 #include "ui/timeline/TimelineEditor.h"
 
 #include <optional>
+#include <unordered_set>
 
 namespace phazite::ui
 {
 class PianoRoll : public TimelineEditor,
                   private juce::ChangeListener,
-                  private juce::ValueTree::Listener,
-                  private juce::AsyncUpdater,
-                  private te::SelectableListener,
                   private ProjectContext::Listener
 {
 public:
@@ -30,22 +29,18 @@ public:
 
     // Shows these clips' notes. The piano roll follows the playlist's selection by itself; this is for
     // opening a clip, as double-clicking it in the playlist does.
-    void showClips (const juce::Array<te::MidiClip*>&);
-    void showClip (ClipID);                      // the same, of one clip by its ID
-    juce::Array<te::MidiClip*> getClips() const; // those still in the song
+    void showClips (const std::vector<ClipID>&);
+    void showClip (ClipID);
+    std::vector<ClipID> getClips() const; // those still in the song
 
     // Shows a track's MIDI clip at the playhead, or the one nearest to it. Without one, the piano roll shows
     // the track from the bar the playhead is in, and the first note drawn makes a clip there.
-    void showTrack (te::AudioTrack&);
-    te::AudioTrack* getTrack() const; // the track shown: the first clip's, or the one showTrack() was given
+    void showTrack (TrackID);
+    TrackID getTrack() const; // the track shown: the first clip's, or the one showTrack() was given
 
     // The piano roll's commands: select all notes, and the transforms with their settings.
     void addCommands (CommandRegistry&);
     void refreshShortcutTexts() override;
-
-    // The open project's Edit, for the code that still works on Tracktion's clips and notes. Transitional: it goes when
-    // the piano roll works by IDs (architecture phase A3).
-    te::Edit* getEdit() const noexcept { return context.getEdit(); }
 
     // TimelineEditor
     bool canUseTool (Tool) const override; // all but Slip
@@ -86,12 +81,11 @@ private:
     };
 
     ProjectContext& context;
-    te::SelectionManager& selection; // the context's
-    juce::ValueTree editState;       // listened to for changes to notes and clips
-    std::vector<te::SafeSelectable<te::MidiClip>> clips;
-    std::unique_ptr<te::SelectedMidiEvents> selectedEvents; // the selection of these clips' notes
-    te::SafeSelectable<te::MidiClip> targetClip;            // where new notes go, if the click isn't in a clip
-    te::SafeSelectable<te::AudioTrack> emptyTrack;          // a track shown without clips; a note drawn makes one
+    SongSelection& selection;  // the context's
+    juce::ValueTree editState; // the project shown, to tell another project from the same one
+    std::vector<ClipID> clips; // shown
+    ClipID targetClip;         // where new notes go, if the click isn't in a clip
+    TrackID emptyTrack;        // a track shown without clips; a note drawn makes one
 
     // The rows: one per pitch, high to low, or in drum mode one per drum.
     int rowHeight = 14;
@@ -100,7 +94,7 @@ private:
     std::vector<DrumRow> drumRows;
 
     // What new notes get: the length and velocity used last, a chord, and the song's key.
-    te::BeatDuration lastLength = te::BeatDuration::fromBeats (0.25);
+    BeatDuration lastLength = BeatDuration::fromBeats (0.25);
     int lastVelocity = 100;
     std::optional<ChordType> chordStamp;
     bool snapToKey = false, showGhostNotes = true;
@@ -114,24 +108,26 @@ private:
     std::unique_ptr<NoteGrid> grid;
     std::unique_ptr<VelocityLane> velocityLane;
     std::unique_ptr<TransformBar> transformBar;
-    te::SafeSelectable<te::AudioTrack> auditionTrack; // the track a note is being auditioned on
+    TrackID auditionTrack; // the track a note is being auditioned on
 
     //==============================================================================
-    void setEdit (te::Edit*); // the open project's, or nullptr while none is open
-    void projectChanged() override { setEdit (context.getEdit()); }
+    void projectChanged() override; // another project, or none
+    void songChanged (const SongChanges&) override;
 
     // The clips and their notes. New clips open at bar 1 with their notes in view, unless keepView is set.
-    void setClips (const juce::Array<te::MidiClip*>&, bool keepView = false);
+    void setClips (const std::vector<ClipID>&, bool keepView = false);
     void clipsChanged(); // the notes or the clips moved: repaint, and update the drum rows
-    std::vector<ClipNote> getAllNotes() const;
-    std::vector<ClipNote> getSelectedNotesHere() const; // the selected notes, if they are these clips'
-    bool isSelected (const te::MidiNote&) const;
-    void selectNotes (const juce::Array<te::MidiNote*>&, bool addToSelection);
+    std::vector<NoteClip> getShownClips() const;
+    std::vector<NoteData> getAllNotes() const;
+    std::unordered_set<NoteRef> getSelectedNoteRefs() const; // the selected notes, if they are these clips'
+    std::vector<NoteData> getSelectedNotesHere() const;
+    std::vector<NoteRef> getSelectedRefsHere() const;
+    void selectNotes (const std::vector<NoteRef>&, bool addToSelection);
     void selectAllNotes();
-    te::MidiClip* getClipForNewNote (te::BeatPosition) const; // the clip the beat is in, or the target clip
-    te::MidiClip* makeClipForNewNotes();                      // on a track shown without clips, from the time origin
-    void updateTimeOrigin (bool scrollToStart);               // bar 1 at the first clip's content start
-    std::optional<Key> getKey() const;                        // the track's key, if it has one
+    ClipID getClipForNewNote (BeatPosition) const; // the clip the beat is in, or the target clip
+    ClipID makeClipForNewNotes();                  // on a track shown without clips, from the time origin
+    void updateTimeOrigin (bool scrollToStart);    // bar 1 at the first clip's content start
+    std::optional<Key> getKey() const;             // the track's key, if it has one
     void setKey (const std::optional<Key>&);
     int getRowHeight() const;
     std::vector<NoteData> getPreview() const; // the selected notes as the open transform would make them
@@ -152,8 +148,8 @@ private:
     juce::Rectangle<float> getNoteBounds (const NoteData&) const;
 
     // Playing notes as they are placed or clicked, on their track's instrument.
-    void audition (te::MidiClip&, int pitch, int velocity);
-    void audition (te::MidiClip&, const std::vector<int>& pitches, int velocity);
+    void audition (ClipID, int pitch, int velocity);
+    void audition (ClipID, const std::vector<int>& pitches, int velocity);
     void stopAudition();
 
     void updateToolbar();
@@ -176,12 +172,6 @@ private:
     static juce::String describeNoteTool (Tool); // what the tool does to notes (PianoRollNotes.cpp)
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection changed
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
-    void selectableObjectChanged (te::Selectable*) override {}
-    void selectableObjectAboutToBeDeleted (te::Selectable*) override; // a clip shown here
-    void handleAsyncUpdate() override;                                // notes or clips changed
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PianoRoll)
 };
