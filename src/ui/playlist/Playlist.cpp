@@ -154,7 +154,7 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     if (const auto target = playlist.sectionsStrip.getDragTarget())
     {
         g.setColour (p.accent);
-        g.fillRect (juce::roundToInt (timeline.beatToX (fromTracktion (*target))) - 1, 0, 3, getHeight());
+        g.fillRect (juce::roundToInt (timeline.beatToX (*target)) - 1, 0, 3, getHeight());
     }
 }
 
@@ -201,7 +201,7 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
       context (projectContext),
       selection (projectContext.getSongSelection()),
       range (projectContext.getSongRange()),
-      sectionsStrip (*this, projectContext.getSelection(), projectContext.getRangeSelection()),
+      sectionsStrip (*this),
       addTrackRow (std::make_unique<AddTrackRow> (*this)),
       lanes (std::make_unique<Lanes> (*this))
 {
@@ -274,7 +274,7 @@ void Playlist::showProject()
     cancelPendingUpdate();
 
     TimelineEditor::showProject();
-    sectionsStrip.setEdit (context.getEdit());
+    sectionsStrip.showProject();
     addTrackButton.setEnabled (open);
     addTrackRow->setVisible (open);
     rebuild();
@@ -282,6 +282,10 @@ void Playlist::showProject()
 
 void Playlist::songChanged (const SongChanges& changes)
 {
+    // The time bar's sections, which the tempo places in time too.
+    if (changes.sections || changes.tempo)
+        sectionsStrip.repaint();
+
     if (changes.tracks)
     {
         rebuild(); // a name, color, mute or solo, or tracks added, deleted or moved

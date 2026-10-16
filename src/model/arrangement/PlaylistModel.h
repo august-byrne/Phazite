@@ -154,16 +154,33 @@ void setCrossfade (ProjectContext&, const CrossfadeSpot&, BeatPosition pointer);
 bool canImport (const ProjectContext&, const juce::File&);
 std::vector<ClipID> importFiles (ProjectContext&, const juce::StringArray& paths, TrackID target, BeatPosition start);
 
-// The song's sections (Sections.h), in its order, as the playlist draws them behind the tracks.
+// The song's sections (Sections.h), in its order, as the playlist draws them in its time bar and behind the tracks.
 struct SongSection
 {
     SectionID id;
     juce::String name;
     BeatRange range;
-    juce::Colour colour;
+    juce::Colour colour; // its own, or its role's
+    juce::String tip;    // a one-line suggestion of what to put in it, for the hint bar
+    float energy = 0.5f; // how intense it is, from 0 to 1, for the energy curve
 };
 
 std::vector<SongSection> getSongSections (const ProjectContext&);
+std::optional<SongSection> getSongSection (const ProjectContext&, SectionID);
+
+// Edits of sections, each one undo step (Sections.h). A section added where the user asks for one, selected alone
+// (an empty ID if there is no room); renamed (an empty name or the same one changes nothing); or given another color.
+SectionID addSectionAt (ProjectContext&, BeatPosition);
+void renameSection (ProjectContext&, SectionID, const juce::String& name);
+void setSectionColour (ProjectContext&, SectionID, juce::Colour);
+
+// Edits of a section and everything in it, on every track. The destinations are section boundaries: the start of each
+// section and the end of the last, places in the song as it is before the edit. A copy is returned; with asAliases, its
+// clips are copied as aliases. Resizing makes it at least a beat long; with moveRest, what comes after it moves along.
+std::vector<BeatPosition> getSectionBoundaries (const ProjectContext&);
+void moveSection (ProjectContext&, SectionID, BeatPosition destination);
+SectionID copySection (ProjectContext&, SectionID, BeatPosition destination, bool asAliases);
+void resizeSection (ProjectContext&, SectionID, BeatDuration newLength, bool moveRest);
 
 // Where Space plays from (Playback.h), and how far the time line goes: everything on it, sections included (not the
 // song's end, which sections don't make longer), so that an outline can be scrolled to.

@@ -282,6 +282,80 @@ TEST_CASE ("The playlist's sections, play start and time line by plain values")
     CHECK (phazite::getPlayStartBeat (context).inBeats() == doctest::Approx (6.0));
 }
 
+TEST_CASE ("Sections by ID are added, renamed, colored, moved, copied and resized, each as one undo step")
+{
+    Song song;
+    auto& context = song.context;
+    auto& undo = song.edit->getUndoManager();
+    const auto startsOf = [&context]
+    {
+        std::vector<double> starts;
+
+        for (const auto& section : phazite::getSongSections (context))
+            starts.push_back (std::round (section.range.getStart().inBeats() * 1000.0) / 1000.0); // to the thousandth of a beat
+
+        return starts;
+    };
+
+    // Each eight bars from the start of the bar asked for, selected alone.
+    const auto first = phazite::addSectionAt (context, beat (1.0));
+    REQUIRE (first.isValid());
+    CHECK (context.getSongSelection().isSelected (first));
+    CHECK (undo.getUndoDescription() == juce::String ("Add Section"));
+    const auto second = phazite::addSectionAt (context, beat (33.0));
+    REQUIRE (second.isValid());
+    CHECK_FALSE (context.getSongSelection().isSelected (first));
+    REQUIRE (phazite::getSongSection (context, second).has_value());
+    CHECK (phazite::getSongSection (context, second)->range.getStart().inBeats() == doctest::Approx (32.0));
+    CHECK (phazite::getSongSection (context, second)->range.getEnd().inBeats() == doctest::Approx (64.0));
+    CHECK (phazite::getSongSection (context, second)->energy >= 0.0f);
+
+    const auto boundaries = phazite::getSectionBoundaries (context);
+    REQUIRE (boundaries.size() == 3);
+    CHECK (boundaries[2].inBeats() == doctest::Approx (64.0));
+
+    phazite::renameSection (context, first, "Intro");
+    CHECK (phazite::getSongSection (context, first)->name == juce::String ("Intro"));
+    CHECK (undo.getUndoDescription() == juce::String ("Rename Section"));
+    phazite::setSectionColour (context, first, juce::Colours::red);
+    CHECK (phazite::getSongSection (context, first)->colour == juce::Colours::red);
+    CHECK (undo.getUndoDescription() == juce::String ("Change Section Color"));
+
+    // Moved after the second, with the clip in it; the second makes room.
+    phazite::moveSection (context, first, beat (64.0));
+    CHECK (undo.getUndoDescription() == juce::String ("Move Section"));
+    auto sections = phazite::getSongSections (context);
+    REQUIRE (sections.size() == 2);
+    CHECK (sections[1].name == juce::String ("Intro"));
+    CHECK (startsOf() == std::vector { 0.0, 32.0 });
+    REQUIRE (phazite::getClips (context, idOf (*song.a)).size() == 1);
+    CHECK (phazite::getClips (context, idOf (*song.a))[0].range.getStart().inBeats() == doctest::Approx (36.0));
+
+    // Copied to the start as aliases: the sections after it make room, and its clip is linked to the original.
+    const auto copy = phazite::copySection (context, sections[1].id, beat (0.0), true);
+    REQUIRE (copy.isValid());
+    CHECK (undo.getUndoDescription() == juce::String ("Copy Section as Aliases"));
+    CHECK (phazite::getSongSection (context, copy)->name == juce::String ("Intro"));
+    CHECK (startsOf() == std::vector { 0.0, 32.0, 64.0 });
+    const auto clips = phazite::getClips (context, idOf (*song.a));
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (clips[0].linked);
+
+    // Shorter, with the rest of the song moving back, and then alone, leaving a gap.
+    phazite::resizeSection (context, copy, beats (16.0), true);
+    CHECK (undo.getUndoDescription() == juce::String ("Resize Section"));
+    CHECK (phazite::getSongSection (context, copy)->range.getEnd().inBeats() == doctest::Approx (16.0));
+    CHECK (startsOf() == std::vector { 0.0, 16.0, 48.0 });
+    phazite::resizeSection (context, copy, beats (8.0), false);
+    CHECK (phazite::getSongSection (context, copy)->range.getEnd().inBeats() == doctest::Approx (8.0));
+    CHECK (startsOf() == std::vector { 0.0, 16.0, 48.0 });
+
+    // Nothing for a section that is gone.
+    CHECK_FALSE (phazite::getSongSection (context, {}).has_value());
+    CHECK_FALSE (phazite::copySection (context, {}, beat (0.0), false).isValid());
+}
+
 TEST_CASE ("The time range selected across tracks, by IDs")
 {
     Song song;

@@ -3,6 +3,7 @@
 #include "UiTestHelpers.h"
 #include "model/arrangement/Clips.h"
 #include "model/arrangement/Outlines.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
 #include "model/commands/Undo.h"
@@ -498,4 +499,71 @@ TEST_CASE ("Dragging along the top of the ruler loops part of the song, and the 
     mouse.dragTo ({ x (2.0), lower });
     mouse.release();
     CHECK (isLoop (1.0, 2.0));
+}
+
+TEST_CASE ("The sections strip adds, selects, resizes, moves and copies sections with the mouse")
+{
+    PlaylistScreen screen;
+    auto& context = screen.context;
+    auto& undo = screen.edit->getUndoManager();
+    screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (64.0) });
+
+    auto* strip = phazite::test::findComponentWithTitle (screen.playlist, "Sections");
+    REQUIRE (strip != nullptr);
+    const auto y = strip->getHeight() / 2;
+    const auto x = [&screen] (double beat)
+    { return juce::roundToInt (screen.playlist.getView().beatToX (phazite::BeatPosition::fromBeats (beat))); };
+    const auto sectionNamed = [&context] (const char* name)
+    {
+        for (const auto& section : phazite::getSongSections (context))
+            if (section.name == juce::String (name))
+                return std::optional (section);
+
+        return std::optional<phazite::SongSection>();
+    };
+
+    phazite::test::Mouse mouse (*strip);
+
+    // A double-click adds a section from the start of the bar, eight bars long, selected alone.
+    mouse.doubleClick ({ x (2.0), y });
+    mouse.doubleClick ({ x (34.0), y });
+    REQUIRE (phazite::getSongSections (context).size() == 2);
+    const auto first = sectionNamed ("Section 1"), second = sectionNamed ("Section 2");
+    REQUIRE (first.has_value());
+    REQUIRE (second.has_value());
+    CHECK (second->range.getStart().inBeats() == doctest::Approx (32.0));
+    CHECK (context.getSongSelection().getSections() == std::vector { second->id });
+
+    // A click selects one alone.
+    mouse.click ({ x (8.0), y });
+    CHECK (context.getSongSelection().getSections() == std::vector { first->id });
+
+    // Dragging its right edge makes it shorter, and what comes after moves along.
+    mouse.press ({ x (32.0) - 2, y });
+    mouse.dragTo ({ x (16.0), y });
+    mouse.release();
+    CHECK (undo.getUndoDescription() == juce::String ("Resize Section"));
+    CHECK (sectionNamed ("Section 1")->range.getEnd().inBeats() == doctest::Approx (16.0));
+    CHECK (sectionNamed ("Section 2")->range.getStart().inBeats() == doctest::Approx (16.0));
+
+    // Dragging it moves it to the boundary nearest the mouse: the end of the song.
+    mouse.pause();
+    mouse.press ({ x (8.0), y });
+    mouse.dragTo ({ x (46.0), y });
+    mouse.release();
+    CHECK (undo.getUndoDescription() == juce::String ("Move Section"));
+    CHECK (sectionNamed ("Section 2")->range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (sectionNamed ("Section 1")->range.getStart().inBeats() == doctest::Approx (32.0));
+
+    // Ctrl+drag copies it there, and selects the copy.
+    mouse.pause();
+    mouse.press ({ x (4.0), y }, juce::ModifierKeys::commandModifier);
+    mouse.dragTo ({ x (47.0), y });
+    mouse.release();
+    CHECK (undo.getUndoDescription() == juce::String ("Copy Section"));
+    const auto sections = phazite::getSongSections (context);
+    REQUIRE (sections.size() == 3);
+    CHECK (sections[2].name == juce::String ("Section 2"));
+    CHECK (sections[2].range.getStart().inBeats() == doctest::Approx (48.0));
+    CHECK (context.getSongSelection().getSections() == std::vector { sections[2].id });
 }

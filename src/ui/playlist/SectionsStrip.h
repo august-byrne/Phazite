@@ -7,7 +7,7 @@
 // or on the bar numbers offers the song outlines. The hint bar shows each section's tip.
 #pragma once
 
-#include "model/arrangement/Selection.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "ui/timeline/TimelineEditor.h"
 
 #include <optional>
@@ -15,30 +15,29 @@
 namespace phazite::ui
 {
 class SectionsStrip : public juce::Component,
-                      private juce::ValueTree::Listener,
                       private juce::ChangeListener
 {
 public:
     static constexpr int preferredHeight = 18;
 
-    SectionsStrip (TimelineEditor&, te::SelectionManager&, RangeSelection&);
+    // In an editor's time bar, with the sections of the project it shows (TimelineEditor::getContext()).
+    explicit SectionsStrip (TimelineEditor&);
     ~SectionsStrip() override;
 
-    // Follows the editor's Edit; call after the editor's changed.
-    void setEdit (te::Edit*);
+    // Another project is open, or none: a drag or a rename in progress stops. The editor calls this, and repaints the
+    // strip when the sections or the tempo change.
+    void showProject();
 
     // Shows the section's name in a text field, to rename it.
     void startRenaming (SectionID);
-    void startRenaming (te::ArrangerClip&);
 
-    // The menu for a section (or none) at a place in the song: renaming and coloring it, adding one there,
-    // and the song outlines. The time bar's bar numbers show it too.
-    void showMenu (te::ArrangerClip*, te::BeatPosition where);
-    void showMenuAt (BeatPosition); // the menu of the section there, which it selects, or of none
+    // The menu of the section at a place in the song, which it selects, or of none there: renaming and coloring it,
+    // adding one there, and the song outlines. The time bar's bar numbers show it too.
+    void showMenuAt (BeatPosition);
 
     // While a section is dragged: where it would go (moving), or where its end would be (resizing). The
     // playlist draws it across the tracks too; onDragChanged says when to repaint.
-    std::optional<te::BeatPosition> getDragTarget() const;
+    std::optional<BeatPosition> getDragTarget() const;
     std::function<void()> onDragChanged;
 
     void paint (juce::Graphics&) override;
@@ -61,34 +60,30 @@ private:
         };
 
         Kind kind = Kind::pending;
-        te::SafeSelectable<te::ArrangerClip> section;
+        SectionID section;
         bool onEdge = false;
-        std::optional<te::BeatPosition> target; // move: the boundary it would go to; resize: the new end
+        std::optional<BeatPosition> target; // move: the boundary it would go to; resize: the new end
     };
 
     TimelineEditor& editor;
-    te::SelectionManager& selection;
-    RangeSelection& range;
-    te::SafeSelectable<te::Edit> edit;
-    juce::ValueTree editState;
+    ProjectContext& context;
+    SongSelection& selection;
+    SongRange& range;
     std::optional<Drag> drag;
     juce::Label nameLabel; // shown over a section while it is renamed
-    te::SafeSelectable<te::ArrangerClip> renaming;
+    SectionID renaming;
 
-    juce::Rectangle<int> getBlockArea (const te::Clip&) const; // where the section's block is drawn
-    te::ArrangerClip* getSectionAt (juce::Point<int>) const;
-    bool isOnRightEdge (const te::Clip&, juce::Point<int>) const;
-    te::BeatPosition findNearestBoundary (const te::ArrangerClip&, double x) const;
-    void paintEnergyCurve (juce::Graphics&, const juce::Array<te::ArrangerClip*>&);
-    void addSectionAt (te::BeatPosition);
+    juce::Rectangle<int> getBlockArea (const SongSection&) const; // where the section's block is drawn
+    std::optional<SongSection> getSectionAt (juce::Point<int>) const;
+    bool isOnRightEdge (const SongSection&, juce::Point<int>) const;
+    BeatPosition findNearestBoundary (const SongSection&, double x) const;
+    void paintEnergyCurve (juce::Graphics&, const std::vector<SongSection>&);
+    void showMenu (const std::optional<SongSection>&, BeatPosition where);
+    void addSectionAt (BeatPosition);
     void renamed(); // the name field closed
     void dragChanged();
 
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); } // the selection changed
-    void sectionsChanged (const juce::ValueTree&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SectionsStrip)
 };
