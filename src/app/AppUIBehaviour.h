@@ -3,7 +3,7 @@
 // (PluginWindow.h). Main passes one to createEngine().
 #pragma once
 
-#include "model/engine/EngineSetup.h"
+#include "model/engine/internal/EngineSetup.h"
 
 namespace phazite
 {

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Selection.h"
-#include "Arrangement.h"
-#include "Clips.h"
-#include "Sections.h"
-#include "Tracks.h"
+#include "internal/Selection.h"
+#include "internal/Arrangement.h"
+#include "internal/Clips.h"
+#include "internal/Sections.h"
+#include "internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
-#include "model/notes/Notes.h"
+#include "model/commands/internal/Undo.h"
+#include "model/notes/internal/Notes.h"
 
 #include <algorithm>
 #include <vector>

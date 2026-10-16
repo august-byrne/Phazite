@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A device's thin Tracktion plug-in (src/model/devices/DevicePlugin.h), with the devices made for tests
+// A device's thin Tracktion plug-in (src/model/devices/internal/DevicePlugin.h), with the devices made for tests
 // (TestDevices.h): an effect (a gain) and an instrument that plays the velocity of the note it holds.
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "devices/core/Processor.h"
-#include "model/devices/DevicePlugin.h"
+#include "model/devices/internal/DevicePlugin.h"
 
 using namespace tracktion::literals;
 

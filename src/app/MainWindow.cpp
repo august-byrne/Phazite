@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MainWindow.h"
 #include "model/arrangement/Outlines.h"
-#include "model/engine/LiveInput.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/project/internal/Export.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/ExportPanel.h"

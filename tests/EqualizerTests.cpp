@@ -3,7 +3,7 @@
 // its slopes, its smoothing, and its tap for the analyzer.
 #include "TestHelpers.h"
 #include "devices/eq/Equalizer.h"
-#include "model/devices/DevicePlugin.h"
+#include "model/devices/internal/DevicePlugin.h"
 
 #include <cmath>
 #include <vector>

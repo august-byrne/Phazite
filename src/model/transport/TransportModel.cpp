@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TransportModel.h"
-#include "Playback.h"
-#include "Tempo.h"
-#include "model/commands/Undo.h"
-#include "model/engine/LiveInput.h"
+#include "internal/Playback.h"
+#include "internal/Tempo.h"
+#include "model/commands/internal/Undo.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "NewProject.h"
-#include "StarterProject.h"
 #include "internal/NewProject.h"
+#include "internal/StarterProject.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Outlines.h"
-#include "model/notes/Notes.h"
-#include "model/transport/Tempo.h"
+#include "model/notes/internal/Notes.h"
+#include "model/transport/internal/Tempo.h"
 
 namespace phazite
 {

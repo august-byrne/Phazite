@@ -3,7 +3,7 @@
 // UI, which gets them by IDs (model/mixer/MixerModel.h).
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 #include <functional>
 

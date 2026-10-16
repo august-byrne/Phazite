@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Undo.h"
+#include "internal/Undo.h"
 
 #include <algorithm>
 #include <vector>

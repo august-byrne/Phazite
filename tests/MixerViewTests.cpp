@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer and the inspector, as they lay out in the window.
 #include "UiTestHelpers.h"
-#include "model/mixer/Mixer.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/mixer/ChannelStrip.h"

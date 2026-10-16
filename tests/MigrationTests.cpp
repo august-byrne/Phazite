@@ -4,13 +4,13 @@
 // whole one (tests/golden/legacy, frozen by GoldenProjectTests.cpp) must open and save as its golden file says.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Grid.h"
-#include "model/arrangement/Tracks.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Grid.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/Migrations.h"
-#include "model/base/Schema.h"
-#include "model/notes/Notes.h"
-#include "model/project/Project.h"
+#include "model/base/internal/Schema.h"
+#include "model/notes/internal/Notes.h"
+#include "model/project/internal/Project.h"
 
 #include <algorithm>
 #include <utility>

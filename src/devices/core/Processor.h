@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// How a device's DSP runs, without any engine: the device's thin Tracktion plug-in (src/model/devices/DevicePlugin.h)
+// How a device's DSP runs, without any engine: the device's thin Tracktion plug-in (src/model/devices/internal/DevicePlugin.h)
 // prepares it before playback and hands it each block's audio, notes and parameter values.
 #pragma once
 

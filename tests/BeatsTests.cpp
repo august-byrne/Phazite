@@ -2,7 +2,7 @@
 // Phazite's own beats and IDs (src/model/base/Beats.h and IDs.h), which the model's public functions and the UI pass
 // instead of Tracktion's, and their conversions in the model's prelude.
 #include "TestHelpers.h"
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 #include <unordered_set>
 

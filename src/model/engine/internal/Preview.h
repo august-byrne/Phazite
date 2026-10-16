@@ -2,7 +2,7 @@
 // The previewer's Tracktion side (model/engine/Preview.h), for the app and tests: one made for an Engine. Not for the UI.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 #include <memory>
 

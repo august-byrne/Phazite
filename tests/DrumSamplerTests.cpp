@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's drum sampler (src/devices/drums/DrumSampler.h): its pads' one-shots, level, pan, tuning, length and choke
 // groups, sound files swapped in as it plays, and the pads played from its editor; and in a project
-// (src/model/devices/DrumKit.h), putting a file on a pad as an undo step, which the project keeps a copy of, and the
+// (src/model/devices/internal/DrumKit.h), putting a file on a pad as an undo step, which the project keeps a copy of, and the
 // piano roll's rows named after the pads.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "devices/drums/DrumSampler.h"
-#include "model/base/Schema.h"
-#include "model/commands/Undo.h"
-#include "model/devices/DrumKit.h"
-#include "model/devices/DrumSamplerPlugin.h"
-#include "model/engine/EngineSetup.h"
-#include "model/mixer/Mixer.h"
-#include "model/notes/Notes.h"
+#include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumKit.h"
+#include "model/devices/internal/DrumSamplerPlugin.h"
+#include "model/engine/internal/EngineSetup.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
 
 #include <cmath>
 #include <vector>

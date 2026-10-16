@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectSession.h"
-#include "model/engine/LiveInput.h"
 #include "model/engine/internal/EngineContext.h"
-#include "model/project/StarterProject.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/project/internal/Export.h"
 #include "model/project/internal/NewProject.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/project/internal/StarterProject.h"
 #include "ui/shell/NewProjectPanel.h"
 #include "ui/theme/LookAndFeel.h"
 

@@ -2,14 +2,14 @@
 // The transport and the tempo as the top bar reaches them, by plain values (src/model/transport/TransportModel.h), and
 // the engine as the UI reaches it (src/model/engine/EngineContext.h).
 #include "TestHelpers.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/transport/Playback.h"
-#include "model/transport/Tempo.h"
 #include "model/transport/TransportModel.h"
+#include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each change outside a drag")
 {

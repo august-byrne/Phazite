@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Playback.h"
-#include "model/arrangement/Sections.h"
-#include "model/base/Schema.h"
+#include "internal/Playback.h"
+#include "model/arrangement/internal/Sections.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 
 namespace phazite
 {

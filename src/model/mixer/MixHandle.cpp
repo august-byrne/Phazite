@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MixHandle.h"
-#include "Mixer.h"
 #include "internal/MixHandle.h"
-#include "model/commands/Undo.h"
+#include "internal/Mixer.h"
+#include "model/commands/internal/Undo.h"
 
 namespace phazite
 {

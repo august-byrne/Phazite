@@ -4,8 +4,8 @@
 // Not for the UI.
 #pragma once
 
-#include "model/arrangement/Selection.h"
-#include "model/base/Tracktion.h"
+#include "model/arrangement/internal/Selection.h"
+#include "model/base/internal/Tracktion.h"
 
 namespace phazite
 {

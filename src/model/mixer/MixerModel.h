@@ -80,7 +80,7 @@ struct MuteSolo
 
 std::optional<MuteSolo> getMuteSolo (const ProjectContext&, TrackID); // nothing for a track that is gone
 
-// Not undo steps, as in many DAWs (model/arrangement/Tracks.h).
+// Not undo steps, as in many DAWs (model/arrangement/internal/Tracks.h).
 void toggleMute (ProjectContext&, TrackID);
 void toggleSolo (ProjectContext&, TrackID);      // along with the tracks soloed already
 void toggleSoloAlone (ProjectContext&, TrackID); // alone, or unsolo it

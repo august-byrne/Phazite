@@ -6,8 +6,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "TestHelpers.h"
 #include "model/engine/EngineContext.h"
-#include "model/engine/EngineSetup.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/engine/internal/EngineSetup.h"
 
 namespace
 {

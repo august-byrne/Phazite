@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Sidechains (model/mixer/Sidechain.h): which tracks a device can listen to, picking one as an undo step, forgetting a
+// Sidechains (model/mixer/internal/Sidechain.h): which tracks a device can listen to, picking one as an undo step, forgetting a
 // deleted one, and the source's sound reaching the device as the song plays.
 #include "TestDevices.h"
 #include "TestHelpers.h"
-#include "model/arrangement/Tracks.h"
-#include "model/commands/Undo.h"
-#include "model/mixer/Mixer.h"
-#include "model/mixer/Sidechain.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/mixer/internal/Sidechain.h"
 
 using namespace tracktion::literals;
 using phazite::test::TestGain;

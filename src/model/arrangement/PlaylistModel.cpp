@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PlaylistModel.h"
-#include "Clips.h"
-#include "Import.h"
-#include "Sections.h"
-#include "Tracks.h"
-#include "model/engine/LiveInput.h"
-#include "model/mixer/Mixer.h"
+#include "internal/Clips.h"
+#include "internal/Import.h"
+#include "internal/Sections.h"
+#include "internal/Tracks.h"
+#include "model/engine/internal/LiveInput.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/transport/Playback.h"
+#include "model/transport/internal/Playback.h"
 
 namespace phazite
 {

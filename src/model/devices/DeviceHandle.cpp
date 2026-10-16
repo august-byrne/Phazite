@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceHandle.h"
-#include "DevicePlugin.h"
-#include "DrumKit.h"
 #include "internal/DeviceHandle.h"
+#include "internal/DevicePlugin.h"
+#include "internal/DrumKit.h"
 #include "internal/ParameterHandle.h"
-#include "model/mixer/Sidechain.h"
+#include "model/mixer/internal/Sidechain.h"
 
 namespace phazite
 {

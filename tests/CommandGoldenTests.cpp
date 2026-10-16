@@ -10,16 +10,16 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "app/AppCommands.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Import.h"
-#include "model/arrangement/Selection.h"
-#include "model/arrangement/Tracks.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Import.h"
+#include "model/arrangement/internal/Selection.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/notes/Notes.h"
-#include "model/project/Project.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/transport/Playback.h"
+#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 #include <functional>

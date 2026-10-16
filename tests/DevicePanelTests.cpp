@@ -4,10 +4,10 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
-#include "model/mixer/Mixer.h"
+#include "model/mixer/internal/Mixer.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DevicePanel.h"
 

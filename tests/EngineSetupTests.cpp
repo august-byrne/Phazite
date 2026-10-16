@@ -2,8 +2,8 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "model/base/Migrations.h"
-#include "model/base/Schema.h"
-#include "model/engine/EngineSetup.h"
+#include "model/base/internal/Schema.h"
+#include "model/engine/internal/EngineSetup.h"
 
 using namespace tracktion::literals;
 

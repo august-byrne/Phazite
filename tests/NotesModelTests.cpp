@@ -2,12 +2,12 @@
 // The song's notes as the piano roll reaches them, by IDs and plain values (src/model/notes/NotesModel.h), and the notes
 // selected, by IDs (SongSelection).
 #include "TestHelpers.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
-#include "model/commands/Undo.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
-#include "model/notes/Notes.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 

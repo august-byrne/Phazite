@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Sections.h"
-#include "model/arrangement/Selection.h"
-#include "model/arrangement/Tracks.h"
-#include "model/base/Schema.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Sections.h"
+#include "model/arrangement/internal/Selection.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
-#include "model/notes/Notes.h"
+#include "model/commands/internal/Undo.h"
+#include "model/notes/internal/Notes.h"
 #include "ui/input/KeyDispatcher.h"
 
 #include <algorithm>

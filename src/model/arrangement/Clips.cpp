@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Clips.h"
-#include "Tracks.h"
+#include "internal/Clips.h"
+#include "internal/Tracks.h"
 #include "model/base/Toggles.h"
-#include "model/commands/Undo.h"
-#include "model/engine/LiveInput.h"
+#include "model/commands/internal/Undo.h"
+#include "model/engine/internal/LiveInput.h"
 
 #include <algorithm>
 #include <cmath>

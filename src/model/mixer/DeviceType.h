@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A device that can be added (docs/design.md, section 9): one of Phazite's own (model/devices/Devices.h) or a plug-in
+// A device that can be added (docs/design.md, section 9): one of Phazite's own (model/devices/internal/Devices.h) or a plug-in
 // found by scanning, as the device menus, the browser and the plug-in picker list them. The model makes them
 // (Mixer.h: getDeviceTypes(); MixerModel.h).
 #pragma once

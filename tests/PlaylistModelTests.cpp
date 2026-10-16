@@ -2,15 +2,15 @@
 // The playlist as the UI reaches it, by IDs and plain values (src/model/arrangement/PlaylistModel.h), and the time range
 // selected across tracks by IDs (src/model/arrangement/SongRange.h).
 #include "TestHelpers.h"
-#include "model/arrangement/Clips.h"
 #include "model/arrangement/PlaylistModel.h"
-#include "model/arrangement/Sections.h"
 #include "model/arrangement/SongRange.h"
-#include "model/arrangement/Tracks.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Sections.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/transport/Playback.h"
+#include "model/transport/internal/Playback.h"
 
 namespace
 {

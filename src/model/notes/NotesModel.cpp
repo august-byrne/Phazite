@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "NotesModel.h"
-#include "Notes.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
-#include "model/commands/Undo.h"
-#include "model/engine/LiveInput.h"
+#include "internal/Notes.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/commands/internal/Undo.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 

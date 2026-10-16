@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "UnsavedProjects.h"
-#include "Project.h"
+#include "internal/UnsavedProjects.h"
+#include "internal/Project.h"
 #include "model/engine/AppInfo.h"
 
 namespace phazite

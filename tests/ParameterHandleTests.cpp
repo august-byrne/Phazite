@@ -4,7 +4,7 @@
 #include "GoldenFiles.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
 

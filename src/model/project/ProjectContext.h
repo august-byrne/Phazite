@@ -23,7 +23,7 @@ class EngineContext;
 class UIBehaviour;
 
 // What changed in the open project's song, in groups, for views to show it again. Changes made at once (in one turn of
-// the message loop) come together, after it. View state (model/base/Schema.h), such as how tall a track shows, is no
+// the message loop) come together, after it. View state (model/base/internal/Schema.h), such as how tall a track shows, is no
 // change to the song: it has a group of its own. A drag can change the song as often as the mouse moves: views that
 // take long to show a change show the last one at their next timer tick instead.
 struct SongChanges

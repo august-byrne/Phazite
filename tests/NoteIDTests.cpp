@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Notes' IDs (model/notes/Notes.h, schema::phaziteNoteID): each note has one that no other note of its clip has, which it
+// Notes' IDs (model/notes/internal/Notes.h, schema::phaziteNoteID): each note has one that no other note of its clip has, which it
 // keeps through edits, undo and redo, and saving and opening the project. A copy of a clip keeps its notes' IDs.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Tracks.h"
-#include "model/base/Schema.h"
-#include "model/commands/Undo.h"
-#include "model/notes/Notes.h"
-#include "model/project/Project.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>

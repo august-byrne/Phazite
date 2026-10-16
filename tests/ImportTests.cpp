@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/arrangement/Import.h"
-#include "model/arrangement/Tracks.h"
-#include "model/commands/Undo.h"
-#include "model/project/Project.h"
+#include "model/arrangement/internal/Import.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/commands/internal/Undo.h"
+#include "model/project/internal/Project.h"
 
 namespace
 {

@@ -3,7 +3,7 @@
 // Not for the UI.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 namespace phazite
 {

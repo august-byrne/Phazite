@@ -3,7 +3,7 @@
 // can be exported, and starting one. Not for the UI.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 #include <functional>
 #include <memory>

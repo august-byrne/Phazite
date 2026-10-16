@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Recording MIDI and Capture (src/model/transport/Recording.h, Capture.h): the settings and their commands, takes
+// Recording MIDI and Capture (src/model/transport/internal/Recording.h, Capture.h): the settings and their commands, takes
 // recorded in real time through Tracktion's hosted audio device, as the app's audio device would play it, and what
 // Capture makes of notes played a moment ago.
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
-#include "model/arrangement/Clips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
-#include "model/engine/LiveInput.h"
-#include "model/notes/Notes.h"
-#include "model/transport/Capture.h"
-#include "model/transport/Metronome.h"
-#include "model/transport/Playback.h"
-#include "model/transport/Recording.h"
-#include "model/transport/Tempo.h"
+#include "model/commands/internal/Undo.h"
+#include "model/engine/internal/LiveInput.h"
+#include "model/notes/internal/Notes.h"
+#include "model/transport/internal/Capture.h"
+#include "model/transport/internal/Metronome.h"
+#include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <atomic>
 #include <chrono>

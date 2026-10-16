@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Buses.h"
-#include "model/base/Schema.h"
+#include "internal/Buses.h"
+#include "model/base/internal/Schema.h"
 
 namespace phazite
 {

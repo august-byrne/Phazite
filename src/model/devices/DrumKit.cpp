@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "DrumKit.h"
-#include "DrumSamplerPlugin.h"
-#include "model/arrangement/Import.h"
-#include "model/base/Schema.h"
-#include "model/commands/Undo.h"
+#include "internal/DrumKit.h"
+#include "internal/DrumSamplerPlugin.h"
+#include "model/arrangement/internal/Import.h"
+#include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 
 namespace phazite
 {

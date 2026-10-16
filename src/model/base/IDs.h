@@ -35,11 +35,11 @@ private:
 
 using TrackID = ItemID<struct TrackKind>;     // a track, a folder or a return track
 using ClipID = ItemID<struct ClipKind>;       // an audio or MIDI clip
-using SectionID = ItemID<struct SectionKind>; // a section of the song (model/arrangement/Sections.h)
+using SectionID = ItemID<struct SectionKind>; // a section of the song (model/arrangement/internal/Sections.h)
 using DeviceID = ItemID<struct DeviceKind>;   // a device on a track or on the master, or a send
 
 // A note, among its clip's notes: no other note of that clip has its ID, but a copy of the clip (an alias too) keeps it
-// (model/notes/Notes.h). Not one of Tracktion's EditItemIDs, so a note is named by its clip and its ID together.
+// (model/notes/internal/Notes.h). Not one of Tracktion's EditItemIDs, so a note is named by its clip and its ID together.
 using NoteID = ItemID<struct NoteKind>;
 
 // A note by its clip and its ID in it.

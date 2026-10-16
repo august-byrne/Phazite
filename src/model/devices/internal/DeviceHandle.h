@@ -3,7 +3,7 @@
 // Not for the UI, which gets handles from the model's functions by IDs.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 namespace phazite
 {

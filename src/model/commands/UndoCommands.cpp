@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "UndoCommands.h"
+#include "internal/UndoCommands.h"
 #include "CommandRegistry.h"
-#include "Undo.h"
+#include "internal/Undo.h"
 
 namespace phazite
 {

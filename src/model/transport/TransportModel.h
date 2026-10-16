@@ -21,12 +21,12 @@ std::optional<TimeSignature> getTimeSignature (const ProjectContext&);
 void setTimeSignature (ProjectContext&, TimeSignature);
 
 // The track that what is played on a MIDI keyboard or the computer keyboard goes to, and records onto
-// (model/engine/LiveInput.h); an empty ID for none.
+// (model/engine/internal/LiveInput.h); an empty ID for none.
 TrackID getLiveMidiTrack (const ProjectContext&);
 
 //==============================================================================
 // The tempo as a field changes it: a drag is one undo step, "Change Tempo", from its first move to its last (a Gesture,
-// model/commands/Undo.h), and a change outside a drag, such as a typed tempo, is one of its own. It forgets a project
+// model/commands/internal/Undo.h), and a change outside a drag, such as a typed tempo, is one of its own. It forgets a project
 // that closes.
 class TempoHandle
 {

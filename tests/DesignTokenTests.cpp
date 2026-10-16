@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/arrangement/Tracks.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "ui/theme/DesignTokens.h"
 
 using namespace phazite::ui;

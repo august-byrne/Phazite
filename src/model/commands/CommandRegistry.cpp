@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "CommandRegistry.h"
-#include "Undo.h"
+#include "internal/Undo.h"
 
 #include <algorithm>
 

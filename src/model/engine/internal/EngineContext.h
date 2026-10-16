@@ -2,7 +2,7 @@
 // Making the EngineContext (model/engine/EngineContext.h) of an Engine, for the app's services and tests.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 #include <memory>
 

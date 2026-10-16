@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Capture.h"
-#include "Playback.h"
-#include "Recording.h"
-#include "Tempo.h"
-#include "model/arrangement/Clips.h"
+#include "internal/Capture.h"
+#include "internal/Playback.h"
+#include "internal/Recording.h"
+#include "internal/Tempo.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
-#include "model/engine/LiveInput.h"
-#include "model/notes/Notes.h"
+#include "model/commands/internal/Undo.h"
+#include "model/engine/internal/LiveInput.h"
+#include "model/notes/internal/Notes.h"
 
 #include <algorithm>
 #include <cmath>

@@ -2,7 +2,7 @@
 // What a device is and what its parameters are, without any engine (docs/design.md, section 24). The DSP of each of
 // Phazite's devices describes itself with these: its thin Tracktion plug-in (src/model/devices/) turns the parameters
 // into automatable ones, editors show them, and the DSP reads their current values. Type and parameter IDs are saved
-// in projects, so never change one (model/base/Schema.h).
+// in projects, so never change one (model/base/internal/Schema.h).
 #pragma once
 
 #include <juce_core/juce_core.h>

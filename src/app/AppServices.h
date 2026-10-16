@@ -3,7 +3,7 @@
 // section 24). Made right after the Engine, and gone just before it: after the window and the project's session.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/Preview.h"
 #include "services/Library.h"

@@ -88,22 +88,16 @@ target_sources(phazite_core PRIVATE
     src/devices/synth/Synth.cpp
     src/devices/synth/Synth.h
     src/model/arrangement/Arrangement.cpp
-    src/model/arrangement/Arrangement.h
     src/model/arrangement/Clips.cpp
-    src/model/arrangement/Clips.h
     src/model/arrangement/Grid.cpp
-    src/model/arrangement/Grid.h
     src/model/arrangement/GridSettings.h
     src/model/arrangement/Import.cpp
-    src/model/arrangement/Import.h
     src/model/arrangement/Outlines.cpp
     src/model/arrangement/Outlines.h
     src/model/arrangement/PlaylistModel.cpp
     src/model/arrangement/PlaylistModel.h
     src/model/arrangement/Sections.cpp
-    src/model/arrangement/Sections.h
     src/model/arrangement/Selection.cpp
-    src/model/arrangement/Selection.h
     src/model/arrangement/SongRange.cpp
     src/model/arrangement/SongRange.h
     src/model/arrangement/SongSelection.cpp
@@ -113,102 +107,108 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/TrackColours.cpp
     src/model/arrangement/TrackColours.h
     src/model/arrangement/Tracks.cpp
-    src/model/arrangement/Tracks.h
+    src/model/arrangement/internal/Arrangement.h
+    src/model/arrangement/internal/Clips.h
+    src/model/arrangement/internal/Grid.h
+    src/model/arrangement/internal/Import.h
     src/model/arrangement/internal/Outlines.h
+    src/model/arrangement/internal/Sections.h
+    src/model/arrangement/internal/Selection.h
     src/model/arrangement/internal/SongRange.h
     src/model/arrangement/internal/SongSelection.h
+    src/model/arrangement/internal/Tracks.h
     src/model/base/Beats.h
     src/model/base/IDs.h
     src/model/base/Migrations.cpp
     src/model/base/Migrations.h
     src/model/base/Schema.cpp
-    src/model/base/Schema.h
     src/model/base/Toggles.h
-    src/model/base/Tracktion.h
+    src/model/base/internal/Schema.h
+    src/model/base/internal/Tracktion.h
     src/model/commands/CommandRegistry.cpp
     src/model/commands/CommandRegistry.h
     src/model/commands/SongGesture.cpp
     src/model/commands/SongGesture.h
     src/model/commands/Undo.cpp
-    src/model/commands/Undo.h
     src/model/commands/UndoCommands.cpp
-    src/model/commands/UndoCommands.h
+    src/model/commands/internal/Undo.h
+    src/model/commands/internal/UndoCommands.h
     src/model/devices/DeviceHandle.cpp
     src/model/devices/DeviceHandle.h
     src/model/devices/DevicePlugin.cpp
-    src/model/devices/DevicePlugin.h
     src/model/devices/DrumKit.cpp
-    src/model/devices/DrumKit.h
     src/model/devices/DrumSamplerPlugin.cpp
-    src/model/devices/DrumSamplerPlugin.h
     src/model/devices/Devices.cpp
-    src/model/devices/Devices.h
     src/model/devices/ParameterHandle.cpp
     src/model/devices/ParameterHandle.h
     src/model/devices/internal/DeviceHandle.h
+    src/model/devices/internal/DevicePlugin.h
+    src/model/devices/internal/Devices.h
+    src/model/devices/internal/DrumKit.h
+    src/model/devices/internal/DrumSamplerPlugin.h
     src/model/devices/internal/ParameterHandle.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
     src/model/engine/EngineContext.cpp
     src/model/engine/EngineContext.h
     src/model/engine/EngineSetup.cpp
-    src/model/engine/EngineSetup.h
     src/model/engine/LiveInput.cpp
-    src/model/engine/LiveInput.h
     src/model/engine/LoudnessMeterPlugin.cpp
-    src/model/engine/LoudnessMeterPlugin.h
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
     src/model/engine/internal/EngineContext.h
+    src/model/engine/internal/EngineSetup.h
+    src/model/engine/internal/LiveInput.h
+    src/model/engine/internal/LoudnessMeterPlugin.h
     src/model/engine/internal/Preview.h
     src/model/mixer/Buses.cpp
-    src/model/mixer/Buses.h
     src/model/mixer/DeviceType.h
     src/model/mixer/LevelSource.cpp
     src/model/mixer/LevelSource.h
     src/model/mixer/MixHandle.cpp
     src/model/mixer/MixHandle.h
     src/model/mixer/Mixer.cpp
-    src/model/mixer/Mixer.h
     src/model/mixer/MixerModel.cpp
     src/model/mixer/MixerModel.h
     src/model/mixer/Sidechain.cpp
-    src/model/mixer/Sidechain.h
+    src/model/mixer/internal/Buses.h
     src/model/mixer/internal/LevelSource.h
     src/model/mixer/internal/MixHandle.h
+    src/model/mixer/internal/Mixer.h
+    src/model/mixer/internal/Sidechain.h
     src/model/notes/Notes.cpp
     src/model/notes/NoteValues.h
     src/model/notes/NotesModel.cpp
     src/model/notes/NotesModel.h
-    src/model/notes/Notes.h
+    src/model/notes/internal/Notes.h
     src/model/project/Export.cpp
     src/model/project/Export.h
     src/model/project/NewProject.cpp
     src/model/project/NewProject.h
     src/model/project/Project.cpp
-    src/model/project/Project.h
     src/model/project/ProjectContext.cpp
     src/model/project/ProjectContext.h
+    src/model/project/StarterProject.cpp
+    src/model/project/UnsavedProjects.cpp
     src/model/project/internal/Export.h
     src/model/project/internal/NewProject.h
+    src/model/project/internal/Project.h
     src/model/project/internal/ProjectContext.h
-    src/model/project/StarterProject.cpp
-    src/model/project/StarterProject.h
-    src/model/project/UnsavedProjects.cpp
-    src/model/project/UnsavedProjects.h
+    src/model/project/internal/StarterProject.h
+    src/model/project/internal/UnsavedProjects.h
     src/model/transport/Capture.cpp
-    src/model/transport/Capture.h
     src/model/transport/Metronome.cpp
-    src/model/transport/Metronome.h
     src/model/transport/Playback.cpp
-    src/model/transport/Playback.h
     src/model/transport/Recording.cpp
-    src/model/transport/Recording.h
     src/model/transport/Tempo.cpp
-    src/model/transport/Tempo.h
     src/model/transport/TempoValues.h
     src/model/transport/TransportModel.cpp
     src/model/transport/TransportModel.h
+    src/model/transport/internal/Capture.h
+    src/model/transport/internal/Metronome.h
+    src/model/transport/internal/Playback.h
+    src/model/transport/internal/Recording.h
+    src/model/transport/internal/Tempo.h
     # services: what the whole app shares (they use the model; the model never uses them)
     src/services/BrowserModel.cpp
     src/services/BrowserModel.h
@@ -329,9 +329,18 @@ endif()
 
 # Links a target (an executable, phazite_ui or phazite_app) to phazite_core and gives it the module headers
 # and phazite_core's definitions (including JUCE's JUCE_MODULE_AVAILABLE_* ones), without compiling the
-# modules a second time.
+# modules a second time. WITHOUT_TRACKTION leaves Tracktion's modules folder out of its include path (JUCE's,
+# inside it, stays), so that it can include neither Tracktion nor the model's internal/ headers, which do
+# (docs/design.md, section 24, rule 4).
 function(phazite_use_core target)
-    target_include_directories(${target} PRIVATE $<TARGET_PROPERTY:phazite_core,INCLUDE_DIRECTORIES>)
+    cmake_parse_arguments(PARSE_ARGV 1 arg "WITHOUT_TRACKTION" "" "")
+    set(include_directories $<TARGET_PROPERTY:phazite_core,INCLUDE_DIRECTORIES>)
+
+    if(arg_WITHOUT_TRACKTION)
+        set(include_directories $<FILTER:${include_directories},EXCLUDE,/tracktion_engine/modules/?$>)
+    endif()
+
+    target_include_directories(${target} PRIVATE ${include_directories})
     target_compile_definitions(${target} PRIVATE $<TARGET_PROPERTY:phazite_core,COMPILE_DEFINITIONS>)
     target_link_libraries(${target} PRIVATE phazite_core)
 endfunction()
@@ -457,7 +466,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/timeline/TimelineView.cpp
     src/ui/timeline/TimelineView.h)
 
-phazite_use_core(phazite_ui)
+phazite_use_core(phazite_ui WITHOUT_TRACKTION)
 
 # --- phazite_app: the app's parts (the main window, the open project, the song's commands), in a library the tests
 # link, so the app's logic can be tested without a window. The Phazite executable is Main.cpp. ---

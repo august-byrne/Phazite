@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "LiveInput.h"
+#include "internal/LiveInput.h"
 
 namespace phazite
 {

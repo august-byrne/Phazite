@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Places and lengths in the song in beats from its start (a beat is a quarter note in 4/4), as the model's public
 // functions and the UI pass them: Phazite's own, so that code above the model needs no Tracktion (docs/design.md,
-// section 24, rule 4). They are numbers with names; the model turns them into Tracktion's (model/base/Tracktion.h).
+// section 24, rule 4). They are numbers with names; the model turns them into Tracktion's (model/base/internal/Tracktion.h).
 // Nothing here compares two doubles with ==, which GCC's -Wfloat-equal would refuse: equal means neither is less.
 #pragma once
 

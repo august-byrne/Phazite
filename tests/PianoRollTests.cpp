@@ -2,15 +2,15 @@
 // The piano roll, driven with the mouse and the selection as the user would.
 #include "GoldenFiles.h"
 #include "UiTestHelpers.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Selection.h"
-#include "model/arrangement/Tracks.h"
-#include "model/commands/Undo.h"
-#include "model/mixer/Mixer.h"
-#include "model/notes/Notes.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Selection.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/transport/Playback.h"
+#include "model/transport/internal/Playback.h"
 #include "ui/pianoroll/PianoRoll.h"
 
 namespace

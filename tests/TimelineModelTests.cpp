@@ -6,8 +6,8 @@
 #include "model/commands/SongGesture.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/transport/Playback.h"
-#include "model/transport/Tempo.h"
+#include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 using phazite::BeatPosition;
 

@@ -27,7 +27,7 @@ public:
     // The parameter with that ID; its changes are undo steps named "Change" and its name, or undoName.
     ParameterHandle getParameter (std::string_view id, const juce::String& undoName = {}) const;
 
-    // A track a device's sidechain can listen to (model/mixer/Sidechain.h), or none: the sound passing through the
+    // A track a device's sidechain can listen to (model/mixer/internal/Sidechain.h), or none: the sound passing through the
     // device.
     struct SidechainChoice
     {
@@ -39,7 +39,7 @@ public:
     SidechainChoice getSidechainSource() const;
     void setSidechainSource (TrackID) const; // one of the choices, or none; as one undo step
 
-    // The drum sampler's pads (model/devices/DrumKit.h): what each plays, and putting a sound file on one, or the kit's
+    // The drum sampler's pads (model/devices/internal/DrumKit.h): what each plays, and putting a sound file on one, or the kit's
     // sound back, as undo steps. setPadSound() returns false for a file that isn't a sound.
     juce::String getPadName (int pad) const;
     bool hasPadSound (int pad) const;

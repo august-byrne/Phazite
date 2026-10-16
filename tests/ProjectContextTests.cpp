@@ -2,10 +2,10 @@
 // The open project as commands and panels find it (src/model/project/ProjectContext.h).
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
-#include "model/arrangement/Clips.h"
-#include "model/arrangement/Sections.h"
-#include "model/arrangement/Tracks.h"
-#include "model/engine/EngineSetup.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Sections.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/engine/internal/EngineSetup.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 

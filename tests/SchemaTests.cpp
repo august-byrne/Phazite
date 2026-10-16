@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The names Phazite writes into project files (src/model/base/Schema.h). Projects saved before hold them, so a renamed
+// The names Phazite writes into project files (src/model/base/internal/Schema.h). Projects saved before hold them, so a renamed
 // one would lose what it held.
 #include "TestHelpers.h"
-#include "model/base/Schema.h"
-#include "model/engine/LoudnessMeterPlugin.h"
+#include "model/base/internal/Schema.h"
+#include "model/engine/internal/LoudnessMeterPlugin.h"
 
 #include <utility>
 

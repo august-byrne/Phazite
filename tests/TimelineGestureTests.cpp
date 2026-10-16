@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the playlist's and the piano roll's tools share while the mouse is down (src/ui/timeline/TimelineGesture.h).
 #include "TestHelpers.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/timeline/TimelineGesture.h"

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Arrangement.h"
-#include "Clips.h"
+#include "internal/Arrangement.h"
+#include "internal/Clips.h"
 
 namespace phazite
 {

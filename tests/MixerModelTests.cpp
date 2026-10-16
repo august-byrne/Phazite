@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer as the UI reaches it, by IDs and plain values (src/model/mixer/MixerModel.h).
 #include "TestHelpers.h"
-#include "model/arrangement/Tracks.h"
-#include "model/engine/LoudnessMeterPlugin.h"
-#include "model/mixer/Mixer.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 

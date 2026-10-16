@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "StarterProject.h"
+#include "internal/StarterProject.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/synth/Synth.h"
-#include "model/arrangement/Import.h"
-#include "model/arrangement/Tracks.h"
-#include "model/devices/DevicePlugin.h"
+#include "model/arrangement/internal/Import.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/devices/internal/DevicePlugin.h"
 #include "model/engine/AppInfo.h"
-#include "model/mixer/Mixer.h"
-#include "model/transport/Playback.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/transport/internal/Playback.h"
 
 using namespace tracktion::literals; // 0_tp (time position), 16_bp (beat position), ...
 

@@ -7,7 +7,7 @@
 // where Tracktion's plug-ins meet Phazite's controls.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 

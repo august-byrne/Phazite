@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's tempo and time signature (src/model/transport/Tempo.h).
+// The song's tempo and time signature (src/model/transport/internal/Tempo.h).
 #include "TestHelpers.h"
-#include "model/arrangement/Clips.h"
-#include "model/commands/Undo.h"
-#include "model/transport/Tempo.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/commands/internal/Undo.h"
+#include "model/transport/internal/Tempo.h"
 
 TEST_CASE ("The tempo changes as one undo step, within Tracktion's limits, and clips stay on their beats")
 {

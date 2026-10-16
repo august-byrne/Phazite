@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EngineContext.h"
 #include "internal/EngineContext.h"
-#include "model/mixer/Mixer.h"
+#include "model/mixer/internal/Mixer.h"
 
 namespace phazite
 {

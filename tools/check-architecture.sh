@@ -36,7 +36,8 @@
 #   model-include-loops       model and services files whose includes lead back to themselves
 #   devices-tracktion         Tracktion, or the model's prelude, included in devices, and te:: and
 #                             tracktion:: names there
-#   ui-tracktion-includes     Tracktion, or the model's prelude, included in ui
+#   ui-tracktion-includes     Tracktion, the model's prelude or its internal/ headers (each area's Tracktion
+#                             side), included in ui
 #   ui-tracktion-references   te:: and tracktion:: names in ui
 #   ui-tracktion-aliases      using-declarations, aliases and typedefs in ui that would hide Tracktion names
 #   ui-undo-steps             calls that begin an undo step, in ui and app
@@ -59,7 +60,7 @@ cd "$(git rev-parse --show-toplevel)" || exit 2
 # Settings. Lists of paths are separated by spaces.
 # The model's prelude headers: the only model files that may include Tracktion, and model headers that src/ui
 # may not include.
-tracktion_preludes='src/model/base/Tracktion.h'
+tracktion_preludes='src/model/base/internal/Tracktion.h'
 # The calls that begin an undo step (an extended regular expression), counted in src/ui and src/app.
 undo_functions='beginNewTransaction|UndoStep'
 # The undo code: the model files that may call beginNewTransaction.
@@ -142,6 +143,7 @@ function setup(    i, n, s, parts) {
     reWindowClass = W "juce::(" s ")" W
     reWindowModule = "^(juce_gui_basics|juce_gui_extra|juce_opengl|juce_video)/"
     reTracktionModule = "^(tracktion_engine|tracktion_graph|tracktion_core)/"
+    reModelInternal = "^src/model/[^/]+/internal/"
     reInclude = "^[[:blank:]]*#[[:blank:]]*(include|import)[[:blank:]]*[<" DQ "]"
     reModelUndo = W "beginNewTransaction" W
     reUiUndo = W "(" undo_functions ")" W
@@ -176,8 +178,8 @@ function setup(    i, n, s, parts) {
     instead["model-include-loops"] = "move what both need into a lower header, or split the file."
     what["devices-tracktion"] = "Tracktion or the prelude included in src/devices, and te:: and tracktion:: names there"
     instead["devices-tracktion"] = "keep a device" q "s DSP engine-neutral: its thin Tracktion plug-in in src/model/devices passes it what the engine gives."
-    what["ui-tracktion-includes"] = "Tracktion or the prelude included in src/ui"
-    instead["ui-tracktion-includes"] = "include the model header that offers what the UI needs."
+    what["ui-tracktion-includes"] = "Tracktion, the prelude or the model" q "s internal/ headers included in src/ui"
+    instead["ui-tracktion-includes"] = "include the model header outside internal/ that offers what the UI needs, or add a model function that takes and returns Phazite" q "s own types."
     what["ui-tracktion-references"] = "te:: and tracktion:: in src/ui"
     instead["ui-tracktion-references"] = "call a model function, pass IDs and plain values."
     what["ui-tracktion-aliases"] = "aliases that would hide Tracktion names"
@@ -381,7 +383,7 @@ function takeInclude(path, lineno, text, s,    delim, rest, k, target, res) {
             hitLine("upward-includes", path, lineno, text, 1)
     }
     else if (curLayer == "ui") {
-        if (target ~ reTracktionModule || (res in isPrelude)) hitLine("ui-tracktion-includes", path, lineno, text, 1)
+        if (target ~ reTracktionModule || (res in isPrelude) || res ~ reModelInternal) hitLine("ui-tracktion-includes", path, lineno, text, 1)
         if (index(res, "src/app/") == 1) hitLine("upward-includes", path, lineno, text, 1)
     }
     if (delim == DQ && !(res in isFile)) hitLine("unresolved-includes", path, lineno, text, 1)
@@ -870,6 +872,7 @@ src/model/a/Fixture.h:6:/* #include <juce_gui_extra/juce_gui_extra.h>
 src/model/a/Fixture.h:7:   juce::KeyPress k; */ juce::Component* c; juce::Colour col; juce::ComponentPeer* p;
 src/model/a/Fixture.h:8:auto s = "juce::KeyPress"; auto e = juce::KeyPress::escapeKey;
 src/model/a/Fixture.h:9:edit.getUndoManager().beginNewTransaction ("Add");
+src/model/a/internal/Side.h:1:#include "model/Tracktion.h"
 src/model/Tracktion.h:1:#include <tracktion_engine/tracktion_engine.h>
 src/model/Undo.cpp:1:um.beginNewTransaction (name);
 src/model/b/One.h:1:#include "Two.h"
@@ -891,6 +894,7 @@ src/ui/Fixture.cpp:9:using Edits = juce::Array<te::Edit*>;
 src/ui/Fixture.cpp:10:undo.beginNewTransaction ("Add"); // beginNewTransaction
 src/ui/Fixture.cpp:11:auto m = R"(te::E
 src/ui/Fixture.cpp:12:te::F)"; te::G g; auto c = L'x'; auto u = u8'y';
+src/ui/Fixture.cpp:13:#include "model/a/internal/Side.h"
 src/ui/views/Fixture3.cpp:1:#include "../../model/Tracktion.h"
 src/ui/views/Fixture3.cpp:2:#include "../../app/MainWindow.h"
 src/app/Fixture.cpp:1:e->getUndoManager().beginNewTransaction ("Rename"); te::Edit* e2;
@@ -919,7 +923,7 @@ FIXTURE
 fixture_cmake() {
     cat <<'CMAKE'
 target_sources(fixture PRIVATE
-    src/model/a/Fixture.h src/model/Tracktion.h src/model/Undo.cpp
+    src/model/a/Fixture.h src/model/a/internal/Side.h src/model/Tracktion.h src/model/Undo.cpp
     src/model/b/One.h src/model/b/Two.h src/model/b/Two.cpp
     src/services/Fixture.cpp "src/ui/Fixture.cpp" src/ui/Fixture2.cpp src/ui/views/Fixture3.cpp
     src/app/Fixture.cpp src/app/MainWindow.h src/Fixture.cpp
@@ -939,7 +943,7 @@ fixture_expectations() {
 @expect model-undo-steps 1
 @expect model-include-loops 2
 @expect devices-tracktion 3
-@expect ui-tracktion-includes 3
+@expect ui-tracktion-includes 4
 @expect ui-tracktion-references 8
 @expect ui-tracktion-aliases 3
 @expect ui-undo-steps 2

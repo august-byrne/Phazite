@@ -10,11 +10,11 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
-#include "model/arrangement/Import.h"
-#include "model/arrangement/Tracks.h"
-#include "model/mixer/Mixer.h"
-#include "model/project/Project.h"
-#include "model/project/StarterProject.h"
+#include "model/arrangement/internal/Import.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
+#include "model/project/internal/StarterProject.h"
 
 #include <algorithm>
 #include <array>

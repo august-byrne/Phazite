@@ -8,7 +8,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/DelayLine.h"
-#include "model/devices/DevicePlugin.h"
+#include "model/devices/internal/DevicePlugin.h"
 
 #include <array>
 #include <vector>

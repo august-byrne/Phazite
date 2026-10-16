@@ -2,7 +2,7 @@
 // Making the SongRange (model/arrangement/SongRange.h) of a range selection, for the project's context and tests.
 #pragma once
 
-#include "model/arrangement/Selection.h"
+#include "model/arrangement/internal/Selection.h"
 
 #include <memory>
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Export.h"
 #include "internal/Export.h"
-#include "model/transport/Playback.h"
-#include "model/transport/Recording.h"
+#include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
 
 #include <algorithm>
 #include <utility>

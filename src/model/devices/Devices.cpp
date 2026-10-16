@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Devices.h"
-#include "DevicePlugin.h"
-#include "DrumSamplerPlugin.h"
+#include "internal/Devices.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
+#include "internal/DevicePlugin.h"
+#include "internal/DrumSamplerPlugin.h"
 
 namespace phazite
 {

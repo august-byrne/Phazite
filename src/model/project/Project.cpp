@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Project.h"
+#include "internal/Project.h"
 #include "model/base/Migrations.h"
-#include "model/base/Schema.h"
-#include "model/engine/EngineSetup.h"
-#include "model/engine/LoudnessMeterPlugin.h"
-#include "model/notes/Notes.h"
-#include "model/transport/Playback.h"
+#include "model/base/internal/Schema.h"
+#include "model/engine/internal/EngineSetup.h"
+#include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/notes/internal/Notes.h"
+#include "model/transport/internal/Playback.h"
 
 namespace phazite
 {

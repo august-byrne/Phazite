@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Recording.h"
-#include "Playback.h"
+#include "internal/Recording.h"
+#include "internal/Playback.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
-#include "model/engine/LiveInput.h"
+#include "model/commands/internal/Undo.h"
+#include "model/engine/internal/LiveInput.h"
 
 namespace phazite
 {

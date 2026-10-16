@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The metronome and the count-in (src/model/transport/Metronome.h).
+// The metronome and the count-in (src/model/transport/internal/Metronome.h).
 #include "TestHelpers.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/project/Project.h"
-#include "model/transport/Metronome.h"
+#include "model/project/internal/Project.h"
+#include "model/transport/internal/Metronome.h"
 
 TEST_CASE ("The metronome's and the count-in's commands switch them on and off, without undo steps")
 {

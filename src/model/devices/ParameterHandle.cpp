@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ParameterHandle.h"
-#include "DevicePlugin.h"
+#include "internal/DevicePlugin.h"
 #include "internal/ParameterHandle.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 
 namespace phazite
 {

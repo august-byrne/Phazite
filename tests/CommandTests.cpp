@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
-#include "model/commands/UndoCommands.h"
+#include "model/commands/internal/Undo.h"
+#include "model/commands/internal/UndoCommands.h"
 
 namespace
 {

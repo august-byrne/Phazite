@@ -3,7 +3,7 @@
 // Tracktion's selection manager, which the model's commands act on. Not for the UI.
 #pragma once
 
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 
 #include <memory>
 

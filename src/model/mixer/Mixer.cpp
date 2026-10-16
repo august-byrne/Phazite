@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Mixer.h"
-#include "model/arrangement/Import.h"
-#include "model/arrangement/Tracks.h"
-#include "model/base/Schema.h"
+#include "internal/Mixer.h"
+#include "model/arrangement/internal/Import.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
-#include "model/devices/DevicePlugin.h"
-#include "model/devices/Devices.h"
-#include "model/engine/LoudnessMeterPlugin.h"
+#include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/Devices.h"
+#include "model/engine/internal/LoudnessMeterPlugin.h"
 
 #include <optional>
 

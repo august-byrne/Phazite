@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
-#include "model/arrangement/Clips.h"
 #include "model/arrangement/Outlines.h"
-#include "model/arrangement/Sections.h"
-#include "model/arrangement/Selection.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Outlines.h"
+#include "model/arrangement/internal/Sections.h"
+#include "model/arrangement/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/project/StarterProject.h"
-#include "model/transport/Playback.h"
+#include "model/project/internal/StarterProject.h"
+#include "model/transport/internal/Playback.h"
 
 namespace
 {

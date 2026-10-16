@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ClipWaveforms.h"
-#include "model/base/Tracktion.h"
+#include "model/base/internal/Tracktion.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 

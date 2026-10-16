@@ -5,12 +5,12 @@
 
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineContext.h"
-#include "model/engine/EngineSetup.h"
+#include "model/engine/internal/EngineSetup.h"
 #include "model/project/NewProject.h"
-#include "model/project/Project.h"
 #include "model/project/ProjectContext.h"
-#include "model/project/UnsavedProjects.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/project/internal/UnsavedProjects.h"
 #include "services/RecentProjects.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -28,7 +28,7 @@ public:
     Project* getProject() const noexcept { return project.get(); }
 
     // Whether the open project is a new one that hasn't been saved yet: its first save asks what it is called and where
-    // it goes (model/project/UnsavedProjects.h).
+    // it goes (model/project/internal/UnsavedProjects.h).
     bool isUntitled() const;
 
     // The open project's Edit and what is selected in it: tracks and clips (live MIDI input follows the selected

@@ -3,7 +3,7 @@
 // an editor of its own (src/ui/devices/DeviceEditors.h).
 #include "TestHelpers.h"
 #include "devices/eq/Equalizer.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "ui/devices/DeviceEditors.h"

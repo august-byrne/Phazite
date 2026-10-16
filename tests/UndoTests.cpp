@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Undo, redo and the undo convention (src/model/commands/Undo.h): a change of its own begins a named UndoStep, which
+// Undo, redo and the undo convention (src/model/commands/internal/Undo.h): a change of its own begins a named UndoStep, which
 // joins a step already in progress for the same Edit, and a drag is a Gesture.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 
 namespace
 {

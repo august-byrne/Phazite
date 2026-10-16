@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SongSelection.h"
-#include "Clips.h"
-#include "Sections.h"
-#include "Tracks.h"
+#include "internal/Clips.h"
+#include "internal/Sections.h"
 #include "internal/SongSelection.h"
-#include "model/notes/Notes.h"
+#include "internal/Tracks.h"
+#include "model/notes/internal/Notes.h"
 
 #include <unordered_map>
 

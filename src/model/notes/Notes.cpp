@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "Notes.h"
-#include "model/base/Schema.h"
+#include "internal/Notes.h"
 #include "model/base/Toggles.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
-#include "model/devices/DrumSamplerPlugin.h"
+#include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumSamplerPlugin.h"
 
 #include <algorithm>
 #include <cmath>
@@ -65,7 +65,7 @@ namespace
                                       { ChordType::majorNinth, te::Chord::majorNinthChord, "Maj9" },
                                       { ChordType::power, te::Chord::powerChord, "Power" } };
 
-    // A key, on a track's state or on LASTKEY in the song's Phazite state (model/base/Schema.h). A key exists exactly when
+    // A key, on a track's state or on LASTKEY in the song's Phazite state (model/base/internal/Schema.h). A key exists exactly when
     // its root does.
     std::optional<Key> readKey (const juce::ValueTree& state)
     {

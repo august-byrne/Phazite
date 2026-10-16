@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "EngineSetup.h"
-#include "LoudnessMeterPlugin.h"
+#include "internal/EngineSetup.h"
+#include "internal/LoudnessMeterPlugin.h"
 #include "model/base/Migrations.h"
-#include "model/devices/Devices.h"
+#include "model/devices/internal/Devices.h"
 
 // ThreadSanitizer builds (linux-tsan preset): GCC defines __SANITIZE_THREAD__, Clang has a feature check.
 #if defined(__SANITIZE_THREAD__)

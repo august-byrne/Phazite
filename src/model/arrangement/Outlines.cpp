@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Outlines.h"
-#include "Sections.h"
-#include "Tracks.h"
 #include "internal/Outlines.h"
-#include "model/base/Schema.h"
+#include "internal/Sections.h"
+#include "internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/commands/Undo.h"
+#include "model/commands/internal/Undo.h"
 
 #include <PhaziteData.h>
 

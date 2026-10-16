@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Migrations.h"
-#include "Schema.h"
+#include "internal/Schema.h"
 
 #include <algorithm>
 #include <iterator>

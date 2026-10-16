@@ -3,10 +3,10 @@
 #include "internal/ProjectContext.h"
 #include "model/arrangement/internal/SongRange.h"
 #include "model/arrangement/internal/SongSelection.h"
-#include "model/base/Schema.h"
-#include "model/engine/EngineSetup.h"
+#include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineContext.h"
-#include "model/notes/Notes.h"
+#include "model/engine/internal/EngineSetup.h"
+#include "model/notes/internal/Notes.h"
 
 namespace phazite
 {

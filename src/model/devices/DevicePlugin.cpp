@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "DevicePlugin.h"
+#include "internal/DevicePlugin.h"
 
 #include <algorithm>
 
