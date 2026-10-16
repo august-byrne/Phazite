@@ -3,6 +3,7 @@
 #include "UiTestHelpers.h"
 #include "model/mixer/Mixer.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/Inspector.h"
 #include "ui/mixer/MasterStrip.h"
@@ -14,8 +15,8 @@ TEST_CASE ("The mixer's strips keep their parts apart, however short the window 
     // A short window used to squeeze the faders over the devices and the names.
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     edit->ensureNumberOfAudioTracks (2);
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    context.setEdit (edit.get());
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    setEdit (context, edit.get());
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::MixerView mixer { commands, context };
@@ -43,15 +44,15 @@ TEST_CASE ("The mixer's strips keep their parts apart, however short the window 
         }
     }
 
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks for one when its notes make no sound")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    context.setEdit (edit.get());
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    setEdit (context, edit.get());
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::ChannelStrip strip { commands, context };
@@ -100,9 +101,9 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
     REQUIRE (reverbReturn != nullptr);
     edit->moveTrack (reverbReturn, { nullptr, nullptr }); // first in the playlist
 
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    context.setEdit (edit.get());
-    auto& selection = context.getSelection();
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    setEdit (context, edit.get());
+    auto& selection = getSelection (context);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::MixerView mixer { commands, context };
@@ -129,14 +130,14 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
     CHECK_FALSE (strips[1]->isRelated());
 
     selection.deselectAll();
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("The inspector's channel fills the panel, and scrolls only when the panel is shorter than it needs")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
-    context.setEdit (edit.get());
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, edit.get());
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::Inspector inspector { commands, context };
@@ -152,5 +153,5 @@ TEST_CASE ("The inspector's channel fills the panel, and scrolls only when the p
 
     window.setSize (300, 200);
     CHECK (strips[0]->getHeight() == phazite::ui::ChannelStrip::getMinimumHeight());
-    context.getSelection().deselectAll();
+    getSelection (context).deselectAll();
 }

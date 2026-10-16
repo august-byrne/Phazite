@@ -7,6 +7,7 @@
 #include "model/arrangement/Selection.h"
 #include "model/arrangement/Tracks.h"
 #include "model/commands/Undo.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/ClipComponent.h"
@@ -34,7 +35,7 @@ struct PlaylistScreen
 
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
         playlist.addCommands (registry);
-        context.setEdit (edit.get());
+        setEdit (context, edit.get());
         window.addKeyListener (&shortcutKeys); // as the main window does
         phazite::test::dispatchPendingMessages();
 
@@ -45,7 +46,7 @@ struct PlaylistScreen
     ~PlaylistScreen()
     {
         window.removeKeyListener (&shortcutKeys);
-        context.setEdit (nullptr);
+        setEdit (context, nullptr);
     }
 
     // How tall a track shows, through the model's row of it.
@@ -86,9 +87,9 @@ struct PlaylistScreen
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    te::SelectionManager& selection = context.getSelection();
-    phazite::RangeSelection& range = context.getRangeSelection();
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    te::SelectionManager& selection = getSelection (context);
+    phazite::RangeSelection& range = getRangeSelection (context);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry }; // with the default keymap
     phazite::ui::KeyDispatcher shortcutKeys { commands };

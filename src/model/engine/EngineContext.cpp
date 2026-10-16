@@ -15,6 +15,11 @@ std::unique_ptr<EngineContext> createEngineContext (te::Engine& engine)
     return std::make_unique<EngineContext> (std::make_unique<EngineContext::Impl> (engine));
 }
 
+te::Engine& getEngine (EngineContext& context)
+{
+    return context.getImpl().engine;
+}
+
 EngineContext::EngineContext (std::unique_ptr<Impl> i)
     : impl (std::move (i))
 {

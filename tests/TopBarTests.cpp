@@ -6,6 +6,7 @@
 #include "model/commands/Undo.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Metronome.h"
 #include "model/transport/Tempo.h"
 #include "ui/input/CommandBridge.h"
@@ -19,15 +20,15 @@ struct TopBarScreen
 {
     TopBarScreen()
     {
-        context.setEdit (edit.get());
-        phazite::addMetronomeCommands (registry, context.getSelection());
+        setEdit (context, edit.get());
+        phazite::addMetronomeCommands (registry, getSelection (context));
         edit->getUndoManager().clearUndoHistory();
 
         // The bar shows the project at its next update.
         REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return getTempoField().isEnabled(); }));
     }
 
-    ~TopBarScreen() { context.setEdit (nullptr); }
+    ~TopBarScreen() { setEdit (context, nullptr); }
 
     phazite::ui::NumberField& getTempoField()
     {
@@ -37,7 +38,7 @@ struct TopBarScreen
     }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge bridge { registry };
     phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };

@@ -11,6 +11,7 @@
 #include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"
 #include "model/project/StarterProject.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Tempo.h"
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
@@ -47,7 +48,7 @@ TEST_CASE ("The session opens and saves a project")
         session.openProject (file);
         REQUIRE (session.getProject() != nullptr);
         CHECK (session.getProject()->getFile() == file);
-        CHECK (session.getContext().getEdit() == &session.getProject()->getEdit());
+        CHECK (getEdit (session.getContext()) == &session.getProject()->getEdit());
         CHECK (session.getSelection().getEdit() == &session.getProject()->getEdit());
         CHECK (uiBehaviour.getLastFocusedEdit() == &session.getProject()->getEdit());
         CHECK (recent.getProjects() == juce::Array<juce::File> { file });
@@ -93,11 +94,11 @@ TEST_CASE ("The first start makes My First Song, which its first save names and 
     CHECK (file.isAChildOf (unsaved));
     CHECK (file.getFileName() == juce::String ("My First Song") + phazite::Project::fileExtension);
     CHECK (file.existsAsFile());
-    CHECK (te::getAudioTracks (*session.getContext().getEdit()).size() == 2); // the starter song: drums and a synth
+    CHECK (te::getAudioTracks (*getEdit (session.getContext())).size() == 2); // the starter song: drums and a synth
     CHECK (recent.getProjects().isEmpty());                                   // until it is saved
 
     // The computer keyboard plays the synth, in its octave: its track is selected, and live MIDI follows the selection.
-    auto* synth = phazite::findSynthTrack (*session.getContext().getEdit());
+    auto* synth = phazite::findSynthTrack (*getEdit (session.getContext()));
     REQUIRE (synth != nullptr);
     CHECK (synth->getName() == "Synth");
     CHECK (session.getSelection().isSelected (synth));
@@ -105,7 +106,7 @@ TEST_CASE ("The first start makes My First Song, which its first save names and 
     // It is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (session.getContext().getEdit()->getUndoManager().canUndo());
+    CHECK_FALSE (getEdit (session.getContext())->getUndoManager().canUndo());
 }
 
 TEST_CASE ("A new project starts as the new-project window chooses, with the computer keyboard on its synth")
@@ -127,7 +128,7 @@ TEST_CASE ("A new project starts as the new-project window chooses, with the com
     CHECK (session.isUntitled());
     CHECK (session.getProject()->getFile().getFileNameWithoutExtension() == "Untitled");
 
-    auto* edit = session.getContext().getEdit();
+    auto* edit = getEdit (session.getContext());
     REQUIRE (edit != nullptr);
     CHECK (phazite::getTempo (*edit) == doctest::Approx (90.0));
     CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 6, 8 });
@@ -159,7 +160,7 @@ TEST_CASE ("A new project starts as the new-project window chooses, with the com
     phazite::NewProjectSettings plain;
     plain.withInstruments = false;
     REQUIRE (session.createProject (plain).wasOk());
-    auto* plainEdit = session.getContext().getEdit();
+    auto* plainEdit = getEdit (session.getContext());
     REQUIRE (plainEdit != nullptr);
     CHECK (phazite::getTempo (*plainEdit) == doctest::Approx (120.0));
     CHECK (phazite::getSections (*plainEdit).isEmpty());
@@ -304,7 +305,7 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     CHECK (recent.getProjects().isEmpty());
     CHECK (session.getExportFolder() == temp.folder.getChildFile ("Exports")); // not the untitled project's own folder
 
-    auto& edit = *session.getContext().getEdit();
+    auto& edit = *getEdit (session.getContext());
     session.getProject()->getPhaziteState().setProperty (phazite::schema::outline, "pop", &edit.getUndoManager());
     REQUIRE (session.getProject()->hasUnsavedChanges());
 

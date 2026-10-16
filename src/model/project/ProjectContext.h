@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The open project, as commands, panels and dialogs find it: its Edit, what is selected in it, and the time range
-// selected across tracks. The app's ProjectSession owns the one ProjectContext and is the only code (besides tests) that
-// calls setEdit(). Code that holds the context reads getEdit(); model code given the selection may read
-// selection.getEdit(): the same Edit. Tracktion's focused Edit and selection (UIBehaviour, which live MIDI and
-// controller mappings use) follow this; Phazite's code never reads them. Views listen to it, to show another project
-// or none. Message thread only.
+// The open project, as commands, panels and dialogs find it: what is selected in it, by IDs, the time range selected across
+// tracks, its undo manager, and what changes in it. The app's ProjectSession owns the one ProjectContext and is the only
+// code (besides tests) that opens an Edit in it. Views listen to it, to show another project or none. Message thread
+// only.
 //
-// Architecture phase A3 moves its Tracktion side out of this header: views use getSongSelection(), which names items by
-// their IDs, rather than getSelection().
+// No Tracktion here (architecture phase A3): the model, the app and tests reach the open Edit, Tracktion's selection
+// manager and the range selection through internal/ProjectContext.h; model code given the selection manager may read
+// selection.getEdit(), the same Edit. Tracktion's focused Edit and selection (UIBehaviour, which live MIDI and controller
+// mappings use) follow them; Phazite's code never reads those.
 #pragma once
 
-#include "model/arrangement/Selection.h"
 #include "model/arrangement/SongRange.h"
 #include "model/arrangement/SongSelection.h"
 
+#include <juce_data_structures/juce_data_structures.h>
+
+#include <memory>
+
 namespace phazite
 {
-class NoteIDKeeper;
+class EngineContext;
 class UIBehaviour;
 
 // What changed in the open project's song, in groups, for views to show it again. Changes made at once (in one turn of
@@ -47,40 +50,31 @@ public:
     };
 
     // Keeps Tracktion's focus (the Engine's UIBehaviour) in step, if given one.
-    explicit ProjectContext (te::Engine&, UIBehaviour* tracktionFocus = nullptr);
+    explicit ProjectContext (EngineContext&, UIBehaviour* tracktionFocus = nullptr);
     ~ProjectContext();
 
-    te::Edit* getEdit() const noexcept { return selection.getEdit(); } // nullptr while no project is open
-    bool hasProject() const noexcept { return getEdit() != nullptr; }
+    bool hasProject() const noexcept;
+
+    // Which project is open, or none: a number that changes each time another one opens, so that a view told the
+    // project changed can tell the same one again from another.
+    int getProjectNumber() const noexcept;
 
     // The open project's undo manager, for the commands that change it (Command::undoTarget): none while no project is
     // open.
     juce::UndoManager* getUndoManager() const noexcept;
 
-    te::SelectionManager& getSelection() noexcept { return selection; }
-    const te::SelectionManager& getSelection() const noexcept { return selection; }
-    SongSelection& getSongSelection() noexcept { return *songSelection; }
-    const SongSelection& getSongSelection() const noexcept { return *songSelection; }
-    RangeSelection& getRangeSelection() noexcept { return rangeSelection; }
-    SongRange& getSongRange() noexcept { return *songRange; } // a view of it, by IDs
-
-    // The Edit open now, or none. Nothing of the previous Edit stays selected. Then tells the listeners.
-    void setEdit (te::Edit*);
+    SongSelection& getSongSelection() noexcept;
+    const SongSelection& getSongSelection() const noexcept;
+    SongRange& getSongRange() noexcept; // the time range selected across tracks, by beats and IDs
 
     void addListener (Listener*);
     void removeListener (Listener*);
 
-private:
-    struct SongWatcher; // tells the listeners what changes in the open Edit
+    struct Impl; // the open Edit, Tracktion's selection manager and the range selection (internal/ProjectContext.h)
+    Impl& getImpl() const noexcept { return *impl; }
 
-    UIBehaviour* const focus;
-    te::SelectionManager selection;
-    std::unique_ptr<SongSelection> songSelection; // a view of selection, by IDs
-    RangeSelection rangeSelection;
-    std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
-    juce::ListenerList<Listener> listeners;
-    std::unique_ptr<NoteIDKeeper> noteIDs; // gives the notes added to the open Edit their IDs
-    std::unique_ptr<SongWatcher> songWatcher;
+private:
+    std::unique_ptr<Impl> impl;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProjectContext)
 };

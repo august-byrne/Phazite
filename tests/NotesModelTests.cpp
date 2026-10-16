@@ -9,6 +9,7 @@
 #include "model/notes/Notes.h"
 #include "model/notes/NotesModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
 
@@ -40,7 +41,7 @@ struct Song
         b = te::getAudioTracks (*edit)[1];
         a->setName ("A");
         b->setName ("B");
-        context.setEdit (edit.get());
+        setEdit (context, edit.get());
 
         auto* first = phazite::insertMidiClip (*a, { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
         auto* other = phazite::insertMidiClip (*b, { te::BeatPosition(), te::BeatPosition::fromBeats (8.0) }, nullptr);
@@ -54,7 +55,7 @@ struct Song
         edit->getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { context.setEdit (nullptr); }
+    ~Song() { setEdit (context, nullptr); }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -67,7 +68,7 @@ struct Song
     }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
     phazite::ClipID clip, otherClip;
@@ -227,7 +228,7 @@ TEST_CASE ("Notes are selected by ID, of the clips an editor shows, and nothing 
 
     // The model's note commands act on them.
     selection.selectNotes ({ song.c, song.e });
-    CHECK (phazite::getSelectedNotes (song.context.getSelection()).size() == 2);
+    CHECK (phazite::getSelectedNotes (getSelection (song.context)).size() == 2);
 
     // Selecting a clip deselects them; a deleted note is no longer selected.
     selection.selectOnly (song.clip);

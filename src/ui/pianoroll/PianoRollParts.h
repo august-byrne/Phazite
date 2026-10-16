@@ -9,6 +9,8 @@
 #include "ui/components/Controls.h"
 #include "ui/timeline/TimelineGesture.h"
 
+#include <juce_audio_basics/juce_audio_basics.h>
+
 #include <map>
 
 namespace phazite::ui

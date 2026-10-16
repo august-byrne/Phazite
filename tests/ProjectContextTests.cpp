@@ -7,6 +7,7 @@
 #include "model/arrangement/Tracks.h"
 #include "model/engine/EngineSetup.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 TEST_CASE ("The open project's Edit, selection and Tracktion's focus move together")
 {
@@ -16,32 +17,32 @@ TEST_CASE ("The open project's Edit, selection and Tracktion's focus move togeth
     auto* track = te::getAudioTracks (*edit)[0];
 
     {
-        phazite::ProjectContext context (engine, &focus);
-        CHECK (context.getEdit() == nullptr);
-        CHECK (focus.getCurrentlyFocusedSelectionManager() == &context.getSelection());
+        phazite::ProjectContext context (phazite::test::getEngineContext(), &focus);
+        CHECK (getEdit (context) == nullptr);
+        CHECK (focus.getCurrentlyFocusedSelectionManager() == &getSelection (context));
 
-        context.setEdit (edit.get());
-        CHECK (context.getEdit() == edit.get());
-        CHECK (context.getSelection().getEdit() == edit.get()); // the model's commands find it there
+        setEdit (context, edit.get());
+        CHECK (getEdit (context) == edit.get());
+        CHECK (getSelection (context).getEdit() == edit.get()); // the model's commands find it there
         CHECK (focus.getLastFocusedEdit() == edit.get());
 
         // Closing the project leaves nothing of it selected, and Tracktion's focus with it.
-        context.getSelection().selectOnly (track);
-        context.getRangeSelection().set ({ te::BeatPosition::fromBeats (0.0), te::BeatPosition::fromBeats (4.0) }, { track });
-        REQUIRE (context.getSelection().isSelected (track));
-        REQUIRE_FALSE (context.getRangeSelection().isEmpty());
+        getSelection (context).selectOnly (track);
+        getRangeSelection (context).set ({ te::BeatPosition::fromBeats (0.0), te::BeatPosition::fromBeats (4.0) }, { track });
+        REQUIRE (getSelection (context).isSelected (track));
+        REQUIRE_FALSE (getRangeSelection (context).isEmpty());
 
-        context.setEdit (nullptr);
-        CHECK (context.getEdit() == nullptr);
-        CHECK_FALSE (context.getSelection().isSelected (track));
-        CHECK (context.getRangeSelection().isEmpty());
+        setEdit (context, nullptr);
+        CHECK (getEdit (context) == nullptr);
+        CHECK_FALSE (getSelection (context).isSelected (track));
+        CHECK (getRangeSelection (context).isEmpty());
         CHECK (focus.getLastFocusedEdit() == nullptr);
 
         // Opening it again selects nothing; an Edit that is deleted is gone from the context too.
-        context.setEdit (edit.get());
-        CHECK_FALSE (context.getSelection().isSelected (track));
+        setEdit (context, edit.get());
+        CHECK_FALSE (getSelection (context).isSelected (track));
         edit = nullptr;
-        CHECK (context.getEdit() == nullptr);
+        CHECK (getEdit (context) == nullptr);
     }
 
     // Gone with the context: Tracktion is left with no selection of Phazite's.
@@ -58,7 +59,7 @@ TEST_CASE ("Views hear when another project opens, or none, before the one that 
         {
         }
 
-        void projectChanged() override { seen.push_back (context.getEdit()); }
+        void projectChanged() override { seen.push_back (getEdit (context)); }
 
         phazite::ProjectContext& context;
         std::vector<te::Edit*> seen;
@@ -66,18 +67,18 @@ TEST_CASE ("Views hear when another project opens, or none, before the one that 
 
     auto& engine = phazite::test::getEngine();
     auto edit = te::Edit::createSingleTrackEdit (engine);
-    phazite::ProjectContext context (engine);
+    phazite::ProjectContext context (phazite::test::getEngineContext());
     View view (context);
     context.addListener (&view);
 
-    context.setEdit (edit.get());
-    context.setEdit (nullptr); // while the Edit is still there to let go of
+    setEdit (context, edit.get());
+    setEdit (context, nullptr); // while the Edit is still there to let go of
     CHECK (view.seen == std::vector<te::Edit*> { edit.get(), nullptr });
 
     context.removeListener (&view);
-    context.setEdit (edit.get());
+    setEdit (context, edit.get());
     CHECK (view.seen.size() == 2);
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
@@ -86,15 +87,15 @@ TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
     auto edit = te::Edit::createSingleTrackEdit (engine); // 120 BPM, 4/4
     edit->ensureNumberOfAudioTracks (2);
     const auto tracks = te::getAudioTracks (*edit);
-    phazite::ProjectContext context (engine);
-    context.setEdit (edit.get());
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+    setEdit (context, edit.get());
     auto& selection = context.getSongSelection();
 
     const auto first = phazite::getTrackID (*tracks[0]), second = phazite::getTrackID (*tracks[1]);
     selection.selectOnly (second);
     selection.add (first);
     CHECK (selection.getTracks() == std::vector<phazite::TrackID> { first, second }); // in the playlist's order
-    CHECK (context.getSelection().isSelected (tracks[0]));                            // what the commands act on
+    CHECK (getSelection (context).isSelected (tracks[0]));                            // what the commands act on
     selection.remove (first);
     CHECK (selection.getTracks() == std::vector<phazite::TrackID> { second });
 
@@ -121,7 +122,7 @@ TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
     CHECK (selection.isSelected (phazite::getSectionID (*section)));
     selection.clear();
     CHECK (selection.getSections().empty());
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("Views hear what changed in the song, in groups, once for the changes made at once")
@@ -137,8 +138,8 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     auto& engine = phazite::test::getEngine();
     auto edit = te::Edit::createSingleTrackEdit (engine);
     auto* track = te::getAudioTracks (*edit)[0];
-    phazite::ProjectContext context (engine);
-    context.setEdit (edit.get());
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+    setEdit (context, edit.get());
     View view;
     context.addListener (&view);
 
@@ -209,7 +210,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
 
     // Changes not yet told are the closing project's: none come after another opens.
     track->setName ("Lead");
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
     CHECK (hear().empty());
     context.removeListener (&view);
 }

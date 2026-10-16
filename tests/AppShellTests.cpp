@@ -7,6 +7,7 @@
 #include "app/AppCommands.h"
 #include "app/AppServices.h"
 #include "app/ProjectSession.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/shell/AppShell.h"
@@ -94,7 +95,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     // No recent projects: the first start makes My First Song.
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
-    REQUIRE (screen.session.getContext().getEdit() != nullptr);
+    REQUIRE (getEdit (screen.session.getContext()) != nullptr);
     phazite::test::settle();
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 

@@ -7,6 +7,7 @@
 #include "model/commands/UndoCommands.h"
 #include "model/mixer/Mixer.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Capture.h"
 #include "model/transport/Metronome.h"
 #include "model/transport/Playback.h"
@@ -17,8 +18,8 @@ namespace phazite
 {
 void addSongCommands (CommandRegistry& registry, ProjectContext& context)
 {
-    auto& selection = context.getSelection();
-    auto& range = context.getRangeSelection();
+    auto& selection = getSelection (context);
+    auto& range = getRangeSelection (context);
 
     addUndoCommands (registry, selection);
     addTransportCommands (registry, selection);

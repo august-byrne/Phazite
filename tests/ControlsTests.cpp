@@ -4,6 +4,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/LevelSource.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/ValueText.h"
 
@@ -14,8 +15,8 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     CHECK_FALSE (slider.isEnabled()); // nothing to control yet
 
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    context.setEdit (edit.get());
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    setEdit (context, edit.get());
     auto* track = te::getAudioTracks (*edit)[0];
     auto* volume = track->getVolumePlugin();
     REQUIRE (volume != nullptr);
@@ -60,7 +61,7 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     CHECK (slider.isEnabled());
 
     // When the project closes, the slider turns off instead of reaching for a deleted plug-in.
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
     edit = nullptr;
     attachment.update();
     CHECK_FALSE (slider.isEnabled());
@@ -101,8 +102,8 @@ TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     edit->ensureNumberOfAudioTracks (2);
     const auto tracks = te::getAudioTracks (*edit);
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    context.setEdit (edit.get());
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    setEdit (context, edit.get());
 
     phazite::ui::MuteSoloButtons buttons (context);
     phazite::test::TestWindow window (buttons, 60, 24);

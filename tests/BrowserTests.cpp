@@ -6,6 +6,7 @@
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
 #include "model/mixer/Mixer.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"
 #include "services/Library.h"
 #include "ui/browser/Browser.h"
@@ -59,7 +60,7 @@ struct BrowserScreen
 {
     BrowserScreen()
     {
-        context.setEdit (edit.get());
+        setEdit (context, edit.get());
         browser.onPlace = [this] (const phazite::LibraryItem& item)
         {
             placed.push_back (item);
@@ -78,7 +79,7 @@ struct BrowserScreen
     phazite::test::TemporaryFolder temp;
     phazite::SoundPack soundPack { writeSoundPack (temp.folder) };
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() }; // with the Edit open
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // with the Edit open
     phazite::Settings settings;
     phazite::Library library { phazite::test::getEngineContext(), settings, soundPack.getFolder() };
     std::unique_ptr<phazite::Previewer> previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
@@ -234,14 +235,14 @@ TEST_CASE ("The plug-in picker finds a device as its name is typed, and Enter ad
 TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or below the tracks, or at the play start")
 {
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine); // 120 BPM, 4/4
-    phazite::ProjectContext context (engine);             // the open project, as the app has it
-    auto& selection = context.getSelection();
+    auto edit = te::Edit::createSingleTrackEdit (engine);                // 120 BPM, 4/4
+    phazite::ProjectContext context (phazite::test::getEngineContext()); // the open project, as the app has it
+    auto& selection = getSelection (context);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands (registry);
     phazite::ui::Playlist playlist (commands, context);
     phazite::test::TestWindow window (playlist, 1000, 600);
-    context.setEdit (edit.get());
+    setEdit (context, edit.get());
     phazite::test::dispatchPendingMessages();
 
     auto* lanes = phazite::test::findComponentWithTitle (playlist, "Tracks");
@@ -303,7 +304,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     CHECK (std::any_of (track->getClips().begin(), track->getClips().end(),
                         [] (te::Clip* clip) { return std::abs (clip->getStartBeat().inBeats() - 8.0) < 0.001; }));
 
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lists them once a click has downloaded them")
@@ -315,7 +316,7 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     phazite::Library library (phazite::test::getEngineContext(), settings, soundPack.getFolder());
     const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
     auto& previewer = *previewerOwner;
-    const phazite::ProjectContext noProject (phazite::test::getEngine());
+    const phazite::ProjectContext noProject (phazite::test::getEngineContext());
     phazite::ui::Browser browser (library, previewer, soundPack, settings, noProject);
     phazite::test::TestWindow window (browser, 320, 700);
     bool pageShown = false;

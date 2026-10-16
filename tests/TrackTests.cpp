@@ -5,6 +5,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/Undo.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/playlist/TrackHeights.h"
 
 namespace
@@ -20,7 +21,7 @@ struct Tracks
             te::getAudioTracks (*edit)[i]->setName (juce::String::charToString ((juce::juce_wchar) ('A' + i)));
 
         edit->getUndoManager().clearUndoHistory();
-        context.setEdit (edit.get());
+        setEdit (context, edit.get());
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addTrackCommands (registry, selection);
         phazite::ui::addTrackViewCommands (registry, context);
@@ -80,9 +81,9 @@ struct Tracks
     }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    te::SelectionManager& selection = context.getSelection();
-    phazite::RangeSelection& range = context.getRangeSelection();
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    te::SelectionManager& selection = getSelection (context);
+    phazite::RangeSelection& range = getRangeSelection (context);
     phazite::CommandRegistry registry;
 };
 } // namespace

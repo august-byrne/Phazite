@@ -10,6 +10,7 @@
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
 
@@ -48,16 +49,16 @@ struct Song
 {
     Song()
     {
-        context.setEdit (edit.get());
+        setEdit (context, edit.get());
         clip = phazite::insertMidiClip (*te::getAudioTracks (*edit)[0], { beats (0.0), beats (4.0) }, nullptr);
         REQUIRE (clip != nullptr);
         edit->getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { context.setEdit (nullptr); }
+    ~Song() { setEdit (context, nullptr); }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::MidiClip* clip = nullptr;
 };
 } // namespace
@@ -179,10 +180,10 @@ TEST_CASE ("Notes without IDs, or with another note's, get IDs of their own")
     // The open project's context assigns them when it takes the Edit.
     clip->getSequence().state.appendChild (juce::ValueTree (te::IDs::NOTE, { { "p", 70 }, { "b", 2.0 }, { "l", 1.0 }, { "v", 100 } }),
                                            nullptr);
-    phazite::ProjectContext context (phazite::test::getEngine());
-    context.setEdit (edit.get());
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+    setEdit (context, edit.get());
     CHECK (allDifferent (idsOf (*clip)));
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("Notes' IDs are saved with the project and the same when it opens again, with nothing to save")

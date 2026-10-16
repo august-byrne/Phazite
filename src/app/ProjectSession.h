@@ -4,11 +4,13 @@
 #pragma once
 
 #include "model/commands/CommandRegistry.h"
+#include "model/engine/EngineContext.h"
 #include "model/engine/EngineSetup.h"
 #include "model/project/NewProject.h"
 #include "model/project/Project.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/UnsavedProjects.h"
+#include "model/project/internal/ProjectContext.h"
 #include "services/RecentProjects.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -32,8 +34,8 @@ public:
     // The open project's Edit and what is selected in it: tracks and clips (live MIDI input follows the selected
     // track), and a time range across tracks.
     ProjectContext& getContext() noexcept { return context; }
-    te::SelectionManager& getSelection() noexcept { return context.getSelection(); }
-    RangeSelection& getRangeSelection() noexcept { return context.getRangeSelection(); }
+    te::SelectionManager& getSelection() noexcept { return phazite::getSelection (context); }
+    RangeSelection& getRangeSelection() noexcept { return phazite::getRangeSelection (context); }
 
     std::function<void()> onProjectClosing;  // the open project is about to close: let go of its Edit
     std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
@@ -85,6 +87,7 @@ private:
     te::Engine& engine;
     const juce::File projectsFolder, unsavedFolder;
     RecentProjects& recent;
+    std::unique_ptr<EngineContext> engineContext;        // the Engine, as the project context takes it
     ProjectContext context;                              // keeps Tracktion's focus in step
     std::unique_ptr<UnsavedFolder> projectUnsavedFolder; // where the project was made while untitled, until it closes
     std::unique_ptr<Project> project;

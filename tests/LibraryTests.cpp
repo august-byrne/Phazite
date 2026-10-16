@@ -4,6 +4,7 @@
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "services/Library.h"
 
 using phazite::test::TemporaryFolder;
@@ -90,8 +91,8 @@ TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")
     TemporaryFolder temp;
     auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     project->tempoSequence.getTempos()[0]->setBpm (100.0);
-    phazite::ProjectContext context (phazite::test::getEngine()); // with the project open
-    context.setEdit (project.get());
+    phazite::ProjectContext context (phazite::test::getEngineContext()); // with the project open
+    setEdit (context, project.get());
 
     // Two bars at the tempo in its name.
     const auto loop = writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
@@ -109,7 +110,7 @@ TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")
     previewer.stop();
     CHECK (previewer.getFile() == juce::File());
     CHECK_FALSE (previewer.play (temp.folder.getChildFile ("Missing.wav"), context));
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("Sounds named as Phazite Sounds names them get their folders' tags, and those with a tempo play in time")

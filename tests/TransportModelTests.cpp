@@ -6,6 +6,7 @@
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"
 #include "model/transport/Tempo.h"
 #include "model/transport/TransportModel.h"
@@ -13,13 +14,13 @@
 TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each change outside a drag")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
     auto& undo = edit->getUndoManager();
 
     CHECK_FALSE (phazite::getTempoHandle (context).isValid()); // no project open
     CHECK (phazite::getTempoHandle (context).getValue() == doctest::Approx (120.0));
 
-    context.setEdit (edit.get());
+    setEdit (context, edit.get());
     auto tempo = phazite::getTempoHandle (context);
     REQUIRE (tempo.isValid());
     undo.clearUndoHistory();
@@ -48,13 +49,13 @@ TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each c
     CHECK_FALSE (tempo.isValid());
     tempo.setValue (60.0);
     CHECK (phazite::getTempo (*edit) == doctest::Approx (150.0));
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("The transport's switches and the time signature by the project's context")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     CHECK_FALSE (phazite::isPlaying (context));
     CHECK_FALSE (phazite::isLoopOn (context));
@@ -62,7 +63,7 @@ TEST_CASE ("The transport's switches and the time signature by the project's con
     CHECK_FALSE (phazite::getLiveMidiTrack (context).isValid());
     phazite::setTimeSignature (context, { 3, 4 }); // no project: nothing to change
 
-    context.setEdit (edit.get());
+    setEdit (context, edit.get());
     CHECK (phazite::isLoopOn (context) == phazite::isLoopOn (*edit));
     phazite::toggleLoop (*edit);
     CHECK (phazite::isLoopOn (context) == phazite::isLoopOn (*edit));
@@ -71,7 +72,7 @@ TEST_CASE ("The transport's switches and the time signature by the project's con
     phazite::setTimeSignature (context, { 6, 8 });
     CHECK (phazite::getTimeSignature (context) == phazite::TimeSignature { 6, 8 });
     CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Change Time Signature"));
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("The engine as the UI reaches it: its audio devices, how busy it is, and the MIDI keyboards connected")

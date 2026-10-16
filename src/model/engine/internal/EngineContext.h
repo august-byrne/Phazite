@@ -11,4 +11,5 @@ namespace phazite
 class EngineContext;
 
 std::unique_ptr<EngineContext> createEngineContext (te::Engine&);
+te::Engine& getEngine (EngineContext&); // the one it was made for
 } // namespace phazite

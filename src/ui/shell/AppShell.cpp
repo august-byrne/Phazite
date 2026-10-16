@@ -469,7 +469,7 @@ void AppShell::addCommands (CommandRegistry& registry)
                                    "picker does.",
                     .synonyms = { "plug-in picker", "plugin", "vst", "synth", "insert", "fx" },
                     .perform = [this] { showPluginPicker(); },
-                    .isEnabled = [this] { return projectContext.getEdit() != nullptr; } });
+                    .isEnabled = [this] { return projectContext.hasProject(); } });
 
     // Showing and hiding apply to the main window; a panel in its own window is closed there.
     add (

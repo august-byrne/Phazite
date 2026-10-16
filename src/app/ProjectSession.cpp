@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectSession.h"
 #include "model/engine/LiveInput.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/project/Export.h"
 #include "model/project/StarterProject.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/shell/NewProjectPanel.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -22,15 +24,16 @@ ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui, RecentProjects& 
       projectsFolder (std::move (projects)),
       unsavedFolder (std::move (unsaved)),
       recent (recentProjects),
-      context (e, &ui)
+      engineContext (createEngineContext (e)),
+      context (*engineContext, &ui)
 {
     engine.getDeviceManager().addChangeListener (this);
-    context.getSelection().addChangeListener (this);
+    getSelection().addChangeListener (this);
 }
 
 ProjectSession::~ProjectSession()
 {
-    context.getSelection().removeChangeListener (this);
+    getSelection().removeChangeListener (this);
     engine.getDeviceManager().removeChangeListener (this);
     setProject (nullptr); // closes the project on the message thread, before the Engine goes
 }
@@ -40,8 +43,8 @@ void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (project == nullptr)
         return;
 
-    if (source == &context.getSelection())
-        followSelectedTrack (context.getSelection());
+    if (source == &getSelection())
+        followSelectedTrack (getSelection());
     else
         routeLiveMidiInput (project->getEdit()); // MIDI inputs show up a moment after startup, and when plugged in
 }
@@ -121,7 +124,7 @@ void ProjectSession::selectSynthTrack()
     // Live MIDI follows the selection, so the computer keyboard plays the synth, in its octave.
     if (project != nullptr)
         if (auto* synth = findSynthTrack (project->getEdit()))
-            context.getSelection().selectOnly (synth);
+            getSelection().selectOnly (synth);
 }
 
 void ProjectSession::newProject()
@@ -445,7 +448,7 @@ void ProjectSession::openNextRecentProject (const juce::File& failed)
 void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::unique_ptr<UnsavedFolder> newUnsavedFolder)
 {
     autosaveTimer = nullptr;
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 
     if (project != nullptr && onProjectClosing != nullptr)
         onProjectClosing();
@@ -455,7 +458,7 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
 
     if (project != nullptr)
     {
-        context.setEdit (&project->getEdit());
+        setEdit (context, &project->getEdit());
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
 
         if (! isUntitled()) // it is in Open Recent once it is saved

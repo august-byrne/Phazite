@@ -3,6 +3,7 @@
 #include "devices/synth/Synth.h"
 #include "internal/Preview.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace phazite
 {
@@ -49,7 +50,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
     // defaults. Loops keep their own pitch: Tracktion would pull every loop with a known root toward the song's pitch
     // sequence, which is C in a song without a key, and it ignores major and minor (an A minor loop would go up to C in
     // C major).
-    auto* project = context.getEdit();
+    auto* project = getEdit (context);
     auto matched = false;
     const auto synth = te::createValueTree (te::IDs::PLUGIN, te::IDs::type, devices::Synth::typeID);
     impl->edit = te::Edit::createEditForPreviewingFile (impl->engine, newFile, project, true, false, &matched, synth, {}, false,
@@ -75,7 +76,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
 
 void Previewer::keepInTime (const ProjectContext& context)
 {
-    auto* project = context.getEdit();
+    auto* project = getEdit (context);
 
     if (impl->edit == nullptr || ! impl->inTime || project == nullptr)
         return;

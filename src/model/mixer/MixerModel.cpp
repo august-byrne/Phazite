@@ -8,6 +8,7 @@
 #include "model/engine/LiveInput.h"
 #include "model/engine/LoudnessMeterPlugin.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace phazite
 {
@@ -15,13 +16,13 @@ namespace
 {
     te::Track* findTrack (const ProjectContext& context, TrackID id)
     {
-        auto* edit = context.getEdit();
+        auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
     }
 
     te::Plugin* findDevice (const ProjectContext& context, DeviceID id)
     {
-        auto* edit = context.getEdit();
+        auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
     }
 
@@ -74,7 +75,7 @@ MixerChannels getMixerChannels (const ProjectContext& context)
 {
     MixerChannels channels;
 
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         for (auto* track : getPlaylistTracks (*edit))
             (getReturnBus (*track) >= 0 ? channels.returns : channels.tracks).push_back (getTrackID (*track));
 
@@ -122,15 +123,15 @@ bool feeds (const ProjectContext& context, TrackID from, TrackID to)
 
 TrackID getInspectedChannel (const ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
 
     if (edit == nullptr)
         return {};
 
-    te::Track* track = getSelectedTracks (context.getSelection()).getFirst();
+    te::Track* track = getSelectedTracks (getSelection (context)).getFirst();
 
     if (track == nullptr)
-        track = getSelectedAudioTrack (context.getSelection());
+        track = getSelectedAudioTrack (getSelection (context));
 
     if (track == nullptr)
         track = getLiveMidiTrack (*edit);
@@ -168,12 +169,12 @@ ParameterHandle getPan (ProjectContext& context, TrackID id)
 
 LevelSource getLevel (ProjectContext& context, TrackID id)
 {
-    if (context.getEdit() == nullptr || ! id.isValid())
+    if (getEdit (context) == nullptr || ! id.isValid())
         return {};
 
     // The track is looked up again only once it has gone (its deletion undone brings back another object).
     return makeLevelSource (
-        [edit = te::SafeSelectable<te::Edit> (context.getEdit()), id,
+        [edit = te::SafeSelectable<te::Edit> (getEdit (context)), id,
          track = te::SafeSelectable<te::Track>()]() mutable -> te::LevelMeasurer*
         {
             if (auto* e = edit.get(); e != nullptr && track.get() == nullptr)
@@ -186,7 +187,7 @@ LevelSource getLevel (ProjectContext& context, TrackID id)
 
 ParameterHandle getMasterVolume (ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     const auto fader = edit != nullptr ? edit->getMasterVolumePlugin() : nullptr;
     return fader != nullptr ? makeParameterHandle (fader.get(), fader->volParam->paramID, "Change Master Volume") : ParameterHandle();
 }
@@ -195,7 +196,7 @@ LevelSource getMasterLevel (ProjectContext& context)
 {
     // The playback context, which holds the master's levels, comes and goes as playback is set up again.
     return makeLevelSource (
-        [edit = te::SafeSelectable<te::Edit> (context.getEdit())]() -> te::LevelMeasurer*
+        [edit = te::SafeSelectable<te::Edit> (getEdit (context))]() -> te::LevelMeasurer*
         {
             auto* e = edit.get();
             auto* playback = e != nullptr ? e->getCurrentPlaybackContext() : nullptr;
@@ -252,7 +253,7 @@ std::optional<DeviceSlot> getInstrument (const ProjectContext& context, TrackID 
 std::vector<DeviceSlot> getEffects (const ProjectContext& context, TrackID id)
 {
     if (! id.isValid())
-        return context.getEdit() != nullptr ? makeSlots (getMasterDevices (*context.getEdit())) : std::vector<DeviceSlot>();
+        return getEdit (context) != nullptr ? makeSlots (getMasterDevices (*getEdit (context))) : std::vector<DeviceSlot>();
 
     auto* track = findTrack (context, id);
     return track != nullptr ? makeSlots (phazite::getEffects (*track)) : std::vector<DeviceSlot>();
@@ -290,7 +291,7 @@ void setDeviceOn (ProjectContext& context, DeviceID id, bool on)
 void moveEffect (ProjectContext& context, DeviceID id, int places)
 {
     auto* device = findDevice (context, id);
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
 
     if (device == nullptr || edit == nullptr)
         return;
@@ -319,7 +320,7 @@ void showDeviceWindow (ProjectContext& context, DeviceID id)
 
 std::vector<DeviceType> getDeviceTypes (const ProjectContext& context)
 {
-    return phazite::getDeviceTypes (context.getSelection().engine);
+    return phazite::getDeviceTypes (getSelection (context).engine);
 }
 
 void chooseInstrument (ProjectContext& context, TrackID id, const DeviceType& type)
@@ -330,7 +331,7 @@ void chooseInstrument (ProjectContext& context, TrackID id, const DeviceType& ty
 
 void addEffect (ProjectContext& context, TrackID id, const DeviceType& type)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     auto* track = findTrack (context, id);
 
     if (edit != nullptr && (track != nullptr || ! id.isValid()))
@@ -346,13 +347,13 @@ TrackID addReturnWith (ProjectContext& context, TrackID sender, const DeviceType
 
 bool addDeviceTo (ProjectContext& context, TrackID id, const DeviceType& type)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     auto* track = findTrack (context, id);
 
     if (edit == nullptr || (track == nullptr && id.isValid()))
         return false;
 
-    return phazite::addDeviceTo (*edit, track, type, &context.getSelection()) != nullptr; // selects a track made for it
+    return phazite::addDeviceTo (*edit, track, type, &getSelection (context)) != nullptr; // selects a track made for it
 }
 
 //==============================================================================
@@ -394,7 +395,7 @@ std::vector<Return> getReturns (const ProjectContext& context)
 {
     std::vector<Return> returns;
 
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         for (auto* track : getReturnTracks (*edit))
             returns.push_back ({ getTrackID (*track), track->getName() });
 
@@ -419,7 +420,7 @@ void addSendToNewReturn (ProjectContext& context, TrackID from)
 //==============================================================================
 std::optional<Loudness> getLoudness (const ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     auto* meter = edit != nullptr ? findLoudnessMeter (*edit) : nullptr;
 
     if (meter == nullptr)
@@ -434,7 +435,7 @@ std::optional<Loudness> getLoudness (const ProjectContext& context)
 
 void resetLoudness (ProjectContext& context)
 {
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         if (auto* meter = findLoudnessMeter (*edit))
             meter->resetReadings();
 }

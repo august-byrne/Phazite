@@ -251,12 +251,10 @@ Playlist::~Playlist()
 void Playlist::showProject()
 {
     // The same project again (after a save, say) keeps the view as it is.
-    const auto* edit = context.getEdit();
-
-    if (editState == (edit != nullptr ? edit->state : juce::ValueTree()))
+    if (shownProject == context.getProjectNumber())
         return;
 
-    editState = edit != nullptr ? edit->state : juce::ValueTree();
+    shownProject = context.getProjectNumber();
     const auto open = context.hasProject();
 
     // Another project's tracks and clips can have the same IDs: nothing of what was shown stays.

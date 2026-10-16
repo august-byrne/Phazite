@@ -9,6 +9,7 @@
 #include "model/arrangement/Tracks.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"
 
 namespace
@@ -45,10 +46,10 @@ struct Song
         midi->getSequence().addNote (60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
         midi->getSequence().addNote (64, te::BeatPosition::fromBeats (2.0), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
         clip = phazite::getClipID (*midi);
-        context.setEdit (edit.get());
+        setEdit (context, edit.get());
     }
 
-    ~Song() { context.setEdit (nullptr); }
+    ~Song() { setEdit (context, nullptr); }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -61,7 +62,7 @@ struct Song
     }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
     phazite::ClipID clip;
@@ -118,7 +119,7 @@ TEST_CASE ("The playlist's rows are its tracks top to bottom, without those in c
     phazite::deleteTracks ({ song.b }, nullptr);
     CHECK_FALSE (phazite::getTrackRow (context, gone).has_value());
     CHECK (phazite::getClips (context, gone).empty());
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
     CHECK (phazite::getPlaylistRows (context).empty());
     CHECK (phazite::getAllPlaylistTracks (context).empty());
 }
@@ -367,8 +368,8 @@ TEST_CASE ("The time range selected across tracks, by IDs")
     CHECK (range.getRange().getStart().inBeats() == doctest::Approx (2.0));
     CHECK (range.getRange().getEnd().inBeats() == doctest::Approx (6.0));
     CHECK (range.getTracks() == std::vector { idOf (*song.a), idOf (*song.b) });
-    CHECK (song.context.getRangeSelection().getTracks().size() == 2); // what the model's commands act on
-    CHECK (range.isSource (&song.context.getRangeSelection()));
+    CHECK (getRangeSelection (song.context).getTracks().size() == 2); // what the model's commands act on
+    CHECK (range.isSource (&getRangeSelection (song.context)));
     CHECK_FALSE (range.isSource (nullptr));
 
     // Tracks that are gone are left out, and with none left it is empty.

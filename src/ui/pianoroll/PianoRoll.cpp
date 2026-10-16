@@ -67,16 +67,14 @@ PianoRoll::~PianoRoll()
 void PianoRoll::projectChanged()
 {
     // The same project again (after a save, say) keeps the view as it is.
-    auto* edit = context.getEdit();
-
-    if (editState == (edit != nullptr ? edit->state : juce::ValueTree()))
+    if (shownProject == context.getProjectNumber())
         return;
 
     stopAudition();
     closeTransform();
     setClips ({});
     emptyTrack = {};
-    editState = edit != nullptr ? edit->state : juce::ValueTree();
+    shownProject = context.getProjectNumber();
     showProject();
     updateToolbar();
 }

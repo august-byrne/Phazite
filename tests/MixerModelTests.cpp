@@ -6,6 +6,7 @@
 #include "model/mixer/Mixer.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace
 {
@@ -19,10 +20,10 @@ struct Song
         b = te::getAudioTracks (*edit)[1];
         a->setName ("A");
         b->setName ("B");
-        context.setEdit (edit.get());
+        setEdit (context, edit.get());
     }
 
-    ~Song() { context.setEdit (nullptr); }
+    ~Song() { setEdit (context, nullptr); }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -35,7 +36,7 @@ struct Song
     }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
 };
@@ -231,7 +232,7 @@ TEST_CASE ("Mixer functions give nothing, and do nothing, for what is gone or wi
     REQUIRE (loudness.has_value());
     CHECK_FALSE (loudness->integrated.has_value()); // until enough has been measured
 
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
     CHECK (phazite::getMixerChannels (context).tracks.empty());
     CHECK_FALSE (phazite::getMasterVolume (context).isValid());
     CHECK_FALSE (phazite::getLoudness (context).has_value());

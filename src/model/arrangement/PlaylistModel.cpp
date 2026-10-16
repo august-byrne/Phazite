@@ -7,6 +7,7 @@
 #include "model/engine/LiveInput.h"
 #include "model/mixer/Mixer.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"
 
 namespace phazite
@@ -15,13 +16,13 @@ namespace
 {
     te::Track* findTrack (const ProjectContext& context, TrackID id)
     {
-        auto* edit = context.getEdit();
+        auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
     }
 
     te::Clip* findClip (const ProjectContext& context, ClipID id)
     {
-        auto* edit = context.getEdit();
+        auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? te::findClipForID (*edit, toTracktion (id)) : nullptr;
     }
 
@@ -49,7 +50,7 @@ namespace
 
     te::ArrangerClip* findSection (const ProjectContext& context, SectionID id)
     {
-        auto* edit = context.getEdit();
+        auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? dynamic_cast<te::ArrangerClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
     }
 
@@ -152,7 +153,7 @@ namespace
 std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
 {
     std::vector<TrackRow> rows;
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
 
     if (edit == nullptr)
         return rows;
@@ -168,7 +169,7 @@ std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
 
 std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     auto* track = findTrack (context, id);
 
     if (track == nullptr)
@@ -181,7 +182,7 @@ std::vector<TrackID> getAllPlaylistTracks (const ProjectContext& context)
 {
     std::vector<TrackID> ids;
 
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         for (auto* track : getPlaylistTracks (*edit))
             ids.push_back (getTrackID (*track));
 
@@ -227,8 +228,8 @@ void moveTracksAfter (ProjectContext& context, const std::vector<TrackID>& movin
 
 TrackID addTrackAtEnd (ProjectContext& context, bool folder)
 {
-    auto* edit = context.getEdit();
-    auto* added = edit != nullptr ? addTrackAtEnd (*edit, folder, &context.getSelection()) : nullptr;
+    auto* edit = getEdit (context);
+    auto* added = edit != nullptr ? addTrackAtEnd (*edit, folder, &getSelection (context)) : nullptr;
     return added != nullptr ? getTrackID (*added) : TrackID();
 }
 
@@ -374,7 +375,7 @@ void nudgeClips (ProjectContext& context, const std::vector<ClipID>& ids, BeatDu
 ClipID addMidiClipAt (ProjectContext& context, TrackID trackID, BeatPosition start)
 {
     auto* track = dynamic_cast<te::ClipTrack*> (findTrack (context, trackID));
-    auto* added = track != nullptr ? addMidiClipAt (*track, toTracktion (start), &context.getSelection()) : nullptr;
+    auto* added = track != nullptr ? addMidiClipAt (*track, toTracktion (start), &getSelection (context)) : nullptr;
     return added != nullptr ? getClipID (*added) : ClipID();
 }
 
@@ -431,13 +432,13 @@ void setCrossfade (ProjectContext& context, const CrossfadeSpot& spot, BeatPosit
 //==============================================================================
 bool canImport (const ProjectContext& context, const juce::File& file)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     return edit != nullptr && getFileKind (edit->engine, file) != FileKind::other;
 }
 
 std::vector<ClipID> importFiles (ProjectContext& context, const juce::StringArray& paths, TrackID target, BeatPosition start)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     return edit != nullptr ? idsOf (importFiles (*edit, paths, findTrack (context, target), toTracktion (start))) : std::vector<ClipID>();
 }
 
@@ -445,7 +446,7 @@ std::vector<SongSection> getSongSections (const ProjectContext& context)
 {
     std::vector<SongSection> sections;
 
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         for (auto* section : getSections (*edit))
             sections.push_back (makeSection (*section));
 
@@ -462,8 +463,8 @@ std::optional<SongSection> getSongSection (const ProjectContext& context, Sectio
 
 SectionID addSectionAt (ProjectContext& context, BeatPosition beat)
 {
-    auto* edit = context.getEdit();
-    auto* added = edit != nullptr ? addSectionAt (*edit, toTracktion (beat), &context.getSelection()) : nullptr;
+    auto* edit = getEdit (context);
+    auto* added = edit != nullptr ? addSectionAt (*edit, toTracktion (beat), &getSelection (context)) : nullptr;
     return added != nullptr ? getSectionID (*added) : SectionID();
 }
 
@@ -483,7 +484,7 @@ std::vector<BeatPosition> getSectionBoundaries (const ProjectContext& context)
 {
     std::vector<BeatPosition> boundaries;
 
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         for (const auto boundary : getSectionBoundaries (*edit))
             boundaries.push_back (fromTracktion (boundary));
 
@@ -511,13 +512,13 @@ void resizeSection (ProjectContext& context, SectionID id, BeatDuration newLengt
 
 BeatPosition getPlayStartBeat (const ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (getPlayStart (*edit))) : BeatPosition();
 }
 
 BeatPosition getTimelineEnd (const ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength()))) : BeatPosition();
 }
 } // namespace phazite

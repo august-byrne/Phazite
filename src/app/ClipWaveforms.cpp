@@ -2,6 +2,7 @@
 #include "ClipWaveforms.h"
 #include "model/base/Tracktion.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace phazite
 {
@@ -58,7 +59,7 @@ namespace
 
         te::Clip* findClip() const
         {
-            auto* edit = context.getEdit();
+            auto* edit = getEdit (context);
             return edit != nullptr ? te::findClipForID (*edit, toTracktion (clipID)) : nullptr;
         }
 

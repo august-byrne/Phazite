@@ -70,9 +70,9 @@ private:
     };
 
     ProjectContext& context;
-    SongSelection& selection;  // the context's, by IDs
-    SongRange& range;          // a time range across tracks
-    juce::ValueTree editState; // the open project's, to tell another project from the same one
+    SongSelection& selection; // the context's, by IDs
+    SongRange& range;         // a time range across tracks
+    int shownProject = -1;    // the project shown (ProjectContext::getProjectNumber()), to tell another one from the same one
     int scrollY = 0;
 
     SectionsStrip sectionsStrip; // in the time bar, above the ruler

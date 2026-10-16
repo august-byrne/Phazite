@@ -2,6 +2,7 @@
 #include "SongGesture.h"
 #include "Undo.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace phazite
 {
@@ -13,7 +14,7 @@ struct SongGesture::Impl
 SongGesture::SongGesture (ProjectContext& context, const juce::String& name)
     : impl (std::make_unique<Impl>())
 {
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         impl->gesture = std::make_unique<Gesture> (*edit, name);
 }
 

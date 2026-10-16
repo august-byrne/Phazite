@@ -45,6 +45,7 @@ public:
     void removeChangeListener (juce::ChangeListener*);
 
     struct Impl; // the Engine (internal/EngineContext.h)
+    Impl& getImpl() const noexcept { return *impl; }
     explicit EngineContext (std::unique_ptr<Impl>);
 
 private:

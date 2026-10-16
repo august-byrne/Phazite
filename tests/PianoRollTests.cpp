@@ -9,6 +9,7 @@
 #include "model/mixer/Mixer.h"
 #include "model/notes/Notes.h"
 #include "model/notes/NotesModel.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"
 #include "ui/pianoroll/PianoRoll.h"
 
@@ -30,14 +31,14 @@ struct PianoRollScreen
 
         phazite::ui::addTimelineCommands (registry, [this] { return &pianoRoll; });
         pianoRoll.addCommands (registry);
-        context.setEdit (edit.get());
+        setEdit (context, edit.get());
         phazite::test::dispatchPendingMessages();
 
         notes = phazite::test::findComponentWithTitle (pianoRoll, "Notes");
         REQUIRE (notes != nullptr);
     }
 
-    ~PianoRollScreen() { context.setEdit (nullptr); }
+    ~PianoRollScreen() { setEdit (context, nullptr); }
 
     te::MidiClip& addClip (int track, double start, double length)
     {
@@ -60,8 +61,8 @@ struct PianoRollScreen
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    te::SelectionManager& selection = context.getSelection();
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    te::SelectionManager& selection = getSelection (context);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::PianoRoll pianoRoll { commands, context };

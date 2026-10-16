@@ -6,6 +6,7 @@
 #include "model/commands/Undo.h"
 #include "model/engine/LiveInput.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 #include <unordered_map>
 
@@ -15,7 +16,7 @@ namespace
 {
     te::Track* findTrack (const ProjectContext& context, TrackID id)
     {
-        auto* edit = context.getEdit();
+        auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
     }
 
@@ -26,7 +27,7 @@ namespace
 
     te::MidiClip* findMidiClip (const ProjectContext& context, ClipID id)
     {
-        auto* edit = context.getEdit();
+        auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
     }
 
@@ -195,7 +196,7 @@ std::optional<NoteData> getNote (const ProjectContext& context, NoteRef ref)
 std::vector<NoteData> getNotesOfOtherTracks (const ProjectContext& context, const std::vector<TrackID>& shown, BeatRange range)
 {
     std::vector<NoteData> notes;
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
 
     if (edit == nullptr)
         return notes;
@@ -284,14 +285,14 @@ void setNotes (ProjectContext& context, const std::vector<NoteData>& notes)
 
 std::vector<NoteRef> replaceNotes (ProjectContext& context, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     return edit != nullptr ? refsOf (replaceNotes (*edit, findNotes (context, old), replacements)) : std::vector<NoteRef>();
 }
 
 std::vector<NoteRef> replaceNotes (ProjectContext& context, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements,
                                    const juce::String& undoName)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     return edit != nullptr ? refsOf (replaceNotes (*edit, findNotes (context, old), replacements, undoName)) : std::vector<NoteRef>();
 }
 
@@ -315,7 +316,7 @@ void chooseTrackKey (ProjectContext& context, TrackID id, const std::optional<Ke
 
 void useKeyOnEveryTrack (ProjectContext& context, const std::optional<Key>& key)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
 
     if (edit == nullptr)
         return;
@@ -406,6 +407,6 @@ void stopAuditioning (ProjectContext& context, TrackID id)
 //==============================================================================
 void addNoteCommands (CommandRegistry& registry, ProjectContext& context, std::function<double()> getGridStepInBeats)
 {
-    addNoteCommands (registry, context.getSelection(), std::move (getGridStepInBeats));
+    addNoteCommands (registry, getSelection (context), std::move (getGridStepInBeats));
 }
 } // namespace phazite

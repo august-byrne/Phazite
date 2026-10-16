@@ -82,7 +82,7 @@ private:
 
     ProjectContext& context;
     SongSelection& selection;  // the context's
-    juce::ValueTree editState; // the project shown, to tell another project from the same one
+    int shownProject = -1;     // the project shown (ProjectContext::getProjectNumber()), to tell another one from the same one
     std::vector<ClipID> clips; // shown
     ClipID targetClip;         // where new notes go, if the click isn't in a clip
     TrackID emptyTrack;        // a track shown without clips; a note drawn makes one

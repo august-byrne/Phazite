@@ -3,6 +3,7 @@
 #include "TestHelpers.h"
 #include "model/commands/Undo.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/timeline/TimelineGesture.h"
 
 using phazite::BeatPosition;
@@ -12,8 +13,8 @@ TEST_CASE ("A gesture's changes are one undo step, the first one's, however many
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     const auto name = track->getName();
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    context.setEdit (edit.get());
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    setEdit (context, edit.get());
     edit->getUndoManager().clearUndoHistory();
 
     {

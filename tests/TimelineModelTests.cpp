@@ -5,6 +5,7 @@
 #include "model/arrangement/TimelineModel.h"
 #include "model/commands/SongGesture.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"
 #include "model/transport/Tempo.h"
 
@@ -21,14 +22,14 @@ BeatPosition beat (double beats)
 TEST_CASE ("The time line's bars follow the time signature, and the grid snaps in beats")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     // With no project open, a new song's 4/4.
     CHECK (phazite::getBeatsPerBar (context, beat (0.0)) == 4);
     CHECK (phazite::getBarStart (context, 2).inBeats() == doctest::Approx (8.0));
     CHECK (phazite::snapToGrid (context, beat (2.7), { 9, false }).inBeats() == doctest::Approx (2.7)); // nothing to snap to
 
-    context.setEdit (edit.get());
+    setEdit (context, edit.get());
     phazite::setTimeSignature (*edit, { 3, 4 });
     CHECK (phazite::getBeatsPerBar (context, beat (0.0)) == 3);
     CHECK (phazite::getBarAt (context, beat (7.0)) == 2);
@@ -61,19 +62,19 @@ TEST_CASE ("The time line's bars follow the time signature, and the grid snaps i
     grid.adaptive = false;
     grid.fixedLevel = 7;
     CHECK (phazite::getGridStep (context, grid, beat (0.0), 2.0, 20.0).level == 7);
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("The playhead and the loop by beats, through the project's context")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     CHECK (phazite::getPlayheadBeat (context).inBeats() == doctest::Approx (0.0));
     CHECK_FALSE (phazite::getLoop (context).has_value());
     phazite::loopRange (context, { beat (4.0), beat (8.0) }); // no project: nothing to loop
 
-    context.setEdit (edit.get());
+    setEdit (context, edit.get());
     phazite::movePlayhead (context, beat (6.0));
     CHECK (phazite::getPlayheadBeat (context).inBeats() == doctest::Approx (6.0));
     CHECK (phazite::getPlayStart (*edit) == edit->tempoSequence.toTime (te::BeatPosition::fromBeats (6.0)));
@@ -91,7 +92,7 @@ TEST_CASE ("The playhead and the loop by beats, through the project's context")
     CHECK_FALSE (phazite::getLoop (context).has_value());
     phazite::loopSong (context);
     CHECK (phazite::getLoop (context).has_value());
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("A song gesture is one undo step for the open project, and nothing without one")
@@ -99,14 +100,14 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     const auto name = track->getName();
-    phazite::ProjectContext context { phazite::test::getEngine() };
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     {
         phazite::SongGesture none (context, "Nothing");
         CHECK_FALSE (none.isOpen());
     }
 
-    context.setEdit (edit.get());
+    setEdit (context, edit.get());
     edit->getUndoManager().clearUndoHistory();
 
     {
@@ -129,5 +130,5 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
     }
 
     CHECK (track->getName() == name);
-    context.setEdit (nullptr);
+    setEdit (context, nullptr);
 }

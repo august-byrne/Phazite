@@ -18,6 +18,7 @@
 #include "model/notes/Notes.h"
 #include "model/project/Project.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/Playback.h"
 
 #include <algorithm>
@@ -57,7 +58,7 @@ te::BeatPosition beats (double b)
 void addModelCommands (phazite::CommandRegistry& registry, phazite::ProjectContext& context)
 {
     phazite::addSongCommands (registry, context);
-    phazite::addNoteCommands (registry, context.getSelection(), [] { return 0.25; });
+    phazite::addNoteCommands (registry, getSelection (context), [] { return 0.25; });
 }
 
 //==============================================================================
@@ -213,7 +214,7 @@ struct Script
         one->setName ("One");
         edit.getUndoManager().clearUndoHistory();
 
-        context.setEdit (&edit);
+        setEdit (context, &edit);
         addModelCommands (registry, context);
         snapshot ("start");
     }
@@ -315,9 +316,9 @@ struct Script
     std::unique_ptr<phazite::Project> project = createProject (temp.folder);
     te::Edit& edit = project->getEdit();
     te::AudioTrack* one = nullptr;
-    phazite::ProjectContext context { phazite::test::getEngine() }; // the open project, as the app has it
-    te::SelectionManager& selection = context.getSelection();
-    phazite::RangeSelection& range = context.getRangeSelection();
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    te::SelectionManager& selection = getSelection (context);
+    phazite::RangeSelection& range = getRangeSelection (context);
     phazite::CommandRegistry registry;
     std::unique_ptr<te::SelectedMidiEvents> events; // the selected notes, while the script edits them
 
@@ -332,7 +333,7 @@ TEST_SUITE ("golden")
 {
     TEST_CASE ("Golden commands: the model's commands keep their ids, texts, switches and order")
     {
-        phazite::ProjectContext context { phazite::test::getEngine() };
+        phazite::ProjectContext context { phazite::test::getEngineContext() };
         phazite::CommandRegistry registry;
         addModelCommands (registry, context);
 

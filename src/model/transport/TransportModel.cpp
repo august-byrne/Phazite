@@ -5,24 +5,25 @@
 #include "model/commands/Undo.h"
 #include "model/engine/LiveInput.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace phazite
 {
 bool isPlaying (const ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     return edit != nullptr && edit->getTransport().isPlaying();
 }
 
 bool isLoopOn (const ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     return edit != nullptr && isLoopOn (*edit);
 }
 
 std::optional<TimeSignature> getTimeSignature (const ProjectContext& context)
 {
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         return getTimeSignature (*edit);
 
     return {};
@@ -30,13 +31,13 @@ std::optional<TimeSignature> getTimeSignature (const ProjectContext& context)
 
 void setTimeSignature (ProjectContext& context, TimeSignature timeSignature)
 {
-    if (auto* edit = context.getEdit())
+    if (auto* edit = getEdit (context))
         setTimeSignature (*edit, timeSignature);
 }
 
 TrackID getLiveMidiTrack (const ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
     auto* track = edit != nullptr ? getLiveMidiTrack (*edit) : nullptr;
     return track != nullptr ? getTrackID (*track) : TrackID();
 }
@@ -50,7 +51,7 @@ struct TempoHandle::Impl
 
 TempoHandle getTempoHandle (ProjectContext& context)
 {
-    auto* edit = context.getEdit();
+    auto* edit = getEdit (context);
 
     if (edit == nullptr)
         return {};

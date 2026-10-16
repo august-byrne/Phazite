@@ -188,6 +188,7 @@ target_sources(phazite_core PRIVATE
     src/model/project/Project.h
     src/model/project/ProjectContext.cpp
     src/model/project/ProjectContext.h
+    src/model/project/internal/ProjectContext.h
     src/model/project/StarterProject.cpp
     src/model/project/StarterProject.h
     src/model/project/UnsavedProjects.cpp
