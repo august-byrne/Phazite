@@ -199,6 +199,118 @@ te::BeatDuration getMinimumNoteLength()
 }
 
 //==============================================================================
+namespace
+{
+    juce::int64 readNoteID (const juce::ValueTree& note)
+    {
+        return std::max<juce::int64> (0, static_cast<juce::int64> (note[schema::phaziteNoteID]));
+    }
+
+    // The highest note ID in a tree, or 0.
+    juce::int64 findHighestNoteID (const juce::ValueTree& tree)
+    {
+        juce::int64 highest = 0;
+
+        for (const auto& child : tree)
+            highest = std::max (highest, child.hasType (te::IDs::NOTE) ? readNoteID (child) : findHighestNoteID (child));
+
+        return highest;
+    }
+
+    // Among a tree's notes (a sequence's children), gives each that has no ID, or one that a note before it has, the next
+    // ID above the highest among them, in their order; and the same in the trees below it. A clip and its aliases hold
+    // the same notes in the same order, so they get the same IDs, as Tracktion's copying of one alias to the others
+    // keeps them.
+    void assignMissingNoteIDs (const juce::ValueTree& tree)
+    {
+        std::vector<juce::int64> ids;
+
+        for (const auto& child : tree)
+        {
+            if (child.hasType (te::IDs::NOTE))
+                ids.push_back (readNoteID (child));
+            else
+                assignMissingNoteIDs (child);
+        }
+
+        if (ids.empty())
+            return;
+
+        std::sort (ids.begin(), ids.end());
+
+        if (ids.front() > 0 && std::adjacent_find (ids.begin(), ids.end()) == ids.end())
+            return; // as usual, each has one of its own
+
+        auto next = ids.back() + 1;
+        std::set<juce::int64> used;
+
+        for (auto child : tree)
+            if (child.hasType (te::IDs::NOTE))
+                if (const auto id = readNoteID (child); id == 0 || ! used.insert (id).second)
+                    child.setProperty (schema::phaziteNoteID, next++, nullptr);
+    }
+} // namespace
+
+NoteID getNoteID (const te::MidiNote& note)
+{
+    return NoteID::fromRaw ((std::uint64_t) readNoteID (note.state));
+}
+
+te::MidiNote* findNote (const te::MidiClip& clip, NoteID id)
+{
+    if (id.isValid())
+        for (auto* note : clip.getSequence().getNotes())
+            if (getNoteID (*note) == id)
+                return note;
+
+    return nullptr;
+}
+
+NoteRef getNoteRef (const te::MidiClip& clip, const te::MidiNote& note)
+{
+    return { getClipID (clip), getNoteID (note) };
+}
+
+void assignNoteIDs (te::Edit& edit)
+{
+    assignMissingNoteIDs (edit.state);
+}
+
+NoteIDKeeper::NoteIDKeeper (te::Edit& edit)
+    : state (edit.state)
+{
+    assignNoteIDs (edit);
+    next = findHighestNoteID (state) + 1;
+    state.addListener (this);
+}
+
+NoteIDKeeper::~NoteIDKeeper()
+{
+    state.removeListener (this);
+}
+
+void NoteIDKeeper::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
+{
+    // A note added with its ID (put back by an undo, or copied with its clip's other notes) keeps it.
+    if (child.hasType (te::IDs::NOTE))
+    {
+        if (const auto id = readNoteID (child); id > 0)
+            next = std::max (next, id + 1);
+        else
+            child.setProperty (schema::phaziteNoteID, next++, nullptr);
+
+        return;
+    }
+
+    // A clip, or a track, with its notes: those that have no ID yet are numbered in their clip (a MIDI file's, say).
+    if (child.getNumChildren() > 0)
+    {
+        assignMissingNoteIDs (child);
+        next = std::max (next, findHighestNoteID (child) + 1);
+    }
+}
+
+//==============================================================================
 te::SelectedMidiEvents* getSelectedMidiEvents (const te::SelectionManager& selection)
 {
     return selection.getFirstItemOfType<te::SelectedMidiEvents>();

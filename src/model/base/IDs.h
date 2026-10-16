@@ -37,10 +37,33 @@ using TrackID = ItemID<struct TrackKind>;     // a track, a folder or a return t
 using ClipID = ItemID<struct ClipKind>;       // an audio or MIDI clip
 using SectionID = ItemID<struct SectionKind>; // a section of the song (model/arrangement/Sections.h)
 using DeviceID = ItemID<struct DeviceKind>;   // a device on a track or on the master, or a send
+
+// A note, among its clip's notes: no other note of that clip has its ID, but a copy of the clip (an alias too) keeps it
+// (model/notes/Notes.h). Not one of Tracktion's EditItemIDs, so a note is named by its clip and its ID together.
+using NoteID = ItemID<struct NoteKind>;
+
+// A note by its clip and its ID in it.
+struct NoteRef
+{
+    ClipID clip;
+    NoteID note;
+
+    constexpr bool isValid() const noexcept { return clip.isValid() && note.isValid(); }
+    constexpr auto operator<=> (const NoteRef&) const noexcept = default;
+};
 } // namespace phazite
 
 template <typename Kind>
 struct std::hash<phazite::ItemID<Kind>>
 {
     std::size_t operator() (phazite::ItemID<Kind> id) const noexcept { return std::hash<std::uint64_t>() (id.getRaw()); }
+};
+
+template <>
+struct std::hash<phazite::NoteRef>
+{
+    std::size_t operator() (const phazite::NoteRef& ref) const noexcept
+    {
+        return std::hash<std::uint64_t>() (ref.clip.getRaw() * 0x9e3779b97f4a7c15ull + ref.note.getRaw());
+    }
 };

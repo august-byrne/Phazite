@@ -840,7 +840,7 @@ The roadmap's [architecture track](roadmap.md#architecture-track) gets there in 
 - Tracktion's Edit stays the project store: a `.phazite` file is the Edit saved as XML, with Phazite's own properties on Tracktion's nodes and in a `PHAZITE` branch of its own.
 - One schema file names every property Phazite saves, marks which are view state ([section 18](#18-projects-saving-and-export)), and carries a schema version. A project saved by an older version is converted when it opens, by migrations kept next to the schema, each with a test. Phazite doesn't open a project saved by a newer Phazite ([question 17](#25-open-questions)), so nothing it holds is lost.
 - Phazite saves its own values, never Tracktion's enum numbers, so a Tracktion update can't change what a saved project means. The two it saved that way before (the grid's fixed size, and the scale of a track's key and of the key chosen last) are converted.
-- Notes will get stable IDs saved in the project (phase A3), so that selections, undo and scripts can refer to one note reliably.
+- Notes have stable IDs saved in the project (phase A3; project format version 3, 2026-10-16), so that selections, undo and scripts can refer to one note reliably: each note has one that no other note of its clip has, and a copy of a clip, an alias too, keeps them (`schema::phaziteNoteID`).
 
 ## 25. Open questions
 

@@ -4,6 +4,7 @@
 #include "model/base/Schema.h"
 #include "model/engine/EngineSetup.h"
 #include "model/engine/LoudnessMeterPlugin.h"
+#include "model/notes/Notes.h"
 #include "model/transport/Playback.h"
 
 namespace phazite
@@ -29,13 +30,15 @@ namespace
         return a == b && b == a;
     }
 
-    // What every project has, added before the project watches for changes: the format version it is in, and the
-    // master's loudness meter. It isn't the user's change, so it is neither an undo step nor an unsaved change.
+    // What every project has, added before the project watches for changes: the format version it is in, the master's
+    // loudness meter, and an ID for each note. It isn't the user's change, so it is neither an undo step nor an unsaved
+    // change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
         writeCurrentSchemaVersion (edit.state);
         ensureLoudnessMeter (edit);
+        assignNoteIDs (edit);
         edit.getUndoManager().clearUndoHistory();
 
         if (! wasChanged)
@@ -220,8 +223,10 @@ juce::Result Project::save()
     bool saved = false;
 
     {
-        // Saving writes plug-in states into the Edit's state; that isn't a change by the user.
+        // Saving writes plug-in states into the Edit's state, and IDs for the notes that have none yet (those a new
+        // project's content added before it was open); that isn't a change by the user.
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
+        assignNoteIDs (*edit);
 
         // No dialogs, save even if Tracktion sees no change, don't offer to discard. With these
         // arguments Tracktion saves synchronously: write a temporary file, then rename it.
@@ -251,7 +256,8 @@ juce::Result Project::autosave()
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
-        edit->flushState(); // the plug-ins' current states, as a save writes them
+        edit->flushState(); // the plug-ins' current states, and notes' IDs, as a save writes them
+        assignNoteIDs (*edit);
 
         const auto xml = edit->state.createXml();
         juce::TemporaryFile temporary (target);
@@ -274,7 +280,8 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
         return {};
 
     const juce::ScopedValueSetter<bool> writing (isWriting, true);
-    edit->flushState(); // the plug-ins' current states, as a save writes them
+    edit->flushState(); // the plug-ins' current states, and notes' IDs, as a save writes them
+    assignNoteIDs (*edit);
 
     // The copy is a project of its own, so it gets an ID of its own.
     auto state = edit->state.createCopy();

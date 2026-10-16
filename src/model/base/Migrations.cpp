@@ -71,9 +71,28 @@ namespace
     }
 
     //==========================================================================
+    // Version 2 to 3: every note gets an ID, 1 and up among the notes of its sequence, in the order they are saved in.
+
+    // Tracktion's element for a note, as version 2 saved it.
+    const juce::Identifier v2Note { "NOTE" };
+
+    void upgrade2To3 (juce::ValueTree& tree)
+    {
+        auto next = 1;
+
+        for (auto child : tree)
+        {
+            if (child.hasType (v2Note))
+                child.setProperty (schema::phaziteNoteID, next++, nullptr);
+            else
+                upgrade2To3 (child);
+        }
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
-    constexpr Step steps[] = { upgrade0To1, upgrade1To2 };
+    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 

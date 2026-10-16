@@ -50,6 +50,8 @@ te::EditItemID toTracktion (ItemID<Kind> id)
     return te::EditItemID::fromRawID (id.getRaw());
 }
 
+te::EditItemID toTracktion (NoteID) = delete; // a note's ID is Phazite's, not one of Tracktion's (model/notes/Notes.h)
+
 // An item's ID: a track's, a clip's, a section's (an arranger clip's) or a device's.
 inline TrackID getTrackID (const te::Track& track)
 {

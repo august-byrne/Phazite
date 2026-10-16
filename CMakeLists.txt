@@ -570,6 +570,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
         tests/NewProjectTests.cpp
+        tests/NoteIDTests.cpp
         tests/NoteTests.cpp
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp

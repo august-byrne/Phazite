@@ -18,8 +18,8 @@ namespace phazite::schema
 //==============================================================================
 // The project format's version (src/model/base/Migrations.h). Files without schemaVersion are version 0 (saved up to
 // 2026-10-14); version 1 saves the grid's size and keys' scales by name; version 2 can hold Phazite's own devices
-// (roadmap step 1.6), which an older Phazite would drop.
-inline constexpr int currentVersion = 2;
+// (roadmap step 1.6), which an older Phazite would drop; version 3 gives every note an ID (phaziteNoteID).
+inline constexpr int currentVersion = 3;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
@@ -122,6 +122,15 @@ inline const juce::Identifier phaziteTip { "phaziteTip" };
 
 // float 0..1, default 0.5: how intense the section is, for the energy curve.
 inline const juce::Identifier phaziteEnergy { "phaziteEnergy" };
+
+//==============================================================================
+// On notes: Tracktion's NOTEs, in a MIDI clip's SEQUENCE. song
+
+// int, 1 or more: the note's ID (NoteID, model/base/IDs.h), which no other note of its clip has, so that selections, undo
+// and scripts can name one note (decided 2026-10-14). A copy of a clip, an alias too, keeps its notes' IDs. Each note
+// gets one when it is added (model/notes/Notes.h: NoteIDKeeper), and any that has none when a project opens or is saved
+// (assignNoteIDs()). Version 3 added them.
+inline const juce::Identifier phaziteNoteID { "phaziteNoteID" };
 
 //==============================================================================
 // The type of Phazite's loudness meter (LoudnessMeterPlugin), a PLUGIN that every project has on its master.

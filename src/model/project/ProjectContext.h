@@ -16,6 +16,7 @@
 
 namespace phazite
 {
+class NoteIDKeeper;
 class UIBehaviour;
 
 // What changed in the open project's song, in groups, for views to show it again. Changes made at once (in one turn of
@@ -74,6 +75,7 @@ private:
     RangeSelection rangeSelection;
     std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
     juce::ListenerList<Listener> listeners;
+    std::unique_ptr<NoteIDKeeper> noteIDs; // gives the notes added to the open Edit their IDs
     std::unique_ptr<SongWatcher> songWatcher;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProjectContext)

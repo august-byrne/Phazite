@@ -279,9 +279,9 @@ TEST_CASE ("A project in the current format is left as it is")
     CHECK_FALSE (invalid.isValid());
 }
 
-TEST_CASE ("A version 1 project becomes version 2 with nothing else changed")
+TEST_CASE ("A version 1 project without notes becomes the current version with nothing else changed")
 {
-    // Version 2 only adds Phazite's own devices, which a version 1 project has none of.
+    // Version 2 only adds Phazite's own devices, which a version 1 project has none of, and version 3 notes' IDs.
     const auto* version1 =
         R"(<EDIT><PHAZITE schemaVersion="1" gridStep="1 bar"><LASTKEY phaziteKeyRoot="2" phaziteKeyScale="dorian"/></PHAZITE>
                               <TRACK id="1003" phaziteKeyRoot="9" phaziteKeyScale="minor"><PLUGIN type="reverb"/></TRACK></EDIT>)";
@@ -290,10 +290,35 @@ TEST_CASE ("A version 1 project becomes version 2 with nothing else changed")
     CHECK (phazite::getSchemaVersion (state) == 1);
 
     REQUIRE (phazite::migrateToCurrentSchema (state));
-    CHECK (phazite::getSchemaVersion (state) == 2);
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
 
     auto expected = juce::ValueTree::fromXml (version1);
-    expected.getChildWithName (phazite::schema::PHAZITE).setProperty (phazite::schema::schemaVersion, 2, nullptr);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}
+
+TEST_CASE ("A version 2 project becomes version 3 with an ID for each note, 1 and up in each clip")
+{
+    const auto* version2 = R"(<EDIT><PHAZITE schemaVersion="2"/>
+        <TRACK id="1003">
+          <MIDICLIP id="1004"><SEQUENCE ver="1"><NOTE p="60" b="0.0" l="1.0" v="100"/><CONTROL b="0.0" type="7" val="100"/>
+                                                <NOTE p="64" b="1.0" l="1.0" v="90"/></SEQUENCE></MIDICLIP>
+          <MIDICLIP id="1005"><SEQUENCE ver="1"><NOTE p="67" b="0.0" l="2.0" v="80"/></SEQUENCE></MIDICLIP>
+        </TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version2);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == 3);
+
+    // The notes get IDs, and nothing else changes: not the controller event between them, nor the other properties.
+    auto expected = juce::ValueTree::fromXml (version2);
+    expected.getChildWithName (phazite::schema::PHAZITE).setProperty (phazite::schema::schemaVersion, 3, nullptr);
+    const auto track = expected.getChildWithName ("TRACK");
+    const auto first = track.getChild (0).getChildWithName ("SEQUENCE"), second = track.getChild (1).getChildWithName ("SEQUENCE");
+    first.getChild (0).setProperty (phazite::schema::phaziteNoteID, 1, nullptr);
+    first.getChild (2).setProperty (phazite::schema::phaziteNoteID, 2, nullptr);
+    second.getChild (0).setProperty (phazite::schema::phaziteNoteID, 1, nullptr);
     CHECK (state.isEquivalentTo (expected));
 }
 

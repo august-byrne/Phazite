@@ -38,7 +38,7 @@
            gridTriplets="0"
            loopFollowsSong="0"
            outline="golden"
-           schemaVersion="2">
+           schemaVersion="3">
     <LASTKEY phaziteKeyRoot="2"
              phaziteKeyScale="minor"/>
     <PIANOROLL gridAdaptive="0"
@@ -128,21 +128,25 @@
               c="0"
               l="0.25"
               p="36"
+              phaziteNoteID="1"
               v="110"/>
         <NOTE b="2"
               c="0"
               l="0.25"
               p="36"
+              phaziteNoteID="2"
               v="110"/>
         <NOTE b="1"
               c="0"
               l="0.25"
               p="38"
+              phaziteNoteID="3"
               v="110"/>
         <NOTE b="3"
               c="0"
               l="0.25"
               p="38"
+              phaziteNoteID="4"
               v="110"/>
       </SEQUENCE>
     </MIDICLIP>
@@ -217,12 +221,14 @@
                 c="0"
                 l="2"
                 p="62"
+                phaziteNoteID="1"
                 v="90"/>
           <NOTE b="2"
                 c="0"
                 l="1.5"
                 m="1"
                 p="65"
+                phaziteNoteID="2"
                 v="70"/>
         </SEQUENCE>
       </MIDICLIP>
@@ -255,12 +261,14 @@
                 c="0"
                 l="2"
                 p="62"
+                phaziteNoteID="1"
                 v="90"/>
           <NOTE b="2"
                 c="0"
                 l="1.5"
                 m="1"
                 p="65"
+                phaziteNoteID="2"
                 v="70"/>
         </SEQUENCE>
       </MIDICLIP>

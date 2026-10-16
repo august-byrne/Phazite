@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/SongSelection.h"
 #include "model/base/Schema.h"
 #include "model/engine/EngineSetup.h"
+#include "model/notes/Notes.h"
 
 namespace phazite
 {
@@ -142,6 +143,7 @@ ProjectContext::ProjectContext (te::Engine& engine, UIBehaviour* tracktionFocus)
 ProjectContext::~ProjectContext()
 {
     songWatcher = nullptr;
+    noteIDs = nullptr;
 
     if (focus != nullptr)
     {
@@ -159,6 +161,7 @@ void ProjectContext::setEdit (te::Edit* edit)
     selection.edit = nullptr;
     rangeSelection.clear();
     selection.edit = edit;
+    noteIDs = edit != nullptr ? std::make_unique<NoteIDKeeper> (*edit) : nullptr; // before the watcher hears what it writes
     songWatcher->setState (edit != nullptr ? edit->state : juce::ValueTree());
 
     if (focus != nullptr)

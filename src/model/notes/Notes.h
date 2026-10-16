@@ -43,6 +43,34 @@ std::vector<NoteData> getNoteData (const std::vector<ClipNote>&);
 te::BeatDuration getMinimumNoteLength();
 
 //==============================================================================
+// Notes' IDs (schema::phaziteNoteID): each note's, which no other note of its clip has. A copy of a clip keeps them.
+
+NoteID getNoteID (const te::MidiNote&); // none for a note that has no ID yet
+te::MidiNote* findNote (const te::MidiClip&, NoteID);
+NoteRef getNoteRef (const te::MidiClip&, const te::MidiNote&);
+
+// Gives every note of an Edit that has no ID, or one that another note of its clip has, an ID of its own, without an undo
+// step: when a project opens or is saved, and when the project context takes an Edit.
+void assignNoteIDs (te::Edit&);
+
+// While it lives, gives every note added to an Edit an ID, without an undo step, from above the highest the Edit had:
+// the open project's (ProjectContext). It first assigns those the Edit's notes lack (assignNoteIDs()).
+class NoteIDKeeper : private juce::ValueTree::Listener
+{
+public:
+    explicit NoteIDKeeper (te::Edit&);
+    ~NoteIDKeeper() override;
+
+private:
+    juce::ValueTree state;
+    juce::int64 next = 1;
+
+    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
+
+    JUCE_DECLARE_NON_COPYABLE (NoteIDKeeper)
+};
+
+//==============================================================================
 // The selected notes: Tracktion's SelectedMidiEvents, while the selection manager holds it.
 te::SelectedMidiEvents* getSelectedMidiEvents (const te::SelectionManager&);
 std::vector<ClipNote> getSelectedNotes (const te::SelectionManager&);
