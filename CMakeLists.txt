@@ -105,6 +105,8 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/TrackColours.h
     src/model/arrangement/Tracks.cpp
     src/model/arrangement/Tracks.h
+    src/model/base/Beats.h
+    src/model/base/IDs.h
     src/model/base/Migrations.cpp
     src/model/base/Migrations.h
     src/model/base/Schema.cpp
@@ -493,6 +495,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/BeatsTests.cpp
         tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
         tests/ClipTests.cpp
