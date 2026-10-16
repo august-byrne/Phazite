@@ -651,6 +651,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - Project files contain no personal data, and media paths are relative to the project folder ([section 22](#22-privacy-licences-and-trademarks)).
 - Phazite's own data is stored in the project file alongside the engine's: sections and the outline style, track keys, and later the chord lane's source and the window layout. One schema file lists all of it with a schema version; a project saved by an older Phazite is converted when it opens, and Phazite saves its own values, never Tracktion's enum numbers (2026-10-14, [section 24](#24-code-structure)). Version 0 is every project saved up to 2026-10-14; version 1 saves the grid's fixed size and key scales by name; version 2 can hold Phazite's own devices, with the sound files on the drum sampler's pads (step 1.6). A converted project has no unsaved changes when it opens, and its first save keeps the old file in `Backups/`. What happens to a project saved by a newer Phazite is [open question 17](#25-open-questions); until it is decided, Phazite doesn't open one, keeps it in Open Recent, and at startup opens the next recent project instead.
 - **View state** (track heights, collapsed and pinned tracks, drum mode and drum rows, the grids' settings) is saved with the project, so it reopens as it was left. Changing it isn't an undo step and doesn't count as an unsaved change: no `*` in the title bar and no question when closing, as with the playhead's position (2026-10-14).
+- **How the song plays (2026-10-16, [question 18](#25-open-questions)):** whether the loop is on, whether it loops the song or a range, and the metronome's switch are saved with the project too, and, like where the loop is and where playback starts, switching them isn't an unsaved change: they are about playing the song, not the song.
 
 **Export:**
 - WAV and FLAC. MP3 needs an encoder (**Open**).
@@ -867,7 +868,7 @@ Raised by the third round of feedback (2026-10-13):
 Raised by the architecture review (2026-10-14):
 
 17. **Projects from a newer Phazite:** with a schema version in every project (architecture phase A1), Phazite can tell that a newer version saved a project, whose data it might misread or drop when saving. Proposed: don't open it, say that a newer Phazite saved it, keep it in Open Recent, and at startup open the next recent project instead. The alternatives are opening it read-only, or after a warning. Until this is decided, Phazite does as proposed.
-18. **Choosing what loops:** where the loop is doesn't count as an unsaved change, but turning looping on or off, or switching between looping the song and a range, still does: the view state of [section 18](#18-projects-saving-and-export) doesn't include them. Proposed: treat them like the loop's position.
+18. ~~Choosing what loops~~ **Decided (2026-10-16):** turning looping on or off, and switching between looping the song and a range, are treated like the loop's position: saved, but not unsaved changes. So is the metronome's switch, which step 1.7 had counted as the loop's switch was ([section 18](#18-projects-saving-and-export)).
 
 Raised by the golden tests (2026-10-14):
 

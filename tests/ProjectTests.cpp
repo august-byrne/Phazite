@@ -526,12 +526,6 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     };
 
     CHECK (isUnsavedChange ([&project] { project->getPhaziteState().setProperty (schema::outline, "rock", nullptr); }));
-
-    // With looping on and saved, a range looped on purpose (only loopFollowsSong changes, and the uncounted loop points).
-    reopened.getTransport().looping = true;
-    CHECK (isUnsavedChange (
-        [&reopened] { phazite::loopRange (reopened, { te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (6.0) }); }));
-
     CHECK (isUnsavedChange ([&project] { project->getPhaziteState().getOrCreateChildWithName (schema::LASTKEY, nullptr); }));
     CHECK (isUnsavedChange ([t] { phazite::setTrackKey (*t, phazite::Key { 2, te::Scale::dorian }); }));
     CHECK (isUnsavedChange ([f] { phazite::setMixedAsBus (*f, true); }));
@@ -544,4 +538,32 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     REQUIRE (section != nullptr);
     CHECK (isUnsavedChange ([section] { section->state.setProperty (schema::phaziteRole, "chorus", nullptr); }));
     CHECK (isUnsavedChange ([section] { section->state.setProperty (schema::phaziteEnergy, 0.9f, nullptr); }));
+}
+
+TEST_CASE ("Switching the loop on or off, or between the song and a range, is saved but isn't an unsaved change")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Loops");
+    auto& edit = project->getEdit();
+    phazite::test::settle();
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    // It is about playing the song rather than the song (design question 18), as where the loop is.
+    phazite::toggleLoop (edit);
+    phazite::loopRange (edit, { te::TimePosition::fromSeconds (1.0), te::TimePosition::fromSeconds (3.0) });
+    phazite::test::settle();
+    REQUIRE (phazite::isLoopOn (edit));
+    REQUIRE_FALSE (phazite::doesLoopFollowSong (edit));
+    CHECK_FALSE (project->hasUnsavedChanges());
+    REQUIRE (project->autosave().wasOk());
+    CHECK_FALSE (phazite::Project::getAutosaveFile (project->getFile()).exists());
+
+    // Saved, the project opens with it as it was.
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+    project = openProject (file);
+    CHECK (phazite::isLoopOn (project->getEdit()));
+    CHECK_FALSE (phazite::doesLoopFollowSong (project->getEdit()));
+    CHECK (project->getEdit().getTransport().getLoopRange().getStart().inSeconds() == doctest::Approx (1.0));
 }

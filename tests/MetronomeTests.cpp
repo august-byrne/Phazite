@@ -44,7 +44,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
     selection.edit = nullptr;
 }
 
-TEST_CASE ("A project keeps its metronome on, as it keeps its loop")
+TEST_CASE ("A project keeps its metronome on, as it keeps its loop, though switching it isn't an unsaved change")
 {
     phazite::test::TemporaryFolder temp;
     juce::String error;
@@ -52,8 +52,9 @@ TEST_CASE ("A project keeps its metronome on, as it keeps its loop")
     REQUIRE (project != nullptr);
     CHECK_FALSE (phazite::isMetronomeOn (project->getEdit()));
 
+    // It is about playing the song, not the song (design question 18).
     phazite::setMetronomeOn (project->getEdit(), true);
-    CHECK (project->hasUnsavedChanges());
+    CHECK_FALSE (project->hasUnsavedChanges());
     REQUIRE (project->save().wasOk());
 
     const auto file = project->getFile();

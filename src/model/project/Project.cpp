@@ -417,9 +417,10 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
 {
     return (tree.hasType (te::IDs::TRANSPORT)
             && (property == te::IDs::position || property == te::IDs::start || property == te::IDs::loopPoint1
-                || property == te::IDs::loopPoint2))
+                || property == te::IDs::loopPoint2 || property == te::IDs::looping))
+           || (tree.hasType (te::IDs::CLICKTRACK) && (property == te::IDs::active || property == te::IDs::emphasiseBars))
            || (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property))
-           || (tree.hasType (schema::PHAZITE) && schema::isGridProperty (property));
+           || (tree.hasType (schema::PHAZITE) && (schema::isGridProperty (property) || property == schema::loopFollowsSong));
 }
 
 bool Project::isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)

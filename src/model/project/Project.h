@@ -118,8 +118,9 @@ private:
 
     // Tracktion writes these while it plays, without anyone changing the song, so they don't count as changes: the
     // playhead position, and the Edit's input-device states (the inputs it knows, and which track live input goes to).
-    // Nor does where the loop is, which follows the song, or where playback starts; nor do view settings, which are saved
-    // but aren't the song (decision 4: schema::isTrackViewProperty(), isGridProperty() and PIANOROLL). A property
+    // Nor do the loop (where it is, whether it is on, and whether it follows the song), the metronome's switch and where
+    // playback starts, which are about playing the song rather than the song (design question 18); nor do view settings,
+    // which are saved but aren't the song (decision 4: schema::isTrackViewProperty(), isGridProperty() and PIANOROLL). A property
     // (isUncountedProperty()), or an element with everything in it (isUncountedElement()): notifications and the
     // comparison with savedState leave out the same. Never leave out lastSignificantChange: Tracktion's time stamp is how
     // a change it notices outside the Edit's values (a plug-in's own settings) reaches autosave. Tracktion renews it when
