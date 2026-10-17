@@ -2,6 +2,7 @@
 // The playlist's automation lanes (docs/design.md, section 10): each lane's header, under its track's header, and its
 // curve, under its track's clips, which the tools edit through the model (model/automation/AutomationModel.h).
 #include "PlaylistParts.h"
+#include "TrackHeights.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/CommandUI.h"
@@ -13,11 +14,11 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr int resizeEdgeHeight = 4; // a lane header's bottom edge, which resizes the lane when dragged
-    constexpr int colourStripWidth = 8; // as a track header's
-    constexpr int indentPerLevel = 12;  // as a track header's
-    constexpr int modeButtonWidth = 52; // "Touch", "Latch"
-    constexpr int closeButtonSize = 20;
+    constexpr int resizeEdgeHeight = 4;       // a lane header's bottom edge, which resizes the lane when dragged
+    constexpr int colourStripWidth = 8;       // as a track header's
+    constexpr int indentPerLevel = 12;        // as a track header's
+    constexpr int modeButtonWidth = 52;       // "Touch", "Latch"
+    constexpr int collapseButtonSize = 20;    // as a track header's chevron
     constexpr int pixelsPerValue = 2;         // how finely a lane's line is drawn
     constexpr float bendPerLaneHeight = 1.0f; // a drag half the lane's height bends a line from straight to the most it bends
     constexpr float fineFactor = 0.2f;        // Shift moves a value a fifth as far
@@ -76,9 +77,10 @@ Playlist::AutomationLaneView::AutomationLaneView (Playlist& p, TrackID t, const 
     refreshPoints();
 }
 
-void Playlist::AutomationLaneView::update (juce::Colour newColour)
+void Playlist::AutomationLaneView::update (juce::Colour newColour, bool isCollapsed)
 {
     colour = newColour;
+    collapsed = isCollapsed;
     handle = getParameter (playlist.context, parameter);
 
     if (const auto target = getAutomationTarget (playlist.context, parameter))
@@ -99,8 +101,8 @@ void Playlist::AutomationLaneView::refreshPoints()
 //==============================================================================
 juce::Rectangle<float> Playlist::AutomationLaneView::getCurveArea() const
 {
-    // Room for the points' dots at the top and the bottom, above the line under a lane.
-    return getLocalBounds().toFloat().withTrimmedBottom (1.0f).reduced (0.0f, LaneTint::selectedPointRadius + 1.0f);
+    // Room for the points' dots at the top and the bottom, above the line under a lane; a collapsed lane shows no points.
+    return getLocalBounds().toFloat().withTrimmedBottom (1.0f).reduced (0.0f, collapsed ? 2.0f : LaneTint::selectedPointRadius + 1.0f);
 }
 
 float Playlist::AutomationLaneView::valueToY (float value) const
@@ -194,6 +196,9 @@ juce::String Playlist::AutomationLaneView::getValueText (float value) const
 
 juce::String Playlist::AutomationLaneView::describeHere (juce::Point<float> position) const
 {
+    if (collapsed)
+        return "A collapsed lane: its automation still plays. Double-click it, or click its chevron, to expand it.";
+
     if (const auto point = getPointAt (position))
         return getValueText (points[(size_t) *point].value)
                + ". Drag the point to move it (Shift for fine steps, Alt to place it off the grid), double-click to delete it.";
@@ -278,6 +283,9 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
         g.setColour (colour);
         g.strokePath (line, juce::PathStrokeType (GraphTint::curveWidth));
 
+        if (collapsed)
+            return;
+
         // The points: selected ones larger, in the text color with an accent ring, which every track's color shows.
         const auto selected = playlist.selection.getSelectedAutomationPoints();
         const auto isSelected = [&selected, this] (int index)
@@ -315,6 +323,14 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
 //==============================================================================
 void Playlist::AutomationLaneView::mouseMove (const juce::MouseEvent& e)
 {
+    if (collapsed)
+    {
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+        setDescription (describeHere (e.position));
+        setTooltip ({});
+        return;
+    }
+
     const auto onPoint = getPointAt (e.position).has_value();
     const auto onLine = ! onPoint && playlist.getTool() == Tool::smart && getLineAt (e.position).has_value();
     setMouseCursor (onPoint                             ? juce::MouseCursor::DraggingHandCursor
@@ -344,6 +360,15 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
 
     if (! playlist.context.hasProject())
         return;
+
+    // A collapsed lane only shows its line: its menu, or a double-click to expand it.
+    if (collapsed)
+    {
+        if (e.mods.isPopupMenu())
+            playlist.showLaneMenu (track, parameter);
+
+        return;
+    }
 
     if (const auto selected = playlist.selection.getSelectedAutomationPoints(); selected.parameter == parameter)
         selectedBefore = selected.indices;
@@ -729,6 +754,12 @@ void Playlist::AutomationLaneView::addPointAt (juce::Point<float> position, cons
 
 void Playlist::AutomationLaneView::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    if (collapsed)
+    {
+        playlist.setLaneCollapsed (track, parameter, false);
+        return;
+    }
+
     if (playlist.getTool() != Tool::smart && playlist.getTool() != Tool::draw)
         return;
 
@@ -759,34 +790,44 @@ Playlist::AutomationLaneHeader::AutomationLaneHeader (Playlist& p, TrackID t, co
       track (t),
       parameter (shown)
 {
-    setDescription ("An automation lane. Click its name to show another of the track's parameters, and the mode to choose how "
-                    "moving the track's controls while the song plays writes their automation. Drag the bottom edge to resize "
-                    "the lane, and right-click for its menu.");
+    setDescription ("An automation lane. The chevron collapses it to a thin row; in a lane without automation, click the name "
+                    "to show another of the track's parameters; the mode chooses how moving the track's controls while the "
+                    "song plays writes their automation. Drag the bottom edge to resize the lane, and right-click for its menu.");
 
-    nameButton.setTooltip ("Shows another of the track's parameters in this lane");
-    nameButton.onClick = [this] { showParameterMenu(); };
+    collapseButton.setQuiet (true);
+    collapseButton.onClick = [this] { playlist.setLaneCollapsed (track, parameter, ! collapsed); };
+    nameButton.onClick = [this]
+    {
+        if (! automated)
+            showParameterMenu();
+    };
     modeButton.setTooltip ("How moving the track's controls while the song plays writes their automation: Read plays it, "
                            "Touch writes while a control is held, Latch from the first move until playback stops, and Write "
                            "overwrites from when playback starts");
     modeButton.onClick = [this] { showModeMenu(); };
-    closeButton.setQuiet (true);
-    closeButton.setTooltip ("Hides the lane; its automation stays");
-    closeButton.onClick = [this] { hideAutomationLane (playlist.context, parameter); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &nameButton, &modeButton, &closeButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &collapseButton, &nameButton, &modeButton })
     {
         c->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (c);
     }
 }
 
-void Playlist::AutomationLaneHeader::update (const TrackRow& shown)
+void Playlist::AutomationLaneHeader::update (const TrackRow& shown, const LaneRow& lane)
 {
     row = shown;
+    collapsed = lane.collapsed;
     const auto target = getAutomationTarget (playlist.context, parameter);
+    automated = target.has_value() && target->automated;
     const auto name = target.has_value() ? describeTarget (*target) : juce::String ("Automation");
     nameButton.setButtonText (name);
+    nameButton.setTooltip (automated ? "The parameter this lane's automation sets"
+                                     : "Shows another of the track's parameters in this lane, which has no automation yet");
     setTitle ("Automation lane: " + name);
+
+    collapseButton.setIcon (collapsed ? Icon::folded : Icon::expanded);
+    collapseButton.setTitle (collapsed ? "Expand lane" : "Collapse lane");
+    collapseButton.setTooltip (collapsed ? "Shows the lane at its full height" : "Makes the lane a thin row; its automation still plays");
 
     const auto mode = getAutomationMode (playlist.context, track);
     modeButton.setButtonText (getModeName (mode));
@@ -819,15 +860,13 @@ void Playlist::AutomationLaneHeader::resized()
                     .withTrimmedBottom (resizeEdgeHeight);
     auto top = area.removeFromTop (std::min (area.getHeight(), controlHeight));
 
-    // A short lane has room for its name only.
-    const auto roomForButtons = top.getHeight() >= closeButtonSize;
-    modeButton.setVisible (roomForButtons);
-    closeButton.setVisible (roomForButtons);
+    // The chevron first, as on a track's header; a collapsed lane has room for its name only beside it.
+    const auto size = std::min (collapseButtonSize, top.getHeight());
+    collapseButton.setBounds (top.removeFromLeft (collapseButtonSize).withSizeKeepingCentre (size, size));
+    modeButton.setVisible (! collapsed);
 
-    if (roomForButtons)
+    if (! collapsed)
     {
-        closeButton.setBounds (top.removeFromRight (closeButtonSize).withSizeKeepingCentre (closeButtonSize, closeButtonSize));
-        top.removeFromRight (Space::xs);
         modeButton.setBounds (top.removeFromRight (modeButtonWidth).reduced (0, 2));
         top.removeFromRight (Space::xs);
     }
@@ -867,8 +906,17 @@ void Playlist::AutomationLaneHeader::mouseDrag (const juce::MouseEvent& e)
     if (! resizing)
         return;
 
-    // View state, without undo steps; shown at once.
-    setAutomationLaneHeight (playlist.context, parameter, heightAtDragStart + e.getDistanceFromDragStartY());
+    // View state, without undo steps; shown at once. Halfway between a collapsed row and the shortest lane, it snaps to
+    // one or the other, as a track does (TrackHeights.h).
+    const auto height = heightAtDragStart + e.getDistanceFromDragStartY();
+    const auto collapse = height < (TrackHeight::collapsed + AutomationLane::minHeight) / 2;
+
+    if (! collapse)
+        setAutomationLaneHeight (playlist.context, parameter, height);
+
+    if (collapse != collapsed)
+        playlist.setLaneCollapsed (track, parameter, collapse);
+
     playlist.refreshLanes();
 }
 
@@ -935,9 +983,23 @@ void Playlist::showLaneMenu (TrackID track, const ParameterRef& parameter)
     const juce::Component::SafePointer<Playlist> safeThis (this);
     juce::PopupMenu menu;
 
-    menu.addItem ("Clear Automation", ! getAutomationPoints (projectContext, parameter).empty(), false,
-                  [&projectContext, parameter] { clearAutomation (projectContext, parameter); });
-    menu.addItem ("Hide Lane", [&projectContext, parameter] { hideAutomationLane (projectContext, parameter); });
+    // Collapsing it, as its chevron does; and taking it away, with its automation if it has some (an undo brings both
+    // back): automation never hides.
+    auto collapsed = false;
+
+    if (const auto row = getRowOf (track); row >= 0)
+        for (const auto& lane : rows[(size_t) row].lanes)
+            if (lane.lane.parameter == parameter)
+                collapsed = lane.collapsed;
+
+    menu.addItem (collapsed ? "Expand Lane" : "Collapse Lane",
+                  [safeThis, track, parameter, collapsed]
+                  {
+                      if (safeThis != nullptr)
+                          safeThis->setLaneCollapsed (track, parameter, ! collapsed);
+                  });
+    menu.addItem (getAutomationPoints (projectContext, parameter).empty() ? "Remove Lane" : "Delete Automation",
+                  [&projectContext, parameter] { removeAutomationLane (projectContext, parameter); });
     menu.addSeparator();
 
     // The shape Paint draws in every lane.
@@ -1095,9 +1157,26 @@ void Playlist::updateLanes()
     {
         if (const auto rowIndex = getRowOf (laneHeaders[i]->track); rowIndex >= 0)
         {
-            laneHeaders[i]->update (rows[(size_t) rowIndex].track);
-            laneViews[i]->update (rows[(size_t) rowIndex].track.colour);
+            const auto& row = rows[(size_t) rowIndex];
+
+            for (const auto& lane : row.lanes)
+            {
+                if (lane.lane.parameter == laneHeaders[i]->parameter)
+                {
+                    laneHeaders[i]->update (row.track, lane);
+                    laneViews[i]->update (row.track.colour, lane.collapsed);
+                }
+            }
         }
     }
+}
+
+void Playlist::setLaneCollapsed (TrackID track, const ParameterRef& parameter, bool collapse)
+{
+    setAutomationLaneCollapsed (context, parameter, collapse);
+
+    // A lane expanded under a collapsed track opens the track, which kept it thin.
+    if (const auto row = getTrackRow (context, track); ! collapse && row.has_value() && row->collapsed && row->kind != TrackType::folder)
+        setCollapsed (context, track, false);
 }
 } // namespace phazite::ui

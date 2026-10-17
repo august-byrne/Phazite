@@ -75,14 +75,16 @@ void Playlist::layOutRows()
                      : inFocus                           ? getShownTrackHeight (row.track)
                                                          : focusedOutHeight;
 
-        // Its lanes under it, while it is in focus and not a thin collapsed row.
-        const auto showsLanes = inFocus && ! (row.track.collapsed && row.track.kind != TrackType::folder);
+        // Its lanes under it, while it is in focus: thin rows while it is one, or each that is collapsed, but never hidden,
+        // as their automation plays (focus mode is a view of some tracks only). A folder collapses by hiding its tracks.
+        const auto collapsesLanes = row.track.collapsed && row.track.kind != TrackType::folder;
         row.lanesHeight = 0;
 
         for (auto& lane : row.lanes)
         {
+            lane.collapsed = collapsesLanes || lane.lane.collapsed;
             lane.top = row.height + row.lanesHeight;
-            lane.height = showsLanes ? lane.lane.height : 0;
+            lane.height = ! inFocus ? 0 : lane.collapsed ? TrackHeight::collapsed : lane.lane.height;
             row.lanesHeight += lane.height;
         }
 

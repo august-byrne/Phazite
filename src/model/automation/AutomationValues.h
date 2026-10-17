@@ -10,13 +10,15 @@
 
 namespace phazite
 {
-// A lane: a parameter whose automation a track shows under it in the playlist.
+// A lane: a parameter whose automation a track shows under it in the playlist. Every parameter with automation has one,
+// so that automation never hides: a lane only collapses to a thin row.
 struct AutomationLane
 {
-    static constexpr int minHeight = 24, defaultHeight = 48, maxHeight = 320;
+    static constexpr int minHeight = 32, defaultHeight = 48, maxHeight = 320;
 
     ParameterRef parameter {};
-    int height = defaultHeight; // in pixels at an interface scale of 100%
+    int height = defaultHeight; // while it isn't collapsed, in pixels at an interface scale of 100%
+    bool collapsed = false;
 };
 
 // A point where a parameter's automation changes. Between two points it goes from one's value to the next one's along a

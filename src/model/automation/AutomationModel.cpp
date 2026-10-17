@@ -82,16 +82,20 @@ namespace
         }
     }
 
-    // All a parameter's points, as one step.
-    void clearPoints (te::AutomatableParameter& parameter)
+    // A parameter's automation, all its points as one step, and its lane, which is view state: an undo brings back the
+    // automation, and the lane with it.
+    void deleteAutomationOf (te::AutomatableParameter& parameter)
     {
-        if (! parameter.hasAutomationPoints())
-            return;
+        if (parameter.hasAutomationPoints())
+        {
+            std::vector<int> indices ((size_t) parameter.getCurve().getNumPoints());
+            std::iota (indices.begin(), indices.end(), 0);
+            const UndoStep step (parameter.getEdit(), "Delete Automation");
+            deletePoints (parameter, indices);
+        }
 
-        std::vector<int> indices ((size_t) parameter.getCurve().getNumPoints());
-        std::iota (indices.begin(), indices.end(), 0);
-        const UndoStep step (parameter.getEdit(), "Clear Automation");
-        deletePoints (parameter, indices);
+        if (auto* track = getTrackOfParameter (parameter))
+            removeLane (*track, getParameterRef (parameter));
     }
 
     std::vector<te::Track*> getSelectedTracksOf (const ProjectContext& context)
@@ -178,10 +182,10 @@ TrackID showAutomationLane (ProjectContext& context, const ParameterRef& paramet
     return getTrackID (*track);
 }
 
-void hideAutomationLane (ProjectContext& context, const ParameterRef& parameter)
+void removeAutomationLane (ProjectContext& context, const ParameterRef& parameter)
 {
-    if (auto* track = findTrackOf (context, parameter))
-        hideLane (*track, parameter);
+    if (const auto found = find (context, parameter))
+        deleteAutomationOf (*found);
 }
 
 void setAutomationLaneParameter (ProjectContext& context, const ParameterRef& lane, const ParameterRef& replacement)
@@ -196,22 +200,17 @@ void setAutomationLaneHeight (ProjectContext& context, const ParameterRef& param
         setLaneHeight (*track, parameter, height);
 }
 
-void showAutomatedLanes (ProjectContext& context, TrackID id)
+void setAutomationLaneCollapsed (ProjectContext& context, const ParameterRef& parameter, bool collapsed)
 {
-    if (auto* track = findTrack (context, id))
-    {
-        for (auto* parameter : getAutomatableParameters (*track))
-            if (parameter->hasAutomationPoints())
-                showLane (*track, getParameterRef (*parameter));
-
-        openToShow (*track);
-    }
+    if (auto* track = findTrackOf (context, parameter))
+        setLaneCollapsed (*track, parameter, collapsed);
 }
 
-void hideAutomationLanes (ProjectContext& context, TrackID id)
+void setAutomationLanesCollapsed (ProjectContext& context, TrackID id, bool collapsed)
 {
     if (auto* track = findTrack (context, id))
-        hideAllLanes (*track);
+        for (const auto& lane : getLanes (*track))
+            setLaneCollapsed (*track, lane.parameter, collapsed);
 }
 
 //==============================================================================
@@ -278,12 +277,6 @@ void replaceAutomationPoints (ProjectContext& context, const ParameterRef& param
     }
 }
 
-void clearAutomation (ProjectContext& context, const ParameterRef& parameter)
-{
-    if (const auto found = find (context, parameter))
-        clearPoints (*found);
-}
-
 bool isAutomated (const ParameterHandle& handle)
 {
     const auto found = findParameter (handle);
@@ -296,10 +289,10 @@ void showAutomationLane (const ParameterHandle& handle)
         showLaneOf (*found);
 }
 
-void clearAutomation (const ParameterHandle& handle)
+void deleteAutomation (const ParameterHandle& handle)
 {
     if (const auto found = findParameter (handle))
-        clearPoints (*found);
+        deleteAutomationOf (*found);
 }
 
 //==============================================================================
@@ -359,29 +352,34 @@ bool areTracksSelected (const ProjectContext& context)
     return ! getSelectedTracksOf (context).empty();
 }
 
-bool areAutomationLanesShown (const ProjectContext& context)
+bool areAutomationLanesExpanded (const ProjectContext& context)
 {
     const auto tracks = getSelectedTracksOf (context);
-    return std::any_of (tracks.begin(), tracks.end(), [] (const te::Track* track) { return ! getLanes (*track).empty(); });
+
+    return std::any_of (tracks.begin(), tracks.end(),
+                        [] (te::Track* track)
+                        {
+                            const auto lanes = getLanes (*track);
+                            return std::any_of (lanes.begin(), lanes.end(), [] (const AutomationLane& lane) { return ! lane.collapsed; });
+                        });
 }
 
 void toggleAutomationLanes (ProjectContext& context)
 {
-    const auto hide = areAutomationLanesShown (context);
+    const auto collapse = areAutomationLanesExpanded (context);
 
     for (auto* track : getSelectedTracksOf (context))
     {
-        if (hide)
+        // A track without lanes gets its volume's, as Ableton Live shows a new lane; expanded lanes need their track open.
+        if (! collapse)
         {
-            hideAllLanes (*track);
-            continue;
+            if (const auto parameters = getAutomatableParameters (*track); getLanes (*track).empty() && ! parameters.isEmpty())
+                showLane (*track, getParameterRef (*parameters.getFirst()));
+
+            openToShow (*track);
         }
 
-        showAutomatedLanes (context, getTrackID (*track));
-
-        // A track without automation shows its volume's lane, as Ableton Live shows a new lane.
-        if (const auto parameters = getAutomatableParameters (*track); getLanes (*track).empty() && ! parameters.isEmpty())
-            showAutomationLane (context, getParameterRef (*parameters.getFirst()));
+        setAutomationLanesCollapsed (context, getTrackID (*track), collapse);
     }
 }
 
@@ -431,11 +429,12 @@ void addAutomationCommands (CommandRegistry& registry, ProjectContext& context)
     registry.add ({ .id = "automation.showLanes",
                     .name = "Show Automation",
                     .category = "Automation",
-                    .description = "Shows the selected tracks' automation lanes, or hides them while they show.",
-                    .synonyms = { "automation lanes", "envelopes", "hide automation" },
+                    .description = "Expands the selected tracks' automation lanes, or collapses them to thin rows while one shows "
+                                   "expanded. A track without lanes gets one for its volume.",
+                    .synonyms = { "automation lanes", "envelopes", "collapse automation", "expand automation" },
                     .perform = [&context] { toggleAutomationLanes (context); },
                     .isEnabled = [&context] { return areTracksSelected (context); },
-                    .isTicked = [&context] { return areAutomationLanesShown (context); } });
+                    .isTicked = [&context] { return areAutomationLanesExpanded (context); } });
 
     registry.add ({ .id = "automation.raisePoints",
                     .name = "Raise Automation Points",

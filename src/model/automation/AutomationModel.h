@@ -53,22 +53,27 @@ ParameterHandle getParameter (ProjectContext&, const ParameterRef&);
 TrackID getMasterTrack (const ProjectContext&);
 
 //==============================================================================
-// Lanes (AutomationValues.h): the parameters whose automation a track shows under it in the playlist, in their order. View
-// state: saved, but written without undo steps, and not unsaved changes.
+// Lanes (AutomationValues.h): the parameters whose automation a track shows under it in the playlist, in their order.
+// Every parameter with automation has one, after those the track keeps if it keeps none for it, so that automation
+// never hides: a lane only collapses to a thin row. View state: saved, but written without undo steps, and not unsaved
+// changes.
 std::vector<AutomationLane> getAutomationLanes (const ProjectContext&, TrackID);
 
-// Shows a parameter's lane under the track whose device it is, after the lanes it shows already; a lane it shows already
-// stays where it is. Returns the track, or an empty ID for a parameter that isn't there.
+// Shows a parameter's lane under the track whose device it is, after the lanes it shows already, and expands it; a lane
+// it shows already stays where it is. Returns the track, or an empty ID for a parameter that isn't there.
 TrackID showAutomationLane (ProjectContext&, const ParameterRef&);
-void hideAutomationLane (ProjectContext&, const ParameterRef&);
+
+// Takes a lane away: one without automation at once, and one with automation with its automation, as one undo step,
+// "Delete Automation", which an undo brings back, and the lane with it.
+void removeAutomationLane (ProjectContext&, const ParameterRef&);
 
 // The lane shows another parameter of its track's devices instead, in its place (one shown already moves there).
 void setAutomationLaneParameter (ProjectContext&, const ParameterRef& lane, const ParameterRef& replacement);
 void setAutomationLaneHeight (ProjectContext&, const ParameterRef&, int height); // kept within the limits
+void setAutomationLaneCollapsed (ProjectContext&, const ParameterRef&, bool);
 
-// Shows a lane for each of a track's parameters that has automation, or hides them all.
-void showAutomatedLanes (ProjectContext&, TrackID);
-void hideAutomationLanes (ProjectContext&, TrackID);
+// Collapses all of a track's lanes, or expands them.
+void setAutomationLanesCollapsed (ProjectContext&, TrackID, bool);
 
 //==============================================================================
 // Points (AutomationValues.h) of a parameter's automation, at song beats.
@@ -97,14 +102,12 @@ void deleteAutomationPoints (ProjectContext&, const ParameterRef&, const std::ve
 // Replaces the points in a range, its start and end included, with others, as drawing in a lane does: "Draw Automation".
 void replaceAutomationPoints (ProjectContext&, const ParameterRef&, BeatRange, const std::vector<AutomationPoint>&);
 
-void clearAutomation (ProjectContext&, const ParameterRef&); // all its points: "Clear Automation"
-
 // The same for a control's parameter, as its menu reaches it (ui/components/Controls.h: ParameterAttachment): whether it
-// has automation, showing its lane (Automate), and deleting its points (Clear Automation). Nothing for a handle of
-// nothing.
+// has automation, showing its lane (Automate), and deleting its automation with its lane (Delete Automation:
+// removeAutomationLane()). Nothing for a handle of nothing.
 bool isAutomated (const ParameterHandle&);
 void showAutomationLane (const ParameterHandle&);
-void clearAutomation (const ParameterHandle&);
+void deleteAutomation (const ParameterHandle&);
 
 //==============================================================================
 // Write modes (AutomationValues.h): each track has one.
@@ -124,10 +127,10 @@ bool canAutomateLastTouched (const ProjectContext&);
 void automateLastTouched (ProjectContext&);
 juce::String describeAutomateLastTouched (const ProjectContext&);
 
-// Show Automation: the selected tracks show a lane for each automated parameter (a track without automation, its
-// volume's), or, while one of them shows lanes, none.
+// Show Automation: the selected tracks' lanes expand (a track without lanes gets one, for its volume), or, while one of
+// them shows a lane expanded, they all collapse.
 bool areTracksSelected (const ProjectContext&);
-bool areAutomationLanesShown (const ProjectContext&); // a selected track shows lanes
+bool areAutomationLanesExpanded (const ProjectContext&); // a selected track shows a lane expanded
 void toggleAutomationLanes (ProjectContext&);
 
 // The selected points (SongSelection): whether there are any, and moving them later by a distance (earlier, if negative)

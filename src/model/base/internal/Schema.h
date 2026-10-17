@@ -20,8 +20,8 @@ namespace phazite::schema
 // 2026-10-14); version 1 saves the grid's size and keys' scales by name; version 2 can hold Phazite's own devices
 // (roadmap step 1.6), which an older Phazite would drop; version 3 gives every note an ID (phaziteNoteID); version 4 adds
 // automation lanes (PHAZITELANE, roadmap step 2.1); version 5 has no automation clips (step 2.2 until 2026-10-17): their
-// curves are their parameters' own automation.
-inline constexpr int currentVersion = 5;
+// curves are their parameters' own automation; version 6 lets lanes collapse (laneCollapsed).
+inline constexpr int currentVersion = 6;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
@@ -101,7 +101,8 @@ inline const juce::Identifier phaziteBus { "phaziteBus" };
 
 // Child of TRACK, FOLDERTRACK and MASTERTRACK, one for each automation lane the playlist shows under the track, in their
 // order (docs/design.md, section 10): the automation of a parameter of one of the track's devices, its volume and pan
-// included. A lane of a device that isn't on the track any more is ignored. Version 4 added them. view
+// included. A lane of a device that isn't on the track any more is ignored, and a parameter with automation but no lane
+// here shows one after these. Version 4 added them. view
 inline const juce::Identifier PHAZITELANE { "PHAZITELANE" };
 
 // On PHAZITELANE: the device, by the EditItemID Tracktion saves it with ("1042").
@@ -110,8 +111,12 @@ inline const juce::Identifier laneDevice { "device" };
 // On PHAZITELANE: the parameter, by its ID in its device (the paramID of its automation curve in Tracktion's AUTOMATIONCURVE).
 inline const juce::Identifier laneParameter { "parameter" };
 
-// On PHAZITELANE. int 24..320, default 48: the lane's height in the playlist, in pixels at an interface scale of 100%.
+// On PHAZITELANE. int 32..320 (24..320 up to version 5), default 48: the lane's height in the playlist while it isn't
+// collapsed, in pixels at an interface scale of 100%.
 inline const juce::Identifier laneHeight { "height" };
+
+// On PHAZITELANE. true, or none: the lane shows as a thin row. Version 6 added it.
+inline const juce::Identifier laneCollapsed { "collapsed" };
 
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; Project's isUncountedProperty()
 // and isUncountedElement()): on tracks, their heights, collapsed and pinned, drum mode and rows, and their automation

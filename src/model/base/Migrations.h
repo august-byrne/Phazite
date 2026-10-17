@@ -9,6 +9,7 @@
 //              upgrade made on the Edit rather than on the saved state: createEditFromState() makes it for a state saved
 //              before version 5 (model/engine/internal/EngineSetup.h, model/automation/internal/Automation.h:
 //              convertAutomationClips()).
+//   Version 6: lanes that collapse.
 // A change to what projects save raises schema::currentVersion (Schema.h) and adds a step here.
 #pragma once
 

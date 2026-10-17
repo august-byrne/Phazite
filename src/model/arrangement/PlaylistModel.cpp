@@ -109,6 +109,7 @@ namespace
     {
         TrackRow row;
         row.id = getTrackID (track);
+        row.collapsed = isCollapsed (track); // the master's: its lanes are thin rows
 
         if (track.isMasterTrack())
         {
@@ -123,7 +124,6 @@ namespace
         row.kind = track.isFolderTrack() ? TrackType::folder : (getReturnBus (track) >= 0 ? TrackType::returnTrack : TrackType::track);
         row.depth = track.getTrackDepth();
         row.pinned = isPinned (track);
-        row.collapsed = isCollapsed (track);
         row.savedHeight = getSavedTrackHeight (track);
 
         if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))

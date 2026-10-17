@@ -87,14 +87,9 @@ void Playlist::showTrackMenu (TrackID track)
     auto& bridge = getCommands();
     juce::PopupMenu menu;
 
-    // The master's row is there for its lanes.
+    // The master's row is there for its lanes, which its chevron collapses: it has no menu.
     if (const auto row = getRowOf (track); row >= 0 && rows[(size_t) row].track.kind == TrackType::master)
-    {
-        auto& projectContext = context;
-        menu.addItem ("Hide Automation", [&projectContext, track] { hideAutomationLanes (projectContext, track); });
-        menu.showMenuAsync (juce::PopupMenu::Options());
         return;
-    }
 
     addCommandItems (menu, bridge, { "edit.rename", "track.color" });
     menu.addSeparator();

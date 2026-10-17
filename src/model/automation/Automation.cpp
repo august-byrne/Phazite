@@ -148,6 +148,21 @@ namespace
         return found != nullptr && getTrackOfParameter (*found) == &track;
     }
 
+    // Before a change to a track's lanes: it keeps one for each lane it shows without keeping one (of a parameter with
+    // automation), in the order they show, so that they stay in that order.
+    void keepShownLanes (te::Track& track)
+    {
+        for (const auto& shown : getLanes (track))
+        {
+            if (findLaneState (track, shown.parameter).isValid())
+                continue;
+
+            juce::ValueTree lane (schema::PHAZITELANE);
+            writeLane (lane, shown.parameter);
+            track.state.appendChild (lane, nullptr);
+        }
+    }
+
     te::AutomationMode toTracktion (AutomationMode mode)
     {
         switch (mode)
@@ -551,7 +566,7 @@ void convertAutomationClips (te::Edit& edit)
 }
 
 //==============================================================================
-std::vector<AutomationLane> getLanes (const te::Track& track)
+std::vector<AutomationLane> getLanes (te::Track& track)
 {
     std::vector<AutomationLane> lanes;
 
@@ -565,7 +580,17 @@ std::vector<AutomationLane> getLanes (const te::Track& track)
                                           (int) child.getProperty (schema::laneHeight, AutomationLane::defaultHeight));
 
         if (isOnTrack (track, parameter))
-            lanes.push_back ({ parameter, height });
+            lanes.push_back ({ parameter, height, (bool) child[schema::laneCollapsed] });
+    }
+
+    // Automation never hides: a parameter with automation that the track keeps no lane for shows one after the others.
+    for (auto* parameter : getAutomatableParameters (track))
+    {
+        const auto ref = getParameterRef (*parameter);
+
+        if (parameter->hasAutomationPoints()
+            && std::none_of (lanes.begin(), lanes.end(), [&ref] (const AutomationLane& lane) { return lane.parameter == ref; }))
+            lanes.push_back ({ ref });
     }
 
     return lanes;
@@ -573,42 +598,59 @@ std::vector<AutomationLane> getLanes (const te::Track& track)
 
 void showLane (te::Track& track, const ParameterRef& parameter)
 {
-    if (findLaneState (track, parameter).isValid() || ! isOnTrack (track, parameter))
+    if (! isOnTrack (track, parameter))
         return;
+
+    keepShownLanes (track);
+
+    if (auto lane = findLaneState (track, parameter); lane.isValid())
+    {
+        lane.removeProperty (schema::laneCollapsed, nullptr);
+        return;
+    }
 
     juce::ValueTree lane (schema::PHAZITELANE);
     writeLane (lane, parameter);
     track.state.appendChild (lane, nullptr);
 }
 
-void hideLane (te::Track& track, const ParameterRef& parameter)
+void removeLane (te::Track& track, const ParameterRef& parameter)
 {
     if (auto lane = findLaneState (track, parameter); lane.isValid())
         track.state.removeChild (lane, nullptr);
 }
 
-void hideAllLanes (te::Track& track)
-{
-    for (auto i = track.state.getNumChildren(); --i >= 0;)
-        if (schema::isTrackViewElement (track.state.getChild (i)))
-            track.state.removeChild (i, nullptr);
-}
-
 void replaceLane (te::Track& track, const ParameterRef& parameter, const ParameterRef& replacement)
 {
+    keepShownLanes (track);
     auto lane = findLaneState (track, parameter);
 
     if (! lane.isValid() || parameter == replacement || ! isOnTrack (track, replacement))
         return;
 
-    hideLane (track, replacement); // a lane that shows it already moves here
+    removeLane (track, replacement); // a lane that shows it already moves here
     writeLane (lane, replacement);
 }
 
 void setLaneHeight (te::Track& track, const ParameterRef& parameter, int height)
 {
+    keepShownLanes (track);
+
     if (auto lane = findLaneState (track, parameter); lane.isValid())
         lane.setProperty (schema::laneHeight, juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight, height), nullptr);
+}
+
+void setLaneCollapsed (te::Track& track, const ParameterRef& parameter, bool collapsed)
+{
+    keepShownLanes (track);
+
+    if (auto lane = findLaneState (track, parameter); lane.isValid())
+    {
+        if (collapsed)
+            lane.setProperty (schema::laneCollapsed, true, nullptr);
+        else
+            lane.removeProperty (schema::laneCollapsed, nullptr);
+    }
 }
 
 void copyLanes (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers)

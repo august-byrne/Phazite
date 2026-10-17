@@ -70,7 +70,8 @@ private:
     struct LaneRow
     {
         AutomationLane lane;
-        int top = 0, height = 0; // from the top of its track's row; no height while the track hides its lanes
+        int top = 0, height = 0; // from the top of its track's row; no height while its track is out of focus
+        bool collapsed = false;  // a thin row: collapsed itself, or its track is
     };
 
     // A track shown in the playlist, with its lanes under it. Pinned tracks stay in a band at the top; the rest scroll
@@ -142,7 +143,8 @@ private:
     void updateLanes();                               // their colors, modes, selected points and curves
     void noteLanes();                                 // after the lanes were built: one shown since the last time scrolls into view
     void showLaneMenu (TrackID, const ParameterRef&); // a lane's right-click menu
-    int getRowAt (int y) const;                       // y in the lanes; -1 below the last row
+    void setLaneCollapsed (TrackID, const ParameterRef&, bool collapse); // expanding one opens a collapsed track
+    int getRowAt (int y) const;                                          // y in the lanes; -1 below the last row
     int getRowOf (TrackID) const;
     int getRowTop (const Row&) const; // where a row is in the lanes now
     bool isInFocus (TrackID) const;   // in focus mode, the rest are made small

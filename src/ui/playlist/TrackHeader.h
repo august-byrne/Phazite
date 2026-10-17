@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A track's header in the playlist: its color, a handle to move it by, a chevron that collapses it, its name,
+// A track's header in the playlist: its color, a handle to move it by, a chevron that collapses it (and its lanes), its name,
 // mute and solo. Clicking selects the track, double-clicking the name renames it, dragging the handle moves the
 // track, dragging the bottom edge resizes it, and dragging elsewhere selects the tracks the mouse passes.
 #pragma once

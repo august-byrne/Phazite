@@ -63,13 +63,15 @@ std::vector<int> duplicatePoints (te::AutomatableParameter&, const std::vector<i
 void convertAutomationClips (te::Edit&);
 
 //==============================================================================
-// The lanes a track shows, of devices on it (getAutomationLanes()), and changes to them, written without undo steps.
-std::vector<AutomationLane> getLanes (const te::Track&);
-void showLane (te::Track&, const ParameterRef&);
-void hideLane (te::Track&, const ParameterRef&);
-void hideAllLanes (te::Track&);
+// The lanes a track shows (getAutomationLanes()): those it keeps (Schema.h: PHAZITELANE), of devices on it, then one for
+// each of its parameters with automation that it keeps none for, so that automation never hides. Changes to them are
+// written without undo steps, and keep a lane for each of those first, so that the lanes stay in the order shown.
+std::vector<AutomationLane> getLanes (te::Track&);
+void showLane (te::Track&, const ParameterRef&);   // after the others, or where it is; expanded
+void removeLane (te::Track&, const ParameterRef&); // one for a parameter with automation shows again, after the others
 void replaceLane (te::Track&, const ParameterRef& lane, const ParameterRef& replacement);
 void setLaneHeight (te::Track&, const ParameterRef&, int height);
+void setLaneCollapsed (te::Track&, const ParameterRef&, bool);
 
 // After a track was copied (a folder with its tracks): the copy's lanes show the copy's devices, as the original's show
 // the original's, those in its containers too.

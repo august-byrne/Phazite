@@ -12,6 +12,7 @@
 #include "ui/components/Controls.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/Playlist.h"
+#include "ui/playlist/TrackHeights.h"
 #include "ui/theme/DesignTokens.h"
 
 #include <algorithm>
@@ -274,27 +275,51 @@ TEST_CASE ("Dragging over empty lane space selects the points in the rectangle, 
     CHECK (screen.getBeats() == std::vector { 2.0 });
 }
 
-TEST_CASE ("A lane's header hides it, and the master's row shows while the master has lanes")
+TEST_CASE ("A lane's chevron collapses it to a thin row, as a collapsed track's lanes are, and the master's row has one too")
 {
     LaneScreen screen;
     auto& context = screen.context;
+    const auto track = screen.trackID (0);
+    CHECK (phazite::test::findComponentWithTitle (screen.playlist, "Hide lane") == nullptr); // lanes collapse; nothing hides
 
-    auto* hide = phazite::test::findComponentWithTitle (screen.playlist, "Hide lane");
-    REQUIRE (hide != nullptr);
-    phazite::test::Mouse mouse (*hide);
-    mouse.click (hide->getLocalBounds().getCentre());
+    auto* chevron = phazite::test::findComponentWithTitle (screen.playlist, "Collapse lane");
+    REQUIRE (chevron != nullptr);
+    phazite::test::Mouse mouse (*chevron);
+    mouse.click (chevron->getLocalBounds().getCentre());
     phazite::test::dispatchPendingMessages();
-    CHECK (phazite::getAutomationLanes (context, screen.trackID (0)).empty());
-    CHECK (phazite::test::findComponentWithTitle (screen.playlist, "Automation of Volume") == nullptr);
+    REQUIRE (phazite::getAutomationLanes (context, track).size() == 1);
+    CHECK (phazite::getAutomationLanes (context, track)[0].collapsed);
+    CHECK (screen.lane().isShowing());
+    CHECK (screen.lane().getHeight() == phazite::ui::TrackHeight::collapsed);
 
-    // The master's volume: its lane shows under a row named Master, below the tracks.
+    // A double-click on the thin lane expands it.
+    phazite::test::Mouse onLane (screen.lane());
+    onLane.doubleClick (screen.lane().getLocalBounds().getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (phazite::getAutomationLanes (context, track)[0].collapsed);
+    CHECK (screen.lane().getHeight() == phazite::AutomationLane::defaultHeight);
+
+    // A collapsed track's lanes are thin rows too, never hidden.
+    phazite::setCollapsed (context, track, true);
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.lane().isShowing());
+    CHECK (screen.lane().getHeight() == phazite::ui::TrackHeight::collapsed);
+    phazite::setCollapsed (context, track, false);
+    phazite::test::dispatchPendingMessages();
+
+    // The master's volume: its lane shows under a row named Master, below the tracks, whose chevron collapses its lanes.
     phazite::showAutomationLane (context, phazite::getMasterVolume (context).getRef());
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::getMasterRow (context).has_value());
     auto* master = phazite::test::findComponentWithTitle (screen.playlist, "Master");
     REQUIRE (master != nullptr);
     CHECK (master->isShowing());
-    CHECK (phazite::test::findComponentWithTitle (screen.playlist, "Automation of Volume") != nullptr);
+    auto* masterChevron = phazite::test::findComponentWithTitle (*master, "Collapse master's lanes");
+    REQUIRE (masterChevron != nullptr);
+    phazite::test::Mouse onChevron (*masterChevron);
+    onChevron.click (masterChevron->getLocalBounds().getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getMasterRow (context)->collapsed);
 
     // Clicking the master's row selects nothing: it can't be moved or deleted.
     phazite::test::Mouse onMaster (*master);

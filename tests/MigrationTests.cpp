@@ -571,3 +571,20 @@ TEST_CASE ("A version 4 project's automation clips become their parameters' own 
     CHECK_FALSE (project->hasUnsavedChanges());
     CHECK_FALSE (edit.getUndoManager().canUndo());
 }
+
+TEST_CASE ("A version 5 project, whose lanes never collapse, becomes the current version with nothing else changed")
+{
+    const auto* version5 = R"(<EDIT><PHAZITE schemaVersion="5"/>
+        <TRACK id="1003"><PHAZITELANE device="1004" parameter="volume" height="48"/>
+          <PLUGIN type="volume" id="1004" volume="0.5"/>
+        </TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version5);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
+
+    auto expected = juce::ValueTree::fromXml (version5);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}

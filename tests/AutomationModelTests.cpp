@@ -170,7 +170,8 @@ TEST_CASE ("Lanes show under the track whose device they are, as view state with
     phazite::setAutomationLaneParameter (context, song.threshold(), song.volume());
     CHECK (lanesOf (context, a) == std::vector { song.volume() });
 
-    phazite::hideAutomationLane (context, song.volume());
+    // A lane without automation goes at once.
+    phazite::removeAutomationLane (context, song.volume());
     CHECK (lanesOf (context, a).empty());
 
     // A lane of a device that is gone doesn't show, and a parameter that isn't there gets none.
@@ -194,6 +195,68 @@ TEST_CASE ("Showing a lane opens its track, and the folders it is in")
     phazite::showAutomationLane (context, song.threshold());
     CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->collapsed);
     CHECK_FALSE (phazite::getTrackRow (context, idOf (*folder))->collapsed);
+}
+
+TEST_CASE ("Automation never hides: every automated parameter has a lane, which collapses to a thin row")
+{
+    Song song;
+    auto& context = song.context;
+    const auto a = idOf (*song.a);
+    const auto threshold = song.threshold(), volume = song.volume();
+
+    // Automation written where no lane showed (as recording, or an older project, gives it) shows one after the others.
+    phazite::showAutomationLane (context, volume);
+    phazite::addAutomationPoint (context, threshold, { beats (4), -30.0f });
+    CHECK (lanesOf (context, a) == std::vector { volume, threshold });
+    song.edit->getUndoManager().clearUndoHistory();
+
+    // A lane collapses and expands where it is; showing it expands it too. None of it is an undo step.
+    phazite::setAutomationLaneCollapsed (context, threshold, true);
+    auto lanes = phazite::getAutomationLanes (context, a);
+    REQUIRE (lanes.size() == 2);
+    CHECK (lanes[1].parameter == threshold);
+    CHECK (lanes[1].collapsed);
+    CHECK_FALSE (lanes[0].collapsed);
+    phazite::setAutomationLaneCollapsed (context, volume, true);
+    CHECK (lanesOf (context, a) == std::vector { volume, threshold });
+    phazite::showAutomationLane (context, threshold);
+    CHECK_FALSE (phazite::getAutomationLanes (context, a)[1].collapsed);
+    phazite::setAutomationLanesCollapsed (context, a, false);
+    CHECK_FALSE (phazite::getAutomationLanes (context, a)[0].collapsed);
+    CHECK_FALSE (song.edit->getUndoManager().canUndo());
+
+    // Removing a lane with automation deletes the automation, as one step that brings both back.
+    phazite::removeAutomationLane (context, threshold);
+    CHECK (lanesOf (context, a) == std::vector { volume });
+    CHECK (phazite::getAutomationPoints (context, threshold).empty());
+    CHECK (song.describeUndo() == juce::String ("Undo Delete Automation"));
+    phazite::undo (*song.edit);
+    CHECK (lanesOf (context, a) == std::vector { volume, threshold });
+    CHECK (phazite::getAutomationPoints (context, threshold).size() == 1);
+}
+
+TEST_CASE ("Show Automation expands the selected tracks' lanes, or collapses them all while one shows expanded")
+{
+    Song song;
+    auto& context = song.context;
+    const auto a = idOf (*song.a);
+    phazite::CommandRegistry registry;
+    phazite::addAutomationCommands (registry, context);
+    context.getSongSelection().selectOnly (a);
+
+    // A track without lanes gets one for its volume, expanded; again, its lanes collapse.
+    REQUIRE (registry.invoke ("automation.showLanes"));
+    CHECK (lanesOf (context, a) == std::vector { song.volume() });
+    CHECK (registry.find ("automation.showLanes")->isTicked());
+    REQUIRE (registry.invoke ("automation.showLanes"));
+    CHECK (phazite::getAutomationLanes (context, a)[0].collapsed);
+    CHECK_FALSE (registry.find ("automation.showLanes")->isTicked());
+
+    // Expanding them opens their collapsed track.
+    phazite::setCollapsed (context, a, true);
+    REQUIRE (registry.invoke ("automation.showLanes"));
+    CHECK_FALSE (phazite::getAutomationLanes (context, a)[0].collapsed);
+    CHECK_FALSE (phazite::getTrackRow (context, a)->collapsed);
 }
 
 TEST_CASE ("Points are added, moved, bent, deleted and drawn in beats, each edit one named undo step")
@@ -254,10 +317,10 @@ TEST_CASE ("Points are added, moved, bent, deleted and drawn in beats, each edit
     phazite::redo (*song.edit);
     CHECK (beatsOf (phazite::getAutomationPoints (context, threshold)) == std::vector { 2.0, 6.0 });
 
-    phazite::clearAutomation (context, threshold);
+    phazite::removeAutomationLane (context, threshold);
     CHECK (phazite::getAutomationPoints (context, threshold).empty());
     CHECK_FALSE (phazite::getAutomationTarget (context, threshold)->automated);
-    CHECK (song.describeUndo() == juce::String ("Undo Clear Automation"));
+    CHECK (song.describeUndo() == juce::String ("Undo Delete Automation"));
 }
 
 TEST_CASE ("Shapes repeat a whole number of cycles across a range, starting from the first value")
@@ -470,25 +533,31 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
     CHECK_FALSE (phazite::CommandRegistry::isEnabled (*registry.find ("automation.raisePoints")));
 }
 
-TEST_CASE ("Show Automation shows the selected tracks' automated lanes, or a track's volume, and hides them again")
+TEST_CASE ("Show Automation collapses the selected tracks' lanes while one shows expanded, and expands them again")
 {
     Song song;
     auto& context = song.context;
+    const auto a = idOf (*song.a), b = idOf (*song.b);
     phazite::addAutomationPoint (context, song.threshold(), { beats (0), -10.0f });
 
     phazite::CommandRegistry registry;
     phazite::addAutomationCommands (registry, context);
-    context.getSongSelection().selectOnly (idOf (*song.a));
-    context.getSongSelection().add (idOf (*song.b));
+    context.getSongSelection().selectOnly (a);
+    context.getSongSelection().add (b);
 
-    REQUIRE (registry.invoke ("automation.showLanes"));
-    CHECK (lanesOf (context, idOf (*song.a)) == std::vector { song.threshold() });
-    CHECK (lanesOf (context, idOf (*song.b)) == std::vector { phazite::getVolume (context, idOf (*song.b)).getRef() });
+    // A's automation shows a lane, expanded: the selected tracks' lanes collapse.
+    CHECK (lanesOf (context, a) == std::vector { song.threshold() });
     CHECK (registry.find ("automation.showLanes")->isTicked());
-
     REQUIRE (registry.invoke ("automation.showLanes"));
-    CHECK (lanesOf (context, idOf (*song.a)).empty());
-    CHECK (lanesOf (context, idOf (*song.b)).empty());
+    CHECK (phazite::getAutomationLanes (context, a)[0].collapsed);
+    CHECK (lanesOf (context, b).empty());
+    CHECK_FALSE (registry.find ("automation.showLanes")->isTicked());
+
+    // Again: they expand, and B, without lanes, gets one for its volume.
+    REQUIRE (registry.invoke ("automation.showLanes"));
+    CHECK_FALSE (phazite::getAutomationLanes (context, a)[0].collapsed);
+    CHECK (lanesOf (context, b) == std::vector { phazite::getVolume (context, b).getRef() });
+    CHECK (registry.find ("automation.showLanes")->isTicked());
 }
 
 TEST_CASE ("A duplicated track's lanes show its own devices")
@@ -545,7 +614,7 @@ TEST_CASE ("A control's menu automates its parameter, and a device's menu lists 
     auto& context = song.context;
     const auto a = idOf (*song.a);
 
-    // Automate shows the lane, opening the track; Clear Automation deletes the points, as one step.
+    // Automate shows the lane, opening the track; Delete Automation deletes the points as one step, and the lane.
     phazite::setCollapsed (context, a, true);
     auto volume = phazite::getVolume (context, a);
     CHECK_FALSE (phazite::isAutomated (volume));
@@ -555,9 +624,10 @@ TEST_CASE ("A control's menu automates its parameter, and a device's menu lists 
 
     phazite::addAutomationPoint (context, song.volume(), { beats (0), 0.5f });
     CHECK (phazite::isAutomated (volume));
-    phazite::clearAutomation (volume);
+    phazite::deleteAutomation (volume);
     CHECK_FALSE (phazite::isAutomated (volume));
-    CHECK (song.describeUndo() == juce::String ("Undo Clear Automation"));
+    CHECK (lanesOf (context, a).empty());
+    CHECK (song.describeUndo() == juce::String ("Undo Delete Automation"));
 
     // A handle of nothing does nothing.
     phazite::showAutomationLane (phazite::ParameterHandle());
@@ -585,6 +655,6 @@ TEST_CASE ("The master's row is in the playlist while the master has lanes")
     CHECK (master->kind == phazite::TrackType::master);
     CHECK (master->name == juce::String ("Master"));
 
-    phazite::hideAutomationLanes (context, master->id);
+    phazite::removeAutomationLane (context, phazite::getMasterVolume (context).getRef());
     CHECK_FALSE (phazite::getMasterRow (context).has_value());
 }

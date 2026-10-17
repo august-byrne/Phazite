@@ -59,7 +59,7 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
     setTitle (isFolder() ? row.name + " (folder)" : row.name); // what screen readers call the header
 
     if (isMaster())
-        setDescription ("The master's automation lanes are under it. Right-click to hide them.");
+        setDescription ("The master's automation lanes are under it. Its chevron collapses them to thin rows.");
 
     updateCollapseButton();
     updateColours();
@@ -99,11 +99,18 @@ void TrackHeader::updateCollapseButton()
         collapseButton.setTooltip (row.collapsed ? "Shows the folder's tracks. Alt+click: every track"
                                                  : "Hides the folder's tracks. Alt+click: every track");
     }
+    else if (isMaster())
+    {
+        collapseButton.setTitle (row.collapsed ? "Expand master's lanes" : "Collapse master's lanes");
+        collapseButton.setTooltip (row.collapsed ? "Shows the master's automation lanes at their full height"
+                                                 : "Makes the master's automation lanes thin rows; their automation still plays");
+    }
     else
     {
         collapseButton.setTitle (row.collapsed ? "Expand track" : "Collapse track");
-        collapseButton.setTooltip (row.collapsed ? "Shows the track at its full height. Alt+click: every track"
-                                                 : "Makes the track a thin row that shows its name. Alt+click: every track");
+        collapseButton.setTooltip (row.collapsed ? "Shows the track and its automation lanes at their full height. Alt+click: every track"
+                                                 : "Makes the track and its automation lanes thin rows that show their names. Alt+click: "
+                                                   "every track");
     }
 }
 
@@ -179,17 +186,22 @@ void TrackHeader::resized()
                     .withTrimmedBottom (1);
     auto top = area.removeFromTop (juce::jmin (area.getHeight(), controlHeight + Space::xs));
 
-    // Mute and solo shrink to fit a collapsed row. A row shorter than that has room only for the name.
+    // Mute and solo shrink to fit a collapsed row. A row shorter than that has room only for the name. The master's row
+    // has its chevron only, for its lanes.
     const auto size = juce::jmin (buttonSize, top.getHeight() - 2);
-    const auto roomForButtons = size >= minButtonSize && ! isMaster(); // the master's row shows its name only
-    muteSolo.setVisible (roomForButtons);
+    const auto roomForButtons = size >= minButtonSize;
+    muteSolo.setVisible (roomForButtons && ! isMaster());
     collapseButton.setVisible (roomForButtons);
 
     if (roomForButtons)
     {
-        const auto buttonsWidth = 2 * size + Space::xs / 2;
-        muteSolo.setBounds (top.removeFromRight (buttonsWidth).withSizeKeepingCentre (buttonsWidth, size));
-        top.removeFromRight (Space::xs);
+        if (! isMaster())
+        {
+            const auto buttonsWidth = 2 * size + Space::xs / 2;
+            muteSolo.setBounds (top.removeFromRight (buttonsWidth).withSizeKeepingCentre (buttonsWidth, size));
+            top.removeFromRight (Space::xs);
+        }
+
         collapseButton.setBounds (top.removeFromLeft (collapseButtonSize).withSizeKeepingCentre (collapseButtonSize, size));
     }
 

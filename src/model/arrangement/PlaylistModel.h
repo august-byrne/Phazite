@@ -37,7 +37,7 @@ struct TrackRow
     TrackType kind = TrackType::track;
     int depth = 0;                  // how many folders it is in
     bool pinned = false;            // it stays in view while the others scroll
-    bool collapsed = false;         // a thin row, or a folder whose tracks are hidden
+    bool collapsed = false;         // a thin row, a folder whose tracks are hidden, or the master with thin lanes
     std::optional<int> savedHeight; // as the project keeps it, in pixels (view state); the playlist keeps it in range
     bool hasInstrument = false;     // a double-click on it adds a MIDI clip
 };

@@ -56,13 +56,13 @@ struct Playlist::AddTrackRow : public juce::Button
 // them as the engine plays it, in the track's color. The tools edit it: the Smart Tool adds a point where it clicks, drags
 // points and the line (Alt bends the line), and selects the points in a rectangle it drags on empty space; Draw draws
 // steps on the grid (or, with Alt, a free line); Paint draws the chosen shape; Delete deletes the points it passes; Select
-// selects. Each drag is one undo step.
+// selects. Each drag is one undo step. Collapsed, it shows the line in a thin row, and a double-click expands it.
 struct Playlist::AutomationLaneView : public juce::Component,
                                       public juce::SettableTooltipClient
 {
     AutomationLaneView (Playlist&, TrackID, const ParameterRef&);
 
-    void update (juce::Colour); // its color, and what it shows now
+    void update (juce::Colour, bool isCollapsed); // its color, whether it is a thin row, and what it shows now
 
     // A click's point where nothing is: on the grid unless Alt is held, as its own undo step, and selected.
     void addPointAt (juce::Point<float>, const juce::ModifierKeys&);
@@ -95,6 +95,7 @@ struct Playlist::AutomationLaneView : public juce::Component,
     ParameterHandle handle; // its range, value and texts
     ParameterKind kind = ParameterKind::other;
     juce::Colour colour;
+    bool collapsed = false;
     std::vector<AutomationPoint> points; // as shown
 
     Drag drag = Drag::none, pendingDrag = Drag::none;
@@ -135,14 +136,15 @@ struct Playlist::AutomationLaneView : public juce::Component,
 };
 
 //==============================================================================
-// An automation lane's header, under its track's header: the parameter it shows (click for another of the track's),
-// the track's write mode, and a button that hides the lane. Dragging its bottom edge resizes the lane; right-clicking
-// shows the lane's menu.
+// An automation lane's header, under its track's header: a chevron that collapses the lane to a thin row, as a track's
+// does, the parameter it shows (in a lane without automation, click for another of the track's), and the track's write
+// mode. Dragging its bottom edge resizes the lane, collapsing it as a track collapses; right-clicking shows its menu.
 struct Playlist::AutomationLaneHeader : public juce::Component
 {
     AutomationLaneHeader (Playlist&, TrackID, const ParameterRef&);
 
-    void update (const TrackRow&); // the track's color, depth and write mode, and the parameter's name
+    // The track's color, depth and write mode, the parameter's name, and whether the lane is collapsed.
+    void update (const TrackRow&, const LaneRow&);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -155,8 +157,9 @@ struct Playlist::AutomationLaneHeader : public juce::Component
     const TrackID track;
     const ParameterRef parameter;
     TrackRow row;
+    bool collapsed = false, automated = false;
+    IconButton collapseButton { "Collapse lane", Icon::expanded };
     juce::TextButton nameButton, modeButton;
-    IconButton closeButton { "Hide lane", Icon::close };
     bool resizing = false;
     int heightAtDragStart = 0;
 
