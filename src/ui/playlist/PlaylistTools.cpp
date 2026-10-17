@@ -173,13 +173,19 @@ void Playlist::selectClipsIn (juce::Rectangle<int> area, bool addToSelection)
 //==============================================================================
 bool Playlist::canNudgeSelection() const
 {
-    return ! range.isEmpty() || ! selection.getClips().empty();
+    return ! range.isEmpty() || ! selection.getClips().empty() || hasSelectedAutomationPoints (context);
 }
 
 void Playlist::nudgeSelection (int direction)
 {
     // A step of the grid as it is now, so what is seen is what moves.
     const auto step = BeatDuration::fromBeats (direction * getGridStepInBeats());
+
+    if (hasSelectedAutomationPoints (context))
+    {
+        moveSelectedAutomationPoints (context, step, 0.0f);
+        return;
+    }
 
     if (const auto clips = selection.getClips(); ! clips.empty())
     {
@@ -252,6 +258,10 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     gesture = nullptr;
 
     if (! context.hasProject())
+        return;
+
+    // The master's row holds no clips, only the lanes under it.
+    if (const auto row = getRowAt (e.y); row >= 0 && rows[(size_t) row].track.kind == TrackType::master && getTool() != Tool::zoom)
         return;
 
     gesture = std::make_unique<Gesture>();

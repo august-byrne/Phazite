@@ -46,6 +46,11 @@ ParameterHandle makeParameterHandle (te::Plugin* plugin, const juce::String& par
     return ParameterHandle (std::move (impl));
 }
 
+te::AutomatableParameter::Ptr findParameter (const ParameterHandle& handle)
+{
+    return handle.getImpl() != nullptr ? handle.getImpl()->find() : nullptr;
+}
+
 ParameterHandle::ParameterHandle() = default;
 
 ParameterHandle::ParameterHandle (std::unique_ptr<Impl> i)

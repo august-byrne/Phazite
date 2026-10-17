@@ -2,6 +2,7 @@
 #include "AutomationModel.h"
 #include "internal/Automation.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
@@ -10,6 +11,7 @@
 #include "model/project/internal/ProjectContext.h"
 
 #include <cmath>
+#include <numeric>
 
 namespace phazite
 {
@@ -83,12 +85,37 @@ namespace
         return target;
     }
 
-    // A lane that shows needs its track, and the folders it is in, open.
-    void openToShow (ProjectContext& context, const te::Track& track)
+    // A lane that shows needs its track, and the folders it is in, open (view state, without undo steps).
+    void openToShow (te::Track& track)
     {
-        for (const auto* t = &track; t != nullptr; t = t->getParentFolderTrack())
-            if (const auto row = getTrackRow (context, getTrackID (*t)); row.has_value() && row->collapsed)
-                setCollapsed (context, row->id, false);
+        for (auto* t = &track; t != nullptr; t = t->getParentFolderTrack())
+            if (isCollapsed (*t))
+                setCollapsed (*t, false);
+    }
+
+    void showLaneOf (te::AutomatableParameter& parameter)
+    {
+        if (auto* track = getTrackOfParameter (parameter))
+        {
+            showLane (*track, getParameterRef (parameter));
+            openToShow (*track);
+        }
+    }
+
+    std::vector<int> getAllIndices (const te::AutomatableParameter& parameter)
+    {
+        std::vector<int> indices ((size_t) parameter.getCurve().getNumPoints());
+        std::iota (indices.begin(), indices.end(), 0);
+        return indices;
+    }
+
+    void clearPointsOf (te::AutomatableParameter& parameter)
+    {
+        if (parameter.hasAutomationPoints())
+        {
+            const UndoStep step (parameter.getEdit(), "Clear Automation");
+            deletePoints (parameter, getAllIndices (parameter));
+        }
     }
 
     std::vector<te::Track*> getSelectedTracksOf (const ProjectContext& context)
@@ -111,6 +138,23 @@ std::vector<AutomationTarget> getAutomationTargets (const ProjectContext& contex
     if (auto* track = findTrack (context, id))
         for (auto* parameter : getAutomatableParameters (*track))
             targets.push_back (makeTarget (*parameter, *track));
+
+    return targets;
+}
+
+std::vector<AutomationTarget> getAutomationTargets (const ProjectContext& context, DeviceID device)
+{
+    std::vector<AutomationTarget> targets;
+    auto* edit = getEdit (context);
+    const auto found = edit != nullptr && device.isValid() ? te::findPluginForID (*edit, toTracktion (device)) : nullptr;
+    auto* track = found != nullptr && ! found->getAutomatableParameters().isEmpty()
+                      ? getTrackOfParameter (*found->getAutomatableParameters().getFirst())
+                      : nullptr;
+
+    if (track != nullptr)
+        for (auto* parameter : getAutomatableParameters (*track))
+            if (parameter->getPlugin() == found.get())
+                targets.push_back (makeTarget (*parameter, *track));
 
     return targets;
 }
@@ -154,7 +198,7 @@ TrackID showAutomationLane (ProjectContext& context, const ParameterRef& paramet
         return {};
 
     showLane (*track, parameter);
-    openToShow (context, *track);
+    openToShow (*track);
     return getTrackID (*track);
 }
 
@@ -184,7 +228,7 @@ void showAutomatedLanes (ProjectContext& context, TrackID id)
             if (parameter->hasAutomationPoints())
                 showLane (*track, getParameterRef (*parameter));
 
-        openToShow (context, *track);
+        openToShow (*track);
     }
 }
 
@@ -260,12 +304,26 @@ void replaceAutomationPoints (ProjectContext& context, const ParameterRef& param
 
 void clearAutomation (ProjectContext& context, const ParameterRef& parameter)
 {
-    if (const auto found = find (context, parameter); found != nullptr && found->hasAutomationPoints())
-    {
-        const UndoStep step (found->getEdit(), "Clear Automation");
-        found->getCurve().clear (&found->getEdit().getUndoManager());
-        replacePoints (*found, {}, {}); // follows what is left: nothing
-    }
+    if (const auto found = find (context, parameter))
+        clearPointsOf (*found);
+}
+
+bool isAutomated (const ParameterHandle& handle)
+{
+    const auto found = findParameter (handle);
+    return found != nullptr && found->hasAutomationPoints();
+}
+
+void showAutomationLane (const ParameterHandle& handle)
+{
+    if (const auto found = findParameter (handle))
+        showLaneOf (*found);
+}
+
+void clearAutomation (const ParameterHandle& handle)
+{
+    if (const auto found = findParameter (handle))
+        clearPointsOf (*found);
 }
 
 //==============================================================================

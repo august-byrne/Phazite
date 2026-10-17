@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceSlots.h"
 #include "StripParts.h"
+#include "model/automation/AutomationModel.h"
 #include "model/project/ProjectContext.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/theme/LookAndFeel.h"
@@ -316,6 +317,18 @@ void DeviceSlots::showSlotMenu (const DeviceSlot& device)
     juce::PopupMenu menu;
     menu.addItem ("Open Window", [&projectContext, id] { showDeviceWindow (projectContext, id); });
     menu.addItem ("On", true, device.isOn, act ([&projectContext, id, on = device.isOn] { setDeviceOn (projectContext, id, ! on); }));
+
+    // Its parameters, each of which shows its automation lane under the track in the playlist; those with automation
+    // ticked. A plug-in's own window can't offer this: Automate Last Touched does, for the knob moved last.
+    juce::PopupMenu automate;
+
+    for (const auto& target : getAutomationTargets (projectContext, id))
+        automate.addItem (
+            juce::PopupMenu::Item (target.name)
+                .setTicked (target.automated)
+                .setAction ([&projectContext, parameter = target.parameter] { showAutomationLane (projectContext, parameter); }));
+
+    menu.addSubMenu ("Automate", automate, automate.getNumItems() > 0);
     menu.addSeparator();
 
     if (kind == Kind::instrument)

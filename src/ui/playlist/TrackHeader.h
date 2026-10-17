@@ -74,6 +74,7 @@ private:
     bool selected = false;
 
     bool isFolder() const noexcept { return row.kind == TrackType::folder; }
+    bool isMaster() const noexcept { return row.kind == TrackType::master; }
     juce::Colour getBackground() const; // the surface, tinted with the track's color
     void updateColours();
     void updateCollapseButton();

@@ -278,6 +278,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/square.svg
         resources/icons/lucide/star.svg
         resources/icons/lucide/volume-x.svg
+        resources/icons/lucide/x.svg
         resources/icons/lucide/zoom-in.svg)
 
 target_link_libraries(phazite_core PRIVATE phazite_data)
@@ -428,6 +429,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/playlist/ClipWaveform.h
     src/ui/playlist/Playlist.cpp
     src/ui/playlist/Playlist.h
+    src/ui/playlist/PlaylistAutomation.cpp
     src/ui/playlist/PlaylistDrops.cpp
     src/ui/playlist/PlaylistParts.h
     src/ui/playlist/PlaylistRows.cpp
@@ -553,6 +555,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/AutomationLaneTests.cpp
         tests/AutomationModelTests.cpp
         tests/BeatsTests.cpp
         tests/BrowserModelTests.cpp

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Controls.h"
 #include "ValueText.h"
+#include "model/automation/AutomationModel.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -38,12 +39,29 @@ ValueSlider::ValueSlider (SliderStyle style, const juce::String& title, double d
 
 void ValueSlider::mouseDown (const juce::MouseEvent& e)
 {
+    showedMenu = e.mods.isPopupMenu() && onContextMenu != nullptr;
+
+    if (showedMenu)
+    {
+        onContextMenu();
+        return;
+    }
+
     fineDrag = e.mods.isShiftDown();
     juce::Slider::mouseDown (e);
 }
 
+void ValueSlider::mouseUp (const juce::MouseEvent& e)
+{
+    if (! showedMenu)
+        juce::Slider::mouseUp (e);
+}
+
 void ValueSlider::mouseDrag (const juce::MouseEvent& e)
 {
+    if (showedMenu)
+        return;
+
     if (fineDrag)
         juce::Slider::mouseDrag (e.withNewPosition (e.mouseDownPosition + (e.position - e.mouseDownPosition) * fineDragFactor));
     else
@@ -220,6 +238,34 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s)
 
     // During a drag it moves the gesture's value; a key press or a double-click is a step of its own.
     slider.onValueChange = [this] { handle.setValue ((float) slider.getValue()); };
+
+    // A right-click offers to automate the parameter (docs/design.md, section 10).
+    if (auto* valueSlider = dynamic_cast<ValueSlider*> (&slider))
+        valueSlider->onContextMenu = [this] { showMenu(); };
+}
+
+void ParameterAttachment::showMenu()
+{
+    if (! handle.isValid())
+        return;
+
+    // The slider and this go together; the menu's choices come later, when either may be gone.
+    const juce::Component::SafePointer<juce::Slider> safeSlider (&slider);
+    juce::PopupMenu menu;
+    menu.addSectionHeader (handle.getName());
+    menu.addItem ("Automate",
+                  [this, safeSlider]
+                  {
+                      if (safeSlider != nullptr)
+                          showAutomationLane (handle);
+                  });
+    menu.addItem ("Clear Automation", isAutomated (handle), false,
+                  [this, safeSlider]
+                  {
+                      if (safeSlider != nullptr)
+                          clearAutomation (handle);
+                  });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&slider));
 }
 
 void ParameterAttachment::setParameter (ParameterHandle newHandle)

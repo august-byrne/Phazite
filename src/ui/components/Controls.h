@@ -30,14 +30,20 @@ public:
     // as the value, and what shows while dragging.
     ValueSlider (SliderStyle, const juce::String& title, double defaultValue);
 
+    // What a right-click shows, such as its parameter's menu (ParameterAttachment sets it); none by default. A right-click
+    // that shows it doesn't move the value.
+    std::function<void()> onContextMenu;
+
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
     void focusGained (FocusChangeType) override { repaint(); }
     void focusLost (FocusChangeType) override { repaint(); }
     void resized() override;
 
 private:
-    bool fineDrag = false; // Shift was held when the drag started
+    bool fineDrag = false;   // Shift was held when the drag started
+    bool showedMenu = false; // the press was a right-click that showed the menu
 };
 
 // A rotary control, dragged up and down or left and right.
@@ -103,8 +109,9 @@ void setPrimary (juce::TextButton&, bool primary);
 //==============================================================================
 // Links a slider to a parameter of a device, such as a track's volume. Moving the slider sets the parameter, as one
 // named undo step per drag or key press, which the model's ParameterHandle owns; update() shows changes made
-// elsewhere, such as undo or automation. The device may be deleted at any time (when a project closes, for example):
-// the slider then turns off.
+// elsewhere, such as undo or automation. Right-clicking one of Phazite's sliders offers to automate the parameter: its
+// lane shows under its track in the playlist. The device may be deleted at any time (when a project closes, for
+// example): the slider then turns off.
 class ParameterAttachment
 {
 public:
@@ -125,6 +132,7 @@ private:
     ParameterHandle handle; // owns the undo steps: the slider only reports its drags and values
 
     void showRange (const ParameterHandle&);
+    void showMenu(); // a right-click's: Automate, and Clear Automation
 };
 
 // Links a combo box to a parameter of one of Phazite's devices whose value picks one of its choices: the box lists

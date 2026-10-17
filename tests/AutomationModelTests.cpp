@@ -536,3 +536,53 @@ TEST_CASE ("Lanes and the values automation plays are no unsaved changes")
     volume->state.setProperty (te::IDs::pan, 0.5f, nullptr);
     CHECK (project->hasUnsavedChanges());
 }
+
+TEST_CASE ("A control's menu automates its parameter, and a device's menu lists the device's parameters")
+{
+    Song song;
+    auto& context = song.context;
+    const auto a = idOf (*song.a);
+
+    // Automate shows the lane, opening the track; Clear Automation deletes the points, as one step.
+    phazite::setCollapsed (context, a, true);
+    auto volume = phazite::getVolume (context, a);
+    CHECK_FALSE (phazite::isAutomated (volume));
+    phazite::showAutomationLane (volume);
+    CHECK (lanesOf (context, a) == std::vector { song.volume() });
+    CHECK_FALSE (phazite::getTrackRow (context, a)->collapsed);
+
+    phazite::addAutomationPoint (context, song.volume(), { beats (0), 0.5f });
+    CHECK (phazite::isAutomated (volume));
+    phazite::clearAutomation (volume);
+    CHECK_FALSE (phazite::isAutomated (volume));
+    CHECK (song.describeUndo() == juce::String ("Undo Clear Automation"));
+
+    // A handle of nothing does nothing.
+    phazite::showAutomationLane (phazite::ParameterHandle());
+    CHECK_FALSE (phazite::isAutomated (phazite::ParameterHandle()));
+
+    // The compressor's own parameters, by its ID.
+    const auto threshold = song.threshold();
+    const auto targets = phazite::getAutomationTargets (context, threshold.device);
+    REQUIRE_FALSE (targets.empty());
+    CHECK (std::all_of (targets.begin(), targets.end(), [&threshold] (const auto& t) { return t.parameter.device == threshold.device; }));
+    CHECK (std::any_of (targets.begin(), targets.end(), [&threshold] (const auto& t) { return t.parameter == threshold; }));
+    CHECK (phazite::getAutomationTargets (context, phazite::DeviceID::fromRaw (123456)).empty());
+}
+
+TEST_CASE ("The master's row is in the playlist while the master has lanes")
+{
+    Song song;
+    auto& context = song.context;
+    CHECK_FALSE (phazite::getMasterRow (context).has_value());
+
+    phazite::showAutomationLane (context, phazite::getMasterVolume (context).getRef());
+    const auto master = phazite::getMasterRow (context);
+    REQUIRE (master.has_value());
+    CHECK (master->id == phazite::getMasterTrack (context));
+    CHECK (master->kind == phazite::TrackType::master);
+    CHECK (master->name == juce::String ("Master"));
+
+    phazite::hideAutomationLanes (context, master->id);
+    CHECK_FALSE (phazite::getMasterRow (context).has_value());
+}

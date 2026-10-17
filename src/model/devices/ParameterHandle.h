@@ -58,6 +58,7 @@ public:
 
     struct Impl; // the device and the parameter's ID (internal/ParameterHandle.h makes handles)
     explicit ParameterHandle (std::unique_ptr<Impl>);
+    const Impl* getImpl() const noexcept { return impl.get(); } // nullptr for a handle of nothing
 
 private:
     std::unique_ptr<Impl> impl;

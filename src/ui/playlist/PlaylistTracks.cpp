@@ -80,10 +80,20 @@ void Playlist::trackClicked (TrackID track, const juce::ModifierKeys& mods)
     selectionAnchor = track;
 }
 
-void Playlist::showTrackMenu (TrackID)
+void Playlist::showTrackMenu (TrackID track)
 {
     auto& bridge = getCommands();
     juce::PopupMenu menu;
+
+    // The master's row is there for its lanes.
+    if (const auto row = getRowOf (track); row >= 0 && rows[(size_t) row].track.kind == TrackType::master)
+    {
+        auto& projectContext = context;
+        menu.addItem ("Hide Automation", [&projectContext, track] { hideAutomationLanes (projectContext, track); });
+        menu.showMenuAsync (juce::PopupMenu::Options());
+        return;
+    }
+
     addCommandItems (menu, bridge, { "edit.rename", "track.color" });
     menu.addSeparator();
     addCommandItems (menu, bridge, { "track.mute", "track.solo", "track.pin" });
@@ -91,6 +101,11 @@ void Playlist::showTrackMenu (TrackID)
     addCommandItems (menu, bridge, { "track.moveUp", "track.moveDown" });
     menu.addSeparator();
     addCommandItems (menu, bridge, { "track.groupIntoFolder", "track.ungroup", "track.collapse" });
+    menu.addSeparator();
+    addCommandItems (menu, bridge, { "automation.showLanes" });
+    juce::PopupMenu modes;
+    addCommandItems (modes, bridge, { "automation.read", "automation.touch", "automation.latch", "automation.write" });
+    menu.addSubMenu ("Automation Mode", modes);
     menu.addSeparator();
     addCommandItems (menu, bridge, { "edit.duplicate", "edit.delete" });
     menu.addSeparator();

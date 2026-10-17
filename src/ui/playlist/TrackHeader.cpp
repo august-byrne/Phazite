@@ -57,6 +57,10 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
         addAndMakeVisible (c);
 
     setTitle (isFolder() ? row.name + " (folder)" : row.name); // what screen readers call the header
+
+    if (isMaster())
+        setDescription ("The master's automation lanes are under it. Right-click to hide them.");
+
     updateCollapseButton();
     updateColours();
 }
@@ -150,7 +154,7 @@ void TrackHeader::paint (juce::Graphics& g)
     g.fillRect (getColourArea());
 
     // The handle, lined up with the name.
-    if (gripIcon != nullptr)
+    if (gripIcon != nullptr && ! isMaster())
     {
         if (const auto ink = getInkFor (background).withAlpha (gripAlpha); ink != gripIconColour)
         {
@@ -177,7 +181,7 @@ void TrackHeader::resized()
 
     // Mute and solo shrink to fit a collapsed row. A row shorter than that has room only for the name.
     const auto size = juce::jmin (buttonSize, top.getHeight() - 2);
-    const auto roomForButtons = size >= minButtonSize;
+    const auto roomForButtons = size >= minButtonSize && ! isMaster(); // the master's row shows its name only
     muteSolo.setVisible (roomForButtons);
     collapseButton.setVisible (roomForButtons);
 
@@ -194,7 +198,9 @@ void TrackHeader::resized()
 
 void TrackHeader::mouseMove (const juce::MouseEvent& e)
 {
-    if (isOnResizeEdge (e.getPosition()))
+    if (isMaster())
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+    else if (isOnResizeEdge (e.getPosition()))
         setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
     else if (getGripArea().contains (e.getPosition()))
         setMouseCursor (juce::MouseCursor::DraggingHandCursor);
@@ -206,6 +212,15 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
 {
     drag = Drag::none;
     selectOnMouseUp = false;
+
+    // The master's row only names the lanes under it: no selecting, moving, resizing or renaming it.
+    if (isMaster())
+    {
+        if (e.mods.isPopupMenu())
+            owner.showTrackMenu (row.id);
+
+        return;
+    }
 
     if (isOnResizeEdge (e.getPosition()) && ! e.mods.isPopupMenu())
     {
@@ -292,6 +307,9 @@ void TrackHeader::mouseUp (const juce::MouseEvent& e)
 
 void TrackHeader::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    if (isMaster())
+        return;
+
     if (isOnResizeEdge (e.getPosition()))
     {
         setShownTrackHeight (context, row.id, TrackHeight::standard);

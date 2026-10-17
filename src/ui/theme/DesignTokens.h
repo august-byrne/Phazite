@@ -122,6 +122,21 @@ namespace TrackTint
     inline constexpr float selectedHeader = 0.5f;
 } // namespace TrackTint
 
+// How an automation lane shows under its track (docs/design.md, section 10): its header's surface mixed with the track's
+// color, less than the track's header; its background, the panels' surface this opaque over the playlist's, so that
+// the grid shows through; the wash under its line, in the track's color; the dashed line where a parameter without
+// automation sits (alphas); and its points' radius and how near the pointer must come to take a point or the line
+// (pixels).
+namespace LaneTint
+{
+    inline constexpr float header = 0.15f;
+    inline constexpr float background = 0.6f;
+    inline constexpr float wash = 0.12f;
+    inline constexpr float idleLine = 0.5f;
+    inline constexpr float pointRadius = 4.0f;
+    inline constexpr float grabDistance = 6.0f;
+} // namespace LaneTint
+
 // How the song's sections show behind the playlist's tracks, as ghosts: a faint wash of each section's color
 // (stronger while it is selected) and a line in it where the section starts (alphas).
 namespace SectionTint

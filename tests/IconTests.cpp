@@ -10,7 +10,7 @@ TEST_CASE ("Every icon reads as a drawing that can be recolored")
                              Icon::plus,      Icon::magnet,     Icon::loop,   Icon::metronome, Icon::grip,     Icon::expanded, Icon::folded,
                              Icon::smartTool, Icon::draw,       Icon::paint,  Icon::slice,     Icon::slip,     Icon::mute,     Icon::erase,
                              Icon::select,    Icon::zoom,       Icon::folder, Icon::addFolder, Icon::favorite, Icon::recent,   Icon::sound,
-                             Icon::midi,      Icon::instrument, Icon::effect, Icon::preview,   Icon::download })
+                             Icon::midi,      Icon::instrument, Icon::effect, Icon::preview,   Icon::download, Icon::close })
     {
         CAPTURE ((int) icon);
         const auto drawable = phazite::ui::createIcon (icon);

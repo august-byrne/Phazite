@@ -221,10 +221,11 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     headerContent.addChildComponent (*addTrackRow); // shown while a project is open
     pinnedHeaders.setTitle ("Pinned tracks");
 
-    // The clips' layers let the mouse through to the lanes, which handle it.
+    // The clips' layers let the mouse through to the lanes, which handle it, and so do the clips; the automation lanes in
+    // them take it.
     for (auto* layer : { &scrollingClips, &pinnedClips })
     {
-        layer->setInterceptsMouseClicks (false, false);
+        layer->setInterceptsMouseClicks (false, true);
         lanes->addAndMakeVisible (layer);
     }
 
@@ -244,6 +245,8 @@ Playlist::~Playlist()
     range.removeChangeListener (this);
     selection.removeChangeListener (this);
     headers.clear(); // before headerContent, which holds them
+    laneHeaders.clear();
+    laneViews.clear();
     clipComponentFor.clear();
     clipComponents.clear(); // and the lanes
 }
@@ -266,6 +269,9 @@ void Playlist::showProject()
     rubberBand = {};
     fileDropBeat.reset();
     headers.clear();
+    laneHeaders.clear();
+    laneViews.clear();
+    knownLanes.reset(); // the new project's lanes show where they are
     clipComponentFor.clear();
     clipComponents.clear();
     rows.clear();
@@ -290,8 +296,10 @@ void Playlist::songChanged (const SongChanges& changes)
         return;
     }
 
-    if (changes.view)
-        trackHeightChanged(); // heights, collapsed and pinned tracks
+    if (changes.view || changes.devices)
+        trackHeightChanged(); // heights, collapsed and pinned tracks, and lanes: shown, hidden, or of devices gone or renamed
+    else if (changes.automation)
+        updateLanes();
 
     // Clips are placed in time, and the time line is in beats: a tempo change moves them on it.
     if (changes.clips || changes.tempo)
@@ -440,7 +448,7 @@ void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
 
     updateHeaders();
     updateClips();
-    lanes->repaint();
+    lanes->repaint(); // and the lanes' selected points
 
     if (focusMode)
         layOutRows(); // what is in focus changed

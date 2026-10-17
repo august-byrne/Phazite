@@ -25,7 +25,8 @@ enum class TrackType
 {
     track,
     folder,
-    returnTrack
+    returnTrack,
+    master // the master's track, which holds no clips: the playlist shows it for its automation lanes (getMasterRow())
 };
 
 struct TrackRow
@@ -44,6 +45,10 @@ struct TrackRow
 std::vector<TrackRow> getPlaylistRows (const ProjectContext&);
 std::vector<TrackID> getAllPlaylistTracks (const ProjectContext&);    // those in collapsed folders too
 std::optional<TrackRow> getTrackRow (const ProjectContext&, TrackID); // any of them, shown or not
+
+// The master's row, in gray, which the playlist shows under the tracks while it has automation lanes
+// (model/automation/AutomationModel.h, as Ableton Live shows its main track); nothing while it has none.
+std::optional<TrackRow> getMasterRow (const ProjectContext&);
 
 // Whether a track is inside a folder, at any depth.
 bool isInside (const ProjectContext&, TrackID track, TrackID folder);

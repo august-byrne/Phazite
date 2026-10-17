@@ -14,8 +14,10 @@ BeatPosition Playlist::getFileDropBeat (int x) const
 
 void Playlist::importFiles (const juce::StringArray& paths, juce::Point<int> position)
 {
+    // Files dropped on the master's row, which holds no clips, go on new tracks, as below the tracks.
     const auto row = getRowAt (position.y);
-    addFiles (paths, row >= 0 ? rows[(size_t) row].track.id : TrackID(), getFileDropBeat (position.x));
+    const auto onTrack = row >= 0 && rows[(size_t) row].track.kind != TrackType::master;
+    addFiles (paths, onTrack ? rows[(size_t) row].track.id : TrackID(), getFileDropBeat (position.x));
 }
 
 bool Playlist::placeFile (const juce::File& file)
@@ -120,7 +122,8 @@ void Playlist::itemDropped (const SourceDetails& details)
     auto placed = false;
 
     if (const auto file = getDraggedFile (details.description))
-        placed = addFiles ({ file->getFullPathName() }, track, getFileDropBeat (std::max (0, position.x)));
+        placed = addFiles ({ file->getFullPathName() }, row >= 0 && rows[(size_t) row].track.kind == TrackType::master ? TrackID() : track,
+                           getFileDropBeat (std::max (0, position.x)));
     else if (const auto device = getDraggedDevice (details.description))
         placed = addDeviceTo (context, track, *device);
 

@@ -80,6 +80,8 @@ namespace
                 return "headphones.svg";
             case Icon::download:
                 return "download.svg";
+            case Icon::close:
+                return "x.svg";
         }
 
         return "";

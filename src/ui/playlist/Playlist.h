@@ -8,6 +8,7 @@
 #include "ClipComponent.h"
 #include "SectionsStrip.h"
 #include "TrackHeader.h"
+#include "model/automation/AutomationModel.h"
 #include "model/project/ProjectContext.h"
 #include "ui/timeline/TimelineEditor.h"
 
@@ -61,12 +62,27 @@ private:
     struct Lanes;
     struct Gesture;
     struct AddTrackRow;
+    struct AutomationLaneView;   // a lane's curve, under its track's clips
+    struct AutomationLaneHeader; // the lane's header, under its track's header
 
-    // A track shown in the playlist. Pinned tracks stay in a band at the top; the rest scroll under it.
+    // An automation lane, under its track's row (model/automation/AutomationModel.h).
+    struct LaneRow
+    {
+        AutomationLane lane;
+        int top = 0, height = 0; // from the top of its track's row; no height while the track hides its lanes
+    };
+
+    // A track shown in the playlist, with its lanes under it. Pinned tracks stay in a band at the top; the rest scroll
+    // under it.
     struct Row
     {
         TrackRow track;
-        int top = 0, height = 0; // in the pinned band, or among the scrolling rows before scrolling
+        int top = 0, height = 0; // in the pinned band, or among the scrolling rows before scrolling; the height is the
+                                 // track's own, where its clips are
+        std::vector<LaneRow> lanes;
+        int lanesHeight = 0;
+
+        int getTotalHeight() const noexcept { return height + lanesHeight; }
     };
 
     ProjectContext& context;
@@ -90,7 +106,11 @@ private:
     juce::Component pinnedClips, scrollingClips;
 
     std::vector<Row> rows;
-    juce::OwnedArray<TrackHeader> headers; // headers[i] shows rows[i]
+    juce::OwnedArray<TrackHeader> headers;               // headers[i] shows rows[i]
+    juce::OwnedArray<AutomationLaneHeader> laneHeaders;  // the rows' lanes, in their order
+    juce::OwnedArray<AutomationLaneView> laneViews;      // laneViews[i] goes with laneHeaders[i]
+    AutomationShape paintShape = AutomationShape::sine;  // what the Paint tool draws in a lane
+    std::optional<std::vector<ParameterRef>> knownLanes; // the lanes shown when they were built last: none for a new project
     juce::OwnedArray<ClipComponent> clipComponents;
     std::unordered_map<ClipID, ClipComponent*> clipComponentFor; // the same, found by their clips
     int contentHeight = 0;                                       // of the scrolling rows
@@ -109,10 +129,19 @@ private:
     void songChanged (const SongChanges&) override;
 
     // The rows of tracks.
-    void rebuild(); // after tracks were added, deleted, moved or changed
+    std::vector<TrackRow> getShownRows() const; // the playlist's tracks, and the master while it has lanes
+    void rebuild();                             // after tracks were added, deleted, moved or changed
     void layOutRows();
     void updateHeaders();
-    int getRowAt (int y) const; // y in the lanes; -1 below the last row
+
+    // The automation lanes (PlaylistAutomation.cpp).
+    void refreshLanes(); // the rows' lanes as the model has them now, laid out; it scrolls to show a lane shown just now
+    void rebuildLanes(); // their headers and views, keeping those of lanes still shown
+    void layOutLanes();
+    void updateLanes();                               // their colors, modes, selected points and curves
+    void noteLanes();                                 // after the lanes were built: one shown since the last time scrolls into view
+    void showLaneMenu (TrackID, const ParameterRef&); // a lane's right-click menu
+    int getRowAt (int y) const;                       // y in the lanes; -1 below the last row
     int getRowOf (TrackID) const;
     int getRowTop (const Row&) const; // where a row is in the lanes now
     bool isInFocus (TrackID) const;   // in focus mode, the rest are made small

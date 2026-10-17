@@ -10,14 +10,24 @@ namespace
     constexpr int focusedOutHeight = 20; // in focus mode, the tracks out of focus are this tall
 } // namespace
 
+std::vector<TrackRow> Playlist::getShownRows() const
+{
+    auto shown = getPlaylistRows (context);
+
+    if (auto master = getMasterRow (context))
+        shown.push_back (std::move (*master));
+
+    return shown;
+}
+
 void Playlist::rebuild()
 {
     // The headers of tracks that are still shown are kept, in the tracks' new order. Tracks in collapsed folders
-    // aren't shown.
+    // aren't shown. The master shows under them while it has automation lanes.
     juce::OwnedArray<TrackHeader> newHeaders;
     rows.clear();
 
-    for (const auto& track : getPlaylistRows (context))
+    for (const auto& track : getShownRows())
     {
         auto* header = getHeaderFor (track.id);
 
@@ -33,15 +43,21 @@ void Playlist::rebuild()
 
         newHeaders.add (header);
         rows.push_back ({ track });
+
+        for (const auto& lane : getAutomationLanes (context, track.id))
+            rows.back().lanes.push_back ({ lane });
     }
 
     headers.swapWith (newHeaders); // newHeaders now holds the hidden or deleted tracks' headers, and deletes them
 
+    rebuildLanes();
     rebuildClips();
     layOutRows();
     updateHeaders();
+    updateLanes();
     updateClips();
     ruler.repaint();
+    noteLanes();
 }
 
 void Playlist::layOutRows()
@@ -53,8 +69,22 @@ void Playlist::layOutRows()
     {
         auto& row = rows[i];
         auto& top = row.track.pinned ? pinnedTop : scrollingTop;
+        const auto inFocus = isInFocus (row.track.id);
         row.top = top;
-        row.height = isInFocus (row.track.id) ? getShownTrackHeight (row.track) : focusedOutHeight;
+        row.height = row.track.kind == TrackType::master ? TrackHeight::collapsed
+                     : inFocus                           ? getShownTrackHeight (row.track)
+                                                         : focusedOutHeight;
+
+        // Its lanes under it, while it is in focus and not a thin collapsed row.
+        const auto showsLanes = inFocus && ! (row.track.collapsed && row.track.kind != TrackType::folder);
+        row.lanesHeight = 0;
+
+        for (auto& lane : row.lanes)
+        {
+            lane.top = row.height + row.lanesHeight;
+            lane.height = showsLanes ? lane.lane.height : 0;
+            row.lanesHeight += lane.height;
+        }
 
         auto* header = headers[(int) i];
         auto& parent = row.track.pinned ? pinnedHeaders : headerContent;
@@ -63,7 +93,7 @@ void Playlist::layOutRows()
             parent.addAndMakeVisible (header);
 
         header->setBounds (0, top, headerWidth, row.height);
-        top += row.height;
+        top += row.getTotalHeight();
     }
 
     pinnedHeight = std::min (pinnedTop, lanes->getHeight() / 2); // the band leaves room for the rest
@@ -83,7 +113,7 @@ void Playlist::trackHeightChanged()
 {
     // The same tracks, taller or shorter or collapsed: the rows as the model keeps them now. (A folder collapsed or
     // opened shows other tracks: then the rows are built again.)
-    const auto fresh = getPlaylistRows (context);
+    const auto fresh = getShownRows();
     const auto same =
         fresh.size() == rows.size()
         && std::equal (fresh.begin(), fresh.end(), rows.begin(), [] (const TrackRow& a, const Row& b) { return a.id == b.track.id; });
@@ -97,7 +127,7 @@ void Playlist::trackHeightChanged()
     for (size_t i = 0; i < rows.size(); ++i)
         rows[i].track = fresh[i];
 
-    layOutRows();
+    refreshLanes(); // shown or hidden, taller or shorter; and lays out the rows
     updateHeaders();
 }
 
@@ -143,7 +173,7 @@ int Playlist::getRowAt (int y) const
     const auto inBand = y < pinnedHeight;
 
     for (size_t i = 0; i < rows.size(); ++i)
-        if (const auto top = getRowTop (rows[i]); rows[i].track.pinned == inBand && y >= top && y < top + rows[i].height)
+        if (const auto top = getRowTop (rows[i]); rows[i].track.pinned == inBand && y >= top && y < top + rows[i].getTotalHeight())
             return (int) i;
 
     return -1;
@@ -174,6 +204,7 @@ void Playlist::setScrollY (int newScrollY)
     scrollY = juce::jlimit (0, maxScroll, newScrollY);
     headerContent.setTopLeftPosition (0, -scrollY);
     layOutClips();
+    layOutLanes();
     lanes->repaint();
     updateVerticalScrollBar();
 }
@@ -188,8 +219,8 @@ void Playlist::scrollToShow (int row)
 
     if (r.top < scrollY)
         setScrollY (r.top);
-    else if (r.top + r.height > scrollY + visibleHeight)
-        setScrollY (r.top + r.height - visibleHeight);
+    else if (r.top + r.getTotalHeight() > scrollY + visibleHeight)
+        setScrollY (r.top + r.getTotalHeight() - visibleHeight);
 }
 
 void Playlist::updateVerticalScrollBar()

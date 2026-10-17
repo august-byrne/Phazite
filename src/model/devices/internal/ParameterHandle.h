@@ -12,4 +12,7 @@ class ParameterHandle;
 // A plug-in's parameter by its ID; changes to it are undo steps named undoName ("Change Volume"), or "Change" and the
 // parameter's name. A handle of nothing if the plug-in is nullptr.
 ParameterHandle makeParameterHandle (te::Plugin*, const juce::String& parameterID, const juce::String& undoName = {});
+
+// The parameter a handle changes, or nullptr for a handle of nothing or once its device is gone.
+te::AutomatableParameter::Ptr findParameter (const ParameterHandle&);
 } // namespace phazite

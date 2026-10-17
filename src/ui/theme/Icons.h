@@ -43,7 +43,8 @@ enum class Icon
     instrument,
     effect,
     preview,
-    download
+    download,
+    close // closes or hides something, such as an automation lane
 };
 
 // The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read. A filled icon has its shape

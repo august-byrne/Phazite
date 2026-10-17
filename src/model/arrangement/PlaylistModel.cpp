@@ -4,6 +4,7 @@
 #include "internal/Import.h"
 #include "internal/Sections.h"
 #include "internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
@@ -103,11 +104,20 @@ namespace
         }
     }
 
-    // A track's row; its color is its row's in the palette unless it has its own.
+    // A track's row; its color is its row's in the palette unless it has its own. The master's is gray.
     TrackRow makeRow (te::Track& track, int index)
     {
         TrackRow row;
         row.id = getTrackID (track);
+
+        if (track.isMasterTrack())
+        {
+            row.name = "Master";
+            row.colour = getTrackColours().back().colour;
+            row.kind = TrackType::master;
+            return row;
+        }
+
         row.name = track.getName();
         row.colour = getTrackColour (track, index);
         row.kind = track.isFolderTrack() ? TrackType::folder : (getReturnBus (track) >= 0 ? TrackType::returnTrack : TrackType::track);
@@ -176,6 +186,17 @@ std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
         return {};
 
     return makeRow (*track, getPlaylistTracks (*edit).indexOf (track));
+}
+
+std::optional<TrackRow> getMasterRow (const ProjectContext& context)
+{
+    auto* edit = getEdit (context);
+    auto* master = edit != nullptr ? edit->getMasterTrack() : nullptr;
+
+    if (master == nullptr || getLanes (*master).empty())
+        return {};
+
+    return makeRow (*master, -1);
 }
 
 std::vector<TrackID> getAllPlaylistTracks (const ProjectContext& context)
