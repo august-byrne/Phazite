@@ -362,10 +362,12 @@ TEST_CASE ("Touch writes what a control does while it is held, as one undo step"
     phazite::setAutomationMode (context, a, AutomationMode::touch);
     auto volume = phazite::getVolume (context, a);
 
+    // Once the song plays (later in a slow build, such as ThreadSanitizer's).
     auto& transport = song.edit->getTransport();
     transport.setPosition (te::TimePosition());
     transport.play (false);
-    phazite::test::RealTimePlayback::wait (300);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&transport] { return transport.getPosition() > te::TimePosition::fromSeconds (0.2); },
+                                                   10000));
 
     volume.beginGesture();
     volume.setValue (0.3f);

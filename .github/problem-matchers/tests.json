@@ -49,7 +49,7 @@
       "severity": "warning",
       "pattern": [
         {
-          "regexp": "^\\s+#(\\d+) (.+) /home/runner/work/Phazite/Phazite/((?:src|tests)/[^:]+):(\\d+)(?::\\d+)? \\([^)]*\\)$",
+          "regexp": "^\\s+#([0-2]) (.+) /home/runner/work/Phazite/Phazite/((?:src|tests|external)/[^:]+):(\\d+)(?::\\d+)? \\([^)]*\\)$",
           "code": 1,
           "message": 2,
           "file": 3,
