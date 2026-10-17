@@ -3,11 +3,28 @@
 
 namespace phazite::ui
 {
-EditorDock::EditorDock (juce::Component& pianoRollPanel, juce::Component& devicesPanel, juce::Component& mixerPanel)
+namespace
+{
+    constexpr int tabBarDepth = 32;
+} // namespace
+
+SongViews::SongViews (juce::Component& playlistPanel, juce::Component& mixerPanel)
+    : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop)
+{
+    setTitle ("Song");
+    setTabBarDepth (tabBarDepth);
+    setOutline (0);
+
+    const auto background = juce::Colours::transparentBlack; // each view paints its own
+    addTab ("Playlist", background, &playlistPanel, false);
+    addTab ("Mixer", background, &mixerPanel, false);
+}
+
+EditorDock::EditorDock (juce::Component& pianoRollPanel, juce::Component& devicesPanel)
     : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop)
 {
     setTitle ("Editor");
-    setTabBarDepth (32);
+    setTabBarDepth (tabBarDepth);
     setOutline (0);
 
     const auto background = juce::Colours::transparentBlack; // each panel paints its own
@@ -16,6 +33,5 @@ EditorDock::EditorDock (juce::Component& pianoRollPanel, juce::Component& device
     // Audio clips get an editor of their own here (roadmap step 2.6).
     addTab ("Piano roll", background, &pianoRollPanel, false);
     addTab ("Devices", background, &devicesPanel, false);
-    addTab ("Mixer", background, &mixerPanel, false);
 }
 } // namespace phazite::ui

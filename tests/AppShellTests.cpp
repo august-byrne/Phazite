@@ -102,9 +102,9 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     phazite::test::settle();
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 
-    for (const auto* id :
-         { "view.toggleBrowser", "view.toggleBrowser", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll", "view.mixer",
-           "view.toggleEditor", "view.toggleEditor", "view.layoutBeat", "view.layoutMix", "view.layoutFull" })
+    for (const auto* id : { "view.toggleBrowser", "view.toggleBrowser", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll",
+                            "view.devices", "view.mixer", "view.playlist", "view.toggleEditor", "view.toggleEditor", "view.layoutBeat",
+                            "view.layoutMix", "view.layoutFull" })
     {
         INFO ("after " << id);
         CHECK (screen.registry.invoke (id));
@@ -114,10 +114,26 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
 
     CHECK (screen.window.paintEverything().isValid());
 
-    // The editor dock's tabs. Automation has none: it is edited in its lanes in the playlist.
+    // The whole song in the centre, as tabs anyone can see, and the selection in the editor dock under it. Automation has
+    // no tab: it is edited in its lanes in the playlist.
+    auto* song = dynamic_cast<juce::TabbedComponent*> (phazite::test::findComponentWithTitle (screen.shell, "Song"));
+    REQUIRE (song != nullptr);
+    CHECK (song->getTabNames() == juce::StringArray { "Playlist", "Mixer" });
     auto* dock = dynamic_cast<juce::TabbedComponent*> (&screen.shell.getPanel (phazite::ui::AppShell::DetachablePanel::editor));
     REQUIRE (dock != nullptr);
-    CHECK (dock->getTabNames() == juce::StringArray { "Piano roll", "Devices", "Mixer" });
+    CHECK (dock->getTabNames() == juce::StringArray { "Piano roll", "Devices" });
+
+    // F9's command shows the mixer in the centre, F5's the playlist again; the Mix layout shows the mixer over the
+    // selected track's devices.
+    REQUIRE (screen.registry.invoke ("view.mixer"));
+    CHECK (song->getCurrentTabName() == juce::String ("Mixer"));
+    REQUIRE (screen.registry.invoke ("view.playlist"));
+    CHECK (song->getCurrentTabName() == juce::String ("Playlist"));
+    REQUIRE (screen.registry.invoke ("view.layoutMix"));
+    CHECK (song->getCurrentTabName() == juce::String ("Mixer"));
+    CHECK (dock->getCurrentTabName() == juce::String ("Devices"));
+    REQUIRE (screen.registry.invoke ("view.layoutFull"));
+    CHECK (song->getCurrentTabName() == juce::String ("Playlist"));
 
     const auto found = screen.registry.search ("mixer");
     REQUIRE_FALSE (found.isEmpty());

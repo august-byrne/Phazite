@@ -72,6 +72,7 @@
     "view.toggleBrowser": [ "command + alt + B" ],
     "view.searchBrowser": [ "command + F" ],
     "device.add": [ "F8" ],
+    "view.playlist": [ "F5" ],
     "view.mixer": [ "F9" ],
     "view.zoomIn": [ "=", "numpad +" ],
     "view.zoomOut": [ "-", "numpad -" ],

@@ -113,13 +113,13 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
                                                              &hintBar, &browserDetachButton, &inspectorDetachButton })
         addAndMakeVisible (c);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &playlist, &editorDivider, &editorDock, &editorDetachButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &songViews, &editorDivider, &editorDock, &editorDetachButton })
         centre.addAndMakeVisible (c);
 
     centre.onResize = [this]
     {
         // A panel in its own window is that window's to lay out: an empty space here.
-        juce::Component* items[] = { &playlist, &editorDivider, editorWindow == nullptr ? &editorDock : nullptr };
+        juce::Component* items[] = { &songViews, &editorDivider, editorWindow == nullptr ? &editorDock : nullptr };
         rows.layOutComponents (items, 3, 0, 0, centre.getWidth(), centre.getHeight(), true, true);
         placeDetachButtons();
     };
@@ -182,8 +182,9 @@ void AppShell::setLayout (Layout layout)
     browserShown = layout != Layout::mix;
     inspectorShown = layout != Layout::beat;
     editorShown = true;
-    editorShare = layout == Layout::mix ? 0.65 : 0.4;
-    editorDock.showTab (layout == Layout::mix ? EditorDock::mixer : EditorDock::pianoRoll);
+    editorShare = 0.4;
+    songViews.showTab (layout == Layout::mix ? SongViews::mixer : SongViews::playlist);
+    editorDock.showTab (layout == Layout::mix ? EditorDock::devices : EditorDock::pianoRoll);
     updateLayout();
 }
 
@@ -197,7 +198,7 @@ void AppShell::showEditor (EditorDock::Tab tab)
         return;
     }
 
-    // Like FL Studio's F7 and F9: show that editor, or hide it if it is already showing.
+    // Like FL Studio's F7: show that editor, or hide it if it is already showing.
     if (editorShown && editorDock.getCurrentTabIndex() == tab)
     {
         editorShown = false;
@@ -209,6 +210,11 @@ void AppShell::showEditor (EditorDock::Tab tab)
     }
 
     updateLayout();
+}
+
+void AppShell::showSongView (SongViews::Tab tab)
+{
+    songViews.showTab (tab);
 }
 
 void AppShell::revealEditor (EditorDock::Tab tab)
@@ -528,14 +534,18 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .perform = [this] { showSelectedDevice(); },
                     .isEnabled = [this] { return ! projectContext.getSongSelection().getDevices().empty(); } });
 
-    add ("view.mixer", "Mixer", "Shows the mixer, or hides it if it is showing.", { "channels", "faders" },
-         [this] { showEditor (EditorDock::mixer); });
+    add ("view.playlist", "Playlist", "Shows the playlist in the centre, in place of the mixer.",
+         { "arrange", "tracks", "clips", "timeline" }, [this] { showSongView (SongViews::playlist); });
+
+    add ("view.mixer", "Mixer", "Shows the mixer in the centre, in place of the playlist, or the playlist again if it is showing.",
+         { "channels", "faders" },
+         [this] { showSongView (songViews.getTab() == SongViews::mixer ? SongViews::playlist : SongViews::mixer); });
 
     add ("view.layoutBeat", "Beat Layout", "Arranges the panels for making beats: playlist, piano roll and browser.", { "layout" },
          [this] { setLayout (Layout::beat); });
 
-    add ("view.layoutMix", "Mix Layout", "Arranges the panels for mixing: a large mixer and the inspector.", { "layout" },
-         [this] { setLayout (Layout::mix); });
+    add ("view.layoutMix", "Mix Layout", "Arranges the panels for mixing: the mixer, the selected track's devices and the inspector.",
+         { "layout" }, [this] { setLayout (Layout::mix); });
 
     add ("view.layoutFull", "Full Layout", "Shows every panel.", { "layout", "all" }, [this] { setLayout (Layout::full); });
 

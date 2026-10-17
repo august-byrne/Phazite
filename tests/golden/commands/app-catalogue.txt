@@ -84,6 +84,7 @@ view.toggleEditor
 view.pianoRoll | F7
 view.devices | F6
 device.show
+view.playlist | F5
 view.mixer | F9
 view.layoutBeat
 view.layoutMix

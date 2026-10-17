@@ -82,8 +82,9 @@ private:
     Inspector inspector;
     PianoRoll pianoRoll;
     MixerView mixer;
-    DevicesView devices; // the selected track's
-    EditorDock editorDock { pianoRoll, devices, mixer };
+    DevicesView devices;                     // the selected track's
+    SongViews songViews { playlist, mixer }; // the centre
+    EditorDock editorDock { pianoRoll, devices };
     HintBar hintBar;
     Guide guide; // the hint bar's next step for newcomers
 
@@ -93,8 +94,8 @@ private:
     bool browserShown = true, inspectorShown = true, editorShown = true;
     double editorShare = 0.4; // of the space below the top bar
 
-    // Holds the playlist, its divider and the editor dock, and lays them out when resized (which is
-    // also what the divider triggers when dragged).
+    // Holds the song's views (the playlist or the mixer), the divider and the editor dock, and lays them out when
+    // resized (which is also what the divider triggers when dragged).
     struct Centre : public juce::Component
     {
         std::function<void()> onResize;
@@ -120,7 +121,8 @@ private:
     std::unique_ptr<PanelWindow> browserWindow, inspectorWindow, editorWindow; // null while docked
 
     void updateLayout();
-    void showEditor (EditorDock::Tab);   // or hides it if it is showing, as FL Studio's F7 and F9 do
+    void showEditor (EditorDock::Tab);   // or hides it if it is showing, as FL Studio's F7 does
+    void showSongView (SongViews::Tab);  // in the centre
     void revealEditor (EditorDock::Tab); // shows it, even if it is showing already
     void showSelectedDevice();           // in the Devices view (the "device.show" command)
     void placeDetachButtons();
