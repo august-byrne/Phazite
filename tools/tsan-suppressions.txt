@@ -8,3 +8,8 @@
 # Finding 18: Tracktion's audio file cache replaces a file's AudioFileInfo, under the file's lock, each time it
 # maps the file again, while playback reads the sample rate, length and channel count without that lock.
 race:tracktion::engine::AudioFileCache::CachedFile::createNewReader
+
+# Finding 19: Tracktion's hosted MIDI input passes each block's MIDI to the input instances of the Edits playing without
+# the lock under which playback adds and removes them on the message thread. Only the tests play through the hosted
+# device; the app uses the computer's own.
+race:tracktion::engine::HostedMidiInputDevice*processBlock

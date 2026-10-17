@@ -31,10 +31,6 @@ public:
         audioIO.prepareToPlay (sampleRate, blockSize);
         deviceManager.dispatchPendingUpdates();
 
-        // Tracktion hears of the device in messages of its own, after another test's playback closed its device, and
-        // rebuilds an Edit's playback then: a transport started before it stops again.
-        dispatchPendingMessages();
-
         audioThread = std::thread (
             [this, &audioIO]
             {
@@ -53,6 +49,10 @@ public:
                     std::this_thread::sleep_until (nextBlock);
                 }
             });
+
+        // Tracktion hears of the device in messages of its own, after another test's playback closed its device, and
+        // rebuilds an Edit's playback then: a transport started before that stops again.
+        wait (settleMilliseconds);
     }
 
     ~RealTimePlayback()
@@ -76,6 +76,7 @@ public:
 private:
     static constexpr double sampleRate = 48000.0;
     static constexpr int blockSize = 256;
+    static constexpr int settleMilliseconds = 200;
 
     te::Engine& engine;
     std::atomic<bool> stopping { false };

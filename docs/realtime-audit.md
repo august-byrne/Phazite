@@ -147,9 +147,14 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 - **Why it is mostly harmless:** for a file that hasn't changed, the values written are the ones already there.
 - **Action:** `tools/tsan-suppressions.txt` suppresses it, so that the `linux-tsan` tests still catch new races. Report upstream.
 
+**19. The hosted MIDI input** (measured by ThreadSanitizer in CI, 2026-10-16).
+- **What:** Tracktion's hosted audio device, which the tests (and plug-ins built on Tracktion) play through, passes each block's MIDI to the input instances of the Edits playing (`HostedMidiInputDevice::processBlock`) without the lock under which an Edit's playback adds and removes its instances on the message thread (`MidiInputDevice::addInstance`, `removeInstance`). A test that starts or stops playback while the hosted device processes blocks on a thread of its own shows it.
+- **Why it is harmless to Phazite:** the app plays through the computer's own audio and MIDI devices, not the hosted one; only the tests use it.
+- **Action:** `tools/tsan-suppressions.txt` suppresses it. Report upstream.
+
 ## Reporting upstream
 
-Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14 and 18. Posting is the owner's call.
+Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18 and 19. Posting is the owner's call.
 
 ## Next
 
