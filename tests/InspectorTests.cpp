@@ -98,8 +98,9 @@ TEST_CASE ("A selected clip shows its place, length and whether it plays; a sect
     REQUIRE (screen.inspector.getShown() == juce::String ("Clip"));
     CHECK (screen.shows ("Bar 2"));
     CHECK (screen.shows ("1 bar"));
-    CHECK (screen.shows ("MIDI: notes"));
-    CHECK (screen.shows ("A clip of its own"));
+    CHECK (screen.shows ("MIDI"));
+    CHECK (screen.shows ("No"));                                                                       // not an alias
+    CHECK_FALSE (phazite::test::findComponentWithTitle (screen.inspector, "Fade shape")->isVisible()); // MIDI clips don't fade
 
     // Its mute switch.
     auto* muted = phazite::test::findComponentWithTitle (screen.inspector, "Muted");

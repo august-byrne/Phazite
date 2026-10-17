@@ -64,3 +64,34 @@ TEST_CASE ("The synth's editor has a control for each parameter, in groups, and 
     panel->refresh();
     CHECK (wave->getText() == juce::String ("Saw"));
 }
+
+TEST_CASE ("Given less height, as a Devices view gives it, the synth's groups go side by side in fewer rows")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
+    REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
+    phazite::test::settle();
+
+    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*plugin));
+    auto* panel = dynamic_cast<phazite::ui::DevicePanel*> (editor.get());
+    REQUIRE (panel != nullptr);
+    const auto tall = panel->getHeight(), narrow = panel->getWidth();
+
+    // At its own height, as wide as it makes itself; at the least height, one row, wider.
+    CHECK (panel->getWidthForHeight (tall) == narrow);
+    const auto low = panel->getMinimumHeight();
+    REQUIRE (low < tall);
+    const auto wide = panel->getWidthForHeight (low);
+    CHECK (wide > narrow);
+
+    // Laid out at that height, every control is inside it, and none overlaps another.
+    phazite::test::TestWindow window (*panel, wide, low);
+    phazite::test::checkChildrenApart (*panel);
+
+    for (const auto& parameter : Synth::info.parameters)
+    {
+        auto* control = panel->findControl (parameter.id);
+        REQUIRE (control != nullptr);
+        CHECK (control->getBottom() <= low);
+    }
+}

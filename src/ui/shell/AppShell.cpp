@@ -182,7 +182,7 @@ void AppShell::setLayout (Layout layout)
     browserShown = layout != Layout::mix;
     inspectorShown = layout != Layout::beat;
     editorShown = true;
-    editorShare = 0.4;
+    editorShare = layout == Layout::mix ? 0.4 : 0.45; // tall enough for most devices' editors, and mixing gives the mixer more
     songViews.showTab (layout == Layout::mix ? SongViews::mixer : SongViews::playlist);
     editorDock.showTab (layout == Layout::mix ? EditorDock::devices : EditorDock::pianoRoll);
     updateLayout();

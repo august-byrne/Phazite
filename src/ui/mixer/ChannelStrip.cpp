@@ -405,8 +405,12 @@ void ChannelStrip::resized()
     inputLabel.setBounds (header);
 
     // At the bottom: the fader with the meter, mute and solo, pan, and where the sound goes. The instrument, effects
-    // and sends get what is left above them, and scroll. (The mixer keeps the strip at least getMinimumHeight() tall.)
-    const auto faderHeight = getFaderHeight (area.getHeight(), buttonHeight + panKnobSize + outputHeight + 4 * Space::xs + minSlotsHeight);
+    // and sends get what is left above them, and scroll; the fader shrinks, down to its shortest, so that they show
+    // whole when they can, as the mixer shares the window's height with the Devices view under it. (The mixer keeps the
+    // strip at least getMinimumHeight() tall.)
+    layOutSlots();
+    const auto slotsWanted = std::max (minSlotsHeight, slotHolder.getHeight());
+    const auto faderHeight = getFaderHeight (area.getHeight(), buttonHeight + panKnobSize + outputHeight + 4 * Space::xs + slotsWanted);
     auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);

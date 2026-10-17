@@ -12,6 +12,7 @@ namespace
     const auto cellWidth = knobSize + Space::l;
     const auto choiceWidth = cellWidth + cellWidth / 2; // a list, wide enough for its choices' names
     const auto cellHeight = knobSize + 2 * labelHeight; // the control, its name and its value
+    const auto rowHeight = labelHeight + cellHeight;    // a row of groups: their titles, then their controls
 
     juce::String toString (std::string_view text)
     {
@@ -177,18 +178,18 @@ void DevicePanel::resized()
 {
     auto y = Space::l;
 
-    for (const auto& row : groups)
+    for (const auto& row : flow (getHeight()))
     {
         auto x = Space::l;
 
-        for (const auto& group : row)
+        for (const auto* group : row)
         {
-            group.title->setBounds (x, y, group.width, labelHeight);
+            group->title->setBounds (x, y, group->width, labelHeight);
             auto left = x;
 
-            for (int i = 0; i < group.count; ++i)
+            for (int i = 0; i < group->count; ++i)
             {
-                auto& control = *controls[(size_t) (group.first + i)];
+                auto& control = *controls[(size_t) (group->first + i)];
                 const auto width = control.box != nullptr ? choiceWidth : cellWidth;
                 auto cell = juce::Rectangle<int> (left, y + labelHeight, width, cellHeight);
                 left += width;
@@ -205,10 +206,82 @@ void DevicePanel::resized()
                     control.value->setBounds (cell.removeFromTop (labelHeight));
             }
 
-            x += group.width + Space::xl;
+            x += group->width + Space::xl;
         }
 
-        y += labelHeight + cellHeight + Space::m;
+        y += rowHeight + Space::m;
     }
+}
+
+int DevicePanel::getRowWidth (const std::vector<const PlacedGroup*>& row)
+{
+    auto width = 0;
+
+    for (const auto* group : row)
+        width += (width > 0 ? Space::xl : 0) + group->width;
+
+    return width;
+}
+
+std::vector<std::vector<const DevicePanel::PlacedGroup*>> DevicePanel::flow (int height) const
+{
+    // The rows as given while they fit; with fewer, the groups in their order, each row about as wide as the others.
+    const auto fit = std::max (1, (height - 2 * Space::l + Space::m) / (rowHeight + Space::m));
+    std::vector<std::vector<const PlacedGroup*>> rows;
+
+    if (fit >= (int) groups.size())
+    {
+        for (const auto& row : groups)
+        {
+            auto& placed = rows.emplace_back();
+
+            for (const auto& group : row)
+                placed.push_back (&group);
+        }
+
+        return rows;
+    }
+
+    auto total = 0;
+
+    for (const auto& row : groups)
+        for (const auto& group : row)
+            total += group.width + Space::xl;
+
+    const auto target = total / fit;
+    auto width = 0;
+    rows.emplace_back();
+
+    for (const auto& row : groups)
+    {
+        for (const auto& group : row)
+        {
+            if (! rows.back().empty() && width + group.width > target && (int) rows.size() < fit)
+            {
+                rows.emplace_back();
+                width = 0;
+            }
+
+            rows.back().push_back (&group);
+            width += group.width + Space::xl;
+        }
+    }
+
+    return rows;
+}
+
+int DevicePanel::getMinimumHeight() const
+{
+    return 2 * Space::l + rowHeight;
+}
+
+int DevicePanel::getWidthForHeight (int height) const
+{
+    auto widest = 0;
+
+    for (const auto& row : flow (height))
+        widest = std::max (widest, getRowWidth (row));
+
+    return 2 * Space::l + widest;
 }
 } // namespace phazite::ui

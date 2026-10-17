@@ -25,6 +25,7 @@ public:
     ~EqEditor() override;
 
     int getMinimumHeight() const override; // its graph shrinks, down to GraphTint::minimumHeight
+    int getWidthForHeight (int) const override { return getWidth(); }
 
     void paint (juce::Graphics&) override;
     void resized() override;

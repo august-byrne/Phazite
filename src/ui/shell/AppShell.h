@@ -92,7 +92,7 @@ private:
     TimelineEditor* activeEditor = nullptr;
 
     bool browserShown = true, inspectorShown = true, editorShown = true;
-    double editorShare = 0.4; // of the space below the top bar
+    double editorShare = 0.45; // of the space below the top bar
 
     // Holds the song's views (the playlist or the mixer), the divider and the editor dock, and lays them out when
     // resized (which is also what the divider triggers when dragged).

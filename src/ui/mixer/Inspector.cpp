@@ -22,7 +22,9 @@ using namespace strip;
 
 namespace
 {
-    constexpr int nameWidth = 84; // a row's name, on its left
+    constexpr int nameWidth = 84;         // a row's name, on its left
+    constexpr int stackWidth = 140;       // a control needs this much beside its name, or the name goes above it
+    constexpr int stackedNameHeight = 16; // a name above its control
     constexpr int titleHeight = 32;
     constexpr int tipLines = 3; // a section's tip, wrapped
 
@@ -115,6 +117,14 @@ namespace
 //==============================================================================
 struct Inspector::Page : public juce::Component
 {
+    struct Row
+    {
+        std::unique_ptr<juce::Label> name;
+        juce::Component* control = nullptr;
+        int height = controlHeight;
+        bool visible = true;
+    };
+
     Page (const juce::String& kindName, juce::Colour stripe)
         : kind (kindName),
           colour (stripe)
@@ -141,15 +151,35 @@ struct Inspector::Page : public juce::Component
         if (control != nullptr)
             addAndMakeVisible (control);
 
-        rows.push_back ({ std::move (label), control, height });
+        rows.push_back ({ std::move (label), control, height, true });
     }
 
-    int getPreferredHeight() const
+    // Shows or hides a row, by its control: rows that don't apply (an audio clip's fades for a MIDI clip) take no room.
+    void setRowVisible (juce::Component& control, bool visible)
+    {
+        for (auto& row : rows)
+        {
+            if (row.control == &control && row.visible != visible)
+            {
+                row.visible = visible;
+                row.name->setVisible (visible);
+                control.setVisible (visible);
+                resized();
+            }
+        }
+    }
+
+    // In a narrow panel each name goes above its control, so that the control has the whole width.
+    static bool isStacked (int width) { return width < 2 * nameWidth + stackWidth; }
+    static bool hasNameAbove (const Row& row) { return row.control != nullptr && row.name->getText().isNotEmpty(); }
+
+    int getPreferredHeight (int width) const
     {
         auto height = Space::m + titleHeight + Space::s;
 
         for (const auto& row : rows)
-            height += row.height + Space::xs;
+            if (row.visible)
+                height += row.height + Space::xs + (isStacked (width) && hasNameAbove (row) ? stackedNameHeight : 0);
 
         return height + Space::m;
     }
@@ -170,28 +200,32 @@ struct Inspector::Page : public juce::Component
         title.setBounds (area.removeFromTop (titleHeight));
         area.removeFromTop (Space::s);
 
+        const auto stacked = isStacked (getWidth());
+
         for (auto& row : rows)
         {
-            auto line = area.removeFromTop (row.height);
-            area.removeFromTop (Space::xs);
+            if (! row.visible)
+                continue;
 
             if (row.control == nullptr)
             {
-                row.name->setBounds (line);
+                row.name->setBounds (area.removeFromTop (row.height));
+                area.removeFromTop (Space::xs);
                 continue;
             }
 
-            row.name->setBounds (line.removeFromLeft (nameWidth).removeFromTop (controlHeight));
+            if (stacked && hasNameAbove (row))
+                row.name->setBounds (area.removeFromTop (stackedNameHeight));
+
+            auto line = area.removeFromTop (row.height);
+            area.removeFromTop (Space::xs);
+
+            if (! stacked)
+                row.name->setBounds (line.removeFromLeft (nameWidth).removeFromTop (controlHeight));
+
             row.control->setBounds (line);
         }
     }
-
-    struct Row
-    {
-        std::unique_ptr<juce::Label> name;
-        juce::Component* control = nullptr;
-        int height = controlHeight;
-    };
 
     const juce::String kind;
     juce::Colour colour;
@@ -481,8 +515,8 @@ namespace
     };
 
     //==============================================================================
-    // Clips: one's name, kind, place, length, and whether it is muted or an alias; an audio clip's fades. Several share
-    // the switches, which act on all of them.
+    // Clips: one's name, kind, place, length, whether it plays, and whether it is an alias; an audio clip's fades. Several
+    // share the switches, which act on all of them.
     struct ClipsPage : public Inspector::Page
     {
         ClipsPage (CommandBridge& bridge, ProjectContext& c, std::vector<ClipID> shown)
@@ -491,48 +525,38 @@ namespace
               context (c),
               clips (std::move (shown))
         {
-            for (auto* label : { &kindLabel, &trackLabel, &startLabel, &lengthLabel, &aliasLabel, &fadesLabel })
+            for (auto* label : { &kindLabel, &trackLabel, &startLabel, &lengthLabel, &aliasLabel, &fadeInLabel, &fadeOutLabel })
                 setUpValueLabel (*label);
 
-            mutedButton.setTitle ("Muted");
-            mutedButton.setTooltip ("A muted clip doesn't play");
-            mutedButton.onClick = [this] { toggleClipsMuted (context, clips); };
+            mutedToggle.setTitle ("Muted");
+            mutedToggle.setTooltip ("A muted clip doesn't play");
+            mutedToggle.onClick = [this] { toggleClipsMuted (context, clips); };
             makeUniqueButton.setTooltip ("Makes the clips copies of their own, so that changing them no longer changes the clips "
                                          "they were aliases of");
             makeUniqueButton.onClick = [this] { invokeOnClips ("clip.makeUnique"); };
 
-            const char* const shapes[][2] = { { "Linear", "clip.fadeLinear" },
-                                              { "Convex", "clip.fadeConvex" },
-                                              { "Concave", "clip.fadeConcave" },
-                                              { "S-curve", "clip.fadeSCurve" } };
+            // The fade shapes are commands, ticked for the shape the clips have.
+            for (int i = 0; i < (int) std::size (fadeShapes); ++i)
+                shapeBox.addItem (fadeShapes[i].name, i + 1);
 
-            for (const auto& [name, id] : shapes)
+            shapeBox.setTitle ("Fade shape");
+            shapeBox.setTooltip ("How the clips' fades in and out curve");
+            shapeBox.onChange = [this]
             {
-                auto* button = shapeButtons.add (new juce::TextButton (name));
-                button->setTooltip ("Fade shape: " + juce::String (name).toLowerCase());
-                button->setClickingTogglesState (false);
-                button->onClick = [this, commandID = juce::String (id)] { invokeOnClips (commandID); };
-                shapeRow.addAndMakeVisible (button);
-            }
-
-            shapeRow.onResize = [this]
-            {
-                auto area = shapeRow.getLocalBounds();
-                const auto width = area.getWidth() / std::max (1, shapeButtons.size());
-
-                for (auto* button : shapeButtons)
-                    button->setBounds (area.removeFromLeft (width).reduced (1, 0));
+                if (const auto index = shapeBox.getSelectedId() - 1; juce::isPositiveAndBelow (index, (int) std::size (fadeShapes)))
+                    invokeOnClips (fadeShapes[index].command);
             };
 
             addRow ("Kind", &kindLabel);
             addRow ("Track", &trackLabel);
             addRow ("Starts", &startLabel);
             addRow ("Length", &lengthLabel);
-            addRow ("Muted", &mutedButton);
+            addRow ("Muted", &mutedToggle);
             addRow ("Alias", &aliasLabel);
             addRow ({}, &makeUniqueButton);
-            addRow ("Fades", &fadesLabel);
-            addRow ("Fade shape", &shapeRow);
+            addRow ("Fade in", &fadeInLabel);
+            addRow ("Fade out", &fadeOutLabel);
+            addRow ("Fade shape", &shapeBox);
             refresh();
         }
 
@@ -574,7 +598,7 @@ namespace
                 std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.kind == ClipType::audio; });
             const auto allMidi =
                 std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.kind == ClipType::midi; });
-            kindLabel.setText (allMidi ? "MIDI: notes" : allAudio ? "Audio" : "MIDI and audio", juce::dontSendNotification);
+            kindLabel.setText (allMidi ? "MIDI" : allAudio ? "Audio" : "MIDI and audio", juce::dontSendNotification);
             trackLabel.setText (row.has_value() ? row->name : juce::String(), juce::dontSendNotification);
 
             auto range = first.range;
@@ -584,55 +608,60 @@ namespace
 
             startLabel.setText (describePlace (context, range.getStart()), juce::dontSendNotification);
             lengthLabel.setText (describeLength (context, range), juce::dontSendNotification);
-
-            const auto allMuted = std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.muted; });
-            mutedButton.setToggleState (allMuted, juce::dontSendNotification);
-            mutedButton.setButtonText (allMuted ? "Muted: click to play" : "Plays: click to mute");
+            mutedToggle.setToggleState (std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.muted; }),
+                                        juce::dontSendNotification);
 
             const auto linked = std::any_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.linked; });
-            aliasLabel.setText (linked ? "Plays what its copies play, changed with them" : "A clip of its own", juce::dontSendNotification);
-            makeUniqueButton.setEnabled (linked);
+            aliasLabel.setText (linked ? "Yes: plays what its copies play" : "No", juce::dontSendNotification);
+            setRowVisible (makeUniqueButton, linked);
 
-            // An audio clip's fades, as parts of its length; their shapes are commands, ticked for the shape it has.
-            fadesLabel.setText (allAudio ? "In " + juce::String (juce::roundToInt (first.fadeIn * 100.0)) + "%, out "
-                                               + juce::String (juce::roundToInt (first.fadeOut * 100.0)) + "%"
-                                         : juce::String ("Only audio clips fade"),
-                                juce::dontSendNotification);
-            shapeRow.setEnabled (allAudio);
-            refreshShapes();
+            // An audio clip's fades, as parts of its length; a MIDI clip has none.
+            fadeInLabel.setText (juce::String (juce::roundToInt (first.fadeIn * 100.0)) + "% of the clip", juce::dontSendNotification);
+            fadeOutLabel.setText (juce::String (juce::roundToInt (first.fadeOut * 100.0)) + "% of the clip", juce::dontSendNotification);
+
+            for (auto* fadeRow : std::initializer_list<juce::Component*> { &fadeInLabel, &fadeOutLabel, &shapeBox })
+                setRowVisible (*fadeRow, allAudio);
+
+            refreshShape();
             repaint();
         }
 
-        void refreshShapes()
+        void refreshShape()
         {
-            const char* const ids[] = { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" };
+            auto ticked = 0;
 
-            for (int i = 0; i < shapeButtons.size(); ++i)
-                if (const auto* command = commands.getRegistry().find (ids[i]))
-                    shapeButtons[i]->setToggleState (context.getSongSelection().getClips() == clips && command->isTicked != nullptr
-                                                         && command->isTicked(),
-                                                     juce::dontSendNotification);
+            for (int i = 0; i < (int) std::size (fadeShapes) && context.getSongSelection().getClips() == clips; ++i)
+                if (const auto* command = commands.getRegistry().find (fadeShapes[i].command))
+                    if (command->isTicked != nullptr && command->isTicked())
+                        ticked = i + 1;
+
+            shapeBox.setSelectedId (ticked, juce::dontSendNotification);
         }
 
-        void updateValues() override { refreshShapes(); }
-
-        struct ShapeRow : public juce::Component
+        void updateValues() override
         {
-            std::function<void()> onResize;
-            void resized() override
-            {
-                if (onResize != nullptr)
-                    onResize();
-            }
+            if (! shapeBox.isPopupActive())
+                refreshShape();
+        }
+
+        struct FadeShape
+        {
+            const char* name;
+            const char* command;
         };
+
+        static constexpr FadeShape fadeShapes[] = { { "Linear", "clip.fadeLinear" },
+                                                    { "Convex", "clip.fadeConvex" },
+                                                    { "Concave", "clip.fadeConcave" },
+                                                    { "S-curve", "clip.fadeSCurve" } };
 
         CommandBridge& commands;
         ProjectContext& context;
         const std::vector<ClipID> clips;
-        juce::Label kindLabel, trackLabel, startLabel, lengthLabel, aliasLabel, fadesLabel;
-        juce::TextButton mutedButton, makeUniqueButton { "Make Unique" };
-        ShapeRow shapeRow;
-        juce::OwnedArray<juce::TextButton> shapeButtons;
+        juce::Label kindLabel, trackLabel, startLabel, lengthLabel, aliasLabel, fadeInLabel, fadeOutLabel;
+        juce::ToggleButton mutedToggle;
+        juce::TextButton makeUniqueButton { "Make Unique" };
+        juce::ComboBox shapeBox;
     };
 
     //==============================================================================
@@ -841,8 +870,10 @@ void Inspector::showTarget()
 void Inspector::layOutPage()
 {
     if (page != nullptr)
-        page->setSize (std::max (1, view.getWidth() - view.getScrollBarThickness()),
-                       std::max (view.getHeight(), page->getPreferredHeight()));
+    {
+        const auto width = std::max (1, view.getWidth() - view.getScrollBarThickness());
+        page->setSize (width, std::max (view.getHeight(), page->getPreferredHeight (width)));
+    }
 }
 
 void Inspector::paint (juce::Graphics& g)

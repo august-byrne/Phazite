@@ -16,13 +16,14 @@ namespace phazite::ui
 // The editor for one of Phazite's devices, or nullptr if the handle has none.
 std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle&);
 
-// An editor that also fits a shorter space than the size it gives itself, as the Devices view's panels are (its graph
-// shrinks): the least height it needs.
+// An editor that also fits a shorter space than the size it gives itself, as the Devices view's panels are (a graph
+// shrinks, or groups of controls move side by side): the least height it needs, and how wide it is at a height.
 class FlexibleHeight
 {
 public:
     virtual ~FlexibleHeight() = default;
     virtual int getMinimumHeight() const = 0;
+    virtual int getWidthForHeight (int height) const = 0;
 };
 
 //==============================================================================

@@ -2,9 +2,11 @@
 // A device editor's controls in rows of titled groups, such as a synth's oscillators, filter and envelopes, built from
 // the device's description: a knob for each parameter, with its name and value under it, or a list for one that picks
 // a choice. Within a group, a name that starts with the group's first word drops it ("Filter Attack" is "Attack" under
-// "Filter Envelope"); the control's title, which screen readers read, keeps the whole name.
+// "Filter Envelope"); the control's title, which screen readers read, keeps the whole name. Given less height than it
+// makes itself, as a Devices view may give it, its groups move side by side, in fewer rows.
 #pragma once
 
+#include "DeviceEditors.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
 
@@ -16,6 +18,7 @@
 namespace phazite::ui
 {
 class DevicePanel : public juce::Component,
+                    public FlexibleHeight,
                     private juce::Timer
 {
 public:
@@ -38,6 +41,9 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    int getMinimumHeight() const override; // a row of groups
+    int getWidthForHeight (int height) const override;
+
 private:
     struct Control
     {
@@ -57,7 +63,11 @@ private:
     };
 
     std::vector<std::unique_ptr<Control>> controls;
-    std::vector<std::vector<PlacedGroup>> groups; // by row
+    std::vector<std::vector<PlacedGroup>> groups; // by row, as given
+
+    // The groups in as many rows as fit a height, no more than given: in order, each row about as wide as the others.
+    std::vector<std::vector<const PlacedGroup*>> flow (int height) const;
+    static int getRowWidth (const std::vector<const PlacedGroup*>&);
 
     void timerCallback() override
     {

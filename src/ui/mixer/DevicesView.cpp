@@ -290,11 +290,15 @@ struct DevicesView::Panel : public juce::Component
             containerBody->updateValues();
     }
 
-    // As wide as what shows it, and a scroll bar if it is taller than the view.
-    int getBodyWidth() const
+    // As wide as what shows it at that height (an editor that reflows is wider when shorter), and a scroll bar if it is
+    // taller than the view.
+    int getBodyWidth (int bodyHeight) const
     {
         if (auto* containerBody = dynamic_cast<ContainerBody*> (body.get()))
             return containerBody->getPreferredWidth();
+
+        if (auto* flexible = dynamic_cast<const FlexibleHeight*> (body.get()))
+            return flexible->getWidthForHeight (getBodyHeight (bodyHeight));
 
         return body->getWidth();
     }
@@ -303,7 +307,7 @@ struct DevicesView::Panel : public juce::Component
     {
         const auto bodyHeight = height - controlHeight;
         const auto scrolls = dynamic_cast<ContainerBody*> (body.get()) == nullptr && getBodyHeight (bodyHeight) > bodyHeight;
-        return getBodyWidth() + (scrolls ? bodyView.getScrollBarThickness() : 0);
+        return getBodyWidth (bodyHeight) + (scrolls ? bodyView.getScrollBarThickness() : 0);
     }
 
     // An editor that can fit less height grows to fill the view (DeviceEditors.h: FlexibleHeight); others keep theirs.
@@ -349,7 +353,7 @@ struct DevicesView::Panel : public juce::Component
         bodyView.setBounds (area);
 
         const auto bodyHeight = getBodyHeight (area.getHeight());
-        body->setSize (getBodyWidth(), bodyHeight);
+        body->setSize (getBodyWidth (area.getHeight()), bodyHeight);
     }
 
     DevicesView& view;
