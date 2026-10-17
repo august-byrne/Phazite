@@ -35,12 +35,12 @@ Done before this plan (progress since then is under [Status](#status)):
 | 3. UI font and its licence | **Decided:** Inter, bundled, SIL OFL 1.1 |
 | 4. Engine fixes: workarounds or a fork | **Decided:** simple workarounds first, a fork if they get awkward; replacing a part of the engine is a separate decision for each part (A5) |
 | 5. MP3 export | **Decided:** none; WAV and FLAC |
-| 6. Airwindows effects | **Decided:** plug-ins that aren't Phazite's own are never built in; optional downloads (step 2.8) |
+| 6. Airwindows effects | **Decided:** plug-ins that aren't Phazite's own are never built in; optional downloads (step 2.10) |
 | 7. Sandboxing before or after v1 | **Decided:** before v1, on by default, unless it costs a lot of performance (step 3.3) |
 | 8. Ableton Live keymap in v1 | **Decided:** yes (step 3.7) |
 | 9. Single-key tools and the computer keyboard | **Decided:** Ableton's way, Shift and a letter for the shortcut while the keyboard plays notes |
 | 10. The computer keyboard at startup | **Decided:** off until turned on |
-| 11 to 19 (the mixer, plug-in windows, newer projects, loops, duplicated ranges) | **Decided** by Claude, for the owner to review (2026-10-16): folders are buses (done), a strip's Out menu and a send knob for every return (step 2.7), empty new tracks and no reverb return (as now), keys to plug-ins per plug-in (step 2.10), newer projects not opened and duplicates replacing (as now), the loop's and metronome's switches not unsaved changes (done) |
+| 11 to 19 (the mixer, plug-in windows, newer projects, loops, duplicated ranges) | **Decided** by Claude, for the owner to review (2026-10-16): folders are buses (done), a strip's Out menu and a send knob for every return (step 2.9), empty new tracks and no reverb return (as now), keys to plug-ins per plug-in (step 2.12), newer projects not opened and duplicates replacing (as now), the loop's and metronome's switches not unsaved changes (done) |
 
 ## Architecture track
 
@@ -155,7 +155,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - A static library target, `phazite_core`, holds everything testable without a window. The app links it.
 - A test runner using doctest (MIT, bundled with Tracktion Engine), run by CTest locally and in CI. On Linux it runs headless.
 - *Done when:* CI runs the tests on Windows and Linux.
-- *Status:* done for `app/`, `model/` and `ui/`. Since 2026-10-14 the [architecture track](#architecture-track) organizes them by area, adds `services/`, and makes `app/` a library the tests link. Built-in DSP goes in `devices/` from step 1.6; the chord engine and the sound generator (steps 2.5, 2.6 and 3.1) follow the same rules: no Tracktion or window code in their logic.
+- *Status:* done for `app/`, `model/` and `ui/`. Since 2026-10-14 the [architecture track](#architecture-track) organizes them by area, adds `services/`, and makes `app/` a library the tests link. Built-in DSP goes in `devices/` from step 1.6; the chord engine and the sound generator (steps 2.7, 2.8 and 3.1) follow the same rules: no Tracktion or window code in their logic.
 
 **0.2 Engine hooks (S)**
 - A `PropertyStorage` subclass: a neutral user name (no personal data), the app version and the settings folder.
@@ -353,7 +353,17 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Done when:* a container saved as a preset loads into another project with its macros working.
 - *Status:* done (2026-10-16), pending a check by hand: containers in the model (`src/model/mixer/ContainerModel.h`, with tests in `tests/ContainerTests.cpp`): effects of a channel grouped into a container in the first one's place and ungrouped again, each one named undo step, as Tracktion racks of their own wired one after the other; their eight macros, which modulate their devices, and their devices, which the mixer's functions, automation and the track's modulators reach as any device; a duplicated track's containers play racks of their own; devices are selected on their own in the song's selection, which Group into Container (Ctrl+G) and Ungroup Container (Ctrl+Shift+G) act on. Presets (`src/model/presets/PresetModel.h`, with tests in `tests/PresetTests.cpp`, the "done when" among them): a device's, a container's or a track's in a file of its own, without what ties it to its project, loaded into any project with new IDs as one undo step, a drum sampler's sounds copied in. In the window: Ctrl-click selects devices in the mixer, their menus group, ungroup and save presets; a container's slot shows its mix and macros, and its window (`src/ui/mixer/ContainerEditor.h`) its macros, to turn, rename and drag onto its devices' knobs, and its devices in a row; the browser has a Presets place, saves the selected device's or track's preset (Save Device Preset..., Save Track Preset...) and a track dragged into it by its handle, and presets go into the song as devices do, by a drop or Enter (tests in `tests/ContainerUiTests.cpp`). A guarded real-time audit scenario plays a container with a macro and an LFO at work (design.md, section 9).
 
-**2.5 Chord lane and progression outlines (L)**
+**2.5 The window: the whole song in the centre, the selection below (L)** (the owner's decision, 2026-10-17, [design section 4](design.md#4-the-window))
+- The centre shows the playlist or the mixer, chosen by tabs at its top (F5 and F9 too); the editor dock shows the piano roll and a new Devices view (F6); the Audio placeholder tab goes.
+- The Devices view: the selected track's modulators and macros, then its instrument and effects, in a row and in line. Phazite's own devices show their editors and containers their macros and devices, and their windows go; plug-ins and Tracktion's built-in devices show their key knobs and a button for their windows. A click on a device's name in the mixer shows it there.
+- The inspector shows the properties of what is selected (a track, clips, a section, or the song), not a copy of a mixer channel.
+- *Done when:* someone who hasn't used Phazite finds the mixer and the playlist from the tabs without a key, edits an EQ in the Devices view under the mixer, drags an LFO from its first column onto a cutoff, and changes a clip's fades and a track's send in the inspector.
+
+**2.6 Audio clip editor (L)**
+- The editor dock's editor for audio clips, in the piano roll's tab, which names what it shows: the selected audio clip's waveform, with its gain, fades, pitch, reverse and stretching to the song's tempo. Double-clicking an audio clip opens it, as a MIDI clip's double-click opens the piano roll.
+- *Done when:* a vocal clip can be trimmed, faded, turned up, pitched and stretched to the tempo in the editor, each change one undo step.
+
+**2.7 Chord lane and progression outlines (L)**
 - Phazite's chord format and the chord lane.
 - The progression library (about 40): audition and apply, and follow key changes.
 - Chords written to the engine, and chord highlighting in the piano roll.
@@ -362,7 +372,7 @@ Done before this plan (progress since then is under [Status](#status)):
   - picking a progression for a section plays it in the project key;
   - a bass part generated from it follows the chord lane.
 
-**2.6 Sound generator v1 (L)**
+**2.8 Sound generator v1 (L)**
 - **The drum synth device:** kick, 808, snare, clap, hats, tom, rim and percussion.
 - **The generator panel:**
   - a grid of sounds, with audition in context;
@@ -371,23 +381,23 @@ Done before this plan (progress since then is under [Status](#status)):
 - **Project fit and recipes:** sounds fit the project's key, tempo and loudness, and each keeps its recipe.
 - *Done when:* generating, auditioning in the loop and keeping a kick tuned to the song's key works end to end, and a kept sound reopens with its recipe.
 
-**2.7 Mixer depth (M)**
+**2.9 Mixer depth (M)**
 - The sidechain source picker, the routing view, and a per-track CPU meter.
 - A strip's Out line as a menu: Master, the folder buses (choosing one moves the track into that folder) and a new bus from the selected tracks ([question 12](design.md#25-open-questions)).
 - A send knob for every return on every strip, off until first touched ([question 13](design.md#25-open-questions)).
 - *Done when:* a kick-to-bass sidechain is set up from the picker and shows as a cable in the routing view, and a track is sent to a reverb return with one drag.
 
-**2.8 More devices (XL)**
+**2.10 More devices (XL)**
 - Multiband dynamics and a maximizer in the style of Maximus and OTT.
 - A tempo-synced delay, a saturator, a filter and a utility.
 - A better synth.
 - Phazite's own devices only: plug-ins that aren't, such as Airwindows' effects and Surge XT, may be offered as optional downloads next to Phazite Sounds, never built in ([question 6](design.md#25-open-questions)).
 - *Done when:* each device passes its DSP and real-time tests and holds up in A/B listening against reference tools.
 
-**2.9 Freeze, bounce in place and stems (M)**
+**2.11 Freeze, bounce in place and stems (M)**
 - *Done when:* a heavy plug-in track can be frozen and unfrozen, and exporting stems produces one file per track or bus.
 
-**2.10 Plug-in windows and plug-in presets (M)**
+**2.12 Plug-in windows and plug-in presets (M)**
 - A "Send All Keys to the Plug-in" switch in each plug-in window's menu, off at first and remembered for that plug-in ([question 16](design.md#25-open-questions)).
 - *Done when:* plug-in windows remember their positions, plug-in states save as presets, and a name can be typed into a plug-in that draws its own text fields.
 
