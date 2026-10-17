@@ -61,7 +61,7 @@ struct LaneScreen
     juce::Point<int> at (double beat, float value)
     {
         const auto area =
-            lane().getLocalBounds().toFloat().withTrimmedBottom (1.0f).reduced (0.0f, phazite::ui::LaneTint::pointRadius + 1.0f);
+            lane().getLocalBounds().toFloat().withTrimmedBottom (1.0f).reduced (0.0f, phazite::ui::LaneTint::selectedPointRadius + 1.0f);
         return { juce::roundToInt (playlist.getView().beatToX (BeatPosition::fromBeats (beat))),
                  juce::roundToInt (area.getBottom() - value * area.getHeight()) };
     }
@@ -143,6 +143,34 @@ TEST_CASE ("Dragging a point moves it on the grid as one step, and a double-clic
     CHECK (screen.getPoints().empty());
 }
 
+TEST_CASE ("Dragging one of several points moves that point only")
+{
+    LaneScreen screen;
+    phazite::test::Mouse mouse (screen.lane());
+
+    // Three points clicked in, as the user adds them.
+    for (const auto beat : { 2.0, 4.0, 6.0 })
+    {
+        mouse.click (screen.at (beat, 0.5f));
+        mouse.pause();
+    }
+
+    REQUIRE (screen.getBeats() == std::vector { 2.0, 4.0, 6.0 });
+
+    mouse.press (screen.at (4.0, 0.5f));
+    mouse.dragTo (screen.at (4.5, 0.6f));
+    mouse.dragTo (screen.at (5.0, 0.75f));
+    mouse.release();
+    mouse.pause();
+
+    const auto points = screen.getPoints();
+    REQUIRE (points.size() == 3);
+    CHECK (screen.getBeats() == std::vector { 2.0, 5.0, 6.0 });
+    CHECK (points[0].value == doctest::Approx (0.5f).epsilon (0.05));
+    CHECK (points[1].value == doctest::Approx (0.75f).epsilon (0.05));
+    CHECK (points[2].value == doctest::Approx (0.5f).epsilon (0.05));
+}
+
 TEST_CASE ("Dragging a line moves it up or down, and Alt bends it")
 {
     LaneScreen screen;
@@ -163,13 +191,38 @@ TEST_CASE ("Dragging a line moves it up or down, and Alt bends it")
     CHECK (points[1].value == doctest::Approx (0.7f).epsilon (0.1));
     CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
 
-    // Alt+drag up bows the rising line up: its curve goes below 0.
+    // Alt+drag up bows the rising line up: its curve goes below 0, and no further than where the line still runs from
+    // point to point, however far the mouse goes. The points stay where they are.
     mouse.press (screen.at (4.0, 0.5f), juce::ModifierKeys::altModifier);
-    mouse.dragTo (screen.at (4.0, 0.8f));
+    mouse.dragTo (screen.at (4.0, 0.6f));
+    CHECK (screen.getPoints()[0].curve < -0.05f);
+    CHECK (screen.getPoints()[0].curve > -phazite::AutomationPoint::maxBend);
+    mouse.dragTo (screen.at (4.0, 1.0f));
+    mouse.dragTo ({ screen.at (4.0, 1.0f).x, 0 });
     mouse.release();
     mouse.pause();
-    CHECK (screen.getPoints()[0].curve < -0.1f);
+    points = screen.getPoints();
+    CHECK (points[0].curve == doctest::Approx (-phazite::AutomationPoint::maxBend));
+    CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
+    CHECK (points[0].value == doctest::Approx (0.3f).epsilon (0.1));
+    CHECK (points[1].value == doctest::Approx (0.7f).epsilon (0.1));
     CHECK (screen.describeUndo() == juce::String ("Undo Bend Automation"));
+}
+
+TEST_CASE ("A press a little beside a point takes the point rather than selecting")
+{
+    LaneScreen screen;
+    phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (4.0), 0.5f });
+    phazite::test::dispatchPendingMessages();
+
+    phazite::test::Mouse mouse (screen.lane());
+    const auto beside = screen.at (4.0, 0.5f) + juce::Point<int> (6, 3);
+    mouse.press (beside);
+    mouse.dragTo (beside + juce::Point<int> (0, -10));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getPoints()[0].value > 0.55f);
+    CHECK (screen.describeUndo() == juce::String ("Undo Move Automation Points"));
 }
 
 TEST_CASE ("Draw draws steps on the grid, and Paint the chosen shape between where it starts and ends")

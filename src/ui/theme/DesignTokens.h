@@ -130,8 +130,9 @@ namespace TrackTint
 // How an automation lane shows under its track (docs/design.md, section 10): its header's surface mixed with the track's
 // color, less than the track's header; its background, the panels' surface this opaque over the playlist's, so that
 // the grid shows through; the wash under its line, in the track's color; the dashed line where a parameter without
-// automation sits (alphas); and its points' radius and how near the pointer must come to take a point or the line
-// (pixels).
+// automation sits (alphas); and its points' radius, a selected point's (filled with the text color and ringed in the
+// accent, so that it stands out on a track of any color), its ring's thickness, and how near the pointer must come to
+// take a point or the line (pixels).
 namespace LaneTint
 {
     inline constexpr float header = 0.15f;
@@ -139,7 +140,9 @@ namespace LaneTint
     inline constexpr float wash = 0.12f;
     inline constexpr float idleLine = 0.5f;
     inline constexpr float pointRadius = 4.0f;
-    inline constexpr float grabDistance = 6.0f;
+    inline constexpr float selectedPointRadius = 5.5f;
+    inline constexpr float selectedRing = 2.0f;
+    inline constexpr float grabDistance = 8.0f;
 } // namespace LaneTint
 
 // The ring around a modulated knob (ui::Knob), in the modulation color: how thick its arc is, how far outside the knob's

@@ -19,7 +19,7 @@ namespace
     constexpr int modeButtonWidth = 52; // "Touch", "Latch"
     constexpr int closeButtonSize = 20;
     constexpr int pixelsPerValue = 2;         // how finely a lane's line is drawn
-    constexpr float bendPerLaneHeight = 2.0f; // a drag the lane's height up or down bends a line from straight to a step
+    constexpr float bendPerLaneHeight = 1.0f; // a drag half the lane's height bends a line from straight to the most it bends
     constexpr float fineFactor = 0.2f;        // Shift moves a value a fifth as far
 
     juce::String getModeName (AutomationMode mode)
@@ -104,7 +104,7 @@ void Playlist::AutomationLaneView::refreshPoints()
 juce::Rectangle<float> Playlist::AutomationLaneView::getCurveArea() const
 {
     // Room for the points' dots at the top and the bottom, above the line under a lane.
-    return getLocalBounds().toFloat().withTrimmedBottom (isClip() ? 0.0f : 1.0f).reduced (0.0f, LaneTint::pointRadius + 1.0f);
+    return getLocalBounds().toFloat().withTrimmedBottom (isClip() ? 0.0f : 1.0f).reduced (0.0f, LaneTint::selectedPointRadius + 1.0f);
 }
 
 float Playlist::AutomationLaneView::valueToY (float value) const
@@ -333,7 +333,7 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
         g.setColour (colour);
         g.strokePath (line, juce::PathStrokeType (GraphTint::curveWidth));
 
-        // The points: selected ones in the accent color.
+        // The points: selected ones larger, in the text color with an accent ring, which every track's color shows.
         const auto selected = playlist.selection.getSelectedAutomationPoints();
         const auto isSelected = [&selected, this] (int index)
         {
@@ -343,15 +343,17 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
         for (int i = 0; i < (int) points.size(); ++i)
         {
             const juce::Point<float> centre (beatToX (points[(size_t) i].beat), valueToY (points[(size_t) i].value));
-            const auto dot = juce::Rectangle<float> (LaneTint::pointRadius * 2.0f, LaneTint::pointRadius * 2.0f).withCentre (centre);
+            const auto chosen = isSelected (i);
+            const auto radius = chosen ? LaneTint::selectedPointRadius : LaneTint::pointRadius;
+            const auto dot = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);
 
             if (! dot.intersects (clip.toFloat()))
                 continue;
 
-            g.setColour (isSelected (i) ? p.accent : colour);
+            g.setColour (chosen ? p.text : colour);
             g.fillEllipse (dot);
-            g.setColour (p.background);
-            g.drawEllipse (dot, 1.0f);
+            g.setColour (chosen ? p.accent : p.background);
+            g.drawEllipse (dot, chosen ? LaneTint::selectedRing : 1.0f);
         }
     }
 
@@ -640,11 +642,12 @@ void Playlist::AutomationLaneView::bendLine (const juce::MouseEvent& e)
         return;
 
     // Dragging up bows the line up, whichever way it goes (Tracktion's curve bends a rising line up below 0, a falling
-    // one above).
+    // one above). It stops where the line still runs from point to point: bent further, it would hold at both ends.
     const auto& first = before[(size_t) pressed];
     const auto rising = before[(size_t) pressed + 1].value > first.value;
     const auto up = (start.y - e.position.y) / std::max (1.0f, getCurveArea().getHeight());
-    setAutomationCurve (playlist.context, curve, pressed, first.curve + (rising ? -up : up) * bendPerLaneHeight);
+    const auto bend = first.curve + (rising ? -up : up) * bendPerLaneHeight;
+    setAutomationCurve (playlist.context, curve, pressed, juce::jlimit (-AutomationPoint::maxBend, AutomationPoint::maxBend, bend));
     refreshPoints();
 }
 

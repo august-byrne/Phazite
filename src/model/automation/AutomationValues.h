@@ -45,9 +45,12 @@ struct AutomationPoint
     BeatPosition beat {};
     float value = 0.0f; // in the parameter's own range
 
-    // The line to the next point: 0 is straight; toward -1 or 1 it bends one way or the other, and at -1 or 1 the value
-    // holds and then jumps, as discrete parameters' points do.
+    // The line to the next point: 0 is straight; toward -maxBend or maxBend it bends one way or the other, still running
+    // from this point to the next. Beyond, up to -1 or 1, the value holds at both ends with a shorter bend between them,
+    // and at -1 or 1 it holds and then jumps, as discrete parameters' points do.
     float curve = 0.0f;
+
+    static constexpr float maxBend = 0.5f; // the most bending a lane's line gives (Tracktion's curve)
 };
 
 //==============================================================================

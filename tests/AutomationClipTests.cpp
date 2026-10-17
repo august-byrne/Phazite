@@ -569,7 +569,7 @@ struct ClipScreen
         auto& view = curve();
         const auto& timeline = playlist.getView();
         const auto clipStart = phazite::getClip (song.context, clip)->range.getStart();
-        const auto area = view.getLocalBounds().toFloat().reduced (0.0f, phazite::ui::LaneTint::pointRadius + 1.0f);
+        const auto area = view.getLocalBounds().toFloat().reduced (0.0f, phazite::ui::LaneTint::selectedPointRadius + 1.0f);
         return { juce::roundToInt (timeline.beatToX (beats (beat)) - std::round (timeline.beatToX (clipStart))),
                  juce::roundToInt (area.getBottom() - (decibels + 60.0f) / 60.0f * area.getHeight()) };
     }
