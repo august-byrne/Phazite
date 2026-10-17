@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The mixer and the inspector, as they lay out in the window.
+// The mixer, as it lays out in the window (the inspector: InspectorTests.cpp).
 #include "UiTestHelpers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/mixer/ChannelStrip.h"
-#include "ui/mixer/Inspector.h"
 #include "ui/mixer/MasterStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/theme/DesignTokens.h"
@@ -131,27 +130,4 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
 
     selection.deselectAll();
     setEdit (context, nullptr);
-}
-
-TEST_CASE ("The inspector's channel fills the panel, and scrolls only when the panel is shorter than it needs")
-{
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, edit.get());
-    phazite::CommandRegistry registry;
-    phazite::ui::CommandBridge commands { registry };
-    phazite::ui::Inspector inspector { commands, context };
-    phazite::test::TestWindow window { inspector, 300, 1000 };
-    phazite::test::dispatchPendingMessages();
-
-    // A margin all round, and the title over the strip.
-    const auto strips = phazite::test::findAll<phazite::ui::ChannelStrip> (inspector);
-    REQUIRE (strips.size() == 1);
-    CHECK (strips[0]->getWidth() == 300 - 2 * phazite::ui::Space::m);
-    CHECK (strips[0]->getHeight() == 1000 - 2 * phazite::ui::Space::m - 24 - phazite::ui::Space::s);
-    phazite::test::checkChildrenApart (*strips[0]);
-
-    window.setSize (300, 200);
-    CHECK (strips[0]->getHeight() == phazite::ui::ChannelStrip::getMinimumHeight());
-    getSelection (context).deselectAll();
 }

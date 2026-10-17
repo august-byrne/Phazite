@@ -1,23 +1,762 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Inspector.h"
+#include "StripParts.h"
+#include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/SongSelection.h"
+#include "model/arrangement/TimelineModel.h"
+#include "model/automation/AutomationModel.h"
 #include "model/mixer/MixerModel.h"
+#include "model/transport/TransportModel.h"
+#include "ui/components/Controls.h"
+#include "ui/devices/DeviceMenus.h"
+#include "ui/input/CommandBridge.h"
+#include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace phazite::ui
 {
+using namespace strip;
+
+namespace
+{
+    constexpr int nameWidth = 84; // a row's name, on its left
+    constexpr int titleHeight = 32;
+    constexpr int tipLines = 3; // a section's tip, wrapped
+
+    // "Bar 5", or "Bar 5, beat 3" for a place after a bar's first beat; bars count from 1, as the time line's do.
+    juce::String describePlace (const ProjectContext& context, BeatPosition place)
+    {
+        const auto bar = getBarAt (context, place); // from 0
+        const auto intoBar = (place - getBarStart (context, bar)).inBeats();
+
+        if (intoBar < 0.001)
+            return "Bar " + juce::String (bar + 1);
+
+        return "Bar " + juce::String (bar + 1) + ", beat "
+               + juce::String (1.0 + intoBar, 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
+    }
+
+    // "2 bars", "1 bar, 2 beats" or "3 beats", in the time signature where it starts.
+    juce::String describeLength (const ProjectContext& context, BeatRange range)
+    {
+        const auto beats = range.getLength().inBeats();
+        const auto perBar = std::max (1, getBeatsPerBar (context, range.getStart()));
+        const auto bars = (int) std::floor (beats / perBar + 0.0001);
+        const auto rest = std::max (0.0, beats - bars * perBar);
+        const auto restText = rest < 0.001 ? juce::String() : juce::String (rest, 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
+        const auto barsText = bars == 1 ? juce::String ("1 bar") : juce::String (bars) + " bars";
+
+        const auto beatsWord = std::abs (rest - 1.0) < 0.001 ? " beat" : " beats";
+
+        if (bars == 0)
+            return restText + beatsWord;
+
+        return restText.isEmpty() ? barsText : barsText + ", " + restText + beatsWord;
+    }
+
+    juce::String getModeName (AutomationMode mode)
+    {
+        switch (mode)
+        {
+            case AutomationMode::touch:
+                return "Touch";
+            case AutomationMode::latch:
+                return "Latch";
+            case AutomationMode::write:
+                return "Write";
+            case AutomationMode::read:
+            default:
+                return "Read";
+        }
+    }
+
+    // A color, which a click on offers the palette's others.
+    struct ColourButton : public juce::Button
+    {
+        explicit ColourButton (const juce::String& title)
+            : juce::Button (title)
+        {
+            setTitle (title);
+        }
+
+        void paintButton (juce::Graphics& g, bool highlighted, bool) override
+        {
+            const auto area = getLocalBounds().toFloat().reduced (1.0f).withWidth ((float) controlHeight * 2.0f);
+            g.setColour (colour);
+            g.fillRoundedRectangle (area, cornerRadius);
+            g.setColour (highlighted ? getPalette (*this).text : getPalette (*this).border);
+            g.drawRoundedRectangle (area, cornerRadius, 1.0f);
+        }
+
+        juce::Colour colour;
+    };
+
+    // A row's text, in the text color, cut short with dots when it doesn't fit.
+    void setUpValueLabel (juce::Label& label)
+    {
+        label.setFont (juce::FontOptions (TextSize::body));
+        label.setMinimumHorizontalScale (1.0f);
+    }
+
+    // A single-line field that changes something when Enter is pressed or the focus leaves it.
+    void setUpNameEditor (juce::TextEditor& editor, std::function<void (const juce::String&)> apply)
+    {
+        editor.setFont (juce::FontOptions (TextSize::body));
+        editor.setSelectAllWhenFocused (true);
+        editor.onReturnKey = [&editor, apply] { apply (editor.getText()); };
+        editor.onFocusLost = [&editor, apply] { apply (editor.getText()); };
+        editor.onEscapeKey = [&editor] { editor.giveAwayKeyboardFocus(); };
+    }
+} // namespace
+
+//==============================================================================
+struct Inspector::Page : public juce::Component
+{
+    Page (const juce::String& kindName, juce::Colour stripe)
+        : kind (kindName),
+          colour (stripe)
+    {
+        setTitle (kindName);
+        title.setFont (juce::FontOptions (TextSize::title, juce::Font::bold));
+        title.setMinimumHorizontalScale (1.0f);
+        addAndMakeVisible (title);
+    }
+
+    virtual void refresh() {}      // the song changed: what it shows, as it is now
+    virtual void updateValues() {} // a timer: the faders' and switches' values
+
+    // A row: its name on the left, a control filling the rest. A row without a control is a heading.
+    void addRow (const juce::String& name, juce::Component* control, int height = controlHeight)
+    {
+        auto label = std::make_unique<juce::Label> (juce::String(), name);
+        label->setFont (
+            juce::FontOptions (control != nullptr ? TextSize::small : TextSize::body, control != nullptr ? 0 : juce::Font::bold));
+        label->setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+        label->setInterceptsMouseClicks (false, false);
+        addAndMakeVisible (*label);
+
+        if (control != nullptr)
+            addAndMakeVisible (control);
+
+        rows.push_back ({ std::move (label), control, height });
+    }
+
+    int getPreferredHeight() const
+    {
+        auto height = Space::m + titleHeight + Space::s;
+
+        for (const auto& row : rows)
+            height += row.height + Space::xs;
+
+        return height + Space::m;
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // The color of what it shows, beside its title, as a track's header has its track's.
+        if (! colour.isTransparent())
+        {
+            g.setColour (colour);
+            g.fillRect (title.getBounds().withX (0).withWidth (colourBarHeight));
+        }
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (Space::m);
+        title.setBounds (area.removeFromTop (titleHeight));
+        area.removeFromTop (Space::s);
+
+        for (auto& row : rows)
+        {
+            auto line = area.removeFromTop (row.height);
+            area.removeFromTop (Space::xs);
+
+            if (row.control == nullptr)
+            {
+                row.name->setBounds (line);
+                continue;
+            }
+
+            row.name->setBounds (line.removeFromLeft (nameWidth).removeFromTop (controlHeight));
+            row.control->setBounds (line);
+        }
+    }
+
+    struct Row
+    {
+        std::unique_ptr<juce::Label> name;
+        juce::Component* control = nullptr;
+        int height = controlHeight;
+    };
+
+    const juce::String kind;
+    juce::Colour colour;
+    juce::Label title;
+    std::vector<Row> rows;
+};
+
+namespace
+{
+    //==============================================================================
+    // A send of a track: its level, and whether it takes the sound before or after the fader.
+    struct SendRow : public juce::Component
+    {
+        SendRow (ProjectContext& c, const Send& send)
+            : context (c),
+              shown (send)
+        {
+            showAsDecibels (level);
+            level.setTooltip ("How much of this track the send feeds the return. Double-click for 0 dB");
+            attachment.setParameter (getSendLevel (context, send.id));
+            prePost.setTooltip ("Pre: the send takes the sound before the fader, so the fader doesn't change it. Post: after the fader");
+            prePost.onClick = [this] { setPreFader (context, shown.id, ! shown.preFader); };
+            remove.setTooltip ("Removes the send");
+            remove.onClick = [this] { removeSend (context, shown.id); };
+            addAndMakeVisible (level);
+            addAndMakeVisible (prePost);
+            addAndMakeVisible (remove);
+            show (send);
+        }
+
+        void show (const Send& send)
+        {
+            shown = send;
+            level.setTitle ("Send to " + send.returnName);
+            prePost.setButtonText (send.preFader ? "Pre" : "Post");
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds();
+            remove.setBounds (area.removeFromRight (controlHeight));
+            area.removeFromRight (Space::xs);
+            prePost.setBounds (area.removeFromRight (44));
+            area.removeFromRight (Space::xs);
+            level.setBounds (area);
+        }
+
+        ProjectContext& context;
+        Send shown;
+        Fader level { Fader::Direction::horizontal, "Send level", decibelsToFaderPosition (0.0f) };
+        ParameterAttachment attachment { level };
+        juce::TextButton prePost, remove { juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) };
+    };
+
+    //==============================================================================
+    // A track's name, color, level, routing, devices and automation.
+    struct TrackPage : public Inspector::Page
+    {
+        TrackPage (CommandBridge& bridge, ProjectContext& c, TrackID id)
+            : Page ("Track", juce::Colours::transparentBlack),
+              commands (bridge),
+              context (c),
+              track (id),
+              colourButton ("Color"),
+              muteSolo (c)
+        {
+            setUpNameEditor (nameEditor,
+                             [this] (const juce::String& text)
+                             {
+                                 if (const auto row = getTrackRow (context, track); row.has_value() && text != row->name)
+                                     renameTrack (context, track, text);
+                             });
+            nameEditor.setTitle ("Name");
+            colourButton.setTooltip ("The track's color, which its clips and its channel show. Click for another");
+            colourButton.onClick = [this]
+            {
+                showColourMenu (colourButton, colourButton.colour, [&projectContext = context, id = track] (juce::Colour chosen)
+                                { setTrackColours (projectContext, { id }, chosen); });
+            };
+
+            showAsDecibels (volume);
+            volume.setTooltip ("The track's volume. Double-click for 0 dB; drag with Shift held for fine steps");
+            volumeAttachment.setParameter (getVolume (context, track));
+            showAsPan (pan);
+            pan.setTooltip ("Where the track sits between the left and right speakers. Double-click to center it");
+            panAttachment.setParameter (getPan (context, track));
+            muteSolo.setTrack (track);
+
+            instrumentButton.onClick = [this] { instrumentClicked(); };
+            devicesButton.setTooltip ("Shows the track's instrument and effects in the Devices view, under the playlist");
+            devicesButton.onClick = [this]
+            {
+                const auto effects = getEffects (context, track);
+                const auto instrument = getInstrument (context, track);
+
+                if (instrument.has_value())
+                    showDevice (context, commands, *instrument);
+                else if (! effects.empty())
+                    showDevice (context, commands, effects.front());
+            };
+
+            addSendButton.setTooltip ("Sends some of this track to a return track, which holds an effect that several tracks "
+                                      "share, such as a reverb");
+            addSendButton.onClick = [this] { showSendMenu(); };
+
+            for (const auto mode : { AutomationMode::read, AutomationMode::touch, AutomationMode::latch, AutomationMode::write })
+                modeBox.addItem (getModeName (mode), (int) mode + 1);
+
+            modeBox.setTitle ("Automation mode");
+            modeBox.setTooltip ("How moving the track's controls while the song plays writes their automation: Read plays it, "
+                                "Touch writes while a control is held, Latch from the first move until playback stops, and "
+                                "Write overwrites from when playback starts");
+            modeBox.onChange = [this] { setAutomationMode (context, track, (AutomationMode) (modeBox.getSelectedId() - 1)); };
+            lanesButton.setTooltip ("Shows the track's automation lanes under it in the playlist, or collapses them");
+            lanesButton.onClick = [this]
+            {
+                context.getSongSelection().selectOnly (track);
+                commands.invoke ("automation.showLanes");
+            };
+
+            for (auto* label : { &kindLabel, &outputLabel })
+                setUpValueLabel (*label);
+
+            addRow ("Name", &nameEditor);
+            addRow ("Color", &colourButton);
+            addRow ("Kind", &kindLabel);
+            addRow ("Volume", &volume);
+            addRow ("Pan", &pan);
+            addRow ("Mute, solo", &muteSolo);
+            addRow ("Output", &outputLabel);
+            addRow ("Instrument", &instrumentButton);
+            addRow ("Devices", &devicesButton);
+            addRow ("Automation", &modeBox);
+            addRow ("Lanes", &lanesButton);
+            sendsHeadingIndex = (int) rows.size();
+            refresh();
+        }
+
+        void refresh() override
+        {
+            channel = getChannel (context, track);
+
+            if (! channel.has_value())
+                return;
+
+            title.setText (channel->name, juce::dontSendNotification);
+            colour = channel->colour;
+            colourButton.colour = channel->colour;
+            colourButton.repaint();
+
+            if (! nameEditor.hasKeyboardFocus (true))
+                nameEditor.setText (channel->name, juce::dontSendNotification);
+
+            kindLabel.setText (channel->kind == ChannelKind::bus           ? "Folder: mixes its tracks"
+                               : channel->kind == ChannelKind::plainFolder ? "Folder: scales its tracks' volumes"
+                               : channel->kind == ChannelKind::returnTrack ? "Return: holds effects tracks share"
+                                                                           : "Track",
+                               juce::dontSendNotification);
+            outputLabel.setText (channel->kind == ChannelKind::plainFolder ? juce::String ("No sound of its own")
+                                 : channel->outputBus.isNotEmpty()         ? channel->outputBus
+                                                                           : juce::String ("Master"),
+                                 juce::dontSendNotification);
+
+            // A track's instrument; or a button that asks for one while the track's notes make no sound.
+            const auto instrument = getInstrument (context, track);
+            instrumentButton.setEnabled (canHoldInstrument (context, track));
+            instrumentButton.setButtonText (instrument.has_value()     ? instrument->name
+                                            : channel->needsInstrument ? juce::String ("Choose instrument")
+                                                                       : juce::String ("+ Instrument"));
+            instrumentButton.setTooltip (instrument.has_value() ? "Shows the instrument in the Devices view"
+                                                                : "Adds an instrument, which plays the track's notes");
+
+            const auto effects = getEffects (context, track);
+            juce::StringArray names;
+
+            for (const auto& effect : effects)
+                names.add (effect.name);
+
+            devicesButton.setButtonText (names.isEmpty() ? juce::String ("No effects") : names.joinIntoString (", "));
+            devicesButton.setEnabled (instrument.has_value() || ! effects.empty());
+
+            modeBox.setSelectedId ((int) getAutomationMode (context, track) + 1, juce::dontSendNotification);
+            const auto lanes = (int) getAutomationLanes (context, track).size();
+            lanesButton.setButtonText (lanes == 0   ? juce::String ("Show volume lane")
+                                       : lanes == 1 ? juce::String ("1 lane: show or collapse")
+                                                    : juce::String (lanes) + " lanes: show or collapse");
+
+            refreshSends();
+            repaint();
+        }
+
+        void refreshSends()
+        {
+            // Tracks and returns send; folders don't.
+            const auto canSend = channel->kind == ChannelKind::track || channel->kind == ChannelKind::returnTrack;
+            const auto sends = canSend ? getSends (context, track) : std::vector<Send>();
+
+            if (getIDs (sends) == shownSends && rows.size() > (size_t) sendsHeadingIndex)
+            {
+                for (size_t i = 0; i < sends.size(); ++i)
+                    sendRows[(int) i]->show (sends[i]);
+
+                return;
+            }
+
+            // The rows after the heading: a row for each send, then the button that adds one.
+            rows.resize ((size_t) sendsHeadingIndex);
+            sendRows.clear();
+            shownSends = getIDs (sends);
+
+            if (canSend)
+            {
+                addRow ("Sends", nullptr);
+
+                for (const auto& send : sends)
+                    addRow ("To " + send.returnName, sendRows.add (new SendRow (context, send)));
+
+                addRow ({}, &addSendButton);
+            }
+            else
+            {
+                addSendButton.setVisible (false);
+            }
+
+            if (auto* inspector = findParentComponentOfClass<Inspector>())
+                inspector->resized();
+        }
+
+        void updateValues() override
+        {
+            volumeAttachment.update();
+            panAttachment.update();
+            muteSolo.update();
+
+            for (auto* send : sendRows)
+                send->attachment.update();
+        }
+
+        void instrumentClicked()
+        {
+            if (const auto instrument = getInstrument (context, track))
+                showDevice (context, commands, *instrument);
+            else
+                showInstrumentMenu (context, track, instrumentButton);
+        }
+
+        void showSendMenu()
+        {
+            // The returns there are, then new ones: one with an effect, as Studio One makes it in one step, or an empty one.
+            juce::PopupMenu menu;
+            auto& projectContext = context;
+            const auto from = track;
+            menu.addSectionHeader ("Return tracks hold effects that tracks share");
+
+            for (const auto& target : getReturns (context))
+                if (target.id != from) // a return can't send to itself
+                    menu.addItem ("To " + target.name, [&projectContext, from, to = target.id] { addSendTo (projectContext, from, to); });
+
+            menu.addSeparator();
+            menu.addItem ("To a New Return With an Effect...",
+                          [&projectContext, from, safeButton = juce::Component::SafePointer<juce::Component> (&addSendButton)]
+                          {
+                              if (safeButton != nullptr)
+                                  showNewReturnMenu (projectContext, from, *safeButton);
+                          });
+
+            menu.addItem ("To a New Empty Return", [&projectContext, from] { addSendToNewReturn (projectContext, from); });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addSendButton));
+        }
+
+        CommandBridge& commands;
+        ProjectContext& context;
+        const TrackID track;
+        std::optional<Channel> channel;
+        juce::TextEditor nameEditor;
+        ColourButton colourButton;
+        juce::Label kindLabel, outputLabel;
+        Fader volume { Fader::Direction::horizontal, "Volume", decibelsToFaderPosition (0.0f) };
+        Fader pan { Fader::Direction::horizontal, "Pan", 0.0 };
+        ParameterAttachment volumeAttachment { volume }, panAttachment { pan };
+        MuteSoloButtons muteSolo;
+        juce::TextButton instrumentButton, devicesButton, lanesButton, addSendButton { "+ Send" };
+        juce::ComboBox modeBox;
+        juce::OwnedArray<SendRow> sendRows;
+        std::vector<DeviceID> shownSends;
+        int sendsHeadingIndex = 0;
+    };
+
+    //==============================================================================
+    // Clips: one's name, kind, place, length, and whether it is muted or an alias; an audio clip's fades. Several share
+    // the switches, which act on all of them.
+    struct ClipsPage : public Inspector::Page
+    {
+        ClipsPage (CommandBridge& bridge, ProjectContext& c, std::vector<ClipID> shown)
+            : Page (shown.size() == 1 ? "Clip" : "Clips", juce::Colours::transparentBlack),
+              commands (bridge),
+              context (c),
+              clips (std::move (shown))
+        {
+            for (auto* label : { &kindLabel, &trackLabel, &startLabel, &lengthLabel, &aliasLabel, &fadesLabel })
+                setUpValueLabel (*label);
+
+            mutedButton.setTitle ("Muted");
+            mutedButton.setTooltip ("A muted clip doesn't play");
+            mutedButton.onClick = [this] { toggleClipsMuted (context, clips); };
+            makeUniqueButton.setTooltip ("Makes the clips copies of their own, so that changing them no longer changes the clips "
+                                         "they were aliases of");
+            makeUniqueButton.onClick = [this] { invokeOnClips ("clip.makeUnique"); };
+
+            const char* const shapes[][2] = { { "Linear", "clip.fadeLinear" },
+                                              { "Convex", "clip.fadeConvex" },
+                                              { "Concave", "clip.fadeConcave" },
+                                              { "S-curve", "clip.fadeSCurve" } };
+
+            for (const auto& [name, id] : shapes)
+            {
+                auto* button = shapeButtons.add (new juce::TextButton (name));
+                button->setTooltip ("Fade shape: " + juce::String (name).toLowerCase());
+                button->setClickingTogglesState (false);
+                button->onClick = [this, commandID = juce::String (id)] { invokeOnClips (commandID); };
+                shapeRow.addAndMakeVisible (button);
+            }
+
+            shapeRow.onResize = [this]
+            {
+                auto area = shapeRow.getLocalBounds();
+                const auto width = area.getWidth() / std::max (1, shapeButtons.size());
+
+                for (auto* button : shapeButtons)
+                    button->setBounds (area.removeFromLeft (width).reduced (1, 0));
+            };
+
+            addRow ("Kind", &kindLabel);
+            addRow ("Track", &trackLabel);
+            addRow ("Starts", &startLabel);
+            addRow ("Length", &lengthLabel);
+            addRow ("Muted", &mutedButton);
+            addRow ("Alias", &aliasLabel);
+            addRow ({}, &makeUniqueButton);
+            addRow ("Fades", &fadesLabel);
+            addRow ("Fade shape", &shapeRow);
+            refresh();
+        }
+
+        // A command that acts on the selected clips, with these selected.
+        void invokeOnClips (const juce::String& id)
+        {
+            auto& selection = context.getSongSelection();
+
+            if (selection.getClips() != clips)
+            {
+                selection.clear();
+
+                for (const auto clip : clips)
+                    selection.add (clip);
+            }
+
+            commands.invoke (id);
+        }
+
+        void refresh() override
+        {
+            std::vector<ClipInfo> infos;
+
+            for (const auto id : clips)
+                if (const auto info = getClip (context, id))
+                    infos.push_back (*info);
+
+            if (infos.empty())
+                return;
+
+            const auto& first = infos.front();
+            const auto row = getTrackRow (context, first.track);
+            colour = row.has_value() ? row->colour : juce::Colours::transparentBlack;
+            title.setText (infos.size() == 1 ? (first.name.isNotEmpty() ? first.name : juce::String ("Clip"))
+                                             : juce::String ((int) infos.size()) + " clips",
+                           juce::dontSendNotification);
+
+            const auto allAudio =
+                std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.kind == ClipType::audio; });
+            const auto allMidi =
+                std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.kind == ClipType::midi; });
+            kindLabel.setText (allMidi ? "MIDI: notes" : allAudio ? "Audio" : "MIDI and audio", juce::dontSendNotification);
+            trackLabel.setText (row.has_value() ? row->name : juce::String(), juce::dontSendNotification);
+
+            auto range = first.range;
+
+            for (const auto& info : infos)
+                range = BeatRange (std::min (range.getStart(), info.range.getStart()), std::max (range.getEnd(), info.range.getEnd()));
+
+            startLabel.setText (describePlace (context, range.getStart()), juce::dontSendNotification);
+            lengthLabel.setText (describeLength (context, range), juce::dontSendNotification);
+
+            const auto allMuted = std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.muted; });
+            mutedButton.setToggleState (allMuted, juce::dontSendNotification);
+            mutedButton.setButtonText (allMuted ? "Muted: click to play" : "Plays: click to mute");
+
+            const auto linked = std::any_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.linked; });
+            aliasLabel.setText (linked ? "Plays what its copies play, changed with them" : "A clip of its own", juce::dontSendNotification);
+            makeUniqueButton.setEnabled (linked);
+
+            // An audio clip's fades, as parts of its length; their shapes are commands, ticked for the shape it has.
+            fadesLabel.setText (allAudio ? "In " + juce::String (juce::roundToInt (first.fadeIn * 100.0)) + "%, out "
+                                               + juce::String (juce::roundToInt (first.fadeOut * 100.0)) + "%"
+                                         : juce::String ("Only audio clips fade"),
+                                juce::dontSendNotification);
+            shapeRow.setEnabled (allAudio);
+            refreshShapes();
+            repaint();
+        }
+
+        void refreshShapes()
+        {
+            const char* const ids[] = { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" };
+
+            for (int i = 0; i < shapeButtons.size(); ++i)
+                if (const auto* command = commands.getRegistry().find (ids[i]))
+                    shapeButtons[i]->setToggleState (context.getSongSelection().getClips() == clips && command->isTicked != nullptr
+                                                         && command->isTicked(),
+                                                     juce::dontSendNotification);
+        }
+
+        void updateValues() override { refreshShapes(); }
+
+        struct ShapeRow : public juce::Component
+        {
+            std::function<void()> onResize;
+            void resized() override
+            {
+                if (onResize != nullptr)
+                    onResize();
+            }
+        };
+
+        CommandBridge& commands;
+        ProjectContext& context;
+        const std::vector<ClipID> clips;
+        juce::Label kindLabel, trackLabel, startLabel, lengthLabel, aliasLabel, fadesLabel;
+        juce::TextButton mutedButton, makeUniqueButton { "Make Unique" };
+        ShapeRow shapeRow;
+        juce::OwnedArray<juce::TextButton> shapeButtons;
+    };
+
+    //==============================================================================
+    // A section: its name, color, place, length, energy and tip.
+    struct SectionPage : public Inspector::Page
+    {
+        SectionPage (ProjectContext& c, SectionID id)
+            : Page ("Section", juce::Colours::transparentBlack),
+              context (c),
+              section (id),
+              colourButton ("Color")
+        {
+            setUpNameEditor (nameEditor,
+                             [this] (const juce::String& text)
+                             {
+                                 if (const auto shown = getSongSection (context, section); shown.has_value() && text != shown->name)
+                                     renameSection (context, section, text);
+                             });
+            nameEditor.setTitle ("Name");
+            colourButton.setTooltip ("The section's color, behind the tracks. Click for another");
+            colourButton.onClick = [this]
+            {
+                showColourMenu (colourButton, colourButton.colour, [&projectContext = context, id = section] (juce::Colour chosen)
+                                { setSectionColour (projectContext, id, chosen); });
+            };
+
+            for (auto* label : { &startLabel, &lengthLabel, &energyLabel, &tipLabel })
+                setUpValueLabel (*label);
+
+            tipLabel.setJustificationType (juce::Justification::topLeft);
+            addRow ("Name", &nameEditor);
+            addRow ("Color", &colourButton);
+            addRow ("Starts", &startLabel);
+            addRow ("Length", &lengthLabel);
+            addRow ("Energy", &energyLabel);
+            addRow ("Tip", &tipLabel, tipLines * controlHeight);
+            refresh();
+        }
+
+        void refresh() override
+        {
+            const auto shown = getSongSection (context, section);
+
+            if (! shown.has_value())
+                return;
+
+            title.setText (shown->name, juce::dontSendNotification);
+            colour = shown->colour;
+            colourButton.colour = shown->colour;
+            colourButton.repaint();
+
+            if (! nameEditor.hasKeyboardFocus (true))
+                nameEditor.setText (shown->name, juce::dontSendNotification);
+
+            startLabel.setText (describePlace (context, shown->range.getStart()), juce::dontSendNotification);
+            lengthLabel.setText (describeLength (context, shown->range), juce::dontSendNotification);
+            energyLabel.setText (juce::String (juce::roundToInt (shown->energy * 100.0f)) + "%: how intense it is",
+                                 juce::dontSendNotification);
+            tipLabel.setText (shown->tip.isNotEmpty() ? shown->tip : juce::String ("No tip"), juce::dontSendNotification);
+            repaint();
+        }
+
+        ProjectContext& context;
+        const SectionID section;
+        juce::TextEditor nameEditor;
+        ColourButton colourButton;
+        juce::Label startLabel, lengthLabel, energyLabel, tipLabel;
+    };
+
+    //==============================================================================
+    // With nothing selected, the song: its tempo, time signature, length, tracks and sections.
+    struct SongPage : public Inspector::Page
+    {
+        explicit SongPage (ProjectContext& c)
+            : Page ("Song", juce::Colours::transparentBlack),
+              context (c)
+        {
+            title.setText ("Song", juce::dontSendNotification);
+
+            for (auto* label : { &tempoLabel, &signatureLabel, &lengthLabel, &tracksLabel, &sectionsLabel, &hintLabel })
+                setUpValueLabel (*label);
+
+            hintLabel.setText ("Select a track, a clip or a section to see its properties here.", juce::dontSendNotification);
+            hintLabel.setJustificationType (juce::Justification::topLeft);
+            addRow ("Tempo", &tempoLabel);
+            addRow ("Time", &signatureLabel);
+            addRow ("Length", &lengthLabel);
+            addRow ("Tracks", &tracksLabel);
+            addRow ("Sections", &sectionsLabel);
+            addRow ({}, &hintLabel, 2 * controlHeight);
+            refresh();
+        }
+
+        void refresh() override
+        {
+            tempoLabel.setText (juce::String (getTempoHandle (context).getValue(), 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".")
+                                    + " BPM",
+                                juce::dontSendNotification);
+            const auto signature = getTimeSignature (context).value_or (TimeSignature {});
+            signatureLabel.setText (juce::String (signature.numerator) + "/" + juce::String (signature.denominator),
+                                    juce::dontSendNotification);
+            lengthLabel.setText (describeLength (context, { BeatPosition(), getTimelineEnd (context) }), juce::dontSendNotification);
+            tracksLabel.setText (juce::String ((int) getAllPlaylistTracks (context).size()), juce::dontSendNotification);
+            sectionsLabel.setText (juce::String ((int) getSongSections (context).size()), juce::dontSendNotification);
+        }
+
+        ProjectContext& context;
+        juce::Label tempoLabel, signatureLabel, lengthLabel, tracksLabel, sectionsLabel, hintLabel;
+    };
+} // namespace
+
+//==============================================================================
 Inspector::Inspector (CommandBridge& bridge, ProjectContext& projectContext)
-    : context (projectContext),
-      strip (bridge, projectContext)
+    : commands (bridge),
+      context (projectContext)
 {
     setTitle ("Inspector");
-    setDescription ("The channel of the selected track.");
-    stripView.setViewedComponent (&strip, false);
-    stripView.setScrollBarsShown (true, false);
-    addAndMakeVisible (stripView);
+    view.setScrollBarsShown (true, false);
+    view.setScrollBarThickness (6);
+    addAndMakeVisible (view);
     context.addListener (this);
     context.getSongSelection().addChangeListener (this);
-    strip.setTrack (getInspectedChannel (context));
-    startTimerHz (2);
+    showTarget();
+    startTimerHz (10);
 }
 
 Inspector::~Inspector()
@@ -26,31 +765,123 @@ Inspector::~Inspector()
     context.removeListener (this);
 }
 
-void Inspector::showTrack()
+juce::String Inspector::getShown() const
 {
-    if (const auto track = getInspectedChannel (context); track != strip.getTrack())
-        strip.setTrack (track);
+    return page != nullptr ? page->kind : juce::String();
+}
+
+Inspector::Target Inspector::getTarget() const
+{
+    if (! context.hasProject())
+        return {};
+
+    const auto& selection = context.getSongSelection();
+
+    if (auto clips = selection.getClips(); ! clips.empty())
+        return { .kind = Target::Kind::clips, .clips = std::move (clips) };
+
+    // Notes are their clip's.
+    if (const auto notes = selection.getNotes(); ! notes.empty())
+        return { .kind = Target::Kind::clips, .clips = { notes.front().clip } };
+
+    if (const auto sections = selection.getSections(); ! sections.empty())
+        return { .kind = Target::Kind::section, .section = sections.front() };
+
+    // A device's track (the master's has none here: the Devices view shows it), or an automation point's.
+    if (const auto devices = selection.getDevices(); ! devices.empty())
+        if (const auto channel = getDeviceChannel (context, devices.front()); channel.has_value() && channel->isValid())
+            return { .kind = Target::Kind::track, .track = *channel };
+
+    if (const auto points = selection.getSelectedAutomationPoints(); points.parameter.isValid())
+        if (const auto target = getAutomationTarget (context, points.parameter); target.has_value() && getChannel (context, target->track))
+            return { .kind = Target::Kind::track, .track = target->track };
+
+    if (const auto tracks = selection.getTracks(); ! tracks.empty() && getChannel (context, tracks.front()).has_value())
+        return { .kind = Target::Kind::track, .track = tracks.front() };
+
+    return { .kind = Target::Kind::song };
+}
+
+void Inspector::showTarget()
+{
+    const auto target = getTarget();
+
+    if (target == shown && page != nullptr)
+        return;
+
+    shown = target;
+    view.setViewedComponent (nullptr, false);
+    page = nullptr;
+
+    switch (shown.kind)
+    {
+        case Target::Kind::track:
+            page = std::make_unique<TrackPage> (commands, context, shown.track);
+            break;
+        case Target::Kind::clips:
+            page = std::make_unique<ClipsPage> (commands, context, shown.clips);
+            break;
+        case Target::Kind::section:
+            page = std::make_unique<SectionPage> (context, shown.section);
+            break;
+        case Target::Kind::song:
+            page = std::make_unique<SongPage> (context);
+            break;
+        case Target::Kind::none:
+        default:
+            break;
+    }
+
+    if (page != nullptr)
+        view.setViewedComponent (page.get(), false);
+
+    layOutPage();
+}
+
+void Inspector::layOutPage()
+{
+    if (page != nullptr)
+        page->setSize (std::max (1, view.getWidth() - view.getScrollBarThickness()),
+                       std::max (view.getHeight(), page->getPreferredHeight()));
 }
 
 void Inspector::paint (juce::Graphics& g)
 {
-    const auto& p = getPalette (*this);
-    g.fillAll (p.surface);
-
-    g.setColour (p.text);
-    g.setFont (juce::FontOptions (TextSize::title, juce::Font::bold));
-    g.drawText (getTitle(), getLocalBounds().reduced (Space::m).removeFromTop (24), juce::Justification::centredLeft);
+    g.fillAll (getPalette (*this).surface);
 }
 
 void Inspector::resized()
 {
-    // The strip fills the panel, but is no shorter than its parts need (then it scrolls) and no narrower than the
-    // mixer's strips.
-    auto area = getLocalBounds().reduced (Space::m);
-    area.removeFromTop (24 + Space::s);
-    const auto scrolls = area.getHeight() < ChannelStrip::getMinimumHeight();
-    stripView.setBounds (area);
-    strip.setSize (std::max (ChannelStrip::width, area.getWidth() - (scrolls ? stripView.getScrollBarThickness() : 0)),
-                   std::max (area.getHeight(), ChannelStrip::getMinimumHeight()));
+    view.setBounds (getLocalBounds());
+    layOutPage();
+}
+
+void Inspector::projectChanged()
+{
+    page = nullptr; // another project's items can have the same IDs
+    showTarget();
+}
+
+void Inspector::songChanged (const SongChanges& changes)
+{
+    // What it shows may be gone, or changed.
+    showTarget();
+
+    if (page != nullptr && (changes.tracks || changes.clips || changes.sections || changes.devices || changes.automation || changes.tempo))
+    {
+        page->refresh();
+        layOutPage();
+    }
+}
+
+void Inspector::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    showTarget();
+}
+
+void Inspector::timerCallback()
+{
+    if (page != nullptr && isShowing())
+        page->updateValues();
 }
 } // namespace phazite::ui

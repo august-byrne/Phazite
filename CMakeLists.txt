@@ -611,6 +611,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/GuideTests.cpp
         tests/IconTests.cpp
         tests/ImportTests.cpp
+        tests/InspectorTests.cpp
         tests/LibraryTests.cpp
         tests/LimiterEditorTests.cpp
         tests/LimiterTests.cpp

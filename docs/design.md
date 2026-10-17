@@ -112,7 +112,7 @@ Why this audience:
   - **Piano roll** (F7): the selected MIDI clips' notes. It follows the selection, so double-clicking a MIDI clip shows it here. Audio clips get an editor here of their own ([roadmap](roadmap.md) step 2.6);
   - **Devices** (F6): the selected track's devices in a row, each shown in line ([section 9](#9-devices-containers-and-presets)).
   Automation has no tab: it is edited in its lanes, under its tracks in the playlist (2026-10-17, [section 10](#10-automation-and-modulation)).
-- **Inspector (right): the properties of what is selected,** as Bitwig's, Studio Pro's, Logic Pro's and Cubase's inspectors show them, laid out to use its width: a track's name, color, volume, pan, where its sound goes and its sends; a clip's name, place, length, mute, fades and whether it is an alias; a section's name, role, energy and tip; and, with nothing selected, the song's tempo, time signature and length. It isn't a copy of a mixer channel, which the mixer already shows.
+- **Inspector (right): the properties of what is selected,** as Bitwig's, Studio Pro's, Logic Pro's and Cubase's inspectors show them, laid out to use its width: a track's name, color, volume, pan, where its sound goes and its sends; a clip's name, place, length, mute, fades and whether it is an alias; a section's name, color, place, length, energy and tip; and, with nothing selected, the song's tempo, time signature and length. A track's also shows its instrument, its effects and its automation mode, each a click from the Devices view or its lanes. It isn't a copy of a mixer channel, which the mixer already shows.
 - **Hint bar (bottom edge):** what clicking, dragging and the modifier keys do under the pointer.
 
 **Panels and layouts:**
