@@ -23,6 +23,9 @@ namespace
     constexpr float bendPerLaneHeight = 1.0f; // a drag half the lane's height bends a line from straight to the most it bends
     constexpr float fineFactor = 0.2f;        // Shift moves a value a fifth as far
 
+    // A line narrower than this has no bend handle: in its middle, the handle would be within reach of its points.
+    constexpr float minimumBendWidth = 3.0f * LaneTint::grabDistance;
+
     juce::String getModeName (AutomationMode mode)
     {
         switch (mode)
@@ -157,24 +160,78 @@ std::optional<int> Playlist::AutomationLaneView::getPointAt (juce::Point<float> 
     return nearest;
 }
 
-std::optional<int> Playlist::AutomationLaneView::getLineAt (juce::Point<float> position) const
+std::optional<float> Playlist::AutomationLaneView::getValueAt (BeatPosition beat) const
+{
+    const auto values = getAutomationValues (playlist.context, parameter, { beat, beat }, 1);
+
+    if (values.empty())
+        return {};
+
+    return values.front();
+}
+
+bool Playlist::AutomationLaneView::isOnLine (juce::Point<float> position) const
+{
+    // The line as the engine plays it, where the pointer is: it holds the first point's value before it, and the last
+    // one's after it. A lane without points shows where its parameter is, which isn't automation.
+    if (points.empty())
+        return false;
+
+    const auto value = getValueAt (xToBeat (position.x));
+    return value.has_value() && std::abs (valueToY (*value) - position.y) <= LaneTint::grabDistance;
+}
+
+int Playlist::AutomationLaneView::getLineUnder (float x) const
 {
     for (int i = 0; i + 1 < (int) points.size(); ++i)
-    {
-        if (position.x <= beatToX (points[(size_t) i].beat) || position.x >= beatToX (points[(size_t) i + 1].beat))
-            continue;
-
-        // The line as the engine plays it, where the pointer is.
-        const auto beat = xToBeat (position.x);
-        const auto values = getAutomationValues (playlist.context, parameter, { beat, beat }, 1);
-
-        if (! values.empty() && std::abs (valueToY (values.front()) - position.y) <= LaneTint::grabDistance)
+        if (x > beatToX (points[(size_t) i].beat) && x < beatToX (points[(size_t) i + 1].beat))
             return i;
 
+    return -1;
+}
+
+std::optional<juce::Point<float>> Playlist::AutomationLaneView::getHandle (int line) const
+{
+    // In the middle of the line, on it as the engine plays it. A flat line doesn't bend, and a collapsed lane edits nothing.
+    if (collapsed || line < 0 || line + 1 >= (int) points.size())
         return {};
-    }
+
+    const auto& first = points[(size_t) line];
+    const auto& second = points[(size_t) line + 1];
+    const auto left = beatToX (first.beat), right = beatToX (second.beat);
+
+    if (right - left < minimumBendWidth || std::abs (valueToY (first.value) - valueToY (second.value)) < 1.0f)
+        return {};
+
+    const auto x = (left + right) / 2.0f;
+
+    if (const auto value = getValueAt (xToBeat (x)))
+        return juce::Point<float> (x, valueToY (*value));
 
     return {};
+}
+
+std::optional<int> Playlist::AutomationLaneView::getHandleAt (juce::Point<float> position) const
+{
+    // The Smart Tool's: the handle of the line across the pointer, within reach.
+    if (playlist.getTool() != Tool::smart)
+        return {};
+
+    const auto line = getLineUnder (position.x);
+
+    if (const auto centre = getHandle (line); centre.has_value() && centre->getDistanceFrom (position) <= LaneTint::grabDistance)
+        return line;
+
+    return {};
+}
+
+void Playlist::AutomationLaneView::setHovered (int line)
+{
+    if (line != hovered)
+    {
+        hovered = line;
+        repaint();
+    }
 }
 
 juce::String Playlist::AutomationLaneView::getValueText (float value) const
@@ -201,15 +258,18 @@ juce::String Playlist::AutomationLaneView::describeHere (juce::Point<float> posi
 
     if (const auto point = getPointAt (position))
         return getValueText (points[(size_t) *point].value)
-               + ". Drag the point to move it (Shift for fine steps, Alt to place it off the grid), double-click to delete it.";
+               + ". Drag the point to move it, and double-click it to delete it. Hold Alt to place it freely, and Shift for fine steps.";
 
     switch (playlist.getTool())
     {
         case Tool::smart:
-            if (getLineAt (position).has_value())
-                return "Drag the line to move it up or down, Alt+drag to bend it, and double-click to straighten it.";
+            if (getHandleAt (position).has_value())
+                return "Drag the handle up or down to bend the line, and double-click it to straighten the line.";
 
-            return "Click to add a point, and drag to select the points in a rectangle. Right-click for the lane's menu.";
+            if (isOnLine (position))
+                return "Click to add a point on the line, or drag to pull one from it.";
+
+            return "Click to add a point, or drag to select the points in a rectangle. Right-click for the lane's menu.";
         case Tool::draw:
             return "Drag to draw steps on the grid, or a free line with Alt. Drag a point to move it.";
         case Tool::paint:
@@ -309,6 +369,22 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
             g.setColour (chosen ? p.accent : p.background);
             g.drawEllipse (dot, chosen ? LaneTint::selectedRing : 1.0f);
         }
+
+        // The Smart Tool's bend handle, on the line under the mouse: hollow, and filled while it bends the line.
+        const auto bending = drag == Drag::bend || (drag == Drag::pending && pendingDrag == Drag::bend);
+
+        if (playlist.getTool() == Tool::smart && (bending || drag == Drag::none))
+        {
+            if (const auto centre = getHandle (bending ? pressed : hovered))
+            {
+                const auto ring =
+                    juce::Rectangle<float> (LaneTint::handleRadius * 2.0f, LaneTint::handleRadius * 2.0f).withCentre (*centre);
+                g.setColour (bending ? colour : p.background);
+                g.fillEllipse (ring);
+                g.setColour (colour);
+                g.drawEllipse (ring, GraphTint::curveWidth);
+            }
+        }
     }
 
     if (! rubberBand.isEmpty())
@@ -331,14 +407,23 @@ void Playlist::AutomationLaneView::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
-    const auto onPoint = getPointAt (e.position).has_value();
-    const auto onLine = ! onPoint && playlist.getTool() == Tool::smart && getLineAt (e.position).has_value();
-    setMouseCursor (onPoint                             ? juce::MouseCursor::DraggingHandCursor
-                    : onLine                            ? juce::MouseCursor::UpDownResizeCursor
-                    : playlist.getTool() == Tool::smart ? juce::MouseCursor::NormalCursor
-                                                        : juce::MouseCursor::CrosshairCursor);
+    // The Smart Tool shows the handle of the line under the mouse; a point, or the line, can be grabbed.
+    const auto smart = playlist.getTool() == Tool::smart;
+    const auto point = getPointAt (e.position);
+    setHovered (smart ? getLineUnder (e.position.x) : -1);
+    const auto onHandle = smart && ! point.has_value() && getHandleAt (e.position).has_value();
+    const auto onLine = smart && ! point.has_value() && ! onHandle && isOnLine (e.position);
+    setMouseCursor (point.has_value() || onLine ? juce::MouseCursor::DraggingHandCursor
+                    : onHandle                  ? juce::MouseCursor::UpDownResizeCursor
+                    : smart                     ? juce::MouseCursor::NormalCursor
+                                                : juce::MouseCursor::CrosshairCursor);
     setDescription (describeHere (e.position));
-    setTooltip (onPoint ? getValueText (points[(size_t) *getPointAt (e.position)].value) : juce::String());
+    setTooltip (point.has_value() ? getValueText (points[(size_t) *point].value) : juce::String());
+}
+
+void Playlist::AutomationLaneView::mouseExit (const juce::MouseEvent&)
+{
+    setHovered (-1);
 }
 
 void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
@@ -425,51 +510,31 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
 
     if (point.has_value())
     {
-        // A point: selected (Ctrl or Shift adds it, or takes it out), and moved with the others selected.
-        auto& songSelection = playlist.selection;
-        const auto alreadySelected = songSelection.isSelected (parameter, *point);
-
-        if (e.mods.isCommandDown() || e.mods.isShiftDown())
-        {
-            auto indices = songSelection.getSelectedAutomationPoints().indices;
-
-            if (songSelection.getSelectedAutomationPoints().parameter != parameter)
-                indices.clear();
-
-            if (alreadySelected)
-                indices.erase (std::remove (indices.begin(), indices.end(), *point), indices.end());
-            else
-                indices.push_back (*point);
-
-            songSelection.selectAutomationPoints (parameter, indices);
-        }
-        else if (! alreadySelected)
-        {
-            songSelection.selectAutomationPoints (parameter, { *point });
-        }
-        else
-        {
-            clickSelectsAlone = true;
-        }
-
-        pressed = *point;
-        pendingDrag = Drag::movePoints;
-        drag = Drag::pending;
+        pressPoint (*point, e.mods);
         return;
     }
 
     if (playlist.getTool() == Tool::smart)
     {
-        if (const auto line = getLineAt (e.position))
+        // The handle in the middle of the line bends it; a press on the line puts a point there; anywhere else, a click
+        // adds a point and a drag selects.
+        if (const auto line = getHandleAt (e.position))
         {
             pressed = *line;
-            pendingDrag = e.mods.isAltDown() ? Drag::bend : Drag::moveLine;
+            pendingDrag = Drag::bend;
             drag = Drag::pending;
-            return;
+            repaint();
+        }
+        else if (isOnLine (e.position))
+        {
+            pullPointFrom (e);
+        }
+        else
+        {
+            pendingDrag = Drag::select;
+            drag = Drag::pending;
         }
 
-        pendingDrag = Drag::select; // a click adds a point instead
-        drag = Drag::pending;
         return;
     }
 
@@ -477,6 +542,69 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
     gesture.beginStep (playlist.context, "Draw Automation");
     drag = Drag::draw;
     drawTo (e);
+}
+
+void Playlist::AutomationLaneView::pressPoint (int index, const juce::ModifierKeys& mods)
+{
+    // Selected (Ctrl adds it to those selected, or takes it out), and moved with the others selected once it drags.
+    auto& songSelection = playlist.selection;
+    const auto alreadySelected = songSelection.isSelected (parameter, index);
+
+    if (mods.isCommandDown())
+    {
+        auto indices = songSelection.getSelectedAutomationPoints().indices;
+
+        if (songSelection.getSelectedAutomationPoints().parameter != parameter)
+            indices.clear();
+
+        if (alreadySelected)
+            indices.erase (std::remove (indices.begin(), indices.end(), index), indices.end());
+        else
+            indices.push_back (index);
+
+        songSelection.selectAutomationPoints (parameter, indices);
+    }
+    else if (! alreadySelected)
+    {
+        songSelection.selectAutomationPoints (parameter, { index });
+    }
+    else
+    {
+        clickSelectsAlone = true;
+    }
+
+    pressed = index;
+    pendingDrag = Drag::movePoints;
+    drag = Drag::pending;
+}
+
+void Playlist::AutomationLaneView::pullPointFrom (const juce::MouseEvent& e)
+{
+    // A new point, as Studio One's arrow makes one: on the grid unless Alt is held, at the line's value there, so that
+    // nothing changes until it moves. With a point already there on the grid, the press takes that one instead.
+    const auto beat = limitBeat (playlist.snap (xToBeat (e.position.x), e.mods));
+
+    for (int i = (int) points.size(); --i >= 0;)
+    {
+        if (std::abs ((points[(size_t) i].beat - beat).inBeats()) < 1.0e-6)
+        {
+            pressPoint (i, e.mods);
+            return;
+        }
+    }
+
+    gesture.beginStep (playlist.context, "Add Automation Point");
+    const auto index = addAutomationPoint (playlist.context, parameter, { beat, getValueAt (beat).value_or (yToValue (e.position.y)) });
+    refreshPoints();
+    before = points;
+
+    if (index >= 0)
+    {
+        playlist.selection.selectAutomationPoints (parameter, { index });
+        pressed = index;
+        pendingDrag = Drag::movePoints;
+        drag = Drag::pending;
+    }
 }
 
 void Playlist::AutomationLaneView::mouseDrag (const juce::MouseEvent& e)
@@ -493,9 +621,6 @@ void Playlist::AutomationLaneView::mouseDrag (const juce::MouseEvent& e)
     {
         case Drag::movePoints:
             dragPoints (e);
-            break;
-        case Drag::moveLine:
-            dragLine (e);
             break;
         case Drag::bend:
             bendLine (e);
@@ -540,14 +665,9 @@ void Playlist::AutomationLaneView::beginDrag (const juce::MouseEvent&)
                 moving = { pressed };
 
             clickSelectsAlone = false;
-            gesture.beginStep (playlist.context, "Move Automation Points");
+            gesture.beginStep (playlist.context, "Move Automation Points"); // or, for a point pulled from the line, its step
             break;
         }
-        case Drag::moveLine:
-            moving = { pressed, pressed + 1 };
-            playlist.selection.selectAutomationPoints (parameter, moving);
-            gesture.beginStep (playlist.context, "Move Automation Points");
-            break;
         case Drag::bend:
             gesture.beginStep (playlist.context, "Bend Automation");
             break;
@@ -580,23 +700,6 @@ void Playlist::AutomationLaneView::dragPoints (const juce::MouseEvent& e)
     {
         const auto& now = points[(size_t) pressed];
         moveAutomationPoints (playlist.context, parameter, moving, target - now.beat, value - now.value);
-        refreshPoints();
-    }
-}
-
-void Playlist::AutomationLaneView::dragLine (const juce::MouseEvent& e)
-{
-    if (! juce::isPositiveAndBelow (pressed + 1, (int) before.size()))
-        return;
-
-    // Both ends up or down together, by as much as the mouse moves.
-    const auto dy = (e.position.y - start.y) * (e.mods.isShiftDown() ? fineFactor : 1.0f);
-    const auto value = yToValue (valueToY (before[(size_t) pressed].value) + dy);
-    refreshPoints();
-
-    if (juce::isPositiveAndBelow (pressed, (int) points.size()))
-    {
-        moveAutomationPoints (playlist.context, parameter, moving, {}, value - points[(size_t) pressed].value);
         refreshPoints();
     }
 }
@@ -734,6 +837,7 @@ void Playlist::AutomationLaneView::mouseUp (const juce::MouseEvent& e)
     drag = pendingDrag = Drag::none;
     rubberBand = {};
     refreshPoints();
+    setHovered (playlist.getTool() == Tool::smart && getLocalBounds().contains (e.getPosition()) ? getLineUnder (e.position.x) : -1);
 }
 
 void Playlist::AutomationLaneView::addPointAt (juce::Point<float> position, const juce::ModifierKeys& mods)
@@ -768,7 +872,7 @@ void Playlist::AutomationLaneView::mouseDoubleClick (const juce::MouseEvent& e)
     clickSelectsAlone = false;
     gesture.endStep();
 
-    // A point goes; a bent line straightens.
+    // A point goes; a bent line straightens at its handle.
     refreshPoints();
 
     if (const auto point = getPointAt (e.position))
@@ -776,9 +880,11 @@ void Playlist::AutomationLaneView::mouseDoubleClick (const juce::MouseEvent& e)
         deleteAutomationPoints (playlist.context, parameter, { *point });
         playlist.selection.selectAutomationPoints (parameter, {});
     }
-    else if (const auto line = getLineAt (e.position))
+    else if (const auto line = getHandleAt (e.position))
     {
+        gesture.beginStep (playlist.context, "Straighten Automation");
         setAutomationCurve (playlist.context, parameter, *line, 0.0f);
+        gesture.endStep();
     }
 
     refreshPoints();

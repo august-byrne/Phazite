@@ -20,8 +20,8 @@ private:
 };
 
 //==============================================================================
-// The editor dock under the playlist: tabs for the piano roll, audio editor, automation and mixer. The piano
-// roll and the mixer belong to the window; the dock only shows them.
+// The editor dock under the playlist: tabs for the piano roll, audio editor and mixer. The piano roll and the
+// mixer belong to the window; the dock only shows them.
 class EditorDock : public juce::TabbedComponent
 {
 public:
@@ -29,7 +29,6 @@ public:
     {
         pianoRoll,
         audio,
-        automation,
         mixer
     };
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Automation lanes in the playlist (src/ui/playlist/PlaylistAutomation.cpp), driven with the mouse as the user would:
-// a lane under its track, points added, moved, drawn, painted, selected and deleted, the lane's header, the master's row,
-// and a fader's right-click (src/ui/components/Controls.h).
+// a lane under its track, points added (pulled from the line too), moved, drawn, painted, selected and deleted, lines bent
+// at their handles, the lane's header, the master's row, and a fader's right-click (src/ui/components/Controls.h).
 #include "UiTestHelpers.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Selection.h"
@@ -172,42 +172,118 @@ TEST_CASE ("Dragging one of several points moves that point only")
     CHECK (points[2].value == doctest::Approx (0.5f).epsilon (0.05));
 }
 
-TEST_CASE ("Dragging a line moves it up or down, and Alt bends it")
+TEST_CASE ("A press on the line adds a point on it, which a drag pulls, as one step")
 {
     LaneScreen screen;
     phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (2.0), 0.2f });
     phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (6.0), 0.6f });
     phazite::test::dispatchPendingMessages();
-
+    screen.edit->getUndoManager().clearUndoHistory();
     phazite::test::Mouse mouse (screen.lane());
 
-    // The middle of the line: halfway up, at beat 4. Both ends move up by about a tenth.
-    mouse.press (screen.at (4.0, 0.4f));
-    mouse.dragTo (screen.at (4.0, 0.5f));
+    // At beat 3 the line is at 0.3, away from the bend handle in its middle (beat 4).
+    REQUIRE (screen.at (3.0, 0.3f).getDistanceFrom (screen.at (4.0, 0.4f)) > phazite::ui::LaneTint::grabDistance);
+    mouse.press (screen.at (3.1, 0.3f));
+    mouse.dragTo (screen.at (3.1, 0.5f));
+    mouse.dragTo (screen.at (3.1, 0.8f));
     mouse.release();
     mouse.pause();
+
     auto points = screen.getPoints();
-    REQUIRE (points.size() == 2);
-    CHECK (points[0].value == doctest::Approx (0.3f).epsilon (0.1));
-    CHECK (points[1].value == doctest::Approx (0.7f).epsilon (0.1));
+    REQUIRE (points.size() == 3);
+    CHECK (screen.getBeats() == std::vector { 2.0, 3.0, 6.0 }); // on the grid
+    CHECK (points[1].value == doctest::Approx (0.8f).epsilon (0.05));
+    CHECK (points[0].value == doctest::Approx (0.2f).epsilon (0.05)); // the line's ends stay
+    CHECK (points[2].value == doctest::Approx (0.6f).epsilon (0.05));
+    CHECK (screen.describeUndo() == juce::String ("Undo Add Automation Point"));
+    phazite::undo (*screen.edit);
     CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
 
-    // Alt+drag up bows the rising line up: its curve goes below 0, and no further than where the line still runs from
-    // point to point, however far the mouse goes. The points stay where they are.
-    mouse.press (screen.at (4.0, 0.5f), juce::ModifierKeys::altModifier);
-    mouse.dragTo (screen.at (4.0, 0.6f));
+    // A click on the line puts a point on it, where the line is, so that nothing sounds different; Alt places it off the
+    // grid (a pixel at this zoom is a 24th of a beat).
+    mouse.click (screen.at (5.3, 0.53f), juce::ModifierKeys::altModifier);
+    mouse.pause();
+    points = screen.getPoints();
+    REQUIRE (points.size() == 3);
+    CHECK (points[1].beat.inBeats() == doctest::Approx (5.3).epsilon (0.005));
+    CHECK (points[1].value == doctest::Approx (0.53f).epsilon (0.02));
+    CHECK (screen.describeUndo() == juce::String ("Undo Add Automation Point"));
+}
+
+TEST_CASE ("The handle in the middle of a line bends it, and a double-click on the handle straightens it")
+{
+    LaneScreen screen;
+    phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (2.0), 0.2f });
+    phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (6.0), 0.6f });
+    phazite::test::dispatchPendingMessages();
+    phazite::test::Mouse mouse (screen.lane());
+
+    // The handle is on the line, halfway between the points: dragging it up bows the rising line up. Its curve goes
+    // below 0, and no further than where the line still runs from point to point, however far the mouse goes; the
+    // points stay where they are. No keys are needed.
+    mouse.press (screen.at (4.0, 0.4f));
+    mouse.dragTo (screen.at (4.0, 0.55f));
     CHECK (screen.getPoints()[0].curve < -0.05f);
     CHECK (screen.getPoints()[0].curve > -phazite::AutomationPoint::maxBend);
     mouse.dragTo (screen.at (4.0, 1.0f));
     mouse.dragTo ({ screen.at (4.0, 1.0f).x, 0 });
     mouse.release();
     mouse.pause();
-    points = screen.getPoints();
+    auto points = screen.getPoints();
+    REQUIRE (points.size() == 2);
     CHECK (points[0].curve == doctest::Approx (-phazite::AutomationPoint::maxBend));
     CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
-    CHECK (points[0].value == doctest::Approx (0.3f).epsilon (0.1));
-    CHECK (points[1].value == doctest::Approx (0.7f).epsilon (0.1));
+    CHECK (points[0].value == doctest::Approx (0.2f).epsilon (0.05));
+    CHECK (points[1].value == doctest::Approx (0.6f).epsilon (0.05));
     CHECK (screen.describeUndo() == juce::String ("Undo Bend Automation"));
+
+    // The handle stays on the bent line, in its middle: a double-click there straightens it.
+    const auto middle =
+        phazite::getAutomationValues (screen.context, screen.volume, { BeatPosition::fromBeats (4.0), BeatPosition::fromBeats (4.0) }, 1);
+    REQUIRE (middle.size() == 1);
+    CHECK (middle[0] > 0.45f);
+    mouse.doubleClick (screen.at (4.0, middle[0]));
+    CHECK (screen.getPoints()[0].curve == doctest::Approx (0.0f));
+    CHECK (screen.getPoints().size() == 2);
+    CHECK (screen.describeUndo() == juce::String ("Undo Straighten Automation"));
+}
+
+TEST_CASE ("Ctrl adds a point to the selection, and dragging one of the selected points moves them all")
+{
+    LaneScreen screen;
+    phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (2.0), 0.2f });
+    phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (6.0), 0.6f });
+    phazite::test::dispatchPendingMessages();
+    phazite::test::Mouse mouse (screen.lane());
+
+    mouse.click (screen.at (2.0, 0.2f));
+    mouse.pause();
+    mouse.click (screen.at (6.0, 0.6f), juce::ModifierKeys::commandModifier);
+    mouse.pause();
+    CHECK (screen.context.getSongSelection().getSelectedAutomationPoints().indices == std::vector { 0, 1 });
+
+    // Shift is for fine steps only: it doesn't change the selection.
+    mouse.press (screen.at (6.0, 0.6f), juce::ModifierKeys::shiftModifier);
+    mouse.dragTo (screen.at (6.0, 0.7f));
+    mouse.dragTo (screen.at (6.0, 1.0f));
+    mouse.release();
+    mouse.pause();
+    auto points = screen.getPoints();
+    REQUIRE (points.size() == 2);
+    CHECK (points[0].value == doctest::Approx (0.28f).epsilon (0.05)); // a fifth as far as the mouse went
+    CHECK (points[1].value == doctest::Approx (0.68f).epsilon (0.05));
+
+    // Without Shift, as far as the mouse goes.
+    mouse.press (screen.at (6.0, points[1].value));
+    mouse.dragTo (screen.at (6.0, points[1].value + 0.2f));
+    mouse.dragTo (screen.at (6.0, points[1].value + 0.1f));
+    mouse.release();
+    mouse.pause();
+    points = screen.getPoints();
+    CHECK (points[0].value == doctest::Approx (0.38f).epsilon (0.05));
+    CHECK (points[1].value == doctest::Approx (0.78f).epsilon (0.05));
+    CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
+    CHECK (screen.describeUndo() == juce::String ("Undo Move Automation Points"));
 }
 
 TEST_CASE ("A press a little beside a point takes the point rather than selecting")

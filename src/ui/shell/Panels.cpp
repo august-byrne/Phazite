@@ -38,9 +38,9 @@ EditorDock::EditorDock (juce::Component& pianoRollPanel, juce::Component& mixerP
 
     const auto background = juce::Colours::transparentBlack; // each panel paints its own
 
+    // Automation has no tab: it is edited in its lanes, under its tracks in the playlist (docs/design.md, section 10).
     addTab ("Piano roll", background, &pianoRollPanel, false);
     addTab ("Audio", background, new Panel ("Audio editor", "The selected audio clip, in detail. Coming in a later roadmap step."), true);
-    addTab ("Automation", background, new Panel ("Automation", "Automation lanes and clips. Coming in roadmap step 2.1."), true);
     addTab ("Mixer", background, &mixerPanel, false);
 }
 } // namespace phazite::ui

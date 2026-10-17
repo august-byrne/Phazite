@@ -131,8 +131,8 @@ namespace TrackTint
 // color, less than the track's header; its background, the panels' surface this opaque over the playlist's, so that
 // the grid shows through; the wash under its line, in the track's color; the dashed line where a parameter without
 // automation sits (alphas); and its points' radius, a selected point's (filled with the text color and ringed in the
-// accent, so that it stands out on a track of any color), its ring's thickness, and how near the pointer must come to
-// take a point or the line (pixels).
+// accent, so that it stands out on a track of any color), its ring's thickness, the radius of the hollow handle that
+// bends the line under the mouse, and how near the pointer must come to take a point, a handle or the line (pixels).
 namespace LaneTint
 {
     inline constexpr float header = 0.15f;
@@ -142,6 +142,7 @@ namespace LaneTint
     inline constexpr float pointRadius = 4.0f;
     inline constexpr float selectedPointRadius = 5.5f;
     inline constexpr float selectedRing = 2.0f;
+    inline constexpr float handleRadius = 4.0f;
     inline constexpr float grabDistance = 8.0f;
 } // namespace LaneTint
 

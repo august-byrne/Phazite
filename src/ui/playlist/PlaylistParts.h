@@ -53,10 +53,12 @@ struct Playlist::AddTrackRow : public juce::Button
 
 //==============================================================================
 // A lane's automation (docs/design.md, section 10), under its track's clips. It shows the points and the line between
-// them as the engine plays it, in the track's color. The tools edit it: the Smart Tool adds a point where it clicks, drags
-// points and the line (Alt bends the line), and selects the points in a rectangle it drags on empty space; Draw draws
-// steps on the grid (or, with Alt, a free line); Paint draws the chosen shape; Delete deletes the points it passes; Select
-// selects. Each drag is one undo step. Collapsed, it shows the line in a thin row, and a double-click expands it.
+// them as the engine plays it, in the track's color. The tools edit it. The Smart Tool needs no keys: a click adds a
+// point (pressed on the line, the new point sits on it, and a drag pulls it), a point drags, the handle in the middle of
+// the line under the mouse bends that line, a drag on empty space selects the points in a rectangle, and a double-click
+// deletes a point or straightens a line at its handle. Draw draws steps on the grid (or, with Alt, a free line); Paint
+// draws the chosen shape; Delete deletes the points it passes; Select selects. Each drag is one undo step. Collapsed, it
+// shows the line in a thin row, and a double-click expands it.
 struct Playlist::AutomationLaneView : public juce::Component,
                                       public juce::SettableTooltipClient
 {
@@ -69,6 +71,7 @@ struct Playlist::AutomationLaneView : public juce::Component,
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
@@ -80,7 +83,6 @@ struct Playlist::AutomationLaneView : public juce::Component,
         none,
         pending, // not dragging yet: a click, unless the mouse moves far enough
         movePoints,
-        moveLine,
         bend,
         draw,
         paint,
@@ -104,6 +106,7 @@ struct Playlist::AutomationLaneView : public juce::Component,
     std::vector<AutomationPoint> before; // the points then
     std::vector<int> moving;             // the points that move
     int pressed = -1;                    // the point, or the line after the point, the mouse went down on
+    int hovered = -1;                    // the line, by the point it starts at, whose bend handle shows: the one under the mouse
     bool clickSelectsAlone = false;      // a click on a selected point selects it alone, unless it starts a drag
     std::map<double, float> steps;       // Draw: each grid cell's value, by its start in beats
     std::vector<AutomationPoint> stroke; // Draw with Alt: the free line, by beat
@@ -119,13 +122,19 @@ struct Playlist::AutomationLaneView : public juce::Component,
     BeatPosition xToBeat (float) const;
     BeatPosition limitBeat (BeatPosition) const; // where points can go: the song
     std::optional<int> getPointAt (juce::Point<float>) const;
-    std::optional<int> getLineAt (juce::Point<float>) const; // the point the line under the pointer starts at
+    std::optional<float> getValueAt (BeatPosition) const;         // the line's, as the engine plays it
+    bool isOnLine (juce::Point<float>) const;                     // anywhere along it, before the first point and after the last too
+    int getLineUnder (float x) const;                             // the point that starts the line across x, or -1
+    std::optional<juce::Point<float>> getHandle (int line) const; // in its middle, unless too short or flat to bend
+    std::optional<int> getHandleAt (juce::Point<float>) const;    // the line whose handle is under the pointer
     juce::String getValueText (float) const;
     juce::String describeHere (juce::Point<float>) const; // for the hint bar
+    void setHovered (int line);
 
+    void pressPoint (int index, const juce::ModifierKeys&); // selects it as a click does, ready to move it
+    void pullPointFrom (const juce::MouseEvent&);           // a press on the line: a point there, which a drag moves
     void beginDrag (const juce::MouseEvent&);
     void dragPoints (const juce::MouseEvent&);
-    void dragLine (const juce::MouseEvent&);
     void bendLine (const juce::MouseEvent&);
     void drawTo (const juce::MouseEvent&);
     void paintTo (const juce::MouseEvent&);
