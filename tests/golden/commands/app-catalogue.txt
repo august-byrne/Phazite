@@ -45,6 +45,16 @@ section.outline.rnb
 section.outline.drumAndBass
 section.outline.techno
 track.addReturn
+automation.automateLastTouched | ctrl + shift + A
+automation.showLanes | A
+automation.raisePoints | cursor up
+automation.lowerPoints | cursor down
+automation.raisePointsMore | shift + cursor up
+automation.lowerPointsMore | shift + cursor down
+automation.read
+automation.touch
+automation.latch
+automation.write
 transport.loop | L
 transport.loopSelection | ctrl + L
 section.loop

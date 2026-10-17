@@ -160,6 +160,14 @@ void Gesture::rollBack()
 }
 
 //==============================================================================
+RecordingStep::RecordingStep (te::Edit& edit, const juce::String& name)
+    : inhibitor (edit)
+{
+    if (! isInGesture (edit.getUndoManager()))
+        edit.getUndoManager().beginNewTransaction (name);
+}
+
+//==============================================================================
 std::function<void()> withEdit (const te::SelectionManager& selection, std::function<void (te::Edit&)> action)
 {
     return [&selection, action]

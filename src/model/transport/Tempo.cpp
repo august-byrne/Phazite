@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Tempo.h"
+#include "model/automation/internal/Automation.h"
 #include "model/commands/internal/Undo.h"
 
 #include <cmath>
@@ -20,7 +21,8 @@ void setTempo (te::Edit& edit, double bpm)
         return;
 
     const UndoStep step (edit, "Change Tempo");
-    tempo->setBpm (rounded); // Tracktion moves the clips with their beats
+    const AutomationOnBeats keepAutomation (edit); // as Tracktion keeps the clips
+    tempo->setBpm (rounded);                       // Tracktion moves the clips with their beats
 }
 
 TimeSignature getTimeSignature (const te::Edit& edit)
@@ -42,6 +44,7 @@ void setTimeSignature (te::Edit& edit, TimeSignature timeSignature)
         return;
 
     const UndoStep step (edit, "Change Time Signature");
+    const AutomationOnBeats keepAutomation (edit);
     auto* timeSig = edit.tempoSequence.getTimeSig (0);
     timeSig->numerator = timeSignature.numerator;
     timeSig->denominator = timeSignature.denominator;

@@ -36,6 +36,10 @@ TEST_CASE ("The names Phazite writes into project files stay the same")
         { schema::phaziteTip, "phaziteTip" },
         { schema::phaziteEnergy, "phaziteEnergy" },
         { schema::phaziteNoteID, "phaziteNoteID" },
+        { schema::PHAZITELANE, "PHAZITELANE" },
+        { schema::laneDevice, "device" },
+        { schema::laneParameter, "parameter" },
+        { schema::laneHeight, "height" },
     };
 
     for (const auto& [name, saved] : names)
@@ -46,7 +50,7 @@ TEST_CASE ("The names Phazite writes into project files stay the same")
     CHECK (juce::String (phazite::LoudnessMeterPlugin::xmlTypeName) == juce::String ("phaziteLoudnessMeter"));
 
     // The format version projects are saved in now (Migrations.h upgrades older ones).
-    CHECK (schema::currentVersion == 3);
+    CHECK (schema::currentVersion == 4);
 }
 
 TEST_CASE ("Reading Phazite's state doesn't add it")

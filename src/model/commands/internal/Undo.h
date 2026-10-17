@@ -78,6 +78,22 @@ private:
 };
 
 //==============================================================================
+// The undo step of what Tracktion records while the song plays (automation, roadmap step 2.1): it begins a named step
+// and keeps Tracktion from splitting it until it goes. Unlike a Gesture, changes made meanwhile begin steps of their own
+// as usual, and what is recorded after one of them joins its step. Begun during a gesture, it joins the gesture's step.
+// Message thread only.
+class RecordingStep
+{
+public:
+    RecordingStep (te::Edit&, const juce::String& name);
+
+private:
+    const te::Edit::UndoTransactionInhibitor inhibitor;
+
+    JUCE_DECLARE_NON_COPYABLE (RecordingStep)
+};
+
+//==============================================================================
 // For registering commands (CommandRegistry.h) that act on a selection manager's Edit, the open project's: the action
 // runs, or the test answers, with that Edit (without one, the action does nothing and the test is false); and the Edit's
 // undo manager as the undo target of a command that changes it.

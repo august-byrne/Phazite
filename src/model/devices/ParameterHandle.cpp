@@ -84,6 +84,14 @@ bool ParameterHandle::refersToSameParameter (const ParameterHandle& other) const
     return impl->plugin.get() == other.impl->plugin.get() && impl->parameterID == other.impl->parameterID;
 }
 
+ParameterRef ParameterHandle::getRef() const
+{
+    if (auto* plugin = impl != nullptr ? impl->plugin.get() : nullptr)
+        return { getDeviceID (*plugin), impl->parameterID };
+
+    return {};
+}
+
 juce::String ParameterHandle::getName() const
 {
     if (const auto parameter = impl != nullptr ? impl->find() : nullptr)

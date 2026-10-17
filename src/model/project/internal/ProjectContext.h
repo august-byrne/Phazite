@@ -9,12 +9,16 @@
 
 namespace phazite
 {
+class AutomationWatcher;
 class ProjectContext;
 
 te::Edit* getEdit (const ProjectContext&); // nullptr while no project is open
 te::SelectionManager& getSelection (ProjectContext&);
 const te::SelectionManager& getSelection (const ProjectContext&);
 RangeSelection& getRangeSelection (ProjectContext&);
+
+// What watches the open Edit's automation (model/automation/internal/Automation.h): nullptr while no project is open.
+AutomationWatcher* getAutomationWatcher (const ProjectContext&);
 
 // The Edit open now, or none: ProjectSession's (and tests'). Nothing of the previous Edit stays selected. Then tells the
 // listeners.

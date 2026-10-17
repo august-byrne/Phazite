@@ -3,6 +3,7 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/UndoCommands.h"
 #include "model/mixer/internal/Mixer.h"
@@ -29,6 +30,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context)
     addSectionCommands (registry, selection);
     addOutlineCommands (registry, selection);
     addMixerCommands (registry, selection);
+    addAutomationCommands (registry, context);
     addLoopCommands (registry, selection, range);
     addMetronomeCommands (registry, selection);
     addRecordingCommands (registry, selection);

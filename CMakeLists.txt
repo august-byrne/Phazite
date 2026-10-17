@@ -117,6 +117,12 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/internal/SongRange.h
     src/model/arrangement/internal/SongSelection.h
     src/model/arrangement/internal/Tracks.h
+    src/model/automation/Automation.cpp
+    src/model/automation/AutomationModel.cpp
+    src/model/automation/AutomationModel.h
+    src/model/automation/AutomationValues.cpp
+    src/model/automation/AutomationValues.h
+    src/model/automation/internal/Automation.h
     src/model/base/Beats.h
     src/model/base/IDs.h
     src/model/base/Migrations.cpp
@@ -141,6 +147,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/Devices.cpp
     src/model/devices/ParameterHandle.cpp
     src/model/devices/ParameterHandle.h
+    src/model/devices/ParameterRef.h
     src/model/devices/internal/DeviceHandle.h
     src/model/devices/internal/DevicePlugin.h
     src/model/devices/internal/Devices.h
@@ -546,6 +553,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/AutomationModelTests.cpp
         tests/BeatsTests.cpp
         tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
@@ -598,6 +606,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/PlaylistTests.cpp
         tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp
+        tests/RealTimePlayback.h
         tests/RealtimeAuditTests.cpp
         tests/RecordingTests.cpp
         tests/ReverbEditorTests.cpp

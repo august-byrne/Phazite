@@ -3,6 +3,7 @@
 #include "internal/ProjectContext.h"
 #include "model/arrangement/internal/SongRange.h"
 #include "model/arrangement/internal/SongSelection.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/EngineSetup.h"
@@ -47,6 +48,12 @@ namespace
                 if (element.hasType (te::IDs::TRANSPORT) || element.hasType (te::IDs::INPUTDEVICES))
                     return;
 
+                if (element.hasType (te::IDs::AUTOMATIONCURVE))
+                    return add (pending.automation);
+
+                if (schema::isTrackViewElement (element))
+                    return add (pending.view);
+
                 if (element.hasType (te::IDs::ARRANGERCLIP))
                     return add (pending.sections);
 
@@ -79,7 +86,11 @@ namespace
         // A child that is gone has no parent to say where it was: its own type does, or else its old parent's.
         void markRemoved (const juce::ValueTree& parent, const juce::ValueTree& child)
         {
-            if (child.hasType (te::IDs::ARRANGERCLIP))
+            if (child.hasType (te::IDs::AUTOMATIONCURVE))
+                add (pending.automation);
+            else if (schema::isTrackViewElement (child))
+                add (pending.view);
+            else if (child.hasType (te::IDs::ARRANGERCLIP))
                 add (pending.sections);
             else if (te::Clip::isClipState (child))
                 add (pending.clips);
@@ -117,6 +128,10 @@ namespace
 
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
+            // The value of a parameter with automation, which Tracktion writes as the automation plays, is no change.
+            if (isAutomatedValue (tree, property))
+                return;
+
             // How tall a track shows, and the like, is view state (Schema.h), not the song.
             if (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property))
                 add (pending.view);
@@ -152,7 +167,8 @@ struct ProjectContext::Impl
     RangeSelection rangeSelection;
     std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
     juce::ListenerList<Listener> listeners;
-    std::unique_ptr<NoteIDKeeper> noteIDs; // gives the notes added to the open Edit their IDs
+    std::unique_ptr<NoteIDKeeper> noteIDs;         // gives the notes added to the open Edit their IDs
+    std::unique_ptr<AutomationWatcher> automation; // the parameter touched last, and recorded automation's undo steps
     std::unique_ptr<SongWatcher> songWatcher;
     int projectNumber = 0;
 };
@@ -167,6 +183,7 @@ ProjectContext::ProjectContext (EngineContext& engine, UIBehaviour* tracktionFoc
 ProjectContext::~ProjectContext()
 {
     impl->songWatcher = nullptr;
+    impl->automation = nullptr;
     impl->noteIDs = nullptr;
 
     if (impl->focus != nullptr)
@@ -238,6 +255,11 @@ RangeSelection& getRangeSelection (ProjectContext& context)
     return context.getImpl().rangeSelection;
 }
 
+AutomationWatcher* getAutomationWatcher (const ProjectContext& context)
+{
+    return context.getImpl().automation.get();
+}
+
 void setEdit (ProjectContext& context, te::Edit* edit)
 {
     auto& impl = context.getImpl();
@@ -253,7 +275,9 @@ void setEdit (ProjectContext& context, te::Edit* edit)
     impl.selection.edit = nullptr;
     impl.rangeSelection.clear();
     impl.selection.edit = edit;
+    impl.automation = nullptr;                                                         // before the Edit it watches goes
     impl.noteIDs = edit != nullptr ? std::make_unique<NoteIDKeeper> (*edit) : nullptr; // before the watcher hears what it writes
+    impl.automation = edit != nullptr ? std::make_unique<AutomationWatcher> (*edit) : nullptr;
     impl.songWatcher->setState (edit != nullptr ? edit->state : juce::ValueTree());
 
     if (impl.focus != nullptr)

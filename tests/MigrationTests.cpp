@@ -298,7 +298,7 @@ TEST_CASE ("A version 1 project without notes becomes the current version with n
     CHECK (state.isEquivalentTo (expected));
 }
 
-TEST_CASE ("A version 2 project becomes version 3 with an ID for each note, 1 and up in each clip")
+TEST_CASE ("A version 2 project gets an ID for each note, 1 and up in each clip, and nothing else changes")
 {
     const auto* version2 = R"(<EDIT><PHAZITE schemaVersion="2"/>
         <TRACK id="1003">
@@ -309,16 +309,35 @@ TEST_CASE ("A version 2 project becomes version 3 with an ID for each note, 1 an
     auto state = juce::ValueTree::fromXml (version2);
     REQUIRE (state.isValid());
     REQUIRE (phazite::migrateToCurrentSchema (state));
-    CHECK (phazite::getSchemaVersion (state) == 3);
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
 
     // The notes get IDs, and nothing else changes: not the controller event between them, nor the other properties.
     auto expected = juce::ValueTree::fromXml (version2);
-    expected.getChildWithName (phazite::schema::PHAZITE).setProperty (phazite::schema::schemaVersion, 3, nullptr);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
     const auto track = expected.getChildWithName ("TRACK");
     const auto first = track.getChild (0).getChildWithName ("SEQUENCE"), second = track.getChild (1).getChildWithName ("SEQUENCE");
     first.getChild (0).setProperty (phazite::schema::phaziteNoteID, 1, nullptr);
     first.getChild (2).setProperty (phazite::schema::phaziteNoteID, 2, nullptr);
     second.getChild (0).setProperty (phazite::schema::phaziteNoteID, 1, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}
+
+TEST_CASE ("A version 3 project, which can have no automation lanes, becomes version 4 with nothing else changed")
+{
+    const auto* version3 = R"(<EDIT><PHAZITE schemaVersion="3"/>
+        <TRACK id="1003" automationMode="latch">
+          <PLUGIN type="volume" id="1004" volume="0.5">
+            <AUTOMATIONCURVE paramID="volume"><POINT t="0.0" v="0.5" c="0.0"/></AUTOMATIONCURVE>
+          </PLUGIN>
+        </TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version3);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == 4);
+
+    auto expected = juce::ValueTree::fromXml (version3);
+    expected.getChildWithName (phazite::schema::PHAZITE).setProperty (phazite::schema::schemaVersion, 4, nullptr);
     CHECK (state.isEquivalentTo (expected));
 }
 

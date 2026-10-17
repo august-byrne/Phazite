@@ -6,6 +6,7 @@
 // internal/ParameterHandle.h.
 #pragma once
 
+#include "ParameterRef.h"
 #include "devices/core/DeviceInfo.h"
 
 #include <juce_core/juce_core.h>
@@ -28,6 +29,9 @@ public:
 
     // Whether both are handles of the same parameter of the same device.
     bool refersToSameParameter (const ParameterHandle&) const;
+
+    // Its parameter by IDs (ParameterRef.h), for automation; an invalid one for a handle of nothing.
+    ParameterRef getRef() const;
 
     juce::String getName() const;
     juce::NormalisableRange<float> getRange() const; // with the parameter's skew and steps

@@ -46,6 +46,16 @@ after start:
   section.outline.drumAndBass: on "Apply Outline: Drum and bass"
   section.outline.techno: on "Apply Outline: Techno"
   track.addReturn: on "Add Return Track"
+  automation.automateLastTouched: off "Automate Last Touched Parameter"
+  automation.showLanes: off "Show Automation"
+  automation.raisePoints: off "Raise Automation Points"
+  automation.lowerPoints: off "Lower Automation Points"
+  automation.raisePointsMore: off "Raise Automation Points More"
+  automation.lowerPointsMore: off "Lower Automation Points More"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
   transport.loop: on "Loop"
   transport.loopSelection: on "Loop Selection"
   section.loop: off "Loop Section"
@@ -78,6 +88,11 @@ after select One:
   track.moveDown: on "Move Track Down"
   track.mute: on "Mute Track"
   track.solo: on "Solo Track"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
   selected: track One
 after track.add:
   edit.undo: on "Undo Add Track"
@@ -110,6 +125,11 @@ after track.ungroup:
   track.moveDown: off "Move Track Down"
   track.mute: off "Mute Track"
   track.solo: off "Solo Track"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
   selected: nothing
 after select One:
   edit.delete: on "Delete Track"
@@ -122,6 +142,11 @@ after select One:
   track.moveDown: on "Move Track Down"
   track.mute: on "Mute Track"
   track.solo: on "Solo Track"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
   selected: track One
 after track.taller:
 after track.shorter:
@@ -136,6 +161,11 @@ after select nothing:
   track.moveDown: off "Move Track Down"
   track.mute: off "Mute Track"
   track.solo: off "Solo Track"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
   selected: nothing
 after track.taller:
 after select One:
@@ -149,6 +179,11 @@ after select One:
   track.moveDown: on "Move Track Down"
   track.mute: on "Mute Track"
   track.solo: on "Solo Track"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
   selected: track One
 after track.pin:
   track.pin: on, ticked "Pin Track"
@@ -214,6 +249,11 @@ after select nothing:
   track.moveDown: off "Move Track Down"
   track.mute: off "Mute Track"
   track.solo: off "Solo Track"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
   selected: nothing
 after track.selectNext:
   edit.delete: on "Delete Track"
@@ -227,6 +267,11 @@ after track.selectNext:
   track.moveDown: on "Move Track Down"
   track.mute: on "Mute Track"
   track.solo: on "Solo Track"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
   selected: track Group
 after select nothing:
   edit.delete: off "Delete"
@@ -240,6 +285,11 @@ after select nothing:
   track.moveDown: off "Move Track Down"
   track.mute: off "Mute Track"
   track.solo: off "Solo Track"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
   selected: nothing
 after track.selectPrevious:
   edit.delete: on "Delete Track"
@@ -252,6 +302,11 @@ after track.selectPrevious:
   track.moveDown: on "Move Track Down"
   track.mute: on "Mute Track"
   track.solo: on "Solo Track"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
   selected: track Two
 after select One:
   track.pin: on, ticked "Pin Track"
@@ -283,6 +338,11 @@ after select nothing:
   track.moveDown: off "Move Track Down"
   track.mute: off "Mute Track"
   track.solo: off "Solo Track"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
   selected: nothing
 after section.add:
   edit.undo: on "Undo Add Section"
@@ -580,6 +640,11 @@ after select One:
   track.moveDown: on "Move Track Down"
   track.mute: on "Mute Track"
   track.solo: on "Solo Track"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
   selected: track One
 after edit.selectAll:
   edit.delete: on "Delete 4 Tracks"
@@ -599,6 +664,11 @@ after edit.deselectAll:
   track.moveDown: off "Move Track Down"
   track.mute: off "Mute Track"
   track.solo: off "Solo Track"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
   selected: nothing
 after edit.undo:
   edit.undo: on "Undo Duplicate Range"

@@ -28,12 +28,13 @@ class UIBehaviour;
 // take long to show a change show the last one at their next timer tick instead.
 struct SongChanges
 {
-    bool tracks = false;   // tracks added, deleted, moved or changed
-    bool devices = false;  // devices or sends added, deleted, moved or changed
-    bool clips = false;    // clips added, deleted or changed, their notes included
-    bool sections = false; // sections added, deleted or changed
-    bool tempo = false;    // the tempo or the time signature
-    bool view = false;     // how tracks show: their heights, collapsed and pinned ones, drum rows (view state)
+    bool tracks = false;     // tracks added, deleted, moved or changed
+    bool devices = false;    // devices or sends added, deleted, moved or changed
+    bool clips = false;      // clips added, deleted or changed, their notes included
+    bool automation = false; // automation points added, moved or deleted
+    bool sections = false;   // sections added, deleted or changed
+    bool tempo = false;      // the tempo or the time signature
+    bool view = false;       // how tracks show: their heights, collapsed and pinned ones, drum rows, automation lanes (view state)
 };
 
 class ProjectContext

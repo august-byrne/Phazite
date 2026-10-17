@@ -90,9 +90,16 @@ namespace
     }
 
     //==========================================================================
+    // Version 3 to 4: version 4 adds automation lanes (PHAZITELANE), which a version 3 project has none of, so nothing
+    // changes; the new version keeps an older Phazite from opening a project with them, and dropping them.
+    void upgrade3To4 (juce::ValueTree&)
+    {
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
-    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3 };
+    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 

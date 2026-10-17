@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Project.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/Migrations.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineSetup.h"
@@ -427,12 +428,14 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
                 || property == te::IDs::loopPoint2 || property == te::IDs::looping))
            || (tree.hasType (te::IDs::CLICKTRACK) && (property == te::IDs::active || property == te::IDs::emphasiseBars))
            || (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property))
-           || (tree.hasType (schema::PHAZITE) && (schema::isGridProperty (property) || property == schema::loopFollowsSong));
+           || (tree.hasType (schema::PHAZITE) && (schema::isGridProperty (property) || property == schema::loopFollowsSong))
+           || isAutomatedValue (tree, property); // Tracktion writes it as the automation plays
 }
 
 bool Project::isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)
 {
-    return element.hasType (te::IDs::INPUTDEVICES) || (parent.hasType (schema::PHAZITE) && element.hasType (schema::PIANOROLL));
+    return element.hasType (te::IDs::INPUTDEVICES) || (parent.hasType (schema::PHAZITE) && element.hasType (schema::PIANOROLL))
+           || (te::TrackList::isTrack (parent) && schema::isTrackViewElement (element));
 }
 
 bool Project::isCounted (const juce::ValueTree& tree, const juce::Identifier& property)

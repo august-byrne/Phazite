@@ -334,6 +334,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - The lane editor, drawn by Phazite over the model's automation data: it reads points as plain values and changes them through model functions and commands, one named undo step per gesture. Not Tracktion's `CurveEditor`, a component that edits Tracktion's objects directly, in its own style. It comes after architecture phase A3 for the playlist and the mixer.
 - Right-click → Automate, the write modes and shapes, keyboard editing, and the last-touched hotkey.
 - *Done when:* any built-in or plug-in parameter can be automated in two clicks, and the four write modes behave as described.
+- *Status:* in progress (since 2026-10-16). Done: automation in the model, by IDs and plain values (`src/model/automation/AutomationModel.h`, with tests): the parameters each track's devices offer, the lanes a track shows (view state, saved in format version 4), points in beats and their edits as named undo steps, shapes, each track's write mode (Tracktion's touch, latch and write, which record a pass as one undo step), the selected points with Delete, Duplicate and the arrow keys, Automate Last Touched (Ctrl+Shift+A) and Show Automation (A); automation keeps its beats when the tempo changes, and the values automation plays aren't unsaved changes. Still to do: the lanes in the playlist, and Automate on every control's menu.
 
 **2.2 Automation clips (M)**
 - The automation clip type, "Create automation clip", and aliased automation clips.
@@ -503,7 +504,7 @@ Roughly in order of value:
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
 | 1. Make a beat | Steps done, pending checks by hand and the milestone 1 check (a usability test with a newcomer and an FL Studio user): steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser), with three rounds of fixes from trying them (2026-10-13); step 1.6 (all six devices, and the starter project on them), step 1.7 (metronome, tempo, recording and Capture), step 1.8 (export to WAV and FLAC, normalized to a loudness) and step 1.9 (first launch, the guide and the new-project window), 2026-10-15 |
-| 2. Finish a track | Not started |
+| 2. Finish a track | In progress: step 2.1 (automation lanes), its model done (2026-10-16) |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
 | Architecture track | A0 (2026-10-14), A1 and A2 (2026-10-15) and A3 (2026-10-16) done, A2 pending a check by hand: the UI begins no undo steps (46 when A2 began) and makes no direct edits, the playlist, piano roll and mixer strip are split into a file per part, the browser has a model, and the two editors' tools share one gesture. A3: IDs and beats, views that follow the project, the mixer by IDs, the transport and the engine for the top bar and the settings, the shared time line in Phazite's beats, the playlist by IDs, note IDs saved in the project (format version 3), the piano roll by note IDs and the browser by IDs and plain values; the UI names and includes no Tracktion and compiles without it, and the model's headers that use Tracktion are in `internal/` folders. Next: step 2.1 |

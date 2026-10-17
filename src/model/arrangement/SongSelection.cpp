@@ -4,6 +4,7 @@
 #include "internal/Sections.h"
 #include "internal/SongSelection.h"
 #include "internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/notes/internal/Notes.h"
 
 #include <unordered_map>
@@ -84,6 +85,9 @@ struct SongSelection::Impl : private te::SelectableListener
 
     // The note selection holds pointers to its clips, so it goes when one of them does.
     void selectableObjectAboutToBeDeleted (te::Selectable*) override { forgetNoteEvents(); }
+
+    // The automation points this selects, when they are what is selected.
+    SelectedAutomationPoints points;
 };
 
 namespace
@@ -294,6 +298,47 @@ void SongSelection::selectNotes (const std::vector<NoteRef>& refs, bool addToSel
     // Adding to a selection that isn't of these clips' notes starts a new one.
     const auto adding = addToSelection && getSelectedMidiEvents (impl->manager) == events;
     events->setSelected (impl->manager, notes, adding);
+}
+
+//==============================================================================
+SongSelection::AutomationPoints SongSelection::getSelectedAutomationPoints() const
+{
+    if (const auto selected = getSelectedPoints (impl->manager))
+        return { getParameterRef (*selected->parameter), selected->indices };
+
+    return {};
+}
+
+bool SongSelection::isSelected (const ParameterRef& parameter, int index) const
+{
+    const auto selected = getSelectedAutomationPoints();
+    return selected.parameter == parameter && std::find (selected.indices.begin(), selected.indices.end(), index) != selected.indices.end();
+}
+
+void SongSelection::selectAutomationPoints (const ParameterRef& parameter, const std::vector<int>& indices, bool addToSelection)
+{
+    auto* edit = impl->manager.getEdit();
+    const auto found = edit != nullptr ? findParameter (*edit, parameter) : nullptr;
+
+    if (found == nullptr)
+        return;
+
+    // Adding to points of the same parameter keeps them; otherwise these are all that is selected.
+    auto all = indices;
+
+    if (const auto before = getSelectedAutomationPoints(); addToSelection && before.parameter == parameter)
+        all.insert (all.end(), before.indices.begin(), before.indices.end());
+
+    if (all.empty())
+    {
+        impl->manager.deselect (&impl->points);
+        return;
+    }
+
+    if (! impl->manager.isSelected (&impl->points))
+        impl->manager.selectOnly (&impl->points);
+
+    selectPoints (impl->manager, *found, all);
 }
 
 void SongSelection::addChangeListener (juce::ChangeListener* listener)

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -414,7 +415,10 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
 
     for (auto* track : tracks)
         if (auto copy = track->edit.copyTrack (track, getInsertPointAfter (*track)))
+        {
+            copyLanes (*track, *copy); // its lanes show its own devices
             copies.add (copy.get());
+        }
 
     if (selection != nullptr)
     {

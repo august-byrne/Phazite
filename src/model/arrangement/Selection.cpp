@@ -4,6 +4,7 @@
 #include "internal/Clips.h"
 #include "internal/Sections.h"
 #include "internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -127,6 +128,13 @@ void deleteSelection (te::SelectionManager& selection, const RangeSelection& ran
         return;
     }
 
+    if (const auto points = getSelectedPoints (selection))
+    {
+        deletePoints (*points->parameter, points->indices);
+        selection.deselectAll(); // their indices name other points now
+        return;
+    }
+
     if (! range.isEmpty())
     {
         deleteTimeRange (*edit, range.getRange(), range.getTracks(), closeGap);
@@ -162,6 +170,14 @@ void duplicateSelection (te::SelectionManager& selection, RangeSelection& range,
     {
         auto* events = getSelectedMidiEvents (selection); // before the copies change the clips
         events->setSelected (selection, toMidiNotes (duplicateNotes (notes)), false);
+        return;
+    }
+
+    // Automation points: the copies go right after them (a beat after one point alone), and are selected instead.
+    if (const auto points = getSelectedPoints (selection); points.has_value() && ! asAliases)
+    {
+        const auto copies = duplicatePoints (*points->parameter, points->indices, BeatDuration::fromBeats (1.0));
+        selectPoints (selection, *points->parameter, copies);
         return;
     }
 
@@ -257,8 +273,8 @@ bool isSelectionMuted (const te::SelectionManager& selection)
 
 bool canDeleteSelection (const te::SelectionManager& selection, const RangeSelection& range)
 {
-    return hasSelectedNotes (selection) || ! range.isEmpty() || hasSelectedSections (selection) || hasSelectedClips (selection)
-           || hasSelectedTracks (selection);
+    return hasSelectedNotes (selection) || getSelectedPoints (selection).has_value() || ! range.isEmpty() || hasSelectedSections (selection)
+           || hasSelectedClips (selection) || hasSelectedTracks (selection);
 }
 
 bool hasSelectedRangeOrClips (const te::SelectionManager& selection, const RangeSelection& range)
@@ -289,6 +305,9 @@ juce::String describeSelection (const te::SelectionManager& selection, const Ran
     if (const auto notes = getSelectedNotes (selection).size(); notes > 0)
         return describe ((int) notes, "Note");
 
+    if (const auto points = getSelectedPoints (selection))
+        return describe ((int) points->indices.size(), "Automation Point");
+
     if (! range.isEmpty())
         return verb + " Range";
 
@@ -312,7 +331,8 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
     registry.add ({ .id = "edit.delete",
                     .name = "Delete",
                     .category = "Edit",
-                    .description = "Deletes the selected notes, time range, sections, clips or tracks. A section goes with what is in it.",
+                    .description = "Deletes the selected notes, automation points, time range, sections, clips or tracks. A section "
+                                   "goes with what is in it.",
                     .synonyms = { "remove", "erase" },
                     .perform = [&selection, &range] { deleteSelection (selection, range, false); },
                     .isEnabled = [&selection, &range] { return canDeleteSelection (selection, range); },
@@ -332,8 +352,9 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .name = "Duplicate",
                     .category = "Edit",
                     .description =
-                        "Duplicates the selected notes, time range, sections or clips right after them, or the selected tracks, each "
-                        "below its original. A time range's copy replaces what it lands on, and the range moves to it.",
+                        "Duplicates the selected notes, automation points, time range, sections or clips right after them, or the "
+                        "selected tracks, each below its original. A time range's copy replaces what it lands on, and the range "
+                        "moves to it.",
                     .synonyms = { "copy", "clone", "repeat" },
                     .perform = [&selection, &range] { duplicateSelection (selection, range, false); },
                     .isEnabled = [&selection, &range] { return canDeleteSelection (selection, range); },

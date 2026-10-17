@@ -2,6 +2,7 @@
 // Recording MIDI and Capture (src/model/transport/internal/Recording.h, Capture.h): the settings and their commands, takes
 // recorded in real time through Tracktion's hosted audio device, as the app's audio device would play it, and what
 // Capture makes of notes played a moment ago.
+#include "RealTimePlayback.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
@@ -15,12 +16,10 @@
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 
-#include <atomic>
-#include <chrono>
-#include <thread>
-
 namespace
 {
+using phazite::test::RealTimePlayback;
+
 // Tracktion's merged MIDI input, which it creates on a timer once asked to scan the MIDI devices (as LiveInputTests.cpp
 // waits for it).
 std::shared_ptr<te::MidiInputDevice> waitForAllMidiInputs()
@@ -41,70 +40,6 @@ void addInstrument (te::AudioTrack& track)
     track.pluginList.insertPlugin (track.edit.getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {}), 0, nullptr);
 }
 
-// Plays an Edit through Tracktion's hosted audio device for as long as it lives, on a thread that acts as the audio
-// thread and processes a block every block's length, so that MIDI played meanwhile is recorded as the app records it.
-class RealTimePlayback
-{
-public:
-    explicit RealTimePlayback (te::Engine& e)
-        : engine (e)
-    {
-        auto& deviceManager = engine.getDeviceManager();
-        auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
-
-        te::HostedAudioDeviceInterface::Parameters params;
-        params.sampleRate = sampleRate;
-        params.blockSize = blockSize;
-        audioIO.initialise (params);
-        audioIO.prepareToPlay (sampleRate, blockSize);
-        deviceManager.dispatchPendingUpdates();
-
-        audioThread = std::thread (
-            [this, &audioIO]
-            {
-                juce::AudioBuffer<float> buffer (2, blockSize);
-                juce::MidiBuffer midi;
-                const auto blockDuration = std::chrono::duration_cast<std::chrono::steady_clock::duration> (
-                    std::chrono::duration<double> (blockSize / sampleRate));
-                auto nextBlock = std::chrono::steady_clock::now();
-
-                while (! stopping.load())
-                {
-                    nextBlock += blockDuration;
-                    buffer.clear();
-                    midi.clear();
-                    audioIO.processBlock (buffer, midi);
-                    std::this_thread::sleep_until (nextBlock);
-                }
-            });
-    }
-
-    ~RealTimePlayback()
-    {
-        stopping = true;
-        audioThread.join();
-
-        // As Tracktion's own tests do, so later tests start without the hosted device.
-        auto& deviceManager = engine.getDeviceManager();
-        deviceManager.closeDevices();
-        deviceManager.removeHostedAudioDeviceInterface();
-        deviceManager.deviceManager.closeAudioDevice();
-    }
-
-    // Lets some time pass on the message thread, which delivers its messages and runs its timers meanwhile.
-    static void wait (int milliseconds)
-    {
-        phazite::test::dispatchMessagesUntil ([] { return false; }, milliseconds);
-    }
-
-private:
-    static constexpr double sampleRate = 48000.0;
-    static constexpr int blockSize = 256;
-
-    te::Engine& engine;
-    std::atomic<bool> stopping { false };
-    std::thread audioThread;
-};
 } // namespace
 
 TEST_CASE ("Overdub and quantizing recordings are the app's settings, which their commands switch")
