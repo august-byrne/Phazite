@@ -309,6 +309,7 @@ struct Browser::PlaceNode : public Node
             case BrowserPlace::Kind::types:
             case BrowserPlace::Kind::sounds:
             case BrowserPlace::Kind::folder:
+            case BrowserPlace::Kind::presets: // a folder of the user's presets
                 break;
         }
 
