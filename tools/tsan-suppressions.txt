@@ -13,3 +13,9 @@ race:tracktion::engine::AudioFileCache::CachedFile::createNewReader
 # the lock under which playback adds and removes them on the message thread. Only the tests play through the hosted
 # device; the app uses the computer's own.
 race:tracktion::engine::HostedMidiInputDevice*processBlock
+
+# Finding 20: while the song is stopped, a plug-in with automation reads the transport's position on the audio thread
+# (Plugin::applyToBufferWithAutomation) from a CachedValue that the message thread writes when the playhead moves.
+# Phazite's own code calls getPosition() on the message thread only; naming the plug-in function would hide every race
+# in any device's processing.
+race:tracktion::engine::TransportControl::getPosition

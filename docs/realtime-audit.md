@@ -154,9 +154,14 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 - **Why it is harmless to Phazite:** the app plays through the computer's own audio and MIDI devices, not the hosted one; only the tests use it.
 - **Action:** `tools/tsan-suppressions.txt` suppresses it. Report upstream.
 
+**20. The transport's position while the song is stopped** (measured by ThreadSanitizer in CI, 2026-10-17).
+- **What:** while the transport is stopped, a plug-in with automation sets its parameters from where the playhead is, in each block (`Plugin::applyToBufferWithAutomation`). It reads that position with `TransportControl::getPosition()`, a `juce::CachedValue` that the message thread writes whenever the playhead moves, without synchronisation. The touch test in `tests/AutomationModelTests.cpp` shows it, now and then: it stops the song while the volume it automated keeps playing. The app does the same when the playhead moves while the song is stopped.
+- **Why it is mostly harmless:** the position is an aligned 8-byte value, which x86-64 and ARM64 read and write whole, so the audio thread sees the old position or the new one. At worst, one block applies the automation from where the playhead was.
+- **Action:** `tools/tsan-suppressions.txt` suppresses races in `TransportControl::getPosition()`, which Phazite's own code calls on the message thread only. Naming the plug-in function instead would hide every race inside any device's processing. A fork would read the playhead's own position, which the audio thread may read. Report upstream.
+
 ## Reporting upstream
 
-Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18 and 19. Posting is the owner's call.
+Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19 and 20. Posting is the owner's call.
 
 ## Next
 
