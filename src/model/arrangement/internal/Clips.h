@@ -74,7 +74,8 @@ juce::Array<te::Clip*> splitClips (const juce::Array<te::Clip*>&, te::BeatPositi
 void splitClipsAtEdges (const juce::Array<te::Track*>&, te::BeatRange);
 
 // Copies the clips right after them all, as FL Studio's Ctrl+B does: each copy starts as far after its original as
-// the clips span, on its track. As aliases, the copies stay linked to their originals. With a selection manager, the
+// the clips span, on its track, and the automation under each is copied with it (model/automation/internal/
+// Automation.h: moveAutomation()). As aliases, the copies stay linked to their originals. With a selection manager, the
 // copies are selected instead of what was. Returns the copies.
 juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>&, bool asAliases, te::SelectionManager*);
 
@@ -85,21 +86,23 @@ void makeClipsUnique (const juce::Array<te::Clip*>&);
 void toggleClipsMuted (const juce::Array<te::Clip*>&);
 bool areAllClipsMuted (const juce::Array<te::Clip*>&);
 
-// Moves clips by an amount, all together, but none before the start of the song.
+// Moves clips by an amount, all together, but none before the start of the song, with the automation under them.
 void nudgeClips (const juce::Array<te::Clip*>&, te::BeatDuration);
 
-// Deletes clips. With closeGap, the clips after each one on its track move back by its length.
+// Deletes clips, leaving the automation under them. With closeGap, each one's time goes from its track, with the
+// automation in it, and what comes after moves back by its length.
 void deleteClips (const juce::Array<te::Clip*>&, bool closeGap);
 
-// Deletes what lies in a time range on some tracks: clips inside it go, and clips across its edges are
-// trimmed or split. With closeGap, what comes after on those tracks moves back to fill the gap. (Removing
-// time from the whole song, sections and automation too, is Arrangement.h's removeTime().)
+// Deletes what lies in a time range on some tracks: clips inside it go, clips across its edges are trimmed or split,
+// and the tracks' automation in it goes. With closeGap, what comes after on those tracks moves back to fill the gap.
+// (Removing time from the whole song, sections too, is Arrangement.h's removeTime().)
 void deleteTimeRange (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&, bool closeGap);
 
 // Copies what lies in a time range on some tracks right after it, on the same tracks, and returns where the copy is.
 // The copy is cut at the range's edges, as Split cuts clips; the clips themselves aren't cut there. Each piece of the
 // copy replaces what lies under it (as REAPER's razor edits trim what is behind them), so nothing plays twice, and what
-// no piece lands on stays. The pieces are copies, not aliases. (Copying a range on every track, with room made for it,
-// is Arrangement.h's copyTime().)
+// no piece lands on stays. The pieces are copies, not aliases. The tracks' automation in the range is copied too, in
+// place of theirs where it lands. (Copying a range on every track, with room made for it, is Arrangement.h's
+// copyTime().)
 te::BeatRange duplicateTimeRange (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&);
 } // namespace phazite

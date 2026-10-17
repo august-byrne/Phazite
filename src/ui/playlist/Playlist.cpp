@@ -296,10 +296,10 @@ void Playlist::songChanged (const SongChanges& changes)
         return;
     }
 
-    if (changes.view || changes.devices)
-        trackHeightChanged(); // heights, collapsed and pinned tracks, and lanes: shown, hidden, or of devices gone or renamed
-    else if (changes.automation)
-        updateLanes();
+    // Heights, collapsed and pinned tracks, and lanes: shown, collapsed, of devices gone or renamed, or of parameters that
+    // gained or lost automation, which always shows a lane (the master's row with it).
+    if (changes.view || changes.devices || changes.automation)
+        trackHeightChanged();
 
     // Clips are placed in time, and the time line is in beats: a tempo change moves them on it.
     if (changes.clips || changes.tempo || changes.devices)

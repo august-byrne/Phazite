@@ -53,6 +53,25 @@ void replacePoints (te::AutomatableParameter&, BeatRange, const std::vector<Auto
 std::vector<int> duplicatePoints (te::AutomatableParameter&, const std::vector<int>& indices, BeatDuration minimumSpan);
 
 //==============================================================================
+// Automation that goes with the clips above it (docs/design.md, section 10), as Ableton Live, Bitwig and Studio One move
+// automation with clips: the points of a track's parameters in a stretch of the song, moved or copied by a distance (later,
+// or earlier if negative), replacing what is where they land. A stretch keeps its shape at its edges wherever it goes, and
+// what lies around it keeps its own; where a moved stretch was, the line runs straight across. A track's stretches that
+// overlap or touch go as one. They join the caller's undo step.
+struct AutomationStretch
+{
+    te::Track* track = nullptr;
+    BeatRange range {};
+};
+
+void moveAutomation (const std::vector<AutomationStretch>&, BeatDuration distance, bool copy);
+
+// Deletes the automation in stretches, as deleting time does, the parts on either side keeping their shape; with closeGap,
+// what comes after a stretch moves back by its length, as the track's clips do (arrangement/internal/Clips.h:
+// deleteTimeRange()).
+void deleteAutomation (const std::vector<AutomationStretch>&, bool closeGap);
+
+//==============================================================================
 // The automation clips of projects up to version 4 (base/Migrations.h): MIDI clips without notes whose curve (Tracktion's
 // clip automation) set a parameter while they played, and outside them the parameter's own automation or value. Each
 // becomes the parameter's own automation over the clip's place in the song, which jumps to the clip's curve where the

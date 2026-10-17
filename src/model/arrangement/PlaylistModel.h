@@ -136,7 +136,18 @@ std::vector<ClipID> splitClips (ProjectContext&, const std::vector<ClipID>&, Bea
 std::vector<ClipID> copyClips (ProjectContext&, const std::vector<ClipID>&, bool asAliases);
 void deleteClips (ProjectContext&, const std::vector<ClipID>&, bool closeGap);
 void toggleClipsMuted (ProjectContext&, const std::vector<ClipID>&);
-void nudgeClips (ProjectContext&, const std::vector<ClipID>&, BeatDuration);
+void nudgeClips (ProjectContext&, const std::vector<ClipID>&, BeatDuration); // with the automation under them
+
+// Automation goes with the clips above it (docs/design.md, section 10): after a drag moved or copied clips along their
+// tracks by a distance, the automation of each track's parameters under where they were goes the same way, in place of
+// what is where it lands. Each clip as it was before the drag: its track and where it was. Joins the caller's step.
+struct ClipPlace
+{
+    TrackID track {};
+    BeatRange range {};
+};
+
+void moveAutomationWithClips (ProjectContext&, const std::vector<ClipPlace>&, BeatDuration distance, bool copied);
 
 // A new, empty MIDI clip a bar long on a track, selected. Returns it, or an empty ID.
 ClipID addMidiClipAt (ProjectContext&, TrackID, BeatPosition start);

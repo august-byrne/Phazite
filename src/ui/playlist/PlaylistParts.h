@@ -190,12 +190,13 @@ struct Playlist::Gesture : public TimelineGesture
         zoom    // the Zoom tool's range
     };
 
-    // A clip being moved, and where it started.
+    // A clip being moved, and where it started: its row, and its track and place there, whose automation goes with it.
     struct MovingClip
     {
         ClipID clip;
         BeatPosition start;
         int row = -1;
+        ClipPlace place {};
     };
 
     // Which ways the lanes scroll when this drags past their edges, if at all.
@@ -232,6 +233,8 @@ struct Playlist::Gesture : public TimelineGesture
     std::vector<MovingClip> moving;
     BeatPosition anchorStart; // where the clip under the mouse (or its copy) started; it is the one that snaps
     int rowOffset = 0;        // how many rows the moving clips have moved
+    BeatDuration moved;       // and how far along
+    bool copying = false;     // copies (or aliases) of the clips move, and the originals stay
 
     std::optional<CrossfadeSpot> crossfade; // where the mouse went down to draw a crossfade
     double startOffset = 0.0;               // Slip: the clip's offset when the drag began, in seconds

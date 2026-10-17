@@ -393,6 +393,17 @@ void nudgeClips (ProjectContext& context, const std::vector<ClipID>& ids, BeatDu
         nudgeClips (clips, toTracktion (step));
 }
 
+void moveAutomationWithClips (ProjectContext& context, const std::vector<ClipPlace>& places, BeatDuration distance, bool copied)
+{
+    std::vector<AutomationStretch> stretches;
+
+    for (const auto& place : places)
+        if (auto* track = findTrack (context, place.track))
+            stretches.push_back ({ track, place.range });
+
+    moveAutomation (stretches, distance, copied);
+}
+
 ClipID addMidiClipAt (ProjectContext& context, TrackID trackID, BeatPosition start)
 {
     auto* track = dynamic_cast<te::ClipTrack*> (findTrack (context, trackID));

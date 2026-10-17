@@ -108,6 +108,83 @@ namespace
         add (end, after, 0.0f);
     }
 
+    //==========================================================================
+    // Automation that goes with clips (moveAutomation(), deleteAutomation()).
+    const auto justBefore = BeatDuration::fromBeats (1.0e-4); // where an edge's point on the side before it goes
+
+    // Each track's stretches in time order, those that overlap or touch as one.
+    std::vector<std::pair<te::Track*, std::vector<BeatRange>>> byTrack (const std::vector<AutomationStretch>& stretches)
+    {
+        std::vector<std::pair<te::Track*, std::vector<BeatRange>>> tracks;
+
+        for (const auto& stretch : stretches)
+        {
+            if (stretch.track == nullptr || stretch.range.isEmpty())
+                continue;
+
+            auto found = std::find_if (tracks.begin(), tracks.end(), [&stretch] (const auto& each) { return each.first == stretch.track; });
+
+            if (found == tracks.end())
+                found = tracks.insert (tracks.end(), { stretch.track, {} });
+
+            found->second.push_back (stretch.range);
+        }
+
+        for (auto& entry : tracks)
+        {
+            auto& ranges = entry.second;
+            std::sort (ranges.begin(), ranges.end(), [] (const BeatRange& a, const BeatRange& b) { return a.getStart() < b.getStart(); });
+            std::vector<BeatRange> merged;
+
+            for (const auto& range : ranges)
+            {
+                if (! merged.empty() && range.getStart() <= merged.back().getEnd())
+                    merged.back() = { merged.back().getStart(), std::max (merged.back().getEnd(), range.getEnd()) };
+                else
+                    merged.push_back (range);
+            }
+
+            ranges = std::move (merged);
+        }
+
+        return tracks;
+    }
+
+    // A point where an edge is, at the curve's value there, and one just before it at the value there, so that what lies
+    // on either side keeps its shape whatever becomes of the other.
+    void addEdge (te::AutomatableParameter& parameter, BeatPosition beat)
+    {
+        auto& curve = parameter.getCurve();
+        auto* undoManager = undoManagerOf (parameter);
+        const auto valueAt = [&curve, &parameter] (BeatPosition b)
+        { return curve.getValueAt (toCurvePosition (curve, b), parameter.getCurrentBaseValue()); };
+        const auto before = valueAt (beat - justBefore), at = valueAt (beat);
+
+        if (beat - justBefore > BeatPosition())
+            curve.addPoint (toCurvePosition (curve, beat - justBefore), before, 0.0f, undoManager);
+
+        curve.addPoint (toCurvePosition (curve, beat), at, 0.0f, undoManager);
+    }
+
+    // Afterwards, the points at the edges that change nothing go, as Tracktion's removeRedundantPoints() finds them.
+    void tidyEdges (te::AutomatableParameter& parameter, const std::vector<BeatPosition>& edges)
+    {
+        for (const auto beat : edges)
+            parameter.getCurve().removeRedundantPoints ({ toTracktion (beat - justBefore * 2.0), toTracktion (beat + justBefore) },
+                                                        undoManagerOf (parameter));
+    }
+
+    std::vector<te::AutomatableParameter*> getAutomatedParameters (te::Track& track)
+    {
+        std::vector<te::AutomatableParameter*> automated;
+
+        for (auto* parameter : getAutomatableParameters (track))
+            if (parameter->hasAutomationPoints())
+                automated.push_back (parameter);
+
+        return automated;
+    }
+
     // Indices of points that are there, each once, in order.
     std::vector<int> getValidIndices (const te::AutomationCurve& curve, std::vector<int> indices)
     {
@@ -514,6 +591,93 @@ std::vector<int> duplicatePoints (te::AutomatableParameter& parameter, const std
 
     followCurve (parameter);
     return copies;
+}
+
+//==============================================================================
+void moveAutomation (const std::vector<AutomationStretch>& stretches, BeatDuration distance, bool copy)
+{
+    if (juce::exactlyEqual (distance.inBeats(), 0.0))
+        return;
+
+    for (const auto& [track, ranges] : byTrack (stretches))
+    {
+        for (auto* parameter : getAutomatedParameters (*track))
+        {
+            auto& curve = parameter->getCurve();
+            auto* undoManager = undoManagerOf (*parameter);
+            std::vector<BeatPosition> edges;
+
+            // Edges where each stretch is and where it lands, so that each part keeps its shape.
+            for (const auto& range : ranges)
+                for (const auto beat : { range.getStart(), range.getEnd(), range.getStart() + distance, range.getEnd() + distance })
+                    edges.push_back (beat);
+
+            for (const auto beat : edges)
+                addEdge (*parameter, beat);
+
+            // The stretches' points as they are, then cleared where they come from (unless copied) and where they land.
+            const auto isInAny = [&ranges] (BeatPosition beat, BeatDuration offset)
+            {
+                return std::any_of (ranges.begin(), ranges.end(), [beat, offset] (const BeatRange& range)
+                                    { return BeatRange (range.getStart() + offset, range.getEnd() + offset).contains (beat); });
+            };
+
+            std::vector<AutomationPoint> moved;
+
+            for (const auto& point : getPoints (*parameter))
+                if (isInAny (point.beat, {}))
+                    moved.push_back ({ point.beat + distance, point.value, point.curve });
+
+            for (auto i = curve.getNumPoints(); --i >= 0;)
+                if (const auto beat = getPointBeat (curve, i); (! copy && isInAny (beat, {})) || isInAny (beat, distance))
+                    curve.removePoint (i, undoManager);
+
+            // In order, each after any at its beat already, so that a jump stays one.
+            for (const auto& point : moved)
+                curve.addPoint (toCurvePosition (curve, point.beat), point.value, point.curve, undoManager);
+
+            tidyEdges (*parameter, edges);
+            followCurve (*parameter);
+        }
+    }
+}
+
+void deleteAutomation (const std::vector<AutomationStretch>& stretches, bool closeGap)
+{
+    for (const auto& [track, ranges] : byTrack (stretches))
+    {
+        for (auto* parameter : getAutomatedParameters (*track))
+        {
+            auto& curve = parameter->getCurve();
+            auto* undoManager = undoManagerOf (*parameter);
+            std::vector<BeatPosition> edges;
+
+            // The latest stretch first, so that closing its gap doesn't move one still to go.
+            for (auto range = ranges.rbegin(); range != ranges.rend(); ++range)
+            {
+                addEdge (*parameter, range->getStart());
+                addEdge (*parameter, range->getEnd());
+
+                for (auto i = curve.getNumPoints(); --i >= 0;)
+                {
+                    const auto beat = getPointBeat (curve, i);
+
+                    if (range->contains (beat))
+                        curve.removePoint (i, undoManager);
+                    else if (closeGap && beat >= range->getEnd())
+                        curve.setPointPosition (i, toCurvePosition (curve, beat - range->getLength()), undoManager);
+                }
+
+                edges.push_back (range->getStart());
+
+                if (! closeGap)
+                    edges.push_back (range->getEnd());
+            }
+
+            tidyEdges (*parameter, edges);
+            followCurve (*parameter);
+        }
+    }
 }
 
 //==============================================================================

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Clips.h"
 #include "internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
@@ -17,6 +18,40 @@ namespace
 
     // Positions this close count as the same: rounding between beats and seconds leaves differences this small.
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
+
+    // Where clips are on their tracks, for the automation under them (Automation.h: moveAutomation()).
+    std::vector<AutomationStretch> getStretchesOf (const juce::Array<te::Clip*>& clips)
+    {
+        std::vector<AutomationStretch> stretches;
+
+        for (auto* clip : clips)
+            stretches.push_back ({ clip->getClipTrack(), { fromTracktion (clip->getStartBeat()), fromTracktion (clip->getEndBeat()) } });
+
+        return stretches;
+    }
+
+    std::vector<AutomationStretch> getStretchesOf (const juce::Array<te::Track*>& tracks, te::BeatRange range)
+    {
+        std::vector<AutomationStretch> stretches;
+
+        for (auto* track : tracks)
+            stretches.push_back ({ track, { fromTracktion (range.getStart()), fromTracktion (range.getEnd()) } });
+
+        return stretches;
+    }
+
+    // The clips in a range of a track, as deleteTimeRange() deletes them, without the automation there.
+    void deleteClipsIn (te::ClipTrack& track, te::TimeRange time, bool closeGap)
+    {
+        for (auto* clip : juce::Array<te::Clip*> (track.getClips())) // a copy: deleting changes the list
+            if (clip->getEditTimeRange().overlaps (time))
+                te::deleteRegionOfClip (*clip, time);
+
+        if (closeGap)
+            for (auto* clip : juce::Array<te::Clip*> (track.getClips()))
+                if (clip->getPosition().getStart() >= time.getEnd())
+                    clip->setStart (clip->getPosition().getStart() - time.getLength(), false, true);
+    }
 
     // A copy of the part of a clip that lies in a range, where that part is. The copy is cut at the range's edges as
     // Split cuts clips (an audio clip loses its fades where it is cut); the clip itself stays whole.
@@ -340,6 +375,8 @@ juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>& clips, bool
             selection->addToSelection (copy);
     }
 
+    // The automation under the clips is copied with them.
+    moveAutomation (getStretchesOf (clips), fromTracktion (end - start), true);
     return copies;
 }
 
@@ -371,13 +408,17 @@ void toggleClipsMuted (const juce::Array<te::Clip*>& clips)
 
 void nudgeClips (const juce::Array<te::Clip*>& clips, te::BeatDuration amount)
 {
-    // The earliest clip decides how far back they can go.
+    // The earliest clip decides how far back they can go. The automation under them goes along.
     for (auto* clip : clips)
         amount = std::max (amount, te::BeatPosition() - clip->getStartBeat());
+
+    const auto under = getStretchesOf (clips);
 
     for (auto* clip : clips)
         if (auto* track = clip->getClipTrack())
             moveClip (*clip, clip->getStartBeat() + amount, *track);
+
+    moveAutomation (under, fromTracktion (amount), false);
 }
 
 void deleteClips (const juce::Array<te::Clip*>& clips, bool closeGap)
@@ -390,13 +431,20 @@ void deleteClips (const juce::Array<te::Clip*>& clips, bool closeGap)
     for (auto* clip : sorted)
     {
         const auto removed = clip->getPosition();
+        const auto under = getStretchesOf ({ clip });
         auto* track = clip->getClipTrack();
         clip->removeFromParent();
 
+        // Closing the gap takes the clip's time out of its track, its automation with it, and what comes after moves
+        // back, automation and all; without, the automation stays where it is.
         if (closeGap && track != nullptr)
+        {
             for (auto* other : juce::Array<te::Clip*> (track->getClips())) // a copy: moving clips can reorder the list
                 if (other->getPosition().getStart() >= removed.getStart())
                     other->setStart (std::max (removed.getStart(), other->getPosition().getStart() - removed.getLength()), false, true);
+
+            deleteAutomation (under, true);
+        }
     }
 }
 
@@ -405,21 +453,11 @@ void deleteTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te:
     const auto time = edit.tempoSequence.toTime (range);
 
     for (auto* track : tracks)
-    {
-        auto* clipTrack = dynamic_cast<te::ClipTrack*> (track);
+        if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (track))
+            deleteClipsIn (*clipTrack, time, closeGap);
 
-        if (clipTrack == nullptr)
-            continue;
-
-        for (auto* clip : juce::Array<te::Clip*> (clipTrack->getClips())) // a copy: deleting changes the list
-            if (clip->getEditTimeRange().overlaps (time))
-                te::deleteRegionOfClip (*clip, time);
-
-        if (closeGap)
-            for (auto* clip : juce::Array<te::Clip*> (clipTrack->getClips()))
-                if (clip->getPosition().getStart() >= time.getEnd())
-                    clip->setStart (clip->getPosition().getStart() - time.getLength(), false, true);
-    }
+    // The automation there goes too, on folders as well, which hold no clips.
+    deleteAutomation (getStretchesOf (tracks, range), closeGap);
 }
 
 te::BeatRange duplicateTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te::Track*>& tracks)
@@ -442,14 +480,18 @@ te::BeatRange duplicateTimeRange (te::Edit& edit, te::BeatRange range, const juc
 
     // Each part goes a range's length later, in place of what lies there. What is in the way goes first, so that no
     // part cuts another.
+    const auto& tempo = edit.tempoSequence;
+
     for (const auto& part : parts)
-        if (auto* track = part->getTrack())
-            deleteTimeRange (edit, { part->getStartBeat() + length, part->getEndBeat() + length }, { track }, false);
+        if (auto* track = part->getClipTrack())
+            deleteClipsIn (*track, tempo.toTime (te::BeatRange (part->getStartBeat() + length, part->getEndBeat() + length)), false);
 
     for (const auto& part : parts)
         if (auto* track = part->getClipTrack())
             moveClip (*part, part->getStartBeat() + length, *track);
 
+    // And the range's automation, on its tracks and folders, in place of what lies there.
+    moveAutomation (getStretchesOf (tracks, range), fromTracktion (length), true);
     return copyRange;
 }
 } // namespace phazite

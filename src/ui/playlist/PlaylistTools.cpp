@@ -527,6 +527,7 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
                 if (const auto row = moving.row + gesture->rowOffset; juce::isPositiveAndBelow (row, (int) rows.size()))
                     moveClip (context, moving.clip, moving.start + delta, rows[(size_t) row].track.id);
 
+            gesture->moved = delta;
             break;
         }
 
@@ -692,6 +693,7 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
         clips = copyClips (context, clips, alias);
         clip = anchorIndex < clips.size() ? clips[anchorIndex] : ClipID();
         gesture->clip = clip;
+        gesture->copying = true;
 
         selection.clear(); // the copies are what moves
 
@@ -704,7 +706,7 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
 
     for (const auto id : clips)
         if (const auto moving = getClip (context, id))
-            gesture->moving.push_back ({ id, moving->range.getStart(), getRowOf (moving->track) });
+            gesture->moving.push_back ({ id, moving->range.getStart(), getRowOf (moving->track), { moving->track, moving->range } });
 }
 
 juce::Point<int> Playlist::getGestureStart() const
@@ -738,6 +740,17 @@ void Playlist::lanesMouseUp (const juce::MouseEvent& e)
     {
         // Zoom to the dragged time.
         zoomTo ({ getView().xToBeat (rubberBand.getX()), getView().xToBeat (rubberBand.getRight()) });
+    }
+    else if (gesture->kind == Gesture::Kind::move && gesture->rowOffset == 0)
+    {
+        // Clips moved or copied along their tracks take the automation under them, once, in the drag's undo step; clips
+        // moved to other tracks leave it, as their devices are others.
+        std::vector<ClipPlace> places;
+
+        for (const auto& moving : gesture->moving)
+            places.push_back (moving.place);
+
+        moveAutomationWithClips (context, places, gesture->moved, gesture->copying);
     }
 
     gesture = nullptr;

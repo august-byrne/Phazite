@@ -7,7 +7,9 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/MixerModel.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "ui/input/KeyDispatcher.h"
@@ -181,6 +183,69 @@ TEST_CASE ("Dragging a clip past the edge of the playlist scrolls it")
     // The clip went along, to beyond what showed when the drag began.
     const auto widthInBeats = screen.lanes->getWidth() / view.pixelsPerBeat;
     CHECK (clip.getStartBeat().inBeats() > widthInBeats);
+}
+
+TEST_CASE ("A clip dragged along its track takes the automation under it, Ctrl copies it too, and to another track it stays")
+{
+    PlaylistScreen screen;
+    auto& clip = screen.addClip (0, 4.0, 4.0);
+    const auto volume = phazite::getVolume (screen.context, phazite::getTrackID (*screen.tracks[0])).getRef();
+
+    // A peak at beat 6, under the clip.
+    for (const auto& [beat, value] :
+         { std::pair (0.0, 0.5f), std::pair (5.0, 0.5f), std::pair (6.0, 0.9f), std::pair (7.0, 0.5f), std::pair (16.0, 0.5f) })
+        phazite::addAutomationPoint (screen.context, volume, { phazite::BeatPosition::fromBeats (beat), value });
+
+    screen.edit->getUndoManager().clearUndoHistory();
+    phazite::test::dispatchPendingMessages();
+
+    const auto valueAt = [&screen, &volume] (double beat)
+    {
+        const auto at = phazite::BeatPosition::fromBeats (beat);
+        return phazite::getAutomationValues (screen.context, volume, { at, at }, 1).front();
+    };
+
+    // The lower half of a clip moves it. The first track's automation shows its lane under it, above the second track.
+    phazite::test::Mouse mouse (*screen.lanes);
+    const juce::Point<int> lower (0, phazite::ui::TrackHeight::standard / 4);
+    const auto onFirst = [&screen, lower] (double beat) { return screen.at (beat, 0) + lower; };
+    const auto onSecond = [&screen, lower] (double beat)
+    { return screen.at (beat, 1) + lower + juce::Point<int> (0, phazite::AutomationLane::defaultHeight); };
+
+    // Four beats later along its track: the peak goes along, in the drag's one undo step.
+    mouse.press (onFirst (5.0));
+    mouse.dragTo (onFirst (7.0));
+    mouse.dragTo (onFirst (9.0));
+    mouse.release();
+    mouse.pause();
+    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (8.0));
+    CHECK (valueAt (10.0) == doctest::Approx (0.9f));
+    CHECK (valueAt (6.0) == doctest::Approx (0.5f));
+    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Move Clip"));
+    phazite::undo (*screen.edit);
+    CHECK (valueAt (6.0) == doctest::Approx (0.9f));
+    phazite::test::dispatchPendingMessages();
+
+    // With Ctrl, a copy goes, with a copy of the peak; the original keeps its own.
+    mouse.press (onFirst (5.0), juce::ModifierKeys::ctrlModifier);
+    mouse.dragTo (onFirst (7.0));
+    mouse.dragTo (onFirst (9.0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getClipStarts (0) == std::vector { 4.0, 8.0 });
+    CHECK (valueAt (6.0) == doctest::Approx (0.9f));
+    CHECK (valueAt (10.0) == doctest::Approx (0.9f));
+    phazite::undo (*screen.edit);
+    phazite::test::dispatchPendingMessages();
+
+    // To another track, the automation stays: that track's devices are others.
+    mouse.press (onFirst (5.0));
+    mouse.dragTo (onSecond (5.0) + juce::Point<int> (0, -2));
+    mouse.dragTo (onSecond (5.0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getClipStarts (1) == std::vector { 4.0 });
+    CHECK (valueAt (6.0) == doctest::Approx (0.9f));
 }
 
 TEST_CASE ("A notch of the mouse wheel zooms or scrolls the playlist once")

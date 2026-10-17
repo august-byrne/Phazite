@@ -575,6 +575,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/AutomationFollowsClipsTests.cpp
         tests/AutomationLaneTests.cpp
         tests/AutomationModelTests.cpp
         tests/BeatsTests.cpp

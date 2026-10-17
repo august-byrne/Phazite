@@ -327,6 +327,28 @@ TEST_CASE ("A lane's chevron collapses it to a thin row, as a collapsed track's 
     CHECK (context.getSongSelection().getTracks().empty());
 }
 
+TEST_CASE ("A parameter that gets automation shows its lane at once, as automation never hides")
+{
+    LaneScreen screen;
+    const auto countLanes = [&screen]
+    {
+        auto count = 0;
+
+        for (auto* component : phazite::test::findAll<juce::Component> (screen.playlist))
+            if (component->getTitle() == "Automation of Volume" && component->isShowing())
+                ++count;
+
+        return count;
+    };
+
+    REQUIRE (countLanes() == 1); // the first track's, shown
+    const auto second = phazite::getVolume (screen.context, screen.trackID (1)).getRef();
+    phazite::addAutomationPoint (screen.context, second, { BeatPosition::fromBeats (2.0), 0.4f });
+    phazite::test::dispatchPendingMessages();
+    CHECK (countLanes() == 2);
+    CHECK (phazite::getAutomationLanes (screen.context, screen.trackID (1)).size() == 1);
+}
+
 TEST_CASE ("Right-clicking a fader shows its menu instead of moving it")
 {
     LaneScreen screen;
