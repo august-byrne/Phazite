@@ -1,0 +1,11 @@
+# LeakSanitizer suppressions for the linux-asan build. Each entry is a leak in code Phazite can't change (external/ is
+# read-only), with why it happens. Never add a leak in Phazite's own code here: fix it.
+#
+# The linux-asan test preset passes this file to the tests (LSAN_OPTIONS).
+
+# JUCE's HeapBlock::realloc() to no elements sets the block to nullptr without freeing what it held, and Tracktion's
+# DeviceManager::prepareToStart() reallocates a scratch block to the audio device's number of inputs: a device with no
+# inputs after one with some leaks a pointer's size per input. The tests switch Tracktion's hosted device between two
+# inputs and none (the tests that play in real time have two, the real-time audit's scenarios none but one); the app
+# would leak as much when the user switches to a device without inputs.
+leak:tracktion::engine::DeviceManager::prepareToStart

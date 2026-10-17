@@ -118,7 +118,13 @@
     { "name": "windows-release", "inherits": "windows-test-base", "configurePreset": "windows-release" },
     { "name": "linux-debug",     "inherits": "linux-test-base",   "configurePreset": "linux-debug" },
     { "name": "linux-release",   "inherits": "linux-test-base",   "configurePreset": "linux-release" },
-    { "name": "linux-asan",      "inherits": "linux-test-base",   "configurePreset": "linux-asan" },
+    {
+      "name": "linux-asan",
+      "inherits": "linux-test-base",
+      "configurePreset": "linux-asan",
+      "description": "Known leaks in JUCE and Tracktion, which Phazite can't change, are suppressed (tools/lsan-suppressions.txt).",
+      "environment": { "LSAN_OPTIONS": "suppressions=${sourceDir}/tools/lsan-suppressions.txt" }
+    },
     {
       "name": "linux-tsan",
       "inherits": "linux-test-base",
