@@ -30,6 +30,19 @@
           "message": 1
         }
       ]
+    },
+    {
+      "owner": "sanitizer-frames",
+      "severity": "warning",
+      "pattern": [
+        {
+          "regexp": "^\\s+#(\\d+) 0x[0-9a-f]+ in (.+) /home/runner/work/Phazite/Phazite/((?:src|tests|external)/[^:]+):(\\d+)(?::\\d+)?$",
+          "code": 1,
+          "message": 2,
+          "file": 3,
+          "line": 4
+        }
+      ]
     }
   ]
 }
