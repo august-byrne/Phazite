@@ -142,8 +142,8 @@ struct Inspector::Page : public juce::Component
     void addRow (const juce::String& name, juce::Component* control, int height = controlHeight)
     {
         auto label = std::make_unique<juce::Label> (juce::String(), name);
-        label->setFont (
-            juce::FontOptions (control != nullptr ? TextSize::small : TextSize::body, control != nullptr ? 0 : juce::Font::bold));
+        label->setFont (juce::FontOptions (control != nullptr ? TextSize::small : TextSize::body,
+                                           control != nullptr ? juce::Font::plain : juce::Font::bold));
         label->setColour (juce::Label::textColourId, getPalette (*this).textMuted);
         label->setInterceptsMouseClicks (false, false);
         addAndMakeVisible (*label);

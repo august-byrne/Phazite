@@ -47,9 +47,9 @@ public:
         };
 
         Kind kind = Kind::none;
-        TrackID track;
-        std::vector<ClipID> clips;
-        SectionID section;
+        TrackID track {};
+        std::vector<ClipID> clips {};
+        SectionID section {};
 
         bool operator== (const Target&) const = default;
     };
