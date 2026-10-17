@@ -79,7 +79,7 @@ private:
         TrackRow track;
         int top = 0, height = 0; // in the pinned band, or among the scrolling rows before scrolling; the height is the
                                  // track's own, where its clips are
-        std::vector<LaneRow> lanes;
+        std::vector<LaneRow> lanes {};
         int lanesHeight = 0;
 
         int getTotalHeight() const noexcept { return height + lanesHeight; }
