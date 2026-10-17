@@ -10,6 +10,7 @@
 #include "LevelSource.h"
 #include "MixHandle.h"
 #include "model/base/IDs.h"
+#include "model/devices/DeviceHandle.h"
 #include "model/devices/ParameterHandle.h"
 
 #include <juce_graphics/juce_graphics.h>
@@ -97,6 +98,10 @@ struct DeviceSlot
     bool hasMix = false;         // an effect's mix (getMix())
     double latencySeconds = 0.0; // how late its sound comes out
     bool isContainer = false;    // a container of effects (ContainerModel.h)
+
+    // A plug-in, or one of Tracktion's built-in devices: its own controls are in a window of its own (showDeviceWindow()).
+    // Phazite's own devices and containers have none: the Devices view shows them whole (docs/design.md, section 9).
+    bool opensWindow = false;
 };
 
 std::optional<DeviceSlot> getInstrument (const ProjectContext&, TrackID);
@@ -111,7 +116,14 @@ MixHandle getMix (ProjectContext&, DeviceID);
 void setDeviceOn (ProjectContext&, DeviceID, bool);
 void moveEffect (ProjectContext&, DeviceID, int places); // earlier (negative) or later among its channel's effects
 void removeDevice (ProjectContext&, DeviceID);
-void showDeviceWindow (ProjectContext&, DeviceID);
+void showDeviceWindow (ProjectContext&, DeviceID); // a device that opens one (DeviceSlot::opensWindow); nothing for others
+
+// One of Phazite's own devices, for its editor (model/devices/DeviceHandle.h); a handle of nothing for another device.
+DeviceHandle getDeviceHandle (ProjectContext&, DeviceID);
+
+// The channel a device is on, the devices in its containers included: a track, or an empty ID for the master; nothing
+// for a device that is gone.
+std::optional<TrackID> getDeviceChannel (const ProjectContext&, DeviceID);
 
 // What can be added, and adding it (Mixer.h): an instrument for a track, in place of the one it had; an effect after a
 // channel's effects (the master's, with an empty ID); a return holding an effect, with a send to it; and a device

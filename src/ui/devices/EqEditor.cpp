@@ -22,6 +22,14 @@ namespace
 
     const auto labelHeight = juce::roundToInt (TextSize::small) + Space::xs;
 
+    // Under the graph: the band buttons, then the band's choices and switch, or a knob with its name and value, whichever
+    // is taller.
+    int getHeightBelowGraph()
+    {
+        const auto controls = std::max (3 * controlHeight + 2 * Space::xs, knobSize + 2 * labelHeight);
+        return 2 * Space::s + controlHeight + controls;
+    }
+
     juce::String toString (std::string_view text)
     {
         return juce::String (text.data(), text.size());
@@ -385,11 +393,14 @@ EqEditor::EqEditor (const DeviceHandle& handle)
     outputAttachment.setParameter (device.getParameter (getInfo (Eq::outputParameter).id));
 
     selectBand (selectedBand);
-    // The band's choices and switch, or a knob with its name and value, whichever is taller, under the graph and buttons.
-    const auto controls = std::max (3 * controlHeight + 2 * Space::xs, knobSize + 2 * labelHeight);
-    setSize (10 * (knobSize + Space::l), 2 * Space::l + GraphTint::height + 2 * Space::s + controlHeight + controls);
+    setSize (10 * (knobSize + Space::l), 2 * Space::l + GraphTint::height + getHeightBelowGraph());
     refresh();
     startTimerHz (refreshRateHz);
+}
+
+int EqEditor::getMinimumHeight() const
+{
+    return 2 * Space::l + GraphTint::minimumHeight + getHeightBelowGraph();
 }
 
 EqEditor::~EqEditor()
@@ -498,8 +509,10 @@ void EqEditor::paint (juce::Graphics& g)
 
 void EqEditor::resized()
 {
+    // The graph shrinks when the editor is shorter than it makes itself, as a Devices view may be.
     auto area = getLocalBounds().reduced (Space::l);
-    graph->setBounds (area.removeFromTop (GraphTint::height));
+    graph->setBounds (
+        area.removeFromTop (juce::jlimit (GraphTint::minimumHeight, GraphTint::height, area.getHeight() - getHeightBelowGraph())));
     area.removeFromTop (Space::s);
 
     auto buttons = area.removeFromTop (controlHeight);

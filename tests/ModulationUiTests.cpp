@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Modulation in the window (roadmap step 2.3), driven with the mouse as the user would: the ring around a modulated knob
-// and dragging it, a modulator dropped on a knob, a channel strip's modulators, and a modulator's editor with a step
-// sequencer's steps.
+// and dragging it, a modulator dropped on a knob, and a modulator's editor with a step sequencer's steps. The track's
+// modulators show in the Devices view (DevicesViewTests.cpp).
 #include "UiTestHelpers.h"
 #include "model/automation/AutomationModel.h"
 #include "model/commands/internal/Undo.h"
@@ -12,7 +12,6 @@
 #include "ui/components/Controls.h"
 #include "ui/components/ModulatorDrag.h"
 #include "ui/devices/ModulatorEditor.h"
-#include "ui/mixer/ChannelStrip.h"
 
 namespace
 {
@@ -129,31 +128,6 @@ TEST_CASE ("A modulator dropped on a knob of its track modulates it; one of anot
     phazite::modulate (song.context, lfo, song.threshold(), 0.6f);
     screen.knob.itemDropped (dragOf (lfo, source));
     CHECK (phazite::getModulations (song.context, song.threshold())[0].amount == doctest::Approx (0.6f));
-}
-
-TEST_CASE ("A channel strip shows its track's modulators, a macro with its knob")
-{
-    Song song;
-    phazite::CommandRegistry registry;
-    phazite::ui::CommandBridge commands { registry };
-    phazite::ui::ChannelStrip strip { commands, song.context };
-    phazite::test::TestWindow window { strip, phazite::ui::ChannelStrip::width, 900 };
-    strip.setTrack (phazite::getTrackID (*song.a));
-
-    auto* group = phazite::test::findComponentWithTitle (strip, "Modulators");
-    REQUIRE (group != nullptr);
-    CHECK (group->isShowing());
-
-    phazite::addModulator (song.context, phazite::getTrackID (*song.a), ModulatorType::lfo);
-    phazite::addModulator (song.context, phazite::getTrackID (*song.a), ModulatorType::macro);
-    CHECK (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "LFO 1") != nullptr; }));
-    CHECK (phazite::test::findComponentWithTitle (*group, "Macro 1") != nullptr);
-    CHECK (phazite::test::findAll<phazite::ui::Knob> (*group).size() == 1); // the macro's
-    phazite::test::checkChildrenApart (strip);
-
-    // Removing one takes its slot away.
-    phazite::removeModulator (song.context, phazite::getModulators (song.context, phazite::getTrackID (*song.a))[0].id);
-    CHECK (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "LFO 1") == nullptr; }));
 }
 
 TEST_CASE ("A modulator's editor has a knob for each parameter, and a step sequencer's steps are drawn with the mouse")

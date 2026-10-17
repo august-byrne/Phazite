@@ -8,6 +8,7 @@
 #include "TopBar.h"
 #include "ui/browser/Browser.h"
 #include "ui/input/KeyDispatcher.h"
+#include "ui/mixer/DevicesView.h"
 #include "ui/mixer/Inspector.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/pianoroll/PianoRoll.h"
@@ -81,7 +82,8 @@ private:
     Inspector inspector;
     PianoRoll pianoRoll;
     MixerView mixer;
-    EditorDock editorDock { pianoRoll, mixer };
+    DevicesView devices; // the selected track's
+    EditorDock editorDock { pianoRoll, devices, mixer };
     HintBar hintBar;
     Guide guide; // the hint bar's next step for newcomers
 
@@ -120,6 +122,7 @@ private:
     void updateLayout();
     void showEditor (EditorDock::Tab);   // or hides it if it is showing, as FL Studio's F7 and F9 do
     void revealEditor (EditorDock::Tab); // shows it, even if it is showing already
+    void showSelectedDevice();           // in the Devices view (the "device.show" command)
     void placeDetachButtons();
     void setActiveEditor (TimelineEditor*);
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track

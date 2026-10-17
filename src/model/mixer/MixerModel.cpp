@@ -6,6 +6,8 @@
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
@@ -26,6 +28,12 @@ namespace
     {
         auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
+    }
+
+    // A plug-in, or one of Tracktion's built-in devices: not one of Phazite's own, nor a container.
+    bool opensWindow (const te::Plugin& device)
+    {
+        return ! isContainer (device) && dynamic_cast<const DevicePlugin*> (&device) == nullptr;
     }
 
     std::vector<DeviceSlot> makeSlots (const juce::Array<te::Plugin*>& devices)
@@ -69,9 +77,8 @@ namespace
 
 DeviceSlot makeDeviceSlot (te::Plugin& device)
 {
-    return {
-        getDeviceID (device), device.getName(), device.isEnabled(), hasMix (device), device.getLatencySeconds(), isContainer (device)
-    };
+    return { getDeviceID (device),       device.getName(),     device.isEnabled(),  hasMix (device),
+             device.getLatencySeconds(), isContainer (device), opensWindow (device) };
 }
 
 //==============================================================================
@@ -344,8 +351,35 @@ void removeDevice (ProjectContext& context, DeviceID id)
 
 void showDeviceWindow (ProjectContext& context, DeviceID id)
 {
-    if (auto* device = findDevice (context, id))
+    if (auto* device = findDevice (context, id); device != nullptr && opensWindow (*device))
         device->showWindowExplicitly();
+}
+
+DeviceHandle getDeviceHandle (ProjectContext& context, DeviceID id)
+{
+    auto* device = findDevice (context, id);
+    return device != nullptr ? makeDeviceHandle (*device) : DeviceHandle();
+}
+
+std::optional<TrackID> getDeviceChannel (const ProjectContext& context, DeviceID id)
+{
+    auto* device = findDevice (context, id);
+
+    if (device == nullptr)
+        return {};
+
+    // A container's devices are on its channel (containers don't nest). The master's devices belong to Tracktion's master
+    // track, which the mixer calls the master, by an empty ID.
+    if (auto* container = findContainerOf (*device))
+        device = container;
+
+    if (getMasterDevices (device->edit).contains (device))
+        return TrackID();
+
+    if (auto* track = device->getOwnerTrack())
+        return getTrackID (*track);
+
+    return {};
 }
 
 std::vector<DeviceType> getDeviceTypes (const ProjectContext& context)

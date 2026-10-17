@@ -201,7 +201,7 @@ ModulatorEditor::ModulatorEditor (ProjectContext& projectContext, ModulatorID id
     const auto graphs = (scope != nullptr ? graphHeight + Space::s : 0) + (steps != nullptr ? graphHeight + Space::s : 0);
     setSize (columns * (knobSize + Space::s) + 2 * Space::m, titleHeight + graphs + rows * (knobSize + nameHeight) + 2 * Space::m);
 
-    timerCallback();
+    refresh();
     startTimerHz (refreshRateHz);
 }
 
@@ -246,6 +246,12 @@ void ModulatorEditor::resized()
 }
 
 void ModulatorEditor::timerCallback()
+{
+    if (isShowing()) // nothing to show behind another tab of the Devices view
+        refresh();
+}
+
+void ModulatorEditor::refresh()
 {
     if (scope != nullptr)
         scope->refresh();

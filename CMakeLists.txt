@@ -419,10 +419,10 @@ target_sources(phazite_ui PRIVATE
     src/ui/input/WindowKeys.h
     src/ui/mixer/ChannelStrip.cpp
     src/ui/mixer/ChannelStrip.h
-    src/ui/mixer/ContainerEditor.cpp
-    src/ui/mixer/ContainerEditor.h
     src/ui/mixer/DeviceSlots.cpp
     src/ui/mixer/DeviceSlots.h
+    src/ui/mixer/DevicesView.cpp
+    src/ui/mixer/DevicesView.h
     src/ui/mixer/Inspector.cpp
     src/ui/mixer/Inspector.h
     src/ui/mixer/MasterStrip.cpp
@@ -595,6 +595,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DeviceInfoTests.cpp
         tests/DevicePanelTests.cpp
         tests/DevicePluginTests.cpp
+        tests/DevicesViewTests.cpp
         tests/DrumRowTests.cpp
         tests/DrumSamplerEditorTests.cpp
         tests/DrumSamplerTests.cpp

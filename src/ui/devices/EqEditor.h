@@ -4,6 +4,7 @@
 // or off; a right-click picks its shape), and the selected band's controls below, which work from the keyboard too.
 #pragma once
 
+#include "DeviceEditors.h"
 #include "devices/core/Spectrum.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
@@ -16,11 +17,14 @@
 namespace phazite::ui
 {
 class EqEditor : public juce::Component,
+                 public FlexibleHeight,
                  private juce::Timer
 {
 public:
     explicit EqEditor (const DeviceHandle&);
     ~EqEditor() override;
+
+    int getMinimumHeight() const override; // its graph shrinks, down to GraphTint::minimumHeight
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -62,7 +66,11 @@ private:
     devices::Spectrum spectrum;
     std::vector<float> pulled;
 
-    void timerCallback() override { refresh(); }
+    void timerCallback() override
+    {
+        if (isShowing()) // nothing to show behind another tab of the Devices view
+            refresh();
+    }
     juce::Label& addLabel (const juce::String&);
     double getSampleRate() const; // the EQ's, for its curve near the top of the range
 };

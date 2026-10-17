@@ -45,6 +45,7 @@ private:
     juce::OwnedArray<ParameterAttachment> attachments;
     juce::OwnedArray<juce::Label> names;
 
-    void timerCallback() override; // the output, the steps and the knobs, as they are now
+    void refresh();                // the output, the steps and the knobs, as they are now
+    void timerCallback() override; // refresh(), while it shows
 };
 } // namespace phazite::ui

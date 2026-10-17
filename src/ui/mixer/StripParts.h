@@ -5,10 +5,12 @@
 #pragma once
 
 #include "model/base/IDs.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/components/Controls.h"
 #include "ui/theme/DesignTokens.h"
 
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace phazite::ui
@@ -56,6 +58,24 @@ namespace strip
     // A knob for a parameter of a device, attached to it; nullptr for a handle of nothing.
     Knob* addParameterKnob (juce::Component& parent, juce::OwnedArray<Knob>& knobs, juce::OwnedArray<ParameterAttachment>& attachments,
                             ParameterHandle);
+
+    // Links a knob to an effect's mix through the model's MixHandle, as ParameterAttachment links one to a parameter: one
+    // named undo step per drag or key press.
+    class MixAttachment
+    {
+    public:
+        MixAttachment (juce::Slider&, MixHandle);
+        void update(); // shows the mix as it is now, unless the knob is being dragged
+
+    private:
+        juce::Slider& slider;
+        MixHandle handle;
+        bool dragging = false;
+    };
+
+    // A knob for an effect's mix, 100% at a double-click, attached to it; its tooltip warns when the effect delays its sound.
+    Knob* addMixKnob (juce::Component& parent, juce::OwnedArray<Knob>& knobs, std::unique_ptr<MixAttachment>&, ProjectContext&,
+                      const DeviceSlot&);
 
     // Dots to drag a modulator or a macro by, onto a knob it can modulate (ui/components/ModulatorDrag.h), in devices'
     // windows too. Its drag-and-drop container is the nearest around it.

@@ -86,6 +86,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       inspector (bridge, context),
       pianoRoll (bridge, context),
       mixer (bridge, context),
+      devices (bridge, context),
       guide (bridge, s)
 {
     setTitle ("Phazite");
@@ -222,6 +223,14 @@ void AppShell::revealEditor (EditorDock::Tab tab)
 
     editorShown = true;
     updateLayout();
+}
+
+void AppShell::showSelectedDevice()
+{
+    if (const auto selected = projectContext.getSongSelection().getDevices(); ! selected.empty())
+        devices.showDevice (selected.front());
+
+    revealEditor (EditorDock::devices);
 }
 
 void AppShell::showCommandPalette()
@@ -507,6 +516,17 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     add ("view.pianoRoll", "Piano Roll", "Shows the piano roll, or hides it if it is showing.", { "notes", "midi" },
          [this] { showEditor (EditorDock::pianoRoll); });
+
+    add ("view.devices", "Devices", "Shows the selected track's instrument and effects, or hides them if they are showing.",
+         { "effects", "instrument", "device view", "chain", "plug-ins" }, [this] { showEditor (EditorDock::devices); });
+
+    registry.add ({ .id = "device.show",
+                    .name = "Show Device",
+                    .category = "Device",
+                    .description = "Shows the selected device in the Devices view, under the playlist or the mixer.",
+                    .synonyms = { "edit", "open", "effect", "instrument", "plug-in" },
+                    .perform = [this] { showSelectedDevice(); },
+                    .isEnabled = [this] { return ! projectContext.getSongSelection().getDevices().empty(); } });
 
     add ("view.mixer", "Mixer", "Shows the mixer, or hides it if it is showing.", { "channels", "faders" },
          [this] { showEditor (EditorDock::mixer); });

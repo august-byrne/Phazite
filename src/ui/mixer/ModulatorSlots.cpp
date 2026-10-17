@@ -199,6 +199,12 @@ void ModulatorSlots::resized()
 
 void ModulatorSlots::openEditor (ModulatorID id)
 {
+    if (onOpenEditor != nullptr)
+    {
+        onOpenEditor (id);
+        return;
+    }
+
     for (auto* slot : slots)
     {
         if (slot->shown.id == id)

@@ -68,6 +68,7 @@
     "project.export": [ "command + shift + R" ],
     "view.commandPalette": [ "command + K" ],
     "view.pianoRoll": [ "F7" ],
+    "view.devices": [ "F6" ],
     "view.toggleBrowser": [ "command + alt + B" ],
     "view.searchBrowser": [ "command + F" ],
     "device.add": [ "F8" ],

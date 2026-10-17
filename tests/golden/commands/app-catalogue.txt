@@ -82,6 +82,8 @@ view.toggleBrowser | ctrl + alt + B
 view.toggleInspector
 view.toggleEditor
 view.pianoRoll | F7
+view.devices | F6
+device.show
 view.mixer | F9
 view.layoutBeat
 view.layoutMix

@@ -59,6 +59,10 @@ private:
     std::vector<std::unique_ptr<Control>> controls;
     std::vector<std::vector<PlacedGroup>> groups; // by row
 
-    void timerCallback() override { refresh(); }
+    void timerCallback() override
+    {
+        if (isShowing()) // nothing to show behind another tab of the Devices view
+            refresh();
+    }
 };
 } // namespace phazite::ui

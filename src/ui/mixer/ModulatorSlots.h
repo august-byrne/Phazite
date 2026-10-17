@@ -6,6 +6,7 @@
 #include "model/project/ProjectContext.h"
 #include "ui/components/Controls.h"
 
+#include <functional>
 #include <vector>
 
 namespace phazite::ui
@@ -30,8 +31,9 @@ public:
     // Shows the meters and the macros' knobs. Call it from a timer.
     void updateValues();
 
-    // Opens a modulator's editor, over its slot.
+    // Opens a modulator's editor: where onOpenEditor shows it (the Devices view, beside the slots), or else over its slot.
     void openEditor (ModulatorID);
+    std::function<void (ModulatorID)> onOpenEditor;
 
     int getPreferredHeight() const;
     void resized() override;

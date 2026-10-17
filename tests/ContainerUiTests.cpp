@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Containers and presets in the window (roadmap step 2.4), driven with the mouse as the user would: devices selected by
-// Ctrl-clicking their names and grouped with the command, a container's slot with its macros, a container's window with
-// its macros and its devices in a row, a macro dragged onto a device's knob, presets saved by commands or by a track
-// dragged into the browser, and presets dropped on a mixer channel.
+// Ctrl-clicking their names and grouped with the command, a container's slot with its macros (its macros and devices in
+// line: DevicesViewTests.cpp), presets saved by commands or by a track dragged into the browser, and presets dropped on
+// a mixer channel.
 #include "UiTestHelpers.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -22,7 +22,6 @@
 #include "ui/input/CommandBridge.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/mixer/ChannelStrip.h"
-#include "ui/mixer/ContainerEditor.h"
 
 namespace
 {
@@ -100,7 +99,7 @@ TEST_CASE ("Ctrl-clicking devices' names selects them, Group into Container grou
     REQUIRE (eq != nullptr);
     REQUIRE (compressor != nullptr);
 
-    // A Ctrl-click selects a device (a click opens its window); another adds to the selection.
+    // A Ctrl-click selects a device (a click shows it in the Devices view); another adds to the selection.
     phazite::test::Mouse eqMouse (*eq), compressorMouse (*compressor);
     eqMouse.click (eq->getLocalBounds().getCentre(), juce::ModifierKeys::commandModifier);
     compressorMouse.click (compressor->getLocalBounds().getCentre(), juce::ModifierKeys::commandModifier);
@@ -121,54 +120,6 @@ TEST_CASE ("Ctrl-clicking devices' names selects them, Group into Container grou
     CHECK (phazite::test::findComponentWithTitle (strip, "Macro 2") != nullptr);
     CHECK (phazite::test::findComponentWithTitle (strip, "Mix") != nullptr);
     phazite::test::checkChildrenApart (strip);
-}
-
-TEST_CASE ("A container's window shows its macros and its devices in a row; a macro dropped on a device's knob modulates it")
-{
-    Song song;
-    const auto container = phazite::groupIntoContainer (song.context, song.effects());
-    phazite::ui::ContainerEditor editor { song.context, song.commands, container };
-    phazite::test::TestWindow window { editor, editor.getWidth(), editor.getHeight() };
-
-    CHECK (editor.getNameLabel().getText() == juce::String ("Container"));
-    REQUIRE (editor.getNumMacros() == 8);
-    CHECK (editor.getMacroName (0).getText() == juce::String ("Macro 1"));
-    CHECK (editor.getMacroName (7).getText() == juce::String ("Macro 8"));
-
-    // Its devices, side by side.
-    auto* eq = phazite::test::findComponentWithTitle (editor.getDevices(), "EQ");
-    auto* compressor = phazite::test::findComponentWithTitle (editor.getDevices(), "Compressor");
-    REQUIRE (eq != nullptr);
-    REQUIRE (compressor != nullptr);
-    CHECK (compressor->getScreenX() > eq->getScreenX());
-    CHECK (compressor->getScreenY() == eq->getScreenY());
-    phazite::test::checkChildrenApart (editor);
-
-    // The first macro's grip, dropped on a knob of the compressor's: it modulates that parameter, and not the EQ's on
-    // another track.
-    const auto macro = phazite::getContainerMacros (song.context, container)[0].id;
-    auto* compressorSlot = compressor->getParentComponent();
-    const auto knobs = phazite::test::findAll<phazite::ui::Knob> (*compressorSlot);
-    REQUIRE (knobs.size() >= 2);
-    auto* threshold = knobs[1]; // after the mix
-    juce::Component source;
-    REQUIRE (threshold->isInterestedInDragSource (dragOf (phazite::ui::makeModulatorDrag (macro), source)));
-    threshold->itemDropped (dragOf (phazite::ui::makeModulatorDrag (macro), source));
-    CHECK (phazite::getModulations (song.context, macro).size() == 1);
-
-    // Renamed by typing: the macro's name, and the container's.
-    editor.getMacroName (0).setText ("Air", juce::sendNotification);
-    CHECK (song.describeUndo() == juce::String ("Undo Rename Macro"));
-    CHECK (phazite::getContainerMacros (song.context, container)[0].name == juce::String ("Air"));
-    editor.getNameLabel().setText ("Glue", juce::sendNotification);
-    CHECK (song.describeUndo() == juce::String ("Undo Rename Container"));
-    CHECK (phazite::getEffects (song.context, song.track())[0].name == juce::String ("Glue"));
-
-    // A device added to it widens the window.
-    const auto width = editor.getWidth();
-    phazite::addEffectToContainer (song.context, container, song.find ("phaziteReverb"));
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return editor.getWidth() > width; }));
-    CHECK (phazite::test::findComponentWithTitle (editor.getDevices(), "Reverb") != nullptr);
 }
 
 TEST_CASE ("Saving presets: the commands for the selected device and track, and a track dragged into the browser")

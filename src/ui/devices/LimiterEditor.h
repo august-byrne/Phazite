@@ -41,6 +41,10 @@ private:
     juce::OwnedArray<ParameterAttachment> attachments;
     juce::OwnedArray<juce::Label> names, texts; // each knob's name, and what it is set to
 
-    void timerCallback() override { refresh(); }
+    void timerCallback() override
+    {
+        if (isShowing()) // nothing to show behind another tab of the Devices view
+            refresh();
+    }
 };
 } // namespace phazite::ui

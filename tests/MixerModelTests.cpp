@@ -3,6 +3,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
@@ -176,6 +177,45 @@ TEST_CASE ("A channel's devices by ID: its instrument, its effects in their orde
     CHECK (phazite::getInstrument (context, a)->name == juce::String ("Drum Sampler"));
     CHECK (phazite::addDeviceTo (context, {}, song.find ("phaziteReverb")));
     CHECK (namesOf (phazite::getEffects (context, {})).back() == juce::String ("Reverb"));
+}
+
+TEST_CASE ("A device's channel, its handle for an editor, and whether its controls open in a window of their own")
+{
+    Song song;
+    auto& context = song.context;
+    const auto a = idOf (*song.a);
+    phazite::addEffect (context, a, song.find ("phaziteEq"));
+    phazite::addEffect (context, a, song.find ("phaziteCompressor"));
+    phazite::addEffect (context, {}, song.find ("phaziteLimiter")); // the master's
+    const auto eq = phazite::getEffects (context, a)[0];
+    const auto compressor = phazite::getEffects (context, a)[1];
+    const auto limiter = phazite::getEffects (context, {}).back();
+
+    // Phazite's own devices show whole in the Devices view, through their handles; they open no windows.
+    CHECK_FALSE (eq.opensWindow);
+    CHECK (phazite::getDeviceHandle (context, eq.id).isValid());
+    CHECK (phazite::getDeviceChannel (context, eq.id) == std::optional (a));
+    CHECK (phazite::getDeviceChannel (context, limiter.id) == std::optional (phazite::TrackID()));
+
+    // A container's devices are on its channel; a container shows whole too, and has no handle of its own.
+    const auto container = phazite::groupIntoContainer (context, { eq.id, compressor.id });
+    REQUIRE (container.isValid());
+    CHECK (phazite::getDeviceChannel (context, eq.id) == std::optional (a));
+    CHECK (phazite::getDeviceChannel (context, container) == std::optional (a));
+    CHECK_FALSE (phazite::getEffects (context, a).front().opensWindow);
+    CHECK_FALSE (phazite::getDeviceHandle (context, container).isValid());
+
+    // One of Tracktion's built-in devices has its controls in a window of its own, as a plug-in has.
+    song.a->pluginList.insertPlugin (song.edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}), -1, nullptr);
+    const auto effects = phazite::getEffects (context, a);
+    REQUIRE (effects.size() == 2);
+    CHECK (effects.back().opensWindow);
+    CHECK_FALSE (phazite::getDeviceHandle (context, effects.back().id).isValid());
+
+    // Nothing for a device that is gone.
+    phazite::removeDevice (context, limiter.id);
+    CHECK_FALSE (phazite::getDeviceChannel (context, limiter.id).has_value());
+    CHECK_FALSE (phazite::getDeviceHandle (context, limiter.id).isValid());
 }
 
 TEST_CASE ("Sends by ID: to a return or a new one, before or after the fader, and removed")

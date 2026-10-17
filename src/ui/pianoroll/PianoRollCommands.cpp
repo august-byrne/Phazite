@@ -154,7 +154,8 @@ void PianoRoll::instrumentClicked()
 
     const juce::Component::SafePointer<juce::Component> safeButton (&instrumentButton);
     juce::PopupMenu menu;
-    menu.addItem ("Open " + instrument->name, [&c = context, id = instrument->id] { showDeviceWindow (c, id); });
+    menu.addItem ("Show " + instrument->name,
+                  [&c = context, &bridge = getCommands(), shown = *instrument] { showDevice (c, bridge, shown); });
     menu.addItem ("Replace Instrument...",
                   [&c = context, trackID, safeButton]
                   {

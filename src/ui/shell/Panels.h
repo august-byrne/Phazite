@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The main window's panels. Most are placeholders until the roadmap step that builds them.
+// The editor dock under the playlist (docs/design.md, section 4).
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -7,32 +7,19 @@
 namespace phazite::ui
 {
 //==============================================================================
-// A titled panel that says what will live there, and in which roadmap step.
-class Panel : public juce::Component
-{
-public:
-    Panel (const juce::String& title, const juce::String& placeholder);
-
-    void paint (juce::Graphics&) override;
-
-private:
-    juce::String placeholder;
-};
-
-//==============================================================================
-// The editor dock under the playlist: tabs for the piano roll, audio editor and mixer. The piano roll and the
-// mixer belong to the window; the dock only shows them.
+// The editor dock under the playlist: tabs for the piano roll, the selected track's devices (DevicesView.h) and the
+// mixer. The views belong to the window; the dock only shows them.
 class EditorDock : public juce::TabbedComponent
 {
 public:
     enum Tab
     {
         pianoRoll,
-        audio,
+        devices,
         mixer
     };
 
-    EditorDock (juce::Component& pianoRollPanel, juce::Component& mixerPanel);
+    EditorDock (juce::Component& pianoRollPanel, juce::Component& devicesPanel, juce::Component& mixerPanel);
 
     void showTab (Tab tab) { setCurrentTabIndex (tab); }
 };

@@ -117,7 +117,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     // The editor dock's tabs. Automation has none: it is edited in its lanes in the playlist.
     auto* dock = dynamic_cast<juce::TabbedComponent*> (&screen.shell.getPanel (phazite::ui::AppShell::DetachablePanel::editor));
     REQUIRE (dock != nullptr);
-    CHECK (dock->getTabNames() == juce::StringArray { "Piano roll", "Audio", "Mixer" });
+    CHECK (dock->getTabNames() == juce::StringArray { "Piano roll", "Devices", "Mixer" });
 
     const auto found = screen.registry.search ("mixer");
     REQUIRE_FALSE (found.isEmpty());

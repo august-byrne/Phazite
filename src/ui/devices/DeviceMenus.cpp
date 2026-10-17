@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceMenus.h"
+#include "model/arrangement/SongSelection.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
+#include "model/project/ProjectContext.h"
+#include "ui/input/CommandBridge.h"
 
 #include <map>
 
@@ -105,5 +108,15 @@ void showContainerEffectMenu (ProjectContext& context, DeviceID container, juce:
 
     show (std::move (menu), target, std::move (types),
           [&context, container] (const DeviceType& type) { addEffectToContainer (context, container, type); });
+}
+
+void showDevice (ProjectContext& context, CommandBridge& commands, const DeviceSlot& device)
+{
+    context.getSongSelection().selectOnly (device.id);
+
+    if (device.opensWindow)
+        showDeviceWindow (context, device.id);
+
+    commands.invoke ("device.show");
 }
 } // namespace phazite::ui

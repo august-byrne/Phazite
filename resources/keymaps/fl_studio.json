@@ -57,6 +57,7 @@
     "project.export": [ "command + R" ],
     "view.commandPalette": [ "command + K" ],
     "view.pianoRoll": [ "F7" ],
+    "view.devices": [ "F6" ],
     "view.toggleBrowser": [ "alt + F8" ],
     "device.add": [ "F8" ],
     "view.mixer": [ "F9" ],

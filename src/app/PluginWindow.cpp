@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginWindow.h"
+#include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/mixer/internal/Containers.h"
-#include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
-#include "ui/devices/DeviceEditors.h"
 #include "ui/input/PluginKeys.h"
-#include "ui/mixer/ContainerEditor.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite
@@ -72,45 +70,13 @@ namespace
     };
 
     //==============================================================================
-    // One of Phazite's devices' editors (ui/devices/DeviceEditors.h), or a container's (ui/mixer/ContainerEditor.h), as
-    // Tracktion's windows take editors: as big as the editor makes itself, as a container's grows with its devices.
-    class DeviceEditor : public te::Plugin::EditorComponent,
-                         private juce::ComponentListener
-    {
-    public:
-        explicit DeviceEditor (std::unique_ptr<juce::Component> editor)
-            : content (std::move (editor))
-        {
-            addAndMakeVisible (*content);
-            setSize (content->getWidth(), content->getHeight());
-            content->addComponentListener (this);
-        }
-
-        ~DeviceEditor() override { content->removeComponentListener (this); }
-
-        bool allowWindowResizing() override { return false; }
-        juce::ComponentBoundsConstrainer* getBoundsConstrainer() override { return nullptr; }
-        void resized() override { content->setBounds (getLocalBounds()); }
-
-    private:
-        std::unique_ptr<juce::Component> content;
-
-        void componentMovedOrResized (juce::Component&, bool, bool wasResized) override
-        {
-            if (wasResized)
-                setSize (content->getWidth(), content->getHeight());
-        }
-    };
-
-    //==============================================================================
     class PluginWindow : public juce::DocumentWindow,
                          private juce::Timer
     {
     public:
-        PluginWindow (te::Plugin& p, const PluginWindowServices& s)
+        explicit PluginWindow (te::Plugin& p)
             : juce::DocumentWindow (p.getName(), {}, juce::DocumentWindow::closeButton),
-              plugin (p),
-              services (s)
+              plugin (p)
         {
             setBackgroundColour (ui::getPalette (*this).surface);
             setUsingNativeTitleBar (true);
@@ -141,17 +107,12 @@ namespace
         void recreateEditor()
         {
             setEditor (nullptr);
+
+            // A plug-in's own editor, or for one of Tracktion's built-in devices a knob for each parameter.
             auto newEditor = plugin.createEditor();
 
-            if (newEditor == nullptr)
-            {
-                if (auto deviceEditor = ui::createDeviceEditor (makeDeviceHandle (plugin))) // one of Phazite's own devices
-                    newEditor = std::make_unique<DeviceEditor> (std::move (deviceEditor));
-                else if (isContainer (plugin))
-                    newEditor = createContainerEditor();
-                else if (dynamic_cast<te::ExternalPlugin*> (&plugin) == nullptr)
-                    newEditor = std::make_unique<GenericEditor> (plugin);
-            }
+            if (newEditor == nullptr && dynamic_cast<te::ExternalPlugin*> (&plugin) == nullptr)
+                newEditor = std::make_unique<GenericEditor> (plugin);
 
             setEditor (std::move (newEditor));
         }
@@ -172,7 +133,6 @@ namespace
 
     private:
         te::Plugin& plugin;
-        const PluginWindowServices services;
         std::unique_ptr<te::Plugin::EditorComponent> editor;
         bool storeBounds = false;
 
@@ -180,16 +140,6 @@ namespace
         {
             if (const auto inFront = juce::Process::isForegroundProcess(); inFront != isAlwaysOnTop())
                 setAlwaysOnTop (inFront);
-        }
-
-        // A container's devices and macros, in the open project; nothing before the app has given what it needs.
-        std::unique_ptr<te::Plugin::EditorComponent> createContainerEditor() const
-        {
-            if (services.context == nullptr || services.commands == nullptr || getEdit (*services.context) != &plugin.edit)
-                return {};
-
-            return std::make_unique<DeviceEditor> (
-                std::make_unique<ui::ContainerEditor> (*services.context, *services.commands, getDeviceID (plugin)));
         }
 
         void setEditor (std::unique_ptr<te::Plugin::EditorComponent> newEditor)
@@ -216,7 +166,7 @@ namespace
     };
 } // namespace
 
-std::unique_ptr<juce::Component> createPluginWindow (te::PluginWindowState& state, const PluginWindowServices& services)
+std::unique_ptr<juce::Component> createPluginWindow (te::PluginWindowState& state)
 {
     auto* windowState = dynamic_cast<te::Plugin::WindowState*> (&state);
 
@@ -225,10 +175,14 @@ std::unique_ptr<juce::Component> createPluginWindow (te::PluginWindowState& stat
 
     auto& plugin = windowState->plugin;
 
+    // Phazite's own devices and containers show in the Devices view instead.
+    if (makeDeviceHandle (plugin).isValid() || isContainer (plugin))
+        return {};
+
     if (auto* external = dynamic_cast<te::ExternalPlugin*> (&plugin); external != nullptr && external->getAudioPluginInstance() == nullptr)
         return {}; // it didn't load
 
-    auto window = std::make_unique<PluginWindow> (plugin, services);
+    auto window = std::make_unique<PluginWindow> (plugin);
 
     if (! window->hasEditor())
         return {};

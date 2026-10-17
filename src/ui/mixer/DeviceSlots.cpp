@@ -13,52 +13,8 @@ namespace phazite::ui
 {
 using namespace strip;
 
-namespace
-{
-    constexpr int rowAddButtonWidth = 90; // a container's add button, at the end of its row
-
-    // Links a knob to an effect's mix through the model's MixHandle, as ParameterAttachment links one to a parameter: one
-    // named undo step per drag or key press.
-    class MixAttachment
-    {
-    public:
-        MixAttachment (juce::Slider& s, MixHandle mix)
-            : slider (s),
-              handle (std::move (mix))
-        {
-            slider.setRange (0.0, 1.0);
-            slider.setDoubleClickReturnValue (true, 1.0);
-            slider.onDragStart = [this]
-            {
-                dragging = true;
-                handle.beginGesture();
-            };
-
-            slider.onDragEnd = [this]
-            {
-                dragging = false;
-                handle.endGesture();
-            };
-
-            slider.onValueChange = [this] { handle.setValue ((float) slider.getValue()); }; // a key press: a step of its own
-            update();
-        }
-
-        void update()
-        {
-            if (handle.isValid() && ! dragging)
-                slider.setValue (handle.getValue(), juce::dontSendNotification);
-        }
-
-    private:
-        juce::Slider& slider;
-        MixHandle handle;
-        bool dragging = false;
-    };
-} // namespace
-
 //==============================================================================
-// A device: its name, which opens its window (right-click for more), an on/off switch, and its key controls.
+// A device: its name, which shows it in the Devices view (right-click for more), an on/off switch, and its key controls.
 struct DeviceSlots::Slot : public juce::Component
 {
     Slot (DeviceSlots& o, const DeviceSlot& device)
@@ -72,7 +28,7 @@ struct DeviceSlots::Slot : public juce::Component
             else if (mods.isCommandDown() || mods.isShiftDown())
                 owner.select (shown, mods);
             else
-                showDeviceWindow (owner.context, shown.id);
+                showDevice (owner.context, owner.commands, shown);
         };
 
         power.setButtonText ("On");
@@ -83,21 +39,7 @@ struct DeviceSlots::Slot : public juce::Component
 
         // An effect's mix first, as FL Studio's mixer slots have it, then its key controls (a container's: its macros).
         if (owner.kind != Kind::instrument && device.hasMix)
-        {
-            auto* knob = knobs.add (new Knob ("Mix", 1.0));
-            knob->textFromValueFunction = [] (double value) { return juce::String (juce::roundToInt (value * 100.0)) + "% wet"; };
-            juce::String tooltip ("Mix: how much of the sound is the effect. At 100% it is the effect alone; lower lets the sound "
-                                  "that comes in through as well. Double-click for 100%");
-
-            // Tracktion adds the dry sound back without waiting for the effect, as FL Studio's mix knob does.
-            if (device.latencySeconds > 0.0)
-                tooltip << ". This effect delays its sound by " << juce::jmax (1, juce::roundToInt (device.latencySeconds * 1000.0))
-                        << " ms, so below 100% the two blur together: use the effect's own mix control if it has one";
-
-            knob->setTooltip (tooltip);
-            mixAttachment = std::make_unique<MixAttachment> (*knob, getMix (owner.context, device.id));
-            addAndMakeVisible (knob);
-        }
+            addMixKnob (*this, knobs, mixAttachment, owner.context, device);
 
         for (auto& control : getKeyControls (owner.context, device.id, keyControlsPerDevice))
             addParameterKnob (*this, knobs, attachments, std::move (control));
@@ -114,10 +56,11 @@ struct DeviceSlots::Slot : public juce::Component
         nameButton.setButtonText (device.name);
         nameButton.setTitle (device.name);
 
-        const auto what = device.isContainer ? juce::String ("its devices and macros") : device.name + "'s window";
+        const auto what = device.opensWindow ? juce::String ("it in the Devices view, and its own window")
+                                             : juce::String ("it whole in the Devices view, under the mixer");
         const auto more =
             owner.kind == Kind::instrument ? juce::String ("replace or remove it") : juce::String ("move, group or remove it");
-        nameButton.setTooltip ("Opens " + what + ". Ctrl-click to select it with others; right-click to turn it off, " + more);
+        nameButton.setTooltip ("Shows " + what + ". Ctrl-click to select it with others; right-click to turn it off, " + more);
         power.setToggleState (device.isOn, juce::dontSendNotification);
         repaint();
     }
@@ -172,7 +115,7 @@ DeviceSlots::DeviceSlots (Kind k, ProjectContext& projectContext, CommandBridge&
       context (projectContext),
       commands (bridge)
 {
-    setTitle (kind == Kind::instrument ? "Instrument" : kind == Kind::effects ? "Effects" : "Devices");
+    setTitle (kind == Kind::instrument ? "Instrument" : "Effects");
     addButton.onClick = [this] { showAddMenu(); };
     addAndMakeVisible (addButton);
     updateAddButton();
@@ -198,17 +141,8 @@ void DeviceSlots::setMaster()
     rebuild (getChannelDevices());
 }
 
-void DeviceSlots::setContainer (DeviceID newContainer)
-{
-    container = newContainer;
-    rebuild (getChannelDevices());
-}
-
 std::vector<DeviceSlot> DeviceSlots::getChannelDevices() const
 {
-    if (kind == Kind::containerDevices)
-        return getContainerDevices (context, container);
-
     if (! master && ! track.isValid())
         return {};
 
@@ -265,13 +199,11 @@ void DeviceSlots::rebuild (const std::vector<DeviceSlot>& devices)
 
 void DeviceSlots::updateAddButton()
 {
-    if (kind != Kind::instrument)
+    if (kind == Kind::effects)
     {
         addButton.setButtonText ("+ Effect");
-        addButton.setTooltip (kind == Kind::containerDevices
-                                  ? "Adds an effect after the container's devices: built in or a plug-in"
-                                  : "Adds an effect, which changes the sound, such as a reverb: built in or a plug-in");
-        addButton.setEnabled (kind == Kind::containerDevices ? container.isValid() : master ? context.hasProject() : track.isValid());
+        addButton.setTooltip ("Adds an effect, which changes the sound, such as a reverb: built in or a plug-in");
+        addButton.setEnabled (master ? context.hasProject() : track.isValid());
         return;
     }
 
@@ -302,9 +234,6 @@ void DeviceSlots::lookAndFeelChanged()
 
 int DeviceSlots::getPreferredHeight() const
 {
-    if (kind == Kind::containerDevices)
-        return slotNameHeight + slotKnobHeight;
-
     auto height = addButton.isVisible() ? buttonHeight : 0;
 
     for (auto* slot : slots)
@@ -313,27 +242,9 @@ int DeviceSlots::getPreferredHeight() const
     return height;
 }
 
-int DeviceSlots::getPreferredWidth() const
-{
-    return slots.size() * (rowSlotWidth + Space::xs) + rowAddButtonWidth;
-}
-
 void DeviceSlots::resized()
 {
     auto area = getLocalBounds();
-
-    // A container's devices: in a row, the add button after them.
-    if (kind == Kind::containerDevices)
-    {
-        for (auto* slot : slots)
-        {
-            slot->setBounds (area.removeFromLeft (rowSlotWidth));
-            area.removeFromLeft (Space::xs);
-        }
-
-        addButton.setBounds (area.removeFromLeft (rowAddButtonWidth).removeFromTop (buttonHeight));
-        return;
-    }
 
     for (auto* slot : slots)
     {
@@ -348,8 +259,6 @@ void DeviceSlots::showAddMenu()
 {
     if (kind == Kind::instrument)
         showInstrumentMenu (context, track, addButton);
-    else if (kind == Kind::containerDevices)
-        showContainerEffectMenu (context, container, addButton);
     else if (master || track.isValid())
         showEffectMenu (context, getEffectsChannel(), addButton);
 }
@@ -372,67 +281,84 @@ void DeviceSlots::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void DeviceSlots::showSlotMenu (const DeviceSlot& device)
 {
+    const auto index = (int) (std::find (shownDevices.begin(), shownDevices.end(), device.id) - shownDevices.begin());
+    const juce::Component::SafePointer<DeviceSlots> safeThis (this);
+
+    showDeviceMenu (context, commands, device, kind == Kind::instrument ? DevicePlace::instrument : DevicePlace::effect, track, index,
+                    (int) shownDevices.size(), false, *this,
+                    [safeThis]
+                    {
+                        if (safeThis != nullptr)
+                            safeThis->refresh();
+                    });
+}
+
+//==============================================================================
+void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const DeviceSlot& device, DevicePlace place, TrackID track,
+                     int index, int count, bool inRow, juce::Component& target, std::function<void()> changed)
+{
     // The menu acts on the selected devices: this one alone, unless it is one of them.
     if (! context.getSongSelection().isSelected (device.id))
         context.getSongSelection().selectOnly (device.id);
 
-    // Effects move among the channel's effects, or the container's devices.
-    const auto index = (int) (std::find (shownDevices.begin(), shownDevices.end(), device.id) - shownDevices.begin());
     const auto id = device.id;
-    const juce::Component::SafePointer<DeviceSlots> safeThis (this);
+    const juce::Component::SafePointer<juce::Component> safeTarget (&target);
 
-    // Each a model function that is an undo step of its own; the slots show what it did at once.
-    const auto act = [safeThis] (std::function<void()> action)
+    // Each a model function that is an undo step of its own; what shows the device shows what it did at once.
+    const auto act = [changed] (std::function<void()> action)
     {
-        return [safeThis, action]
+        return [changed, action]
         {
             action();
 
-            if (safeThis != nullptr)
-                safeThis->refresh();
+            if (changed != nullptr)
+                changed();
         };
     };
 
     auto& projectContext = context;
     juce::PopupMenu menu;
-    menu.addItem ("Open Window", [&projectContext, id] { showDeviceWindow (projectContext, id); });
+
+    if (device.opensWindow)
+        menu.addItem ("Open Window", [&projectContext, id] { showDeviceWindow (projectContext, id); });
+
     menu.addItem ("On", true, device.isOn, act ([&projectContext, id, on = device.isOn] { setDeviceOn (projectContext, id, ! on); }));
 
     // Its parameters, each of which shows its automation lane under the track in the playlist (those with automation
     // ticked). A plug-in's own window can't offer this: Automate Last Touched does, for the knob moved last.
     juce::PopupMenu automate;
 
-    for (const auto& target : getAutomationTargets (projectContext, id))
+    for (const auto& automated : getAutomationTargets (projectContext, id))
         automate.addItem (
-            juce::PopupMenu::Item (target.name)
-                .setTicked (target.automated)
-                .setAction ([&projectContext, parameter = target.parameter] { showAutomationLane (projectContext, parameter); }));
+            juce::PopupMenu::Item (automated.name)
+                .setTicked (automated.automated)
+                .setAction ([&projectContext, parameter = automated.parameter] { showAutomationLane (projectContext, parameter); }));
 
     menu.addSubMenu ("Automate", automate, automate.getNumItems() > 0);
     menu.addSeparator();
 
-    if (kind == Kind::instrument)
+    if (place == DevicePlace::instrument)
     {
         menu.addItem ("Replace...",
-                      [safeThis]
+                      [&projectContext, track, safeTarget]
                       {
-                          if (safeThis != nullptr)
-                              showInstrumentMenu (safeThis->context, safeThis->track, *safeThis);
+                          if (safeTarget != nullptr)
+                              showInstrumentMenu (projectContext, track, *safeTarget);
                       });
     }
     else
     {
-        const auto row = kind == Kind::containerDevices;
-        menu.addItem (row ? "Move Left" : "Move Up", index > 0, false,
+        // Effects move among the channel's effects, or the container's devices; the Devices view shows them in a row.
+        menu.addItem (inRow ? "Move Left" : "Move Up", index > 0, false,
                       act ([&projectContext, id] { moveEffect (projectContext, id, -1); }));
-        menu.addItem (row ? "Move Right" : "Move Down", index < (int) shownDevices.size() - 1, false,
+        menu.addItem (inRow ? "Move Right" : "Move Down", index < count - 1, false,
                       act ([&projectContext, id] { moveEffect (projectContext, id, 1); }));
     }
 
     // The selected devices' commands: a container of the effects, or its devices back; and a preset of this one.
     menu.addSeparator();
 
-    if (kind == Kind::effects)
+    if (place == DevicePlace::effect)
         addCommandItem (menu, commands, device.isContainer ? "device.ungroup" : "device.group");
 
     addCommandItem (menu, commands, "device.savePreset");

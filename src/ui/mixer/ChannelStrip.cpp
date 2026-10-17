@@ -76,7 +76,6 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
       context (projectContext),
       instrument (DeviceSlots::Kind::instrument, projectContext, bridge),
       effects (DeviceSlots::Kind::effects, projectContext, bridge),
-      modulators (projectContext),
       muteSolo (projectContext)
 {
     setTitle ("Channel");
@@ -118,7 +117,7 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
     slotView.setScrollBarThickness (6);
 
     for (auto* c : std::initializer_list<juce::Component*> { &instrumentHeading, &instrument, &effectsHeading, &effects, &sendsHeading,
-                                                             &addSendButton, &modulatorsHeading, &modulators })
+                                                             &addSendButton })
         slotHolder.addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &inputLabel, &busButton, &slotView, &outputLabel, &meter, &volume,
@@ -141,7 +140,6 @@ void ChannelStrip::setTrack (TrackID newTrack)
     track = newTrack;
     instrument.setTrack (newTrack);
     effects.setTrack (newTrack);
-    modulators.setTrack (newTrack);
     muteSolo.setTrack (newTrack);
     meter.setSource (getLevel (context, newTrack));
     shownSends.clear();
@@ -171,7 +169,7 @@ void ChannelStrip::setRelated (bool isRelated)
 void ChannelStrip::songChanged (const SongChanges& changes)
 {
     // Shown at the next tick: a fader dragged on another strip changes the song as often as the mouse moves.
-    refreshDue = refreshDue || changes.tracks || changes.devices || changes.modulation;
+    refreshDue = refreshDue || changes.tracks || changes.devices;
     needDue = needDue || changes.clips; // notes that have no instrument to play them
 }
 
@@ -185,7 +183,6 @@ void ChannelStrip::refresh()
     attachControls();
     instrument.refresh();
     effects.refresh();
-    modulators.refresh();
     refreshSends();
     muteSolo.update();
     layOutSlots();
@@ -219,8 +216,6 @@ void ChannelStrip::attachControls()
     instrument.setVisible (holdsInstrument);
     sendsHeading.setVisible (sends);
     addSendButton.setVisible (sends);
-    modulatorsHeading.setVisible (channel.has_value());
-    modulators.setVisible (channel.has_value());
 
     // A folder's bus switch. A bus with effects stays one: making it plain would take them away.
     const auto folder = channel.has_value() && (kind == ChannelKind::bus || kind == ChannelKind::plainFolder);
@@ -325,7 +320,6 @@ void ChannelStrip::timerCallback()
     panAttachment.update();
     instrument.updateValues();
     effects.updateValues();
-    modulators.updateValues();
 
     for (auto* slot : sendSlots)
         slot->attachment.update();
@@ -465,14 +459,6 @@ void ChannelStrip::layOutSlots()
             place (*slot, sendHeight, Space::xs);
 
         place (addSendButton, buttonHeight, 0);
-    }
-
-    // Then what moves the channel's parameters as the song plays.
-    if (modulators.isVisible())
-    {
-        y += Space::s;
-        place (modulatorsHeading, headingHeight, 0);
-        place (modulators, modulators.getPreferredHeight(), 0);
     }
 
     slotHolder.setSize (slotWidth, y);

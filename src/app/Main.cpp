@@ -55,10 +55,6 @@ public:
         session = std::make_unique<ProjectSession> (*engine, getUIBehaviour (*engine), services->recentProjects, getDefaultProjectsFolder(),
                                                     getUnsavedProjectsFolder());
         mainWindow = std::make_unique<MainWindow> (*engine, *commandBridge, *session, *lookAndFeel, *services);
-
-        // A container's window shows its devices and macros in the open project, with the commands in their menus.
-        static_cast<AppUIBehaviour&> (getUIBehaviour (*engine)).setWindowServices ({ &session->getContext(), commandBridge.get() });
-
         addSongCommands (*commands, session->getContext());
         session->addCommands (*commands);
         mainWindow->addCommands();
@@ -79,9 +75,6 @@ public:
         // Reverse order of creation: the window uses the session and the commands, the session holds
         // the Edit, and every Edit must go before the Engine. The services keep their settings in the
         // Engine's settings file.
-        if (engine != nullptr)
-            static_cast<AppUIBehaviour&> (getUIBehaviour (*engine)).setWindowServices ({});
-
         mainWindow = nullptr;
         session = nullptr;
         commandBridge = nullptr;

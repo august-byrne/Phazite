@@ -116,6 +116,9 @@ void DeviceKnobs::resized()
 
 void DeviceKnobs::timerCallback()
 {
+    if (! isShowing()) // nothing to show behind another tab of the Devices view
+        return;
+
     for (auto* attachment : attachments)
         attachment->update();
 }

@@ -58,6 +58,10 @@ private:
 
     void play (int pad);
     void chooseFile();
-    void timerCallback() override { refresh(); }
+    void timerCallback() override
+    {
+        if (isShowing()) // nothing to show behind another tab of the Devices view
+            refresh();
+    }
 };
 } // namespace phazite::ui
