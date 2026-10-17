@@ -31,6 +31,10 @@ public:
         audioIO.prepareToPlay (sampleRate, blockSize);
         deviceManager.dispatchPendingUpdates();
 
+        // Tracktion adds the hosted device's MIDI inputs and outputs in messages of its own, to lists its audio callback
+        // reads without a lock: the audio thread starts once they are there.
+        wait (settleMilliseconds);
+
         audioThread = std::thread (
             [this, &audioIO]
             {

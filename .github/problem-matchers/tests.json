@@ -43,6 +43,19 @@
           "line": 4
         }
       ]
+    },
+    {
+      "owner": "tsan-frames",
+      "severity": "warning",
+      "pattern": [
+        {
+          "regexp": "^\\s+#(\\d+) (.+) /home/runner/work/Phazite/Phazite/((?:src|tests)/[^:]+):(\\d+)(?::\\d+)? \\([^)]*\\)$",
+          "code": 1,
+          "message": 2,
+          "file": 3,
+          "line": 4
+        }
+      ]
     }
   ]
 }
