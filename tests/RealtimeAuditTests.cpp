@@ -27,6 +27,7 @@
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Recording.h"
 
@@ -505,6 +506,39 @@ TEST_SUITE ("realtime-audit")
 
         std::vector<float> tapped (32768);
         CHECK (tap.pull (tapped.data(), (int) tapped.size()) > 0);
+    }
+
+    TEST_CASE ("Real-time audit: every kind of modulator, and a macro, moving Phazite's EQ")
+    {
+        using phazite::devices::Equalizer;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+
+        const auto plugin = edit->getPluginCache().createNewPlugin (Equalizer::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
+
+        // Each moves a band's gain, as Phazite sets them up (model/modulation/internal/Modulation.h); the note follower
+        // follows a note played into the track's MIDI.
+        int band = 0;
+
+        for (const auto type : phazite::allModulatorTypes)
+        {
+            device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::on)]->setParameter (1.0f,
+                                                                                                                  juce::sendNotification);
+            const auto modulator = phazite::addModulator (track, type);
+            REQUIRE (modulator.has_value());
+            phazite::setModulation (*modulator, *device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::gain)],
+                                    0.5f);
+            ++band;
+        }
+
+        const auto m = playAndMeasure (*edit);
+        report ("Every kind of modulator, and a macro, moving Phazite's EQ", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
     }
 
     TEST_CASE ("Real-time audit: automation clips sweeping Phazite's EQ and fading a track's volume")

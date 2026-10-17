@@ -35,13 +35,6 @@ namespace
         return found != nullptr ? getTrackOfParameter (*found) : nullptr;
     }
 
-    // The track's own volume, pan and sends are the mixer's controls, not a device's.
-    bool isMixerControl (const te::Plugin* device)
-    {
-        return dynamic_cast<const te::VolumeAndPanPlugin*> (device) != nullptr || dynamic_cast<const te::VCAPlugin*> (device) != nullptr
-               || dynamic_cast<const te::AuxSendPlugin*> (device) != nullptr;
-    }
-
     ParameterKind getKind (const te::AutomatableParameter& parameter)
     {
         auto* device = parameter.getPlugin();
@@ -57,18 +50,7 @@ namespace
 
     juce::String getName (const te::AutomatableParameter& parameter)
     {
-        auto* device = parameter.getPlugin();
-
-        if (auto* send = dynamic_cast<te::AuxSendPlugin*> (device))
-        {
-            const auto* returnTrack = findReturnTrack (send->edit, send->getBusNumber());
-            return "Send to " + (returnTrack != nullptr ? returnTrack->getName() : juce::String ("Return"));
-        }
-
-        if (isMixerControl (device))
-            return getKind (parameter) == ParameterKind::pan ? "Pan" : "Volume";
-
-        return parameter.getParameterName();
+        return getParameterName (parameter);
     }
 
     AutomationTarget makeTarget (const te::AutomatableParameter& parameter, const te::Track& track)

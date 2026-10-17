@@ -345,6 +345,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - Add a modulator and assign it by dragging. Rings on controls show the modulation.
 - Editors for the six modulator types, and macros.
 - *Done when:* an LFO dragged onto a filter cutoff moves it, with the amount shown on the knob.
+- *Status:* done (2026-10-16), pending a check by hand: modulation in the model (`src/model/modulation/ModulationModel.h`, with tests): each track's modulators of the six kinds and its macros (Tracktion's modifiers and macro parameters), added and removed as named undo steps; what they modulate, by an amount, set, changed and taken away as named steps; a drag of the amount as one step; the range a modulated parameter moves over, for the ring; modulators' parameters with clear names, and a step sequencer's steps. A test plays an LFO on the synth's cutoff in real time and sees it move; another reopens a saved project with its modulators; a guarded real-time audit scenario plays every kind. In the window: the ring around a modulated knob, dragged to change the amount; Modulate on every knob's right-click; a Modulators section in each channel strip, whose grips drag onto knobs and whose names open the modulators' editors (output, knobs, steps), with tests that drive them with the mouse (design.md, section 10).
 
 **2.4 Containers and presets (L)**
 - Group devices into containers with macros.
@@ -505,7 +506,7 @@ Roughly in order of value:
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
 | 1. Make a beat | Steps done, pending checks by hand and the milestone 1 check (a usability test with a newcomer and an FL Studio user): steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser), with three rounds of fixes from trying them (2026-10-13); step 1.6 (all six devices, and the starter project on them), step 1.7 (metronome, tempo, recording and Capture), step 1.8 (export to WAV and FLAC, normalized to a loudness) and step 1.9 (first launch, the guide and the new-project window), 2026-10-15 |
-| 2. Finish a track | In progress: steps 2.1 (automation lanes) and 2.2 (automation clips) done, pending a check by hand (2026-10-16) |
+| 2. Finish a track | In progress: steps 2.1 (automation lanes), 2.2 (automation clips) and 2.3 (modulators and macros) done, pending a check by hand (2026-10-16) |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
 | Architecture track | A0 (2026-10-14), A1 and A2 (2026-10-15) and A3 (2026-10-16) done, A2 pending a check by hand: the UI begins no undo steps (46 when A2 began) and makes no direct edits, the playlist, piano roll and mixer strip are split into a file per part, the browser has a model, and the two editors' tools share one gesture. A3: IDs and beats, views that follow the project, the mixer by IDs, the transport and the engine for the top bar and the settings, the shared time line in Phazite's beats, the playlist by IDs, note IDs saved in the project (format version 3), the piano roll by note IDs and the browser by IDs and plain values; the UI names and includes no Tracktion and compiles without it, and the model's headers that use Tracktion are in `internal/` folders. Next: step 2.1 |

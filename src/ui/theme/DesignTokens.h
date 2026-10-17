@@ -26,7 +26,8 @@ struct Palette
     juce::Colour textOnAccent;
     juce::Colour warning;
     juce::Colour danger;
-    juce::Colour loop; // where playback loops, in the rulers
+    juce::Colour loop;       // where playback loops, in the rulers
+    juce::Colour modulation; // what modulation does to a control: the ring around a knob, a modulator's output
 };
 
 inline Palette getPalette (ThemeName theme)
@@ -38,18 +39,18 @@ inline Palette getPalette (ThemeName theme)
         case ThemeName::light:
             return { Colour (0xfff4f5f7), Colour (0xffffffff), Colour (0xffeceef1), Colour (0xffd3d7dd),
                      Colour (0xff1b1f24), Colour (0xff545d69), Colour (0xff1f6feb), Colour (0xffffffff),
-                     Colour (0xff9a5b00), Colour (0xffc62828), Colour (0xff1a7f5a) };
+                     Colour (0xff9a5b00), Colour (0xffc62828), Colour (0xff1a7f5a), Colour (0xff7b3fd4) };
 
         case ThemeName::highContrast:
             return { Colour (0xff000000), Colour (0xff000000), Colour (0xff1a1a1a), Colour (0xffffffff),
                      Colour (0xffffffff), Colour (0xffe6e6e6), Colour (0xffffd400), Colour (0xff000000),
-                     Colour (0xffffb000), Colour (0xffff6b6b), Colour (0xff00ff9c) };
+                     Colour (0xffffb000), Colour (0xffff6b6b), Colour (0xff00ff9c), Colour (0xffff5cff) };
 
         case ThemeName::dark:
         default:
             return { Colour (0xff15171a), Colour (0xff1c1f23), Colour (0xff272b31), Colour (0xff343a42),
                      Colour (0xffe8eaed), Colour (0xffa5adb8), Colour (0xff5b9dff), Colour (0xff0b1220),
-                     Colour (0xfff2b84b), Colour (0xffff7a6b), Colour (0xff3fbf8f) };
+                     Colour (0xfff2b84b), Colour (0xffff7a6b), Colour (0xff3fbf8f), Colour (0xffb48cff) };
     }
 }
 
@@ -136,6 +137,17 @@ namespace LaneTint
     inline constexpr float pointRadius = 4.0f;
     inline constexpr float grabDistance = 6.0f;
 } // namespace LaneTint
+
+// The ring around a modulated knob (ui::Knob), in the modulation color: how thick its arc is, how far outside the knob's
+// edge, the size of the dot where the value is now, and how far inside the edge a drag takes the ring rather than the
+// knob (pixels).
+namespace ModulationRing
+{
+    inline constexpr float width = 1.5f;
+    inline constexpr float offset = 1.0f;
+    inline constexpr float dotSize = 3.5f;
+    inline constexpr float grabWidth = 3.0f;
+} // namespace ModulationRing
 
 // How the song's sections show behind the playlist's tracks, as ghosts: a faint wash of each section's color
 // (stronger while it is selected) and a line in it where the section starts (alphas).

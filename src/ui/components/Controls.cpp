@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Controls.h"
+#include "ModulatorDrag.h"
 #include "ValueText.h"
 #include "model/automation/AutomationModel.h"
 #include "model/mixer/MixerModel.h"
@@ -84,6 +85,130 @@ void ValueSlider::resized()
 Knob::Knob (const juce::String& title, double defaultValue)
     : ValueSlider (RotaryHorizontalVerticalDrag, title, defaultValue)
 {
+}
+
+void Knob::setModulation (std::optional<ModulationRange> newModulation)
+{
+    const auto same = [] (const std::optional<ModulationRange>& a, const std::optional<ModulationRange>& b)
+    {
+        if (a.has_value() != b.has_value())
+            return false;
+
+        return ! a.has_value()
+               || (juce::approximatelyEqual (a->low, b->low) && juce::approximatelyEqual (a->high, b->high)
+                   && juce::approximatelyEqual (a->now, b->now));
+    };
+
+    if (! same (modulation, newModulation))
+    {
+        modulation = newModulation;
+        repaint();
+    }
+}
+
+bool Knob::isOnRing (juce::Point<float> position) const
+{
+    // The knob's outer edge, as ui::LookAndFeel draws it (drawRotarySlider()), and the ring just outside it.
+    const auto bounds = getLocalBounds().toFloat().reduced (2.0f);
+    const auto radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) / 2.0f;
+    return position.getDistanceFrom (bounds.getCentre()) >= radius - ModulationRing::grabWidth;
+}
+
+void Knob::paint (juce::Graphics& g)
+{
+    ValueSlider::paint (g);
+
+    if (! modulation.has_value() && ! dropping)
+        return;
+
+    const auto& p = getPalette (*this);
+    const auto bounds = getLocalBounds().toFloat().reduced (2.0f);
+    const auto radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) / 2.0f + ModulationRing::offset;
+    const auto centre = bounds.getCentre();
+    const auto rotary = getRotaryParameters();
+    const auto angleOf = [&rotary] (float proportion)
+    { return rotary.startAngleRadians + juce::jlimit (0.0f, 1.0f, proportion) * (rotary.endAngleRadians - rotary.startAngleRadians); };
+
+    g.setColour (p.modulation);
+
+    // A modulator dragged over it, which it would take: all the way round.
+    if (dropping)
+        g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre), ModulationRing::width);
+
+    if (modulation.has_value())
+    {
+        juce::Path arc;
+        arc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, angleOf (modulation->low), angleOf (modulation->high), true);
+        g.strokePath (arc, juce::PathStrokeType (ModulationRing::width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        const auto now = centre.getPointOnCircumference (radius, angleOf (modulation->now));
+        g.fillEllipse (juce::Rectangle<float> (ModulationRing::dotSize, ModulationRing::dotSize).withCentre (now));
+    }
+}
+
+void Knob::mouseDown (const juce::MouseEvent& e)
+{
+    // On the ring, a drag changes the modulation's amount; anywhere else, the knob's value.
+    draggingRing = ! e.mods.isPopupMenu() && modulation.has_value() && isOnRing (e.position) && onModulationDragStart != nullptr
+                   && onModulationDragStart();
+
+    if (! draggingRing)
+        ValueSlider::mouseDown (e);
+}
+
+void Knob::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! draggingRing)
+    {
+        ValueSlider::mouseDrag (e);
+        return;
+    }
+
+    const auto change = (float) -e.getDistanceFromDragStartY() / (float) knobDragDistance * (e.mods.isShiftDown() ? fineDragFactor : 1.0f);
+
+    if (onModulationDrag != nullptr)
+        onModulationDrag (change);
+}
+
+void Knob::mouseUp (const juce::MouseEvent& e)
+{
+    if (! draggingRing)
+    {
+        ValueSlider::mouseUp (e);
+        return;
+    }
+
+    draggingRing = false;
+
+    if (onModulationDragEnd != nullptr)
+        onModulationDragEnd();
+}
+
+bool Knob::isInterestedInDragSource (const SourceDetails& details)
+{
+    const auto modulator = readModulatorDrag (details.description);
+    return modulator.has_value() && canAcceptModulator != nullptr && canAcceptModulator (*modulator);
+}
+
+void Knob::itemDragEnter (const SourceDetails&)
+{
+    dropping = true;
+    repaint();
+}
+
+void Knob::itemDragExit (const SourceDetails&)
+{
+    dropping = false;
+    repaint();
+}
+
+void Knob::itemDropped (const SourceDetails& details)
+{
+    dropping = false;
+    repaint();
+
+    if (const auto modulator = readModulatorDrag (details.description); modulator.has_value() && onModulatorDropped != nullptr)
+        onModulatorDropped (*modulator);
 }
 
 Fader::Fader (Direction direction, const juce::String& title, double defaultValue)
@@ -239,9 +364,43 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s)
     // During a drag it moves the gesture's value; a key press or a double-click is a step of its own.
     slider.onValueChange = [this] { handle.setValue ((float) slider.getValue()); };
 
-    // A right-click offers to automate the parameter (docs/design.md, section 10).
+    // A right-click offers to automate the parameter, or modulate it (docs/design.md, section 10).
     if (auto* valueSlider = dynamic_cast<ValueSlider*> (&slider))
         valueSlider->onContextMenu = [this] { showMenu(); };
+
+    // A knob's ring changes the amount of its first modulation, and a modulator dropped on it modulates it.
+    if (auto* knob = dynamic_cast<Knob*> (&slider))
+    {
+        knob->onModulationDragStart = [this]
+        {
+            const auto modulations = getModulations (handle);
+            modulationDrag = modulations.empty() ? nullptr : beginModulationDrag (handle, modulations.front().modulator);
+            return modulationDrag != nullptr;
+        };
+
+        knob->onModulationDrag = [this] (float change)
+        {
+            if (modulationDrag != nullptr)
+                modulationDrag->setAmount (modulationDrag->getStartAmount() + change);
+        };
+
+        knob->onModulationDragEnd = [this] { modulationDrag = nullptr; };
+
+        knob->canAcceptModulator = [this] (ModulatorID id)
+        {
+            const auto modulators = getModulatorsFor (handle);
+            return std::any_of (modulators.begin(), modulators.end(), [id] (const ModulatorInfo& m) { return m.id == id; });
+        };
+
+        // One that modulates it already keeps its amount.
+        knob->onModulatorDropped = [this] (ModulatorID id)
+        {
+            const auto modulations = getModulations (handle);
+
+            if (std::none_of (modulations.begin(), modulations.end(), [id] (const Modulation& m) { return m.modulator == id; }))
+                modulate (handle, id, defaultModulationAmount);
+        };
+    }
 }
 
 void ParameterAttachment::showMenu()
@@ -251,26 +410,52 @@ void ParameterAttachment::showMenu()
 
     // The slider and this go together; the menu's choices come later, when either may be gone.
     const juce::Component::SafePointer<juce::Slider> safeSlider (&slider);
+    const auto act = [this, safeSlider] (std::function<void (ParameterHandle&)> action)
+    {
+        return [this, safeSlider, action = std::move (action)]
+        {
+            if (safeSlider != nullptr)
+                action (handle);
+        };
+    };
+
+    // A device's parameter can be automated; a modulator's, in its editor, can't yet.
+    const auto isDevices = handle.getRef().isValid();
     juce::PopupMenu menu;
     menu.addSectionHeader (handle.getName());
-    menu.addItem ("Automate",
-                  [this, safeSlider]
-                  {
-                      if (safeSlider != nullptr)
-                          showAutomationLane (handle);
-                  });
-    menu.addItem ("Create Automation Clip",
-                  [this, safeSlider]
-                  {
-                      if (safeSlider != nullptr)
-                          createAutomationClip (handle);
-                  });
-    menu.addItem ("Clear Automation", isAutomated (handle), false,
-                  [this, safeSlider]
-                  {
-                      if (safeSlider != nullptr)
-                          clearAutomation (handle);
-                  });
+    menu.addItem ("Automate", isDevices, false, act ([] (ParameterHandle& h) { showAutomationLane (h); }));
+    menu.addItem ("Create Automation Clip", isDevices, false, act ([] (ParameterHandle& h) { createAutomationClip (h); }));
+    menu.addItem ("Clear Automation", isAutomated (handle), false, act ([] (ParameterHandle& h) { clearAutomation (h); }));
+
+    // Modulation (docs/design.md, section 10): the modulators of its track, ticked while they modulate it (choosing one
+    // adds or takes away its modulation), and a new one of each kind.
+    juce::PopupMenu modulateMenu;
+    const auto modulations = getModulations (handle);
+
+    for (const auto& modulator : getModulatorsFor (handle))
+    {
+        const auto id = modulator.id;
+        const auto on = std::any_of (modulations.begin(), modulations.end(), [id] (const Modulation& m) { return m.modulator == id; });
+        modulateMenu.addItem (juce::PopupMenu::Item (modulator.name)
+                                  .setTicked (on)
+                                  .setAction (act (
+                                      [id, on] (ParameterHandle& h)
+                                      {
+                                          if (on)
+                                              removeModulation (h, id);
+                                          else
+                                              modulate (h, id, defaultModulationAmount);
+                                      })));
+    }
+
+    if (modulateMenu.getNumItems() > 0)
+        modulateMenu.addSeparator();
+
+    for (const auto type : allModulatorTypes)
+        modulateMenu.addItem ("New " + getModulatorTypeName (type),
+                              act ([type] (ParameterHandle& h) { modulateWithNew (h, type, defaultModulationAmount); }));
+
+    menu.addSubMenu ("Modulate", modulateMenu, isDevices);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&slider));
 }
 
@@ -311,8 +496,15 @@ void ParameterAttachment::update()
 {
     slider.setEnabled (handle.isValid());
 
+    // A knob shows its value without modulation, and its ring the modulation; a fader shows where the sound is.
+    auto* knob = dynamic_cast<Knob*> (&slider);
+    const auto modulation = knob != nullptr ? getModulationRange (handle) : std::nullopt;
+
     if (handle.isValid() && ! handle.isInGesture())
-        slider.setValue (handle.getValue(), juce::dontSendNotification);
+        slider.setValue (modulation.has_value() ? handle.getBaseValue() : handle.getValue(), juce::dontSendNotification);
+
+    if (knob != nullptr)
+        knob->setModulation (modulation);
 }
 
 //==============================================================================

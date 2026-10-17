@@ -37,8 +37,10 @@ public:
     juce::NormalisableRange<float> getRange() const; // with the parameter's skew and steps
     std::optional<float> getDefaultValue() const;
 
-    // Its value now, automation and modulation included.
+    // Its value now, automation and modulation included; and without its modulation, which a control shows while a ring
+    // around it shows the modulation (model/modulation/ModulationModel.h).
     float getValue() const;
+    float getBaseValue() const;
 
     // How the device itself writes a value ("-6.0 dB"), for plug-ins that aren't Phazite's own.
     juce::String getText (float value) const;

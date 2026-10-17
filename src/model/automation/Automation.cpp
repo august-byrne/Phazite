@@ -204,8 +204,19 @@ te::AutomatableParameter::Ptr findParameter (const te::Edit& edit, const Paramet
     if (! parameter.isValid())
         return {};
 
-    if (const auto device = te::findPluginForID (edit, toTracktion (parameter.device)))
+    // A device's, a modulator's or a track's macros' (ParameterRef.h), while it is in the song: Tracktion keeps a device
+    // that was removed, for undo.
+    const auto id = toTracktion (parameter.device);
+
+    if (const auto device = te::findPluginForID (edit, id))
         return device->getAutomatableParameterByID (parameter.parameter);
+
+    if (const auto modulator = te::findModifierForID (edit, id))
+        return modulator->getAutomatableParameterByID (parameter.parameter);
+
+    for (auto* macros : te::getAllMacroParameterLists (edit))
+        if (macros->itemID == id)
+            return macros->getAutomatableParameterByID (parameter.parameter);
 
     return {};
 }
@@ -282,6 +293,31 @@ juce::ReferenceCountedArray<te::AutomatableParameter> getAutomatableParameters (
 
     parameters.removeObject (nullptr);
     return parameters;
+}
+
+bool isMixerControl (const te::Plugin* device)
+{
+    return dynamic_cast<const te::VolumeAndPanPlugin*> (device) != nullptr || dynamic_cast<const te::VCAPlugin*> (device) != nullptr
+           || dynamic_cast<const te::AuxSendPlugin*> (device) != nullptr;
+}
+
+juce::String getParameterName (const te::AutomatableParameter& parameter)
+{
+    auto* device = parameter.getPlugin();
+
+    if (auto* send = dynamic_cast<te::AuxSendPlugin*> (device))
+    {
+        const auto* returnTrack = findReturnTrack (send->edit, send->getBusNumber());
+        return "Send to " + (returnTrack != nullptr ? returnTrack->getName() : juce::String ("Return"));
+    }
+
+    if (auto* volume = dynamic_cast<te::VolumeAndPanPlugin*> (device))
+        return &parameter == volume->panParam.get() ? "Pan" : "Volume";
+
+    if (isMixerControl (device))
+        return "Volume"; // a folder's, which is a VCA
+
+    return parameter.getParameterName();
 }
 
 //==============================================================================

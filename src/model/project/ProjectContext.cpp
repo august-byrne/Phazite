@@ -51,6 +51,11 @@ namespace
                 if (element.hasType (te::IDs::AUTOMATIONCURVE))
                     return add (pending.automation);
 
+                // A track's modulators and macros, and what they modulate, in its devices' states.
+                if (element.hasType (te::IDs::MODIFIERS) || element.hasType (te::IDs::MACROPARAMETERS)
+                    || element.hasType (te::IDs::MODIFIERASSIGNMENTS))
+                    return add (pending.modulation);
+
                 if (schema::isTrackViewElement (element))
                     return add (pending.view);
 

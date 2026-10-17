@@ -32,6 +32,7 @@ struct SongChanges
     bool devices = false;    // devices or sends added, deleted, moved or changed
     bool clips = false;      // clips added, deleted or changed, their notes included
     bool automation = false; // automation points added, moved or deleted
+    bool modulation = false; // modulators and macros added, deleted or changed, and what they modulate
     bool sections = false;   // sections added, deleted or changed
     bool tempo = false;      // the tempo or the time signature
     bool view = false;       // how tracks show: their heights, collapsed and pinned ones, drum rows, automation lanes (view state)

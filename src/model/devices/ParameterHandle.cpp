@@ -8,7 +8,9 @@ namespace phazite
 {
 struct ParameterHandle::Impl
 {
-    te::SafeSelectable<te::Plugin> plugin;
+    te::SafeSelectable<te::Plugin> plugin;     // a device's parameter,
+    te::SafeSelectable<te::Modifier> modifier; // a modulator's,
+    te::SafeSelectable<te::AudioTrack> macros; // or one of a track's macros
     juce::String parameterID, undoName;
     std::unique_ptr<Gesture> gesture; // the gesture it began,
     bool joined = false;              // or whether it joined another change's
@@ -18,7 +20,25 @@ struct ParameterHandle::Impl
         if (auto* p = plugin.get())
             return p->getAutomatableParameterByID (parameterID);
 
+        if (auto* m = modifier.get())
+            return m->getAutomatableParameterByID (parameterID);
+
+        if (auto* t = macros.get())
+            if (auto* list = t->getMacroParameterList())
+                return list->getAutomatableParameterByID (parameterID);
+
         return {};
+    }
+
+    const void* getOwner() const
+    {
+        if (auto* p = plugin.get())
+            return p;
+
+        if (auto* m = modifier.get())
+            return m;
+
+        return macros.get();
     }
 };
 
@@ -42,6 +62,24 @@ ParameterHandle makeParameterHandle (te::Plugin* plugin, const juce::String& par
     auto impl = std::make_unique<ParameterHandle::Impl>();
     impl->plugin = plugin;
     impl->parameterID = parameterID;
+    impl->undoName = undoName;
+    return ParameterHandle (std::move (impl));
+}
+
+ParameterHandle makeParameterHandle (te::Modifier& modifier, const juce::String& parameterID, const juce::String& undoName)
+{
+    auto impl = std::make_unique<ParameterHandle::Impl>();
+    impl->modifier = &modifier;
+    impl->parameterID = parameterID;
+    impl->undoName = undoName;
+    return ParameterHandle (std::move (impl));
+}
+
+ParameterHandle makeMacroHandle (te::AudioTrack& track, const te::MacroParameter& macro, const juce::String& undoName)
+{
+    auto impl = std::make_unique<ParameterHandle::Impl>();
+    impl->macros = &track;
+    impl->parameterID = macro.paramID;
     impl->undoName = undoName;
     return ParameterHandle (std::move (impl));
 }
@@ -86,7 +124,7 @@ bool ParameterHandle::refersToSameParameter (const ParameterHandle& other) const
     if (impl == nullptr || other.impl == nullptr)
         return impl == other.impl;
 
-    return impl->plugin.get() == other.impl->plugin.get() && impl->parameterID == other.impl->parameterID;
+    return impl->getOwner() == other.impl->getOwner() && impl->parameterID == other.impl->parameterID;
 }
 
 ParameterRef ParameterHandle::getRef() const
@@ -125,6 +163,14 @@ float ParameterHandle::getValue() const
 {
     if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->getCurrentValue();
+
+    return 0.0f;
+}
+
+float ParameterHandle::getBaseValue() const
+{
+    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
+        return parameter->getCurrentBaseValue();
 
     return 0.0f;
 }

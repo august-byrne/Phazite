@@ -7,6 +7,7 @@
 #include "model/base/IDs.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/mixer/LevelSource.h"
+#include "model/modulation/ModulationModel.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -46,11 +47,44 @@ private:
     bool showedMenu = false; // the press was a right-click that showed the menu
 };
 
-// A rotary control, dragged up and down or left and right.
-class Knob : public ValueSlider
+// A rotary control, dragged up and down or left and right. A ring around it shows what modulation does to its value
+// (model/modulation/ModulationValues.h): the range it moves it over, and where it is now. Dragging the ring changes the
+// modulation's amount, and a modulator dropped on it modulates it (ParameterAttachment does both).
+class Knob : public ValueSlider,
+             public juce::DragAndDropTarget
 {
 public:
     Knob (const juce::String& title, double defaultValue);
+
+    // The ring, or none.
+    void setModulation (std::optional<ModulationRange>);
+    const std::optional<ModulationRange>& getModulation() const noexcept { return modulation; }
+
+    // Dragging the ring: whether a modulation can be dragged as the drag starts, then the change of its amount (a part of
+    // the range: up is more, a fifth as much with Shift), and its end.
+    std::function<bool()> onModulationDragStart;
+    std::function<void (float change)> onModulationDrag;
+    std::function<void()> onModulationDragEnd;
+
+    // A modulator dropped on it (ModulatorDrag.h), if it can modulate it.
+    std::function<bool (ModulatorID)> canAcceptModulator;
+    std::function<void (ModulatorID)> onModulatorDropped;
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped (const SourceDetails&) override;
+
+private:
+    std::optional<ModulationRange> modulation;
+    bool draggingRing = false, dropping = false;
+
+    bool isOnRing (juce::Point<float>) const; // the outer edge, where the ring is
 };
 
 // A fader. Dragging moves the value from where it is, wherever the fader was clicked.
@@ -124,15 +158,16 @@ public:
     // The slider shows values as the device writes them ("-6.0 dB"), for plug-ins that aren't Phazite's own.
     void showDeviceText();
 
-    // Shows the parameter's value. Call it regularly, from a timer.
+    // Shows the parameter's value, and a knob's modulation. Call it regularly, from a timer.
     void update();
 
 private:
     juce::Slider& slider;
-    ParameterHandle handle; // owns the undo steps: the slider only reports its drags and values
+    ParameterHandle handle;                         // owns the undo steps: the slider only reports its drags and values
+    std::unique_ptr<ModulationDrag> modulationDrag; // while a knob's ring is dragged
 
     void showRange (const ParameterHandle&);
-    void showMenu(); // a right-click's: Automate, Create Automation Clip, and Clear Automation
+    void showMenu(); // a right-click's: Automate, Create Automation Clip, Clear Automation, and Modulate
 };
 
 // Links a combo box to a parameter of one of Phazite's devices whose value picks one of its choices: the box lists

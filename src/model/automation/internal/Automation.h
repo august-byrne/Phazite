@@ -29,6 +29,13 @@ te::Track* getTrackOfParameter (const te::AutomatableParameter&);
 // getAutomationTargets()).
 juce::ReferenceCountedArray<te::AutomatableParameter> getAutomatableParameters (te::Track&);
 
+// The track's own volume, pan and sends are the mixer's controls, not a device's.
+bool isMixerControl (const te::Plugin*);
+
+// A parameter's name as menus, lanes and undo steps show it: "Volume", "Pan", "Send to Reverb", or the device's own name
+// for it.
+juce::String getParameterName (const te::AutomatableParameter&);
+
 //==============================================================================
 // A curve (CurveRef): the parameter it sets, and the curve itself, the parameter's own or an automation clip's.
 struct CurveAccess

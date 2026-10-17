@@ -6,6 +6,7 @@
 #pragma once
 
 #include "DeviceSlots.h"
+#include "ModulatorSlots.h"
 #include "StripParts.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
@@ -63,8 +64,10 @@ private:
 
     juce::Label nameLabel, inputLabel, outputLabel; // the name, what the channel is and what feeds it, and where it goes
     juce::TextButton busButton { "Bus" };           // a folder's: whether it mixes its tracks, or only scales them
-    StripHeading instrumentHeading { "Instrument" }, effectsHeading { "Effects" }, sendsHeading { "Sends" };
+    StripHeading instrumentHeading { "Instrument" }, effectsHeading { "Effects" }, sendsHeading { "Sends" },
+        modulatorsHeading { "Modulators" };
     DeviceSlots instrument, effects;
+    ModulatorSlots modulators;
     juce::OwnedArray<SendSlot> sendSlots;
     juce::TextButton addSendButton { "+ Send" };
     std::vector<DeviceID> shownSends; // the sends the slots show

@@ -38,6 +38,9 @@ using ClipID = ItemID<struct ClipKind>;       // an audio or MIDI clip
 using SectionID = ItemID<struct SectionKind>; // a section of the song (model/arrangement/internal/Sections.h)
 using DeviceID = ItemID<struct DeviceKind>;   // a device on a track or on the master, or a send
 
+// A modulator on a track, or one of its macros (model/modulation/ModulationModel.h).
+using ModulatorID = ItemID<struct ModulatorKind>;
+
 // A note, among its clip's notes: no other note of that clip has its ID, but a copy of the clip (an alias too) keeps it
 // (model/notes/internal/Notes.h). Not one of Tracktion's EditItemIDs, so a note is named by its clip and its ID together.
 using NoteID = ItemID<struct NoteKind>;

@@ -20,28 +20,32 @@ namespace
         {
             for (auto* parameter : edit.getAllAutomatableParams (true))
             {
-                if (parameter->getCurve().getNumPoints() == 0)
-                {
-                    watched.add (parameter);
-                    parameter->addListener (this);
-                }
+                before.add (parameter);
+                parameter->addListener (this);
             }
         }
 
         ~StoredValueChanges() override
         {
-            for (auto* parameter : watched)
+            for (auto* parameter : before)
                 parameter->removeListener (this);
         }
 
-        void play()
+        void play (te::Edit& edit)
         {
             for (auto* parameter : changed)
-                parameter->updateFromAttachedValue();
+                if (parameter->getCurve().getNumPoints() == 0)
+                    parameter->updateFromAttachedValue();
+
+            // Those of devices and modulators the undo or redo brought back too: it puts back what they stored after
+            // making them.
+            for (auto* parameter : edit.getAllAutomatableParams (true))
+                if (! before.contains (parameter) && parameter->getCurve().getNumPoints() == 0)
+                    parameter->updateFromAttachedValue();
         }
 
     private:
-        juce::ReferenceCountedArray<te::AutomatableParameter> watched; // kept while an undo deletes some
+        juce::ReferenceCountedArray<te::AutomatableParameter> before; // kept while an undo deletes some
         juce::Array<te::AutomatableParameter*> changed;
 
         void curveHasChanged (te::AutomatableParameter&) override {}
@@ -67,7 +71,7 @@ namespace
         StoredValueChanges changes (edit);
         undoOrRedoIt();
         connectAutomationClips (edit);
-        changes.play();
+        changes.play (edit);
     }
 
     // The undo managers of the Edits with a gesture in progress (message thread only).

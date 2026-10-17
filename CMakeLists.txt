@@ -184,6 +184,12 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/internal/MixHandle.h
     src/model/mixer/internal/Mixer.h
     src/model/mixer/internal/Sidechain.h
+    src/model/modulation/Modulation.cpp
+    src/model/modulation/ModulationModel.cpp
+    src/model/modulation/ModulationModel.h
+    src/model/modulation/ModulationValues.cpp
+    src/model/modulation/ModulationValues.h
+    src/model/modulation/internal/Modulation.h
     src/model/notes/Notes.cpp
     src/model/notes/NoteValues.h
     src/model/notes/NotesModel.cpp
@@ -366,6 +372,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/browser/PluginPicker.h
     src/ui/components/Controls.cpp
     src/ui/components/Controls.h
+    src/ui/components/ModulatorDrag.h
     src/ui/components/ValueText.cpp
     src/ui/components/ValueText.h
     src/ui/devices/CompressorEditor.cpp
@@ -382,6 +389,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/EqEditor.h
     src/ui/devices/LimiterEditor.cpp
     src/ui/devices/LimiterEditor.h
+    src/ui/devices/ModulatorEditor.cpp
+    src/ui/devices/ModulatorEditor.h
     src/ui/devices/ReverbEditor.cpp
     src/ui/devices/ReverbEditor.h
     src/ui/input/CommandBridge.cpp
@@ -412,6 +421,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/mixer/MasterStrip.h
     src/ui/mixer/MixerView.cpp
     src/ui/mixer/MixerView.h
+    src/ui/mixer/ModulatorSlots.cpp
+    src/ui/mixer/ModulatorSlots.h
     src/ui/mixer/StripParts.cpp
     src/ui/mixer/StripParts.h
     src/ui/pianoroll/DrumRows.cpp
@@ -596,6 +607,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/MessageQueueTests.cpp
         tests/MetronomeTests.cpp
         tests/MigrationTests.cpp
+        tests/ModulationModelTests.cpp
+        tests/ModulationUiTests.cpp
         tests/MixerModelTests.cpp
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
