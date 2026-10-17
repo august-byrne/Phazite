@@ -318,17 +318,23 @@ void DeviceSlots::showSlotMenu (const DeviceSlot& device)
     menu.addItem ("Open Window", [&projectContext, id] { showDeviceWindow (projectContext, id); });
     menu.addItem ("On", true, device.isOn, act ([&projectContext, id, on = device.isOn] { setDeviceOn (projectContext, id, ! on); }));
 
-    // Its parameters, each of which shows its automation lane under the track in the playlist; those with automation
-    // ticked. A plug-in's own window can't offer this: Automate Last Touched does, for the knob moved last.
-    juce::PopupMenu automate;
+    // Its parameters, each of which shows its automation lane under the track in the playlist (those with automation
+    // ticked), or makes an automation clip for it. A plug-in's own window can't offer this: Automate Last Touched and
+    // Create Automation Clip do, for the knob moved last.
+    juce::PopupMenu automate, createClip;
 
     for (const auto& target : getAutomationTargets (projectContext, id))
+    {
         automate.addItem (
             juce::PopupMenu::Item (target.name)
                 .setTicked (target.automated)
                 .setAction ([&projectContext, parameter = target.parameter] { showAutomationLane (projectContext, parameter); }));
+        createClip.addItem (target.name, [&projectContext, parameter = target.parameter]
+                            { createAutomationClip (getParameter (projectContext, parameter)); });
+    }
 
     menu.addSubMenu ("Automate", automate, automate.getNumItems() > 0);
+    menu.addSubMenu ("Create Automation Clip", createClip, createClip.getNumItems() > 0);
     menu.addSeparator();
 
     if (kind == Kind::instrument)

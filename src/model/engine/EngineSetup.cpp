@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/EngineSetup.h"
 #include "internal/LoudnessMeterPlugin.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/Migrations.h"
 #include "model/devices/internal/Devices.h"
 
@@ -185,6 +186,10 @@ std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::V
 
     if (! id.isValid())
         id = te::ProjectItemID::createNewID (te::ProjectID {});
+
+    // The values set by hand of parameters that automation set to others as the project was saved.
+    auto editState = state;
+    restoreValuesSetByHand (editState);
 
     return te::Edit::createEdit (
         { engine, state, id, te::Edit::forEditing, nullptr, te::Edit::getDefaultNumUndoLevels(), [file] { return file; }, {} });

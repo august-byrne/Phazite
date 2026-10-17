@@ -244,8 +244,10 @@ void Playlist::lanesMouseMove (const juce::MouseEvent& e)
     {
         const auto& clip = component->getInfo();
         const auto zone = getClipZone (getClipBounds (clip).toFloat(), e.position, clip.kind == ClipType::audio);
+        const auto addsPoints =
+            getCurveOf (*component) != nullptr && currentTool == Tool::smart && (zone == ClipZone::move || zone == ClipZone::selectRange);
         lanes->setMouseCursor (getCursorFor (zone));
-        lanes->setDescription (describeClipZone (zone));
+        lanes->setDescription (describeClipZone (zone) + (addsPoints ? " Double-click to add a point to its curve." : ""));
         return;
     }
 
@@ -506,7 +508,8 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
             for (const auto& moving : gesture->moving)
                 delta = std::max (delta, BeatPosition() - moving.start);
 
-            // Up or down by whole rows, as long as every clip lands on a track that holds clips.
+            // Up or down by whole rows, as long as every clip lands on a track that holds clips (not a folder, nor the
+            // master's row).
             if (const auto row = rowAtPointer; row >= 0 && gesture->startRow >= 0)
             {
                 const auto offset = row - gesture->startRow;
@@ -515,7 +518,7 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
                                                {
                                                    const auto target = moving.row + offset;
                                                    return juce::isPositiveAndBelow (target, (int) rows.size())
-                                                          && rows[(size_t) target].track.kind != TrackType::folder;
+                                                          && canHoldClips (context, rows[(size_t) target].track.id);
                                                });
 
                 if (fits)
@@ -766,11 +769,14 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
         return;
     }
 
-    // On a MIDI clip: open it in the piano roll.
+    // On a MIDI clip: open it in the piano roll. On an automation clip: a point on its curve there.
     if (auto* component = getClipComponentAt (e.getPosition()))
     {
         if (component->getInfo().kind == ClipType::midi && onOpenClip != nullptr)
             onOpenClip (component->getClip());
+        else if (auto* curve = getCurveOf (*component))
+            if (const auto inCurve = curve->getLocalPoint (lanes.get(), e.position); curve->getLocalBounds().toFloat().contains (inCurve))
+                curve->addPointAt (inCurve, e.mods);
 
         return;
     }

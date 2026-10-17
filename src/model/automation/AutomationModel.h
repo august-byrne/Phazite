@@ -71,33 +71,35 @@ void showAutomatedLanes (ProjectContext&, TrackID);
 void hideAutomationLanes (ProjectContext&, TrackID);
 
 //==============================================================================
-// Points (AutomationValues.h).
-std::vector<AutomationPoint> getAutomationPoints (const ProjectContext&, const ParameterRef&); // in time order
+// Points (AutomationValues.h) of a curve: a parameter's own, written as the parameter, or an automation clip's. Beats are
+// the song's, an automation clip's too.
+std::vector<AutomationPoint> getAutomationPoints (const ProjectContext&, const CurveRef&); // in time order
 
-// The automated value at evenly spaced beats across a range (the first at its start, the last at its end), as the engine
-// plays it, for drawing a lane; empty without points.
-std::vector<float> getAutomationValues (const ProjectContext&, const ParameterRef&, BeatRange, int numValues);
+// The curve's value at evenly spaced beats across a range (the first at its start, the last at its end), as the engine
+// plays it, for drawing a lane or a clip; empty without points.
+std::vector<float> getAutomationValues (const ProjectContext&, const CurveRef&, BeatRange, int numValues);
 
 // Edits. Indices are points' places in time order. Values are kept within the parameter's range, and beats at or after
-// the song's start.
+// the song's start (an automation clip's: its notes' start, where they would be). An edit of an automation clip's curve
+// is its aliases' too.
 
 // Adds a point, after any at the same beat, as "Add Automation Point". Returns its index.
-int addAutomationPoint (ProjectContext&, const ParameterRef&, AutomationPoint);
+int addAutomationPoint (ProjectContext&, const CurveRef&, AutomationPoint);
 
 // Moves points (their indices in order) later by a distance (earlier, if negative) and up by an amount (down, if
 // negative), as "Move Automation Points". They keep their order among the points that don't move, and their values stay in
 // the parameter's range, so the distance and the amount are cut to fit. Returns the distance they moved.
-BeatDuration moveAutomationPoints (ProjectContext&, const ParameterRef&, const std::vector<int>& indices, BeatDuration, float valueChange);
+BeatDuration moveAutomationPoints (ProjectContext&, const CurveRef&, const std::vector<int>& indices, BeatDuration, float valueChange);
 
 // Bends the line after a point (AutomationPoint::curve, -1 to 1), as "Bend Automation".
-void setAutomationCurve (ProjectContext&, const ParameterRef&, int index, float curve);
+void setAutomationCurve (ProjectContext&, const CurveRef&, int index, float bend);
 
-void deleteAutomationPoints (ProjectContext&, const ParameterRef&, const std::vector<int>& indices); // "Delete Automation Points"
+void deleteAutomationPoints (ProjectContext&, const CurveRef&, const std::vector<int>& indices); // "Delete Automation Points"
 
 // Replaces the points in a range, its start and end included, with others, as drawing in a lane does: "Draw Automation".
-void replaceAutomationPoints (ProjectContext&, const ParameterRef&, BeatRange, const std::vector<AutomationPoint>&);
+void replaceAutomationPoints (ProjectContext&, const CurveRef&, BeatRange, const std::vector<AutomationPoint>&);
 
-void clearAutomation (ProjectContext&, const ParameterRef&); // all its points: "Clear Automation"
+void clearAutomation (ProjectContext&, const CurveRef&); // all its points: "Clear Automation"
 
 // The same for a control's parameter, as its menu reaches it (ui/components/Controls.h: ParameterAttachment): whether it
 // has automation, showing its lane (Automate), and deleting its points (Clear Automation). Nothing for a handle of
@@ -105,6 +107,25 @@ void clearAutomation (ProjectContext&, const ParameterRef&); // all its points: 
 bool isAutomated (const ParameterHandle&);
 void showAutomationLane (const ParameterHandle&);
 void clearAutomation (const ParameterHandle&);
+
+//==============================================================================
+// Automation clips (docs/design.md, section 10; roadmap step 2.2): clips whose curve sets a parameter while they play,
+// over its lane, as FL Studio's automation clips do. They move, copy, split and alias as other clips do, to any track,
+// and set the parameter they were made for wherever they are (the copy of a track's set the copy's devices); an alias's
+// curve is its original's. Before and after them, the parameter goes back to its lane, or to its value. Their curves
+// are CurveRefs with the clip.
+
+// Makes one for a parameter over a range of the song, a flat line at the parameter's value now, named after what it sets
+// ("Compressor: Threshold", "Bass: Volume"): on the parameter's track, or for a folder's or the master's, on a track at
+// the end of the song called Automation (made if there is none). One undo step, "Create Automation Clip". Returns it, or
+// an empty ID for a parameter that isn't there.
+ClipID createAutomationClip (ProjectContext&, const ParameterRef&, BeatRange);
+
+// The same for a control's parameter, as its menu reaches it: four bars from the bar the playhead is in.
+ClipID createAutomationClip (const ParameterHandle&);
+
+// The parameter an automation clip sets; nothing for another clip.
+std::optional<ParameterRef> getAutomationClipParameter (const ProjectContext&, ClipID);
 
 //==============================================================================
 // Write modes (AutomationValues.h): each track has one.
@@ -124,6 +145,11 @@ bool canAutomateLastTouched (const ProjectContext&);
 void automateLastTouched (ProjectContext&);
 juce::String describeAutomateLastTouched (const ProjectContext&);
 
+// Create Automation Clip: an automation clip for the parameter changed by hand last, as its control's menu makes one
+// (createAutomationClip()), "Create Automation Clip for Cutoff". Enabled as Automate Last Touched is.
+void createClipForLastTouched (ProjectContext&);
+juce::String describeCreateClipForLastTouched (const ProjectContext&);
+
 // Show Automation: the selected tracks show a lane for each automated parameter (a track without automation, its
 // volume's), or, while one of them shows lanes, none.
 bool areTracksSelected (const ProjectContext&);
@@ -139,8 +165,8 @@ void moveSelectedAutomationPoints (ProjectContext&, BeatDuration, float partOfRa
 bool isAutomationModeOfSelection (const ProjectContext&, AutomationMode);
 void setAutomationModeOfSelection (ProjectContext&, AutomationMode);
 
-// The automation commands: Automate Last Touched Parameter (its key works over plug-in windows too), Show Automation,
-// raising and lowering the selected points (Command::notePriority, so that the arrow keys move them while points are
-// selected), and the selected tracks' write modes.
+// The automation commands: Automate Last Touched Parameter and Create Automation Clip (their keys work over plug-in
+// windows too), Show Automation, raising and lowering the selected points (Command::notePriority, so that the arrow keys
+// move them while points are selected), and the selected tracks' write modes.
 void addAutomationCommands (CommandRegistry&, ProjectContext&);
 } // namespace phazite

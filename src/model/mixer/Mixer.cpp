@@ -2,6 +2,7 @@
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/AutomationClips.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -167,7 +168,7 @@ bool needsInstrument (const te::Track& track)
         return false;
 
     for (auto* clip : audioTrack->getClips())
-        if (dynamic_cast<te::MidiClip*> (clip) != nullptr)
+        if (dynamic_cast<te::MidiClip*> (clip) != nullptr && ! isAutomationClip (*clip)) // notes, not a curve
             return true;
 
     return false;

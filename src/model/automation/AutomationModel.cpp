@@ -102,20 +102,68 @@ namespace
         }
     }
 
-    std::vector<int> getAllIndices (const te::AutomatableParameter& parameter)
+    std::optional<CurveAccess> findCurveIn (const ProjectContext& context, const CurveRef& curve)
     {
-        std::vector<int> indices ((size_t) parameter.getCurve().getNumPoints());
-        std::iota (indices.begin(), indices.end(), 0);
-        return indices;
+        auto* edit = getEdit (context);
+        return edit != nullptr ? findCurve (*edit, curve) : std::nullopt;
     }
 
-    void clearPointsOf (te::AutomatableParameter& parameter)
+    // All a curve's points, as one step.
+    void clearPoints (const CurveAccess& access)
     {
-        if (parameter.hasAutomationPoints())
-        {
-            const UndoStep step (parameter.getEdit(), "Clear Automation");
-            deletePoints (parameter, getAllIndices (parameter));
-        }
+        if (access.curve->getNumPoints() == 0)
+            return;
+
+        std::vector<int> indices ((size_t) access.curve->getNumPoints());
+        std::iota (indices.begin(), indices.end(), 0);
+        const UndoStep step (access.parameter->getEdit(), "Clear Automation");
+        deletePoints (access, indices);
+    }
+
+    // The track an automation clip for a parameter goes on: the parameter's own, if it holds clips; for a folder's or the
+    // master's, the track called Automation at the end of the song, made if there is none.
+    const juce::String automationTrackName ("Automation");
+
+    te::AudioTrack* getTrackForAutomationClip (te::AutomatableParameter& parameter)
+    {
+        if (auto* own = dynamic_cast<te::AudioTrack*> (getTrackOfParameter (parameter)))
+            return own;
+
+        auto& edit = parameter.getEdit();
+
+        for (auto* track : te::getAudioTracks (edit))
+            if (track->getName() == automationTrackName && getReturnBus (*track) < 0)
+                return track;
+
+        auto* added = dynamic_cast<te::AudioTrack*> (addTrackAtEnd (edit, false, nullptr));
+
+        if (added != nullptr)
+            added->setName (automationTrackName);
+
+        return added;
+    }
+
+    ClipID createClipFor (te::AutomatableParameter& parameter, BeatRange range)
+    {
+        if (range.isEmpty())
+            return {};
+
+        const UndoStep step (parameter.getEdit(), "Create Automation Clip");
+        auto* track = getTrackForAutomationClip (parameter);
+        auto* clip =
+            track != nullptr ? createAutomationClip (*track, parameter, toTracktion (range), parameter.getCurrentValue()) : nullptr;
+
+        if (clip == nullptr)
+            return {};
+
+        // Named after what it sets, which can be on another track: "Compressor: Threshold", or "Bass: Volume".
+        auto* device = parameter.getPlugin();
+        auto* owner = getTrackOfParameter (parameter);
+        const auto setBy = isMixerControl (device) ? (owner != nullptr ? owner->getName() : juce::String())
+                           : device != nullptr     ? device->getName()
+                                                   : juce::String();
+        clip->setName (setBy.isNotEmpty() ? setBy + ": " + getName (parameter) : getName (parameter));
+        return getClipID (*clip);
     }
 
     std::vector<te::Track*> getSelectedTracksOf (const ProjectContext& context)
@@ -239,73 +287,72 @@ void hideAutomationLanes (ProjectContext& context, TrackID id)
 }
 
 //==============================================================================
-std::vector<AutomationPoint> getAutomationPoints (const ProjectContext& context, const ParameterRef& parameter)
+std::vector<AutomationPoint> getAutomationPoints (const ProjectContext& context, const CurveRef& curve)
 {
-    const auto found = find (context, parameter);
-    return found != nullptr ? getPoints (*found) : std::vector<AutomationPoint>();
+    const auto found = findCurveIn (context, curve);
+    return found.has_value() ? getPoints (*found) : std::vector<AutomationPoint>();
 }
 
-std::vector<float> getAutomationValues (const ProjectContext& context, const ParameterRef& parameter, BeatRange range, int numValues)
+std::vector<float> getAutomationValues (const ProjectContext& context, const CurveRef& curve, BeatRange range, int numValues)
 {
-    const auto found = find (context, parameter);
-    return found != nullptr ? getValues (*found, range, numValues) : std::vector<float>();
+    const auto found = findCurveIn (context, curve);
+    return found.has_value() ? getValues (*found, range, numValues) : std::vector<float>();
 }
 
-int addAutomationPoint (ProjectContext& context, const ParameterRef& parameter, AutomationPoint point)
+int addAutomationPoint (ProjectContext& context, const CurveRef& curve, AutomationPoint point)
 {
-    const auto found = find (context, parameter);
+    const auto found = findCurveIn (context, curve);
 
-    if (found == nullptr)
+    if (! found.has_value())
         return -1;
 
-    const UndoStep step (found->getEdit(), "Add Automation Point");
+    const UndoStep step (found->parameter->getEdit(), "Add Automation Point");
     return addPoint (*found, point);
 }
 
-BeatDuration moveAutomationPoints (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices,
-                                   BeatDuration distance, float valueChange)
+BeatDuration moveAutomationPoints (ProjectContext& context, const CurveRef& curve, const std::vector<int>& indices, BeatDuration distance,
+                                   float valueChange)
 {
-    const auto found = find (context, parameter);
+    const auto found = findCurveIn (context, curve);
 
-    if (found == nullptr)
+    if (! found.has_value())
         return {};
 
-    const UndoStep step (found->getEdit(), "Move Automation Points");
+    const UndoStep step (found->parameter->getEdit(), "Move Automation Points");
     return movePoints (*found, indices, distance, valueChange);
 }
 
-void setAutomationCurve (ProjectContext& context, const ParameterRef& parameter, int index, float curve)
+void setAutomationCurve (ProjectContext& context, const CurveRef& curve, int index, float bend)
 {
-    if (const auto found = find (context, parameter))
+    if (const auto found = findCurveIn (context, curve))
     {
-        const UndoStep step (found->getEdit(), "Bend Automation");
-        setCurve (*found, index, curve);
+        const UndoStep step (found->parameter->getEdit(), "Bend Automation");
+        setCurve (*found, index, bend);
     }
 }
 
-void deleteAutomationPoints (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices)
+void deleteAutomationPoints (ProjectContext& context, const CurveRef& curve, const std::vector<int>& indices)
 {
-    if (const auto found = find (context, parameter))
+    if (const auto found = findCurveIn (context, curve))
     {
-        const UndoStep step (found->getEdit(), "Delete Automation Points");
+        const UndoStep step (found->parameter->getEdit(), "Delete Automation Points");
         deletePoints (*found, indices);
     }
 }
 
-void replaceAutomationPoints (ProjectContext& context, const ParameterRef& parameter, BeatRange range,
-                              const std::vector<AutomationPoint>& points)
+void replaceAutomationPoints (ProjectContext& context, const CurveRef& curve, BeatRange range, const std::vector<AutomationPoint>& points)
 {
-    if (const auto found = find (context, parameter))
+    if (const auto found = findCurveIn (context, curve))
     {
-        const UndoStep step (found->getEdit(), "Draw Automation");
+        const UndoStep step (found->parameter->getEdit(), "Draw Automation");
         replacePoints (*found, range, points);
     }
 }
 
-void clearAutomation (ProjectContext& context, const ParameterRef& parameter)
+void clearAutomation (ProjectContext& context, const CurveRef& curve)
 {
-    if (const auto found = find (context, parameter))
-        clearPointsOf (*found);
+    if (const auto found = findCurveIn (context, curve))
+        clearPoints (*found);
 }
 
 bool isAutomated (const ParameterHandle& handle)
@@ -323,7 +370,41 @@ void showAutomationLane (const ParameterHandle& handle)
 void clearAutomation (const ParameterHandle& handle)
 {
     if (const auto found = findParameter (handle))
-        clearPointsOf (*found);
+        clearPoints (getOwnCurve (*found));
+}
+
+//==============================================================================
+ClipID createAutomationClip (ProjectContext& context, const ParameterRef& parameter, BeatRange range)
+{
+    const auto found = find (context, parameter);
+    return found != nullptr ? createClipFor (*found, range) : ClipID();
+}
+
+ClipID createAutomationClip (const ParameterHandle& handle)
+{
+    const auto found = findParameter (handle);
+
+    if (found == nullptr)
+        return {};
+
+    // Four bars from the bar the playhead is in.
+    const auto& tempo = found->getEdit().tempoSequence;
+    const auto bar = std::max (0, tempo.toBarsAndBeats (found->getEdit().getTransport().getPosition()).bars);
+    const auto start = tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 });
+    const auto end = tempo.toBeats (te::tempo::BarsAndBeats { bar + 4, {}, 0 });
+    return createClipFor (*found, { fromTracktion (start), fromTracktion (end) });
+}
+
+std::optional<ParameterRef> getAutomationClipParameter (const ProjectContext& context, ClipID id)
+{
+    auto* edit = getEdit (context);
+    auto* clip = edit != nullptr && id.isValid() ? te::findClipForID (*edit, toTracktion (id)) : nullptr;
+    const auto parameter = clip != nullptr ? getAutomationClipParameter (*clip) : nullptr;
+
+    if (parameter == nullptr)
+        return {};
+
+    return getParameterRef (*parameter);
 }
 
 //==============================================================================
@@ -378,6 +459,21 @@ juce::String describeAutomateLastTouched (const ProjectContext& context)
     return "Automate Last Touched Parameter";
 }
 
+void createClipForLastTouched (ProjectContext& context)
+{
+    if (const auto parameter = getLastTouchedParameter (context))
+        createAutomationClip (getParameter (context, *parameter));
+}
+
+juce::String describeCreateClipForLastTouched (const ProjectContext& context)
+{
+    if (const auto parameter = getLastTouchedParameter (context))
+        if (const auto target = getAutomationTarget (context, *parameter))
+            return "Create Automation Clip for " + target->name;
+
+    return "Create Automation Clip";
+}
+
 bool areTracksSelected (const ProjectContext& context)
 {
     return ! getSelectedTracksOf (context).empty();
@@ -418,9 +514,9 @@ void moveSelectedAutomationPoints (ProjectContext& context, BeatDuration distanc
 {
     if (const auto selected = getSelectedPoints (getSelection (context)))
     {
-        auto& parameter = *selected->parameter;
+        const auto& parameter = *selected->curve.parameter;
         const UndoStep step (parameter.getEdit(), "Move Automation Points");
-        movePoints (parameter, selected->indices, distance, partOfRange * (parameter.valueRange.end - parameter.valueRange.start));
+        movePoints (selected->curve, selected->indices, distance, partOfRange * (parameter.valueRange.end - parameter.valueRange.start));
     }
 }
 
@@ -450,6 +546,17 @@ void addAutomationCommands (CommandRegistry& registry, ProjectContext& context)
                     .perform = [&context] { automateLastTouched (context); },
                     .isEnabled = [&context] { return canAutomateLastTouched (context); },
                     .currentName = [&context] { return describeAutomateLastTouched (context); },
+                    .overPlugins = true });
+
+    registry.add ({ .id = "automation.createClip",
+                    .name = "Create Automation Clip",
+                    .category = "Automation",
+                    .description = "Makes an automation clip for the parameter you changed last, in a device's window too: four "
+                                   "bars from the bar the playhead is in, on the parameter's track.",
+                    .synonyms = { "automation clip", "last tweaked", "envelope clip", "automate" },
+                    .perform = [&context] { createClipForLastTouched (context); },
+                    .isEnabled = [&context] { return canAutomateLastTouched (context); },
+                    .currentName = [&context] { return describeCreateClipForLastTouched (context); },
                     .overPlugins = true });
 
     registry.add ({ .id = "automation.showLanes",

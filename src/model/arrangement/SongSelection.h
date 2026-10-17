@@ -5,8 +5,8 @@
 // Message thread only.
 #pragma once
 
+#include "model/automation/AutomationValues.h"
 #include "model/base/IDs.h"
-#include "model/devices/ParameterRef.h"
 
 #include <juce_events/juce_events.h>
 
@@ -47,18 +47,18 @@ public:
     bool isSelected (NoteRef) const;
     void selectNotes (const std::vector<NoteRef>&, bool addToSelection = false); // those of the note clips
 
-    // Automation points of one parameter's lane, by their indices in time order (model/automation/AutomationModel.h).
-    // Selecting points selects nothing else with them, and selecting anything else deselects them; points of a parameter
-    // that is gone, or indices of points that aren't there, aren't selected.
+    // Automation points of one curve (a lane's, or an automation clip's: model/automation/AutomationValues.h), by their
+    // indices in time order. Selecting points selects nothing else with them, and selecting anything else deselects them;
+    // points of a curve that is gone, or indices of points that aren't there, aren't selected.
     struct AutomationPoints
     {
-        ParameterRef parameter {};
+        CurveRef curve {};
         std::vector<int> indices {};
     };
 
-    AutomationPoints getSelectedAutomationPoints() const; // an invalid parameter while none are selected
-    bool isSelected (const ParameterRef&, int index) const;
-    void selectAutomationPoints (const ParameterRef&, const std::vector<int>& indices, bool addToSelection = false);
+    AutomationPoints getSelectedAutomationPoints() const; // an invalid curve while none are selected
+    bool isSelected (const CurveRef&, int index) const;
+    void selectAutomationPoints (const CurveRef&, const std::vector<int>& indices, bool addToSelection = false);
 
     // Tells a listener after each change, on the message thread.
     void addChangeListener (juce::ChangeListener*);

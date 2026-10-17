@@ -47,6 +47,7 @@ after start:
   section.outline.techno: on "Apply Outline: Techno"
   track.addReturn: on "Add Return Track"
   automation.automateLastTouched: off "Automate Last Touched Parameter"
+  automation.createClip: off "Create Automation Clip"
   automation.showLanes: off "Show Automation"
   automation.raisePoints: off "Raise Automation Points"
   automation.lowerPoints: off "Lower Automation Points"

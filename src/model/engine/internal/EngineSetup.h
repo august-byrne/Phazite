@@ -96,6 +96,7 @@ UIBehaviour& getUIBehaviour (te::Engine&);
 std::unique_ptr<te::Edit> loadEdit (te::Engine&, const juce::File&);
 
 // Creates an Edit for editing from a saved state, already upgraded, that saves to a file. It keeps the state's saved
-// ID, or makes a new one.
+// ID, or makes a new one, and the values parameters were set to by hand (model/automation/internal/Automation.h:
+// restoreValuesSetByHand()).
 std::unique_ptr<te::Edit> createEditFromState (te::Engine&, const juce::ValueTree& state, const juce::File& file);
 } // namespace phazite

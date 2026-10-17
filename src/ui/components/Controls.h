@@ -132,7 +132,7 @@ private:
     ParameterHandle handle; // owns the undo steps: the slider only reports its drags and values
 
     void showRange (const ParameterHandle&);
-    void showMenu(); // a right-click's: Automate, and Clear Automation
+    void showMenu(); // a right-click's: Automate, Create Automation Clip, and Clear Automation
 };
 
 // Links a combo box to a parameter of one of Phazite's devices whose value picks one of its choices: the box lists

@@ -29,7 +29,8 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>&, bool asAliases)
 // playhead is there already), or no clip linked to them does.
 std::optional<double> getLinkedPlayBeat (const juce::Array<te::MidiClip*>& shown, double songBeat);
 
-// Moves a clip to start at a beat (not before the song does) on a track, keeping its length.
+// Moves a clip to start at a beat (not before the song does) on a track, keeping its length. An automation clip, copied,
+// split or moved, sets what it set (model/automation/internal/Automation.h: AutomationTargets).
 void moveClip (te::Clip&, te::BeatPosition start, te::ClipTrack&);
 
 // Moves a clip's start or end to a beat, leaving its content where it is. A clip can't start before its
@@ -56,9 +57,10 @@ te::MidiClip* insertBarLongMidiClip (te::ClipTrack&, te::BeatPosition start, te:
 // The same, as one undo step, "Add MIDI Clip": a double-click on a track with an instrument.
 te::MidiClip* addMidiClipAt (te::ClipTrack&, te::BeatPosition, te::SelectionManager*);
 
-// What the Draw and Paint tools place at a beat on a track: a copy of the clip used last (of a MIDI clip, an alias that
-// stays linked to it, as FL Studio places the same pattern again), or, before any clip was used or once it is gone, an
-// empty MIDI clip a bar long on a track with an instrument. Returns it, or nullptr when there is nothing to place there.
+// What the Draw and Paint tools place at a beat on a track: a copy of the clip used last (of a MIDI or automation clip,
+// an alias that stays linked to it, as FL Studio places the same pattern again), or, before any clip was used or once it
+// is gone, an empty MIDI clip a bar long on a track with an instrument. Returns it, or nullptr when there is nothing to
+// place there.
 te::Clip* placeClip (te::ClipTrack&, te::BeatPosition start, te::Clip* lastUsed);
 
 // Slips what a clip plays, as the Slip tool does: its content moves later by a distance (earlier if negative), from the

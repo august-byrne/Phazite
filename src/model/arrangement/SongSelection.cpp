@@ -304,29 +304,29 @@ void SongSelection::selectNotes (const std::vector<NoteRef>& refs, bool addToSel
 SongSelection::AutomationPoints SongSelection::getSelectedAutomationPoints() const
 {
     if (const auto selected = getSelectedPoints (impl->manager))
-        return { getParameterRef (*selected->parameter), selected->indices };
+        return { selected->curve.getRef(), selected->indices };
 
     return {};
 }
 
-bool SongSelection::isSelected (const ParameterRef& parameter, int index) const
+bool SongSelection::isSelected (const CurveRef& curve, int index) const
 {
     const auto selected = getSelectedAutomationPoints();
-    return selected.parameter == parameter && std::find (selected.indices.begin(), selected.indices.end(), index) != selected.indices.end();
+    return selected.curve == curve && std::find (selected.indices.begin(), selected.indices.end(), index) != selected.indices.end();
 }
 
-void SongSelection::selectAutomationPoints (const ParameterRef& parameter, const std::vector<int>& indices, bool addToSelection)
+void SongSelection::selectAutomationPoints (const CurveRef& curve, const std::vector<int>& indices, bool addToSelection)
 {
     auto* edit = impl->manager.getEdit();
-    const auto found = edit != nullptr ? findParameter (*edit, parameter) : nullptr;
+    const auto found = edit != nullptr ? findCurve (*edit, curve) : std::nullopt;
 
-    if (found == nullptr)
+    if (! found.has_value())
         return;
 
-    // Adding to points of the same parameter keeps them; otherwise these are all that is selected.
+    // Adding to points of the same curve keeps them; otherwise these are all that is selected.
     auto all = indices;
 
-    if (const auto before = getSelectedAutomationPoints(); addToSelection && before.parameter == parameter)
+    if (const auto before = getSelectedAutomationPoints(); addToSelection && before.curve == curve)
         all.insert (all.end(), before.indices.begin(), before.indices.end());
 
     if (all.empty())

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Undo.h"
+#include "model/automation/internal/AutomationClips.h"
 
 #include <algorithm>
 #include <vector>
@@ -8,14 +9,65 @@ namespace phazite
 {
 namespace
 {
-    // AutomatableParameter::valueTreePropertyChanged() updates a parameter's CachedValue when undo
-    // changes it, but not its currentValue, which the audio thread reads. Automated parameters
-    // follow their curves instead, so they are left alone.
-    void playStoredParameterValues (te::Edit& edit)
+    // AutomatableParameter::valueTreePropertyChanged() updates a parameter's CachedValue when undo changes it, but not
+    // its currentValue, which the audio thread reads: this tells which stored values an undo or redo changes, so that
+    // their parameters play them. Only those: the stored value of one an automation clip sets, which Tracktion writes as
+    // the clip plays, isn't its value otherwise. Parameters with a curve of their own follow it instead.
+    class StoredValueChanges : private te::AutomatableParameter::Listener
     {
-        for (auto* parameter : edit.getAllAutomatableParams (true))
-            if (parameter->getCurve().getNumPoints() == 0)
+    public:
+        explicit StoredValueChanges (te::Edit& edit)
+        {
+            for (auto* parameter : edit.getAllAutomatableParams (true))
+            {
+                if (parameter->getCurve().getNumPoints() == 0)
+                {
+                    watched.add (parameter);
+                    parameter->addListener (this);
+                }
+            }
+        }
+
+        ~StoredValueChanges() override
+        {
+            for (auto* parameter : watched)
+                parameter->removeListener (this);
+        }
+
+        void play()
+        {
+            for (auto* parameter : changed)
                 parameter->updateFromAttachedValue();
+        }
+
+    private:
+        juce::ReferenceCountedArray<te::AutomatableParameter> watched; // kept while an undo deletes some
+        juce::Array<te::AutomatableParameter*> changed;
+
+        void curveHasChanged (te::AutomatableParameter&) override {}
+        void currentValueChanged (te::AutomatableParameter& parameter) override { changed.addIfNotAlreadyThere (&parameter); }
+
+        JUCE_DECLARE_NON_COPYABLE (StoredValueChanges)
+    };
+
+    // A clip that undo or redo brings back makes its curves when it has some, but Tracktion puts an automation clip's curve
+    // back after the clip, and its parameter's link to it before the curve: asking for its curves makes them, and links
+    // them to their parameters.
+    void connectAutomationClips (te::Edit& edit)
+    {
+        for (auto* track : te::getClipTracks (edit))
+            for (auto* clip : track->getClips())
+                if (isAutomationClip (*clip))
+                    clip->getAutomationCurveList (false);
+    }
+
+    template <typename UndoOrRedo>
+    void undoOrRedo (te::Edit& edit, UndoOrRedo&& undoOrRedoIt)
+    {
+        StoredValueChanges changes (edit);
+        undoOrRedoIt();
+        connectAutomationClips (edit);
+        changes.play();
     }
 
     // The undo managers of the Edits with a gesture in progress (message thread only).
@@ -40,14 +92,12 @@ namespace
 
 void undo (te::Edit& edit)
 {
-    edit.undo();
-    playStoredParameterValues (edit);
+    undoOrRedo (edit, [&edit] { edit.undo(); });
 }
 
 void redo (te::Edit& edit)
 {
-    edit.redo();
-    playStoredParameterValues (edit);
+    undoOrRedo (edit, [&edit] { edit.redo(); });
 }
 
 bool canUndo (te::Edit& edit)
@@ -154,8 +204,7 @@ void Gesture::rollBack()
     if (inhibitor == nullptr)
         return;
 
-    edit.getUndoManager().undoCurrentTransactionOnly();
-    playStoredParameterValues (edit);
+    undoOrRedo (edit, [this] { edit.getUndoManager().undoCurrentTransactionOnly(); });
     commit();
 }
 

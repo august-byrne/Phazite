@@ -20,6 +20,7 @@
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/engine/internal/LiveInput.h"
@@ -504,6 +505,46 @@ TEST_SUITE ("realtime-audit")
 
         std::vector<float> tapped (32768);
         CHECK (tap.pull (tapped.data(), (int) tapped.size()) > 0);
+    }
+
+    TEST_CASE ("Real-time audit: automation clips sweeping Phazite's EQ and fading a track's volume")
+    {
+        using phazite::devices::Equalizer;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+
+        const auto plugin = edit->getPluginCache().createNewPlugin (Equalizer::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
+        device->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::on)]->setParameter (1.0f, juce::sendNotification);
+
+        // Over all of the playback measured: the band's gain swept, a cycle a beat, and the volume faded, by a clip on
+        // another track, as automation clips can be anywhere.
+        const auto whole = te::BeatRange (te::BeatPosition(), te::BeatPosition::fromBeats (32.0));
+        const auto gainParameter = device->findParameter ("band1Gain");
+        REQUIRE (gainParameter != nullptr);
+        const auto* gain = phazite::createAutomationClip (track, *gainParameter, whole, 0.0f);
+        const auto* fade = phazite::createAutomationClip (getTrack (*edit, 1), *track.getVolumePlugin()->volParam, whole, 0.8f);
+        REQUIRE (gain != nullptr);
+        REQUIRE (fade != nullptr);
+
+        const auto song = phazite::BeatRange (phazite::BeatPosition(), phazite::BeatPosition::fromBeats (32.0));
+        const auto sweep = phazite::findCurve (*edit, { phazite::getParameterRef (*gainParameter), phazite::getClipID (*gain) });
+        const auto volume =
+            phazite::findCurve (*edit, { phazite::getParameterRef (*track.getVolumePlugin()->volParam), phazite::getClipID (*fade) });
+        REQUIRE (sweep.has_value());
+        REQUIRE (volume.has_value());
+        phazite::replacePoints (
+            *sweep, song,
+            phazite::makeAutomationShape (phazite::AutomationShape::sine, song, phazite::BeatDuration::fromBeats (1.0), -12.0f, 12.0f));
+        phazite::replacePoints (*volume, song, { { song.getStart(), 0.8f }, { song.getEnd(), 0.4f } });
+
+        const auto m = playAndMeasure (*edit);
+        report ("Automation clips sweeping Phazite's EQ and fading a track's volume", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
     }
 
     TEST_CASE ("Real-time audit: Phazite's compressor, ducked by another track at 70 % mix, with its meters read")

@@ -137,11 +137,16 @@ namespace
         ClipInfo info;
         info.id = getClipID (clip);
         info.track = clip.getTrack() != nullptr ? getTrackID (*clip.getTrack()) : TrackID();
-        info.kind = dynamic_cast<te::AudioClipBase*> (&clip) != nullptr ? ClipType::audio : ClipType::midi;
+        info.kind = dynamic_cast<te::AudioClipBase*> (&clip) != nullptr ? ClipType::audio
+                    : isAutomationClip (clip)                           ? ClipType::automation
+                                                                        : ClipType::midi;
         info.name = clip.getName();
         info.range = { fromTracktion (clip.getStartBeat()), fromTracktion (clip.getEndBeat()) };
         info.muted = clip.isMuted();
         info.linked = clip.isLinked();
+
+        if (const auto parameter = getAutomationClipParameter (clip))
+            info.automates = getParameterRef (*parameter);
 
         if (auto* audio = dynamic_cast<te::AudioClipBase*> (&clip))
         {

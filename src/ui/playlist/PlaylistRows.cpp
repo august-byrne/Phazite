@@ -259,6 +259,7 @@ void Playlist::rebuildClips()
             }
 
             component->showClip (clip);
+            showCurveOf (*component); // an automation clip's
             kept.add (component);
             keptFor[clip.id] = component;
         }
@@ -300,6 +301,8 @@ void Playlist::updateClips()
         const auto row = getRowOf (component->getInfo().track);
         component->showLook (row >= 0 ? rows[(size_t) row].track.colour : juce::Colours::grey, selection.isSelected (component->getClip()));
     }
+
+    updateClipCurves(); // drawn in their clips' ink
 }
 
 juce::Rectangle<int> Playlist::getClipBounds (const ClipInfo& clip) const

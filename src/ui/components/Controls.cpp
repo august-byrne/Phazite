@@ -259,6 +259,12 @@ void ParameterAttachment::showMenu()
                       if (safeSlider != nullptr)
                           showAutomationLane (handle);
                   });
+    menu.addItem ("Create Automation Clip",
+                  [this, safeSlider]
+                  {
+                      if (safeSlider != nullptr)
+                          createAutomationClip (handle);
+                  });
     menu.addItem ("Clear Automation", isAutomated (handle), false,
                   [this, safeSlider]
                   {

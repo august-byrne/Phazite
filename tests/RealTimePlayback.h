@@ -31,6 +31,10 @@ public:
         audioIO.prepareToPlay (sampleRate, blockSize);
         deviceManager.dispatchPendingUpdates();
 
+        // Tracktion hears of the device in messages of its own, after another test's playback closed its device, and
+        // rebuilds an Edit's playback then: a transport started before it stops again.
+        dispatchPendingMessages();
+
         audioThread = std::thread (
             [this, &audioIO]
             {
