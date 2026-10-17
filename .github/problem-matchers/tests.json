@@ -1,0 +1,35 @@
+{
+  "problemMatcher": [
+    {
+      "owner": "doctest-linux",
+      "pattern": [
+        {
+          "regexp": "^(.+?):(\\d+): (?:FATAL )?ERROR: (.*)$",
+          "file": 1,
+          "line": 2,
+          "message": 3
+        }
+      ]
+    },
+    {
+      "owner": "doctest-windows",
+      "pattern": [
+        {
+          "regexp": "^(.+?)\\((\\d+)\\): (?:FATAL )?ERROR: (.*)$",
+          "file": 1,
+          "line": 2,
+          "message": 3
+        }
+      ]
+    },
+    {
+      "owner": "sanitizers",
+      "pattern": [
+        {
+          "regexp": "^SUMMARY: ((?:Address|Thread|UndefinedBehavior|Leak)Sanitizer: .*)$",
+          "message": 1
+        }
+      ]
+    }
+  ]
+}
