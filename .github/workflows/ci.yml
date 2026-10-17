@@ -108,6 +108,13 @@ jobs:
         run: sudo sysctl vm.mmap_rnd_bits=28
 
       - name: Test
+        shell: bash # with pipefail: the step fails when the tests do
         run: |
           echo "::add-matcher::.github/problem-matchers/tests.json"
-          ctest --preset ${{ matrix.preset }}
+          ctest --preset ${{ matrix.preset }} 2>&1 | tee "$RUNNER_TEMP/tests.log"
+
+      # Each sanitizer report whole, every frame of every stack, as one annotation: the API serves annotations without a
+      # login, unlike the log, and the matchers' annotations of single frames stop at ten a step.
+      - name: Sanitizer reports
+        if: failure() && (matrix.preset == 'linux-asan' || matrix.preset == 'linux-tsan')
+        run: sh tools/ci-sanitizer-reports.sh "$RUNNER_TEMP/tests.log"
