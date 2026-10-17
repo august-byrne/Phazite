@@ -107,6 +107,10 @@ namespace GraphTint
 // warning color.
 inline constexpr float attentionTint = 0.35f;
 
+// The accent color's alpha behind something selected: a device's slot in the mixer, or a browser row while the browser
+// hasn't the keyboard focus.
+inline constexpr float selectionWash = 0.3f;
+
 // The playhead's alpha while it shows the notes being edited playing in a linked clip elsewhere in the song, rather
 // than the song's own position.
 inline constexpr float linkedPlayheadAlpha = 0.5f;

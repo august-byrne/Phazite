@@ -362,6 +362,35 @@ TEST_CASE ("A duplicated track's containers play rack types of their own, which 
     CHECK (phazite::getModulations (context, copiedGain).size() == 2);
 }
 
+TEST_CASE ("The master's effects group into a container too, whose macros' track is the master's")
+{
+    Song song;
+    auto& context = song.context;
+
+    for (const auto* effect : { "phaziteEq", "phaziteLimiter" })
+        phazite::addEffect (context, {}, song.find (effect));
+
+    const auto master = phazite::getEffects (context, {});
+    REQUIRE (master.size() >= 2);
+    const auto eq = master[master.size() - 2].id, limiter = master.back().id;
+    const auto container = phazite::groupIntoContainer (context, { eq, limiter });
+    REQUIRE (container.isValid());
+
+    const auto after = phazite::getEffects (context, {});
+    CHECK (after.back().id == container);
+    CHECK (after.back().isContainer);
+    CHECK (phazite::getContainerDevices (context, container).size() == 2);
+
+    const auto macro = phazite::getContainerMacros (context, container)[0];
+    CHECK (macro.track == phazite::getMasterTrack (context));
+    CHECK (phazite::canModulate (context, macro.id, { eq, "band4Gain" }));
+
+    phazite::ungroupContainer (context, container);
+    const auto back = phazite::getEffects (context, {});
+    CHECK (back[back.size() - 2].id == eq);
+    CHECK (back.back().id == limiter);
+}
+
 TEST_CASE ("Group into Container and Ungroup Container act on the selected devices, which are selected on their own")
 {
     Song song;

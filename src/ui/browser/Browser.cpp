@@ -156,7 +156,7 @@ struct Browser::Node : public juce::TreeViewItem
         // The selected row, in the accent color while the tree has the keyboard focus.
         if (isSelected())
         {
-            g.setColour (focused ? p.accent : p.accent.withAlpha (0.3f));
+            g.setColour (focused ? p.accent : p.accent.withAlpha (selectionWash));
             g.fillRoundedRectangle (area.toFloat().reduced (1.0f), cornerRadius);
         }
 

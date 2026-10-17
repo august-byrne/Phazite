@@ -136,7 +136,7 @@ struct DeviceSlots::Slot : public juce::Component
     {
         if (owner.context.getSongSelection().isSelected (shown.id))
         {
-            g.setColour (getPalette (*this).accent.withAlpha (0.3f));
+            g.setColour (getPalette (*this).accent.withAlpha (selectionWash));
             g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
         }
     }
