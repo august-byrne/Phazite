@@ -28,7 +28,7 @@ Replacing a part of the engine outright is a separate decision, made one capabil
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** fifteen scenarios read no files and use none of the code Phazite is replacing: one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), built-in effects with a send, automation with an LFO, automation clips sweeping the EQ and fading a volume (step 2.2), every kind of modulator and a macro moving the EQ (step 2.3), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), and one for each of Phazite's own devices so far (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
+- **Guards:** fifteen scenarios read no files and use none of the code Phazite is replacing: one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), built-in effects with a send, automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2, automation clips until 2026-10-17), every kind of modulator and a macro moving the EQ (step 2.3), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), and one for each of Phazite's own devices so far (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
 
 ## Results (Windows Debug)
 
@@ -42,7 +42,7 @@ The first column covers the warm-up after playback starts (0.5 s for every scena
 | Volume automation and an LFO on pan | 2 allocations | 0 |
 | A tone through a bus, with a send to a reverb return, into the loudness meter | 6 allocations | 0 |
 | Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |
-| Automation clips sweeping Phazite's EQ and fading a track's volume | 5 allocations | 0 |
+| Lanes sweeping Phazite's EQ, a cycle a beat, and fading a track's volume | 3 allocations | 0 |
 | Every kind of modulator, and a macro, moving Phazite's EQ | 3 allocations | 0 |
 | A container of Phazite's EQ and compressor at half mix, a macro and the track's LFO turning them | 3 allocations | 0 |
 | Phazite's compressor, ducked by another track at 70 % mix, with its meters read | 4 allocations | 0 |

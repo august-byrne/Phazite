@@ -137,16 +137,17 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
     // Loads on this, the message thread: Tracktion's EditLoader would use a background thread.
     const auto sourceFile = useAutosave ? autosaveFile : projectFile;
     auto state = te::loadEditFromFile (engine, sourceFile, readSavedID (sourceFile));
+    const auto savedVersion = getSchemaVersion (state);
 
     // Projects saved by an earlier Phazite are upgraded before the Edit is made; a newer Phazite's can't be read.
     if (! migrateToCurrentSchema (state))
     {
         error = "The project file " + projectFile.getFullPathName() + " was saved by a newer version of Phazite (project format "
-                + juce::String (getSchemaVersion (state)) + "). Update Phazite to open it.";
+                + juce::String (savedVersion) + "). Update Phazite to open it.";
         return {};
     }
 
-    auto edit = createEditFromState (engine, state, projectFile);
+    auto edit = createEditFromState (engine, state, projectFile, savedVersion);
 
     if (edit == nullptr)
     {

@@ -167,7 +167,7 @@ private:
     std::unique_ptr<ModulationDrag> modulationDrag; // while a knob's ring is dragged
 
     void showRange (const ParameterHandle&);
-    void showMenu(); // a right-click's: Automate, Create Automation Clip, Clear Automation, and Modulate
+    void showMenu(); // a right-click's: Automate, Clear Automation, and Modulate
 };
 
 // Links a combo box to a parameter of one of Phazite's devices whose value picks one of its choices: the box lists

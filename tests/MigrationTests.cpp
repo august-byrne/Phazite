@@ -323,7 +323,7 @@ TEST_CASE ("A version 2 project gets an ID for each note, 1 and up in each clip,
     CHECK (state.isEquivalentTo (expected));
 }
 
-TEST_CASE ("A version 3 project, which can have no automation lanes, becomes version 4 with nothing else changed")
+TEST_CASE ("A version 3 project, which can have no automation lanes, becomes the current version with nothing else changed")
 {
     const auto* version3 = R"(<EDIT><PHAZITE schemaVersion="3"/>
         <TRACK id="1003" automationMode="latch">
@@ -334,10 +334,11 @@ TEST_CASE ("A version 3 project, which can have no automation lanes, becomes ver
     auto state = juce::ValueTree::fromXml (version3);
     REQUIRE (state.isValid());
     REQUIRE (phazite::migrateToCurrentSchema (state));
-    CHECK (phazite::getSchemaVersion (state) == 4);
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
 
     auto expected = juce::ValueTree::fromXml (version3);
-    expected.getChildWithName (phazite::schema::PHAZITE).setProperty (phazite::schema::schemaVersion, 4, nullptr);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
     CHECK (state.isEquivalentTo (expected));
 }
 
@@ -454,4 +455,119 @@ TEST_CASE ("An old project opens upgraded, without unsaved changes or undo steps
     CHECK (restored->hasUnsavedChanges());
     REQUIRE (restored->save().wasOk());
     checkSavedInCurrentFormat();
+}
+
+TEST_CASE ("A version 4 project's saved state becomes the current version with nothing else changed")
+{
+    // Its automation clips are converted once the Edit is made (the next test): the saved state itself stays.
+    const auto* version4 = R"(<EDIT><PHAZITE schemaVersion="4"/>
+        <TRACK id="1003"><PHAZITELANE device="1004" parameter="volume" height="48"/>
+          <PLUGIN type="volume" id="1004" volume="0.5"/>
+        </TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version4);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
+
+    auto expected = juce::ValueTree::fromXml (version4);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}
+
+TEST_CASE ("A version 4 project's automation clips become their parameters' own automation, as they played")
+{
+    auto& engine = phazite::test::getEngine();
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    juce::File file;
+    float masterValueSetByHand = 0.0f;
+
+    // A project as version 4 saved it: on a track, a MIDI clip whose curve set the track's volume from beat 4 to beat 12,
+    // over volume automation of the track's own; and on a track named Automation, one that set the master's volume from
+    // beat 2 to beat 8. Their curves count in beats from the clips' starts.
+    {
+        auto created = phazite::Project::create (engine, temp.folder, "Clips", error);
+        INFO (error.toStdString());
+        REQUIRE (created != nullptr);
+        file = created->getFile();
+        auto& edit = created->getEdit();
+        auto& tempo = edit.tempoSequence;
+
+        auto* track = dynamic_cast<te::AudioTrack*> (phazite::insertTrack (edit, nullptr, nullptr));
+        auto* holder = dynamic_cast<te::AudioTrack*> (phazite::insertTrack (edit, nullptr, nullptr));
+        REQUIRE (track != nullptr);
+        REQUIRE (holder != nullptr);
+        track->setName ("Bass");
+        holder->setName ("Automation");
+
+        auto& volume = *track->getVolumePlugin()->volParam;
+        volume.getCurve().addPoint (tempo.toTime (te::BeatPosition()), 0.3f, 0.0f, nullptr);
+        volume.getCurve().addPoint (tempo.toTime (te::BeatPosition::fromBeats (16.0)), 0.3f, 0.0f, nullptr);
+
+        const auto addClip =
+            [&tempo] (te::AudioTrack& on, te::AutomatableParameter& parameter, double from, double to, float first, float last)
+        {
+            const te::BeatRange range { te::BeatPosition::fromBeats (from), te::BeatPosition::fromBeats (to) };
+            auto clip = on.insertMIDIClip (tempo.toTime (range), nullptr);
+            REQUIRE (clip != nullptr);
+            auto* list = clip->getAutomationCurveList (true);
+            REQUIRE (list != nullptr);
+            const auto modifier = list->addCurve (parameter);
+            REQUIRE (modifier != nullptr);
+            auto& curve = modifier->getCurve (te::CurveModifierType::absolute).curve;
+            curve.addPoint (te::BeatPosition(), first, 0.0f, nullptr);
+            curve.addPoint (te::BeatPosition::fromBeats (to - from), last, 0.0f, nullptr);
+        };
+
+        auto& master = *edit.getMasterVolumePlugin()->volParam;
+        masterValueSetByHand = master.getCurrentBaseValue();
+        addClip (*track, volume, 4.0, 12.0, 0.2f, 0.9f);
+        addClip (*holder, master, 2.0, 8.0, 0.5f, 0.7f);
+        phazite::test::settle();
+        REQUIRE (created->save().wasOk());
+    }
+
+    auto xml = phazite::test::readXml (file);
+    auto* phaziteXml = xml->getChildByName ("PHAZITE");
+    REQUIRE (phaziteXml != nullptr);
+    phaziteXml->setAttribute ("schemaVersion", 4);
+    REQUIRE (xml->writeTo (file));
+
+    auto project = openProject (file); // settles
+    auto& edit = project->getEdit();
+    const auto& tempo = edit.tempoSequence;
+    const auto valueAt = [&tempo] (const te::AutomatableParameter& parameter, double beat)
+    { return parameter.getCurve().getValueAt (tempo.toTime (te::BeatPosition::fromBeats (beat)), -1.0f); };
+
+    // No clip holds a curve now, and the Automation track they left empty is gone.
+    for (auto* each : te::getAudioTracks (edit))
+    {
+        CHECK (each->getName() != juce::String ("Automation"));
+
+        for (auto* clip : each->getClips())
+            CHECK_FALSE (
+                clip->state.getChildWithName (te::IDs::AUTOMATIONCURVES).getChildWithName (te::IDs::AUTOMATIONCURVEMODIFIER).isValid());
+    }
+
+    // The track's volume plays its own automation before and after the clip, and the clip's curve where it was.
+    auto& bass = findTrack (edit, "Bass");
+    const auto& volume = *bass.getVolumePlugin()->volParam;
+    CHECK (valueAt (volume, 2.0) == doctest::Approx (0.3f));
+    CHECK (valueAt (volume, 4.01) == doctest::Approx (0.2f).epsilon (0.01)); // just after the jump at its start
+    CHECK (valueAt (volume, 8.0) == doctest::Approx (0.55f));
+    CHECK (valueAt (volume, 11.9) == doctest::Approx (0.89f).epsilon (0.01));
+    CHECK (valueAt (volume, 14.0) == doctest::Approx (0.3f));
+    CHECK (volume.getModifiers().isEmpty()); // no clip's curve is assigned to it any more
+    CHECK (bass.getVolumePlugin()->state.getChildWithName (te::IDs::MODIFIERASSIGNMENTS).getNumChildren() == 0);
+
+    // The master's volume: the value set by hand outside the clip, the clip's curve within it.
+    const auto& master = *edit.getMasterVolumePlugin()->volParam;
+    CHECK (valueAt (master, 1.0) == doctest::Approx (masterValueSetByHand));
+    CHECK (valueAt (master, 5.0) == doctest::Approx (0.6f));
+    CHECK (valueAt (master, 9.0) == doctest::Approx (masterValueSetByHand));
+
+    // As every upgrade: the same song, with nothing to save or undo.
+    CHECK_FALSE (project->hasUnsavedChanges());
+    CHECK_FALSE (edit.getUndoManager().canUndo());
 }

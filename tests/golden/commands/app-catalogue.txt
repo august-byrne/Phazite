@@ -48,7 +48,6 @@ track.addReturn
 device.group | ctrl + G
 device.ungroup | ctrl + shift + G
 automation.automateLastTouched | ctrl + shift + A
-automation.createClip
 automation.showLanes | A
 automation.raisePoints | cursor up
 automation.lowerPoints | cursor down

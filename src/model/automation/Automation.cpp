@@ -12,23 +12,10 @@ namespace phazite
 {
 namespace
 {
-    // Where a curve's beat 0 is in the song: the song's start for a parameter's own curve, the clip's content start for
-    // an automation clip's (as its notes are placed).
-    BeatPosition getOrigin (const CurveAccess& access)
+    // Where a curve keeps a song beat: in seconds, as track automation is, or in beats. Never before the song's start.
+    te::EditPosition toCurvePosition (const te::AutomationCurve& curve, BeatPosition beat)
     {
-        if (access.clip == nullptr)
-            return {};
-
-        auto& edit = access.clip->edit;
-        return fromTracktion (edit.tempoSequence.toBeats (access.clip->getTimeOfContentBeat (te::BeatPosition())));
-    }
-
-    // Where a curve keeps a song beat: in seconds, as track automation is, or in beats from its origin. Never before
-    // the origin.
-    te::EditPosition toCurvePosition (const CurveAccess& access, BeatPosition beat)
-    {
-        const auto& curve = *access.curve;
-        const auto position = te::BeatPosition::fromBeats (std::max (0.0, (beat - getOrigin (access)).inBeats()));
+        const auto position = te::BeatPosition::fromBeats (std::max (0.0, beat.inBeats()));
 
         if (curve.timeBase == te::AutomationCurve::TimeBase::beats)
             return position;
@@ -36,11 +23,9 @@ namespace
         return curve.edit.tempoSequence.toTime (position);
     }
 
-    BeatPosition getPointBeat (const CurveAccess& access, int index)
+    BeatPosition getPointBeat (const te::AutomationCurve& curve, int index)
     {
-        const auto& curve = *access.curve;
-        return getOrigin (access)
-               + (fromTracktion (te::toBeats (curve.getPointPosition (index), curve.edit.tempoSequence)) - BeatPosition());
+        return fromTracktion (te::toBeats (curve.getPointPosition (index), curve.edit.tempoSequence));
     }
 
     float limitValue (const te::AutomatableParameter& parameter, float value)
@@ -68,52 +53,59 @@ namespace
             parameter.updateToFollowCurve (transport.getPosition());
     }
 
-    // An automation clip's curve, if it has one for a parameter's ID.
-    te::AutomationCurveModifier::Ptr findClipCurve (te::Clip& clip, const juce::String& parameterID)
+    //==========================================================================
+    // Version 4's automation clips (convertAutomationClips()): a MIDI clip that held a curve rather than notes.
+    bool isVersion4AutomationClip (const te::Clip& clip)
     {
-        // Asking a clip for its curve list adds an empty one to its state, as an undo step: only one that has curves.
-        if (clip.state.getChildWithName (te::IDs::AUTOMATIONCURVES).getNumChildren() == 0)
-            return {};
-
-        if (auto* list = clip.getAutomationCurveList (false))
-            for (auto& item : list->getItems())
-                if (item->getDestID().paramID == parameterID)
-                    return item;
-
-        return {};
+        return dynamic_cast<const te::MidiClip*> (&clip) != nullptr
+               && clip.state.getChildWithName (te::IDs::AUTOMATIONCURVES).getChildWithName (te::IDs::AUTOMATIONCURVEMODIFIER).isValid();
     }
 
-    // An automation clip's aliases share its curve (Tracktion links their notes, not their curves): theirs become the
-    // same as its own, in the same undo step.
-    void copyToAliases (const CurveAccess& access)
+    // A clip's curve becomes the parameter's own over where the clip plays, without undo steps.
+    void convertClipCurve (const te::Clip& clip, const te::AutomationCurve& clipCurve, te::AutomatableParameter& parameter)
     {
-        if (access.clip == nullptr || ! access.clip->isLinked())
+        if (clipCurve.getNumPoints() == 0)
             return;
 
-        const auto& source = *access.curve;
-        auto* undoManager = undoManagerOf (*access.parameter);
+        auto& tempo = clip.edit.tempoSequence;
+        auto& own = parameter.getCurve();
 
-        for (auto* alias : access.clip->edit.findClipsInLinkGroup (access.clip->getLinkGroupID()))
-        {
-            if (alias == access.clip)
-                continue;
+        // Where the clip plays, and where its curve's beat 0 is (its content's start), in song beats.
+        const auto times = clip.getPosition().time;
+        const auto start = tempo.toBeats (times.getStart()), end = tempo.toBeats (times.getEnd());
+        const auto origin = tempo.toBeats (clip.getTimeOfContentBeat (te::BeatPosition()));
+        const auto valueOfClipAt = [&clipCurve, origin] (te::BeatPosition beat)
+        { return clipCurve.getValueAt (te::BeatPosition::fromBeats ((beat - origin).inBeats()), clipCurve.getPointValue (0)); };
 
-            if (const auto modifier = findClipCurve (*alias, access.parameter->paramID))
-            {
-                auto& curve = modifier->getCurve (te::CurveModifierType::absolute).curve;
-                curve.clear (undoManager);
+        // Before and after the clip, the parameter played its own curve, or its value.
+        const auto value = parameter.getCurrentBaseValue();
+        const auto before = own.getValueAt (times.getStart(), value), after = own.getValueAt (times.getEnd(), value);
 
-                for (int i = 0; i < source.getNumPoints(); ++i)
-                    curve.addPoint (source.getPointPosition (i), source.getPointValue (i), source.getPointCurve (i), undoManager);
-            }
-        }
-    }
+        for (auto i = own.getNumPoints(); --i >= 0;)
+            if (times.containsInclusive (te::toTime (own.getPointPosition (i), tempo)))
+                own.removePoint (i, nullptr);
 
-    // After an edit of a curve: its aliases' curves, and the value it plays.
-    void curveEdited (const CurveAccess& access)
-    {
-        copyToAliases (access);
-        followCurve (*access.parameter);
+        const auto add = [&own] (te::BeatPosition beat, float pointValue, float bend)
+        { own.addPoint (toCurvePosition (own, fromTracktion (beat)), pointValue, bend, nullptr); };
+
+        // Jumps to the clip's curve at its start, which bends on to its next point as it did, and back at its end.
+        const auto beatOf = [&clipCurve, &tempo, origin] (int index)
+        { return origin + (te::toBeats (clipCurve.getPointPosition (index), tempo) - te::BeatPosition()); };
+        auto bendAtStart = 0.0f;
+
+        for (int i = 0; i < clipCurve.getNumPoints(); ++i)
+            if (beatOf (i) <= start)
+                bendAtStart = clipCurve.getPointCurve (i);
+
+        add (start, before, 0.0f);
+        add (start, valueOfClipAt (start), bendAtStart);
+
+        for (int i = 0; i < clipCurve.getNumPoints(); ++i)
+            if (const auto beat = beatOf (i); beat > start && beat < end)
+                add (beat, clipCurve.getPointValue (i), clipCurve.getPointCurve (i));
+
+        add (end, valueOfClipAt (end), 0.0f);
+        add (end, after, 0.0f);
     }
 
     // Indices of points that are there, each once, in order.
@@ -335,51 +327,21 @@ juce::String getParameterName (const te::AutomatableParameter& parameter)
 }
 
 //==============================================================================
-CurveRef CurveAccess::getRef() const
-{
-    return { parameter != nullptr ? getParameterRef (*parameter) : ParameterRef(), clip != nullptr ? getClipID (*clip) : ClipID() };
-}
-
-CurveAccess getOwnCurve (te::AutomatableParameter& parameter)
-{
-    return { &parameter, &parameter.getCurve(), nullptr, {} };
-}
-
-std::optional<CurveAccess> findCurve (const te::Edit& edit, const CurveRef& ref)
-{
-    const auto parameter = findParameter (edit, ref.parameter);
-
-    if (parameter == nullptr)
-        return {};
-
-    if (! ref.clip.isValid())
-        return getOwnCurve (*parameter);
-
-    auto* clip = te::findClipForID (edit, toTracktion (ref.clip));
-    const auto modifier = clip != nullptr ? findClipCurve (*clip, parameter->paramID) : nullptr;
-
-    if (modifier == nullptr)
-        return {};
-
-    return CurveAccess { parameter, &modifier->getCurve (te::CurveModifierType::absolute).curve, clip, modifier };
-}
-
-//==============================================================================
-std::vector<AutomationPoint> getPoints (const CurveAccess& access)
+std::vector<AutomationPoint> getPoints (const te::AutomatableParameter& parameter)
 {
     std::vector<AutomationPoint> points;
-    const auto& curve = *access.curve;
+    const auto& curve = parameter.getCurve();
 
     for (int i = 0; i < curve.getNumPoints(); ++i)
-        points.push_back ({ getPointBeat (access, i), curve.getPointValue (i), curve.getPointCurve (i) });
+        points.push_back ({ getPointBeat (curve, i), curve.getPointValue (i), curve.getPointCurve (i) });
 
     return points;
 }
 
-std::vector<float> getValues (const CurveAccess& access, BeatRange range, int numValues)
+std::vector<float> getValues (const te::AutomatableParameter& parameter, BeatRange range, int numValues)
 {
     std::vector<float> values;
-    const auto& curve = *access.curve;
+    const auto& curve = parameter.getCurve();
 
     if (curve.getNumPoints() == 0 || numValues <= 0)
         return values;
@@ -389,44 +351,43 @@ std::vector<float> getValues (const CurveAccess& access, BeatRange range, int nu
 
     for (int i = 0; i < numValues; ++i)
         values.push_back (
-            curve.getValueAt (toCurvePosition (access, range.getStart() + step * (double) i), access.parameter->getCurrentBaseValue()));
+            curve.getValueAt (toCurvePosition (curve, range.getStart() + step * (double) i), parameter.getCurrentBaseValue()));
 
     return values;
 }
 
-int addPoint (const CurveAccess& access, AutomationPoint point)
+int addPoint (te::AutomatableParameter& parameter, AutomationPoint point)
 {
-    const auto index = access.curve->addPoint (toCurvePosition (access, point.beat), limitValue (*access.parameter, point.value),
-                                               limitCurve (point.curve), undoManagerOf (*access.parameter));
-    curveEdited (access);
+    auto& curve = parameter.getCurve();
+    const auto index = curve.addPoint (toCurvePosition (curve, point.beat), limitValue (parameter, point.value), limitCurve (point.curve),
+                                       undoManagerOf (parameter));
+    followCurve (parameter);
     return index;
 }
 
-BeatDuration movePoints (const CurveAccess& access, const std::vector<int>& requested, BeatDuration distance, float valueChange)
+BeatDuration movePoints (te::AutomatableParameter& parameter, const std::vector<int>& requested, BeatDuration distance, float valueChange)
 {
-    auto& curve = *access.curve;
-    const auto& parameter = *access.parameter;
+    auto& curve = parameter.getCurve();
     const auto indices = getValidIndices (curve, requested);
 
     if (indices.empty())
         return {};
 
-    const auto points = getPoints (access);
+    const auto points = getPoints (parameter);
     std::vector<bool> moving (points.size(), false);
 
     for (const auto index : indices)
         moving[(size_t) index] = true;
 
-    // The distance, cut so that no point passes one that stays or goes before the curve's origin (the song's start, or
-    // an automation clip's content start); the change, so that every value stays in range.
+    // The distance, cut so that no point passes one that stays or goes before the song's start; the change, so that every
+    // value stays in range.
     auto earliest = -std::numeric_limits<double>::max(), latest = std::numeric_limits<double>::max();
     auto lowest = -std::numeric_limits<float>::max(), highest = std::numeric_limits<float>::max();
-    const auto origin = getOrigin (access).inBeats();
 
     for (const auto index : indices)
     {
         const auto& point = points[(size_t) index];
-        auto before = origin;
+        auto before = 0.0;
 
         for (auto i = index - 1; i >= 0; --i)
         {
@@ -460,7 +421,7 @@ BeatDuration movePoints (const CurveAccess& access, const std::vector<int>& requ
     const auto move = [&] (int index)
     {
         const auto& point = points[(size_t) index];
-        curve.setPointPosition (index, toCurvePosition (access, point.beat + BeatDuration::fromBeats (beats)), undoManager);
+        curve.setPointPosition (index, toCurvePosition (curve, point.beat + BeatDuration::fromBeats (beats)), undoManager);
         curve.setPointValue (index, limitValue (parameter, point.value + change), undoManager);
     };
 
@@ -469,63 +430,63 @@ BeatDuration movePoints (const CurveAccess& access, const std::vector<int>& requ
     else
         std::for_each (indices.begin(), indices.end(), move);
 
-    curveEdited (access);
+    followCurve (parameter);
     return BeatDuration::fromBeats (beats);
 }
 
-void setCurve (const CurveAccess& access, int index, float curveValue)
+void setCurve (te::AutomatableParameter& parameter, int index, float curveValue)
 {
-    if (juce::isPositiveAndBelow (index, access.curve->getNumPoints()))
+    if (auto& curve = parameter.getCurve(); juce::isPositiveAndBelow (index, curve.getNumPoints()))
     {
-        access.curve->setCurveValue (index, limitCurve (curveValue), undoManagerOf (*access.parameter));
-        curveEdited (access);
+        curve.setCurveValue (index, limitCurve (curveValue), undoManagerOf (parameter));
+        followCurve (parameter);
     }
 }
 
-void deletePoints (const CurveAccess& access, const std::vector<int>& requested)
+void deletePoints (te::AutomatableParameter& parameter, const std::vector<int>& requested)
 {
-    const auto indices = getValidIndices (*access.curve, requested);
+    auto& curve = parameter.getCurve();
+    const auto indices = getValidIndices (curve, requested);
 
     for (auto i = indices.rbegin(); i != indices.rend(); ++i)
-        access.curve->removePoint (*i, undoManagerOf (*access.parameter));
+        curve.removePoint (*i, undoManagerOf (parameter));
 
-    curveEdited (access);
+    followCurve (parameter);
 }
 
-void replacePoints (const CurveAccess& access, BeatRange range, const std::vector<AutomationPoint>& points)
+void replacePoints (te::AutomatableParameter& parameter, BeatRange range, const std::vector<AutomationPoint>& points)
 {
-    auto& curve = *access.curve;
-    auto* undoManager = undoManagerOf (*access.parameter);
+    auto& curve = parameter.getCurve();
+    auto* undoManager = undoManagerOf (parameter);
 
     for (auto i = curve.getNumPoints(); --i >= 0;)
-        if (const auto beat = getPointBeat (access, i); beat >= range.getStart() && beat <= range.getEnd())
+        if (const auto beat = getPointBeat (curve, i); beat >= range.getStart() && beat <= range.getEnd())
             curve.removePoint (i, undoManager);
 
     // Each after any at its beat already, so that two at one beat stay in the order given: a jump.
     for (const auto& point : points)
-        curve.addPoint (toCurvePosition (access, point.beat), limitValue (*access.parameter, point.value), limitCurve (point.curve),
-                        undoManager);
+        curve.addPoint (toCurvePosition (curve, point.beat), limitValue (parameter, point.value), limitCurve (point.curve), undoManager);
 
-    curveEdited (access);
+    followCurve (parameter);
 }
 
-std::vector<int> duplicatePoints (const CurveAccess& access, const std::vector<int>& requested, BeatDuration minimumSpan)
+std::vector<int> duplicatePoints (te::AutomatableParameter& parameter, const std::vector<int>& requested, BeatDuration minimumSpan)
 {
-    auto& curve = *access.curve;
+    auto& curve = parameter.getCurve();
     const auto indices = getValidIndices (curve, requested);
 
     if (indices.empty())
         return {};
 
-    const auto points = getPoints (access);
+    const auto points = getPoints (parameter);
     const auto first = points[(size_t) indices.front()].beat, last = points[(size_t) indices.back()].beat;
     const auto span = std::max (last - first, minimumSpan);
-    auto* undoManager = undoManagerOf (*access.parameter);
+    auto* undoManager = undoManagerOf (parameter);
 
     // The copies replace what is after the last original, up to the last copy; a copy that lands on the last original's
     // beat goes after it, a jump.
     for (auto i = curve.getNumPoints(); --i >= 0;)
-        if (const auto beat = getPointBeat (access, i); beat > first + span && beat <= last + span)
+        if (const auto beat = getPointBeat (curve, i); beat > first + span && beat <= last + span)
             curve.removePoint (i, undoManager);
 
     std::vector<int> copies;
@@ -533,143 +494,60 @@ std::vector<int> duplicatePoints (const CurveAccess& access, const std::vector<i
     for (const auto index : indices)
     {
         const auto& point = points[(size_t) index];
-        copies.push_back (curve.addPoint (toCurvePosition (access, point.beat + span), point.value, point.curve, undoManager));
+        copies.push_back (curve.addPoint (toCurvePosition (curve, point.beat + span), point.value, point.curve, undoManager));
     }
 
-    curveEdited (access);
+    followCurve (parameter);
     return copies;
 }
 
 //==============================================================================
-te::AutomatableParameter::Ptr getAutomationClipParameter (const te::Clip& clip)
+void convertAutomationClips (te::Edit& edit)
 {
-    if (! isAutomationClip (clip))
-        return {};
+    // Earliest first, so that where two set one parameter at once, the later one's curve stays.
+    juce::Array<te::Clip*> clips;
 
-    // The first curve's parameter.
-    for (const auto& modifier : clip.state.getChildWithName (te::IDs::AUTOMATIONCURVES))
+    for (auto* track : te::getClipTracks (edit))
+        for (auto* clip : track->getClips())
+            if (isVersion4AutomationClip (*clip))
+                clips.add (clip);
+
+    std::stable_sort (clips.begin(), clips.end(),
+                      [] (const te::Clip* a, const te::Clip* b) { return a->getPosition().getStart() < b->getPosition().getStart(); });
+
+    juce::Array<te::AudioTrack*> holders;
+    juce::ReferenceCountedArray<te::AutomatableParameter> converted;
+
+    for (auto* clip : clips)
     {
-        const auto device = te::EditItemID::fromProperty (modifier, te::IDs::source);
-        const auto parameterID = modifier[te::IDs::paramID].toString();
-
-        if (const auto found = findParameter (clip.edit, { DeviceID::fromRaw (device.getRawID()), parameterID }))
-            return found;
-    }
-
-    return {};
-}
-
-AutomationTargets::AutomationTargets (const te::Clip& clip)
-{
-    if (isAutomationClip (clip))
-        curves = clip.state.getChildWithName (te::IDs::AUTOMATIONCURVES).createCopy();
-}
-
-void AutomationTargets::setDevice (te::EditItemID from, te::EditItemID to)
-{
-    for (auto curve : curves)
-        if (te::EditItemID::fromProperty (curve, te::IDs::source) == from)
-            to.setProperty (curve, te::IDs::source, nullptr);
-}
-
-void AutomationTargets::restore (te::Clip& clip) const
-{
-    if (! curves.isValid() || dynamic_cast<te::MidiClip*> (&clip) == nullptr)
-        return;
-
-    auto& edit = clip.edit;
-    auto* undoManager = &edit.getUndoManager();
-    auto* list = clip.getAutomationCurveList (true); // so that a curve added below reaches its parameter
-
-    if (list == nullptr)
-        return;
-
-    auto state = clip.state.getChildWithName (te::IDs::AUTOMATIONCURVES);
-
-    for (const auto& saved : curves)
-    {
-        // The clip's curve for the parameter, as Tracktion left it: pointed at another device, or gone.
-        auto current = state.getChildWithProperty (te::IDs::paramID, saved[te::IDs::paramID]);
-
-        if (current.isValid())
+        if (auto* list = clip->getAutomationCurveList (false))
         {
-            if (current[te::IDs::source] != saved[te::IDs::source])
-                current.setProperty (te::IDs::source, saved[te::IDs::source], undoManager); // it moves its assignment
+            for (const auto& modifier : list->getItems())
+            {
+                if (const auto parameter = te::getParameter (*modifier))
+                {
+                    convertClipCurve (*clip, modifier->getCurve (te::CurveModifierType::absolute).curve, *parameter);
+                    parameter->removeModifier (*modifier);
+                    converted.addIfNotAlreadyThere (parameter);
+                }
+            }
         }
-        else
-        {
-            juce::ValueTree holder ("CURVES"), added = saved.createCopy();
-            holder.appendChild (added, nullptr);
-            te::assignNewIDsToAutomationCurveModifiers (edit, holder);
-            holder.removeChild (added, nullptr);
-            state.appendChild (added, undoManager);
-        }
-    }
 
-    // Each curve set its parameter, also one whose device was right already.
-    for (const auto& modifier : list->getItems())
-        if (const auto parameter = te::getParameter (*modifier);
-            parameter != nullptr && ! parameter->getModifiers().contains (modifier.get()))
-            parameter->addModifier (*modifier);
-}
+        if (auto* track = dynamic_cast<te::AudioTrack*> (clip->getTrack()))
+            holders.addIfNotAlreadyThere (track);
 
-void copyAutomationTargets (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers)
-{
-    // The copy's devices are where the original's are in its list, those in its containers as the map says, and its
-    // clips where the original's are in theirs.
-    const auto originalDevices = original.getAllPlugins(), copiedDevices = copy.getAllPlugins();
-    auto* originalClips = dynamic_cast<const te::ClipTrack*> (&original);
-    auto* copiedClips = dynamic_cast<te::ClipTrack*> (&copy);
-
-    if (originalClips != nullptr && copiedClips != nullptr)
-    {
-        const auto& clips = originalClips->getClips();
-        const auto& copies = copiedClips->getClips();
-
-        for (int i = 0; i < clips.size() && i < copies.size(); ++i)
-        {
-            AutomationTargets targets (*clips[i]);
-
-            for (int j = 0; j < originalDevices.size() && j < copiedDevices.size(); ++j)
-                targets.setDevice (originalDevices[j]->itemID, copiedDevices[j]->itemID);
-
-            for (const auto& [from, to] : devicesInContainers)
-                targets.setDevice (from, to);
-
-            targets.restore (*copies[i]);
-        }
-    }
-
-    // A folder's copy holds copies of its tracks, in the same order.
-    const auto originalTracks = original.getAllSubTracks (false), copiedTracks = copy.getAllSubTracks (false);
-
-    for (int i = 0; i < originalTracks.size() && i < copiedTracks.size(); ++i)
-        copyAutomationTargets (*originalTracks[i], *copiedTracks[i], devicesInContainers);
-}
-
-te::MidiClip* createAutomationClip (te::ClipTrack& track, te::AutomatableParameter& parameter, te::BeatRange range, float value)
-{
-    auto& edit = track.edit;
-    auto* clip = track.insertMIDIClip (edit.tempoSequence.toTime (range), nullptr).get();
-
-    if (clip == nullptr)
-        return nullptr;
-
-    auto* list = clip->getAutomationCurveList (true);
-    const auto modifier = list != nullptr ? list->addCurve (parameter) : nullptr;
-
-    if (modifier == nullptr)
-    {
         clip->removeFromParent();
-        return nullptr;
     }
 
-    // A flat line at the value, across the clip.
-    const CurveAccess access { &parameter, &modifier->getCurve (te::CurveModifierType::absolute).curve, clip, modifier };
-    const auto start = fromTracktion (range.getStart());
-    addPoint (access, { start, value });
-    addPoint (access, { start + fromTracktion (range.getLength()), value });
-    return clip;
+    // The tracks Phazite made for the master's and folders' automation clips, which hold nothing now.
+    for (auto* track : holders)
+        if (track->getName() == "Automation" && track->getClips().isEmpty() && getDevices (*track).isEmpty())
+            edit.deleteTrack (track);
+
+    for (auto* parameter : converted)
+        followCurve (*parameter);
+
+    edit.getUndoManager().clearUndoHistory();
 }
 
 //==============================================================================
@@ -799,8 +677,7 @@ bool isAutomatedValue (const juce::ValueTree& tree, const juce::Identifier& prop
 
     const auto parameters = getParametersStoredIn (tree, property);
 
-    // Its own curve, or what else sets it as the song plays: an automation clip's curve (or later a modulator), assigned
-    // to it in its device's state.
+    // Its own curve, or what else moves it as the song plays: a modulator, assigned to it in its device's state.
     for (const auto& child : tree)
         if (child.hasType (te::IDs::AUTOMATIONCURVE) && parameters.contains (child[te::IDs::paramID].toString()))
             return true;
@@ -849,25 +726,25 @@ std::optional<PointSelection> getSelectedPoints (const te::SelectionManager& man
     if (selected == nullptr || edit == nullptr)
         return {};
 
-    const auto access = findCurve (*edit, selected->curve);
+    const auto parameter = findParameter (*edit, selected->parameter);
 
-    if (! access.has_value())
+    if (parameter == nullptr)
         return {};
 
-    auto indices = getValidIndices (*access->curve, selected->indices);
+    auto indices = getValidIndices (parameter->getCurve(), selected->indices);
 
     if (indices.empty())
         return {};
 
-    return PointSelection { *access, std::move (indices) };
+    return PointSelection { parameter, std::move (indices) };
 }
 
-void selectPoints (te::SelectionManager& manager, const CurveAccess& access, const std::vector<int>& indices)
+void selectPoints (te::SelectionManager& manager, const te::AutomatableParameter& parameter, const std::vector<int>& indices)
 {
     if (auto* selected = manager.getFirstItemOfType<SelectedAutomationPoints>())
     {
-        selected->curve = access.getRef();
-        selected->indices = getValidIndices (*access.curve, indices);
+        selected->parameter = getParameterRef (parameter);
+        selected->indices = getValidIndices (parameter.getCurve(), indices);
         manager.sendChangeMessage();
     }
 }

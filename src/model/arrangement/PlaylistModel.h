@@ -8,7 +8,6 @@
 
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
-#include "model/devices/ParameterRef.h"
 
 #include <juce_graphics/juce_graphics.h>
 
@@ -71,8 +70,7 @@ TrackID addTrackAtEnd (ProjectContext&, bool folder);
 enum class ClipType
 {
     midi,
-    audio,
-    automation // its curve sets a parameter while it plays (model/automation/AutomationModel.h: createAutomationClip())
+    audio
 };
 
 enum class FadeShape
@@ -92,9 +90,6 @@ struct ClipInfo
     BeatRange range {}; // where it is in the song
     bool muted = false;
     bool linked = false; // an alias: what it plays is another clip's too
-
-    // An automation clip's parameter, whose curve it holds (CurveRef { automates, id }); none once its device is gone.
-    ParameterRef automates {};
 
     // An audio clip's fades, each as a part of the clip's length (0 to 1), and their shapes.
     double fadeIn = 0.0, fadeOut = 0.0;
@@ -125,7 +120,6 @@ std::vector<NoteShape> getNoteShapes (const ProjectContext&, ClipID);
 // instrument, starting there. Returns it, or an empty ID if nothing could be placed.
 ClipID placeClip (ProjectContext&, TrackID, BeatPosition start, ClipID lastUsed);
 
-// An automation clip on another track sets what it set (model/automation/AutomationModel.h).
 void moveClip (ProjectContext&, ClipID, BeatPosition start, TrackID);
 void trimClipStart (ProjectContext&, ClipID, BeatPosition);
 void trimClipEnd (ProjectContext&, ClipID, BeatPosition);

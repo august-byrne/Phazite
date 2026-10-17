@@ -428,7 +428,6 @@ void ParameterAttachment::showMenu()
     juce::PopupMenu menu;
     menu.addSectionHeader (handle.getName());
     menu.addItem ("Automate", isDevices, false, act ([] (ParameterHandle& h) { showAutomationLane (h); }));
-    menu.addItem ("Create Automation Clip", isDevices, false, act ([] (ParameterHandle& h) { createAutomationClip (h); }));
     menu.addItem ("Clear Automation", isAutomated (handle), false, act ([] (ParameterHandle& h) { clearAutomation (h); }));
 
     // Modulation (docs/design.md, section 10): the modulators of its track, ticked while they modulate it (choosing one

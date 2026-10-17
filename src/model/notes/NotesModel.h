@@ -31,7 +31,7 @@ struct NoteClip
     juce::Colour colour {};       // its notes' color: its track's, as the playlist shows it
 };
 
-// The MIDI clips among these that are still in the song, in the order given; not automation clips, which hold a curve.
+// The MIDI clips among these that are still in the song, in the order given.
 std::vector<NoteClip> getNoteClips (const ProjectContext&, const std::vector<ClipID>&);
 std::optional<NoteClip> getNoteClip (const ProjectContext&, ClipID);
 
@@ -40,8 +40,7 @@ std::optional<NoteClip> getNoteClip (const ProjectContext&, ClipID);
 bool canHoldNotes (const ProjectContext&, TrackID);
 bool hasAudioClips (const ProjectContext&, TrackID);
 
-// A track's MIDI clip at a beat, or else the one nearest to it; nothing for a track without MIDI clips (automation clips
-// don't count).
+// A track's MIDI clip at a beat, or else the one nearest to it; nothing for a track without MIDI clips.
 std::optional<ClipID> getMidiClipNearest (const ProjectContext&, TrackID, BeatPosition);
 
 // A MIDI clip a bar long from a beat, on a track shown without clips, for the first note drawn there; not selected.

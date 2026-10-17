@@ -3,6 +3,12 @@
 //   Version 0: before versions existed (saved up to 2026-10-14): a fixed grid's size as Tracktion's snap level, and key
 //              scales as Tracktion's scale numbers.
 //   Version 1: gridStep, scales by name, and schemaVersion in the Phazite state.
+//   Versions 2 to 4: Phazite's own devices, notes' IDs, automation lanes (Schema.h).
+//   Version 5: no automation clips. Up to version 4, a MIDI clip could hold a curve that set a parameter while it played;
+//              now that curve is the parameter's own automation. Converting it needs the song's tempo, so it is the one
+//              upgrade made on the Edit rather than on the saved state: createEditFromState() makes it for a state saved
+//              before version 5 (model/engine/internal/EngineSetup.h, model/automation/internal/Automation.h:
+//              convertAutomationClips()).
 // A change to what projects save raises schema::currentVersion (Schema.h) and adds a step here.
 #pragma once
 

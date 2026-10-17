@@ -434,7 +434,7 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
     selection.selectOnly (idOf (*song.a));
     selection.selectAutomationPoints (threshold, { 2, 1 });
     CHECK (selection.getTracks().empty()); // points are selected alone
-    CHECK (selection.getSelectedAutomationPoints().curve == phazite::CurveRef (threshold));
+    CHECK (selection.getSelectedAutomationPoints().parameter == threshold);
     CHECK (selection.getSelectedAutomationPoints().indices == std::vector { 1, 2 });
     CHECK (selection.isSelected (threshold, 2));
     CHECK_FALSE (selection.isSelected (threshold, 0));
@@ -461,12 +461,12 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
 
     REQUIRE (registry.invoke ("edit.delete"));
     CHECK (beatsOf (phazite::getAutomationPoints (context, threshold)) == std::vector { 0.0, 2.0, 4.0 });
-    CHECK_FALSE (selection.getSelectedAutomationPoints().curve.isValid());
+    CHECK_FALSE (selection.getSelectedAutomationPoints().parameter.isValid());
 
     // Selecting anything else deselects them.
     selection.selectAutomationPoints (threshold, { 0 });
     selection.selectOnly (idOf (*song.b));
-    CHECK_FALSE (selection.getSelectedAutomationPoints().curve.isValid());
+    CHECK_FALSE (selection.getSelectedAutomationPoints().parameter.isValid());
     CHECK_FALSE (phazite::CommandRegistry::isEnabled (*registry.find ("automation.raisePoints")));
 }
 

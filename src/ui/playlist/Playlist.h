@@ -142,10 +142,7 @@ private:
     void updateLanes();                               // their colors, modes, selected points and curves
     void noteLanes();                                 // after the lanes were built: one shown since the last time scrolls into view
     void showLaneMenu (TrackID, const ParameterRef&); // a lane's right-click menu
-    void showCurveOf (ClipComponent&);                // an automation clip's, while it has its device
-    void updateClipCurves();                          // their colors and points
-    AutomationLaneView* getCurveOf (const ClipComponent&) const;
-    int getRowAt (int y) const; // y in the lanes; -1 below the last row
+    int getRowAt (int y) const;                       // y in the lanes; -1 below the last row
     int getRowOf (TrackID) const;
     int getRowTop (const Row&) const; // where a row is in the lanes now
     bool isInFocus (TrackID) const;   // in focus mode, the rest are made small

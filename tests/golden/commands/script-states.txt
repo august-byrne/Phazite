@@ -49,7 +49,6 @@ after start:
   device.group: off "Group into Container"
   device.ungroup: off "Ungroup Container"
   automation.automateLastTouched: off "Automate Last Touched Parameter"
-  automation.createClip: off "Create Automation Clip"
   automation.showLanes: off "Show Automation"
   automation.raisePoints: off "Raise Automation Points"
   automation.lowerPoints: off "Lower Automation Points"

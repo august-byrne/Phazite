@@ -301,17 +301,12 @@ void Playlist::songChanged (const SongChanges& changes)
     else if (changes.automation)
         updateLanes();
 
-    // Clips are placed in time, and the time line is in beats: a tempo change moves them on it. Automation clips show the
-    // curves of the devices there are.
+    // Clips are placed in time, and the time line is in beats: a tempo change moves them on it.
     if (changes.clips || changes.tempo || changes.devices)
     {
         rebuildClips();
         layOutClips();
-        updateClips(); // and their curves
-    }
-    else if (changes.automation)
-    {
-        updateClipCurves();
+        updateClips();
     }
 
     if (changes.tempo)

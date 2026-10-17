@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Automation's Tracktion side (model/automation/AutomationModel.h), for the model, the app and tests: parameters by their
 // ParameterRefs, the points of a parameter's curve in beats, the lanes a track shows (Schema.h: PHAZITELANE), the selected
-// points as Tracktion's selection manager holds them, automation that keeps its beats when the tempo changes, and the
-// watcher that remembers the parameter touched last and gives recorded automation an undo step of its own. Not for the
-// UI.
+// points as Tracktion's selection manager holds them, automation that keeps its beats when the tempo changes, the
+// watcher that remembers the parameter touched last and gives recorded automation an undo step of its own, and the
+// conversion of the automation clips projects held up to version 4. Not for the UI.
 #pragma once
 
-#include "AutomationClips.h"
 #include "model/automation/AutomationValues.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -38,62 +37,30 @@ bool isMixerControl (const te::Plugin*);
 juce::String getParameterName (const te::AutomatableParameter&);
 
 //==============================================================================
-// A curve (CurveRef): the parameter it sets, and the curve itself, the parameter's own or an automation clip's.
-struct CurveAccess
-{
-    te::AutomatableParameter::Ptr parameter;
-    te::AutomationCurve* curve = nullptr;
-    te::Clip* clip = nullptr;                  // an automation clip's curve: positioned from the clip's content start
-    te::AutomationCurveModifier::Ptr modifier; // and what holds it
-
-    CurveRef getRef() const;
-};
-
-std::optional<CurveAccess> findCurve (const te::Edit&, const CurveRef&);
-CurveAccess getOwnCurve (te::AutomatableParameter&); // the parameter's own
-
-// A curve as points in song beats, and edits of it. They change the Edit through its undo manager without beginning a
-// step: they join the caller's. Each keeps the parameter's value at the playhead in step with the curve while the song
-// isn't playing, and an automation clip's aliases' curves the same as its own.
-std::vector<AutomationPoint> getPoints (const CurveAccess&);
-std::vector<float> getValues (const CurveAccess&, BeatRange, int numValues); // getAutomationValues()
-int addPoint (const CurveAccess&, AutomationPoint);
-BeatDuration movePoints (const CurveAccess&, const std::vector<int>& indices, BeatDuration, float valueChange);
-void setCurve (const CurveAccess&, int index, float curve);
-void deletePoints (const CurveAccess&, const std::vector<int>& indices);
-void replacePoints (const CurveAccess&, BeatRange, const std::vector<AutomationPoint>&);
+// A parameter's curve as points in song beats, and edits of it. They change the Edit through its undo manager without
+// beginning a step: they join the caller's. Each keeps the parameter's value at the playhead in step with the curve
+// while the song isn't playing.
+std::vector<AutomationPoint> getPoints (const te::AutomatableParameter&);
+std::vector<float> getValues (const te::AutomatableParameter&, BeatRange, int numValues); // getAutomationValues()
+int addPoint (te::AutomatableParameter&, AutomationPoint);
+BeatDuration movePoints (te::AutomatableParameter&, const std::vector<int>& indices, BeatDuration, float valueChange);
+void setCurve (te::AutomatableParameter&, int index, float curve);
+void deletePoints (te::AutomatableParameter&, const std::vector<int>& indices);
+void replacePoints (te::AutomatableParameter&, BeatRange, const std::vector<AutomationPoint>&);
 
 // Copies points right after themselves, as Duplicate does: each copy as far after its original as the points span (a
 // grid step at least, for one point), replacing the points where they land. Returns the copies' indices.
-std::vector<int> duplicatePoints (const CurveAccess&, const std::vector<int>& indices, BeatDuration minimumSpan);
+std::vector<int> duplicatePoints (te::AutomatableParameter&, const std::vector<int>& indices, BeatDuration minimumSpan);
 
 //==============================================================================
-// Automation clips (AutomationClips.h: isAutomationClip()): MIDI clips without notes that hold one absolute automation
-// curve (Tracktion's clip automation), which sets its parameter while the clip plays.
-te::AutomatableParameter::Ptr getAutomationClipParameter (const te::Clip&); // nullptr for another clip, or without its device
-
-// Makes one on a track, over a range, setting a parameter to a value; nullptr if it couldn't. Joins the caller's step.
-te::MidiClip* createAutomationClip (te::ClipTrack&, te::AutomatableParameter&, te::BeatRange, float value);
-
-// An automation clip sets the parameter it was made for wherever it is, as FL Studio's do. Tracktion instead points the
-// curve of a clip that is copied, split or moved to another track at the same parameter of the first device of its kind
-// on that track, or drops it (the master's volume, which is on no track). This remembers a clip's curves before such an
-// edit, and puts them back after it on the clip, or on a copy or part of it, joining the caller's step.
-class AutomationTargets
-{
-public:
-    explicit AutomationTargets (const te::Clip&);
-    void setDevice (te::EditItemID from, te::EditItemID to); // curves of one device are to set another's
-    void restore (te::Clip&) const;
-
-private:
-    juce::ValueTree curves; // a copy of the clip's AUTOMATIONCURVES, if it has curves
-};
-
-// After a track was copied: the automation clips the copy holds set the copy's devices where the original's set the
-// original's, as its lanes show them (copyLanes()). The devices in its containers are copies of the original's with new
-// IDs (Containers.h: copyContainers()), which the map gives.
-void copyAutomationTargets (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers = {});
+// The automation clips of projects up to version 4 (base/Migrations.h): MIDI clips without notes whose curve (Tracktion's
+// clip automation) set a parameter while they played, and outside them the parameter's own automation or value. Each
+// becomes the parameter's own automation over the clip's place in the song, which jumps to the clip's curve where the
+// clip started and back where it ended, as the clip played; then the clip goes, and so does a track named Automation
+// that it leaves empty, without devices (Phazite made one for the master's and folders' clips). It needs the song's
+// tempo, so it runs once the Edit is made from such a project (engine/internal/EngineSetup.h: createEditFromState()),
+// and leaves no undo steps.
+void convertAutomationClips (te::Edit&);
 
 //==============================================================================
 // The lanes a track shows, of devices on it (getAutomationLanes()), and changes to them, written without undo steps.
@@ -112,7 +79,7 @@ AutomationMode getAutomationMode (const te::Track&);
 void setAutomationMode (te::Track&, AutomationMode);
 
 //==============================================================================
-// Automation points selected: one curve's, by their indices, as Tracktion's selection manager holds them, so that
+// Automation points selected: one parameter's, by their indices, as Tracktion's selection manager holds them, so that
 // selecting anything else deselects them, and the selection commands (arrangement/internal/Selection.h) find them.
 // SongSelection owns the one it selects.
 class SelectedAutomationPoints : public te::Selectable
@@ -122,19 +89,19 @@ public:
 
     juce::String getSelectableDescription() override { return "Automation Points"; }
 
-    CurveRef curve;
+    ParameterRef parameter;
     std::vector<int> indices; // in order
 };
 
 struct PointSelection
 {
-    CurveAccess curve;
+    te::AutomatableParameter::Ptr parameter;
     std::vector<int> indices; // of points that are there, in order
 };
 
 // The selected points, if points are what the selection manager holds.
 std::optional<PointSelection> getSelectedPoints (const te::SelectionManager&);
-void selectPoints (te::SelectionManager&, const CurveAccess&, const std::vector<int>& indices);
+void selectPoints (te::SelectionManager&, const te::AutomatableParameter&, const std::vector<int>& indices);
 
 //==============================================================================
 // Keeps every automation point at its beat across a change of the tempo or the time signature: Tracktion keeps track
@@ -198,14 +165,14 @@ private:
 // Whether any of the Edit's tracks writes automation (a mode other than read).
 bool isWritingAutomation (const te::Edit&);
 
-// Whether a property of a device's state (a PLUGIN) is the stored value of a parameter with automation, or with an
-// automation clip's curve, which Tracktion writes as the automation plays: no change to the song. The value set by hand
-// is one, as an undo step (Edit::hasChangedSinceSaved()).
+// Whether a property of a device's state (a PLUGIN) is the stored value of a parameter with automation, or one a
+// modulator moves, which Tracktion writes as they play: no change to the song. The value set by hand is one, as an undo
+// step (Edit::hasChangedSinceSaved()).
 bool isAutomatedValue (const juce::ValueTree&, const juce::Identifier& property);
 
 // Puts back, in a saved project's state before its Edit is made, the values its parameters were set to by hand where they
-// were saved while automation set them to others (an automation clip's curve, between its points): Tracktion saves those
-// in the device's state too, and puts them back for plug-ins, but not for its own devices and Phazite's, which would then
-// start at the values the automation played.
+// were saved while something else set them to others (a modulator, or up to version 4 an automation clip's curve):
+// Tracktion saves those in the device's state too, and puts them back for plug-ins, but not for its own devices and
+// Phazite's, which would then start at the values played.
 void restoreValuesSetByHand (juce::ValueTree& editState);
 } // namespace phazite

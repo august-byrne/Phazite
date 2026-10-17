@@ -15,7 +15,7 @@ ClipComponent::ClipComponent (ProjectContext& projectContext, ClipID clip)
     : context (projectContext),
       id (clip)
 {
-    setInterceptsMouseClicks (false, true); // the playlist handles the mouse, but where an automation clip's curve takes it
+    setInterceptsMouseClicks (false, false); // the playlist handles the mouse
 }
 
 ClipComponent::~ClipComponent() = default;
@@ -53,24 +53,6 @@ juce::Colour ClipComponent::getInk() const
     return getInkFor (getFill());
 }
 
-void ClipComponent::setCurveView (std::unique_ptr<juce::Component> view)
-{
-    curveView = std::move (view);
-
-    if (curveView != nullptr)
-    {
-        addAndMakeVisible (*curveView);
-        resized();
-    }
-}
-
-void ClipComponent::resized()
-{
-    // Under the name, across the whole clip, so that the curve reaches its ends.
-    if (curveView != nullptr)
-        curveView->setBounds (getLocalBounds().withTrimmedTop (getHeight() >= nameHeight * 2 ? nameHeight + 2 : 0).withTrimmedBottom (1));
-}
-
 //==============================================================================
 void ClipComponent::paint (juce::Graphics& g)
 {
@@ -103,16 +85,9 @@ void ClipComponent::paint (juce::Graphics& g)
 
         paintFades (g, getLocalBounds());
     }
-    else if (info.kind == ClipType::midi)
+    else
     {
         paintNotes (g, content, ink.withAlpha (0.8f));
-    }
-    else if (curveView == nullptr && content.getHeight() >= nameHeight)
-    {
-        // An automation clip whose device is gone sets nothing.
-        g.setColour (ink.withAlpha (0.6f));
-        g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText ("Its device is gone", content.reduced (2, 0), juce::Justification::centredLeft, true);
     }
 
     // A selected clip has an outline in the text color, which shows on any clip color.

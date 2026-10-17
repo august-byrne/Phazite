@@ -171,14 +171,15 @@ std::unique_ptr<te::Edit> loadEdit (te::Engine& engine, const juce::File& file)
         return {};
 
     auto state = te::loadEditFromFile (engine, file, te::ProjectItemID {});
+    const auto savedVersion = getSchemaVersion (state);
 
     if (! state.isValid() || ! migrateToCurrentSchema (state))
         return {};
 
-    return createEditFromState (engine, state, file);
+    return createEditFromState (engine, state, file, savedVersion);
 }
 
-std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& file)
+std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& file, int savedVersion)
 {
     if (! state.isValid())
         return {};
@@ -194,7 +195,21 @@ std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::V
     restoreValuesSetByHand (editState);
     dropUnusedContainerRacks (editState);
 
-    return te::Edit::createEdit (
+    auto edit = te::Edit::createEdit (
         { engine, state, id, te::Edit::forEditing, nullptr, te::Edit::getDefaultNumUndoLevels(), [file] { return file; }, {} });
+
+    // The upgrade that needs the song's tempo (Migrations.h): the automation clips of projects saved before version 5.
+    constexpr auto versionWithoutAutomationClips = 5;
+
+    if (edit != nullptr && savedVersion < versionWithoutAutomationClips)
+    {
+        const auto wasChanged = edit->hasChangedSinceSaved();
+        convertAutomationClips (*edit);
+
+        if (! wasChanged)
+            edit->resetChangedStatus();
+    }
+
+    return edit;
 }
 } // namespace phazite

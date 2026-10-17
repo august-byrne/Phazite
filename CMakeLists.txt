@@ -123,7 +123,6 @@ target_sources(phazite_core PRIVATE
     src/model/automation/AutomationValues.cpp
     src/model/automation/AutomationValues.h
     src/model/automation/internal/Automation.h
-    src/model/automation/internal/AutomationClips.h
     src/model/base/Beats.h
     src/model/base/IDs.h
     src/model/base/Migrations.cpp
@@ -576,7 +575,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
-        tests/AutomationClipTests.cpp
         tests/AutomationLaneTests.cpp
         tests/AutomationModelTests.cpp
         tests/BeatsTests.cpp

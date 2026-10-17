@@ -66,37 +66,33 @@ namespace
 } // namespace
 
 //==============================================================================
-Playlist::AutomationLaneView::AutomationLaneView (Playlist& p, TrackID t, const CurveRef& shown)
+Playlist::AutomationLaneView::AutomationLaneView (Playlist& p, TrackID t, const ParameterRef& shown)
     : playlist (p),
       track (t),
-      curve (shown)
+      parameter (shown)
 {
-    setTitle (isClip() ? "Automation clip's curve" : "Automation lane");
-    setOpaque (false); // the playlist's grid, or the clip, shows through
+    setTitle ("Automation lane");
+    setOpaque (false); // the playlist's grid shows through
     refreshPoints();
 }
 
 void Playlist::AutomationLaneView::update (juce::Colour newColour)
 {
     colour = newColour;
-    handle = getParameter (playlist.context, curve.parameter);
+    handle = getParameter (playlist.context, parameter);
 
-    if (const auto target = getAutomationTarget (playlist.context, curve.parameter))
+    if (const auto target = getAutomationTarget (playlist.context, parameter))
     {
         kind = target->kind;
-        setTitle ((isClip() ? "Automation clip of " : "Automation of ") + describeTarget (*target));
+        setTitle ("Automation of " + describeTarget (*target));
     }
-
-    if (isClip())
-        if (const auto clip = getClip (playlist.context, curve.clip))
-            clipRange = clip->range;
 
     refreshPoints();
 }
 
 void Playlist::AutomationLaneView::refreshPoints()
 {
-    points = getAutomationPoints (playlist.context, curve);
+    points = getAutomationPoints (playlist.context, parameter);
     repaint();
 }
 
@@ -104,7 +100,7 @@ void Playlist::AutomationLaneView::refreshPoints()
 juce::Rectangle<float> Playlist::AutomationLaneView::getCurveArea() const
 {
     // Room for the points' dots at the top and the bottom, above the line under a lane.
-    return getLocalBounds().toFloat().withTrimmedBottom (isClip() ? 0.0f : 1.0f).reduced (0.0f, LaneTint::selectedPointRadius + 1.0f);
+    return getLocalBounds().toFloat().withTrimmedBottom (1.0f).reduced (0.0f, LaneTint::selectedPointRadius + 1.0f);
 }
 
 float Playlist::AutomationLaneView::valueToY (float value) const
@@ -126,7 +122,6 @@ float Playlist::AutomationLaneView::yToValue (float y) const
 
 float Playlist::AutomationLaneView::beatToX (BeatPosition beat) const
 {
-    // A lane starts where the lanes do; a clip's curve, where its clip is.
     return (float) (playlist.getView().beatToX (beat) - playlist.lanes->getLocalPoint (this, juce::Point<int>()).x);
 }
 
@@ -137,22 +132,7 @@ BeatPosition Playlist::AutomationLaneView::xToBeat (float x) const
 
 BeatPosition Playlist::AutomationLaneView::limitBeat (BeatPosition beat) const
 {
-    if (isClip())
-        return std::max (clipRange.getStart(), std::min (clipRange.getEnd(), beat));
-
     return std::max (BeatPosition(), beat);
-}
-
-bool Playlist::AutomationLaneView::isOnClipEdge (juce::Point<float> position) const
-{
-    // Where the Smart Tool trims the clip (SmartTool.h: getClipZone()).
-    auto* clip = getParentComponent();
-
-    if (! isClip() || clip == nullptr)
-        return false;
-
-    const auto zone = getClipZone (clip->getLocalBounds().toFloat(), position + getPosition().toFloat(), false);
-    return zone == ClipZone::trimStart || zone == ClipZone::trimEnd;
 }
 
 std::optional<int> Playlist::AutomationLaneView::getPointAt (juce::Point<float> position) const
@@ -184,7 +164,7 @@ std::optional<int> Playlist::AutomationLaneView::getLineAt (juce::Point<float> p
 
         // The line as the engine plays it, where the pointer is.
         const auto beat = xToBeat (position.x);
-        const auto values = getAutomationValues (playlist.context, curve, { beat, beat }, 1);
+        const auto values = getAutomationValues (playlist.context, parameter, { beat, beat }, 1);
 
         if (! values.empty() && std::abs (valueToY (values.front()) - position.y) <= LaneTint::grabDistance)
             return i;
@@ -224,14 +204,9 @@ juce::String Playlist::AutomationLaneView::describeHere (juce::Point<float> posi
             if (getLineAt (position).has_value())
                 return "Drag the line to move it up or down, Alt+drag to bend it, and double-click to straighten it.";
 
-            if (isClip())
-                return "Double-click to add a point to the automation clip's curve.";
-
             return "Click to add a point, and drag to select the points in a rectangle. Right-click for the lane's menu.";
         case Tool::draw:
-            return isClip()
-                       ? "Drag to draw the automation clip's curve: steps on the grid, or a free line with Alt. Drag a point to move it."
-                       : "Drag to draw steps on the grid, or a free line with Alt. Drag a point to move it.";
+            return "Drag to draw steps on the grid, or a free line with Alt. Drag a point to move it.";
         case Tool::paint:
             return "Drag to draw a " + getShapeName (playlist.paintShape).toLowerCase()
                    + " from where you start to where you let go, as high and low as you drag. A lane's menu chooses the shape.";
@@ -250,42 +225,11 @@ juce::String Playlist::AutomationLaneView::describeHere (juce::Point<float> posi
 }
 
 //==============================================================================
-bool Playlist::AutomationLaneView::hitTest (int x, int y)
-{
-    if (! isClip())
-        return true;
-
-    // In a clip, only where the tool edits the curve; elsewhere the playlist has the clip. A point at the clip's start or
-    // end is on an edge that trims the clip, but it can be grabbed.
-    const juce::Point<float> position ((float) x, (float) y);
-    const auto onPoint = getPointAt (position).has_value();
-    const auto onEdge = isOnClipEdge (position);
-
-    switch (playlist.getTool())
-    {
-        case Tool::smart:
-            return onPoint || (! onEdge && getLineAt (position).has_value());
-        case Tool::draw:
-        case Tool::paint:
-            return onPoint || ! onEdge;
-        case Tool::erase:
-            return onPoint;
-        case Tool::slice:
-        case Tool::slip:
-        case Tool::mute:
-        case Tool::select:
-        case Tool::zoom:
-        default:
-            return false;
-    }
-}
-
 void Playlist::AutomationLaneView::paint (juce::Graphics& g)
 {
     const auto& p = getPalette (*this);
 
-    // A lane has a background of its own; a clip's curve is drawn on its clip.
-    if (! isClip())
+    // A background of its own, over the playlist's grid.
     {
         auto area = getLocalBounds();
         g.setColour (p.surface.withAlpha (LaneTint::background));
@@ -310,7 +254,8 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
         // The line as the engine plays it, across what shows, with a wash under it.
         const auto left = clip.getX() - pixelsPerValue, right = clip.getRight() + pixelsPerValue;
         const auto numValues = std::max (2, (right - left) / pixelsPerValue + 1);
-        const auto values = getAutomationValues (playlist.context, curve, { xToBeat ((float) left), xToBeat ((float) right) }, numValues);
+        const auto values =
+            getAutomationValues (playlist.context, parameter, { xToBeat ((float) left), xToBeat ((float) right) }, numValues);
         juce::Path line;
 
         for (int i = 0; i < (int) values.size(); ++i)
@@ -337,7 +282,8 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
         const auto selected = playlist.selection.getSelectedAutomationPoints();
         const auto isSelected = [&selected, this] (int index)
         {
-            return selected.curve == curve && std::find (selected.indices.begin(), selected.indices.end(), index) != selected.indices.end();
+            return selected.parameter == parameter
+                   && std::find (selected.indices.begin(), selected.indices.end(), index) != selected.indices.end();
         };
 
         for (int i = 0; i < (int) points.size(); ++i)
@@ -399,7 +345,7 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
     if (! playlist.context.hasProject())
         return;
 
-    if (const auto selected = playlist.selection.getSelectedAutomationPoints(); selected.curve == curve)
+    if (const auto selected = playlist.selection.getSelectedAutomationPoints(); selected.parameter == parameter)
         selectedBefore = selected.indices;
     else
         selectedBefore.clear();
@@ -415,15 +361,9 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
             drag = Drag::erase;
             eraseAt (e.position);
         }
-        else if (isClip())
-        {
-            // The clip's menu, as the playlist shows it (or, in FL Studio's keymap, deleting the clip).
-            drag = Drag::forward;
-            playlist.lanesMouseDown (e.getEventRelativeTo (playlist.lanes.get()));
-        }
         else
         {
-            playlist.showLaneMenu (track, curve.parameter);
+            playlist.showLaneMenu (track, parameter);
         }
 
         return;
@@ -462,13 +402,13 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
     {
         // A point: selected (Ctrl or Shift adds it, or takes it out), and moved with the others selected.
         auto& songSelection = playlist.selection;
-        const auto alreadySelected = songSelection.isSelected (curve, *point);
+        const auto alreadySelected = songSelection.isSelected (parameter, *point);
 
         if (e.mods.isCommandDown() || e.mods.isShiftDown())
         {
             auto indices = songSelection.getSelectedAutomationPoints().indices;
 
-            if (songSelection.getSelectedAutomationPoints().curve != curve)
+            if (songSelection.getSelectedAutomationPoints().parameter != parameter)
                 indices.clear();
 
             if (alreadySelected)
@@ -476,11 +416,11 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
             else
                 indices.push_back (*point);
 
-            songSelection.selectAutomationPoints (curve, indices);
+            songSelection.selectAutomationPoints (parameter, indices);
         }
         else if (! alreadySelected)
         {
-            songSelection.selectAutomationPoints (curve, { *point });
+            songSelection.selectAutomationPoints (parameter, { *point });
         }
         else
         {
@@ -569,7 +509,7 @@ void Playlist::AutomationLaneView::beginDrag (const juce::MouseEvent&)
         {
             // The pressed point with the others selected in this lane.
             const auto selected = playlist.selection.getSelectedAutomationPoints();
-            moving = selected.curve == curve ? selected.indices : std::vector<int>();
+            moving = selected.parameter == parameter ? selected.indices : std::vector<int>();
 
             if (std::find (moving.begin(), moving.end(), pressed) == moving.end())
                 moving = { pressed };
@@ -580,7 +520,7 @@ void Playlist::AutomationLaneView::beginDrag (const juce::MouseEvent&)
         }
         case Drag::moveLine:
             moving = { pressed, pressed + 1 };
-            playlist.selection.selectAutomationPoints (curve, moving);
+            playlist.selection.selectAutomationPoints (parameter, moving);
             gesture.beginStep (playlist.context, "Move Automation Points");
             break;
         case Drag::bend:
@@ -614,7 +554,7 @@ void Playlist::AutomationLaneView::dragPoints (const juce::MouseEvent& e)
     if (juce::isPositiveAndBelow (pressed, (int) points.size()))
     {
         const auto& now = points[(size_t) pressed];
-        moveAutomationPoints (playlist.context, curve, moving, target - now.beat, value - now.value);
+        moveAutomationPoints (playlist.context, parameter, moving, target - now.beat, value - now.value);
         refreshPoints();
     }
 }
@@ -631,7 +571,7 @@ void Playlist::AutomationLaneView::dragLine (const juce::MouseEvent& e)
 
     if (juce::isPositiveAndBelow (pressed, (int) points.size()))
     {
-        moveAutomationPoints (playlist.context, curve, moving, {}, value - points[(size_t) pressed].value);
+        moveAutomationPoints (playlist.context, parameter, moving, {}, value - points[(size_t) pressed].value);
         refreshPoints();
     }
 }
@@ -647,7 +587,7 @@ void Playlist::AutomationLaneView::bendLine (const juce::MouseEvent& e)
     const auto rising = before[(size_t) pressed + 1].value > first.value;
     const auto up = (start.y - e.position.y) / std::max (1.0f, getCurveArea().getHeight());
     const auto bend = first.curve + (rising ? -up : up) * bendPerLaneHeight;
-    setAutomationCurve (playlist.context, curve, pressed, juce::jlimit (-AutomationPoint::maxBend, AutomationPoint::maxBend, bend));
+    setAutomationCurve (playlist.context, parameter, pressed, juce::jlimit (-AutomationPoint::maxBend, AutomationPoint::maxBend, bend));
     refreshPoints();
 }
 
@@ -721,7 +661,7 @@ void Playlist::AutomationLaneView::replaceDrawn (BeatRange drawnRange, std::vect
             newPoints.push_back (point);
 
     std::stable_sort (newPoints.begin(), newPoints.end(), [] (const auto& a, const auto& b) { return a.beat < b.beat; });
-    replaceAutomationPoints (playlist.context, curve, replaced, newPoints);
+    replaceAutomationPoints (playlist.context, parameter, replaced, newPoints);
     drawn = replaced;
     refreshPoints();
 }
@@ -735,7 +675,7 @@ void Playlist::AutomationLaneView::selectIn (juce::Rectangle<float> area, bool a
         if (area.contains (beatToX (points[(size_t) i].beat), valueToY (points[(size_t) i].value)))
             inside.push_back (i);
 
-    playlist.selection.selectAutomationPoints (curve, inside);
+    playlist.selection.selectAutomationPoints (parameter, inside);
 }
 
 void Playlist::AutomationLaneView::eraseAt (juce::Point<float> position)
@@ -744,7 +684,7 @@ void Playlist::AutomationLaneView::eraseAt (juce::Point<float> position)
 
     if (const auto point = getPointAt (position))
     {
-        deleteAutomationPoints (playlist.context, curve, { *point });
+        deleteAutomationPoints (playlist.context, parameter, { *point });
         refreshPoints();
     }
 }
@@ -761,7 +701,7 @@ void Playlist::AutomationLaneView::mouseUp (const juce::MouseEvent& e)
             addPointAt (e.position, e.mods); // a click on empty space
         else if (clickSelectsAlone && pressed >= 0)
         {
-            playlist.selection.selectAutomationPoints (curve, { pressed });
+            playlist.selection.selectAutomationPoints (parameter, { pressed });
         }
     }
 
@@ -778,10 +718,10 @@ void Playlist::AutomationLaneView::addPointAt (juce::Point<float> position, cons
 
     gesture.beginStep (playlist.context, "Add Automation Point");
     const auto beat = limitBeat (playlist.snap (xToBeat (position.x), mods));
-    const auto index = addAutomationPoint (playlist.context, curve, { beat, yToValue (position.y) });
+    const auto index = addAutomationPoint (playlist.context, parameter, { beat, yToValue (position.y) });
 
     if (index >= 0)
-        playlist.selection.selectAutomationPoints (curve, { index });
+        playlist.selection.selectAutomationPoints (parameter, { index });
 
     gesture.endStep();
     refreshPoints();
@@ -802,12 +742,12 @@ void Playlist::AutomationLaneView::mouseDoubleClick (const juce::MouseEvent& e)
 
     if (const auto point = getPointAt (e.position))
     {
-        deleteAutomationPoints (playlist.context, curve, { *point });
-        playlist.selection.selectAutomationPoints (curve, {});
+        deleteAutomationPoints (playlist.context, parameter, { *point });
+        playlist.selection.selectAutomationPoints (parameter, {});
     }
     else if (const auto line = getLineAt (e.position))
     {
-        setAutomationCurve (playlist.context, curve, *line, 0.0f);
+        setAutomationCurve (playlist.context, parameter, *line, 0.0f);
     }
 
     refreshPoints();
@@ -1098,7 +1038,7 @@ void Playlist::rebuildLanes()
             if (header == nullptr)
             {
                 header = new AutomationLaneHeader (*this, row.track.id, lane.lane.parameter);
-                laneView = new AutomationLaneView (*this, row.track.id, CurveRef (lane.lane.parameter));
+                laneView = new AutomationLaneView (*this, row.track.id, lane.lane.parameter);
                 headerContent.addAndMakeVisible (header); // layOutLanes() moves them where they go
                 scrollingClips.addAndMakeVisible (laneView);
             }
@@ -1159,35 +1099,5 @@ void Playlist::updateLanes()
             laneViews[i]->update (rows[(size_t) rowIndex].track.colour);
         }
     }
-}
-
-//==============================================================================
-void Playlist::showCurveOf (ClipComponent& component)
-{
-    const auto& info = component.getInfo();
-
-    if (info.kind != ClipType::automation || ! info.automates.isValid())
-    {
-        component.setCurveView (nullptr);
-        return;
-    }
-
-    // A clip moved to another track sets the same parameter of that track's device: another curve.
-    const CurveRef curve (info.automates, info.id);
-
-    if (auto* shown = getCurveOf (component); shown == nullptr || shown->curve != curve || shown->track != info.track)
-        component.setCurveView (std::make_unique<AutomationLaneView> (*this, info.track, curve));
-}
-
-void Playlist::updateClipCurves()
-{
-    for (auto* component : clipComponents)
-        if (auto* curve = getCurveOf (*component))
-            curve->update (component->getInk());
-}
-
-Playlist::AutomationLaneView* Playlist::getCurveOf (const ClipComponent& component) const
-{
-    return dynamic_cast<AutomationLaneView*> (component.getCurveView());
 }
 } // namespace phazite::ui

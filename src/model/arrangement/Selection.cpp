@@ -130,7 +130,7 @@ void deleteSelection (te::SelectionManager& selection, const RangeSelection& ran
 
     if (const auto points = getSelectedPoints (selection))
     {
-        deletePoints (points->curve, points->indices);
+        deletePoints (*points->parameter, points->indices);
         selection.deselectAll(); // their indices name other points now
         return;
     }
@@ -176,8 +176,8 @@ void duplicateSelection (te::SelectionManager& selection, RangeSelection& range,
     // Automation points: the copies go right after them (a beat after one point alone), and are selected instead.
     if (const auto points = getSelectedPoints (selection); points.has_value() && ! asAliases)
     {
-        const auto copies = duplicatePoints (points->curve, points->indices, BeatDuration::fromBeats (1.0));
-        selectPoints (selection, points->curve, copies);
+        const auto copies = duplicatePoints (*points->parameter, points->indices, BeatDuration::fromBeats (1.0));
+        selectPoints (selection, *points->parameter, copies);
         return;
     }
 

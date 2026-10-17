@@ -6,29 +6,10 @@
 #include "model/base/Beats.h"
 #include "model/devices/ParameterRef.h"
 
-#include <utility>
 #include <vector>
 
 namespace phazite
 {
-// An automation curve by IDs: a parameter's own, which its lane shows, or an automation clip's, which sets the parameter
-// while the clip plays (AutomationModel.h: createAutomationClip()).
-struct CurveRef
-{
-    ParameterRef parameter {};
-    ClipID clip {}; // none: the parameter's own
-
-    CurveRef() = default;
-    CurveRef (ParameterRef p, ClipID c = {}) // a parameter's own curve, written as the parameter
-        : parameter (std::move (p)),
-          clip (c)
-    {
-    }
-
-    bool isValid() const noexcept { return parameter.isValid(); }
-    bool operator== (const CurveRef&) const = default;
-};
-
 // A lane: a parameter whose automation a track shows under it in the playlist.
 struct AutomationLane
 {

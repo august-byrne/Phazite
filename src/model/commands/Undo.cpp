@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Undo.h"
-#include "model/automation/internal/AutomationClips.h"
 
 #include <algorithm>
 #include <vector>
@@ -11,8 +10,7 @@ namespace
 {
     // AutomatableParameter::valueTreePropertyChanged() updates a parameter's CachedValue when undo changes it, but not
     // its currentValue, which the audio thread reads: this tells which stored values an undo or redo changes, so that
-    // their parameters play them. Only those: the stored value of one an automation clip sets, which Tracktion writes as
-    // the clip plays, isn't its value otherwise. Parameters with a curve of their own follow it instead.
+    // their parameters play them. Parameters with a curve of their own follow it instead.
     class StoredValueChanges : private te::AutomatableParameter::Listener
     {
     public:
@@ -54,23 +52,11 @@ namespace
         JUCE_DECLARE_NON_COPYABLE (StoredValueChanges)
     };
 
-    // A clip that undo or redo brings back makes its curves when it has some, but Tracktion puts an automation clip's curve
-    // back after the clip, and its parameter's link to it before the curve: asking for its curves makes them, and links
-    // them to their parameters.
-    void connectAutomationClips (te::Edit& edit)
-    {
-        for (auto* track : te::getClipTracks (edit))
-            for (auto* clip : track->getClips())
-                if (isAutomationClip (*clip))
-                    clip->getAutomationCurveList (false);
-    }
-
     template <typename UndoOrRedo>
     void undoOrRedo (te::Edit& edit, UndoOrRedo&& undoOrRedoIt)
     {
         StoredValueChanges changes (edit);
         undoOrRedoIt();
-        connectAutomationClips (edit);
         changes.play (edit);
     }
 

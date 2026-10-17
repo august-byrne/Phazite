@@ -244,10 +244,8 @@ void Playlist::lanesMouseMove (const juce::MouseEvent& e)
     {
         const auto& clip = component->getInfo();
         const auto zone = getClipZone (getClipBounds (clip).toFloat(), e.position, clip.kind == ClipType::audio);
-        const auto addsPoints =
-            getCurveOf (*component) != nullptr && currentTool == Tool::smart && (zone == ClipZone::move || zone == ClipZone::selectRange);
         lanes->setMouseCursor (getCursorFor (zone));
-        lanes->setDescription (describeClipZone (zone) + (addsPoints ? " Double-click to add a point to its curve." : ""));
+        lanes->setDescription (describeClipZone (zone));
         return;
     }
 
@@ -769,14 +767,11 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
         return;
     }
 
-    // On a MIDI clip: open it in the piano roll. On an automation clip: a point on its curve there.
+    // On a MIDI clip: open it in the piano roll.
     if (auto* component = getClipComponentAt (e.getPosition()))
     {
         if (component->getInfo().kind == ClipType::midi && onOpenClip != nullptr)
             onOpenClip (component->getClip());
-        else if (auto* curve = getCurveOf (*component))
-            if (const auto inCurve = curve->getLocalPoint (lanes.get(), e.position); curve->getLocalBounds().toFloat().contains (inCurve))
-                curve->addPointAt (inCurve, e.mods);
 
         return;
     }

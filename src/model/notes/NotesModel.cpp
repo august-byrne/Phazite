@@ -3,7 +3,6 @@
 #include "internal/Notes.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
-#include "model/automation/internal/AutomationClips.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/ProjectContext.h"
@@ -26,12 +25,10 @@ namespace
         return dynamic_cast<te::AudioTrack*> (findTrack (context, id));
     }
 
-    // A MIDI clip that holds notes: an automation clip holds a curve instead.
     te::MidiClip* findMidiClip (const ProjectContext& context, ClipID id)
     {
         auto* edit = getEdit (context);
-        auto* clip = edit != nullptr && id.isValid() ? dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
-        return clip != nullptr && ! isAutomationClip (*clip) ? clip : nullptr;
+        return edit != nullptr && id.isValid() ? dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
     }
 
     juce::Array<te::MidiClip*> findMidiClips (const ProjectContext& context, const std::vector<ClipID>& ids)
@@ -143,7 +140,7 @@ std::optional<ClipID> getMidiClipNearest (const ProjectContext& context, TrackID
 
     for (auto* clip : track->getClips())
     {
-        if (auto* midi = dynamic_cast<te::MidiClip*> (clip); midi != nullptr && ! isAutomationClip (*midi))
+        if (auto* midi = dynamic_cast<te::MidiClip*> (clip))
         {
             const auto range = midi->getEditBeatRange();
             const auto distance = range.contains (at)

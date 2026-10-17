@@ -97,9 +97,17 @@ namespace
     }
 
     //==========================================================================
+    // Version 4 to 5: version 4's automation clips become their parameters' own automation once the Edit is made, which
+    // gives the song's tempo (Migrations.h: createEditFromState()), so the saved state doesn't change here; the new
+    // version keeps an older Phazite from opening a project whose automation it would read differently.
+    void upgrade4To5 (juce::ValueTree&)
+    {
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
-    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4 };
+    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 

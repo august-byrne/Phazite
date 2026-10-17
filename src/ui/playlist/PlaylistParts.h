@@ -52,27 +52,21 @@ struct Playlist::AddTrackRow : public juce::Button
 };
 
 //==============================================================================
-// An automation curve (docs/design.md, section 10): a lane's, under its track's clips, or an automation clip's, over the
-// clip under its name (ClipComponent::setCurveView()). It shows the curve's points and the line between them as the
-// engine plays it, in the track's color (in a clip, in the clip's ink). The tools edit it: the Smart Tool adds a point
-// where it clicks, drags points and the line (Alt bends the line), and selects the points in a rectangle it drags on empty
-// space; Draw draws steps on the grid (or, with Alt, a free line); Paint draws the chosen shape; Delete deletes the points
-// it passes; Select selects. Each drag is one undo step. In a clip, the Smart Tool takes the mouse only on a point or the
-// line, and Delete only on a point: elsewhere the playlist selects, moves and trims the clip as any other (and a
-// double-click adds a point: addPointAt()). Draw and Paint draw anywhere but on the clip's edges, which trim it (but for
-// the points there). The other tools leave the clip's curve to the playlist.
+// A lane's automation (docs/design.md, section 10), under its track's clips. It shows the points and the line between
+// them as the engine plays it, in the track's color. The tools edit it: the Smart Tool adds a point where it clicks, drags
+// points and the line (Alt bends the line), and selects the points in a rectangle it drags on empty space; Draw draws
+// steps on the grid (or, with Alt, a free line); Paint draws the chosen shape; Delete deletes the points it passes; Select
+// selects. Each drag is one undo step.
 struct Playlist::AutomationLaneView : public juce::Component,
                                       public juce::SettableTooltipClient
 {
-    AutomationLaneView (Playlist&, TrackID, const CurveRef&);
+    AutomationLaneView (Playlist&, TrackID, const ParameterRef&);
 
     void update (juce::Colour); // its color, and what it shows now
-    bool isClip() const noexcept { return curve.clip.isValid(); }
 
     // A click's point where nothing is: on the grid unless Alt is held, as its own undo step, and selected.
     void addPointAt (juce::Point<float>, const juce::ModifierKeys&);
 
-    bool hitTest (int x, int y) override;
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -97,11 +91,10 @@ struct Playlist::AutomationLaneView : public juce::Component,
 
     Playlist& playlist;
     const TrackID track;
-    const CurveRef curve;
+    const ParameterRef parameter;
     ParameterHandle handle; // its range, value and texts
     ParameterKind kind = ParameterKind::other;
     juce::Colour colour;
-    BeatRange clipRange;                 // an automation clip's place in the song
     std::vector<AutomationPoint> points; // as shown
 
     Drag drag = Drag::none, pendingDrag = Drag::none;
@@ -123,8 +116,7 @@ struct Playlist::AutomationLaneView : public juce::Component,
     float yToValue (float) const;
     float beatToX (BeatPosition) const;
     BeatPosition xToBeat (float) const;
-    BeatPosition limitBeat (BeatPosition) const;  // where points can go: the song, or the automation clip
-    bool isOnClipEdge (juce::Point<float>) const; // an automation clip's edges trim it
+    BeatPosition limitBeat (BeatPosition) const; // where points can go: the song
     std::optional<int> getPointAt (juce::Point<float>) const;
     std::optional<int> getLineAt (juce::Point<float>) const; // the point the line under the pointer starts at
     juce::String getValueText (float) const;

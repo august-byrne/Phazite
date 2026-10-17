@@ -19,8 +19,9 @@ namespace phazite::schema
 // The project format's version (src/model/base/Migrations.h). Files without schemaVersion are version 0 (saved up to
 // 2026-10-14); version 1 saves the grid's size and keys' scales by name; version 2 can hold Phazite's own devices
 // (roadmap step 1.6), which an older Phazite would drop; version 3 gives every note an ID (phaziteNoteID); version 4 adds
-// automation lanes (PHAZITELANE, roadmap step 2.1).
-inline constexpr int currentVersion = 4;
+// automation lanes (PHAZITELANE, roadmap step 2.1); version 5 has no automation clips (step 2.2 until 2026-10-17): their
+// curves are their parameters' own automation.
+inline constexpr int currentVersion = 5;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).

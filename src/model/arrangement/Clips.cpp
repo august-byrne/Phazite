@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Clips.h"
 #include "internal/Tracks.h"
-#include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
@@ -154,13 +153,8 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAl
         if (asAliases && ! clip->isLinked())
             clip->setLinkGroupID (juce::Uuid().toString());
 
-        // Tracktion points an automation clip's copy at the first device of its kind on the track: it sets its original's.
-        const AutomationTargets targets (*clip);
-
         if (auto copy = te::duplicateClip (*clip))
         {
-            targets.restore (*copy);
-
             if (! asAliases)
                 copy->setLinkGroupID ({});
 
@@ -175,13 +169,8 @@ void moveClip (te::Clip& clip, te::BeatPosition start, te::ClipTrack& track)
 {
     const auto time = clip.edit.tempoSequence.toTime (te::BeatPosition::fromBeats (std::max (0.0, start.inBeats())));
 
-    // An automation clip keeps setting the parameter it was made for.
     if (clip.getClipTrack() != &track)
-    {
-        const AutomationTargets targets (clip);
         clip.moveTo (track);
-        targets.restore (clip);
-    }
 
     clip.setStart (time, false, true);
 }
@@ -302,15 +291,8 @@ juce::Array<te::Clip*> splitClips (const juce::Array<te::Clip*>& clips, te::Beat
 
         if (time > range.getStart() && time < range.getEnd())
             if (auto* track = clip->getClipTrack())
-            {
-                const AutomationTargets targets (*clip); // an automation clip's part sets what the clip sets
-
                 if (auto* part = track->splitClip (*clip, time))
-                {
-                    targets.restore (*part);
                     parts.add (part);
-                }
-            }
     }
 
     return parts;
