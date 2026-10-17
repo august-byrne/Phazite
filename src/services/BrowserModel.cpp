@@ -32,6 +32,8 @@ juce::String BrowserPlace::getTooltip() const
             return "Instruments turn a track's notes into sound";
         case Kind::effects:
             return "Effects change the sound of a track";
+        case Kind::presets:
+            return "Your presets: devices', containers' and tracks' settings, saved to use again, in " + folder.getFullPathName();
         case Kind::folder:
             return folder.getFullPathName();
         case Kind::addFolder:
@@ -56,11 +58,13 @@ BrowserModel::BrowserModel (const Library& l, const SoundPack& pack)
 std::vector<BrowserPlace> BrowserModel::getPlaces() const
 {
     using Kind = BrowserPlace::Kind;
-    std::vector<BrowserPlace> places {
-        { Kind::favorites, "Favorites", {} },     { Kind::recent, "Recent", {} },
-        { Kind::types, "Sounds by Type", {} },    { Kind::sounds, "Phazite Sounds", library.getFactorySounds() },
-        { Kind::instruments, "Instruments", {} }, { Kind::effects, "Effects", {} }
-    };
+    std::vector<BrowserPlace> places { { Kind::favorites, "Favorites", {} },
+                                       { Kind::recent, "Recent", {} },
+                                       { Kind::types, "Sounds by Type", {} },
+                                       { Kind::sounds, "Phazite Sounds", library.getFactorySounds() },
+                                       { Kind::instruments, "Instruments", {} },
+                                       { Kind::effects, "Effects", {} },
+                                       { Kind::presets, "Presets", library.getPresetsFolder() } };
 
     for (const auto& folder : library.getUserFolders())
         places.push_back ({ Kind::folder, folder.getFileName(), folder });
@@ -116,6 +120,12 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place) const
             contents.items =
                 library.listDevices (place.kind == Kind::instruments ? LibraryItem::Kind::instrument : LibraryItem::Kind::effect);
             hint = "Your plug-ins show here once Options > Scan for Plug-ins has found them";
+            break;
+        case Kind::presets:
+            if (place.folder.isDirectory())
+                contents.items = library.listFolder (place.folder);
+
+            hint = "None yet: right-click a device or a track to save its settings, or drag a track here";
             break;
         case Kind::addFolder:
             break;
@@ -219,6 +229,22 @@ juce::String BrowserModel::getDetail (const LibraryItem& item)
     if (item.device.has_value())
         return item.device->category;
 
+    // What a preset holds: a track, a container, or its device ("EQ").
+    if (item.preset.has_value())
+    {
+        switch (item.preset->kind)
+        {
+            case PresetKind::track:
+                return "Track";
+            case PresetKind::container:
+                return "Container";
+            case PresetKind::device:
+                break;
+        }
+
+        return item.preset->device;
+    }
+
     for (const auto& tag : item.tags)
         if (tag.endsWith (" BPM"))
             return tag;
@@ -238,6 +264,11 @@ juce::String BrowserModel::getTooltip (const LibraryItem& item)
             return "Drag it onto a track or a mixer channel, or press Enter to give it to the selected track";
         case LibraryItem::Kind::effect:
             return "Drag it onto a track or a mixer channel, or press Enter to add it to the selected track";
+        case LibraryItem::Kind::preset:
+            if (item.preset.has_value() && item.preset->kind == PresetKind::track)
+                return "A track's devices and mix: drag it into the playlist, or press Enter, for a new track with them";
+
+            return "A preset: drag it onto a track or a mixer channel, or press Enter to add it to the selected track";
         case LibraryItem::Kind::folder:
             break;
     }

@@ -96,15 +96,18 @@ struct DeviceSlot
     bool isOn = true;
     bool hasMix = false;         // an effect's mix (getMix())
     double latencySeconds = 0.0; // how late its sound comes out
+    bool isContainer = false;    // a container of effects (ContainerModel.h)
 };
 
 std::optional<DeviceSlot> getInstrument (const ProjectContext&, TrackID);
 std::vector<DeviceSlot> getEffects (const ProjectContext&, TrackID);
 bool canHoldInstrument (const ProjectContext&, TrackID); // a track that isn't a return
 
-std::vector<ParameterHandle> getKeyControls (ProjectContext&, DeviceID, int maximum); // as a slot's small knobs
+// As a slot's small knobs: a device's key parameters, or a container's first macros.
+std::vector<ParameterHandle> getKeyControls (ProjectContext&, DeviceID, int maximum);
 MixHandle getMix (ProjectContext&, DeviceID);
 
+// These reach devices in containers too (ContainerModel.h), and move one among its container's devices.
 void setDeviceOn (ProjectContext&, DeviceID, bool);
 void moveEffect (ProjectContext&, DeviceID, int places); // earlier (negative) or later among its channel's effects
 void removeDevice (ProjectContext&, DeviceID);

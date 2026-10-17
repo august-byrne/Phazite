@@ -6,7 +6,12 @@ namespace phazite
 {
 std::unique_ptr<juce::Component> AppUIBehaviour::createPluginWindow (te::PluginWindowState& state)
 {
-    return phazite::createPluginWindow (state); // the free function, not this
+    return phazite::createPluginWindow (state, services); // the free function, not this
+}
+
+void AppUIBehaviour::setWindowServices (const PluginWindowServices& newServices)
+{
+    services = newServices;
 }
 
 void AppUIBehaviour::recreatePluginWindowContentAsync (te::Plugin& plugin)

@@ -15,6 +15,7 @@ namespace phazite
 {
 class CommandRegistry;
 class Gesture;
+struct DeviceSlot;
 
 //==============================================================================
 // Devices: the plug-ins a channel shows in its slots. A channel's volume, meter and sends are controls of its
@@ -42,7 +43,8 @@ te::Plugin* insertDevice (te::Track&, const te::Plugin::Ptr&, int index = -1);
 // Adds a device to the master, before its loudness meter.
 te::Plugin* insertMasterDevice (te::Edit&, const te::Plugin::Ptr&, int index = -1);
 
-// Removes a device, as one undo step named after it. A bus left without devices becomes a plain folder again.
+// Removes a device, as one undo step named after it: a container with what it holds (Containers.h), and a device in a
+// container from its row. A bus left without devices becomes a plain folder again.
 void removeDevice (te::Plugin&);
 
 // Moves a device to another place among its channel's devices, as one undo step.
@@ -52,8 +54,11 @@ void moveDevice (te::Plugin&, int newIndex);
 void setDeviceOn (te::Plugin&, bool on);
 
 // The parameters a device's slot shows as small knobs, by ID: its quick control, then the first others (not the dry
-// and wet levels, which its mix sets).
+// and wet levels, which its mix sets). A container has none of its own: its key controls are its macros.
 juce::StringArray getKeyControls (te::Plugin&, int maximum);
+
+// A device as a slot shows it (MixerModel.h).
+DeviceSlot makeDeviceSlot (te::Plugin&);
 
 // An effect's mix: how much of what it puts out is its effect, from 0 (only the sound that comes into it, "dry") to 1
 // (only the effect, "wet"), as FL Studio's mixer slots and REAPER's effect chains have for every effect. It crossfades
@@ -75,6 +80,9 @@ te::Plugin::Ptr createDevice (te::Edit&, const DeviceType&);
 // instrument would silence. An effect goes after the track's effects, or with no track on the master. Returns the
 // device, or nullptr.
 te::Plugin* addDeviceTo (te::Edit&, te::Track*, const DeviceType&, te::SelectionManager*);
+
+// The same for a device made already (from a preset), joining the caller's step.
+te::Plugin* placeDevice (te::Edit&, te::Track*, const te::Plugin::Ptr&, te::SelectionManager*);
 
 // The device menus' choices (ui/devices/DeviceMenus.h), each one undo step named after the device: an instrument for a
 // track, in place of the one it had ("Add Synth", or "Replace Instrument with Synth"); an effect after a track's

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceMenus.h"
+#include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 
 #include <map>
@@ -95,5 +96,14 @@ void showNewReturnMenu (ProjectContext& context, TrackID sender, juce::Component
 
     show (std::move (menu), target, std::move (types),
           [&context, sender] (const DeviceType& type) { addReturnWith (context, sender, type); });
+}
+
+void showContainerEffectMenu (ProjectContext& context, DeviceID container, juce::Component& target)
+{
+    auto types = getDeviceTypes (context);
+    auto menu = makeMenu (types, false, "No effect plug-ins yet: Options > Scan for Plug-ins finds them");
+
+    show (std::move (menu), target, std::move (types),
+          [&context, container] (const DeviceType& type) { addEffectToContainer (context, container, type); });
 }
 } // namespace phazite::ui

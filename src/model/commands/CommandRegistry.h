@@ -35,7 +35,7 @@ struct Command
     std::function<juce::String()> currentName {};
     // Optional: when commands share a key, the enabled one with the highest priority runs. Commands for
     // selected notes use notePriority, so the arrow keys move notes while notes are selected and select
-    // tracks otherwise.
+    // tracks otherwise; so do those for selected automation points and devices (Ctrl+G groups them).
     int keyPriority {};
     // Optional: whether holding the command's key runs it again each time the key repeats, for commands
     // that take a step (nudging, zooming, moving through tracks, undo). Others run once per press, so that

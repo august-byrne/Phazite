@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MixerModel.h"
+#include "internal/Containers.h"
 #include "internal/LevelSource.h"
 #include "internal/MixHandle.h"
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
@@ -26,17 +28,12 @@ namespace
         return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
     }
 
-    DeviceSlot makeSlot (te::Plugin& device)
-    {
-        return { getDeviceID (device), device.getName(), device.isEnabled(), hasMix (device), device.getLatencySeconds() };
-    }
-
     std::vector<DeviceSlot> makeSlots (const juce::Array<te::Plugin*>& devices)
     {
         std::vector<DeviceSlot> slots;
 
         for (auto* device : devices)
-            slots.push_back (makeSlot (*device));
+            slots.push_back (makeDeviceSlot (*device));
 
         return slots;
     }
@@ -69,6 +66,13 @@ namespace
         return false;
     }
 } // namespace
+
+DeviceSlot makeDeviceSlot (te::Plugin& device)
+{
+    return {
+        getDeviceID (device), device.getName(), device.isEnabled(), hasMix (device), device.getLatencySeconds(), isContainer (device)
+    };
+}
 
 //==============================================================================
 MixerChannels getMixerChannels (const ProjectContext& context)
@@ -247,7 +251,7 @@ std::optional<DeviceSlot> getInstrument (const ProjectContext& context, TrackID 
     if (instrument == nullptr)
         return {};
 
-    return makeSlot (*instrument);
+    return makeDeviceSlot (*instrument);
 }
 
 std::vector<DeviceSlot> getEffects (const ProjectContext& context, TrackID id)
@@ -268,8 +272,19 @@ bool canHoldInstrument (const ProjectContext& context, TrackID id)
 std::vector<ParameterHandle> getKeyControls (ProjectContext& context, DeviceID id, int maximum)
 {
     std::vector<ParameterHandle> handles;
+    auto* device = findDevice (context, id);
 
-    if (auto* device = findDevice (context, id))
+    // A container's are its first macros.
+    if (auto* rack = device != nullptr ? getContainerRack (*device) : nullptr)
+    {
+        for (auto* macro : getContainerMacros (*device))
+            if ((int) handles.size() < maximum)
+                handles.push_back (makeMacroHandle (*rack, *macro, "Change " + macro->macroName.get()));
+
+        return handles;
+    }
+
+    if (device != nullptr)
         for (const auto& parameterID : phazite::getKeyControls (*device, maximum))
             handles.push_back (makeParameterHandle (device, parameterID));
 
@@ -295,6 +310,21 @@ void moveEffect (ProjectContext& context, DeviceID id, int places)
 
     if (device == nullptr || edit == nullptr)
         return;
+
+    // Among its container's devices.
+    if (auto* container = findContainerOf (*device))
+    {
+        const auto devices = getContainerDevices (*container);
+        const auto target = devices.indexOf (device) + places;
+
+        if (juce::isPositiveAndBelow (target, devices.size()))
+        {
+            const UndoStep step (*edit, "Move Device");
+            moveInContainer (*device, target);
+        }
+
+        return;
+    }
 
     // Among the channel's effects, which follow its instrument among all its devices.
     auto* track = device->getOwnerTrack();

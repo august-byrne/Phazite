@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Modulation.h"
 #include "model/automation/internal/Automation.h"
+#include "model/mixer/internal/Containers.h"
 
 #include <algorithm>
 
@@ -75,11 +76,28 @@ te::Track* ModulatorAccess::getTrack() const
     if (modifier != nullptr)
         return te::getTrackContainingModifier (modifier->edit, modifier);
 
+    if (auto* rack = getContainerRack())
+    {
+        auto* container = findContainerOf (*rack);
+        return container != nullptr ? getTrackOfContainer (*container) : nullptr;
+    }
+
     if (macro != nullptr)
         if (auto* list = dynamic_cast<te::MacroParameterList*> (&macro->automatableEditElement))
             return list->getTrack();
 
     return nullptr;
+}
+
+te::RackType* ModulatorAccess::getContainerRack() const
+{
+    auto* list = macro != nullptr ? dynamic_cast<te::MacroParameterList*> (&macro->automatableEditElement) : nullptr;
+    const auto owner = list != nullptr ? list->state.getParent() : juce::ValueTree();
+
+    if (! owner.hasType (te::IDs::RACK))
+        return nullptr;
+
+    return macro->getEdit().getRackList().getRackTypeForID (te::EditItemID::fromID (owner)).get();
 }
 
 ModulatorID ModulatorAccess::getID() const
@@ -174,8 +192,12 @@ std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType typ
     if (type == ModulatorType::macro)
     {
         if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))
-            if (auto* macro = audio->getMacroParameterListForWriting().createMacroParameter())
+        {
+            auto& macros = audio->getMacroParameterListForWriting();
+
+            if (auto* macro = addMacro (macros, "Macro " + juce::String (macros.getMacroParameters().size() + 1)))
                 return ModulatorAccess { nullptr, macro };
+        }
 
         return {};
     }
@@ -205,6 +227,29 @@ std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType typ
     }
 
     return ModulatorAccess { modifier, nullptr };
+}
+
+te::MacroParameter* addMacro (te::MacroParameterList& macros, const juce::String& name)
+{
+    auto& edit = macros.edit;
+    const auto id = edit.createNewItemID();
+    juce::ValueTree macro (te::IDs::MACROPARAMETER);
+    id.writeID (macro, nullptr);
+    macro.setProperty (te::IDs::name, name, nullptr);
+    macro.setProperty (te::IDs::value, 0.0f, nullptr);
+    macros.state.addChild (macro, -1, &edit.getUndoManager());
+
+    for (auto* added : macros.getMacroParameters())
+        if (te::EditItemID::fromID (added->state) == id)
+            return added;
+
+    return nullptr;
+}
+
+void renameMacro (te::MacroParameter& macro, const juce::String& name)
+{
+    if (const auto trimmed = name.trim(); trimmed.isNotEmpty())
+        macro.macroName = trimmed;
 }
 
 juce::String getModulatorParameterName (const te::AutomatableParameter& parameter)
@@ -318,16 +363,18 @@ std::vector<ModulationAccess> getModulations (const ModulatorAccess& modulator)
 
 bool canModulate (const ModulatorAccess& modulator, const te::AutomatableParameter& parameter)
 {
-    auto* track = modulator.getTrack();
-
-    if (track == nullptr || &parameter.automatableEditElement == modulator.modifier.get())
-        return false;
-
     // A macro's own value is set by hand, or by its automation.
-    if (dynamic_cast<const te::MacroParameter*> (&parameter) != nullptr)
+    if (&parameter.automatableEditElement == modulator.modifier.get() || dynamic_cast<const te::MacroParameter*> (&parameter) != nullptr)
         return false;
 
-    return getTrackOfParameter (parameter) == track;
+    if (auto* rack = modulator.getContainerRack())
+    {
+        auto* device = parameter.getPlugin();
+        return device != nullptr && device->isInRack() && device->getOwnerRackType().get() == rack;
+    }
+
+    auto* track = modulator.getTrack();
+    return track != nullptr && getTrackOfParameter (parameter) == track;
 }
 
 void setModulation (const ModulatorAccess& modulator, te::AutomatableParameter& parameter, float amount)

@@ -19,13 +19,13 @@ public:
     static int getMinimumHeight(); // as ChannelStrip's
 
     // Shows the open project's master, and nothing while none is open.
-    explicit MasterStrip (ProjectContext&);
+    MasterStrip (CommandBridge&, ProjectContext&); // the commands, for the effects' menus
     ~MasterStrip() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    // An effect dragged from the browser goes onto the master.
+    // An effect, or a preset of one or of a container, dragged from the browser goes onto the master.
     bool isInterestedInDragSource (const SourceDetails&) override;
     void itemDragEnter (const SourceDetails&) override { setDropping (true); }
     void itemDragExit (const SourceDetails&) override { setDropping (false); }

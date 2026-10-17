@@ -219,7 +219,8 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
 {
     auto& engine = phazite::test::getEngine();
     phazite::test::TemporaryFolder temp;
-    phazite::AppServices services (engine, { .settingsInMemory = true, .packsFolder = temp.folder });
+    phazite::AppServices services (
+        engine, { .settingsInMemory = true, .packsFolder = temp.folder, .presetsFolder = temp.folder.getChildFile ("Presets") });
 
     // The library shows Phazite Sounds' folder, installed or not.
     CHECK (services.library.getFactorySounds() == services.soundPack.getFolder());

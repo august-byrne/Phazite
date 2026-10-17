@@ -40,7 +40,10 @@ struct Screen
 
     te::Engine& engine = phazite::test::getEngine();
     phazite::test::TemporaryFolder temp;
-    phazite::AppServices services { engine, { .settingsInMemory = true, .packsFolder = temp.folder.getChildFile ("Packs") } };
+    phazite::AppServices services { engine,
+                                    { .settingsInMemory = true,
+                                      .packsFolder = temp.folder.getChildFile ("Packs"),
+                                      .presetsFolder = temp.folder.getChildFile ("Presets") } };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::KeyDispatcher shortcutKeys { commands };

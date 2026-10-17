@@ -22,11 +22,12 @@ te::AutomatableParameter::Ptr findParameter (const te::Edit&, const ParameterRef
 // A device's parameter by IDs; an invalid ref for one that isn't a device's (a macro's, a modulator's).
 ParameterRef getParameterRef (const te::AutomatableParameter&);
 
-// The track whose device a parameter is: the master track for the master's volume and effects. nullptr for others.
+// The track whose device a parameter is: the master track for the master's volume and effects, and a container's track
+// for its devices'. nullptr for others.
 te::Track* getTrackOfParameter (const te::AutomatableParameter&);
 
-// The parameters of a track's devices that can be automated, in the mixer's order (AutomationModel.h:
-// getAutomationTargets()).
+// The parameters of a track's devices that can be automated, in the mixer's order, those of the devices in its
+// containers after each container (AutomationModel.h: getAutomationTargets()).
 juce::ReferenceCountedArray<te::AutomatableParameter> getAutomatableParameters (te::Track&);
 
 // The track's own volume, pan and sends are the mixer's controls, not a device's.
@@ -90,8 +91,9 @@ private:
 };
 
 // After a track was copied: the automation clips the copy holds set the copy's devices where the original's set the
-// original's, as its lanes show them (copyLanes()).
-void copyAutomationTargets (const te::Track& original, te::Track& copy);
+// original's, as its lanes show them (copyLanes()). The devices in its containers are copies of the original's with new
+// IDs (Containers.h: copyContainers()), which the map gives.
+void copyAutomationTargets (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers = {});
 
 //==============================================================================
 // The lanes a track shows, of devices on it (getAutomationLanes()), and changes to them, written without undo steps.
@@ -103,8 +105,8 @@ void replaceLane (te::Track&, const ParameterRef& lane, const ParameterRef& repl
 void setLaneHeight (te::Track&, const ParameterRef&, int height);
 
 // After a track was copied (a folder with its tracks): the copy's lanes show the copy's devices, as the original's show
-// the original's.
-void copyLanes (const te::Track& original, te::Track& copy);
+// the original's, those in its containers too.
+void copyLanes (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers = {});
 
 AutomationMode getAutomationMode (const te::Track&);
 void setAutomationMode (te::Track&, AutomationMode);

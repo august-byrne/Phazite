@@ -97,7 +97,7 @@ TEST_CASE ("The browser shows its places, plays a sound when clicked, and Enter 
     // Phazite's sounds are open at first.
     CHECK (screen.getRows()
            == juce::StringArray { "Favorites", "Recent", "Sounds by Type", "Phazite Sounds", "Drums", "Loops", "Instruments", "Effects",
-                                  "Add Folder..." });
+                                  "Presets", "Add Folder..." });
 
     // Sounds by Type lists every kick, from every library.
     phazite::test::Mouse mouse (screen.browser.getTree());

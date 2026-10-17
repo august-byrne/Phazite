@@ -10,7 +10,8 @@ struct ParameterHandle::Impl
 {
     te::SafeSelectable<te::Plugin> plugin;     // a device's parameter,
     te::SafeSelectable<te::Modifier> modifier; // a modulator's,
-    te::SafeSelectable<te::AudioTrack> macros; // or one of a track's macros
+    te::SafeSelectable<te::AudioTrack> macros; // one of a track's macros,
+    te::SafeSelectable<te::RackType> rack;     // or one of a container's
     juce::String parameterID, undoName;
     std::unique_ptr<Gesture> gesture; // the gesture it began,
     bool joined = false;              // or whether it joined another change's
@@ -27,6 +28,10 @@ struct ParameterHandle::Impl
             if (auto* list = t->getMacroParameterList())
                 return list->getAutomatableParameterByID (parameterID);
 
+        if (auto* r = rack.get())
+            if (auto* list = r->getMacroParameterList())
+                return list->getAutomatableParameterByID (parameterID);
+
         return {};
     }
 
@@ -38,7 +43,10 @@ struct ParameterHandle::Impl
         if (auto* m = modifier.get())
             return m;
 
-        return macros.get();
+        if (auto* t = macros.get())
+            return t;
+
+        return rack.get();
     }
 };
 
@@ -79,6 +87,15 @@ ParameterHandle makeMacroHandle (te::AudioTrack& track, const te::MacroParameter
 {
     auto impl = std::make_unique<ParameterHandle::Impl>();
     impl->macros = &track;
+    impl->parameterID = macro.paramID;
+    impl->undoName = undoName;
+    return ParameterHandle (std::move (impl));
+}
+
+ParameterHandle makeMacroHandle (te::RackType& container, const te::MacroParameter& macro, const juce::String& undoName)
+{
+    auto impl = std::make_unique<ParameterHandle::Impl>();
+    impl->rack = &container;
     impl->parameterID = macro.paramID;
     impl->undoName = undoName;
     return ParameterHandle (std::move (impl));

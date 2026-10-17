@@ -6,6 +6,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/UndoCommands.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -30,6 +31,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context)
     addSectionCommands (registry, selection);
     addOutlineCommands (registry, selection);
     addMixerCommands (registry, selection);
+    addContainerCommands (registry, selection);
     addAutomationCommands (registry, context);
     addLoopCommands (registry, selection, range);
     addMetronomeCommands (registry, selection);

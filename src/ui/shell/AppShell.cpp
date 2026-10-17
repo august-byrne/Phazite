@@ -2,6 +2,7 @@
 #include "AppShell.h"
 #include "CommandPalette.h"
 #include "model/mixer/MixerModel.h"
+#include "model/presets/PresetModel.h"
 #include "ui/browser/PluginPicker.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -243,12 +244,16 @@ bool AppShell::placeItem (const LibraryItem& item)
     if (! projectContext.hasProject())
         return false;
 
-    // A device goes onto the selected track (or a new one: phazite::addDeviceTo()), a sound at the play start.
+    // A device goes onto the selected track (or a new one: phazite::addDeviceTo()), and so does a preset (a track's makes
+    // a new track after it: loadPreset()); a sound goes at the play start.
+    const auto tracks = projectContext.getSongSelection().getTracks();
+    const auto track = tracks.empty() ? TrackID() : tracks.front();
+
     if (item.device.has_value())
-    {
-        const auto tracks = projectContext.getSongSelection().getTracks();
-        return addDeviceTo (projectContext, tracks.empty() ? TrackID() : tracks.front(), *item.device);
-    }
+        return addDeviceTo (projectContext, track, *item.device);
+
+    if (item.kind == LibraryItem::Kind::preset)
+        return loadPreset (projectContext, item.file, track);
 
     return playlist.placeFile (item.file);
 }
@@ -469,6 +474,8 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .synonyms = { "plug-in picker", "plugin", "vst", "synth", "insert", "fx" },
                     .perform = [this] { showPluginPicker(); },
                     .isEnabled = [this] { return projectContext.hasProject(); } });
+
+    browser.addCommands (registry); // saving presets, which the browser shows
 
     // Showing and hiding apply to the main window; a panel in its own window is closed there.
     add (

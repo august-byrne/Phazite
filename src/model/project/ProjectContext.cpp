@@ -65,7 +65,8 @@ namespace
                 if (te::Clip::isClipState (element))
                     return add (pending.clips);
 
-                if (element.hasType (te::IDs::PLUGIN) || element.hasType (te::IDs::MASTERPLUGINS))
+                // Devices, and containers' rack types (model/mixer/internal/Containers.h): their names and what they hold.
+                if (element.hasType (te::IDs::PLUGIN) || element.hasType (te::IDs::MASTERPLUGINS) || element.hasType (te::IDs::RACK))
                     return add (pending.devices);
 
                 if (element.hasType (te::IDs::TEMPOSEQUENCE))
@@ -99,7 +100,7 @@ namespace
                 add (pending.sections);
             else if (te::Clip::isClipState (child))
                 add (pending.clips);
-            else if (child.hasType (te::IDs::PLUGIN))
+            else if (child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK))
                 add (pending.devices);
             else if (te::TrackList::isTrack (child))
                 add (pending.tracks);
@@ -112,8 +113,10 @@ namespace
         // have their places in time.
         void markMoved (const juce::ValueTree& parent, int oldIndex, int newIndex)
         {
+            // A device in a container moves with its place in the container's rack type.
             const auto moved = parent.getChild (newIndex);
-            const auto isTrack = te::TrackList::isTrack (moved), isDevice = moved.hasType (te::IDs::PLUGIN);
+            const auto isTrack = te::TrackList::isTrack (moved);
+            const auto isDevice = moved.hasType (te::IDs::PLUGIN) || moved.hasType (te::IDs::PLUGININSTANCE);
 
             // The elements it passed: now between its new place and its old one.
             const auto first = newIndex < oldIndex ? newIndex + 1 : oldIndex;
@@ -126,7 +129,7 @@ namespace
                 if (isTrack && te::TrackList::isTrack (passed))
                     return add (pending.tracks);
 
-                if (isDevice && passed.hasType (te::IDs::PLUGIN))
+                if (isDevice && (passed.hasType (te::IDs::PLUGIN) || passed.hasType (te::IDs::PLUGININSTANCE)))
                     return add (pending.devices);
             }
         }

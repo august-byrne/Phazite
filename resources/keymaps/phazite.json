@@ -54,6 +54,8 @@
     "track.add": [ "command + T" ],
     "track.groupIntoFolder": [ "command + G" ],
     "track.ungroup": [ "command + shift + G" ],
+    "device.group": [ "command + G" ],
+    "device.ungroup": [ "command + shift + G" ],
     "track.collapse": [ "U" ],
     "track.selectPrevious": [ "cursor up" ],
     "track.selectNext": [ "cursor down" ],

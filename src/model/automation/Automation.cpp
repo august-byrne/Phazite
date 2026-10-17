@@ -2,6 +2,7 @@
 #include "internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 
 #include <algorithm>
@@ -239,6 +240,9 @@ te::Track* getTrackOfParameter (const te::AutomatableParameter& parameter)
     if (auto* track = device->getOwnerTrack())
         return track;
 
+    if (device->isInRack())
+        return getTrackOfContainerDevice (*device);
+
     // The master's volume is a device of the Edit's own.
     auto& edit = device->edit;
 
@@ -281,14 +285,24 @@ juce::ReferenceCountedArray<te::AutomatableParameter> getAutomatableParameters (
         devices = getDevices (track);
     }
 
-    // A device's mix (Mixer.h: getMix()) is its dry and wet levels together, which its knob sets: not two parameters.
-    for (auto* device : devices)
+    // A device's mix (Mixer.h: getMix()) is its dry and wet levels together, which its knob sets: not two parameters. A
+    // container's own parameters are Tracktion's levels in and out, which Phazite doesn't show: its devices' follow it.
+    const auto addParametersOf = [&parameters] (te::Plugin& device)
     {
-        const auto mix = getMixParameters (*device);
+        const auto mix = getMixParameters (device);
 
-        for (auto* parameter : device->getAutomatableParameters())
+        for (auto* parameter : device.getAutomatableParameters())
             if (! mix.contains (parameter))
                 parameters.add (parameter);
+    };
+
+    for (auto* device : devices)
+    {
+        if (! isContainer (*device))
+            addParametersOf (*device);
+
+        for (auto* inside : getContainerDevices (*device))
+            addParametersOf (*inside);
     }
 
     parameters.removeObject (nullptr);
@@ -599,9 +613,10 @@ void AutomationTargets::restore (te::Clip& clip) const
             parameter->addModifier (*modifier);
 }
 
-void copyAutomationTargets (const te::Track& original, te::Track& copy)
+void copyAutomationTargets (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers)
 {
-    // The copy's devices are where the original's are in its list, and its clips where the original's are in theirs.
+    // The copy's devices are where the original's are in its list, those in its containers as the map says, and its
+    // clips where the original's are in theirs.
     const auto originalDevices = original.getAllPlugins(), copiedDevices = copy.getAllPlugins();
     auto* originalClips = dynamic_cast<const te::ClipTrack*> (&original);
     auto* copiedClips = dynamic_cast<te::ClipTrack*> (&copy);
@@ -618,6 +633,9 @@ void copyAutomationTargets (const te::Track& original, te::Track& copy)
             for (int j = 0; j < originalDevices.size() && j < copiedDevices.size(); ++j)
                 targets.setDevice (originalDevices[j]->itemID, copiedDevices[j]->itemID);
 
+            for (const auto& [from, to] : devicesInContainers)
+                targets.setDevice (from, to);
+
             targets.restore (*copies[i]);
         }
     }
@@ -626,7 +644,7 @@ void copyAutomationTargets (const te::Track& original, te::Track& copy)
     const auto originalTracks = original.getAllSubTracks (false), copiedTracks = copy.getAllSubTracks (false);
 
     for (int i = 0; i < originalTracks.size() && i < copiedTracks.size(); ++i)
-        copyAutomationTargets (*originalTracks[i], *copiedTracks[i]);
+        copyAutomationTargets (*originalTracks[i], *copiedTracks[i], devicesInContainers);
 }
 
 te::MidiClip* createAutomationClip (te::ClipTrack& track, te::AutomatableParameter& parameter, te::BeatRange range, float value)
@@ -715,9 +733,9 @@ void setLaneHeight (te::Track& track, const ParameterRef& parameter, int height)
         lane.setProperty (schema::laneHeight, juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight, height), nullptr);
 }
 
-void copyLanes (const te::Track& original, te::Track& copy)
+void copyLanes (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers)
 {
-    // The copy's devices are where the original's are in its list.
+    // The copy's devices are where the original's are in its list, and those in its containers as the map says.
     const auto originals = original.getAllPlugins(), copies = copy.getAllPlugins();
 
     for (auto lane : copy.state)
@@ -731,6 +749,9 @@ void copyLanes (const te::Track& original, te::Track& copy)
             if (getDeviceID (*originals[i]) == parameter.device)
                 parameter.device = getDeviceID (*copies[i]);
 
+        if (const auto inside = devicesInContainers.find (toTracktion (parameter.device)); inside != devicesInContainers.end())
+            parameter.device = DeviceID::fromRaw (inside->second.getRawID());
+
         writeLane (lane, parameter);
     }
 
@@ -738,7 +759,7 @@ void copyLanes (const te::Track& original, te::Track& copy)
     const auto originalTracks = original.getAllSubTracks (false), copiedTracks = copy.getAllSubTracks (false);
 
     for (int i = 0; i < originalTracks.size() && i < copiedTracks.size(); ++i)
-        copyLanes (*originalTracks[i], *copiedTracks[i]);
+        copyLanes (*originalTracks[i], *copiedTracks[i], devicesInContainers);
 }
 
 AutomationMode getAutomationMode (const te::Track& track)

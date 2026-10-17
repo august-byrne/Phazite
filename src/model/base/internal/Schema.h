@@ -163,8 +163,8 @@ inline constexpr const char* phaziteLoudnessMeter = "phaziteLoudnessMeter";
 // change, and changing what one holds needs a new version and a migration, as anything here does.
 
 // Phazite's drum sampler (devices/drums/DrumSampler.h) also keeps, on its PLUGIN, the sound file each pad plays: a path
-// relative to the project's folder ("Audio/Kick 01.wav"), or none (no property) for the default kit's sound. These are
-// "pad1Sound" for its first pad up to "pad16Sound"; pad counts from 0.
+// relative to the project's folder ("Audio/Kick 01.wav"), or none (no property) for the default kit's sound; in a preset,
+// its full path. These are "pad1Sound" for its first pad up to "pad16Sound"; pad counts from 0.
 inline const juce::Identifier& getPadSound (int pad)
 {
     static const juce::Identifier names[] = { "pad1Sound",  "pad2Sound",  "pad3Sound",  "pad4Sound",  "pad5Sound",  "pad6Sound",
@@ -172,6 +172,27 @@ inline const juce::Identifier& getPadSound (int pad)
                                               "pad13Sound", "pad14Sound", "pad15Sound", "pad16Sound" };
     return names[juce::jlimit (0, 15, pad)];
 }
+
+//==============================================================================
+// Presets (model/presets/PresetModel.h): files of their own (".phazitepreset"), outside any project, that hold a device,
+// a container or a track as a project holds them (Tracktion's elements with Phazite's names above), in the project format
+// of the version that saved them, which is brought up to date as a project's is (Migrations.h).
+
+// The element at a preset file's root. Its children: a device preset's PLUGIN; a container preset's PLUGIN (a rack) and
+// the RACK it plays; a track preset's TRACK, with the RACKs its containers play.
+inline const juce::Identifier PHAZITEPRESET { "PHAZITEPRESET" };
+
+// On PHAZITEPRESET: "device", "container" or "track".
+inline const juce::Identifier presetKind { "kind" };
+
+// On PHAZITEPRESET: a device preset's device as the browser names it ("EQ", or a plug-in's name).
+inline const juce::Identifier presetDevice { "device" };
+
+// On PHAZITEPRESET. bool, default false: a device preset's device is an instrument.
+inline const juce::Identifier presetInstrument { "instrument" };
+
+// On PHAZITEPRESET, as on PHAZITE: the project format's version (currentVersion) of what it holds.
+// (schemaVersion, above)
 } // namespace phazite::schema
 
 namespace phazite

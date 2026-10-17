@@ -3,6 +3,7 @@
 // (PluginWindow.h). Main passes one to createEngine().
 #pragma once
 
+#include "PluginWindow.h"
 #include "model/engine/internal/EngineSetup.h"
 
 namespace phazite
@@ -12,5 +13,12 @@ class AppUIBehaviour final : public UIBehaviour
 public:
     std::unique_ptr<juce::Component> createPluginWindow (te::PluginWindowState&) override;
     void recreatePluginWindowContentAsync (te::Plugin&) override;
+
+    // The open project and the commands, which a container's window shows (PluginWindow.h), from when the app has made
+    // them until before they go.
+    void setWindowServices (const PluginWindowServices&);
+
+private:
+    PluginWindowServices services;
 };
 } // namespace phazite

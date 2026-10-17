@@ -25,6 +25,7 @@
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
@@ -577,6 +578,39 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playAndMeasure (*edit);
         report ("Automation clips sweeping Phazite's EQ and fading a track's volume", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: a container of Phazite's EQ and compressor at half mix, a macro and the track's LFO turning them")
+    {
+        using phazite::devices::Equalizer;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+
+        const auto eq = edit->getPluginCache().createNewPlugin (Equalizer::typeID, {});
+        const auto compressor = edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {});
+        REQUIRE (phazite::insertDevice (track, eq) != nullptr);
+        REQUIRE (phazite::insertDevice (track, compressor) != nullptr);
+
+        // Grouped as Phazite groups them (model/mixer/internal/Containers.h).
+        auto* container = phazite::groupIntoContainer ({ eq.get(), compressor.get() });
+        REQUIRE (container != nullptr);
+        phazite::setMix (*container, 0.5f);
+
+        // Its first macro turns a band of the EQ; the track's LFO moves the compressor's threshold.
+        eq->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::on)]->setParameter (1.0f, juce::sendNotification);
+        const auto macro = phazite::getContainerMacros (*container)[0];
+        phazite::setModulation ({ nullptr, macro }, *eq->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::gain)],
+                                0.5f);
+        macro->setParameter (0.7f, juce::sendNotification);
+        const auto lfo = phazite::addModulator (track, phazite::ModulatorType::lfo);
+        REQUIRE (lfo.has_value());
+        phazite::setModulation (*lfo, *compressor->getAutomatableParameterByID ("threshold"), 0.5f);
+
+        const auto m = playAndMeasure (*edit);
+        report ("A container of Phazite's EQ and compressor at half mix, a macro and the track's LFO turning them", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }

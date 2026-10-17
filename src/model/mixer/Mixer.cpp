@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Mixer.h"
+#include "internal/Containers.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/AutomationClips.h"
@@ -28,7 +29,7 @@ namespace
 
     std::optional<MixLevels> findMixLevels (te::Plugin& device)
     {
-        if (device.isSynth())
+        if (isInstrument (device))
             return {};
 
         auto dry = device.getAutomatableParameterByID ("dry level");
@@ -104,19 +105,19 @@ namespace
         if (plugin == nullptr)
             return nullptr;
 
-        list.insertPlugin (plugin, getInsertIndex (list, plugin->isSynth() ? 0 : deviceIndex), nullptr); // instruments come first
+        list.insertPlugin (plugin, getInsertIndex (list, isInstrument (*plugin) ? 0 : deviceIndex), nullptr); // instruments come first
         return list.contains (plugin.get()) ? plugin.get() : nullptr;
     }
 
-    DeviceType makeBuiltIn (const juce::String& name, const juce::String& xmlType, bool isInstrument, const juce::String& maker)
+    DeviceType makeBuiltIn (const juce::String& name, const juce::String& xmlType, bool instrument, const juce::String& maker)
     {
         juce::PluginDescription description;
         description.name = name;
         description.pluginFormatName = te::PluginManager::builtInPluginFormatName;
-        description.category = isInstrument ? "Synth" : "Effect";
+        description.category = instrument ? "Synth" : "Effect";
         description.manufacturerName = maker;
         description.fileOrIdentifier = xmlType;
-        description.isInstrument = isInstrument;
+        description.isInstrument = instrument;
         return makeDeviceType (description);
     }
 
@@ -150,7 +151,7 @@ juce::Array<te::Plugin*> getMasterDevices (const te::Edit& edit)
 te::Plugin* getInstrument (const te::Track& track)
 {
     const auto devices = getDevices (track);
-    return ! devices.isEmpty() && devices.getFirst()->isSynth() ? devices.getFirst() : nullptr;
+    return ! devices.isEmpty() && isInstrument (*devices.getFirst()) ? devices.getFirst() : nullptr;
 }
 
 juce::Array<te::Plugin*> getEffects (const te::Track& track)
@@ -176,7 +177,7 @@ bool needsInstrument (const te::Track& track)
 
 te::Plugin* setInstrument (te::AudioTrack& track, const te::Plugin::Ptr& plugin)
 {
-    if (plugin == nullptr || ! plugin->isSynth() || getReturnBus (track) >= 0)
+    if (plugin == nullptr || ! isInstrument (*plugin) || getReturnBus (track) >= 0)
         return nullptr;
 
     if (auto* old = getInstrument (track))
@@ -202,7 +203,14 @@ void removeDevice (te::Plugin& device)
 {
     const UndoStep step (device.edit, "Remove " + device.getName());
     auto* folder = dynamic_cast<te::FolderTrack*> (device.getOwnerTrack());
-    device.deleteFromParent();
+
+    // A container goes with its rack type, and the devices after a device in a container take its place.
+    if (auto* container = dynamic_cast<te::RackInstance*> (&device))
+        deleteContainer (*container);
+    else if (device.isInRack())
+        deleteFromContainer (device);
+    else
+        device.deleteFromParent();
 
     if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty() && ! folder->state.getProperty (schema::phaziteBus, false))
         makePlainFolder (*folder);
@@ -231,6 +239,10 @@ void moveDevice (te::Plugin& device, int newIndex)
 juce::StringArray getKeyControls (te::Plugin& device, int maximum)
 {
     juce::StringArray ids;
+
+    // A container's own parameters are Tracktion's levels in and out, which Phazite doesn't show.
+    if (isContainer (device))
+        return ids;
 
     // Phazite's own devices name theirs.
     if (auto* own = dynamic_cast<DevicePlugin*> (&device))
@@ -355,12 +367,15 @@ te::AudioTrack* addReturnWith (te::Track& sender, const DeviceType& type)
 te::Plugin* addDeviceTo (te::Edit& edit, te::Track* track, const DeviceType& type, te::SelectionManager* selection)
 {
     const UndoStep step (edit, "Add " + type.name);
-    auto device = createDevice (edit, type);
+    return placeDevice (edit, track, createDevice (edit, type), selection);
+}
 
+te::Plugin* placeDevice (te::Edit& edit, te::Track* track, const te::Plugin::Ptr& device, te::SelectionManager* selection)
+{
     if (device == nullptr)
         return nullptr;
 
-    if (! type.isInstrument)
+    if (! isInstrument (*device))
         return track != nullptr ? insertDevice (*track, device) : insertMasterDevice (edit, device);
 
     // An instrument silences a track's audio clips in Tracktion, so a track with audio gets one next to it instead.
@@ -376,9 +391,9 @@ te::Plugin* addDeviceTo (te::Edit& edit, te::Track* track, const DeviceType& typ
         if (audioTrack == nullptr)
             return nullptr;
 
-        audioTrack->setName (type.name);
+        audioTrack->setName (device->getName());
 
-        if (const auto colour = getColourForName (type.name))
+        if (const auto colour = getColourForName (device->getName()))
             audioTrack->setColour (*colour);
     }
 
@@ -499,7 +514,7 @@ te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, te::Se
 
 te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& effect)
 {
-    if (effect == nullptr || effect->isSynth())
+    if (effect == nullptr || isInstrument (*effect))
         return nullptr;
 
     // Named after the effect: "Reverb", or "Reverb 2" if there is one already.

@@ -26,7 +26,8 @@ struct BrowserPlace
         instruments,
         effects,
         folder, // one of the user's
-        addFolder
+        addFolder,
+        presets // the user's presets, listed after the effects
     };
 
     Kind kind = Kind::favorites;
@@ -53,8 +54,8 @@ class BrowserModel
 public:
     BrowserModel (const Library&, const SoundPack&);
 
-    // At the top of the tree: Favorites, Recent, Sounds by Type, Phazite Sounds, Instruments, Effects, each of the user's
-    // folders, and Add Folder.
+    // At the top of the tree: Favorites, Recent, Sounds by Type, Phazite Sounds, Instruments, Effects, Presets, each of
+    // the user's folders, and Add Folder.
     std::vector<BrowserPlace> getPlaces() const;
     BrowserContents getContents (const BrowserPlace&) const;
     BrowserContents getContents (const LibraryItem& folder) const;
@@ -69,7 +70,8 @@ public:
     bool canStartSoundPackDownload() const;
     bool isSoundPackBusy() const; // downloading or installing
 
-    // An item's row: what it says after the name (a loop's tempo, or what a device is), and its tooltip.
+    // An item's row: what it says after the name (a loop's tempo, what a device is, or what a preset holds), and its
+    // tooltip.
     static juce::String getDetail (const LibraryItem&);
     static juce::String getTooltip (const LibraryItem&);
     static bool canPreview (const LibraryItem&);     // sounds and MIDI files

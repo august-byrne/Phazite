@@ -9,7 +9,7 @@
 
 namespace phazite
 {
-// Whether a device has a sidechain to route a track into.
+// Whether a device has a sidechain to route a track into: not one in a container, which hears what passes through it.
 bool hasSidechain (te::Plugin&);
 
 // The tracks a device's sidechain can listen to, in the song's order: every audio track but the device's own and those

@@ -20,6 +20,7 @@ namespace phazite::ui
 class Playlist : public TimelineEditor,
                  public juce::FileDragAndDropTarget,
                  public juce::DragAndDropTarget,
+                 public juce::DragAndDropContainer,
                  private TrackHeader::Owner,
                  private juce::ChangeListener,
                  private juce::AsyncUpdater,
@@ -215,6 +216,7 @@ private:
     void showTrackMenu (TrackID) override;
     void showColourMenu (TrackID, juce::Component& target) override;
     void trackDragged (TrackHeader&, const juce::MouseEvent&) override;
+    bool trackDraggedOut (TrackHeader&, const juce::MouseEvent&) override;
     void trackDragEnded (TrackHeader&, const juce::MouseEvent&) override;
     void trackSelectionDragged (TrackHeader&, const juce::MouseEvent&) override;
     void trackHeightChanged() override; // the row's height, as the model keeps it now

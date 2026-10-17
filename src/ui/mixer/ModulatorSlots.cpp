@@ -2,7 +2,6 @@
 #include "ModulatorSlots.h"
 #include "StripParts.h"
 #include "model/automation/AutomationModel.h"
-#include "ui/components/ModulatorDrag.h"
 #include "ui/devices/ModulatorEditor.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -12,44 +11,7 @@ using namespace strip;
 
 namespace
 {
-    constexpr int gripWidth = 12, outputMeterWidth = 28, gripDots = 3;
-    constexpr float gripDotSize = 2.0f;
-
-    // Drags the modulator onto a knob: dots to grab.
-    struct Grip : public juce::Component,
-                  public juce::SettableTooltipClient
-    {
-        Grip (ModulatorSlots& o, ModulatorID m)
-            : owner (o),
-              modulator (m)
-        {
-            setTitle ("Drag to modulate");
-            setTooltip ("Drag onto a knob of this track's devices, or its volume, pan or sends, to modulate it");
-            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
-        }
-
-        void paint (juce::Graphics& g) override
-        {
-            g.setColour (getPalette (*this).textMuted);
-            const auto area = getLocalBounds().toFloat();
-
-            for (int row = 0; row < gripDots; ++row)
-                for (int column = 0; column < 2; ++column)
-                    g.fillEllipse (juce::Rectangle<float> (gripDotSize, gripDotSize)
-                                       .withCentre ({ area.getCentreX() + ((float) column - 0.5f) * 2.0f * gripDotSize,
-                                                      area.getCentreY() + (float) (row - 1) * 2.0f * gripDotSize }));
-        }
-
-        void mouseDrag (const juce::MouseEvent& e) override
-        {
-            // To knobs in device windows too.
-            if (e.getDistanceFromDragStart() > 4 && ! owner.isDragAndDropActive())
-                owner.startDragging (makeModulatorDrag (modulator), this, juce::ScaledImage(), true);
-        }
-
-        ModulatorSlots& owner;
-        const ModulatorID modulator;
-    };
+    constexpr int outputMeterWidth = 28;
 
     // A modulator's output now: a bar from the middle (bipolar) or from the left.
     struct Meter : public juce::Component
@@ -95,7 +57,7 @@ struct ModulatorSlots::Slot : public juce::Component
     Slot (ModulatorSlots& o, const ModulatorInfo& info)
         : owner (o),
           shown (info),
-          grip (o, info.id)
+          grip (info.id, "Drag onto a knob of this track's devices, or its volume, pan or sends, to modulate it")
     {
         nameButton.onClicked = [this] (bool isMenuClick)
         {
@@ -140,7 +102,7 @@ struct ModulatorSlots::Slot : public juce::Component
     void resized() override
     {
         auto area = getLocalBounds();
-        grip.setBounds (area.removeFromLeft (gripWidth));
+        grip.setBounds (area.removeFromLeft (ModulatorGrip::width));
         auto right = area.removeFromRight (outputMeterWidth);
 
         if (macroKnob != nullptr)
@@ -153,7 +115,7 @@ struct ModulatorSlots::Slot : public juce::Component
 
     ModulatorSlots& owner;
     ModulatorInfo shown;
-    Grip grip;
+    ModulatorGrip grip;
     MenuButton nameButton;
     Meter meter;
     std::unique_ptr<Knob> macroKnob;

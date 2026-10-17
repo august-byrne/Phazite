@@ -16,7 +16,7 @@ namespace
 MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
     : commands (bridge),
       context (projectContext),
-      master (projectContext)
+      master (bridge, projectContext)
 {
     setTitle ("Mixer");
     setDescription ("A channel for every track, in the playlist's order, and the return tracks next to the master. Click a channel to "

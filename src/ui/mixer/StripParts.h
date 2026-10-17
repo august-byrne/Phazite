@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the mixer's strips share (ChannelStrip.h, MasterStrip.h, DeviceSlots.h): the sizes of their parts, a heading
-// over a group of controls, a button that tells a right-click from a click, and knobs for a device's parameters.
+// over a group of controls, a button that tells a right-click from a click, knobs for a device's parameters, and a grip
+// to drag a modulator by.
 #pragma once
 
+#include "model/base/IDs.h"
 #include "ui/components/Controls.h"
 #include "ui/theme/DesignTokens.h"
 
@@ -40,10 +42,13 @@ namespace strip
     {
         using juce::TextButton::clicked;
         std::function<void (bool isMenuClick)> onClicked;
+        std::function<void (const juce::ModifierKeys&)> onClickedWith; // in place of onClicked, for clicks with Ctrl or Shift
 
         void clicked (const juce::ModifierKeys& mods) override
         {
-            if (onClicked != nullptr)
+            if (onClickedWith != nullptr)
+                onClickedWith (mods);
+            else if (onClicked != nullptr)
                 onClicked (mods.isPopupMenu());
         }
     };
@@ -51,6 +56,19 @@ namespace strip
     // A knob for a parameter of a device, attached to it; nullptr for a handle of nothing.
     Knob* addParameterKnob (juce::Component& parent, juce::OwnedArray<Knob>& knobs, juce::OwnedArray<ParameterAttachment>& attachments,
                             ParameterHandle);
+
+    // Dots to drag a modulator or a macro by, onto a knob it can modulate (ui/components/ModulatorDrag.h), in devices'
+    // windows too. Its drag-and-drop container is the nearest around it.
+    struct ModulatorGrip : public juce::Component,
+                           public juce::SettableTooltipClient
+    {
+        ModulatorGrip (ModulatorID, const juce::String& tooltip);
+        void paint (juce::Graphics&) override;
+        void mouseDrag (const juce::MouseEvent&) override;
+
+        const ModulatorID modulator;
+        static constexpr int width = 12;
+    };
 } // namespace strip
 
 //==============================================================================

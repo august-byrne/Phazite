@@ -281,22 +281,26 @@ TEST_CASE ("A held key runs its command once, unless the command takes a step")
 }
 
 TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap, or once more by a command for selected "
-           "notes and once more by one for selected automation points")
+           "notes, one for selected automation points and one for selected devices")
 {
-    // A command for selected notes, or for selected automation points, can share a key with a command of another kind: it
-    // takes the key while its notes or points are selected (Command::notePriority), and notes and points are never
-    // selected together.
+    // A command for selected notes, automation points or devices can share a key with a command of another kind: it takes
+    // the key while its notes, points or devices are selected (Command::notePriority), and those are never selected
+    // together.
     const auto isPointCommand = [] (const juce::String& id)
     { return id.startsWith ("automation.raise") || id.startsWith ("automation.lower"); };
+    const auto isDeviceCommand = [] (const juce::String& id) { return id == "device.group" || id == "device.ungroup"; };
 
     for (const auto& keymap : phazite::ui::Keymap::getBuiltIn())
     {
         CAPTURE (keymap.name.toStdString());
-        juce::Array<juce::KeyPress> used, usedByNotes, usedByPoints;
+        juce::Array<juce::KeyPress> used, usedByNotes, usedByPoints, usedByDevices;
 
         for (const auto& entry : keymap.keys)
         {
-            auto& keys = entry.first.startsWith ("note.") ? usedByNotes : isPointCommand (entry.first) ? usedByPoints : used;
+            auto& keys = entry.first.startsWith ("note.") ? usedByNotes
+                         : isPointCommand (entry.first)   ? usedByPoints
+                         : isDeviceCommand (entry.first)  ? usedByDevices
+                                                          : used;
 
             for (const auto& description : entry.second)
             {

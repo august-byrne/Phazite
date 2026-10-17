@@ -46,7 +46,7 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override; // selects the track
 
-    // A device dragged from the browser goes onto this channel (phazite::addDeviceTo()).
+    // A device or a preset dragged from the browser goes onto this channel (phazite::addDeviceTo(), loadPreset()).
     bool isInterestedInDragSource (const SourceDetails&) override;
     void itemDragEnter (const SourceDetails&) override;
     void itemDragExit (const SourceDetails&) override;

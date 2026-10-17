@@ -170,6 +170,9 @@ target_sources(phazite_core PRIVATE
     src/model/engine/internal/LoudnessMeterPlugin.h
     src/model/engine/internal/Preview.h
     src/model/mixer/Buses.cpp
+    src/model/mixer/ContainerModel.cpp
+    src/model/mixer/ContainerModel.h
+    src/model/mixer/Containers.cpp
     src/model/mixer/DeviceType.h
     src/model/mixer/LevelSource.cpp
     src/model/mixer/LevelSource.h
@@ -180,6 +183,7 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/MixerModel.h
     src/model/mixer/Sidechain.cpp
     src/model/mixer/internal/Buses.h
+    src/model/mixer/internal/Containers.h
     src/model/mixer/internal/LevelSource.h
     src/model/mixer/internal/MixHandle.h
     src/model/mixer/internal/Mixer.h
@@ -195,6 +199,9 @@ target_sources(phazite_core PRIVATE
     src/model/notes/NotesModel.cpp
     src/model/notes/NotesModel.h
     src/model/notes/internal/Notes.h
+    src/model/presets/PresetModel.h
+    src/model/presets/Presets.cpp
+    src/model/presets/internal/Presets.h
     src/model/project/Export.cpp
     src/model/project/Export.h
     src/model/project/NewProject.cpp
@@ -413,6 +420,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/input/WindowKeys.h
     src/ui/mixer/ChannelStrip.cpp
     src/ui/mixer/ChannelStrip.h
+    src/ui/mixer/ContainerEditor.cpp
+    src/ui/mixer/ContainerEditor.h
     src/ui/mixer/DeviceSlots.cpp
     src/ui/mixer/DeviceSlots.h
     src/ui/mixer/Inspector.cpp
@@ -579,6 +588,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/CompressorEditorTests.cpp
         tests/CompressorTests.cpp
         tests/ComputerKeyboardTests.cpp
+        tests/ContainerTests.cpp
+        tests/ContainerUiTests.cpp
         tests/ControlsTests.cpp
         tests/DesignTokenTests.cpp
         tests/DeviceEditorTests.cpp
@@ -622,6 +633,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/PlaylistModelTests.cpp
         tests/PluginKeysTests.cpp
         tests/PlaylistTests.cpp
+        tests/PresetTests.cpp
         tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp
         tests/RealTimePlayback.h

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Browser.h"
+#include "model/mixer/ContainerModel.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
@@ -25,6 +26,11 @@ namespace
                 return Icon::instrument;
             case LibraryItem::Kind::effect:
                 return Icon::effect;
+            case LibraryItem::Kind::preset: // as what it holds: an instrument, an effect or a container, or a track's sound
+                if (item.preset.has_value() && item.preset->kind == PresetKind::track)
+                    return Icon::sound;
+
+                return item.preset.has_value() && item.preset->isInstrument ? Icon::instrument : Icon::effect;
             case LibraryItem::Kind::sound:
                 break;
         }
@@ -324,8 +330,9 @@ struct Browser::PlaceNode : public Node
     void showMenu() override
     {
         const auto isFolder = place.kind == BrowserPlace::Kind::folder;
+        const auto isPresets = place.kind == BrowserPlace::Kind::presets && place.folder.isDirectory();
 
-        if (isFolder || (place.kind == BrowserPlace::Kind::sounds && browser.soundPack.isInstalled()))
+        if (isFolder || isPresets || (place.kind == BrowserPlace::Kind::sounds && browser.soundPack.isInstalled()))
             browser.showMenu (browser.library.makeFileItem (place.folder, place.folder), isFolder);
     }
 
@@ -560,12 +567,17 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
             if (safeThis == nullptr || safeThis->placesRoot == nullptr)
                 return;
 
+            // Its folders open now stay open.
             const auto reopen = [kind] (juce::TreeViewItem* item)
             {
                 if (auto* place = dynamic_cast<PlaceNode*> (item); place != nullptr && place->place.kind == kind && place->isOpen())
                 {
+                    const auto openness = place->getOpennessState();
                     place->setOpen (false);
                     place->setOpen (true);
+
+                    if (openness != nullptr)
+                        place->restoreOpennessState (*openness);
                 }
             };
 
@@ -759,6 +771,187 @@ void Browser::chooseFolderToAdd()
 }
 
 //==============================================================================
+void Browser::addCommands (CommandRegistry& registry)
+{
+    registry.add ({ .id = "device.savePreset",
+                    .name = "Save Device Preset...",
+                    .category = "Device",
+                    .description = "Saves the selected device's settings as a preset, to use again in any project: a container's with "
+                                   "its devices and macros.",
+                    .synonyms = { "preset", "save settings", "patch", "store", "rack preset", "fx chain" },
+                    .perform = [this] { saveSelectedDevicePreset(); },
+                    .isEnabled = [this] { return canSaveDevicePreset(); } });
+
+    registry.add ({ .id = "track.savePreset",
+                    .name = "Save Track Preset...",
+                    .category = "Track",
+                    .description = "Saves the selected track's devices, mix and modulators as a preset, which makes a new track with "
+                                   "them in any project. Dragging a track into the browser does too.",
+                    .synonyms = { "preset", "template", "channel strip", "patch", "store" },
+                    .perform = [this] { saveSelectedTrackPreset(); },
+                    .isEnabled = [this] { return canSaveTrackPreset(); } });
+}
+
+bool Browser::canSaveDevicePreset() const
+{
+    return projectContext.getSongSelection().getDevices().size() == 1;
+}
+
+bool Browser::canSaveTrackPreset() const
+{
+    const auto tracks = projectContext.getSongSelection().getTracks();
+    const auto channel = tracks.size() == 1 ? getChannel (projectContext, tracks.front()) : std::nullopt;
+    return channel.has_value() && channel->kind == ChannelKind::track; // not a folder's or a return's
+}
+
+void Browser::saveSelectedDevicePreset()
+{
+    if (! canSaveDevicePreset())
+        return;
+
+    // In its device's folder, or Containers, named after it.
+    const auto device = projectContext.getSongSelection().getDevices().front();
+    const auto folder = getPresetFolderName (projectContext, device);
+    const auto container = getContainerName (projectContext, device);
+    choosePresetFile (folder, container.isNotEmpty() ? container : folder,
+                      [this, device] (const juce::File& file) { return saveDevicePreset (projectContext, device, file); });
+}
+
+void Browser::saveSelectedTrackPreset()
+{
+    if (! canSaveTrackPreset())
+        return;
+
+    const auto track = projectContext.getSongSelection().getTracks().front();
+    choosePresetFile (trackPresetsFolder, getChannel (projectContext, track)->name,
+                      [this, track] (const juce::File& file) { return phazite::saveTrackPreset (projectContext, track, file); });
+}
+
+void Browser::choosePresetFile (const juce::String& folder, const juce::String& name, std::function<bool (const juce::File&)> save)
+{
+    const auto presets = library.getPresetsFolder().getChildFile (folder);
+    presets.createDirectory();
+    presetChooser = std::make_unique<juce::FileChooser> ("Save a Preset",
+                                                         presets.getChildFile (juce::File::createLegalFileName (name) + presetExtension),
+                                                         "*" + juce::String (presetExtension));
+
+    presetChooser->launchAsync (
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::warnAboutOverwriting,
+        [safeThis = juce::Component::SafePointer<Browser> (this), onChosen = std::move (save)] (const juce::FileChooser& chooser)
+        {
+            const auto chosen = chooser.getResult();
+
+            if (safeThis != nullptr && chosen != juce::File() && onChosen (chosen.withFileExtension (presetExtension)))
+                safeThis->presetSaved (chosen.withFileExtension (presetExtension));
+        });
+}
+
+juce::File Browser::saveTrackPreset (TrackID track)
+{
+    const auto channel = getChannel (projectContext, track);
+
+    if (! channel.has_value() || channel->kind != ChannelKind::track)
+        return {};
+
+    const auto folder = library.getPresetsFolder().getChildFile (trackPresetsFolder);
+    folder.createDirectory();
+    const auto file = folder.getNonexistentChildFile (juce::File::createLegalFileName (channel->name), presetExtension, true);
+
+    if (! phazite::saveTrackPreset (projectContext, track, file))
+        return {};
+
+    presetSaved (file);
+    return file;
+}
+
+void Browser::presetSaved (const juce::File& file)
+{
+    // Search finds it, and Presets shows it, selected.
+    library.notePresetSaved();
+
+    juce::MessageManager::callAsync (
+        [safeThis = juce::Component::SafePointer<Browser> (this), file]
+        {
+            if (safeThis != nullptr)
+                safeThis->reveal (BrowserPlace::Kind::presets, file);
+        });
+}
+
+void Browser::reveal (BrowserPlace::Kind kind, const juce::File& file)
+{
+    if (placesRoot == nullptr)
+        return;
+
+    // The place, listed anew with its folders open as they were, and opened down to the file.
+    for (int i = 0; i < placesRoot->getNumSubItems(); ++i)
+    {
+        auto* place = dynamic_cast<PlaceNode*> (placesRoot->getSubItem (i));
+
+        if (place == nullptr || place->place.kind != kind)
+            continue;
+
+        const auto openness = place->getOpennessState();
+        place->setOpen (false);
+        place->setOpen (true);
+
+        if (openness != nullptr)
+            place->restoreOpennessState (*openness);
+
+        for (juce::TreeViewItem* parent = place; parent != nullptr;)
+        {
+            juce::TreeViewItem* next = nullptr;
+
+            for (int j = 0; j < parent->getNumSubItems() && next == nullptr; ++j)
+            {
+                auto* node = dynamic_cast<Node*> (parent->getSubItem (j));
+                const auto* item = node != nullptr ? node->getItem() : nullptr;
+
+                if (item == nullptr || (item->file != file && ! file.isAChildOf (item->file)))
+                    continue;
+
+                if (item->file == file)
+                {
+                    node->setSelected (true, true);
+                    tree->scrollToKeepItemVisible (node);
+                    return;
+                }
+
+                node->setOpen (true);
+                next = node;
+            }
+
+            parent = next;
+        }
+    }
+}
+
+bool Browser::isInterestedInDragSource (const SourceDetails& details)
+{
+    return projectContext.hasProject() && getDraggedTrack (details.description).has_value();
+}
+
+void Browser::itemDragEnter (const SourceDetails&)
+{
+    trackDropping = true;
+    repaint();
+}
+
+void Browser::itemDragExit (const SourceDetails&)
+{
+    trackDropping = false;
+    repaint();
+}
+
+void Browser::itemDropped (const SourceDetails& details)
+{
+    itemDragExit (details);
+
+    if (const auto track = getDraggedTrack (details.description))
+        saveTrackPreset (*track);
+}
+
+//==============================================================================
 std::optional<LibraryItem> Browser::getSelectedItem() const
 {
     if (auto* node = dynamic_cast<Node*> (tree->getSelectedItem (0)))
@@ -793,6 +986,13 @@ void Browser::paint (juce::Graphics& g)
     g.setColour (p.textMuted);
     g.setFont (juce::FontOptions (TextSize::small));
     g.drawText (BrowserModel::getPreviewStatus (isPreviewOn(), previewer), statusArea, juce::Justification::centredLeft, true);
+
+    // A track about to be saved as a preset, as a mixer channel shows a device about to be dropped on it.
+    if (trackDropping)
+    {
+        g.setColour (p.accent);
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), cornerRadius, 2.0f);
+    }
 }
 
 void Browser::resized()

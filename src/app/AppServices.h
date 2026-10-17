@@ -19,6 +19,7 @@ struct AppServicesOptions
 {
     bool settingsInMemory = false;                                       // for tests: nothing is read from or written to Settings.xml
     juce::File packsFolder = SoundPack::getDefaultPacksFolder();         // where Phazite Sounds are installed
+    juce::File presetsFolder = Library::getDefaultPresetsFolder();       // where the user's presets are saved
     SoundPack::Release soundPackRelease = SoundPack::getPinnedRelease(); // the release of them that is downloaded
 };
 

@@ -27,4 +27,9 @@ std::span<const devices::DeviceInfo* const> getOwnDevices()
                                                       &devices::Compressor::info, &devices::Limiter::info,     &devices::Reverb::info };
     return own;
 }
+
+bool isInstrument (te::Plugin& device)
+{
+    return device.isSynth() && dynamic_cast<te::RackInstance*> (&device) == nullptr;
+}
 } // namespace phazite

@@ -67,7 +67,8 @@ namespace
 
 bool hasSidechain (te::Plugin& plugin)
 {
-    return plugin.canSidechain();
+    // A container wires only the sound passing through its devices (Containers.h).
+    return plugin.canSidechain() && ! plugin.isInRack();
 }
 
 juce::Array<te::AudioTrack*> getSidechainSources (te::Plugin& plugin)

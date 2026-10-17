@@ -24,6 +24,8 @@ public:
         virtual void showTrackMenu (TrackID) = 0;
         virtual void showColourMenu (TrackID, juce::Component& target) = 0;
         virtual void trackDragged (TrackHeader&, const juce::MouseEvent&) = 0; // moving it to another row
+        // While moving it: true if it went out of the playlist and is now carried elsewhere (into the browser, to save it).
+        virtual bool trackDraggedOut (TrackHeader&, const juce::MouseEvent&) = 0;
         virtual void trackDragEnded (TrackHeader&, const juce::MouseEvent&) = 0;
         virtual void trackSelectionDragged (TrackHeader&, const juce::MouseEvent&) = 0; // selecting the tracks it passes
         virtual void trackHeightChanged() = 0;                                          // while its edge is dragged
@@ -60,7 +62,8 @@ private:
         move,
         resize,
         selectPending, // elsewhere on the header: a drag selects the tracks it passes
-        select
+        select,
+        out // moved out of the playlist, carried elsewhere
     };
 
     Owner& owner;

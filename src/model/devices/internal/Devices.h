@@ -14,4 +14,8 @@ void registerDevices (te::Engine&);
 
 // Phazite's devices, in the order menus list them.
 std::span<const devices::DeviceInfo* const> getOwnDevices();
+
+// Whether a device is an instrument, which turns notes into sound. Tracktion counts a rack as a synth, but Phazite's
+// containers (model/mixer/internal/Containers.h) hold effects.
+bool isInstrument (te::Plugin&);
 } // namespace phazite

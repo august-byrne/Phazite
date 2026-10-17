@@ -33,7 +33,8 @@ juce::String getModulatorTypeName (ModulatorType);
 struct ModulatorInfo
 {
     ModulatorID id {};
-    TrackID track {}; // whose it is: a track's, a folder's, or the master's (AutomationModel.h: getMasterTrack())
+    TrackID track {};      // whose it is: a track's, a folder's, or the master's (AutomationModel.h: getMasterTrack())
+    DeviceID container {}; // a container's macro's: the container (model/mixer/ContainerModel.h), on that track
     ModulatorType type = ModulatorType::lfo;
     juce::String name {}; // "LFO 2", "Macro 1"
 };

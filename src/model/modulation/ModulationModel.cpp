@@ -4,6 +4,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -38,6 +39,11 @@ namespace
         info.track = modulator.getTrack() != nullptr ? getTrackID (*modulator.getTrack()) : TrackID();
         info.type = getModulatorType (modulator).value_or (ModulatorType::lfo);
         info.name = getModulatorName (modulator);
+
+        if (auto* rack = modulator.getContainerRack())
+            if (auto* container = findContainerOf (*rack))
+                info.container = getDeviceID (*container);
+
         return info;
     }
 
@@ -126,7 +132,9 @@ ModulatorID addModulator (ProjectContext& context, TrackID id, ModulatorType typ
 
 void removeModulator (ProjectContext& context, ModulatorID id)
 {
-    if (const auto modulator = find (context, id); modulator.has_value() && modulator->getTrack() != nullptr)
+    // A container keeps its eight macros.
+    if (const auto modulator = find (context, id);
+        modulator.has_value() && modulator->getTrack() != nullptr && modulator->getContainerRack() == nullptr)
     {
         const UndoStep step (modulator->getTrack()->edit, "Remove " + getModulatorName (*modulator));
         removeModulator (*modulator);
@@ -166,11 +174,29 @@ ParameterHandle getModulatorParameter (ProjectContext& context, ModulatorID id, 
                    : ParameterHandle();
     }
 
-    if (auto* track = dynamic_cast<te::AudioTrack*> (modulator->getTrack());
-        track != nullptr && modulator->macro != nullptr && modulator->macro->paramID == parameterID)
-        return makeMacroHandle (*track, *modulator->macro, "Change " + getModulatorName (*modulator));
+    if (modulator->macro == nullptr || modulator->macro->paramID != parameterID)
+        return {};
+
+    const auto undoName = "Change " + getModulatorName (*modulator);
+
+    if (auto* rack = modulator->getContainerRack())
+        return makeMacroHandle (*rack, *modulator->macro, undoName);
+
+    if (auto* track = dynamic_cast<te::AudioTrack*> (modulator->getTrack()))
+        return makeMacroHandle (*track, *modulator->macro, undoName);
 
     return {};
+}
+
+void renameMacro (ProjectContext& context, ModulatorID id, const juce::String& name)
+{
+    const auto modulator = find (context, id);
+
+    if (! modulator.has_value() || modulator->macro == nullptr || name.trim().isEmpty() || name.trim() == modulator->macro->macroName.get())
+        return;
+
+    const UndoStep step (modulator->macro->getEdit(), "Rename Macro");
+    renameMacro (*modulator->macro, name);
 }
 
 std::vector<float> getModulatorOutput (const ProjectContext& context, ModulatorID id, double seconds)
@@ -266,6 +292,13 @@ void removeModulation (ProjectContext& context, ModulatorID id, const ParameterR
 std::vector<ModulatorInfo> getModulatorsFor (const ParameterHandle& handle)
 {
     std::vector<ModulatorInfo> modulators;
+
+    // A device's in a container: its container's macros first.
+    if (const auto parameter = findParameter (handle))
+        if (auto* device = parameter->getPlugin(); device != nullptr && device->isInRack())
+            if (auto* container = findContainerOf (*device))
+                for (auto* macro : getContainerMacros (*container))
+                    modulators.push_back (makeInfo ({ nullptr, macro }));
 
     if (auto* track = getTrackOf (handle))
         for (const auto& modulator : getModulators (*track))

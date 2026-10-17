@@ -285,7 +285,10 @@ void TrackHeader::mouseDrag (const juce::MouseEvent& e)
 
     if (drag == Drag::move)
     {
-        owner.trackDragged (*this, e);
+        if (owner.trackDraggedOut (*this, e))
+            drag = Drag::out; // the drag-and-drop container has it now
+        else
+            owner.trackDragged (*this, e);
     }
     else if (drag == Drag::select)
     {

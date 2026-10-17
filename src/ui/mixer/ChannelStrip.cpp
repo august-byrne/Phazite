@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ChannelStrip.h"
+#include "model/presets/PresetModel.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/input/LibraryDrag.h"
@@ -73,8 +74,8 @@ struct ChannelStrip::SendSlot : public juce::Component
 ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContext)
     : commands (bridge),
       context (projectContext),
-      instrument (DeviceSlots::Kind::instrument, projectContext),
-      effects (DeviceSlots::Kind::effects, projectContext),
+      instrument (DeviceSlots::Kind::instrument, projectContext, bridge),
+      effects (DeviceSlots::Kind::effects, projectContext, bridge),
       modulators (projectContext),
       muteSolo (projectContext)
 {
@@ -338,7 +339,8 @@ void ChannelStrip::mouseDown (const juce::MouseEvent&)
 
 bool ChannelStrip::isInterestedInDragSource (const SourceDetails& details)
 {
-    return channel.has_value() && getDraggedDevice (details.description).has_value();
+    return channel.has_value()
+           && (getDraggedDevice (details.description).has_value() || getDraggedPreset (details.description).has_value());
 }
 
 void ChannelStrip::itemDragEnter (const SourceDetails&)
@@ -357,9 +359,19 @@ void ChannelStrip::itemDropped (const SourceDetails& details)
 {
     itemDragExit (details);
 
-    if (const auto device = getDraggedDevice (details.description); device.has_value() && channel.has_value())
-        if (addDeviceTo (context, track, *device))
-            markPlaced (details.description);
+    if (! channel.has_value())
+        return;
+
+    // A device, or a preset: a device's or a container's on this channel, a track's on a new track after it.
+    auto placed = false;
+
+    if (const auto device = getDraggedDevice (details.description))
+        placed = addDeviceTo (context, track, *device);
+    else if (const auto preset = getDraggedPreset (details.description))
+        placed = loadPreset (context, *preset, track);
+
+    if (placed)
+        markPlaced (details.description);
 }
 
 void ChannelStrip::paint (juce::Graphics& g)

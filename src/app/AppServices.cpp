@@ -10,7 +10,7 @@ AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
       settings (options.settingsInMemory ? nullptr : &engine.getPropertyStorage().getPropertiesFile()),
       recentProjects (settings),
       soundPack (options.packsFolder, options.soundPackRelease),
-      library (*engineContext, settings, soundPack.getFolder()),
+      library (*engineContext, settings, soundPack.getFolder(), options.presetsFolder),
       previewer (createPreviewer (engine))
 {
 }

@@ -23,4 +23,7 @@ void showEffectMenu (ProjectContext&, TrackID, juce::Component& target);
 
 // The effects, for a new return track that the track sends to: the return holds the effect chosen and is named after it.
 void showNewReturnMenu (ProjectContext&, TrackID sender, juce::Component& target);
+
+// The effects, for a container (model/mixer/ContainerModel.h): the one chosen goes after its devices.
+void showContainerEffectMenu (ProjectContext&, DeviceID container, juce::Component& target);
 } // namespace phazite::ui

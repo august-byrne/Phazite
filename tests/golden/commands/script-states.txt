@@ -46,6 +46,8 @@ after start:
   section.outline.drumAndBass: on "Apply Outline: Drum and bass"
   section.outline.techno: on "Apply Outline: Techno"
   track.addReturn: on "Add Return Track"
+  device.group: off "Group into Container"
+  device.ungroup: off "Ungroup Container"
   automation.automateLastTouched: off "Automate Last Touched Parameter"
   automation.createClip: off "Create Automation Clip"
   automation.showLanes: off "Show Automation"

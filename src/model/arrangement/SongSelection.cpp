@@ -117,10 +117,26 @@ namespace
             manager.selectOnly (item);
     }
 
+    te::Plugin* findDevice (const te::SelectionManager& manager, DeviceID id)
+    {
+        auto* edit = manager.getEdit();
+        return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
+    }
+
+    // Devices are selected on their own: adding one to a selection of anything else starts a new one, and so does adding
+    // anything else to a selection of devices.
     void addItem (te::SelectionManager& manager, te::Selectable* item)
     {
-        if (item != nullptr)
-            manager.addToSelection (item);
+        if (item == nullptr)
+            return;
+
+        const auto isDevice = dynamic_cast<te::Plugin*> (item) != nullptr;
+        const auto holdsDevices = manager.getFirstItemOfType<te::Plugin>() != nullptr;
+
+        if (manager.getNumObjectsSelected() > 0 && holdsDevices != isDevice)
+            manager.deselectAll();
+
+        manager.addToSelection (item);
     }
 
     void removeItem (te::SelectionManager& manager, te::Selectable* item)
@@ -238,6 +254,38 @@ void SongSelection::remove (SectionID id)
 void SongSelection::clear()
 {
     impl->manager.deselectAll();
+}
+
+//==============================================================================
+std::vector<DeviceID> SongSelection::getDevices() const
+{
+    std::vector<DeviceID> ids;
+
+    for (auto* device : impl->manager.getItemsOfType<te::Plugin>())
+        ids.push_back (getDeviceID (*device));
+
+    return ids;
+}
+
+bool SongSelection::isSelected (DeviceID id) const
+{
+    auto* device = findDevice (impl->manager, id);
+    return device != nullptr && impl->manager.isSelected (device);
+}
+
+void SongSelection::selectOnly (DeviceID id)
+{
+    selectOnlyItem (impl->manager, findDevice (impl->manager, id));
+}
+
+void SongSelection::add (DeviceID id)
+{
+    addItem (impl->manager, findDevice (impl->manager, id));
+}
+
+void SongSelection::remove (DeviceID id)
+{
+    removeItem (impl->manager, findDevice (impl->manager, id));
 }
 
 //==============================================================================

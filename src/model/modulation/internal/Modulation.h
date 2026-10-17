@@ -20,7 +20,8 @@ struct ModulatorAccess
     te::MacroParameter::Ptr macro; // or a macro
 
     te::AutomatableParameter::ModifierSource* getSource() const;
-    te::Track* getTrack() const; // whose it is
+    te::Track* getTrack() const;            // whose it is: a container's macro's, its container's track
+    te::RackType* getContainerRack() const; // a container's macro's: the rack type its container plays
     ModulatorID getID() const;
 };
 
@@ -38,6 +39,14 @@ juce::String getModulatorName (const ModulatorAccess&); // "LFO 2": its kind's n
 // that can't hold one (a macro: only tracks that hold clips can). It starts as Phazite sets it up: LFOs and random
 // sources move both ways, and a step sequencer and an envelope follower at full depth, the steps rising.
 std::optional<ModulatorAccess> addModulator (te::Track&, ModulatorType);
+
+// Adds a macro to a list of them (a track's or a container's), named as given ("Macro 1"), at 0, so that what it
+// modulates doesn't move until it is turned; made with its value in its state, so that redoing the step puts it back at
+// 0 too. Joins the caller's step.
+te::MacroParameter* addMacro (te::MacroParameterList&, const juce::String& name);
+
+// Renames a macro, joining the caller's step; a name of nothing but spaces leaves it as it is.
+void renameMacro (te::MacroParameter&, const juce::String& name);
 
 // The name a modulator's editor shows for one of its parameters: Tracktion's, but clearer ("Polarity", "Point 1 Level").
 juce::String getModulatorParameterName (const te::AutomatableParameter&);
@@ -59,8 +68,8 @@ struct ModulationAccess
 std::vector<ModulationAccess> getModulations (const te::AutomatableParameter&); // in the order they were made
 std::vector<ModulationAccess> getModulations (const ModulatorAccess&);
 
-// Whether a modulator can modulate a parameter: one of its own track's devices', or its track's volume, pan or sends,
-// but none of its own (nor a macro's).
+// Whether a modulator can modulate a parameter: one of its own track's devices' (those in its containers too), or its
+// track's volume, pan or sends, but none of its own (nor a macro's). A container's macros modulate its devices'.
 bool canModulate (const ModulatorAccess&, const te::AutomatableParameter&);
 
 // Makes a modulation or changes its amount, and takes it away, joining the caller's step. The parameter then plays its

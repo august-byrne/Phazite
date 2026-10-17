@@ -4,6 +4,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 
 #include <algorithm>
@@ -847,7 +848,7 @@ bool isDrumTrack (const te::AudioTrack& track)
         return track.state[schema::phaziteDrumMode];
 
     for (auto* plugin : track.pluginList)
-        if (plugin->isSynth())
+        if (isInstrument (*plugin))
             return dynamic_cast<te::SamplerPlugin*> (plugin) != nullptr || dynamic_cast<DrumSamplerPlugin*> (plugin) != nullptr;
 
     return false;

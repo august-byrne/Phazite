@@ -73,14 +73,15 @@ TEST_CASE ("The browser's places come in order, the user's folders before Add Fo
     Libraries libraries (true);
     const auto places = libraries.model.getPlaces();
     CHECK (getTitles (places)
-           == juce::StringArray { "Favorites", "Recent", "Sounds by Type", "Phazite Sounds", "Instruments", "Effects", "My Sounds",
-                                  "Add Folder..." });
+           == juce::StringArray { "Favorites", "Recent", "Sounds by Type", "Phazite Sounds", "Instruments", "Effects", "Presets",
+                                  "My Sounds", "Add Folder..." });
     CHECK_FALSE (places.back().holdsItems());
 
     // The keys are those of the places a user left open, which the settings keep: they don't change between versions.
     CHECK (places[0].getKey() == juce::String ("0:Favorites:"));
-    CHECK (places[6].getKey() == "7:My Sounds:" + libraries.userFolder.getFullPathName());
-    CHECK (places[6].getTooltip() == libraries.userFolder.getFullPathName());
+    CHECK (places[7].getKey() == "7:My Sounds:" + libraries.userFolder.getFullPathName());
+    CHECK (places[6].getKey().startsWith ("9:Presets:"));
+    CHECK (places[7].getTooltip() == libraries.userFolder.getFullPathName());
 }
 
 TEST_CASE ("Each place holds its items, or says what it is for while it holds none")

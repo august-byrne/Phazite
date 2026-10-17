@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Library.h"
+#include "model/engine/AppInfo.h"
 #include "model/engine/EngineContext.h"
 
 #include <algorithm>
@@ -291,7 +292,7 @@ struct Library::Indexer : public juce::Thread
                 if (threadShouldExit() || (int) found.size() >= maxIndexed)
                     break;
 
-                if (const auto& file = entry.getFile(); owner.isSoundFile (file) || owner.isMidiFile (file))
+                if (const auto& file = entry.getFile(); owner.isSoundFile (file) || owner.isMidiFile (file) || isPreset (file))
                     found.push_back (owner.makeFileItem (file, root));
             }
         }
@@ -312,10 +313,11 @@ struct Library::Indexer : public juce::Thread
 };
 
 //==============================================================================
-Library::Library (EngineContext& e, Settings& s, juce::File factory)
+Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File presets)
     : engine (e),
       settings (s),
       factorySounds (std::move (factory)),
+      presetsFolder (std::move (presets)),
       audioExtensions (engine.getAudioFileExtensions()) // which the index can check on its own thread
 {
     reindex();
@@ -335,6 +337,16 @@ bool Library::isSoundFile (const juce::File& file) const
 bool Library::isMidiFile (const juce::File& file) const
 {
     return file.hasFileExtension (".mid;.midi");
+}
+
+bool Library::isPreset (const juce::File& file)
+{
+    return isPresetFile (file) && readPresetInfo (file).has_value();
+}
+
+juce::File Library::getDefaultPresetsFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (appName).getChildFile ("Presets");
 }
 
 juce::Array<juce::File> Library::getUserFolders() const
@@ -379,6 +391,9 @@ juce::Array<juce::File> Library::getRoots() const
         if (folder.isDirectory())
             roots.add (folder);
 
+    if (presetsFolder.isDirectory())
+        roots.add (presetsFolder);
+
     return roots;
 }
 
@@ -403,6 +418,22 @@ LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& roo
         return item;
     }
 
+    // A preset, tagged with what it holds: "Track", "Container", or its device's name.
+    if (isPresetFile (file))
+    {
+        item.kind = LibraryItem::Kind::preset;
+        item.name = file.getFileNameWithoutExtension();
+        item.preset = readPresetInfo (file);
+        item.tags.add ("Preset");
+
+        if (item.preset.has_value())
+            item.tags.add (item.preset->kind == PresetKind::track       ? juce::String ("Track")
+                           : item.preset->kind == PresetKind::container ? juce::String ("Container")
+                                                                        : item.preset->device);
+
+        return item;
+    }
+
     item.kind = isMidiFile (file) ? LibraryItem::Kind::midi : LibraryItem::Kind::sound;
     item.name = file.getFileNameWithoutExtension();
     item.tags = getSoundTags (file, root);
@@ -421,7 +452,7 @@ std::vector<LibraryItem> Library::listFolder (const juce::File& folder) const
 
         if (entry.isDirectory())
             folders.push_back (makeFileItem (file, root));
-        else if (isSoundFile (file) || isMidiFile (file))
+        else if (isSoundFile (file) || isMidiFile (file) || isPreset (file))
             files.push_back (makeFileItem (file, root));
     }
 
@@ -537,7 +568,7 @@ std::vector<LibraryItem> Library::listByTag (const juce::String& tag, int maximu
         const juce::ScopedLock lock (indexLock);
 
         for (const auto& item : index)
-            if (item.tags.contains (tag))
+            if (item.kind != LibraryItem::Kind::preset && item.tags.contains (tag)) // a synth's preset is no synth sound
                 items.push_back (item);
     }
 

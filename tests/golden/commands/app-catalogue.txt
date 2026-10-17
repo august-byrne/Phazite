@@ -45,6 +45,8 @@ section.outline.rnb
 section.outline.drumAndBass
 section.outline.techno
 track.addReturn
+device.group | ctrl + G
+device.ungroup | ctrl + shift + G
 automation.automateLastTouched | ctrl + shift + A
 automation.createClip
 automation.showLanes | A
@@ -75,6 +77,8 @@ project.export | ctrl + shift + R
 view.commandPalette | ctrl + K
 view.searchBrowser | ctrl + F
 device.add | F8
+device.savePreset
+track.savePreset
 view.toggleBrowser | ctrl + alt + B
 view.toggleInspector
 view.toggleEditor

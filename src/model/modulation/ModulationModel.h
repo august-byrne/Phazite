@@ -35,6 +35,9 @@ void removeModulator (ProjectContext&, ModulatorID);
 std::vector<ModulatorParameter> getModulatorParameters (const ProjectContext&, ModulatorID);
 ParameterHandle getModulatorParameter (ProjectContext&, ModulatorID, const juce::String& parameterID);
 
+// Renames a macro, a track's or a container's ("Rename Macro"); a name of nothing but spaces leaves it as it is.
+void renameMacro (ProjectContext&, ModulatorID, const juce::String& name);
+
 // Its output over the last seconds, as the song played, oldest first, for its editor: from -1 to 1 for a bipolar one,
 // else from 0 to 1. Tracktion keeps up to three seconds. And its output now, for its slot's meter (a macro's: its value,
 // from 0 to 1).

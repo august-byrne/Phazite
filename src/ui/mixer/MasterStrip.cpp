@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MasterStrip.h"
 #include "model/mixer/MixerModel.h"
+#include "model/presets/PresetModel.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -8,9 +9,9 @@ namespace phazite::ui
 {
 using namespace strip;
 
-MasterStrip::MasterStrip (ProjectContext& projectContext)
+MasterStrip::MasterStrip (CommandBridge& bridge, ProjectContext& projectContext)
     : context (projectContext),
-      effects (DeviceSlots::Kind::effects, projectContext)
+      effects (DeviceSlots::Kind::effects, projectContext, bridge)
 {
     setTitle ("Master");
     showAsDecibels (volume);
@@ -105,8 +106,18 @@ void MasterStrip::paint (juce::Graphics& g)
 
 bool MasterStrip::isInterestedInDragSource (const SourceDetails& details)
 {
+    if (! context.hasProject())
+        return false;
+
+    // An effect, or a preset of one or of a container.
+    if (const auto preset = getDraggedPreset (details.description))
+    {
+        const auto info = readPresetInfo (*preset);
+        return info.has_value() && info->kind != PresetKind::track && ! info->isInstrument;
+    }
+
     const auto device = getDraggedDevice (details.description);
-    return context.hasProject() && device.has_value() && ! device->isInstrument;
+    return device.has_value() && ! device->isInstrument;
 }
 
 void MasterStrip::setDropping (bool isDropping)
@@ -118,10 +129,15 @@ void MasterStrip::setDropping (bool isDropping)
 void MasterStrip::itemDropped (const SourceDetails& details)
 {
     setDropping (false);
+    auto placed = false;
 
     if (const auto device = getDraggedDevice (details.description))
-        if (addDeviceTo (context, {}, *device))
-            markPlaced (details.description);
+        placed = addDeviceTo (context, {}, *device);
+    else if (const auto preset = getDraggedPreset (details.description))
+        placed = loadPreset (context, *preset, {});
+
+    if (placed)
+        markPlaced (details.description);
 }
 
 void MasterStrip::resized()

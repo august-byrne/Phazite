@@ -53,7 +53,8 @@ public:
     void showCommandPalette();
     void showPluginPicker(); // F8
 
-    // Adds the commands for panels, layouts and the palette (the "view." commands).
+    // Adds the commands for panels, layouts and the palette (the "view." commands), the plug-in picker, and saving
+    // presets, which the browser shows.
     void addCommands (CommandRegistry&);
 
     // Updates tooltips and hints that mention shortcuts, e.g. after the keymap changed.

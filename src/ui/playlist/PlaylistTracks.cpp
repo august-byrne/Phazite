@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist's track headers: clicking, dragging and their menus; adding tracks at the end; and the playlist's commands.
+// The playlist's track headers: clicking, dragging (into the browser too) and their menus; adding tracks at the end; and the
+// playlist's commands.
 #include "PlaylistParts.h"
 #include "ui/input/CommandUI.h"
+#include "ui/input/LibraryDrag.h"
 
 namespace phazite::ui
 {
@@ -109,6 +111,8 @@ void Playlist::showTrackMenu (TrackID track)
     menu.addSeparator();
     addCommandItems (menu, bridge, { "edit.duplicate", "edit.delete" });
     menu.addSeparator();
+    addCommandItems (menu, bridge, { "track.savePreset" });
+    menu.addSeparator();
     addCommandItems (menu, bridge, { "track.add", "track.addFolder" });
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
@@ -142,6 +146,20 @@ void Playlist::trackDragged (TrackHeader&, const juce::MouseEvent& e)
 
     dropRow = (int) nearest;
     repaint();
+}
+
+bool Playlist::trackDraggedOut (TrackHeader& header, const juce::MouseEvent& e)
+{
+    // Past the playlist's left edge, toward the browser: no longer moving among the tracks, but carried there, which saves
+    // it as a preset (ui/browser/Browser.h).
+    if (e.getEventRelativeTo (this).position.x >= 0.0f || isDragAndDropActive())
+        return false;
+
+    dropRow = -1;
+    repaint();
+    startDragging (makeTrackDrag (header.getTrack()), &header, juce::ScaledImage (header.createComponentSnapshot (header.getLocalBounds())),
+                   true);
+    return true;
 }
 
 void Playlist::trackSelectionDragged (TrackHeader& header, const juce::MouseEvent& e)

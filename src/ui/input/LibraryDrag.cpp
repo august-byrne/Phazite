@@ -31,6 +31,14 @@ std::optional<juce::File> getDraggedFile (const juce::var& description)
     return juce::File (path);
 }
 
+std::optional<juce::File> getDraggedPreset (const juce::var& description)
+{
+    if (auto file = getDraggedFile (description); file.has_value() && isPresetFile (*file))
+        return file;
+
+    return std::nullopt;
+}
+
 std::optional<DeviceType> getDraggedDevice (const juce::var& description)
 {
     const auto text = description.getProperty ("device", {}).toString();
@@ -57,5 +65,22 @@ void markPlaced (const juce::var& description)
 bool wasPlaced (const juce::var& description)
 {
     return description.getProperty ("placed", false);
+}
+
+juce::var makeTrackDrag (TrackID track)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("phaziteTrack", (juce::int64) track.getRaw());
+    return juce::var (object);
+}
+
+std::optional<TrackID> getDraggedTrack (const juce::var& description)
+{
+    const auto raw = description.getProperty ("phaziteTrack", {});
+
+    if (raw.isVoid())
+        return std::nullopt;
+
+    return TrackID::fromRaw ((std::uint64_t) (juce::int64) raw);
 }
 } // namespace phazite::ui

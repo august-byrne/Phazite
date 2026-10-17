@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What is selected in the open project, by IDs, as the UI reads and changes it: tracks, clips, sections, notes and
-// automation points. It is a view of the project's one selection (ProjectContext), which the model's commands act on
-// through Tracktion's selection manager behind it (internal/SongSelection.h). IDs of items that are gone are ignored.
-// Message thread only.
+// What is selected in the open project, by IDs, as the UI reads and changes it: tracks, clips, sections, notes,
+// automation points and devices. It is a view of the project's one selection (ProjectContext), which the model's
+// commands act on through Tracktion's selection manager behind it (internal/SongSelection.h). IDs of items that are gone
+// are ignored. Message thread only.
 #pragma once
 
 #include "model/automation/AutomationValues.h"
@@ -39,6 +39,15 @@ public:
     void remove (ClipID);
     void remove (SectionID);
     void clear();
+
+    // Devices, in the mixer (model/mixer/MixerModel.h), in the order they were selected, as the device commands act on them
+    // (model/mixer/ContainerModel.h): selected on their own, so that selecting them deselects anything else, and selecting
+    // anything else deselects them.
+    std::vector<DeviceID> getDevices() const;
+    bool isSelected (DeviceID) const;
+    void selectOnly (DeviceID);
+    void add (DeviceID);
+    void remove (DeviceID);
 
     // Notes, of the clips an editor shows (the piano roll's: setNoteClips()). Selecting notes selects nothing else with
     // them, and selecting anything else deselects them; deleted notes, or notes of deleted clips, are no longer selected.

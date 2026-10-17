@@ -6,6 +6,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Buses.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
 
@@ -416,8 +417,9 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
     for (auto* track : tracks)
         if (auto copy = track->edit.copyTrack (track, getInsertPointAfter (*track)))
         {
-            copyLanes (*track, *copy);             // its lanes show its own devices,
-            copyAutomationTargets (*track, *copy); // and its automation clips set them
+            const auto inContainers = copyContainers (*track, *copy); // its containers hold devices of their own,
+            copyLanes (*track, *copy, inContainers);                  // its lanes show its own devices,
+            copyAutomationTargets (*track, *copy, inContainers);      // and its automation clips set them
             copies.add (copy.get());
         }
 

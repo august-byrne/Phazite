@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/LiveInput.h"
+#include "model/devices/internal/Devices.h"
+#include "model/mixer/internal/Containers.h"
 
 namespace phazite
 {
@@ -20,7 +22,7 @@ namespace
 bool hasInstrument (const te::AudioTrack& track)
 {
     for (auto* plugin : track.pluginList)
-        if (plugin->isSynth())
+        if (isInstrument (*plugin))
             return true;
 
     return false;
@@ -38,6 +40,13 @@ te::AudioTrack* getSelectedAudioTrack (const te::SelectionManager& selection)
     if (auto* notes = selection.getFirstItemOfType<te::SelectedMidiEvents>())
         if (auto* clip = notes->getClips().getFirst())
             return dynamic_cast<te::AudioTrack*> (clip->getTrack());
+
+    // Devices selected in the mixer: their channel's track (a container's devices: their container's).
+    if (auto* device = selection.getFirstItemOfType<te::Plugin>())
+    {
+        auto* container = findContainerOf (*device);
+        return dynamic_cast<te::AudioTrack*> (container != nullptr ? container->getOwnerTrack() : device->getOwnerTrack());
+    }
 
     return nullptr;
 }
