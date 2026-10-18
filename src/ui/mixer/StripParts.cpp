@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "StripParts.h"
+#include "model/project/ProjectContext.h"
 #include "ui/components/ModulatorDrag.h"
+#include "ui/input/CommandBridge.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -10,6 +12,79 @@ namespace strip
     int getFaderHeight (int available, int forTheRest)
     {
         return juce::jlimit (minFaderHeight, std::max (minFaderHeight, available - forTheRest), std::max (120, available / 2));
+    }
+
+    //==============================================================================
+    void showOutputMenu (ProjectContext& context, CommandBridge& commands, TrackID track, juce::Component& target)
+    {
+        juce::PopupMenu menu;
+        auto& projectContext = context;
+        menu.addSectionHeader ("Where the sound goes");
+
+        for (const auto& choice : getOutputChoices (context, track))
+            menu.addItem (choice.bus.isValid() ? choice.name + " (bus)" : choice.name, true, choice.chosen,
+                          [&projectContext, track, bus = choice.bus] { setOutput (projectContext, track, bus); });
+
+        // A folder that is a bus, made of the selected tracks: this one, unless it is one of several selected.
+        menu.addSeparator();
+        menu.addItem ("New Bus from the Selected Tracks",
+                      [&projectContext, &commands, track]
+                      {
+                          auto& selection = projectContext.getSongSelection();
+
+                          if (! selection.isSelected (track))
+                              selection.selectOnly (track);
+
+                          commands.invoke ("track.groupIntoFolder");
+                      });
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+    }
+
+    juce::String describeOutput (const std::optional<Channel>& channel)
+    {
+        if (! channel.has_value())
+            return {};
+
+        if (channel->kind == ChannelKind::plainFolder)
+            return "No sound of its own";
+
+        return "Out: " + (channel->outputBus.isNotEmpty() ? channel->outputBus : juce::String ("Master"));
+    }
+
+    //==============================================================================
+    CpuBar::CpuBar()
+    {
+        setTitle ("CPU");
+        setTooltip ("How much of the processor's time the track's devices take");
+    }
+
+    void CpuBar::setLoad (float newLoad)
+    {
+        newLoad = juce::jlimit (0.0f, 1.0f, newLoad);
+
+        if (juce::approximatelyEqual (newLoad, load))
+            return;
+
+        load = newLoad;
+        const auto percent = juce::roundToInt (load * 100.0f);
+        setTooltip ("CPU: the track's devices take " + juce::String (percent) + "% of each block's time");
+        setDescription (juce::String (percent) + "%");
+        repaint();
+    }
+
+    void CpuBar::paint (juce::Graphics& g)
+    {
+        const auto& p = getPalette (*this);
+        auto area = getLocalBounds().toFloat();
+        g.setColour (p.border);
+        g.fillRoundedRectangle (area, area.getHeight() / 2.0f);
+
+        if (load > 0.0f)
+        {
+            g.setColour (load > 0.5f ? p.warning : p.textMuted);
+            g.fillRoundedRectangle (area.withWidth (std::max (area.getHeight(), area.getWidth() * load)), area.getHeight() / 2.0f);
+        }
     }
 
     Knob* addParameterKnob (juce::Component& parent, juce::OwnedArray<Knob>& knobs, juce::OwnedArray<ParameterAttachment>& attachments,

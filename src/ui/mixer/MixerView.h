@@ -2,11 +2,13 @@
 // The mixer (docs/design.md, section 8; roadmap step 1.4): a channel strip for every track, in the playlist's
 // order and colors, so folders come with their tracks after them; then the return tracks, together next to the
 // master, as in Ableton Live; and the master on the right, with its effects and its loudness meter. Selecting a
-// channel outlines the ones it feeds and those that feed it, through sends and buses.
+// channel outlines the ones it feeds and those that feed it, through sends and buses. Its Routing button shows every
+// channel's wires instead, in the routing view (RoutingView.h).
 #pragma once
 
 #include "ChannelStrip.h"
 #include "MasterStrip.h"
+#include "RoutingView.h"
 #include "model/project/ProjectContext.h"
 
 namespace phazite::ui
@@ -37,9 +39,13 @@ private:
     int firstReturn = 0;                   // the index of the first return's strip
     MasterStrip master;
     juce::TextButton addReturnButton { "+ Return" };
+    juce::TextButton routingButton { "Routing" }; // shows the routing view in place of the strips
+    juce::Viewport routingViewport;
+    RoutingView routing;
 
     void showProject(); // the open project's channels, or none while no project is open
-    void rebuild();     // after tracks were added, deleted or moved
+    void showRouting (bool);
+    void rebuild(); // after tracks were added, deleted or moved
     void updateSelection();
 
     void projectChanged() override { showProject(); }

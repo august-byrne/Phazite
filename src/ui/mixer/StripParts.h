@@ -11,10 +11,13 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace phazite::ui
 {
+class CommandBridge;
+
 namespace strip
 {
     inline constexpr int slotNameHeight = 22, slotKnobHeight = 30, sendHeight = 26, buttonHeight = 24, headingHeight = 16;
@@ -53,6 +56,29 @@ namespace strip
             else if (onClicked != nullptr)
                 onClicked (mods.isPopupMenu());
         }
+    };
+
+    // The menu of where a channel's sound goes (MixerModel.h: getOutputChoices()): the master, or a bus, which the track
+    // then goes into; and a new bus from the selected tracks, this one among them.
+    void showOutputMenu (ProjectContext&, CommandBridge&, TrackID, juce::Component& target);
+
+    // "Out: Master", or the bus's name; a plain folder has no sound of its own.
+    juce::String describeOutput (const std::optional<Channel>&);
+
+    // A slim bar along a strip's bottom: how much of each block's time its devices take (MixerModel.h: getCpuLoad()), in
+    // the warning color above half, with the share in its tooltip.
+    class CpuBar : public juce::Component,
+                   public juce::SettableTooltipClient
+    {
+    public:
+        static constexpr int height = 4;
+        CpuBar();
+        void setLoad (float); // 0 to 1
+        float getLoad() const noexcept { return load; }
+        void paint (juce::Graphics&) override;
+
+    private:
+        float load = 0.0f;
     };
 
     // A knob for a parameter of a device, attached to it; nullptr for a handle of nothing.

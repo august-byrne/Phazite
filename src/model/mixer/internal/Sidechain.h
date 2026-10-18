@@ -9,6 +9,11 @@
 
 namespace phazite
 {
+// The tracks whose sound comes from a track, the track itself first: those it feeds (the bus it is in, the returns it
+// sends to, the tracks whose devices' sidechains listen to it), those they feed, and so on. A route back to any of them
+// would make a loop.
+juce::Array<te::Track*> getTracksFedBy (te::Track&);
+
 // Whether a device has a sidechain to route a track into: not one in a container, which hears what passes through it.
 bool hasSidechain (te::Plugin&);
 

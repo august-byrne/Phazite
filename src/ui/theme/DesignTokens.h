@@ -182,6 +182,17 @@ namespace ChordTint
     inline constexpr int grabDistance = 6;
 } // namespace ChordTint
 
+// How the routing view draws (ui/mixer/RoutingView.h): its channels' boxes, the gap between them and the room above them; a
+// jack's radius and how near the pointer takes it; how deep the cables dip under the boxes, at least and at most (pixels);
+// the cables' thickness, and the wash of a box a dragged cable would go into (an alpha of the accent color).
+namespace RoutingTint
+{
+    inline constexpr int boxWidth = 124, boxHeight = 92, gap = 20, top = 16;
+    inline constexpr int jackRadius = 5, jackSpacing = 28, grabDistance = 10;
+    inline constexpr int shallowestDip = 24, deepestDip = 150;
+    inline constexpr float cableWidth = 2.5f, dropWash = 0.2f;
+} // namespace RoutingTint
+
 // How an audio clip's fades show, in the playlist and the audio clip editor: what a fade takes away is shaded black above
 // its curve from silence to full volume (alphas), and the curve's thickness.
 namespace FadeTint

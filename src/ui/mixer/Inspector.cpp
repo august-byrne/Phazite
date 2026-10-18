@@ -237,31 +237,45 @@ struct Inspector::Page : public juce::Component
 namespace
 {
     //==============================================================================
-    // A send of a track: its level, and whether it takes the sound before or after the fader.
+    // A track's send to a return: its level, off until first turned, which makes the send (question 13), and whether it
+    // takes the sound before or after the fader.
     struct SendRow : public juce::Component
     {
-        SendRow (ProjectContext& c, const Send& send)
-            : context (c),
-              shown (send)
+        SendRow (ProjectContext& c, TrackID from, const SendTarget& target)
+            : context (c)
         {
             showAsDecibels (level);
-            level.setTooltip ("How much of this track the send feeds the return. Double-click for 0 dB");
-            attachment.setParameter (getSendLevel (context, send.id));
+            level.setTooltip ("How much of this track the send feeds the return: off until you turn it. Double-click for 0 dB");
+            attachment.setParameter (getSendLevelTo (context, from, target.returnTrack));
             prePost.setTooltip ("Pre: the send takes the sound before the fader, so the fader doesn't change it. Post: after the fader");
-            prePost.onClick = [this] { setPreFader (context, shown.id, ! shown.preFader); };
+            prePost.onClick = [this]
+            {
+                if (shown.send.has_value())
+                    setPreFader (context, shown.send->id, ! shown.send->preFader);
+            };
+
             remove.setTooltip ("Removes the send");
-            remove.onClick = [this] { removeSend (context, shown.id); };
+            remove.onClick = [this]
+            {
+                if (shown.send.has_value())
+                    removeSend (context, shown.send->id);
+            };
+
             addAndMakeVisible (level);
             addAndMakeVisible (prePost);
             addAndMakeVisible (remove);
-            show (send);
+            show (target);
         }
 
-        void show (const Send& send)
+        void show (const SendTarget& target)
         {
-            shown = send;
-            level.setTitle ("Send to " + send.returnName);
-            prePost.setButtonText (send.preFader ? "Pre" : "Post");
+            shown = target;
+            level.setTitle ("Send to " + target.name);
+            prePost.setButtonText (target.send.has_value() && target.send->preFader ? "Pre" : "Post");
+
+            // A send that isn't there has nothing to switch or remove.
+            prePost.setVisible (target.send.has_value());
+            remove.setVisible (target.send.has_value());
         }
 
         void resized() override
@@ -275,7 +289,7 @@ namespace
         }
 
         ProjectContext& context;
-        Send shown;
+        SendTarget shown;
         Fader level { Fader::Direction::horizontal, "Send level", decibelsToFaderPosition (0.0f) };
         ParameterAttachment attachment { level };
         juce::TextButton prePost, remove { juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) };
@@ -347,7 +361,10 @@ namespace
                 commands.invoke ("automation.showLanes");
             };
 
-            for (auto* label : { &kindLabel, &outputLabel })
+            outputButton.setTitle ("Output");
+            outputButton.onClick = [this] { strip::showOutputMenu (context, commands, track, outputButton); };
+
+            for (auto* label : { &kindLabel })
                 setUpValueLabel (*label);
 
             addRow ("Name", &nameEditor);
@@ -356,7 +373,7 @@ namespace
             addRow ("Volume", &volume);
             addRow ("Pan", &pan);
             addRow ("Mute, solo", &muteSolo);
-            addRow ("Output", &outputLabel);
+            addRow ("Output", &outputButton);
             addRow ("Instrument", &instrumentButton);
             addRow ("Devices", &devicesButton);
             addRow ("Automation", &modeBox);
@@ -385,10 +402,16 @@ namespace
                                : channel->kind == ChannelKind::returnTrack ? "Return: holds effects tracks share"
                                                                            : "Track",
                                juce::dontSendNotification);
-            outputLabel.setText (channel->kind == ChannelKind::plainFolder ? juce::String ("No sound of its own")
-                                 : channel->outputBus.isNotEmpty()         ? channel->outputBus
-                                                                           : juce::String ("Master"),
-                                 juce::dontSendNotification);
+            outputButton.setButtonText (channel->kind == ChannelKind::plainFolder ? juce::String ("No sound of its own")
+                                        : channel->outputBus.isNotEmpty()         ? channel->outputBus
+                                                                                  : juce::String ("Master"));
+
+            // A track or a bus chooses where its sound goes; a return goes to the master, and a plain folder has no sound.
+            const auto chooses = channel->kind != ChannelKind::plainFolder && canChooseOutput (context, track);
+            outputButton.setEnabled (chooses);
+            outputButton.setTooltip (chooses ? "Where the sound goes: to the master, which you hear, or into a bus, which the track "
+                                               "goes into as a folder. Click to choose"
+                                             : "Where the sound goes");
 
             // A track's instrument; or a button that asks for one while the track's notes make no sound.
             const auto instrument = getInstrument (context, track);
@@ -420,29 +443,33 @@ namespace
 
         void refreshSends()
         {
-            // Tracks and returns send; folders don't.
+            // A row for every return the track can send to (tracks and returns send; folders don't).
             const auto canSend = channel->kind == ChannelKind::track || channel->kind == ChannelKind::returnTrack;
-            const auto sends = canSend ? getSends (context, track) : std::vector<Send>();
+            const auto targets = canSend ? getSendTargets (context, track) : std::vector<SendTarget>();
+            std::vector<TrackID> returns;
 
-            if (getIDs (sends) == shownSends && rows.size() > (size_t) sendsHeadingIndex)
+            for (const auto& target : targets)
+                returns.push_back (target.returnTrack);
+
+            if (returns == shownReturns && rows.size() > (size_t) sendsHeadingIndex)
             {
-                for (size_t i = 0; i < sends.size(); ++i)
-                    sendRows[(int) i]->show (sends[i]);
+                for (size_t i = 0; i < targets.size(); ++i)
+                    sendRows[(int) i]->show (targets[i]);
 
                 return;
             }
 
-            // The rows after the heading: a row for each send, then the button that adds one.
+            // The rows after the heading: a row for each return, then the button that makes a new one.
             rows.resize ((size_t) sendsHeadingIndex);
             sendRows.clear();
-            shownSends = getIDs (sends);
+            shownReturns = returns;
 
             if (canSend)
             {
                 addRow ("Sends", nullptr);
 
-                for (const auto& send : sends)
-                    addRow ("To " + send.returnName, sendRows.add (new SendRow (context, send)));
+                for (const auto& target : targets)
+                    addRow ("To " + target.name, sendRows.add (new SendRow (context, track, target)));
 
                 addRow ({}, &addSendButton);
             }
@@ -475,25 +502,20 @@ namespace
 
         void showSendMenu()
         {
-            // The returns there are, then new ones: one with an effect, as Studio One makes it in one step, or an empty one.
+            // The returns there are have their rows above: a new one, with an effect, as Studio One makes it in one step,
+            // or empty.
             juce::PopupMenu menu;
             auto& projectContext = context;
             const auto from = track;
-            menu.addSectionHeader ("Return tracks hold effects that tracks share");
-
-            for (const auto& target : getReturns (context))
-                if (target.id != from) // a return can't send to itself
-                    menu.addItem ("To " + target.name, [&projectContext, from, to = target.id] { addSendTo (projectContext, from, to); });
-
-            menu.addSeparator();
-            menu.addItem ("To a New Return With an Effect...",
+            menu.addSectionHeader ("A new return track, for an effect that tracks share");
+            menu.addItem ("With an Effect...",
                           [&projectContext, from, safeButton = juce::Component::SafePointer<juce::Component> (&addSendButton)]
                           {
                               if (safeButton != nullptr)
                                   showNewReturnMenu (projectContext, from, *safeButton);
                           });
 
-            menu.addItem ("To a New Empty Return", [&projectContext, from] { addSendToNewReturn (projectContext, from); });
+            menu.addItem ("Empty", [&projectContext, from] { addSendToNewReturn (projectContext, from); });
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addSendButton));
         }
 
@@ -503,7 +525,8 @@ namespace
         std::optional<Channel> channel;
         juce::TextEditor nameEditor;
         ColourButton colourButton;
-        juce::Label kindLabel, outputLabel;
+        juce::Label kindLabel;
+        juce::TextButton outputButton;
         Fader volume { Fader::Direction::horizontal, "Volume", decibelsToFaderPosition (0.0f) };
         Fader pan { Fader::Direction::horizontal, "Pan", 0.0 };
         ParameterAttachment volumeAttachment { volume }, panAttachment { pan };
@@ -511,7 +534,7 @@ namespace
         juce::TextButton instrumentButton, devicesButton, lanesButton, addSendButton { "+ Send" };
         juce::ComboBox modeBox;
         juce::OwnedArray<SendRow> sendRows;
-        std::vector<DeviceID> shownSends;
+        std::vector<TrackID> shownReturns; // the returns the send rows are for
         int sendsHeadingIndex = 0;
     };
 

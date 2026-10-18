@@ -4,6 +4,7 @@
 #include "internal/LevelSource.h"
 #include "internal/MixHandle.h"
 #include "internal/Mixer.h"
+#include "internal/Sidechain.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -479,6 +480,242 @@ void addSendToNewReturn (ProjectContext& context, TrackID from)
 {
     if (auto* track = findTrack (context, from))
         phazite::addSendToNewReturn (*track);
+}
+
+//==============================================================================
+namespace
+{
+    // The bus a channel's sound goes into: the nearest folder it is in that is a bus; nullptr for the master.
+    te::FolderTrack* getOutputBus (const te::Track& track)
+    {
+        for (auto* parent = track.getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
+            if (isBus (*parent))
+                return parent;
+
+        return nullptr;
+    }
+
+    te::AuxSendPlugin* findSendTo (const te::Track& track, int bus)
+    {
+        for (auto* send : phazite::getSends (track))
+            if (send->getBusNumber() == bus)
+                return send;
+
+        return nullptr;
+    }
+
+    // Tracks and returns send, folders don't; and a return whose sound comes back to the track would make a loop.
+    bool canSendTo (te::Track& from, te::AudioTrack& returnTrack)
+    {
+        return &from != &returnTrack && ! from.isFolderTrack() && ! getTracksFedBy (returnTrack).contains (&from);
+    }
+
+    // The tracks the mixer shows: the playlist's, then the returns.
+    juce::Array<te::Track*> getChannelTracks (const te::Edit& edit)
+    {
+        auto tracks = getPlaylistTracks (edit);
+
+        for (auto* returnTrack : getReturnTracks (edit))
+            tracks.addIfNotAlreadyThere (returnTrack);
+
+        return tracks;
+    }
+
+    // The parameter of Tracktion's send that sets its level (tracktion_AuxSend.cpp), which the send's knob changes.
+    const juce::String sendLevelID ("send level");
+} // namespace
+
+std::vector<SendTarget> getSendTargets (const ProjectContext& context, TrackID id)
+{
+    std::vector<SendTarget> targets;
+    auto* track = findTrack (context, id);
+
+    if (track == nullptr)
+        return targets;
+
+    for (auto* returnTrack : getReturnTracks (track->edit))
+    {
+        if (! canSendTo (*track, *returnTrack))
+            continue;
+
+        SendTarget target { getTrackID (*returnTrack), returnTrack->getName(), std::nullopt };
+
+        if (auto* send = findSendTo (*track, getReturnBus (*returnTrack)))
+            target.send = Send { getDeviceID (*send), returnTrack->getName(), isPreFader (*send) };
+
+        targets.push_back (target);
+    }
+
+    return targets;
+}
+
+ParameterHandle getSendLevelTo (ProjectContext& context, TrackID from, TrackID returnTrack)
+{
+    auto* track = findTrack (context, from);
+    auto* target = dynamic_cast<te::AudioTrack*> (findTrack (context, returnTrack));
+    const auto bus = target != nullptr ? getReturnBus (*target) : -1;
+
+    if (track == nullptr || bus < 0 || ! canSendTo (*track, *target))
+        return {};
+
+    // The send goes after the fader, as every new send does.
+    const auto locate = [bus] (te::Track& sender) -> te::Plugin* { return findSendTo (sender, bus); };
+    const auto create = [bus] (te::Track& sender) -> te::Plugin* { return addSend (sender, bus, false); };
+    const auto identity = "send " + juce::String (from.getRaw()) + " " + juce::String (returnTrack.getRaw());
+    return makeCreatingHandle (*track, locate, create, identity, sendLevelID, { 0.0f, 1.0f }, "Send to " + target->getName(),
+                               "Change Send Level");
+}
+
+//==============================================================================
+std::vector<OutputChoice> getOutputChoices (const ProjectContext& context, TrackID id)
+{
+    std::vector<OutputChoice> choices;
+    auto* track = findTrack (context, id);
+
+    if (track == nullptr || getReturnBus (*track) >= 0)
+        return choices;
+
+    const auto* current = getOutputBus (*track);
+    choices.push_back ({ {}, "Master", current == nullptr });
+
+    // The buses, in the playlist's order: not the channel itself, nor a folder inside it.
+    for (auto* other : getPlaylistTracks (track->edit))
+    {
+        auto* folder = dynamic_cast<te::FolderTrack*> (other);
+
+        if (folder != nullptr && folder != track && isBus (*folder) && ! folder->isAChildOf (*track))
+            choices.push_back ({ getTrackID (*folder), folder->getName(), folder == current });
+    }
+
+    return choices;
+}
+
+bool canChooseOutput (const ProjectContext& context, TrackID id)
+{
+    auto* track = findTrack (context, id);
+    return track != nullptr && getReturnBus (*track) < 0;
+}
+
+void setOutput (ProjectContext& context, TrackID id, TrackID busID)
+{
+    auto* track = findTrack (context, id);
+    auto* bus = busID.isValid() ? dynamic_cast<te::FolderTrack*> (findTrack (context, busID)) : nullptr;
+
+    if (track == nullptr || getReturnBus (*track) >= 0 || (busID.isValid() && bus == nullptr))
+        return;
+
+    if (bus != nullptr && (bus == track || ! isBus (*bus) || bus->isAChildOf (*track)))
+        return;
+
+    if (getOutputBus (*track) == bus)
+        return;
+
+    const UndoStep step (track->edit, "Change Output");
+
+    if (bus != nullptr)
+    {
+        moveTrackIntoFolder (*track, *bus);
+        return;
+    }
+
+    // Out of its buses, after the outermost: a plain folder around them keeps it.
+    te::FolderTrack* outermost = nullptr;
+
+    for (auto* parent = track->getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
+        if (isBus (*parent))
+            outermost = parent;
+
+    if (outermost != nullptr)
+        track->edit.moveTrack (track, getInsertPointAfter (*outermost));
+}
+
+//==============================================================================
+bool hasSidechain (const ProjectContext& context, DeviceID id)
+{
+    auto* device = findDevice (context, id);
+    return device != nullptr && phazite::hasSidechain (*device);
+}
+
+std::vector<DeviceHandle::SidechainChoice> getSidechainChoices (const ProjectContext& context, DeviceID id)
+{
+    std::vector<DeviceHandle::SidechainChoice> choices;
+
+    if (auto* device = findDevice (context, id))
+        for (auto* source : getSidechainSources (*device))
+            choices.push_back ({ getTrackID (*source), source->getName() });
+
+    return choices;
+}
+
+TrackID getSidechainSource (const ProjectContext& context, DeviceID id)
+{
+    auto* device = findDevice (context, id);
+    auto* source = device != nullptr ? phazite::getSidechainSource (*device) : nullptr;
+    return source != nullptr ? getTrackID (*source) : TrackID();
+}
+
+void setSidechainSource (ProjectContext& context, DeviceID id, TrackID sourceID)
+{
+    auto* device = findDevice (context, id);
+    auto* source = sourceID.isValid() ? dynamic_cast<te::AudioTrack*> (findTrack (context, sourceID)) : nullptr;
+
+    if (device != nullptr && (source != nullptr || ! sourceID.isValid()))
+        phazite::setSidechainSource (*device, source);
+}
+
+//==============================================================================
+float getCpuLoad (const ProjectContext& context, TrackID id)
+{
+    auto* track = findTrack (context, id);
+
+    if (track == nullptr)
+        return 0.0f;
+
+    auto load = 0.0;
+
+    for (auto* device : track->pluginList)
+    {
+        load += device->getCpuUsage();
+
+        // A container's devices, which play in its rack.
+        if (auto* container = dynamic_cast<te::RackInstance*> (device); container != nullptr && container->type != nullptr)
+            for (auto* inside : container->type->getPlugins())
+                load += inside->getCpuUsage();
+    }
+
+    return (float) juce::jlimit (0.0, 1.0, load);
+}
+
+//==============================================================================
+std::vector<Connection> getConnections (const ProjectContext& context)
+{
+    std::vector<Connection> connections;
+    auto* edit = getEdit (context);
+
+    if (edit == nullptr)
+        return connections;
+
+    for (auto* track : getChannelTracks (*edit))
+    {
+        const auto id = getTrackID (*track);
+
+        // A plain folder has no sound of its own to send anywhere.
+        if (! track->isFolderTrack() || isBus (*track))
+        {
+            const auto* bus = getOutputBus (*track);
+            connections.push_back ({ Connection::Kind::output, id, bus != nullptr ? getTrackID (*bus) : TrackID(), {} });
+        }
+
+        for (auto* send : phazite::getSends (*track))
+            if (auto* returnTrack = findReturnTrack (*edit, send->getBusNumber()))
+                connections.push_back ({ Connection::Kind::send, id, getTrackID (*returnTrack), getDeviceID (*send) });
+
+        for (auto* device : track->pluginList)
+            if (auto* source = phazite::getSidechainSource (*device))
+                connections.push_back ({ Connection::Kind::sidechain, getTrackID (*source), id, getDeviceID (*device) });
+    }
+
+    return connections;
 }
 
 //==============================================================================

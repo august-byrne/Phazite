@@ -159,6 +159,74 @@ std::vector<Return> getReturns (const ProjectContext&);
 void addSendTo (ProjectContext&, TrackID from, TrackID returnTrack);
 void addSendToNewReturn (ProjectContext&, TrackID from);
 
+// A send knob for every return on every strip, off until first touched (docs/design.md, section 8; question 13): the
+// returns a track can send to (not itself, nor one whose sound comes from it), each with its send if it has one.
+struct SendTarget
+{
+    TrackID returnTrack;
+    juce::String name;
+    std::optional<Send> send; // none until the knob is first turned
+};
+
+std::vector<SendTarget> getSendTargets (const ProjectContext&, TrackID);
+
+// The level of a track's send to a return, its knob's handle: the send is made, after the fader, by the first change,
+// in that change's undo step, "Send to" and the return's name; later changes are "Change Send Level".
+ParameterHandle getSendLevelTo (ProjectContext&, TrackID from, TrackID returnTrack);
+
+//==============================================================================
+// Where a channel's sound goes (question 12): to the master, or into a folder's bus, which a track gets into by going
+// into the folder, as the playlist shows it. A return goes to the master.
+struct OutputChoice
+{
+    TrackID bus; // a folder that is a bus, or none for the master
+    juce::String name;
+    bool chosen = false;
+};
+
+std::vector<OutputChoice> getOutputChoices (const ProjectContext&, TrackID); // nothing for a return
+bool canChooseOutput (const ProjectContext&, TrackID);
+
+// A step of its own, "Change Output": the channel goes to the end of the bus's folder, or for the master, out of its
+// folders, after the outermost.
+void setOutput (ProjectContext&, TrackID, TrackID bus);
+
+//==============================================================================
+// A device's sidechain (docs/design.md, section 8), Phazite's own or a plug-in's: whether it has one, the tracks it can
+// listen to (none whose sound comes from its own), the one it listens to (none: the sound passing through it), and
+// choosing one, as one undo step.
+bool hasSidechain (const ProjectContext&, DeviceID);
+std::vector<DeviceHandle::SidechainChoice> getSidechainChoices (const ProjectContext&, DeviceID);
+TrackID getSidechainSource (const ProjectContext&, DeviceID);
+void setSidechainSource (ProjectContext&, DeviceID, TrackID source);
+
+//==============================================================================
+// How much of each block's time a channel's devices take to process, from 0 to 1, as Tracktion measures each device (its
+// containers' devices included): what a strip's CPU meter shows. Read it from a timer.
+float getCpuLoad (const ProjectContext&, TrackID);
+
+//==============================================================================
+// The routing view's wires (docs/design.md, section 8): where each channel's sound goes (its bus, or the master), its
+// sends to returns, and the sidechains that listen to it.
+struct Connection
+{
+    enum class Kind
+    {
+        output,
+        send,
+        sidechain
+    };
+
+    Kind kind = Kind::output;
+    TrackID from {};    // the channel whose sound it carries
+    TrackID to {};      // a bus, a return, or the channel of the device that listens; none for the master
+    DeviceID device {}; // a send, or the device whose sidechain listens
+
+    bool operator== (const Connection&) const = default;
+};
+
+std::vector<Connection> getConnections (const ProjectContext&);
+
 //==============================================================================
 // The master's loudness as streaming services measure it (EBU R 128), each reading until there is enough to measure.
 struct Loudness

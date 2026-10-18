@@ -16,7 +16,8 @@ namespace
 MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
     : commands (bridge),
       context (projectContext),
-      master (bridge, projectContext)
+      master (bridge, projectContext),
+      routing (projectContext)
 {
     setTitle ("Mixer");
     setDescription ("A channel for every track, in the playlist's order, and the return tracks next to the master. Click a channel to "
@@ -31,8 +32,18 @@ MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
     addReturnButton.onClick = [this] { commands.invoke ("track.addReturn"); };
     addReturnButton.setEnabled (false);
 
+    // The routing view, in place of the strips while the button is on.
+    routingButton.setClickingTogglesState (true);
+    routingButton.setTooltip ("Shows every channel's wires: where its sound goes, its sends and the sidechains that listen to it. "
+                              "Drag from a channel's Out to route it");
+    routingButton.onClick = [this] { showRouting (routingButton.getToggleState()); };
+    routingViewport.setViewedComponent (&routing, false);
+    routingViewport.setScrollBarsShown (false, true);
+    addChildComponent (routingViewport);
+
     addAndMakeVisible (verticalView);
     addAndMakeVisible (addReturnButton);
+    addAndMakeVisible (routingButton);
 
     context.getSongSelection().addChangeListener (this);
     context.addListener (this);
@@ -133,11 +144,25 @@ void MixerView::paint (juce::Graphics& g)
     }
 }
 
+void MixerView::showRouting (bool show)
+{
+    routingButton.setToggleState (show, juce::dontSendNotification);
+    routingViewport.setVisible (show);
+    verticalView.setVisible (! show);
+    resized();
+}
+
 void MixerView::resized()
 {
     auto area = getLocalBounds();
     auto toolbar = area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs);
     addReturnButton.setBounds (toolbar.removeFromLeft (96));
+    toolbar.removeFromLeft (Space::s);
+    routingButton.setBounds (toolbar.removeFromLeft (96));
+
+    routingViewport.setBounds (area);
+    routing.setSize (std::max (area.getWidth(), routing.getPreferredWidth()),
+                     std::max (1, area.getHeight() - routingViewport.getScrollBarThickness()));
 
     // At least as tall as the strips need to be; a shorter mixer scrolls up and down.
     verticalView.setBounds (area);

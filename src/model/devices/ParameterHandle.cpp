@@ -16,8 +16,30 @@ struct ParameterHandle::Impl
     std::unique_ptr<Gesture> gesture; // the gesture it began,
     bool joined = false;              // or whether it joined another change's
 
+    // A device that may not be there yet, on a track, found each time, which the first change makes
+    // (makeCreatingHandle()), in a step of createName; and the range its parameter shows until then.
+    te::SafeSelectable<te::Track> owner;
+    std::function<te::Plugin*(te::Track&)> locate, create;
+    juce::String identity; // which device it is, for refersToSameParameter() while it isn't there
+    juce::String createName;
+    juce::NormalisableRange<float> rangeUntilMade;
+
+    te::Plugin* locateDevice() const
+    {
+        auto* track = owner.get();
+        return track != nullptr && locate != nullptr ? locate (*track) : nullptr;
+    }
+
     te::AutomatableParameter::Ptr find() const
     {
+        if (locate != nullptr)
+        {
+            if (auto* p = locateDevice())
+                return p->getAutomatableParameterByID (parameterID);
+
+            return {};
+        }
+
         if (auto* p = plugin.get())
             return p->getAutomatableParameterByID (parameterID);
 
@@ -37,6 +59,9 @@ struct ParameterHandle::Impl
 
     const void* getOwner() const
     {
+        if (locate != nullptr)
+            return locateDevice();
+
         if (auto* p = plugin.get())
             return p;
 
@@ -101,6 +126,23 @@ ParameterHandle makeMacroHandle (te::RackType& container, const te::MacroParamet
     return ParameterHandle (std::move (impl));
 }
 
+ParameterHandle makeCreatingHandle (te::Track& owner, std::function<te::Plugin*(te::Track&)> locate,
+                                    std::function<te::Plugin*(te::Track&)> create, const juce::String& identity,
+                                    const juce::String& parameterID, juce::NormalisableRange<float> range, const juce::String& createName,
+                                    const juce::String& undoName)
+{
+    auto impl = std::make_unique<ParameterHandle::Impl>();
+    impl->owner = &owner;
+    impl->locate = std::move (locate);
+    impl->create = std::move (create);
+    impl->identity = identity;
+    impl->parameterID = parameterID;
+    impl->rangeUntilMade = range;
+    impl->createName = createName;
+    impl->undoName = undoName;
+    return ParameterHandle (std::move (impl));
+}
+
 te::AutomatableParameter::Ptr findParameter (const ParameterHandle& handle)
 {
     return handle.getImpl() != nullptr ? handle.getImpl()->find() : nullptr;
@@ -133,6 +175,11 @@ ParameterHandle::~ParameterHandle()
 
 bool ParameterHandle::isValid() const
 {
+    return exists() || (impl != nullptr && impl->create != nullptr);
+}
+
+bool ParameterHandle::exists() const
+{
     return impl != nullptr && impl->find() != nullptr;
 }
 
@@ -141,12 +188,18 @@ bool ParameterHandle::refersToSameParameter (const ParameterHandle& other) const
     if (impl == nullptr || other.impl == nullptr)
         return impl == other.impl;
 
+    if (impl->identity.isNotEmpty() || other.impl->identity.isNotEmpty())
+        return impl->identity == other.impl->identity && impl->parameterID == other.impl->parameterID;
+
     return impl->getOwner() == other.impl->getOwner() && impl->parameterID == other.impl->parameterID;
 }
 
 ParameterRef ParameterHandle::getRef() const
 {
-    if (auto* plugin = impl != nullptr ? impl->plugin.get() : nullptr)
+    if (impl == nullptr)
+        return {};
+
+    if (auto* plugin = impl->locate != nullptr ? impl->locateDevice() : impl->plugin.get())
         return { getDeviceID (*plugin), impl->parameterID };
 
     return {};
@@ -165,7 +218,7 @@ juce::NormalisableRange<float> ParameterHandle::getRange() const
     if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->valueRange;
 
-    return {};
+    return impl != nullptr && impl->create != nullptr ? impl->rangeUntilMade : juce::NormalisableRange<float>();
 }
 
 std::optional<float> ParameterHandle::getDefaultValue() const
@@ -181,7 +234,7 @@ float ParameterHandle::getValue() const
     if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->getCurrentValue();
 
-    return 0.0f;
+    return impl != nullptr && impl->create != nullptr ? impl->rangeUntilMade.start : 0.0f; // the start of the range until made
 }
 
 float ParameterHandle::getBaseValue() const
@@ -189,7 +242,7 @@ float ParameterHandle::getBaseValue() const
     if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
         return parameter->getCurrentBaseValue();
 
-    return 0.0f;
+    return impl != nullptr && impl->create != nullptr ? impl->rangeUntilMade.start : 0.0f; // the start of the range until made
 }
 
 juce::String ParameterHandle::getText (float value) const
@@ -216,10 +269,26 @@ std::optional<devices::ParameterInfo> ParameterHandle::getInfo() const
 
 void ParameterHandle::beginGesture()
 {
-    const auto parameter = impl != nullptr ? impl->find() : nullptr;
-
-    if (parameter == nullptr || isInGesture())
+    if (impl == nullptr || isInGesture())
         return;
+
+    const auto parameter = impl->find();
+
+    // A device the first value makes: the gesture's step begins now, and a press without a drag makes nothing.
+    if (parameter == nullptr)
+    {
+        auto* track = impl->owner.get();
+
+        if (impl->create == nullptr || track == nullptr)
+            return;
+
+        if (Gesture::isInProgress (track->edit))
+            impl->joined = true;
+        else
+            impl->gesture = std::make_unique<Gesture> (track->edit, impl->createName);
+
+        return;
+    }
 
     storeValueWithoutUndo (*parameter);
 
@@ -235,10 +304,16 @@ void ParameterHandle::beginGesture()
 
 void ParameterHandle::setValue (float value)
 {
-    const auto parameter = impl != nullptr ? impl->find() : nullptr;
-
-    if (parameter == nullptr)
+    if (impl == nullptr)
         return;
+
+    if (impl->find() == nullptr)
+    {
+        makeAndSet (value);
+        return;
+    }
+
+    const auto parameter = impl->find();
 
     if (isInGesture())
     {
@@ -248,6 +323,31 @@ void ParameterHandle::setValue (float value)
 
     storeValueWithoutUndo (*parameter);
     const UndoStep step (parameter->getEdit(), impl->undoName.isNotEmpty() ? impl->undoName : "Change " + parameter->getParameterName());
+    parameter->setParameter (value, juce::sendNotification);
+}
+
+void ParameterHandle::makeAndSet (float value)
+{
+    auto* track = impl->owner.get();
+
+    if (impl->create == nullptr || track == nullptr)
+        return;
+
+    // In the gesture's step, or a step of its own for a value set outside a gesture.
+    std::optional<UndoStep> step;
+
+    if (! isInGesture())
+        step.emplace (track->edit, impl->createName);
+
+    auto* made = impl->create (*track);
+    const auto parameter = made != nullptr ? made->getAutomatableParameterByID (impl->parameterID) : nullptr;
+
+    if (parameter == nullptr)
+        return;
+
+    if (isInGesture())
+        parameter->parameterChangeGestureBegin();
+
     parameter->setParameter (value, juce::sendNotification);
 }
 

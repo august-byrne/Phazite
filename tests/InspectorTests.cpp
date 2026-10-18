@@ -35,11 +35,14 @@ struct Screen
 
     TrackID track (int index) const { return phazite::getTrackID (*te::getAudioTracks (*edit)[index]); }
 
-    // A label's text anywhere in the inspector.
+    // A label's or a button's text anywhere in the inspector.
     bool shows (const juce::String& text)
     {
         const auto labels = phazite::test::findAll<juce::Label> (inspector);
-        return std::any_of (labels.begin(), labels.end(), [&text] (juce::Label* label) { return label->getText() == text; });
+        const auto buttons = phazite::test::findAll<juce::TextButton> (inspector);
+        return std::any_of (labels.begin(), labels.end(), [&text] (juce::Label* label) { return label->getText() == text; })
+               || std::any_of (buttons.begin(), buttons.end(),
+                               [&text] (juce::TextButton* button) { return button->getButtonText() == text; });
     }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4

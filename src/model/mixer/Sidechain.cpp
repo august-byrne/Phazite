@@ -40,30 +40,29 @@ namespace
 
         return false;
     }
+} // namespace
 
-    // The tracks whose sound comes from a track, the track itself first: those it feeds, those they feed, and so on.
-    juce::Array<te::Track*> getTracksFedBy (te::Track& track)
+juce::Array<te::Track*> getTracksFedBy (te::Track& track)
+{
+    juce::Array<te::Track*> fed { &track };
+    const auto all = te::getAllTracks (track.edit);
+
+    for (auto grew = true; grew;)
     {
-        juce::Array<te::Track*> fed { &track };
-        const auto all = te::getAllTracks (track.edit);
+        grew = false;
 
-        for (auto grew = true; grew;)
+        for (auto* other : all)
         {
-            grew = false;
-
-            for (auto* other : all)
+            if (! fed.contains (other) && isFedBy (*other, fed))
             {
-                if (! fed.contains (other) && isFedBy (*other, fed))
-                {
-                    fed.add (other);
-                    grew = true;
-                }
+                fed.add (other);
+                grew = true;
             }
         }
-
-        return fed;
     }
-} // namespace
+
+    return fed;
+}
 
 bool hasSidechain (te::Plugin& plugin)
 {

@@ -11,46 +11,56 @@ namespace phazite::ui
 using namespace strip;
 
 //==============================================================================
-// A send: the return it feeds, its level, and whether it takes the sound before or after the fader.
+// A send to a return: its name, its level, and whether it takes the sound before or after the fader. Every return has
+// one on every strip that can send to it, off until its knob is first turned, which makes the send (question 13).
 struct ChannelStrip::SendSlot : public juce::Component
 {
-    SendSlot (ProjectContext& projectContext, const Send& send)
+    SendSlot (ProjectContext& projectContext, TrackID fromTrack, const SendTarget& target)
         : context (projectContext),
-          shown (send)
+          from (fromTrack)
     {
-        nameButton.setTooltip ("A send to this return track. Right-click to remove it");
+        nameButton.setTooltip ("Turn the knob to send some of this track to this return. Right-click to remove the send");
         nameButton.onClicked = [this] (bool isMenuClick)
         {
             if (isMenuClick)
                 showMenu();
         };
 
-        level.setTooltip ("How much of this track the send feeds the return. Double-click for 0 dB");
+        level.setTooltip ("How much of this track the send feeds the return: off until you turn it. Double-click for 0 dB");
         showAsDecibels (level);
-        attachment.setParameter (getSendLevel (context, send.id));
+        attachment.setParameter (getSendLevelTo (context, from, target.returnTrack));
 
         // The slot shows the switch when the song changes, right after this (ChannelStrip::songChanged()).
         prePost.setTooltip ("Pre: the send takes the sound before the fader, so the fader doesn't change it. Post: after the fader");
-        prePost.onClick = [this] { setPreFader (context, shown.id, ! shown.preFader); };
+        prePost.onClick = [this]
+        {
+            if (shown.send.has_value())
+                setPreFader (context, shown.send->id, ! shown.send->preFader);
+        };
 
         for (auto* c : std::initializer_list<juce::Component*> { &nameButton, &level, &prePost })
             addAndMakeVisible (c);
 
-        show (send);
+        show (target);
     }
 
-    void show (const Send& send)
+    void show (const SendTarget& target)
     {
-        shown = send;
-        nameButton.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92 ")) + send.returnName);
-        nameButton.setTitle ("Send to " + send.returnName);
-        prePost.setButtonText (send.preFader ? "Pre" : "Post");
+        shown = target;
+        nameButton.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92 ")) + target.name);
+        nameButton.setTitle (target.name + " return");
+        level.setTitle ("Send to " + target.name);
+        prePost.setVisible (target.send.has_value()); // a send that isn't there has nothing to switch
+        prePost.setButtonText (target.send.has_value() && target.send->preFader ? "Pre" : "Post");
     }
 
     void showMenu()
     {
+        if (! shown.send.has_value())
+            return;
+
         juce::PopupMenu menu;
-        menu.addItem ("Remove Send", [&projectContext = context, id = shown.id] { removeSend (projectContext, id); });
+        menu.addItem ("Remove Send", [&projectContext = context, id = shown.send->id] { removeSend (projectContext, id); });
         menu.showMenuAsync (juce::PopupMenu::Options());
     }
 
@@ -63,7 +73,8 @@ struct ChannelStrip::SendSlot : public juce::Component
     }
 
     ProjectContext& context;
-    Send shown;
+    const TrackID from;
+    SendTarget shown;
     MenuButton nameButton;
     Knob level { "Send level", decibelsToFaderPosition (0.0f) };
     ParameterAttachment attachment { level };
@@ -84,7 +95,7 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
     nameLabel.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
     nameLabel.setInterceptsMouseClicks (false, false); // a click on the name selects the track
 
-    for (auto* label : { &inputLabel, &outputLabel })
+    for (auto* label : { &inputLabel })
     {
         label->setJustificationType (juce::Justification::centred);
         label->setFont (juce::FontOptions (TextSize::small));
@@ -92,7 +103,8 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
         label->setInterceptsMouseClicks (false, false);
     }
 
-    outputLabel.setTitle ("Output");
+    outputButton.setTitle ("Output");
+    outputButton.onClick = [this] { showOutputMenu (context, commands, track, outputButton); };
 
     busButton.setTitle ("Mix as a bus");
     busButton.onClick = [this]
@@ -120,8 +132,8 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
                                                              &addSendButton })
         slotHolder.addAndMakeVisible (c);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &inputLabel, &busButton, &slotView, &outputLabel, &meter, &volume,
-                                                             &pan, &muteSolo })
+    for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &inputLabel, &busButton, &slotView, &outputButton, &meter, &volume,
+                                                             &pan, &muteSolo, &cpuBar })
         addAndMakeVisible (c);
 
     context.addListener (this);
@@ -142,7 +154,7 @@ void ChannelStrip::setTrack (TrackID newTrack)
     effects.setTrack (newTrack);
     muteSolo.setTrack (newTrack);
     meter.setSource (getLevel (context, newTrack));
-    shownSends.clear();
+    shownReturns.clear();
     sendSlots.clear();
     refresh();
     resized(); // a folder's header has the bus switch
@@ -196,10 +208,14 @@ void ChannelStrip::showChannel()
 {
     nameLabel.setText (channel.has_value() ? channel->name : juce::String ("No track"), juce::dontSendNotification);
     inputLabel.setText (describeInput(), juce::dontSendNotification);
-    outputLabel.setText (describeOutput(), juce::dontSendNotification);
-    outputLabel.setTooltip (channel.has_value() && channel->kind != ChannelKind::returnTrack
-                                ? "Where the sound goes: to the master, which you hear, or to the bus of the folder the track is in"
-                                : "Where the sound goes");
+    outputButton.setButtonText (strip::describeOutput (channel));
+
+    // A track or a bus chooses where its sound goes; a return goes to the master, and a plain folder has no sound.
+    const auto chooses = channel.has_value() && channel->kind != ChannelKind::plainFolder && canChooseOutput (context, track);
+    outputButton.setEnabled (chooses);
+    outputButton.setTooltip (chooses ? "Where the sound goes: to the master, which you hear, or into a bus, which the track goes "
+                                       "into as a folder. Click to choose"
+                                     : "Where the sound goes");
 }
 
 void ChannelStrip::attachControls()
@@ -233,21 +249,28 @@ void ChannelStrip::attachControls()
 
 void ChannelStrip::refreshSends()
 {
-    const auto sends = getSends (context, track);
+    // A slot for every return the channel can send to (tracks and returns send; folders don't).
+    const auto kind = channel.has_value() ? channel->kind : ChannelKind::track;
+    const auto sends = channel.has_value() && (kind == ChannelKind::track || kind == ChannelKind::returnTrack);
+    const auto targets = sends ? getSendTargets (context, track) : std::vector<SendTarget>();
+    std::vector<TrackID> returns;
 
-    if (getIDs (sends) == shownSends)
+    for (const auto& target : targets)
+        returns.push_back (target.returnTrack);
+
+    if (returns == shownReturns)
     {
-        for (size_t i = 0; i < sends.size(); ++i)
-            sendSlots[(int) i]->show (sends[i]);
+        for (size_t i = 0; i < targets.size(); ++i)
+            sendSlots[(int) i]->show (targets[i]);
 
         return;
     }
 
     sendSlots.clear();
-    shownSends = getIDs (sends);
+    shownReturns = returns;
 
-    for (const auto& send : sends)
-        slotHolder.addAndMakeVisible (sendSlots.add (new SendSlot (context, send)));
+    for (const auto& target : targets)
+        slotHolder.addAndMakeVisible (sendSlots.add (new SendSlot (context, track, target)));
 }
 
 void ChannelStrip::showSendMenu()
@@ -255,25 +278,19 @@ void ChannelStrip::showSendMenu()
     if (! channel.has_value() || (channel->kind != ChannelKind::track && channel->kind != ChannelKind::returnTrack))
         return;
 
-    // The returns there are, then new ones: one with an effect, as Studio One makes it in one step, or an empty one.
+    // The returns there are have their knobs above: a new one, with an effect, as Studio One makes it in one step, or empty.
     juce::PopupMenu menu;
     auto& projectContext = context;
     const auto from = track;
-    menu.addSectionHeader ("Return tracks hold effects that tracks share");
-
-    for (const auto& target : getReturns (context))
-        if (target.id != from) // a return can't send to itself
-            menu.addItem ("To " + target.name, [&projectContext, from, to = target.id] { addSendTo (projectContext, from, to); });
-
-    menu.addSeparator();
-    menu.addItem ("To a New Return With an Effect...",
+    menu.addSectionHeader ("A new return track, for an effect that tracks share");
+    menu.addItem ("With an Effect...",
                   [&projectContext, from, safeButton = juce::Component::SafePointer<juce::Component> (&addSendButton)]
                   {
                       if (safeButton != nullptr)
                           showNewReturnMenu (projectContext, from, *safeButton);
                   });
 
-    menu.addItem ("To a New Empty Return", [&projectContext, from] { addSendToNewReturn (projectContext, from); });
+    menu.addItem ("Empty", [&projectContext, from] { addSendToNewReturn (projectContext, from); });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addSendButton));
 }
 
@@ -298,17 +315,6 @@ juce::String ChannelStrip::describeInput() const
     return {};
 }
 
-juce::String ChannelStrip::describeOutput() const
-{
-    if (! channel.has_value())
-        return {};
-
-    if (channel->kind == ChannelKind::plainFolder)
-        return "No sound of its own";
-
-    return "Out: " + (channel->outputBus.isNotEmpty() ? channel->outputBus : juce::String ("Master"));
-}
-
 void ChannelStrip::timerCallback()
 {
     if (refreshDue)
@@ -323,6 +329,8 @@ void ChannelStrip::timerCallback()
 
     for (auto* slot : sendSlots)
         slot->attachment.update();
+
+    cpuBar.setLoad (getCpuLoad (context, track));
 }
 
 void ChannelStrip::mouseDown (const juce::MouseEvent&)
@@ -394,6 +402,10 @@ void ChannelStrip::paint (juce::Graphics& g)
 void ChannelStrip::resized()
 {
     auto area = getLocalBounds().reduced (Space::xs + 2, Space::xs);
+
+    // Along the bottom, how much CPU the track's devices take.
+    cpuBar.setBounds (area.removeFromBottom (CpuBar::height).reduced (Space::xs, 0));
+    area.removeFromBottom (Space::xs);
     area.removeFromTop (colourBarHeight);
 
     auto header = area.removeFromTop (headerHeight - colourBarHeight);
@@ -420,7 +432,7 @@ void ChannelStrip::resized()
     area.removeFromBottom (Space::xs);
     pan.setBounds (area.removeFromBottom (panKnobSize).withSizeKeepingCentre (panKnobSize, panKnobSize));
     area.removeFromBottom (Space::xs);
-    outputLabel.setBounds (area.removeFromBottom (outputHeight));
+    outputButton.setBounds (area.removeFromBottom (outputHeight));
     area.removeFromBottom (Space::xs);
 
     slotView.setBounds (area);
@@ -429,9 +441,10 @@ void ChannelStrip::resized()
 
 int ChannelStrip::getMinimumHeight()
 {
-    // As resized() lays it out: the header, a heading and a button, where the sound goes, pan, mute and solo, and the
-    // shortest fader.
-    return 2 * Space::xs + headerHeight + minSlotsHeight + outputHeight + panKnobSize + buttonHeight + minFaderHeight + 4 * Space::xs;
+    // As resized() lays it out: the header, a heading and a button, where the sound goes, pan, mute and solo, the
+    // shortest fader, and the CPU bar.
+    return 2 * Space::xs + headerHeight + minSlotsHeight + outputHeight + panKnobSize + buttonHeight + minFaderHeight + 4 * Space::xs
+           + CpuBar::height + Space::xs;
 }
 
 void ChannelStrip::layOutSlots()

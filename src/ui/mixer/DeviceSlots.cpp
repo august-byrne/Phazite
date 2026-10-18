@@ -335,6 +335,24 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
                 .setAction ([&projectContext, parameter = automated.parameter] { showAutomationLane (projectContext, parameter); }));
 
     menu.addSubMenu ("Automate", automate, automate.getNumItems() > 0);
+
+    // A device with a sidechain (a compressor that ducks under a kick, a plug-in with a sidechain input): what it listens
+    // to, the sound passing through it or another track's.
+    if (hasSidechain (projectContext, id))
+    {
+        juce::PopupMenu sidechain;
+        const auto source = getSidechainSource (projectContext, id);
+        sidechain.addItem ("Off: the sound passing through it", true, ! source.isValid(),
+                           act ([&projectContext, id] { setSidechainSource (projectContext, id, {}); }));
+        sidechain.addSeparator();
+
+        for (const auto& choice : getSidechainChoices (projectContext, id))
+            sidechain.addItem (choice.name, true, choice.track == source,
+                               act ([&projectContext, id, from = choice.track] { setSidechainSource (projectContext, id, from); }));
+
+        menu.addSubMenu ("Sidechain", sidechain);
+    }
+
     menu.addSeparator();
 
     if (place == DevicePlace::instrument)

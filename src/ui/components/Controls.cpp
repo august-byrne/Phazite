@@ -409,7 +409,7 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s)
 
 void ParameterAttachment::showMenu()
 {
-    if (! handle.isValid())
+    if (! handle.exists()) // a send that the first change makes has nothing to automate yet
         return;
 
     // The slider and this go together; the menu's choices come later, when either may be gone.

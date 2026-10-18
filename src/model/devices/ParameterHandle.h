@@ -24,8 +24,11 @@ public:
     ParameterHandle& operator= (ParameterHandle&&) noexcept;
     ~ParameterHandle(); // ends a gesture in progress, keeping its change
 
-    // Whether its parameter exists: none was given, or its device has been deleted.
+    // Whether there is a parameter to control: one that exists (not if none was given, or its device has been deleted),
+    // or one the first change makes, such as a track's send to a return before there is one (MixerModel.h:
+    // getSendLevelTo()). exists() tells them apart: the parameter is there now.
     bool isValid() const;
+    bool exists() const;
 
     // Whether both are handles of the same parameter of the same device.
     bool refersToSameParameter (const ParameterHandle&) const;
@@ -64,5 +67,7 @@ public:
 
 private:
     std::unique_ptr<Impl> impl;
+
+    void makeAndSet (float); // a parameter the first change makes: makes it, then sets it
 };
 } // namespace phazite
