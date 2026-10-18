@@ -10,6 +10,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <thread>
+#include <vector>
 
 namespace phazite::test
 {
@@ -36,6 +37,12 @@ std::jthread queueWithoutWakeUp (int delayMilliseconds);
 
 // The first component in parent's tree (parent included) with this title, or nullptr.
 juce::Component* findComponentWithTitle (juce::Component& parent, const juce::String& title);
+
+// A menu's item, found by the texts of the submenus that lead to it and its own, or nullptr.
+const juce::PopupMenu::Item* findMenuItem (const juce::PopupMenu&, const std::vector<juce::String>& path);
+
+// Runs a menu's item, found as findMenuItem() finds it, if it is enabled and has an action. Returns whether it did.
+bool runMenuItem (const juce::PopupMenu&, const std::vector<juce::String>& path);
 
 //==============================================================================
 // The window, holding the component under test, which fills it.

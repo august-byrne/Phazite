@@ -137,6 +137,11 @@ bool isDevice (const te::Plugin& plugin)
     return ! isChannelPlugin (plugin);
 }
 
+bool opensWindow (const te::Plugin& device)
+{
+    return isDevice (device) && ! isContainer (device) && dynamic_cast<const DevicePlugin*> (&device) == nullptr;
+}
+
 juce::Array<te::Plugin*> getDevices (const te::Track& track)
 {
     return getDevicesIn (track.pluginList);
@@ -600,6 +605,12 @@ void setDeviceOn (te::Plugin& device, bool on)
 
     const UndoStep step (device.edit, on ? "Turn Device On" : "Turn Device Off");
     device.setEnabled (on);
+}
+
+void rememberWindowPosition (te::Plugin& device, juce::Point<int> topLeft)
+{
+    device.state.setProperty (te::IDs::windowX, topLeft.x, nullptr);
+    device.state.setProperty (te::IDs::windowY, topLeft.y, nullptr);
 }
 
 te::AuxSendPlugin* addSendTo (te::Track& track, int bus)

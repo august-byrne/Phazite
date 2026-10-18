@@ -3,6 +3,7 @@
 
 #include "AppServices.h"
 #include "ClipWaveforms.h"
+#include "PluginWindow.h"
 #include "ProjectSession.h"
 #include "model/mixer/FreezeModel.h"
 #include "ui/input/ComputerKeyboard.h"
@@ -56,6 +57,7 @@ private:
     ui::KeyDispatcher shortcutKeys;             // runs commands from keys, in this window and over plug-in windows
     std::unique_ptr<ui::WindowKeys> windowKeys; // the window's shortcuts and the computer keyboard, in the order they get keys
     std::unique_ptr<ui::PluginKeys> pluginKeys; // play, stop and the computer keyboard over plug-in windows
+    PluginWindowServices pluginWindowServices;  // what plug-in windows' menus work with
     ui::AppShell* shell = nullptr;              // owned by the window as its content
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow; // hover help; null when it is turned off

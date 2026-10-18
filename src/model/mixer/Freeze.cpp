@@ -67,7 +67,7 @@ namespace
     // plug-in window's place, and a plug-in's own saved state, which a save writes again; and the IDs Phazite gives notes.
     bool isIgnoredProperty (const juce::Identifier& property)
     {
-        return property == te::IDs::frozen || property == te::IDs::windowX || property == te::IDs::windowY || property == te::IDs::state
+        return property == te::IDs::frozen || schema::isDeviceViewProperty (property) || property == te::IDs::state
                || property == schema::phaziteNoteID;
     }
 

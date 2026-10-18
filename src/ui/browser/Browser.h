@@ -139,4 +139,10 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the sound pack's download went on
     void timerCallback() override;
 };
+
+// Asks where to save a preset, in a dialog that starts in a folder of the user's presets (made if it isn't there), with
+// the name of what the preset holds. Calls save with the file chosen, with the presets' extension, unless the dialog is
+// cancelled or chooser goes meanwhile. The browser's commands use it, and plug-in windows' Save Preset....
+void askWhereToSavePreset (std::unique_ptr<juce::FileChooser>& chooser, const juce::File& folder, const juce::String& name,
+                           std::function<void (const juce::File&)> save);
 } // namespace phazite::ui

@@ -123,8 +123,8 @@ inline const juce::Identifier laneCollapsed { "collapsed" };
 
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; Project's isUncountedProperty()
 // and isUncountedElement()): on tracks, their heights, collapsed and pinned, drum mode and rows, and their automation
-// lanes; on PHAZITE, the playlist's grid. PIANOROLL and PHAZITELANE hold view settings only. Keep these lists exact:
-// anything else a project holds is song or state.
+// lanes; on PHAZITE, the playlist's grid; on devices (PLUGIN), where their windows were. PIANOROLL and PHAZITELANE hold
+// view settings only. Keep these lists exact: anything else a project holds is song or state.
 inline bool isTrackViewProperty (const juce::Identifier& p)
 {
     return p == phaziteHeight || p == phaziteCollapsed || p == phazitePinned || p == phaziteDrumMode || p == phaziteDrumOrder
@@ -134,6 +134,13 @@ inline bool isTrackViewProperty (const juce::Identifier& p)
 inline bool isGridProperty (const juce::Identifier& p)
 {
     return p == gridSnap || p == gridAdaptive || p == gridOffset || p == gridStep || p == gridTriplets;
+}
+
+// Tracktion's names, which Phazite writes as view settings since step 2.12 (model/mixer/internal/Mixer.h:
+// rememberWindowPosition()): Tracktion wrote them through the undo manager as it saved.
+inline bool isDeviceViewProperty (const juce::Identifier& p)
+{
+    return p == te::IDs::windowX || p == te::IDs::windowY;
 }
 
 inline bool isTrackViewElement (const juce::ValueTree& element)

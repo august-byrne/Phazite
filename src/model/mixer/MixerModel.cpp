@@ -9,7 +9,6 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceHandle.h"
-#include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
@@ -30,12 +29,6 @@ namespace
     {
         auto* edit = getEdit (context);
         return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
-    }
-
-    // A plug-in, or one of Tracktion's built-in devices: not one of Phazite's own, nor a container.
-    bool opensWindow (const te::Plugin& device)
-    {
-        return ! isContainer (device) && dynamic_cast<const DevicePlugin*> (&device) == nullptr;
     }
 
     std::vector<DeviceSlot> makeSlots (const juce::Array<te::Plugin*>& devices)

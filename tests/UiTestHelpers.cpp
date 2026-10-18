@@ -101,6 +101,41 @@ juce::Component* findComponentWithTitle (juce::Component& parent, const juce::St
     return nullptr;
 }
 
+const juce::PopupMenu::Item* findMenuItem (const juce::PopupMenu& menu, const std::vector<juce::String>& path)
+{
+    const auto* current = &menu;
+
+    for (size_t level = 0; level < path.size(); ++level)
+    {
+        const juce::PopupMenu::Item* found = nullptr;
+
+        for (juce::PopupMenu::MenuItemIterator it (*current); it.next() && found == nullptr;)
+            if (it.getItem().text == path[level])
+                found = &it.getItem();
+
+        if (found == nullptr || level + 1 == path.size())
+            return found;
+
+        current = found->subMenu.get();
+
+        if (current == nullptr)
+            return nullptr;
+    }
+
+    return nullptr;
+}
+
+bool runMenuItem (const juce::PopupMenu& menu, const std::vector<juce::String>& path)
+{
+    const auto* item = findMenuItem (menu, path);
+
+    if (item == nullptr || ! item->isEnabled || item->action == nullptr)
+        return false;
+
+    item->action();
+    return true;
+}
+
 //==============================================================================
 namespace
 {

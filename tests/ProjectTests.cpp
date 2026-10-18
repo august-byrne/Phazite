@@ -456,6 +456,8 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     REQUIRE (other != nullptr);
     auto* folder = phazite::insertFolder (edit, other, nullptr);
     REQUIRE (folder != nullptr);
+    auto* reverb = phazite::insertDevice (*track, edit.getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}));
+    REQUIRE (reverb != nullptr);
     phazite::test::settle();
 
     // Without undo steps, so that the view settings below can be seen to make none. Tracktion marks the Edit changed when
@@ -466,7 +468,8 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     REQUIRE_FALSE (project->hasUnsavedChanges());
 
     // Every view setting: tracks' heights (one shown so short that it collapses), a collapsed folder, a pinned track, drum
-    // mode and rows, and both editors' grids, which gives the piano roll's its element.
+    // mode and rows, both editors' grids, which gives the piano roll's its element, and where a device's window was (as the
+    // window does when it moves).
     phazite::setSavedTrackHeight (*track, 200);
     phazite::setCollapsed (*other, true); // as dragging its edge well below the minimum does
     phazite::setCollapsed (*folder, true);
@@ -478,6 +481,8 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     phazite::showAllDrumRows (*other);
     phazite::saveGridSettings (edit, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 2 });
     phazite::saveGridSettings (edit, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 10 });
+    reverb->windowState->lastWindowBounds = juce::Rectangle<int> (140, 360, 300, 200);
+    phazite::rememberWindowPosition (*reverb, { 140, 360 });
     phazite::test::settle();
 
     // No unsaved change, nothing to undo, and nothing for autosave to write.
@@ -493,9 +498,11 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     project->getPhaziteState().setProperty (schema::outline, "pop", nullptr);
     CHECK (project->hasUnsavedChanges());
 
-    // Saved and opened again, they are all there.
-    const auto trackID = track->itemID, otherID = other->itemID, folderID = folder->itemID;
+    // Saved and opened again, they are all there. Tracktion writes where the window was as it saves, through the undo
+    // manager, and finds it written.
+    const auto trackID = track->itemID, otherID = other->itemID, folderID = folder->itemID, reverbID = reverb->itemID;
     REQUIRE (project->save().wasOk());
+    CHECK_FALSE (edit.getUndoManager().canUndo());
     const auto file = project->getFile();
     project = nullptr;
     project = openProject (file);
@@ -515,6 +522,10 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (phazite::getHiddenDrumRows (*t) == std::vector<int> { 42 });
     CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::playlist).adaptiveOffset == 2);
     CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::pianoRoll).fixedLevel == 10);
+    const auto reopenedReverb = te::findPluginForID (reopened, reverbID);
+    REQUIRE (reopenedReverb != nullptr);
+    REQUIRE (reopenedReverb->windowState->lastWindowBounds.has_value());
+    CHECK (reopenedReverb->windowState->lastWindowBounds->getPosition() == juce::Point<int> (140, 360));
 
     // Everything else is the song or state, which closing without saving would lose: each of these is an unsaved change.
     const auto isUnsavedChange = [&project] (const std::function<void()>& change)

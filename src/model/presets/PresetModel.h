@@ -57,4 +57,10 @@ bool saveTrackPreset (const ProjectContext&, TrackID, const juce::File&);
 // track's or on a new track; a container is named after the preset. A track's goes after the track, as a new one, or at
 // the end. Returns whether anything went in.
 bool loadPreset (ProjectContext&, const juce::File&, TrackID);
+
+// Puts a device preset's settings and mix into a device with a window of its own (a plug-in, or one of Tracktion's
+// built-in devices: MixerModel.h's DeviceSlot::opensWindow) of the preset's kind (the same plug-in, or the same device),
+// in place of its own, as one undo step named after the preset ("Load Preset Warm Pad"): a plug-in window's Load Preset
+// (step 2.12). Returns whether it did: not for a preset of another device, nor of a container or a track.
+bool loadPresetInto (ProjectContext&, DeviceID, const juce::File&);
 } // namespace phazite

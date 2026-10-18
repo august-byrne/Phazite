@@ -437,6 +437,7 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
                 || property == te::IDs::loopPoint2 || property == te::IDs::looping))
            || (tree.hasType (te::IDs::CLICKTRACK) && (property == te::IDs::active || property == te::IDs::emphasiseBars))
            || (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property))
+           || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property))
            || (tree.hasType (schema::PHAZITE) && (schema::isGridProperty (property) || property == schema::loopFollowsSong))
            || isAutomatedValue (tree, property); // Tracktion writes it as the automation plays
 }

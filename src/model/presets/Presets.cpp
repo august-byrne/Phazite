@@ -68,9 +68,15 @@ namespace
             }
         }
 
-        if (state.hasType (te::IDs::PLUGIN))
-            for (const auto* property : { &te::IDs::sidechainSourceID, &te::IDs::windowX, &te::IDs::windowY, &te::IDs::enabled })
-                state.removeProperty (*property, nullptr);
+        if (! state.hasType (te::IDs::PLUGIN))
+            return;
+
+        for (const auto* property : { &te::IDs::sidechainSourceID, &te::IDs::enabled })
+            state.removeProperty (*property, nullptr);
+
+        for (int i = state.getNumProperties(); --i >= 0;)
+            if (schema::isDeviceViewProperty (state.getPropertyName (i)))
+                state.removeProperty (state.getPropertyName (i), nullptr);
     }
 
     // A state as a preset holds it: the values set by hand, not what automation or modulation set as the song played; a
@@ -381,5 +387,131 @@ bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target
         rack->rackName = name;
 
     return device != nullptr;
+}
+
+//==============================================================================
+namespace
+{
+    // Whether a preset's device is of a device's kind: the same type, and for a plug-in, the same plug-in.
+    bool isSameKindOfDevice (const te::Plugin& device, const juce::ValueTree& saved)
+    {
+        if (saved[te::IDs::type].toString() != device.state[te::IDs::type].toString())
+            return false;
+
+        if (dynamic_cast<const te::ExternalPlugin*> (&device) == nullptr)
+            return true;
+
+        for (const auto& property : { te::IDs::uniqueId, te::IDs::name, te::IDs::manufacturer })
+            if (saved[property].toString() != device.state[property].toString())
+                return false;
+
+        return true;
+    }
+
+    // A plug-in's own settings as they are now, as Tracktion writes them when it saves (ExternalPlugin's
+    // flushPluginStateToValueTree(), which writes through the undo manager): its state block and its program.
+    juce::ValueTree getSettingsNow (te::ExternalPlugin& plugin)
+    {
+        auto settings = plugin.state.createCopy();
+
+        if (auto* instance = plugin.getAudioPluginInstance())
+        {
+            juce::MemoryBlock block;
+            instance->suspendProcessing (true);
+            instance->getStateInformation (block);
+            instance->suspendProcessing (false);
+
+            if (block.getSize() > 0)
+                settings.setProperty (te::IDs::state, block.toBase64Encoding(), nullptr);
+
+            if (instance->getNumPrograms() > 0)
+                settings.setProperty (te::IDs::programNum, instance->getCurrentProgram(), nullptr);
+        }
+
+        return settings;
+    }
+
+    // A plug-in's own settings, which Tracktion keeps as a block that the plug-in reads only when it loads: put into the
+    // plug-in, and back by undo. Neither writes through the undo manager, which an undoable action mustn't.
+    class PluginSettingsAction : public juce::UndoableAction
+    {
+    public:
+        PluginSettingsAction (te::ExternalPlugin& plugin, const juce::ValueTree& newSettings)
+            : edit (plugin.edit),
+              id (plugin.itemID),
+              before (getSettingsNow (plugin)),
+              after (newSettings.createCopy())
+        {
+        }
+
+        bool perform() override { return apply (after); }
+        bool undo() override { return apply (before); }
+
+    private:
+        te::Edit& edit;
+        const te::EditItemID id;
+        const juce::ValueTree before, after;
+
+        bool apply (const juce::ValueTree& settings)
+        {
+            const auto found = te::findPluginForID (edit, id);
+            auto* plugin = dynamic_cast<te::ExternalPlugin*> (found.get());
+
+            if (plugin == nullptr)
+                return false;
+
+            plugin->restorePluginStateFromValueTree (settings);
+
+            // What a save would write, so that the project holds it at once.
+            for (const auto& property : { te::IDs::state, te::IDs::programNum })
+            {
+                if (settings.hasProperty (property))
+                    plugin->state.setProperty (property, settings[property], nullptr);
+                else
+                    plugin->state.removeProperty (property, nullptr);
+            }
+
+            return true;
+        }
+    };
+
+    // One of a plug-in's levels, its dry or its wet, set to what a preset holds, through the undo manager.
+    void loadLevel (te::AutomatableParameter& level, const juce::CachedValue<float>& stored, const juce::ValueTree& saved)
+    {
+        level.setParameter ((float) saved.getProperty (stored.getPropertyID(), stored.getDefault()), juce::sendNotification);
+    }
+} // namespace
+
+bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& file)
+{
+    auto* edit = getEdit (context);
+    const auto device = edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)) : te::Plugin::Ptr();
+    const auto preset = device != nullptr && opensWindow (*device) ? readPreset (file) : juce::ValueTree();
+
+    if (! preset.isValid() || findKind (preset[schema::presetKind]) != PresetKind::device)
+        return false;
+
+    const auto saved = preset.getChildWithName (te::IDs::PLUGIN);
+
+    if (! saved.isValid() || ! isSameKindOfDevice (*device, saved))
+        return false;
+
+    const UndoStep step (*edit, "Load Preset " + file.getFileNameWithoutExtension());
+    auto* plugin = dynamic_cast<te::ExternalPlugin*> (device.get());
+
+    // Tracktion's built-in devices keep their settings and mix as values, which they write through the undo manager.
+    if (plugin == nullptr)
+    {
+        device->restorePluginStateFromValueTree (saved);
+        return true;
+    }
+
+    // A plug-in keeps its settings in a block of its own, and its mix as values.
+    if (! edit->getUndoManager().perform (new PluginSettingsAction (*plugin, saved)))
+        return false;
+
+    loadLevel (*plugin->dryGain, plugin->dryValue, saved);
+    loadLevel (*plugin->wetGain, plugin->wetValue, saved);
+    return true;
 }
 } // namespace phazite

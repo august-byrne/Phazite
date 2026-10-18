@@ -25,6 +25,10 @@ bool isDevice (const te::Plugin&);
 juce::Array<te::Plugin*> getDevices (const te::Track&);
 juce::Array<te::Plugin*> getMasterDevices (const te::Edit&);
 
+// Whether a device has a window of its own (app/PluginWindow.h): a plug-in, or one of Tracktion's built-in devices; not
+// one of Phazite's own, nor a container, which the Devices view shows.
+bool opensWindow (const te::Plugin&);
+
 // A track's instrument, which turns its notes into sound: its first device, if that is an instrument. Its effects
 // are the devices after it, which change the sound. Folders, returns and the master have effects only.
 te::Plugin* getInstrument (const te::Track&);
@@ -52,6 +56,11 @@ void moveDevice (te::Plugin&, int newIndex);
 
 // Turns a device on or off, as one undo step.
 void setDeviceOn (te::Plugin&, bool on);
+
+// Where a device's own window was last (docs/design.md, section 9): view state, written without an undo step, which the
+// project saves, so that the window opens there again. Tracktion writes it as it saves too, through the undo manager,
+// but finds it written already.
+void rememberWindowPosition (te::Plugin&, juce::Point<int> topLeft);
 
 // The parameters a device's slot shows as small knobs, by ID: its quick control, then the first others (not the dry
 // and wet levels, which its mix sets). A container has none of its own: its key controls are its macros.

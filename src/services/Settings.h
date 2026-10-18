@@ -73,7 +73,8 @@ public:
     static constexpr BoolSetting exportNormalize { "phaziteExportNormalize", false, SaveTiming::now };
     static constexpr NumberSetting exportLoudnessTarget { "phaziteExportLoudnessTarget", -14.0, SaveTiming::now };  // LUFS
     static constexpr NumberSetting exportTruePeakCeiling { "phaziteExportTruePeakCeiling", -1.0, SaveTiming::now }; // dBTP
-    static constexpr BoolSetting exportStems { "phaziteExportStems", false, SaveTiming::now }; // the song, or its stems
+    static constexpr BoolSetting exportStems { "phaziteExportStems", false, SaveTiming::now };              // the song, or its stems
+    static constexpr ListSetting pluginsGettingAllKeys { "phazitePluginsGettingAllKeys", SaveTiming::now }; // plug-ins, by identity
     static constexpr BoolSetting guide { "phaziteGuide", true, SaveTiming::now };
     static constexpr ListSetting guideStepsDone { "phaziteGuideStepsDone", SaveTiming::now }; // the guide's steps, by name
 

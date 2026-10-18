@@ -75,7 +75,13 @@ struct PluginKeys::NativeHook
         const auto isDown = message.message == WM_KEYDOWN || message.message == WM_SYSKEYDOWN;
         const auto isUp = message.message == WM_KEYUP || message.message == WM_SYSKEYUP;
 
-        if (! (isDown || isUp) || ! owner.isInWindow (message.hwnd) || isTextField (GetFocus()))
+        if (! (isDown || isUp))
+            return;
+
+        // Keys in a watched window, unless its plug-in gets them all or a native text field has the focus.
+        const auto* watched = owner.findWindow (message.hwnd);
+
+        if (watched == nullptr || watched->allKeys || isTextField (GetFocus()))
             return;
 
         const auto key = toKeyPress ((UINT) message.wParam);
@@ -137,9 +143,9 @@ PluginKeys::PluginKeys (KeyDispatcher& dispatcher, ComputerKeyboard& keyboard)
 
 PluginKeys::~PluginKeys()
 {
-    for (auto& window : windows)
-        if (auto* w = window.getComponent())
-            removeFrom (*w);
+    for (auto& watched : windows)
+        if (auto* window = watched.window.getComponent())
+            removeFrom (*window);
 
     nativeHook = nullptr;
 }
@@ -159,14 +165,40 @@ void PluginKeys::watch (juce::Component& window)
                           component.addKeyListener (this);
                       });
 
-    if (std::none_of (windows.begin(), windows.end(), [&window] (const auto& w) { return w == &window; }))
-        windows.add (&window);
+    if (std::none_of (windows.begin(), windows.end(), [&window] (const Watched& w) { return w.window == &window; }))
+        windows.push_back ({ &window, false });
 }
 
 void PluginKeys::unwatch (juce::Component& window)
 {
     removeFrom (window);
-    windows.removeIf ([&window] (const auto& w) { return w == nullptr || w == &window; });
+    windows.erase (std::remove_if (windows.begin(), windows.end(),
+                                   [&window] (const Watched& w) { return w.window == nullptr || w.window == &window; }),
+                   windows.end());
+}
+
+void PluginKeys::setSendsAllKeys (juce::Component& window, bool allKeys)
+{
+    for (auto& watched : windows)
+        if (watched.window == &window)
+            watched.allKeys = allKeys;
+}
+
+bool PluginKeys::sendsAllKeys (const juce::Component& window) const
+{
+    const auto* watched = findWatched (&window);
+    return watched != nullptr && watched->allKeys;
+}
+
+const PluginKeys::Watched* PluginKeys::findWatched (const juce::Component* component) const
+{
+    const auto* window = component != nullptr ? component->getTopLevelComponent() : nullptr;
+
+    for (const auto& watched : windows)
+        if (window != nullptr && watched.window == window)
+            return &watched;
+
+    return nullptr;
 }
 
 void PluginKeys::removeFrom (juce::Component& window)
@@ -176,6 +208,10 @@ void PluginKeys::removeFrom (juce::Component& window)
 
 bool PluginKeys::keyPressed (const juce::KeyPress& key, juce::Component* component)
 {
+    // A component's key (the native hook passes none): not for a plug-in that gets every key.
+    if (const auto* watched = findWatched (component); watched != nullptr && watched->allKeys)
+        return false;
+
     if (! wants (key))
         return false;
 
@@ -184,24 +220,28 @@ bool PluginKeys::keyPressed (const juce::KeyPress& key, juce::Component* compone
 
 bool PluginKeys::keyStateChanged (bool isKeyDown, juce::Component* component)
 {
+    if (const auto* watched = findWatched (component); watched != nullptr && watched->allKeys)
+        return false;
+
     // Keys let go release the commands they ran, and the computer keyboard starts and ends its notes.
     shortcuts.keyStateChanged (isKeyDown, component);
     return computerKeyboard.keyStateChanged (isKeyDown, component);
 }
 
-bool PluginKeys::isInWindow ([[maybe_unused]] void* nativeHandle) const
+const PluginKeys::Watched* PluginKeys::findWindow ([[maybe_unused]] void* nativeHandle) const
 {
 #if JUCE_WINDOWS
     const auto root = GetAncestor (static_cast<HWND> (nativeHandle), GA_ROOT);
 
-    return std::any_of (windows.begin(), windows.end(),
-                        [root] (const auto& w)
-                        {
-                            auto* peer = w != nullptr ? w->getPeer() : nullptr;
-                            return peer != nullptr && static_cast<HWND> (peer->getNativeHandle()) == root;
-                        });
-#else
-    return false;
+    for (const auto& watched : windows)
+    {
+        auto* peer = watched.window != nullptr ? watched.window->getPeer() : nullptr;
+
+        if (peer != nullptr && static_cast<HWND> (peer->getNativeHandle()) == root)
+            return &watched;
+    }
 #endif
+
+    return nullptr;
 }
 } // namespace phazite::ui

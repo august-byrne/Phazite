@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -203,10 +204,12 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     CHECK (hear() == "clips sections tempo");
 
     // What Tracktion writes as it plays is no change to the song; view state, such as how tall a track shows, is a group of
-    // its own.
+    // its own. Where a device's window was shows in no view: a window moved doesn't make the mixer show its devices again.
     edit->getTransport().setPosition (te::TimePosition::fromSeconds (1.0));
     phazite::setSavedTrackHeight (*track, 120);
     CHECK (hear() == "view");
+    phazite::rememberWindowPosition (*delay, { 200, 120 });
+    CHECK (hear().empty());
 
     // Changes not yet told are the closing project's: none come after another opens.
     track->setName ("Lead");

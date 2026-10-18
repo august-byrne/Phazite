@@ -9,9 +9,15 @@
 // made with the app, before any plug-in's window: Windows calls the hook installed last first, so a plug-in built with
 // JUCE, whose own hook offers each key to its focused control (a preset name being typed, say) and passes on the keys
 // that control doesn't use, gets them first. A key typed into a native text field goes to the plug-in too.
+//
+// A plug-in that draws its own text fields, which none of this can see, gets every key while its window's "Send All
+// Keys to the Plug-in" switch is on (docs/design.md, section 9; roadmap step 2.12): then play, stop and the computer
+// keyboard don't work over it.
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
+
+#include <vector>
 
 namespace phazite::ui
 {
@@ -32,18 +38,29 @@ public:
     void watch (juce::Component& window);
     void unwatch (juce::Component& window);
 
+    // Whether a watched window's plug-in gets every key: its "Send All Keys to the Plug-in" switch.
+    void setSendsAllKeys (juce::Component& window, bool);
+    bool sendsAllKeys (const juce::Component& window) const;
+
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
     bool keyStateChanged (bool isKeyDown, juce::Component*) override;
 
 private:
     struct NativeHook;
 
+    struct Watched
+    {
+        juce::Component::SafePointer<juce::Component> window {};
+        bool allKeys = false; // its plug-in gets every key
+    };
+
     KeyDispatcher& shortcuts;
     ComputerKeyboard& computerKeyboard;
-    juce::Array<juce::Component::SafePointer<juce::Component>> windows;
+    std::vector<Watched> windows;
     std::unique_ptr<NativeHook> nativeHook; // Windows only
 
-    bool isInWindow (void* nativeHandle) const; // a native window in one of the watched ones
+    const Watched* findWindow (void* nativeHandle) const;      // the watched one a native window is in
+    const Watched* findWatched (const juce::Component*) const; // the watched one a component is in
     void removeFrom (juce::Component&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginKeys)

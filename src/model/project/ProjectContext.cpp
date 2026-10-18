@@ -142,8 +142,9 @@ namespace
 
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
-            // The value of a parameter with automation, which Tracktion writes as the automation plays, is no change.
-            if (isAutomatedValue (tree, property))
+            // The value of a parameter with automation, which Tracktion writes as the automation plays, is no change; nor is
+            // where a device's window was, which no view shows.
+            if (isAutomatedValue (tree, property) || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property)))
                 return;
 
             // How tall a track shows, and the like, is view state (Schema.h), not the song.

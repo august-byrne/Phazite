@@ -830,22 +830,29 @@ void Browser::saveSelectedTrackPreset()
 
 void Browser::choosePresetFile (const juce::String& folder, const juce::String& name, std::function<bool (const juce::File&)> save)
 {
-    const auto presets = library.getPresetsFolder().getChildFile (folder);
-    presets.createDirectory();
-    presetChooser = std::make_unique<juce::FileChooser> ("Save a Preset",
-                                                         presets.getChildFile (juce::File::createLegalFileName (name) + presetExtension),
-                                                         "*" + juce::String (presetExtension));
+    askWhereToSavePreset (presetChooser, library.getPresetsFolder().getChildFile (folder), name,
+                          [safeThis = juce::Component::SafePointer<Browser> (this), onChosen = std::move (save)] (const juce::File& file)
+                          {
+                              if (safeThis != nullptr && onChosen (file))
+                                  safeThis->presetSaved (file);
+                          });
+}
 
-    presetChooser->launchAsync (
-        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
-            | juce::FileBrowserComponent::warnAboutOverwriting,
-        [safeThis = juce::Component::SafePointer<Browser> (this), onChosen = std::move (save)] (const juce::FileChooser& chooser)
-        {
-            const auto chosen = chooser.getResult();
+void askWhereToSavePreset (std::unique_ptr<juce::FileChooser>& chooser, const juce::File& folder, const juce::String& name,
+                           std::function<void (const juce::File&)> save)
+{
+    folder.createDirectory();
+    chooser = std::make_unique<juce::FileChooser> ("Save a Preset",
+                                                   folder.getChildFile (juce::File::createLegalFileName (name) + presetExtension),
+                                                   "*" + juce::String (presetExtension));
 
-            if (safeThis != nullptr && chosen != juce::File() && onChosen (chosen.withFileExtension (presetExtension)))
-                safeThis->presetSaved (chosen.withFileExtension (presetExtension));
-        });
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [onChosen = std::move (save)] (const juce::FileChooser& dialog)
+                          {
+                              if (const auto chosen = dialog.getResult(); chosen != juce::File())
+                                  onChosen (chosen.withFileExtension (presetExtension));
+                          });
 }
 
 juce::File Browser::saveTrackPreset (TrackID track)

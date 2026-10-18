@@ -681,6 +681,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/PlaybackTests.cpp
         tests/PlaylistModelTests.cpp
         tests/PluginKeysTests.cpp
+        tests/PluginWindowTests.cpp
         tests/PlaylistTests.cpp
         tests/PresetTests.cpp
         tests/ProjectContextTests.cpp

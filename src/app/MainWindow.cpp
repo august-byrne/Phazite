@@ -54,7 +54,8 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
       lookAndFeel (lf),
       services (appServices),
       computerKeyboard ([&e] (const juce::MidiMessage& m) { playIntoAllMidiInputs (e, m); }),
-      shortcutKeys (bridge)
+      shortcutKeys (bridge),
+      pluginWindowServices { s.getContext(), appServices.library, appServices.settings }
 {
     setUsingNativeTitleBar (true);
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
@@ -88,6 +89,9 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     // Play and stop, and the computer keyboard, work over plug-in windows too.
     pluginKeys = std::make_unique<ui::PluginKeys> (shortcutKeys, computerKeyboard);
     ui::setPluginKeys (pluginKeys.get());
+
+    // Plug-in windows' menus save and load presets, and keep their key switches in the settings.
+    setPluginWindowServices (&pluginWindowServices);
 
     // The playlist's clips draw their waveforms with Tracktion's thumbnails.
     ui::setClipWaveformMaker (getClipWaveformMaker());
@@ -129,6 +133,7 @@ MainWindow::~MainWindow()
     delete pluginListWindow.getComponent();
     delete welcomeWindow.getComponent();
 
+    setPluginWindowServices (nullptr);
     ui::setPluginKeys (nullptr);
     ui::setClipWaveformMaker ({});
     pluginKeys = nullptr;

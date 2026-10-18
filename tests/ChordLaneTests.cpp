@@ -32,43 +32,7 @@ const phazite::Progression& getProgression (const char* id)
     return *progression;
 }
 
-// Runs a menu's item, found by the texts of the submenus that lead to it and its own.
-bool runMenuItem (const juce::PopupMenu& menu, const std::vector<juce::String>& path)
-{
-    const auto* current = &menu;
-
-    for (size_t level = 0; level < path.size(); ++level)
-    {
-        const juce::PopupMenu* next = nullptr;
-
-        for (juce::PopupMenu::MenuItemIterator it (*current); it.next();)
-        {
-            const auto& item = it.getItem();
-
-            if (item.text != path[level])
-                continue;
-
-            if (level + 1 == path.size())
-            {
-                if (item.action == nullptr || ! item.isEnabled)
-                    return false;
-
-                item.action();
-                return true;
-            }
-
-            next = item.subMenu.get();
-            break;
-        }
-
-        if (next == nullptr)
-            return false;
-
-        current = next;
-    }
-
-    return false;
-}
+using phazite::test::runMenuItem;
 
 // A playlist in a window, with two tracks, as the app shows it.
 struct ChordScreen
