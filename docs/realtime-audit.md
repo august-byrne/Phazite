@@ -160,9 +160,14 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 - **Why it is mostly harmless:** the position is an aligned 8-byte value, which x86-64 and ARM64 read and write whole, so the audio thread sees the old position or the new one. At worst, one block applies the automation from where the playhead was.
 - **Action:** `tools/tsan-suppressions.txt` suppresses races in `TransportControl::getPosition()`, which Phazite's own code calls on the message thread only. Naming the plug-in function instead would hide every race inside any device's processing. A fork would read the playhead's own position, which the audio thread may read. Report upstream.
 
+**21. Render jobs deleted while their thread lets go of them** (measured by ThreadSanitizer in CI, 2026-10-17).
+- **What:** Tracktion makes some files in the background with `RenderManager` jobs on a JUCE thread pool, such as the reversed copy of an audio clip's file that Reverse plays (step 2.6). A finished job posts a message, and on the message thread `RenderManager::Job::handleMessage` drops its last reference as soon as `isRunning()` says the pool is done with it, so `RenderManager` deletes it. But JUCE's `ThreadPool::runNextJob` clears a job's running flag before it writes the job's `shouldStop` flag and `pool` pointer, so the pool's thread can still write to a job that has just been deleted. ThreadSanitizer saw the deletion race with the pool's thread four times in the tests that reverse clips. The race's other stack didn't fit in GitHub's annotation, which keeps 4096 characters: `tools/ci-sanitizer-reports.sh` now shortens reports so that both stacks fit.
+- **Why it is rare:** the message must be handled in the moment between those writes, on another thread; if the job still runs then, a timer tries again later. It happens once per render, not during playback.
+- **Action:** `tools/tsan-suppressions.txt` suppresses races in `RenderManager::handleAsyncUpdate()`, which only deletes finished jobs; Phazite's code runs on neither side. The fix belongs in Tracktion (delete a job once the pool has let go of it) or JUCE (clear the running flag last). Report upstream.
+
 ## Reporting upstream
 
-Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19 and 20. Posting is the owner's call.
+Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19, 20 and 21. Posting is the owner's call.
 
 ## Next
 

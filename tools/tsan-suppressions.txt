@@ -19,3 +19,9 @@ race:tracktion::engine::HostedMidiInputDevice*processBlock
 # Phazite's own code calls getPosition() on the message thread only; naming the plug-in function would hide every race
 # in any device's processing.
 race:tracktion::engine::TransportControl::getPosition
+
+# Finding 21: Tracktion's RenderManager deletes a finished render job (the reversed copy of an audio clip's file, say) on
+# the message thread as soon as JUCE's thread pool says the job no longer runs, while the pool's thread can still be
+# writing to the job: JUCE clears the job's running flag before its other fields. Both sides are Tracktion's and JUCE's
+# code, and this function only deletes finished jobs.
+race:tracktion::engine::RenderManager::handleAsyncUpdate
