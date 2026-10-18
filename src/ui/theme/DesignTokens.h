@@ -167,6 +167,30 @@ namespace SectionTint
     inline constexpr float edge = 0.6f;
 } // namespace SectionTint
 
+// How an audio clip's fades show, in the playlist and the audio clip editor: what a fade takes away is shaded black above
+// its curve from silence to full volume (alphas), and the curve's thickness.
+namespace FadeTint
+{
+    inline constexpr float shade = 0.3f;
+    inline constexpr float curve = 0.6f;
+    inline constexpr float curveWidth = 1.5f;
+} // namespace FadeTint
+
+// How the audio clip editor shows its clip (ui/audioclip/AudioClipEditor.h): over the panels' background, the clip in a
+// wash of its track's color with its audio in that color, and the audio its edges trim off in the muted text color
+// (alphas); the line at each edge, and the grip in its middle, which a drag trims; the square handles at its top, which
+// a drag fades; and how near the pointer must come to an edge or a handle to take it (pixels).
+namespace AudioClipTint
+{
+    inline constexpr float clipWash = 0.16f;
+    inline constexpr float trimmedAudio = 0.35f;
+    inline constexpr float edgeWidth = 2.0f;
+    inline constexpr int gripWidth = 6;
+    inline constexpr int gripHeight = 28;
+    inline constexpr int handleSize = 10;
+    inline constexpr int grabDistance = 6;
+} // namespace AudioClipTint
+
 // How the loop shows in a ruler: its lane along the top, which a drag loops (a shade of the text color), a bar of
 // the loop color in that lane over the part that loops, and a wash of it below (alphas); the lane's height, and how
 // near the loop's edge a press takes the edge (pixels).

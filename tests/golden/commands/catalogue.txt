@@ -16,6 +16,8 @@ clip.fadeLinear | Linear Fades | Clip | Fades in a straight line. For the select
 clip.fadeConvex | Convex Fades | Clip | Fades that change fast near silence and slow near full volume. For the selected audio clips. | fade shape, fade curve, crossfade | enabled-when undo ticked
 clip.fadeConcave | Concave Fades | Clip | Fades that change slowly near silence and fast near full volume. For the selected audio clips. | fade shape, fade curve, crossfade | enabled-when undo ticked
 clip.fadeSCurve | S-Curve Fades | Clip | Fades that start and end gently, like an S. For the selected audio clips. | fade shape, fade curve, crossfade | enabled-when undo ticked
+clip.reverse | Reverse | Clip | Plays the selected audio clips backwards, or forwards again. | backwards, reverse audio, play backwards | enabled-when undo ticked
+clip.followTempo | Follow Tempo | Clip | Stretches the selected audio clips to follow the song's tempo, keeping their pitch, or plays them at their own speed again. | warp, stretch, time stretch, sync to tempo, tempo | enabled-when undo ticked
 edit.split | Split | Edit | Splits the clips in the selected time range at its edges, or the selected clips at the playhead. | cut, slice, divide, razor | enabled-when undo
 edit.insertTime | Insert Time | Edit | Inserts empty time, as long as the selected time range, at its start, on every track. A section it falls inside gets longer. | insert silence, add bars, make room | enabled-when undo
 edit.removeTime | Remove Time | Edit | Removes the selected time range from every track, and moves what comes after it back. Sections that reach into it get shorter. | delete time, remove bars, cut time | enabled-when undo

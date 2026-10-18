@@ -80,6 +80,7 @@ void Playlist::showClipMenu()
     juce::PopupMenu fadeShapes;
     addCommandItems (fadeShapes, bridge, { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" });
     menu.addSubMenu ("Fade Shape", fadeShapes);
+    addCommandItems (menu, bridge, { "clip.reverse", "clip.followTempo" });
 
     menu.addSeparator();
     addCommandItems (menu, bridge, { "edit.delete", "edit.deleteAndCloseGap" });
@@ -780,10 +781,10 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
         return;
     }
 
-    // On a MIDI clip: open it in the piano roll.
+    // On a clip: open it in its editor, the piano roll or the audio clip editor.
     if (auto* component = getClipComponentAt (e.getPosition()))
     {
-        if (component->getInfo().kind == ClipType::midi && onOpenClip != nullptr)
+        if (onOpenClip != nullptr)
             onOpenClip (component->getClip());
 
         return;

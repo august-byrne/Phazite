@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Selection.h"
 #include "internal/Arrangement.h"
+#include "internal/AudioClips.h"
 #include "internal/Clips.h"
 #include "internal/Sections.h"
 #include "internal/Tracks.h"
@@ -420,6 +421,28 @@ void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& sele
                         .undoTarget = undoTarget,
                         .isTicked = [&selection, type] { return hasFadeShape (getSelectedClips (selection), type); } });
     }
+
+    // What the selected audio clips play: backwards, and stretched to the song's tempo (as the audio clip editor sets them).
+    registry.add ({ .id = "clip.reverse",
+                    .name = "Reverse",
+                    .category = "Clip",
+                    .description = "Plays the selected audio clips backwards, or forwards again.",
+                    .synonyms = { "backwards", "reverse audio", "play backwards" },
+                    .perform = [&selection] { toggleClipsReversed (getSelectedClips (selection)); },
+                    .isEnabled = [&selection] { return hasAudioClips (getSelectedClips (selection)); },
+                    .undoTarget = undoTarget,
+                    .isTicked = [&selection] { return areAllClipsReversed (getSelectedClips (selection)); } });
+
+    registry.add ({ .id = "clip.followTempo",
+                    .name = "Follow Tempo",
+                    .category = "Clip",
+                    .description = "Stretches the selected audio clips to follow the song's tempo, keeping their pitch, or plays them at "
+                                   "their own speed again.",
+                    .synonyms = { "warp", "stretch", "time stretch", "sync to tempo", "tempo" },
+                    .perform = [&selection] { toggleClipsFollowTempo (getSelectedClips (selection)); },
+                    .isEnabled = [&selection] { return hasAudioClips (getSelectedClips (selection)); },
+                    .undoTarget = undoTarget,
+                    .isTicked = [&selection] { return doAllClipsFollowTempo (getSelectedClips (selection)); } });
 
     registry.add ({ .id = "edit.split",
                     .name = "Split",

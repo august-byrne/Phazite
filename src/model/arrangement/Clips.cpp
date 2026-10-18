@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Clips.h"
+#include "internal/AudioClips.h"
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
@@ -18,6 +19,18 @@ namespace
 
     // Positions this close count as the same: rounding between beats and seconds leaves differences this small.
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
+
+    // The latest a clip can end: where its audio does, for an audio clip that doesn't loop (Tracktion's longest takes no
+    // account of what was trimmed off its start), or else as late as Tracktion lets it.
+    te::TimePosition getLatestEnd (te::Clip& clip)
+    {
+        const auto latest = clip.getPosition().getStart() + clip.getMaximumLength();
+
+        if (auto* audio = dynamic_cast<te::AudioClipBase*> (&clip); audio != nullptr && ! audio->isLooping())
+            return std::min (latest, getAudioTimeRange (*audio).getEnd());
+
+        return latest;
+    }
 
     // Where clips are on their tracks, for the automation under them (Automation.h: moveAutomation()).
     std::vector<AutomationStretch> getStretchesOf (const juce::Array<te::Clip*>& clips)
@@ -226,7 +239,7 @@ void trimClipEnd (te::Clip& clip, te::BeatPosition beat)
 {
     const auto& tempo = clip.edit.tempoSequence;
     const auto earliest = tempo.toTime (clip.getStartBeat() + minimumClipLength);
-    const auto latest = clip.getPosition().getStart() + clip.getMaximumLength();
+    const auto latest = getLatestEnd (clip);
 
     if (latest < earliest)
         return;
@@ -248,7 +261,7 @@ void setCrossfade (te::AudioClipBase& first, te::AudioClipBase& second, te::Time
 {
     // How far each can reach over the boundary: the first as far as its audio goes on, the second as far
     // back as its audio starts.
-    const auto firstReach = first.getPosition().getStart() + first.getMaximumLength() - boundary;
+    const auto firstReach = getLatestEnd (first) - boundary;
     const auto secondReach = boundary - std::max (te::TimePosition(), second.getPosition().getStartOfSource());
     const auto half = std::max (te::TimeDuration(), std::min ({ length / 2.0, firstReach, secondReach }));
 

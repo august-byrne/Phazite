@@ -56,6 +56,7 @@ The first column covers the warm-up after playback starts (0.5 s for every scena
 | MIDI into Tracktion's 4OSC synth | 43 allocations, 15 frees | 1 allocation, 1 free, or more |
 | One empty track with two audio inputs enabled | 8 allocations, 4 frees | 0 |
 | A loop at 120 BPM stretched to 100 BPM, played from its rendered proxy (a loop dropped from the browser) | 12 allocations, 9 frees (from a file cache miss) | 0 |
+| An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from its rendered proxy (as the audio clip editor sets them, step 2.6) | 10 allocations, 6 frees (from a file cache miss) | 0 |
 | A loop at 120 BPM previewed at 100 BPM, stretched as it plays (the browser's preview) | 21 allocations, 14 frees | 0 |
 
 Steady playback is clean everywhere except in 4OSC. Every scenario allocates something in its first blocks, though.
@@ -117,7 +118,7 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 **10. Modulator timing** (source): the Edit takes a lock once per block to update its modulators, and the MIDI tracker modulator takes a spin lock. Report upstream; measure in step 3.5.
 
 **11. Scratch buffers** (source): `AudioScratchBuffer` takes a shared mutex. It allocates when its 8 pooled buffers are busy or a buffer has more than 2 channels. It is used by time-stretching, multi-output plug-ins and sidechains. Revisit when sidechains (step 2.9) land.
-  - **Time-stretching, revisited in step 1.5 (2026-10-13):** a loop dropped from the browser follows the song's tempo, and Tracktion plays it from a stretched copy that it renders in the background (a "proxy"), so the audio thread only reads a file: its steady playback allocates nothing (measured). The render starts 600 ms after the clip changes, and the clip is silent until it is ready, usually well under a second for a loop. The browser's preview stretches as it plays instead (finding 17).
+  - **Time-stretching, revisited in step 1.5 (2026-10-13):** a loop dropped from the browser follows the song's tempo, and Tracktion plays it from a stretched copy that it renders in the background (a "proxy"), so the audio thread only reads a file: its steady playback allocates nothing (measured). The render starts 600 ms after the clip changes, and the clip is silent until it is ready, usually well under a second for a loop. Since step 2.6 (2026-10-17), the audio clip editor's pitch, Reverse and Follow Tempo play the same way: from a reversed copy of the file, and a pitched or stretched proxy rendered from it (measured: steady playback allocates nothing). The browser's preview stretches as it plays instead (finding 17).
 
 **12. Tempo changes** (source): the tempo map swaps its rebuilt sequence under the audio callback's lock. Report upstream; test with tempo automation later.
 

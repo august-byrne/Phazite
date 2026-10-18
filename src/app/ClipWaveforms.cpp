@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ClipWaveforms.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+
+#include <cmath>
+#include <functional>
 
 namespace phazite
 {
@@ -20,34 +24,24 @@ namespace
 
         void paint (juce::Graphics& g, juce::Rectangle<int> area, int width) override
         {
-            auto* audio = dynamic_cast<te::AudioClipBase*> (findClip());
-            const auto visible = area.getIntersection (g.getClipBounds());
-
-            if (audio == nullptr || visible.isEmpty())
-                return;
-
-            showFileOf (*audio);
-
-            // The time in the audio file at an x: from the clip's offset, at its speed. The clip's width spans its
-            // beats, which the tempo turns into times. A time-stretched clip plays a proxy file that is already at the
-            // Edit's tempo.
-            const auto& tempo = audio->edit.tempoSequence;
-            const auto position = audio->getPosition();
-            const auto speed = audio->usesTimeStretchedProxy() ? 1.0 : audio->getSpeedRatio();
-            const auto xToTime = [&] (int x)
+            // The clip's width spans its beats.
+            if (auto* audio = dynamic_cast<te::AudioClipBase*> (findClip()))
             {
-                const auto beat =
-                    audio->getStartBeat() + te::BeatDuration::fromBeats (audio->getLengthInBeats().inBeats() * x / std::max (1, width));
-                return tempo.toTime (beat).inSeconds();
-            };
+                const auto beats = audio->getEditBeatRange();
+                draw (*audio, g, area, [&beats, width] (int x)
+                      { return beats.getStart() + te::BeatDuration::fromBeats (beats.getLength().inBeats() * x / std::max (1, width)); });
+            }
+        }
 
-            const auto sourceTime = [&] (int x)
+        void paintSpan (juce::Graphics& g, juce::Rectangle<int> area, BeatRange span) override
+        {
+            if (auto* audio = dynamic_cast<te::AudioClipBase*> (findClip()))
             {
-                return te::TimePosition::fromSeconds ((xToTime (x) - position.getStart().inSeconds() + position.getOffset().inSeconds())
-                                                      * speed);
-            };
-
-            thumbnail->drawChannels (g, visible, { sourceTime (visible.getX()), sourceTime (visible.getRight()) }, audio->getGain());
+                const auto start = toTracktion (span.getStart());
+                const auto length = span.getLength().inBeats();
+                draw (*audio, g, area, [start, length, &area] (int x)
+                      { return start + te::BeatDuration::fromBeats (length * (x - area.getX()) / std::max (1, area.getWidth())); });
+            }
         }
 
     private:
@@ -63,10 +57,52 @@ namespace
             return edit != nullptr ? te::findClipForID (*edit, toTracktion (clipID)) : nullptr;
         }
 
-        // What the clip plays now, which changes when it is stretched to another tempo, say.
+        // Draws the file over the part of an area that is being painted and that the file has audio for, given the song beat
+        // at each x.
+        void draw (te::AudioClipBase& audio, juce::Graphics& g, juce::Rectangle<int> area,
+                   const std::function<te::BeatPosition (int)>& beatAt)
+        {
+            auto visible = area.getIntersection (g.getClipBounds());
+
+            if (visible.isEmpty())
+                return;
+
+            showFileOf (audio);
+
+            // The time in the file at an x, as the clip plays it: stretched to the song's tempo, say.
+            const auto fileTime = [&] (int x) { return getFileTimeAt (audio, beatAt (x)); };
+
+            // Only where the file has audio, once the thumbnail knows how long it is.
+            if (const auto length = thumbnail->getTotalLength(); length > 0.0)
+            {
+                const auto left = fileTime (visible.getX()), right = fileTime (visible.getRight());
+
+                if (right <= 0.0 || left >= length || right <= left)
+                    return;
+
+                const auto xAt = [&] (double time)
+                { return visible.getX() + (int) std::round ((time - left) / (right - left) * visible.getWidth()); };
+
+                if (left < 0.0)
+                    visible.setLeft (xAt (0.0));
+
+                if (right > length)
+                    visible.setRight (xAt (length));
+            }
+
+            if (visible.getWidth() > 0)
+                thumbnail->drawChannels (g, visible,
+                                         { te::TimePosition::fromSeconds (fileTime (visible.getX())),
+                                           te::TimePosition::fromSeconds (fileTime (visible.getRight())) },
+                                         audio.getGain());
+        }
+
+        // The file the clip's audio comes from, which changes when it is reversed. Not the proxy it plays while stretched or
+        // pitched, which holds only what the clip plays, and only once it is ready: the waveform shows it unstretched, as
+        // Ableton Live shows a sample, and all of it.
         void showFileOf (te::AudioClipBase& audio)
         {
-            const auto file = audio.getPlaybackFile();
+            const auto file = audio.getAudioFile();
 
             if (thumbnail != nullptr && file.getFile() == shownFile)
                 return;

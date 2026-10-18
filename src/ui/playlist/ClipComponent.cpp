@@ -97,44 +97,43 @@ void ClipComponent::paint (juce::Graphics& g)
 
 void ClipComponent::paintFades (juce::Graphics& g, juce::Rectangle<int> area)
 {
-    // What a fade takes away is shaded, above its curve from silence to full volume.
     const auto width = (float) area.getWidth(), height = (float) area.getHeight();
     const auto fadeIn = (float) info.fadeIn * width;
     const auto fadeOut = (float) info.fadeOut * width;
 
-    // The curve, from x0 (silence) to x1 (full volume), and the part of the clip above it.
-    const auto drawFade = [&g, height] (float x0, float x1, FadeShape shape)
-    {
-        juce::Path curve;
-        constexpr int steps = 16;
-
-        for (int i = 0; i <= steps; ++i)
-        {
-            const auto alpha = (float) i / (float) steps;
-            const auto point = juce::Point<float> (x0 + (x1 - x0) * alpha, height * (1.0f - getFadeGain (shape, alpha)));
-
-            if (i == 0)
-                curve.startNewSubPath (point);
-            else
-                curve.lineTo (point);
-        }
-
-        auto shade = curve;
-        shade.lineTo (x1, 0.0f);
-        shade.lineTo (x0, 0.0f);
-        shade.closeSubPath();
-
-        g.setColour (juce::Colours::black.withAlpha (0.3f));
-        g.fillPath (shade);
-        g.setColour (juce::Colours::black.withAlpha (0.6f));
-        g.strokePath (curve, juce::PathStrokeType (1.5f));
-    };
-
     if (fadeIn > 0.0f)
-        drawFade (0.0f, fadeIn, info.fadeInShape);
+        paintFade (g, 0.0f, fadeIn, 0.0f, height, info.fadeInShape);
 
     if (fadeOut > 0.0f)
-        drawFade (width, width - fadeOut, info.fadeOutShape);
+        paintFade (g, width, width - fadeOut, 0.0f, height, info.fadeOutShape);
+}
+
+void paintFade (juce::Graphics& g, float x0, float x1, float top, float bottom, FadeShape shape)
+{
+    // The curve, from x0 (silence) to x1 (full volume), and the part of the clip above it.
+    juce::Path curve;
+    constexpr int steps = 16;
+
+    for (int i = 0; i <= steps; ++i)
+    {
+        const auto alpha = (float) i / (float) steps;
+        const auto point = juce::Point<float> (x0 + (x1 - x0) * alpha, bottom - (bottom - top) * getFadeGain (shape, alpha));
+
+        if (i == 0)
+            curve.startNewSubPath (point);
+        else
+            curve.lineTo (point);
+    }
+
+    auto shade = curve;
+    shade.lineTo (x1, top);
+    shade.lineTo (x0, top);
+    shade.closeSubPath();
+
+    g.setColour (juce::Colours::black.withAlpha (FadeTint::shade));
+    g.fillPath (shade);
+    g.setColour (juce::Colours::black.withAlpha (FadeTint::curve));
+    g.strokePath (curve, juce::PathStrokeType (FadeTint::curveWidth));
 }
 
 void ClipComponent::paintNotes (juce::Graphics& g, juce::Rectangle<int> area, juce::Colour ink)

@@ -6,6 +6,7 @@
 #include "HintBar.h"
 #include "Panels.h"
 #include "TopBar.h"
+#include "ui/audioclip/AudioClipEditor.h"
 #include "ui/browser/Browser.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/mixer/DevicesView.h"
@@ -81,10 +82,11 @@ private:
     Playlist playlist;
     Inspector inspector;
     PianoRoll pianoRoll;
+    AudioClipEditor audioClipEditor;
     MixerView mixer;
     DevicesView devices;                     // the selected track's
     SongViews songViews { playlist, mixer }; // the centre
-    EditorDock editorDock { pianoRoll, devices };
+    EditorDock editorDock { projectContext, pianoRoll, audioClipEditor, devices };
     HintBar hintBar;
     Guide guide; // the hint bar's next step for newcomers
 

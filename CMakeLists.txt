@@ -88,6 +88,9 @@ target_sources(phazite_core PRIVATE
     src/devices/synth/Synth.cpp
     src/devices/synth/Synth.h
     src/model/arrangement/Arrangement.cpp
+    src/model/arrangement/AudioClipModel.cpp
+    src/model/arrangement/AudioClipModel.h
+    src/model/arrangement/AudioClips.cpp
     src/model/arrangement/Clips.cpp
     src/model/arrangement/Grid.cpp
     src/model/arrangement/GridSettings.h
@@ -108,6 +111,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/TrackColours.h
     src/model/arrangement/Tracks.cpp
     src/model/arrangement/internal/Arrangement.h
+    src/model/arrangement/internal/AudioClips.h
     src/model/arrangement/internal/Clips.h
     src/model/arrangement/internal/Grid.h
     src/model/arrangement/internal/Import.h
@@ -372,6 +376,8 @@ endfunction()
 add_library(phazite_ui STATIC)
 
 target_sources(phazite_ui PRIVATE
+    src/ui/audioclip/AudioClipEditor.cpp
+    src/ui/audioclip/AudioClipEditor.h
     src/ui/browser/Browser.cpp
     src/ui/browser/Browser.h
     src/ui/browser/PluginPicker.cpp
@@ -573,6 +579,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppInfoTests.cpp
         tests/AppShellTests.cpp
         tests/AppTests.cpp
+        tests/AudioClipEditorTests.cpp
+        tests/AudioClipModelTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
         tests/AutomationFollowsClipsTests.cpp

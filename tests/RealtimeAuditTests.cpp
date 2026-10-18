@@ -18,6 +18,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
@@ -787,6 +788,33 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playAndMeasure (*edit);
         report ("A loop at 120 BPM stretched to 100 BPM, from its rendered proxy", m);
+        CHECK (m.peakLevel > 0.01f);
+    }
+
+    TEST_CASE ("Real-time audit: an audio clip turned up, pitched and reversed")
+    {
+        // As the audio clip editor sets them (roadmap step 2.6). Tracktion renders a reversed copy of the file, and a pitched
+        // proxy of that, in the background, and plays the proxy, so the audio thread only reads a file.
+        SineFile sine;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto clip = getTrack (*edit, 0).insertWaveClip ("Sine", sine.getFile(), { te::TimeRange (0_tp, 2_tp) }, false);
+        REQUIRE (clip != nullptr);
+        phazite::setClipGain (*clip, 6.0f);
+        phazite::setClipPitch (*clip, 3.0f);
+        phazite::setClipReversed (*clip, true);
+
+        const auto giveUpAt = juce::Time::getMillisecondCounter() + 20000;
+
+        while (clip->getPlaybackFile().getSampleRate() <= 0.0 && juce::Time::getMillisecondCounter() < giveUpAt)
+        {
+            phazite::test::dispatchPendingMessages(); // the renders finishing come as messages
+            juce::Thread::sleep (5);
+        }
+
+        REQUIRE (clip->getPlaybackFile().getSampleRate() > 0.0);
+
+        const auto m = playAndMeasure (*edit);
+        report ("An audio clip turned up 6 dB, pitched up 3 semitones and reversed, from its rendered proxy", m);
         CHECK (m.peakLevel > 0.01f);
     }
 

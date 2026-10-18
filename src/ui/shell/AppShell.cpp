@@ -85,6 +85,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       playlist (bridge, context),
       inspector (bridge, context),
       pianoRoll (bridge, context),
+      audioClipEditor (bridge, context),
       mixer (bridge, context),
       devices (bridge, context),
       guide (bridge, s)
@@ -96,13 +97,15 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     browser.onUsed = [this] (const LibraryItem&) { guide.markDone (Guide::Step::addSound); };
     hintBar.setDefaultHint ([this] { return getDefaultHint(); });
 
-    // Double-clicking a MIDI clip opens it in the piano roll, which then has the keys.
+    // Double-clicking a clip opens it in the editor dock, a MIDI clip in the piano roll and an audio clip in the audio clip
+    // editor, which then has the keys.
     playlist.onOpenClip = [this] (ClipID clip)
     {
-        pianoRoll.showClip (clip);
-        revealEditor (EditorDock::pianoRoll);
-        pianoRoll.grabKeyboardFocus();
-        setActiveEditor (&pianoRoll);
+        editorDock.openClip (clip);
+        revealEditor (EditorDock::clipEditor);
+        auto& editor = editorDock.getClipEditor();
+        editor.grabKeyboardFocus();
+        setActiveEditor (&editor);
     };
 
     // Enter or a double-click in the browser, and the plug-in picker.
@@ -135,6 +138,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     // moving into it.
     playlist.onUsed = [this] { setActiveEditor (&playlist); };
     pianoRoll.onUsed = [this] { setActiveEditor (&pianoRoll); };
+    audioClipEditor.onUsed = [this] { setActiveEditor (&audioClipEditor); };
     setActiveEditor (&playlist);
     juce::Desktop::getInstance().addFocusChangeListener (this);
     projectContext.addListener (this);
@@ -165,7 +169,7 @@ void AppShell::setActiveEditor (TimelineEditor* editor)
 {
     activeEditor = editor;
 
-    for (auto* each : std::initializer_list<TimelineEditor*> { &playlist, &pianoRoll })
+    for (auto* each : std::initializer_list<TimelineEditor*> { &playlist, &pianoRoll, &audioClipEditor })
         each->setActive (each == editor);
 }
 
@@ -184,7 +188,7 @@ void AppShell::setLayout (Layout layout)
     editorShown = true;
     editorShare = layout == Layout::mix ? 0.4 : 0.45; // tall enough for most devices' editors, and mixing gives the mixer more
     songViews.showTab (layout == Layout::mix ? SongViews::mixer : SongViews::playlist);
-    editorDock.showTab (layout == Layout::mix ? EditorDock::devices : EditorDock::pianoRoll);
+    editorDock.showTab (layout == Layout::mix ? EditorDock::devices : EditorDock::clipEditor);
     updateLayout();
 }
 
@@ -520,8 +524,15 @@ void AppShell::addCommands (CommandRegistry& registry)
         },
         [this] { return editorWindow == nullptr; });
 
-    add ("view.pianoRoll", "Piano Roll", "Shows the piano roll, or hides it if it is showing.", { "notes", "midi" },
-         [this] { showEditor (EditorDock::pianoRoll); });
+    // The editor dock's first tab, which edits the selected clip: named for the editor it shows.
+    registry.add ({ .id = "view.pianoRoll",
+                    .name = "Piano Roll",
+                    .category = "View",
+                    .description = "Shows the selected clip's editor, or hides it if it is showing: the piano roll for MIDI clips, and "
+                                   "the audio clip editor for audio clips.",
+                    .synonyms = { "notes", "midi", "audio clip", "audio editor", "sample editor", "clip editor" },
+                    .perform = [this] { showEditor (EditorDock::clipEditor); },
+                    .currentName = [this] { return editorDock.showsAudioClip() ? juce::String ("Audio Clip Editor") : juce::String(); } });
 
     add ("view.devices", "Devices", "Shows the selected track's instrument and effects, or hides them if they are showing.",
          { "effects", "instrument", "device view", "chain", "plug-ins" }, [this] { showEditor (EditorDock::devices); });
@@ -587,6 +598,7 @@ void AppShell::refreshShortcutTexts()
     topBar.refreshTooltips();
     playlist.refreshShortcutTexts();
     pianoRoll.refreshShortcutTexts();
+    audioClipEditor.refreshShortcutTexts();
 }
 
 juce::String AppShell::getDefaultHint() const

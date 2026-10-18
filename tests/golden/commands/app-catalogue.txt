@@ -16,6 +16,8 @@ clip.fadeLinear
 clip.fadeConvex
 clip.fadeConcave
 clip.fadeSCurve
+clip.reverse
+clip.followTempo
 edit.split | ctrl + E
 edit.insertTime | ctrl + I
 edit.removeTime | ctrl + shift + delete

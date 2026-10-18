@@ -31,7 +31,7 @@ public:
     Playlist (CommandBridge&, ProjectContext&);
     ~Playlist() override;
 
-    // Called when a MIDI clip is double-clicked, to open it in the piano roll.
+    // Called when a clip is double-clicked, to open it in the editor dock: the piano roll or the audio clip editor.
     std::function<void (ClipID)> onOpenClip;
 
     // Adds an audio or MIDI file at the play start (where Space plays from), as the browser's Enter does: onto the

@@ -17,6 +17,8 @@ after start:
   clip.fadeConvex: off "Convex Fades"
   clip.fadeConcave: off "Concave Fades"
   clip.fadeSCurve: off "S-Curve Fades"
+  clip.reverse: off "Reverse"
+  clip.followTempo: off "Follow Tempo"
   edit.split: off "Split"
   edit.insertTime: off "Insert Time"
   edit.removeTime: off "Remove Time"
@@ -531,6 +533,8 @@ after import a tone onto Two at beat 8, and select it:
   clip.fadeConvex: on "Convex Fades"
   clip.fadeConcave: on "Concave Fades"
   clip.fadeSCurve: on "S-Curve Fades"
+  clip.reverse: on "Reverse"
+  clip.followTempo: on "Follow Tempo"
   edit.split: on "Split"
   edit.deselectAll: on "Deselect All"
   selected: clip on Two at 8.000
@@ -566,6 +570,8 @@ after edit.deleteAndCloseGap:
   clip.fadeConvex: off "Convex Fades"
   clip.fadeConcave: off "Concave Fades"
   clip.fadeSCurve: off "S-Curve Fades"
+  clip.reverse: off "Reverse"
+  clip.followTempo: off "Follow Tempo"
   edit.split: off "Split"
   edit.deselectAll: off "Deselect All"
   selected: nothing
