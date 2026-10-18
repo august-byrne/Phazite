@@ -23,8 +23,8 @@ namespace phazite::schema
 // curves are their parameters' own automation; version 6 lets lanes collapse (laneCollapsed); version 7 adds the chord
 // lane (CHORDLANE, step 2.7) and parts made from it (phaziteChordPart); version 8 can hold the devices of step 2.10 (the
 // delay, saturator, filter, utility, multiband dynamics and maximizer) and the synth's unison, which an older Phazite would
-// drop or play without.
-inline constexpr int currentVersion = 8;
+// drop or play without; version 9 can hold the wavetable synth (step 2.13), with what its oscillators play.
+inline constexpr int currentVersion = 9;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
@@ -228,6 +228,24 @@ inline const juce::Identifier& getPadSound (int pad)
                                               "pad7Sound",  "pad8Sound",  "pad9Sound",  "pad10Sound", "pad11Sound", "pad12Sound",
                                               "pad13Sound", "pad14Sound", "pad15Sound", "pad16Sound" };
     return names[juce::jlimit (0, 15, pad)];
+}
+
+// Phazite's wavetable synth (devices/wavetable/WavetableSynth.h) also keeps, on its PLUGIN, what each of its two
+// oscillators plays: "osc1Wavetable" and "osc2Wavetable" name one of its factory tables (devices/wavetable/
+// FactoryWavetables.h: "Vowels"; with none, or a name that is none of theirs, the first, "Basic Shapes"), and
+// "osc1WavetableFile" and "osc2WavetableFile" a sound file it plays instead while they are there: a path relative to the
+// project's folder ("Audio/Growl.wav"), or in a preset its full path. osc counts from 0. Version 9 added them, with the
+// synth.
+inline const juce::Identifier& getOscillatorWavetable (int osc)
+{
+    static const juce::Identifier names[] = { "osc1Wavetable", "osc2Wavetable" };
+    return names[juce::jlimit (0, 1, osc)];
+}
+
+inline const juce::Identifier& getOscillatorWavetableFile (int osc)
+{
+    static const juce::Identifier names[] = { "osc1WavetableFile", "osc2WavetableFile" };
+    return names[juce::jlimit (0, 1, osc)];
 }
 
 //==============================================================================

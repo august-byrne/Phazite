@@ -6,6 +6,7 @@
 #include "EqEditor.h"
 #include "LimiterEditor.h"
 #include "ReverbEditor.h"
+#include "WavetableEditor.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -18,6 +19,7 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
 #include "devices/utility/Utility.h"
+#include "devices/wavetable/WavetableSynth.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -109,6 +111,9 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::DrumSampler::typeID)
         return std::make_unique<DrumSamplerEditor> (device);
+
+    if (info->typeID == devices::WavetableSynth::typeID)
+        return std::make_unique<WavetableEditor> (device);
 
     if (info->typeID == devices::Delay::typeID)
         return std::make_unique<DevicePanel> (device, getDelayLayout());

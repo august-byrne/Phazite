@@ -4,6 +4,7 @@
 #include "internal/DevicePlugin.h"
 #include "internal/DrumKit.h"
 #include "internal/ParameterHandle.h"
+#include "internal/Wavetables.h"
 #include "model/mixer/internal/Sidechain.h"
 
 namespace phazite
@@ -108,6 +109,36 @@ void DeviceHandle::clearPadSound (int pad) const
 {
     if (auto* device = pluginOf (impl))
         phazite::clearPadSound (*device, pad);
+}
+
+juce::String DeviceHandle::getWavetableName (int osc) const
+{
+    auto* device = pluginOf (impl);
+    return device != nullptr ? phazite::getWavetableName (*device, osc) : juce::String();
+}
+
+bool DeviceHandle::hasWavetableFile (int osc) const
+{
+    auto* device = pluginOf (impl);
+    return device != nullptr && phazite::hasWavetableFile (*device, osc);
+}
+
+std::shared_ptr<const devices::Wavetable> DeviceHandle::getWavetable (int osc) const
+{
+    auto* device = pluginOf (impl);
+    return device != nullptr ? phazite::getWavetable (*device, osc) : nullptr;
+}
+
+void DeviceHandle::setFactoryWavetable (int osc, int index) const
+{
+    if (auto* device = pluginOf (impl))
+        phazite::setFactoryWavetable (*device, osc, index);
+}
+
+bool DeviceHandle::setWavetableFile (int osc, const juce::File& file) const
+{
+    auto* device = pluginOf (impl);
+    return device != nullptr && phazite::setWavetableFile (*device, osc, file);
 }
 
 devices::Processor* DeviceHandle::getProcessorBase() const

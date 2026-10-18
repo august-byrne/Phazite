@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DrumSamplerPlugin.h"
+#include "internal/DeviceFiles.h"
 #include "model/base/internal/Schema.h"
 
 namespace phazite
@@ -44,17 +45,7 @@ DrumSampler& DrumSamplerPlugin::getSampler() noexcept
 
 juce::File DrumSamplerPlugin::getPadFile (int pad) const
 {
-    const auto path = state[schema::getPadSound (pad)].toString();
-
-    if (path.isEmpty())
-        return {};
-
-    if (juce::File::isAbsolutePath (path))
-        return juce::File (path);
-
-    // Within the project's folder, where the project file is.
-    const auto projectFile = edit.editFileRetriever != nullptr ? edit.editFileRetriever() : juce::File();
-    return projectFile == juce::File() ? juce::File() : projectFile.getParentDirectory().getChildFile (path);
+    return findProjectFile (edit, state[schema::getPadSound (pad)].toString());
 }
 
 juce::String DrumSamplerPlugin::getPadName (int pad) const

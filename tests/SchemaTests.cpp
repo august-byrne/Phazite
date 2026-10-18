@@ -60,8 +60,14 @@ TEST_CASE ("The names Phazite writes into project files stay the same")
     CHECK (juce::String (schema::phaziteLoudnessMeter) == juce::String ("phaziteLoudnessMeter"));
     CHECK (juce::String (phazite::LoudnessMeterPlugin::xmlTypeName) == juce::String ("phaziteLoudnessMeter"));
 
+    // What the wavetable synth's oscillators play.
+    CHECK (schema::getOscillatorWavetable (0).toString() == juce::String ("osc1Wavetable"));
+    CHECK (schema::getOscillatorWavetable (1).toString() == juce::String ("osc2Wavetable"));
+    CHECK (schema::getOscillatorWavetableFile (0).toString() == juce::String ("osc1WavetableFile"));
+    CHECK (schema::getOscillatorWavetableFile (1).toString() == juce::String ("osc2WavetableFile"));
+
     // The format version projects are saved in now (Migrations.h upgrades older ones).
-    CHECK (schema::currentVersion == 8);
+    CHECK (schema::currentVersion == 9);
 }
 
 TEST_CASE ("Reading Phazite's state doesn't add it")

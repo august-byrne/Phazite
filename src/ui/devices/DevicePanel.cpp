@@ -19,9 +19,13 @@ namespace
         return juce::String (text.data(), text.size());
     }
 
-    // A control's name within its group: without the group's first word in front.
+    // A control's name within its group: without the group's title in front ("Envelope 2 Attack" is "Attack" under
+    // "Envelope 2"), or else without its first word ("Filter Attack" under "Filter Envelope").
     juce::String getShownName (const juce::String& name, const juce::String& groupTitle)
     {
+        if (groupTitle.isNotEmpty() && name.startsWith (groupTitle + " "))
+            return name.substring (groupTitle.length() + 1);
+
         const auto first = groupTitle.upToFirstOccurrenceOf (" ", false, false);
 
         if (first.isNotEmpty() && name.startsWith (first + " "))

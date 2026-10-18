@@ -100,6 +100,12 @@ target_sources(phazite_core PRIVATE
     src/devices/synth/Synth.h
     src/devices/utility/Utility.cpp
     src/devices/utility/Utility.h
+    src/devices/wavetable/FactoryWavetables.cpp
+    src/devices/wavetable/FactoryWavetables.h
+    src/devices/wavetable/Wavetable.cpp
+    src/devices/wavetable/Wavetable.h
+    src/devices/wavetable/WavetableSynth.cpp
+    src/devices/wavetable/WavetableSynth.h
     src/model/arrangement/Arrangement.cpp
     src/model/arrangement/AudioClipModel.cpp
     src/model/arrangement/AudioClipModel.h
@@ -166,6 +172,7 @@ target_sources(phazite_core PRIVATE
     src/model/commands/internal/UndoCommands.h
     src/model/devices/DeviceHandle.cpp
     src/model/devices/DeviceHandle.h
+    src/model/devices/DeviceFiles.cpp
     src/model/devices/DevicePlugin.cpp
     src/model/devices/DrumKit.cpp
     src/model/devices/DrumSamplerPlugin.cpp
@@ -173,12 +180,17 @@ target_sources(phazite_core PRIVATE
     src/model/devices/ParameterHandle.cpp
     src/model/devices/ParameterHandle.h
     src/model/devices/ParameterRef.h
+    src/model/devices/WavetablePlugin.cpp
+    src/model/devices/Wavetables.cpp
+    src/model/devices/internal/DeviceFiles.h
     src/model/devices/internal/DeviceHandle.h
     src/model/devices/internal/DevicePlugin.h
     src/model/devices/internal/Devices.h
     src/model/devices/internal/DrumKit.h
     src/model/devices/internal/DrumSamplerPlugin.h
     src/model/devices/internal/ParameterHandle.h
+    src/model/devices/internal/WavetablePlugin.h
+    src/model/devices/internal/Wavetables.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
     src/model/engine/EngineContext.cpp
@@ -432,6 +444,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/ModulatorEditor.h
     src/ui/devices/ReverbEditor.cpp
     src/ui/devices/ReverbEditor.h
+    src/ui/devices/WavetableEditor.cpp
+    src/ui/devices/WavetableEditor.h
     src/ui/input/CommandBridge.cpp
     src/ui/input/CommandBridge.h
     src/ui/input/CommandUI.cpp
@@ -715,6 +729,9 @@ if(PHAZITE_BUILD_TESTS)
         tests/UiTestHelpers.h
         tests/UndoTests.cpp
         tests/ValueTextTests.cpp
+        tests/WavetableEditorTests.cpp
+        tests/WavetableModelTests.cpp
+        tests/WavetableTests.cpp
         tests/WelcomeTests.cpp
         tests/WindowKeysTests.cpp)
 

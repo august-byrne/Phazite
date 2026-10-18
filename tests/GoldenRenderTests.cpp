@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden renders (tests/golden/renders): a short mix with a bus, a send to a reverb return, volume automation and pan is
-// rendered offline, and the RMS and peak level of each 100 ms block of the result are compared with a committed
-// fingerprint, so that a change to how Phazite plays a project fails a test. Levels may be toleranceDb apart, and a
-// level below floorDb counts as floorDb: that absorbs the differences between compilers' maths libraries, and where a
-// reverb's tail is cut off. A fingerprint doesn't notice a change of phase only, or of frequency at the same level.
-// Golden renders never use 4OSC (its oscillators start at random phases) or anything else random. GoldenFiles.h says
-// how to regenerate the golden files.
+// Golden renders (tests/golden/renders): a short mix with a bus, a send to a reverb return, volume automation and pan, the
+// starter project, and chords on the wavetable synth are rendered offline, and the RMS and peak level of each 100 ms block
+// of the result are compared with a committed fingerprint, so that a change to how Phazite plays a project fails a test.
+// Levels may be toleranceDb apart, and a level below floorDb counts as floorDb: that absorbs the differences between
+// compilers' maths libraries, and where a reverb's tail is cut off. A fingerprint doesn't notice a change of phase only,
+// or of frequency at the same level. Golden renders never use 4OSC (its oscillators start at random phases) or anything
+// else random. GoldenFiles.h says how to regenerate the golden files.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/wavetable/FactoryWavetables.h"
+#include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/Wavetables.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/StarterProject.h"
@@ -41,6 +45,9 @@ constexpr const char* aboutTheMix = "Golden render (tests/GoldenRenderTests.cpp)
 constexpr const char* aboutTheStarter = "Golden render (tests/GoldenRenderTests.cpp): the starter project, a beat on Phazite's drum "
                                         "sampler and an arpeggio on its synth. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
 constexpr int starterSeconds = 8; // its 4 bars at 120 BPM
+constexpr const char* aboutTheWavetable = "Golden render (tests/GoldenRenderTests.cpp): two chords on Phazite's wavetable synth, its "
+                                          "two oscillators in unison, an envelope sweeping each note's table. Regenerate with "
+                                          "PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
 
 te::BeatPosition beats (double b)
 {
@@ -358,6 +365,69 @@ bool checkSoundsLikeTheStarter (const Fingerprint& fingerprint)
     return everywhere && inTheMiddle && kick;
 }
 
+// The wavetable song, at 120 BPM: Phazite's wavetable synth with its first oscillator on Saw Build, low in the table, and
+// its second on Vowels an octave down, each in unison four times over and spread across the stereo field, its third
+// envelope lifting the first oscillator up its table at each note's start, through its filter: a chord from 0 to 1.5 s,
+// another from 1.5 to 3 s, then the release.
+void addWavetableSong (te::Edit& edit)
+{
+    using phazite::devices::WavetableSynth;
+    edit.tempoSequence.getTempos()[0]->setBpm (120.0);
+    auto* track = te::getAudioTracks (edit)[0];
+    REQUIRE (track != nullptr);
+    const auto plugin = edit.getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
+    REQUIRE (phazite::setInstrument (*track, plugin) != nullptr);
+    phazite::setFactoryWavetable (*plugin, 0, phazite::devices::findFactoryWavetable ("Saw Build"));
+    phazite::setFactoryWavetable (*plugin, 1, phazite::devices::findFactoryWavetable ("Vowels"));
+
+    auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+    REQUIRE (device != nullptr);
+    const auto set = [device] (const char* id, float value) { device->findParameter (id)->setParameter (value, juce::sendNotification); };
+    set ("osc1Position", 0.2f);
+    set ("osc2On", 1.0f);
+    set ("osc2Pitch", -12.0f);
+    set ("osc2Position", 0.5f);
+    set ("osc2Level", 0.5f);
+    set ("unisonVoices", 3.0f); // four
+    set ("unisonDetune", 15.0f);
+    set ("mod2Source", (float) WavetableSynth::ModSource::envelope3);
+    set ("mod2Target", (float) WavetableSynth::ModTarget::osc1Position);
+    set ("mod2Amount", 0.6f);
+
+    auto clip = track->insertMIDIClip ("Chords", edit.tempoSequence.toTime ({ beats (0.0), beats (6.0) }), nullptr);
+    REQUIRE (clip != nullptr);
+
+    for (const auto note : { 48, 51, 55, 58 })
+        clip->getSequence().addNote (note, beats (0.0), te::BeatDuration::fromBeats (3.0), 100, 0, nullptr);
+
+    for (const auto note : { 44, 48, 51, 55 })
+        clip->getSequence().addNote (note, beats (3.0), te::BeatDuration::fromBeats (3.0), 100, 0, nullptr);
+}
+
+// Checks that a render sounds like the wavetable song before it is compared with its golden file: something on each side
+// while the chords play, wider than the middle somewhere (its unison spreads it), and quiet once they have rung out.
+// Returns whether it does.
+bool checkSoundsLikeTheWavetable (const Fingerprint& fingerprint)
+{
+    REQUIRE (fingerprint.size() == (size_t) fingerprintBlocks);
+    auto playing = true, wide = false;
+
+    for (size_t block = 1; block < 29; ++block)
+    {
+        const auto& rms = fingerprint[block].rms;
+        playing = playing && std::min (rms[0], rms[1]) > -40.0f;
+        wide = wide || std::abs (rms[0] - rms[1]) > 0.05f;
+    }
+
+    CHECK_MESSAGE (playing, "0.10-2.90 s: the chords should be above -40 dBFS on each side");
+    CHECK_MESSAGE (wide, "0.10-2.90 s: the unison should make the sides differ somewhere");
+
+    const auto& after = fingerprint[37].rms;
+    const auto quiet = std::max (after[0], after[1]) < -60.0f;
+    CHECK_MESSAGE (quiet, ("3.70-3.80 s: the chords should have rung out; the RMS is " + describeLevels (after)).toStdString());
+    return playing && wide && quiet;
+}
+
 // Keeps a render that doesn't sound as it should, or doesn't match its golden file, as
 // <temp>/PhaziteGoldenActual/renders/<name>.wav, to listen to.
 void keepRender (const juce::File& file, const juce::String& name)
@@ -479,5 +549,38 @@ TEST_SUITE ("golden")
 
         if (differs)
             keepRender (wav.getFile(), "starter");
+    }
+
+    TEST_CASE ("Golden render: two chords on Phazite's wavetable synth, in unison, an envelope sweeping each note's table")
+    {
+        phazite::test::TemporaryFolder temp;
+        juce::String error;
+        const auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Wavetable", error);
+        REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+        auto& edit = project->getEdit();
+        addWavetableSong (edit);
+        phazite::test::settle();
+
+        const juce::TemporaryFile wav (".wav");
+        renderSong (edit, wav.getFile(), fingerprintBlocks / 10);
+        const auto fingerprint = getFingerprint (readRender (edit.engine, wav.getFile(), fingerprintBlocks));
+        const auto soundsLikeIt = checkSoundsLikeTheWavetable (fingerprint);
+
+        if (! soundsLikeIt)
+            keepRender (wav.getFile(), "wavetable");
+
+        REQUIRE (soundsLikeIt);
+
+        auto differs = false;
+        phazite::test::checkGoldenText ("renders/wavetable.json", writeFingerprint (fingerprint, aboutTheWavetable),
+                                        [&differs] (const juce::String& expectedText, const juce::String& actualText)
+                                        {
+                                            const auto found = compareFingerprints (expectedText, actualText);
+                                            differs = ! found.isEmpty();
+                                            return found;
+                                        });
+
+        if (differs)
+            keepRender (wav.getFile(), "wavetable");
     }
 }

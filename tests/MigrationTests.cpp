@@ -622,3 +622,18 @@ TEST_CASE ("A version 7 project, which can hold none of step 2.10's devices, bec
         .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
     CHECK (state.isEquivalentTo (expected));
 }
+
+TEST_CASE ("A version 8 project, which can hold no wavetable synth, becomes the current version with nothing else changed")
+{
+    const auto* version8 = R"(<EDIT><PHAZITE schemaVersion="8"/>
+        <TRACK id="1003"><PLUGIN type="phaziteSynth" id="1004" unisonVoices="3"/><PLUGIN type="phaziteDelay" id="1005"/></TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version8);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
+
+    auto expected = juce::ValueTree::fromXml (version8);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}

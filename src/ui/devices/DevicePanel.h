@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A device editor's controls in rows of titled groups, such as a synth's oscillators, filter and envelopes, built from
 // the device's description: a knob for each parameter, with its name and value under it, a list for one that picks a
-// choice, or a switch for one that is on or off. Within a group, a name that starts with the group's first word drops it
-// ("Filter Attack" is "Attack" under "Filter Envelope"); the control's title, which screen readers read, keeps the whole
-// name. Given less height than it makes itself, as a Devices view may give it, its groups move side by side, in fewer
-// rows.
+// choice, or a switch for one that is on or off. Within a group, a name that starts with the group's title drops it
+// ("Envelope 2 Attack" is "Attack" under "Envelope 2"), and else one that starts with its first word drops that ("Filter
+// Attack" is "Attack" under "Filter Envelope"); the control's title, which screen readers read, keeps the whole name.
+// Given less height than it makes itself, as a Devices view may give it, its groups move side by side, in fewer rows.
 #pragma once
 
 #include "DeviceEditors.h"

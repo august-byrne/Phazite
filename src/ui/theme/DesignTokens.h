@@ -242,6 +242,20 @@ namespace LoopTint
     inline constexpr int edgeGrab = 4;
 } // namespace LoopTint
 
+// How the wavetable synth's editor draws an oscillator's table (ui/devices/WavetableEditor.h): its frames one behind
+// another in the muted text color, the further back the higher and further right (by these parts of the drawing's height
+// and width at the back), the frame it plays in the accent color, and where a sound dropped on it would go in a wash of
+// the accent color (alphas); at most so many frames, and the drawing's height, at most and at least (pixels).
+namespace WavetableTint
+{
+    inline constexpr float frames = 0.22f;
+    inline constexpr float rise = 0.35f, shift = 0.2f;
+    inline constexpr float dropWash = 0.2f;
+    inline constexpr float lineWidth = 1.0f, playedWidth = 2.0f;
+    inline constexpr int framesDrawn = 24;
+    inline constexpr int height = 120, minimumHeight = 72;
+} // namespace WavetableTint
+
 // WCAG 2.2's contrast ratio between two colours, from 1 (none) to 21 (black on white). Text needs at
 // least 4.5, and the parts of a control that identify it at least 3.
 inline double getContrastRatio (juce::Colour a, juce::Colour b)

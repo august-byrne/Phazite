@@ -24,12 +24,15 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
 #include "devices/utility/Utility.h"
+#include "devices/wavetable/FactoryWavetables.h"
+#include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
+#include "model/devices/internal/Wavetables.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mixer/internal/Containers.h"
@@ -713,6 +716,51 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playAndMeasure (*edit);
         report ("Phazite's synth with seven unison voices, spread wide", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's wavetable synth, eight unison voices and warps, an envelope sweeping each note's table")
+    {
+        using phazite::devices::WavetableSynth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        const auto plugin = edit->getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
+        phazite::setFactoryWavetable (*plugin, 1, phazite::devices::findFactoryWavetable ("Vowels"));
+
+        const auto set = [device] (const char* id, float value)
+        { device->findParameter (id)->setParameter (value, juce::sendNotification); };
+        set ("unisonVoices", 7.0f); // eight
+        set ("unisonPosition", 0.5f);
+        set ("osc1Warp", (float) WavetableSynth::Warp::sync);
+        set ("osc1WarpAmount", 0.4f);
+        set ("osc2On", 1.0f);
+        set ("osc2Warp", (float) WavetableSynth::Warp::fm);
+        set ("osc2WarpAmount", 0.3f);
+        set ("subLevel", 0.3f);
+        set ("noiseLevel", 0.1f);
+        set ("drive", 6.0f);
+        set ("mod2Source", (float) WavetableSynth::ModSource::envelope3);
+        set ("mod2Target", (float) WavetableSynth::ModTarget::osc1Position);
+        set ("mod2Amount", 1.0f);
+        set ("mod3Source", (float) WavetableSynth::ModSource::lfo1);
+        set ("mod3Target", (float) WavetableSynth::ModTarget::osc2Position);
+        set ("mod3Amount", 0.5f);
+
+        // Chords a sixteenth long, as for the synth's unison.
+        auto clip = track.insertMIDIClip ("Chords", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        REQUIRE (clip != nullptr);
+
+        for (int i = 0; i < 32; ++i)
+            for (const auto note : { 48, 52, 55, 59 })
+                clip->getSequence().addNote (note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25), te::BeatDuration::fromBeats (0.25),
+                                             100, 0, nullptr);
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's wavetable synth, eight unison voices and warps, an envelope sweeping each note's table", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }

@@ -20,12 +20,4 @@ bool setPadSound (te::Plugin&, int pad, const juce::File&);
 
 // Puts the default kit's sound back on a pad, as one undo step.
 void clearPadSound (te::Plugin&, int pad);
-
-// Drum samplers' states as a preset keeps them (model/presets/internal/Presets.h): their pads' sounds by their full
-// paths, so that another project can copy them in. And the other way, drum samplers' states from a preset made a
-// project's: their sounds copied into its Audio folder, and those that aren't there any more left to the kit's. Each
-// goes through a state and everything in it (a container's, a track's), and isn't an undo step: the state isn't in a
-// project.
-void writePadSoundPaths (const te::Edit& from, juce::ValueTree& state);
-void copyPadSoundsInto (te::Edit&, juce::ValueTree& state);
 } // namespace phazite

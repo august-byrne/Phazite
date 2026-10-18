@@ -128,9 +128,17 @@ namespace
     }
 
     //==========================================================================
+    // Version 8 to 9: version 9 can hold the wavetable synth of step 2.13, which a version 8 project has none of, so
+    // nothing changes; the new version keeps an older Phazite from opening a project with it, and dropping it.
+    void upgrade8To9 (juce::ValueTree&)
+    {
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
-    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5, upgrade5To6, upgrade6To7, upgrade7To8 };
+    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5,
+                               upgrade5To6, upgrade6To7, upgrade7To8, upgrade8To9 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 

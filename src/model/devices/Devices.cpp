@@ -13,6 +13,7 @@
 #include "devices/utility/Utility.h"
 #include "internal/DevicePlugin.h"
 #include "internal/DrumSamplerPlugin.h"
+#include "internal/WavetablePlugin.h"
 
 namespace phazite
 {
@@ -31,6 +32,7 @@ void registerDevices (te::Engine& engine)
     plugins.createBuiltInType<DevicePluginOf<devices::Delay>>();
     plugins.createBuiltInType<DevicePluginOf<devices::Utility>>();
     plugins.createBuiltInType<DrumSamplerPlugin>();
+    plugins.createBuiltInType<WavetablePlugin>();
 }
 
 std::span<const devices::DeviceInfo* const> getOwnDevices()
@@ -38,9 +40,10 @@ std::span<const devices::DeviceInfo* const> getOwnDevices()
     // In the order menus list them: the instruments, then the effects by what they do (tone, dynamics, colour, space,
     // and the utility last).
     static const devices::DeviceInfo* const own[] = {
-        &devices::Synth::info,      &devices::DrumSampler::info, &devices::Equalizer::info, &devices::FilterEffect::info,
-        &devices::Compressor::info, &devices::Multiband::info,   &devices::Limiter::info,   &devices::Maximizer::info,
-        &devices::Saturator::info,  &devices::Delay::info,       &devices::Reverb::info,    &devices::Utility::info,
+        &devices::Synth::info,        &devices::WavetableSynth::info, &devices::DrumSampler::info, &devices::Equalizer::info,
+        &devices::FilterEffect::info, &devices::Compressor::info,     &devices::Multiband::info,   &devices::Limiter::info,
+        &devices::Maximizer::info,    &devices::Saturator::info,      &devices::Delay::info,       &devices::Reverb::info,
+        &devices::Utility::info,
     };
     return own;
 }

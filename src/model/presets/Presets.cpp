@@ -6,8 +6,8 @@
 #include "model/base/Migrations.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/Devices.h"
-#include "model/devices/internal/DrumKit.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
@@ -79,13 +79,14 @@ namespace
                 state.removeProperty (state.getPropertyName (i), nullptr);
     }
 
-    // A state as a preset holds it: the values set by hand, not what automation or modulation set as the song played; a
-    // drum sampler's sounds by their full paths; and nothing that ties it to its project.
+    // A state as a preset holds it: the values set by hand, not what automation or modulation set as the song played; the
+    // sound files devices play (a drum sampler's, a wavetable synth's) by their full paths; and nothing that ties it to its
+    // project.
     juce::ValueTree copyForPreset (const te::Edit& edit, const juce::ValueTree& state, const juce::Array<te::EditItemID>& modulatorsInside)
     {
         auto copy = state.createCopy();
         restoreValuesSetByHand (copy);
-        writePadSoundPaths (edit, copy);
+        writeDeviceFilePaths (edit, copy);
         cleanForPreset (copy, modulatorsInside);
         return copy;
     }
@@ -246,7 +247,7 @@ te::Plugin* addDeviceFromPreset (te::Edit& edit, te::Track* channel, const juce:
     // and what its macros modulate.
     auto content = preset.createCopy();
     te::EditItemID::remapIDs (content, nullptr, edit);
-    copyPadSoundsInto (edit, content);
+    copyDeviceFilesInto (edit, content);
 
     auto device = content.getChildWithName (te::IDs::PLUGIN);
     const auto rack = content.getChildWithName (te::IDs::RACK);
@@ -262,7 +263,7 @@ te::AudioTrack* addTrackFromPreset (te::Edit& edit, te::Track* after, const juce
 {
     auto content = preset.createCopy();
     te::EditItemID::remapIDs (content, nullptr, edit);
-    copyPadSoundsInto (edit, content);
+    copyDeviceFilesInto (edit, content);
     const auto saved = content.getChildWithName (te::IDs::TRACK);
 
     if (! saved.isValid())

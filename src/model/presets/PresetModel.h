@@ -46,8 +46,8 @@ inline constexpr const char* trackPresetsFolder = "Tracks";
 // whether it did. A device's holds its settings and its mix: not its automation, what modulates it from outside, its
 // sidechain's source or whether it is on. A container's holds its devices and its macros with what they modulate in it.
 // A track's holds its name, color, volume and pan, its devices and containers, and its modulators and macros with what
-// they modulate on it: not its clips, automation, sends or what goes into it. A drum sampler's sounds go by their paths,
-// for another project to copy in.
+// they modulate on it: not its clips, automation, sends or what goes into it. The sound files a device plays (a drum
+// sampler's pads', a wavetable synth's tables) go by their paths, for another project to copy in.
 bool saveDevicePreset (const ProjectContext&, DeviceID, const juce::File&);
 bool saveTrackPreset (const ProjectContext&, TrackID, const juce::File&);
 
