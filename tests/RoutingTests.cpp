@@ -52,6 +52,12 @@ struct Mix
     phazite::TrackID id (te::Track* track) const { return phazite::getTrackID (*track); }
     juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
 
+    // Undo puts a moved track back from its saved state, as a new object: the old pointer is gone, its ID stays.
+    te::AudioTrack* findAudioTrack (phazite::TrackID trackID) const
+    {
+        return dynamic_cast<te::AudioTrack*> (te::findTrackForID (*edit, phazite::toTracktion (trackID)));
+    }
+
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack *kick = nullptr, *bass = nullptr, *keys = nullptr, *reverb = nullptr, *delay = nullptr;
@@ -151,8 +157,11 @@ TEST_CASE ("Where a channel's sound goes: the master, or a bus, which the track 
     // Choosing what is chosen already, or a plain folder, changes nothing.
     phazite::setOutput (mix.context, mix.id (mix.bass), {});
     CHECK (mix.describeUndo() == juce::String ("Undo Change Output"));
+    const auto bass = mix.id (mix.bass);
     phazite::undo (*mix.edit);
     phazite::undo (*mix.edit);
+    mix.bass = mix.findAudioTrack (bass);
+    REQUIRE (mix.bass != nullptr);
     CHECK (mix.bass->getParentFolderTrack() == nullptr);
 
     phazite::setMixedAsBus (mix.context, mix.id (mix.drums), false);
