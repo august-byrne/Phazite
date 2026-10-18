@@ -99,6 +99,8 @@ std::unique_ptr<te::Edit> loadEdit (te::Engine&, const juce::File&);
 // keeps the state's saved ID, or makes a new one, and the values parameters were set to by hand
 // (model/automation/internal/Automation.h: restoreValuesSetByHand()). savedVersion is the format the state was saved in,
 // before the upgrade: the upgrades that need the Edit are made here (model/base/Migrations.h), without undo steps or
-// unsaved changes.
-std::unique_ptr<te::Edit> createEditFromState (te::Engine&, const juce::ValueTree& state, const juce::File& file, int savedVersion);
+// unsaved changes. cacheFolder, if given, becomes the Edit's temporary folder, where its frozen tracks' files are, so
+// that they open frozen (model/mixer/internal/Freeze.h).
+std::unique_ptr<te::Edit> createEditFromState (te::Engine&, const juce::ValueTree& state, const juce::File& file, int savedVersion,
+                                               const juce::File& cacheFolder = {});
 } // namespace phazite

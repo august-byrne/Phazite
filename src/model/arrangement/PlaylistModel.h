@@ -40,6 +40,7 @@ struct TrackRow
     bool collapsed = false;         // a thin row, a folder whose tracks are hidden, or the master with thin lanes
     std::optional<int> savedHeight; // as the project keeps it, in pixels (view state); the playlist keeps it in range
     bool hasInstrument = false;     // a double-click on it adds a MIDI clip
+    bool frozen = false;            // it plays a file of its sound (model/mixer/FreezeModel.h): its clips look frosted
 };
 
 std::vector<TrackRow> getPlaylistRows (const ProjectContext&);

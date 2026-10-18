@@ -198,6 +198,8 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/ContainerModel.h
     src/model/mixer/Containers.cpp
     src/model/mixer/DeviceType.h
+    src/model/mixer/Freeze.cpp
+    src/model/mixer/FreezeModel.h
     src/model/mixer/LevelSource.cpp
     src/model/mixer/LevelSource.h
     src/model/mixer/MixHandle.cpp
@@ -208,6 +210,7 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/Sidechain.cpp
     src/model/mixer/internal/Buses.h
     src/model/mixer/internal/Containers.h
+    src/model/mixer/internal/Freeze.h
     src/model/mixer/internal/LevelSource.h
     src/model/mixer/internal/MixHandle.h
     src/model/mixer/internal/Mixer.h
@@ -314,6 +317,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/scissors.svg
         resources/icons/lucide/search.svg
         resources/icons/lucide/sliders-horizontal.svg
+        resources/icons/lucide/snowflake.svg
         resources/icons/lucide/square-dashed-mouse-pointer.svg
         resources/icons/lucide/square.svg
         resources/icons/lucide/star.svg
@@ -510,6 +514,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/Panels.h
     src/ui/shell/ProgressionsPanel.cpp
     src/ui/shell/ProgressionsPanel.h
+    src/ui/shell/RenderPanel.cpp
+    src/ui/shell/RenderPanel.h
     src/ui/shell/SettingsPanel.cpp
     src/ui/shell/SettingsPanel.h
     src/ui/shell/TopBar.cpp
@@ -645,6 +651,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
         tests/ExportTests.cpp
+        tests/FreezeTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
         tests/GoldenProjectTests.cpp

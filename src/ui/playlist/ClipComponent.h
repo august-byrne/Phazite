@@ -26,9 +26,10 @@ public:
     // the song changes.
     void showClip (const ClipInfo&);
 
-    // Shows it in its track's color, and whether it is selected.
-    void showLook (juce::Colour, bool isSelected);
+    // Shows it in its track's color, whether it is selected, and frosted if its track is frozen.
+    void showLook (juce::Colour, bool isSelected, bool isFrozen = false);
     juce::Colour getColour() const noexcept { return colour; }
+    bool isFrozen() const noexcept { return frozen; }
     juce::Colour getInk() const; // what is drawn on it: its name and its notes
 
     void paint (juce::Graphics&) override;
@@ -39,7 +40,7 @@ private:
     ClipInfo info;
     std::vector<NoteShape> notes; // a MIDI clip's
     juce::Colour colour;
-    bool selected = false;
+    bool selected = false, frozen = false;
     std::unique_ptr<ClipWaveform> waveform; // an audio clip's, made when it first shows
 
     juce::Colour getFill() const;

@@ -57,7 +57,8 @@ te::BeatPosition beats (double b)
 // commands as AppShell adds them, with a grid of a quarter beat.
 void addModelCommands (phazite::CommandRegistry& registry, phazite::ProjectContext& context)
 {
-    phazite::addSongCommands (registry, context);
+    static phazite::test::RenderHost renders; // the main window's part, which outlives the registry as the window does
+    phazite::addSongCommands (registry, context, renders);
     phazite::addNoteCommands (registry, getSelection (context), [] { return 0.25; });
 }
 

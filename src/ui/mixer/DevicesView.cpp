@@ -234,9 +234,17 @@ struct DevicesView::Panel : public juce::Component
         setTitle (device.name);
         nameButton.setButtonText (device.name);
         nameButton.setTitle (device.name);
-        nameButton.setTooltip (device.opensWindow ? "Click to select it, and open its window; right-click for its menu"
-                                                  : "Click to select it; right-click for its menu");
+        nameButton.setTooltip (device.frozen        ? "Frozen with its track: unfreeze the track (its snowflake) to change it"
+                               : device.opensWindow ? "Click to select it, and open its window; right-click for its menu"
+                                                    : "Click to select it; right-click for its menu");
         power.setToggleState (device.isOn, juce::dontSendNotification);
+
+        // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
+        for (auto* control : std::initializer_list<juce::Component*> { &power, &bodyView, windowButton.get() })
+            if (control != nullptr)
+                control->setEnabled (! device.frozen);
+
+        bodyView.setAlpha (device.frozen ? FrozenTint::frozenDevice : 1.0f);
 
         if (auto* containerBody = dynamic_cast<ContainerBody*> (body.get()))
             containerBody->refresh();

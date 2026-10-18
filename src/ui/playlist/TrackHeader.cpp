@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TrackHeader.h"
 #include "TrackHeights.h"
+#include "model/mixer/FreezeModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -53,8 +54,16 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
             setCollapsed (context, row.id, collapse);
     };
 
+    // While the track is frozen, a snowflake that plays it live again.
+    frozenButton.setQuiet (true);
+    frozenButton.setMouseClickGrabsKeyboardFocus (false);
+    frozenButton.onClick = [this] { unfreezeTrack (context, row.id); };
+
     for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &muteSolo, &collapseButton })
         addAndMakeVisible (c);
+
+    addChildComponent (frozenButton);
+    updateFrozenButton();
 
     setTitle (isFolder() ? row.name + " (folder)" : row.name); // what screen readers call the header
 
@@ -78,6 +87,12 @@ void TrackHeader::update (const TrackRow& shown, bool isSelected)
 
     if (row.collapsed != before.collapsed)
         updateCollapseButton();
+
+    if (row.frozen != before.frozen || row.name != before.name)
+    {
+        updateFrozenButton();
+        resized();
+    }
 
     if (row.colour != before.colour || selected != isSelected || row.depth != before.depth)
     {
@@ -112,6 +127,13 @@ void TrackHeader::updateCollapseButton()
                                                  : "Makes the track and its automation lanes thin rows that show their names. Alt+click: "
                                                    "every track");
     }
+}
+
+void TrackHeader::updateFrozenButton()
+{
+    frozenButton.setTooltip (row.name
+                             + " is frozen: it plays a file of its sound, so its instrument and effects take no CPU. "
+                               "Click to play it live again. Changing its clips or notes unfreezes it too.");
 }
 
 juce::Colour TrackHeader::getBackground() const
@@ -192,6 +214,7 @@ void TrackHeader::resized()
     const auto roomForButtons = size >= minButtonSize;
     muteSolo.setVisible (roomForButtons && ! isMaster());
     collapseButton.setVisible (roomForButtons);
+    frozenButton.setVisible (roomForButtons && row.frozen);
 
     if (roomForButtons)
     {
@@ -199,6 +222,12 @@ void TrackHeader::resized()
         {
             const auto buttonsWidth = 2 * size + Space::xs / 2;
             muteSolo.setBounds (top.removeFromRight (buttonsWidth).withSizeKeepingCentre (buttonsWidth, size));
+            top.removeFromRight (Space::xs);
+        }
+
+        if (row.frozen)
+        {
+            frozenButton.setBounds (top.removeFromRight (size).withSizeKeepingCentre (size, size));
             top.removeFromRight (Space::xs);
         }
 

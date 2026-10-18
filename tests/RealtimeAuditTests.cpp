@@ -821,6 +821,30 @@ TEST_SUITE ("realtime-audit")
 
     // These read audio files or use code Phazite is replacing, so they only report.
 
+    TEST_CASE ("Real-time audit: a frozen track, its synth's notes played from its frozen file")
+    {
+        // As Freeze Track leaves a track (roadmap step 2.11): its file plays, and its synth doesn't. Tracktion's own freeze,
+        // which renders on this thread, leaves it playing the same way.
+        using phazite::devices::Synth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::setInstrument (track, edit->getPluginCache().createNewPlugin (Synth::typeID, {})) != nullptr);
+        auto clip = track.insertMIDIClip ("Notes", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        REQUIRE (clip != nullptr);
+
+        for (int i = 0; i < 16; ++i)
+            clip->getSequence().addNote (60 + (i % 5), te::BeatPosition::fromBeats (i * 0.5), te::BeatDuration::fromBeats (0.4), 100, 0,
+                                         nullptr);
+
+        REQUIRE (track.setFrozen (true, te::Track::individualFreeze).wasOk());
+        REQUIRE (track.isFrozen (te::Track::individualFreeze));
+
+        const auto m = playAndMeasure (*edit);
+        report ("A frozen track: its synth's notes, played from its frozen file", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: an audio clip")
     {
         SineFile sine;

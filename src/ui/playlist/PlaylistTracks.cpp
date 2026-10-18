@@ -106,6 +106,8 @@ void Playlist::showTrackMenu (TrackID track)
     menu.addSeparator();
     addCommandItems (menu, bridge, { "edit.duplicate", "edit.delete" });
     menu.addSeparator();
+    addCommandItems (menu, bridge, { "track.freeze", "track.bounceInPlace" });
+    menu.addSeparator();
     addCommandItems (menu, bridge, { "track.savePreset" });
     menu.addSeparator();
     addCommandItems (menu, bridge, { "track.add", "track.addFolder" });

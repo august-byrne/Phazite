@@ -5,6 +5,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
 
@@ -147,7 +148,7 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
         return {};
     }
 
-    auto edit = createEditFromState (engine, state, projectFile, savedVersion);
+    auto edit = createEditFromState (engine, state, projectFile, savedVersion, getCacheFolder (projectFile));
 
     if (edit == nullptr)
     {
@@ -189,6 +190,11 @@ Project::Project (std::unique_ptr<te::Edit> e, const juce::File& f)
       file (f),
       songFollower (std::make_unique<SongFollower> (*edit))
 {
+    // The Edit's temporary folder, where its frozen tracks' files are, is the project's Cache folder (opening the project
+    // made it so already, as the frozen tracks needed it). Closing the project empties it of what nothing uses; opening it
+    // doesn't, as clips find the renders they use only when they play.
+    edit->setTempDirectory (getCacheFolder());
+
     // A project opens with the playhead at the song's start, where playback starts.
     movePlayhead (*edit, te::TimePosition());
     rememberSavedState(); // what opening made of it, Phazite's parts included, isn't a change
@@ -202,6 +208,7 @@ Project::~Project()
     songFollower = nullptr;
     edit->state.removeListener (this);
     getAutosaveFile (file).deleteFile();
+    purgeCache (*edit);
 }
 
 juce::ValueTree Project::getPhaziteState()
@@ -330,9 +337,9 @@ juce::File Project::makeFolderWithFiles (const juce::File& parentFolder, const j
     if (folder == juce::File())
         return {};
 
-    // The files the project uses come along; its earlier versions (Backups) don't. A failure removes the half-made copy
-    // (the folder is new), so that the name can be tried again.
-    for (const auto* subfolderName : { "Audio", "Generated", "Renders" })
+    // The files the project uses come along, its frozen tracks' too; its earlier versions (Backups) don't. A failure removes
+    // the half-made copy (the folder is new), so that the name can be tried again.
+    for (const auto* subfolderName : { "Audio", "Generated", "Renders", "Cache" })
     {
         const auto source = getFolder().getChildFile (subfolderName);
         const auto target = folder.getChildFile (subfolderName);
@@ -355,6 +362,7 @@ void Project::setFile (const juce::File& newFile)
     // its clips keep the files they found until told to look again.
     file = newFile;
     edit->editFileRetriever = [newFile] { return newFile; };
+    edit->setTempDirectory (getCacheFolder()); // the copy of the old one
     edit->sendSourceFileUpdate();
 }
 

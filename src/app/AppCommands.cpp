@@ -7,6 +7,7 @@
 #include "model/chords/ChordModel.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/UndoCommands.h"
+#include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
@@ -19,7 +20,7 @@
 
 namespace phazite
 {
-void addSongCommands (CommandRegistry& registry, ProjectContext& context)
+void addSongCommands (CommandRegistry& registry, ProjectContext& context, TrackRenderHost& renders)
 {
     auto& selection = getSelection (context);
     auto& range = getRangeSelection (context);
@@ -33,6 +34,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context)
     addOutlineCommands (registry, selection);
     addChordCommands (registry, context);
     addMixerCommands (registry, selection);
+    addFreezeCommands (registry, context, renders);
     addContainerCommands (registry, selection);
     addAutomationCommands (registry, context);
     addLoopCommands (registry, selection, range);

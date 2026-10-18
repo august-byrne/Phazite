@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MixerModel.h"
 #include "internal/Containers.h"
+#include "internal/Freeze.h"
 #include "internal/LevelSource.h"
 #include "internal/MixHandle.h"
 #include "internal/Mixer.h"
@@ -78,8 +79,8 @@ namespace
 
 DeviceSlot makeDeviceSlot (te::Plugin& device)
 {
-    return { getDeviceID (device),       device.getName(),     device.isEnabled(),  hasMix (device),
-             device.getLatencySeconds(), isContainer (device), opensWindow (device) };
+    return { getDeviceID (device),       device.getName(),     device.isEnabled(),   hasMix (device),
+             device.getLatencySeconds(), isContainer (device), opensWindow (device), isFrozenDevice (device) };
 }
 
 //==============================================================================
@@ -352,7 +353,7 @@ void removeDevice (ProjectContext& context, DeviceID id)
 
 void showDeviceWindow (ProjectContext& context, DeviceID id)
 {
-    if (auto* device = findDevice (context, id); device != nullptr && opensWindow (*device))
+    if (auto* device = findDevice (context, id); device != nullptr && opensWindow (*device) && ! isFrozenDevice (*device))
         device->showWindowExplicitly();
 }
 
@@ -485,16 +486,6 @@ void addSendToNewReturn (ProjectContext& context, TrackID from)
 //==============================================================================
 namespace
 {
-    // The bus a channel's sound goes into: the nearest folder it is in that is a bus; nullptr for the master.
-    te::FolderTrack* getOutputBus (const te::Track& track)
-    {
-        for (auto* parent = track.getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
-            if (isBus (*parent))
-                return parent;
-
-        return nullptr;
-    }
-
     te::AuxSendPlugin* findSendTo (const te::Track& track, int bus)
     {
         for (auto* send : phazite::getSends (track))
@@ -508,17 +499,6 @@ namespace
     bool canSendTo (te::Track& from, te::AudioTrack& returnTrack)
     {
         return &from != &returnTrack && ! from.isFolderTrack() && ! getTracksFedBy (returnTrack).contains (&from);
-    }
-
-    // The tracks the mixer shows: the playlist's, then the returns.
-    juce::Array<te::Track*> getChannelTracks (const te::Edit& edit)
-    {
-        auto tracks = getPlaylistTracks (edit);
-
-        for (auto* returnTrack : getReturnTracks (edit))
-            tracks.addIfNotAlreadyThere (returnTrack);
-
-        return tracks;
     }
 
     // The parameter of Tracktion's send that sets its level (tracktion_AuxSend.cpp), which the send's knob changes.

@@ -60,8 +60,20 @@ struct DeviceSlots::Slot : public juce::Component
                                              : juce::String ("it whole in the Devices view, under the mixer");
         const auto more =
             owner.kind == Kind::instrument ? juce::String ("replace or remove it") : juce::String ("move, group or remove it");
-        nameButton.setTooltip ("Shows " + what + ". Ctrl-click to select it with others; right-click to turn it off, " + more);
+        nameButton.setTooltip (device.frozen
+                                   ? "Frozen with its track: unfreeze the track (its snowflake) to change it"
+                                   : "Shows " + what + ". Ctrl-click to select it with others; right-click to turn it off, " + more);
         power.setToggleState (device.isOn, juce::dontSendNotification);
+
+        // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
+        power.setEnabled (! device.frozen);
+
+        for (auto* knob : knobs)
+        {
+            knob->setEnabled (! device.frozen);
+            knob->setAlpha (device.frozen ? FrozenTint::frozenDevice : 1.0f);
+        }
+
         repaint();
     }
 

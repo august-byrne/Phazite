@@ -4,6 +4,7 @@
 #include "AppServices.h"
 #include "ClipWaveforms.h"
 #include "ProjectSession.h"
+#include "model/mixer/FreezeModel.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/PluginKeys.h"
 #include "ui/input/WindowKeys.h"
@@ -17,8 +18,10 @@
 namespace phazite
 {
 // Phazite's one window: the menu bar and the AppShell. It also owns the dialogs, and the computer
-// keyboard, which plays notes while this window has the keyboard focus.
+// keyboard, which plays notes while this window has the keyboard focus. Freezes and bounces render in a progress window
+// over it (TrackRenderHost).
 class MainWindow : public juce::DocumentWindow,
+                   public TrackRenderHost,
                    private juce::MenuBarModel,
                    private juce::ChangeListener,
                    private juce::Timer
@@ -26,6 +29,10 @@ class MainWindow : public juce::DocumentWindow,
 public:
     MainWindow (te::Engine&, ui::CommandBridge&, ProjectSession&, ui::LookAndFeel&, AppServices&);
     ~MainWindow() override;
+
+    // A freeze or a bounce, in a progress window with Cancel; and what came of it, an error if it failed.
+    void runRender (std::unique_ptr<TrackRender>) override;
+    void renderFinished (const juce::String& title, const juce::Result&) override;
 
     ui::AppShell& getShell() noexcept { return *shell; }
 
@@ -52,7 +59,8 @@ private:
     ui::AppShell* shell = nullptr;              // owned by the window as its content
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow; // hover help; null when it is turned off
-    juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow, progressionsWindow;
+    juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow, progressionsWindow,
+        renderWindow;
     juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
     juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
 

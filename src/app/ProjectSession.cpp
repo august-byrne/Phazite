@@ -533,9 +533,9 @@ void ProjectSession::addCommands (CommandRegistry& registry)
     registry.add ({ .id = "project.export",
                     .name = "Export Song",
                     .category = "Project",
-                    .description = "Renders the song to a WAV or FLAC file, in the project's Renders folder unless you choose another, "
-                                   "and normalizes its loudness if you ask.",
-                    .synonyms = { "render", "bounce", "mixdown", "wav", "flac", "audio file", "loudness", "lufs" },
+                    .description = "Renders the song to a WAV or FLAC file, or its stems to a file for each channel, in the project's "
+                                   "Renders folder unless you choose another, and normalizes the song's loudness if you ask.",
+                    .synonyms = { "render", "bounce", "mixdown", "wav", "flac", "audio file", "loudness", "lufs", "stems", "multitrack" },
                     .perform = [this] { exportSong(); },
                     .isEnabled = [this] { return project != nullptr && canExport (project->getEdit()); } });
 }

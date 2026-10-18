@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A track's header in the playlist: its color, a handle to move it by, a chevron that collapses it (and its lanes), its name,
-// mute and solo. Clicking selects the track, double-clicking the name renames it, dragging the handle moves the
-// track, dragging the bottom edge resizes it, and dragging elsewhere selects the tracks the mouse passes.
+// mute and solo, and a snowflake while it is frozen (a click unfreezes it). Clicking selects the track, double-clicking
+// the name renames it, dragging the handle moves the track, dragging the bottom edge resizes it, and dragging elsewhere
+// selects the tracks the mouse passes.
 #pragma once
 
 #include "model/arrangement/PlaylistModel.h"
@@ -45,6 +46,9 @@ public:
     // The handle that moves the track, at its left.
     juce::Rectangle<int> getGripArea() const;
 
+    // The snowflake, which shows while the track is frozen (for tests).
+    IconButton& getFrozenButton() noexcept { return frozenButton; }
+
     void paint (juce::Graphics&) override;
     void resized() override;
     void lookAndFeelChanged() override { updateColours(); } // the theme's colors
@@ -72,6 +76,7 @@ private:
     juce::Label nameLabel;
     MuteSoloButtons muteSolo;
     IconButton collapseButton { "Collapse track", Icon::expanded };
+    IconButton frozenButton { "Unfreeze track", Icon::frozen }; // while it is frozen
     std::unique_ptr<juce::Drawable> gripIcon;
     juce::Colour gripIconColour { juce::Colours::black }; // the color the drawing is in now
     bool selected = false;
@@ -81,6 +86,7 @@ private:
     juce::Colour getBackground() const; // the surface, tinted with the track's color
     void updateColours();
     void updateCollapseButton();
+    void updateFrozenButton();
 
     Drag drag = Drag::none;
     bool selectOnMouseUp = false; // a click on a selected track selects it alone, unless it starts a drag

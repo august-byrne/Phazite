@@ -28,6 +28,7 @@ struct Palette
     juce::Colour danger;
     juce::Colour loop;       // where playback loops, in the rulers
     juce::Colour modulation; // what modulation does to a control: the ring around a knob, a modulator's output
+    juce::Colour frozen;     // a frozen track's frost, over its clips and its snowflake (FrozenTint)
 };
 
 inline Palette getPalette (ThemeName theme)
@@ -37,20 +38,20 @@ inline Palette getPalette (ThemeName theme)
     switch (theme)
     {
         case ThemeName::light:
-            return { Colour (0xfff4f5f7), Colour (0xffffffff), Colour (0xffeceef1), Colour (0xffd3d7dd),
-                     Colour (0xff1b1f24), Colour (0xff545d69), Colour (0xff1f6feb), Colour (0xffffffff),
-                     Colour (0xff9a5b00), Colour (0xffc62828), Colour (0xff1a7f5a), Colour (0xff7b3fd4) };
+            return { Colour (0xfff4f5f7), Colour (0xffffffff), Colour (0xffeceef1), Colour (0xffd3d7dd), Colour (0xff1b1f24),
+                     Colour (0xff545d69), Colour (0xff1f6feb), Colour (0xffffffff), Colour (0xff9a5b00), Colour (0xffc62828),
+                     Colour (0xff1a7f5a), Colour (0xff7b3fd4), Colour (0xff2b8fd6) };
 
         case ThemeName::highContrast:
-            return { Colour (0xff000000), Colour (0xff000000), Colour (0xff1a1a1a), Colour (0xffffffff),
-                     Colour (0xffffffff), Colour (0xffe6e6e6), Colour (0xffffd400), Colour (0xff000000),
-                     Colour (0xffffb000), Colour (0xffff6b6b), Colour (0xff00ff9c), Colour (0xffff5cff) };
+            return { Colour (0xff000000), Colour (0xff000000), Colour (0xff1a1a1a), Colour (0xffffffff), Colour (0xffffffff),
+                     Colour (0xffe6e6e6), Colour (0xffffd400), Colour (0xff000000), Colour (0xffffb000), Colour (0xffff6b6b),
+                     Colour (0xff00ff9c), Colour (0xffff5cff), Colour (0xff00e5ff) };
 
         case ThemeName::dark:
         default:
-            return { Colour (0xff15171a), Colour (0xff1c1f23), Colour (0xff272b31), Colour (0xff343a42),
-                     Colour (0xffe8eaed), Colour (0xffa5adb8), Colour (0xff5b9dff), Colour (0xff0b1220),
-                     Colour (0xfff2b84b), Colour (0xffff7a6b), Colour (0xff3fbf8f), Colour (0xffb48cff) };
+            return { Colour (0xff15171a), Colour (0xff1c1f23), Colour (0xff272b31), Colour (0xff343a42), Colour (0xffe8eaed),
+                     Colour (0xffa5adb8), Colour (0xff5b9dff), Colour (0xff0b1220), Colour (0xfff2b84b), Colour (0xffff7a6b),
+                     Colour (0xff3fbf8f), Colour (0xffb48cff), Colour (0xffa8dcff) };
     }
 }
 
@@ -127,6 +128,18 @@ namespace TrackTint
     inline constexpr float header = 0.3f;
     inline constexpr float selectedHeader = 0.5f;
 } // namespace TrackTint
+
+// How a frozen track shows (docs/design.md, section 18; roadmap step 2.11): its clips under a wash of the palette's frozen
+// color, with stripes of it across them this far apart (pixels), like frost (alphas); and its frozen devices' controls
+// faded to this alpha.
+namespace FrozenTint
+{
+    inline constexpr float frost = 0.28f;
+    inline constexpr float stripes = 0.35f;
+    inline constexpr float stripeSpacing = 8.0f;
+    inline constexpr float stripeWidth = 1.5f;
+    inline constexpr float frozenDevice = 0.45f;
+} // namespace FrozenTint
 
 // How an automation lane shows under its track (docs/design.md, section 10): its header's surface mixed with the track's
 // color, less than the track's header; its background, the panels' surface this opaque over the playlist's, so that

@@ -15,8 +15,11 @@ class SongFollower;
 //   <name>.phazite   the project file: Tracktion's Edit, with Phazite's own data inside
 //   Audio/           recordings and imported audio
 //   Generated/       sounds made by Phazite's generators
-//   Renders/         bounces and exports
+//   Renders/         exports: the song, and its stems
 //   Backups/         earlier versions of the project file (newest numBackupsToKeep), and the autosave
+//   Cache/           what Phazite can make again: frozen tracks' files, and Tracktion's renders of stretched audio clips
+//                    (the Edit's temporary folder; model/mixer/internal/Freeze.h). Closing the project deletes what
+//                    nothing in it uses any more.
 //
 // Create, open and destroy Projects on the message thread.
 class Project : private juce::ValueTree::Listener
@@ -46,6 +49,7 @@ public:
     static bool hasNewerAutosave (const juce::File& projectFile);
 
     static juce::File getAutosaveFile (const juce::File& projectFile);
+    static juce::File getCacheFolder (const juce::File& projectFile) { return projectFile.getSiblingFile ("Cache"); }
 
     // Closing a project discards its autosave: the user has saved, or chosen not to.
     ~Project() override;
@@ -57,6 +61,7 @@ public:
     juce::File getGeneratedFolder() const { return getFolder().getChildFile ("Generated"); }
     juce::File getRendersFolder() const { return getFolder().getChildFile ("Renders"); }
     juce::File getBackupsFolder() const { return getFolder().getChildFile ("Backups"); }
+    juce::File getCacheFolder() const { return getCacheFolder (file); }
 
     // Phazite's own data in the project file, next to the engine's (phazite::getPhaziteState(), model/base/internal/Schema.h). Every
     // project has it: it holds the format version.
@@ -104,9 +109,9 @@ private:
     juce::ValueTree savedState;
     bool mayHaveChanged = false;
 
-    // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated and Renders folders, and returns
-    // the project file that goes in it. If the name is empty, the folder exists or something can't be written, sets error
-    // and returns nothing, leaving nothing behind.
+    // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated, Renders and Cache folders, and
+    // returns the project file that goes in it. If the name is empty, the folder exists or something can't be written, sets
+    // error and returns nothing, leaving nothing behind.
     juce::File makeFolderWithFiles (const juce::File& parentFolder, const juce::String& name, juce::String& error) const;
     void setFile (const juce::File&); // the project file from now on, the Edit's too
 

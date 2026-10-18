@@ -82,6 +82,8 @@ namespace
                 return "download.svg";
             case Icon::close:
                 return "x.svg";
+            case Icon::frozen:
+                return "snowflake.svg";
         }
 
         return "";

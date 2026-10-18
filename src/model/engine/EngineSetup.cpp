@@ -5,6 +5,7 @@
 #include "model/base/Migrations.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
+#include "model/mixer/internal/Freeze.h"
 
 // ThreadSanitizer builds (linux-tsan preset): GCC defines __SANITIZE_THREAD__, Clang has a feature check.
 #if defined(__SANITIZE_THREAD__)
@@ -179,7 +180,8 @@ std::unique_ptr<te::Edit> loadEdit (te::Engine& engine, const juce::File& file)
     return createEditFromState (engine, state, file, savedVersion);
 }
 
-std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& file, int savedVersion)
+std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& file, int savedVersion,
+                                               const juce::File& cacheFolder)
 {
     if (! state.isValid())
         return {};
@@ -190,13 +192,21 @@ std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::V
         id = te::ProjectItemID::createNewID (te::ProjectID {});
 
     // The values set by hand of parameters that automation set to others as the project was saved, and only the rack
-    // types its containers play (model/mixer/internal/Containers.h).
+    // types its containers play (model/mixer/internal/Containers.h); and the frozen tracks, which Tracktion would unfreeze
+    // as it makes the Edit, not knowing about the Cache folder yet (model/mixer/internal/Freeze.h).
     auto editState = state;
     restoreValuesSetByHand (editState);
     dropUnusedContainerRacks (editState);
+    const auto frozenTracks = takeFrozenTracks (editState, cacheFolder);
 
     auto edit = te::Edit::createEdit (
         { engine, state, id, te::Edit::forEditing, nullptr, te::Edit::getDefaultNumUndoLevels(), [file] { return file; }, {} });
+
+    if (edit != nullptr && cacheFolder != juce::File())
+    {
+        edit->setTempDirectory (cacheFolder);
+        restoreFrozenTracks (*edit, frozenTracks);
+    }
 
     // The upgrade that needs the song's tempo (Migrations.h): the automation clips of projects saved before version 5.
     constexpr auto versionWithoutAutomationClips = 5;

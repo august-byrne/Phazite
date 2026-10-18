@@ -103,6 +103,12 @@ te::Plugin* getVolumeDevice (te::Track&);
 juce::String getVolumeParameterID (te::Track&);
 te::LevelMeasurer* getLevelMeasurer (te::Track&); // nullptr for a plain folder, which has no sound of its own
 
+// The bus a channel's sound goes into: the nearest folder it is in that is a bus; nullptr for the master.
+te::FolderTrack* getOutputBus (const te::Track&);
+
+// The tracks the mixer shows as channels, in its order: the playlist's, then the returns.
+juce::Array<te::Track*> getChannelTracks (const te::Edit&);
+
 //==============================================================================
 // Returns and sends. A return track takes in an aux bus (Tracktion's AuxReturnPlugin, its first plug-in), so its
 // devices, such as a reverb, process what the sends feed it.

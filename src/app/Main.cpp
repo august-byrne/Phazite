@@ -55,7 +55,7 @@ public:
         session = std::make_unique<ProjectSession> (*engine, getUIBehaviour (*engine), services->recentProjects, getDefaultProjectsFolder(),
                                                     getUnsavedProjectsFolder());
         mainWindow = std::make_unique<MainWindow> (*engine, *commandBridge, *session, *lookAndFeel, *services);
-        addSongCommands (*commands, session->getContext());
+        addSongCommands (*commands, session->getContext(), *mainWindow);
         session->addCommands (*commands);
         mainWindow->addCommands();
 

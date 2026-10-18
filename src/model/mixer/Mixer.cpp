@@ -450,6 +450,25 @@ te::LevelMeasurer* getLevelMeasurer (te::Track& track)
     return nullptr;
 }
 
+te::FolderTrack* getOutputBus (const te::Track& track)
+{
+    for (auto* parent = track.getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
+        if (isBus (*parent))
+            return parent;
+
+    return nullptr;
+}
+
+juce::Array<te::Track*> getChannelTracks (const te::Edit& edit)
+{
+    auto tracks = getPlaylistTracks (edit);
+
+    for (auto* returnTrack : getReturnTracks (edit))
+        tracks.addIfNotAlreadyThere (returnTrack);
+
+    return tracks;
+}
+
 //==============================================================================
 int getReturnBus (const te::Track& track)
 {

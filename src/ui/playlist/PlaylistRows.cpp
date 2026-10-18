@@ -296,11 +296,12 @@ void Playlist::positionClip (ClipComponent& component)
 
 void Playlist::updateClips()
 {
-    // A clip shows in its track's colour, as the track's header does.
+    // A clip shows in its track's colour, as the track's header does, frosted if the track is frozen.
     for (auto* component : clipComponents)
     {
         const auto row = getRowOf (component->getInfo().track);
-        component->showLook (row >= 0 ? rows[(size_t) row].track.colour : juce::Colours::grey, selection.isSelected (component->getClip()));
+        component->showLook (row >= 0 ? rows[(size_t) row].track.colour : juce::Colours::grey, selection.isSelected (component->getClip()),
+                             row >= 0 && rows[(size_t) row].track.frozen);
     }
 }
 

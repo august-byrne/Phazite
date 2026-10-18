@@ -51,6 +51,8 @@ after start:
   chords.makeBassLine: off "Make Bass Line"
   chords.makeArpeggio: off "Make Arpeggio"
   track.addReturn: on "Add Return Track"
+  track.freeze: off "Freeze Track"
+  track.bounceInPlace: off "Bounce in Place"
   device.group: off "Group into Container"
   device.ungroup: off "Ungroup Container"
   automation.automateLastTouched: off "Automate Last Touched Parameter"
@@ -651,6 +653,8 @@ after select One:
   track.moveDown: on "Move Track Down"
   track.mute: on "Mute Track"
   track.solo: on "Solo Track"
+  track.freeze: on "Freeze Track"
+  track.bounceInPlace: on "Bounce in Place"
   automation.showLanes: on "Show Automation"
   automation.read: on, ticked "Read Automation"
   automation.touch: on "Touch Automation"
@@ -662,6 +666,8 @@ after edit.selectAll:
   edit.duplicate: on "Duplicate 4 Tracks"
   track.ungroup: on "Ungroup Folder"
   track.pin: on "Pin Track"
+  track.freeze: off "Freeze Track"
+  track.bounceInPlace: off "Bounce in Place"
   selected: track Group, track One, track Two, track Return 1
 after edit.deselectAll:
   edit.delete: off "Delete"

@@ -128,7 +128,10 @@ namespace
         row.savedHeight = getSavedTrackHeight (track);
 
         if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))
+        {
             row.hasInstrument = hasInstrument (*audio);
+            row.frozen = audio->isFrozen (te::Track::individualFreeze);
+        }
 
         return row;
     }

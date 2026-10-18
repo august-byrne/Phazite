@@ -50,6 +50,8 @@ chords.makeChordPart
 chords.makeBassLine
 chords.makeArpeggio
 track.addReturn
+track.freeze
+track.bounceInPlace
 device.group | ctrl + G
 device.ungroup | ctrl + shift + G
 automation.automateLastTouched | ctrl + shift + A

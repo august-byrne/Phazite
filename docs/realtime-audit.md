@@ -53,6 +53,7 @@ The first column covers the warm-up after playback starts (0.5 s for every scena
 | Phazite's filter, saturator, multiband, delay, utility and maximizer in a row on a tone, the filter swept by a lane (step 2.10) | 2 allocations | 0 |
 | Notes recorded from the computer keyboard onto Phazite's synth | 20 allocations (the same) | 0 |
 | A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor | 24 allocations (the same) | 0 |
+| A frozen track: its synth's notes played from its frozen file (step 2.11) | 1 allocation | 0 |
 | An audio clip | 6 allocations, 3 frees (fewer if the file cache hits) | 0 |
 | Two tracks in a folder bus with a compressor | 10 allocations, 3 frees | 0 |
 | MIDI into Tracktion's 4OSC synth | 43 allocations, 15 frees | 1 allocation, 1 free, or more |

@@ -6,6 +6,7 @@
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/ExportPanel.h"
 #include "ui/shell/ProgressionsPanel.h"
+#include "ui/shell/RenderPanel.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
@@ -96,6 +97,7 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     session.onProjectClosing = [this]
     {
         delete exportWindow.getComponent();       // its export holds the Edit
+        delete renderWindow.getComponent();       // its freeze or bounce too
         delete progressionsWindow.getComponent(); // it plays and changes that project's chords
     };
     session.onProjectChanged = [this]
@@ -119,8 +121,9 @@ MainWindow::~MainWindow()
     session.dialogParent = nullptr;
 
     // Close the dialogs: they point into the Engine and the commands, which are destroyed after
-    // this window, and an export into the project's Edit.
+    // this window, and an export, a freeze or a bounce into the project's Edit.
     delete exportWindow.getComponent();
+    delete renderWindow.getComponent();
     delete progressionsWindow.getComponent();
     delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
@@ -379,17 +382,22 @@ void MainWindow::showExport()
         return;
 
     // The song goes into the project's Renders folder (or, while it is untitled, Documents/Phazite/Exports), named after
-    // the project, unless the user chooses another file.
+    // the project, unless the user chooses another file; its stems into a folder next to it.
     auto& edit = project->getEdit();
     const auto defaultFile = session.getExportFolder().getChildFile (project->getFile().getFileNameWithoutExtension() + ".wav");
+    juce::StringArray stemNames;
+
+    for (auto* track : getStemTracks (edit))
+        stemNames.add (track->getName());
+
     auto* panel = new ui::ExportPanel (
-        services.settings, defaultFile, getExportRange (edit).getLength().inSeconds(),
+        services.settings, defaultFile, getExportRange (edit).getLength().inSeconds(), stemNames,
         [&edit] (const ExportSettings& settings, const juce::File& file, std::function<void (const ExportReport&)> onFinished)
         { return startExport (edit, file, settings, std::move (onFinished)); });
-    panel->setSize (560, 600);
+    panel->setSize (560, 660);
 
     juce::DialogWindow::LaunchOptions o;
-    o.dialogTitle = "Export Song";
+    o.dialogTitle = "Export";
     o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
     o.escapeKeyTriggersCloseButton = true;
     o.useNativeTitleBar = true;
@@ -398,6 +406,40 @@ void MainWindow::showExport()
     o.content.setOwned (panel);
 
     exportWindow = o.launchAsync();
+}
+
+void MainWindow::runRender (std::unique_ptr<TrackRender> render)
+{
+    delete renderWindow.getComponent(); // one at a time: the window is modal, so there is none
+
+    auto* panel = new ui::RenderPanel (std::move (render));
+
+    juce::DialogWindow::LaunchOptions o;
+    o.dialogTitle = panel->getTitle();
+    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
+    o.escapeKeyTriggersCloseButton = false; // Cancel stops it, on purpose
+    o.useNativeTitleBar = true;
+    o.resizable = false;
+    o.componentToCentreAround = this;
+    o.content.setOwned (panel);
+
+    renderWindow = o.launchAsync();
+}
+
+void MainWindow::renderFinished (const juce::String& title, const juce::Result& result)
+{
+    delete renderWindow.getComponent(); // and the render, which is calling back: it lets go of itself last
+
+    if (result.wasOk())
+        return;
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                      .withTitle (title)
+                                      .withMessage (result.getErrorMessage())
+                                      .withButton ("OK")
+                                      .withAssociatedComponent (this),
+                                  nullptr);
 }
 
 void MainWindow::showProgressions()

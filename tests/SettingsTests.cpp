@@ -57,6 +57,7 @@ TEST_CASE ("Every setting keeps its key")
     CHECK (juce::String (Settings::exportNormalize.key) == "phaziteExportNormalize");
     CHECK (juce::String (Settings::exportLoudnessTarget.key) == "phaziteExportLoudnessTarget");
     CHECK (juce::String (Settings::exportTruePeakCeiling.key) == "phaziteExportTruePeakCeiling");
+    CHECK (juce::String (Settings::exportStems.key) == "phaziteExportStems");
     CHECK (juce::String (Settings::guide.key) == "phaziteGuide");
     CHECK (juce::String (Settings::guideStepsDone.key) == "phaziteGuideStepsDone");
 }
@@ -84,6 +85,7 @@ TEST_CASE ("Settings have their defaults, and are stored as before")
     CHECK_FALSE (settings.get (Settings::exportNormalize));
     CHECK (settings.get (Settings::exportLoudnessTarget) == doctest::Approx (-14.0));
     CHECK (settings.get (Settings::exportTruePeakCeiling) == doctest::Approx (-1.0));
+    CHECK_FALSE (settings.get (Settings::exportStems));
     CHECK (settings.get (Settings::guide));
     CHECK (settings.get (Settings::guideStepsDone).isEmpty());
     CHECK (settings.getKeyChanges ("FL Studio").isEmpty());

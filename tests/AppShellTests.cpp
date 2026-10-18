@@ -22,7 +22,7 @@ struct Screen
     Screen()
     {
         // As Main.cpp and MainWindow do.
-        phazite::addSongCommands (registry, session.getContext());
+        phazite::addSongCommands (registry, session.getContext(), renders);
         session.addCommands (registry);
         shell.addCommands (registry);
 
@@ -44,6 +44,7 @@ struct Screen
                                     { .settingsInMemory = true,
                                       .packsFolder = temp.folder.getChildFile ("Packs"),
                                       .presetsFolder = temp.folder.getChildFile ("Presets") } };
+    phazite::test::RenderHost renders; // the main window's part
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::KeyDispatcher shortcutKeys { commands };

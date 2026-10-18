@@ -2,6 +2,8 @@
 // Shared includes and helpers for Phazite's tests.
 #pragma once
 
+#include "model/mixer/FreezeModel.h"
+
 #include <juce_events/juce_events.h>
 #include <tracktion_engine/tracktion_engine.h>
 
@@ -26,6 +28,22 @@ EngineContext& getEngineContext(); // the Engine as the UI reaches it, as the ap
 // MIDI devices, for example). This runs the timers that are due, as the loop would, until the
 // condition holds. Returns false if it still doesn't after timeoutMilliseconds.
 bool runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds = 2000);
+
+// Runs freezes and bounces as the app's main window does, without a window: it keeps the render while it runs, and
+// what came of each.
+struct RenderHost : public TrackRenderHost
+{
+    std::unique_ptr<TrackRender> render;
+    juce::StringArray finished; // "<title>: ok", or "<title>: <why it failed>"
+
+    void runRender (std::unique_ptr<TrackRender> r) override { render = std::move (r); }
+
+    void renderFinished (const juce::String& title, const juce::Result& result) override
+    {
+        finished.add (title + ": " + (result.wasOk() ? juce::String ("ok") : result.getErrorMessage()));
+        render = nullptr; // it is calling back, and lets go of itself last
+    }
+};
 
 // A folder in the temp directory, deleted again at the end of the test.
 struct TemporaryFolder

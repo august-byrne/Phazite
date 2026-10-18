@@ -33,12 +33,13 @@ void ClipComponent::showClip (const ClipInfo& shown)
     repaint();
 }
 
-void ClipComponent::showLook (juce::Colour newColour, bool isSelected)
+void ClipComponent::showLook (juce::Colour newColour, bool isSelected, bool isFrozen)
 {
-    if (colour != newColour || selected != isSelected)
+    if (colour != newColour || selected != isSelected || frozen != isFrozen)
     {
         colour = newColour;
         selected = isSelected;
+        frozen = isFrozen;
         repaint();
     }
 }
@@ -88,6 +89,21 @@ void ClipComponent::paint (juce::Graphics& g)
     else
     {
         paintNotes (g, content, ink.withAlpha (0.8f));
+    }
+
+    // A frozen track's clips are frosted: its file plays, not them.
+    if (frozen)
+    {
+        g.saveState();
+        g.reduceClipRegion (getLocalBounds());
+        g.setColour (p.frozen.withAlpha (FrozenTint::frost));
+        g.fillRoundedRectangle (body, corner);
+        g.setColour (p.frozen.withAlpha (FrozenTint::stripes));
+
+        for (auto x = -body.getHeight(); x < body.getWidth(); x += FrozenTint::stripeSpacing)
+            g.drawLine (x, body.getBottom(), x + body.getHeight(), body.getY(), FrozenTint::stripeWidth);
+
+        g.restoreState();
     }
 
     // A selected clip has an outline in the text color, which shows on any clip color.

@@ -7,6 +7,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/notes/internal/Notes.h"
 
 namespace phazite
@@ -181,6 +182,7 @@ struct ProjectContext::Impl
     std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
     juce::ListenerList<Listener> listeners;
     std::unique_ptr<NoteIDKeeper> noteIDs;         // gives the notes added to the open Edit their IDs
+    std::unique_ptr<FreezeKeeper> freezes;         // unfreezes a frozen track whose clips or frozen devices change
     std::unique_ptr<AutomationWatcher> automation; // the parameter touched last, and recorded automation's undo steps
     std::unique_ptr<SongWatcher> songWatcher;
     int projectNumber = 0;
@@ -197,6 +199,7 @@ ProjectContext::~ProjectContext()
 {
     impl->songWatcher = nullptr;
     impl->automation = nullptr;
+    impl->freezes = nullptr;
     impl->noteIDs = nullptr;
 
     if (impl->focus != nullptr)
@@ -294,7 +297,9 @@ void setEdit (ProjectContext& context, te::Edit* edit)
     impl.rangeSelection.clear();
     impl.selection.edit = edit;
     impl.automation = nullptr;                                                         // before the Edit it watches goes
+    impl.freezes = nullptr;                                                            // likewise
     impl.noteIDs = edit != nullptr ? std::make_unique<NoteIDKeeper> (*edit) : nullptr; // before the watcher hears what it writes
+    impl.freezes = edit != nullptr ? std::make_unique<FreezeKeeper> (*edit) : nullptr;
     impl.automation = edit != nullptr ? std::make_unique<AutomationWatcher> (*edit) : nullptr;
     impl.songWatcher->setState (edit != nullptr ? edit->state : juce::ValueTree());
 
