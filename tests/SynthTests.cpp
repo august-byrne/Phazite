@@ -157,7 +157,7 @@ TEST_CASE ("The synth's description holds together")
 {
     REQUIRE (devices::isValid (Synth::info));
     CHECK (Synth::info.kind == devices::DeviceKind::instrument);
-    CHECK (Synth::info.parameters.size() == (size_t) Synth::filterSlope + 1);
+    CHECK (Synth::info.parameters.size() == (size_t) Synth::level + 1);
     CHECK (devices::findParameter (Synth::info, "cutoff") == Synth::cutoff);
     CHECK (devices::findParameter (Synth::info, "voiceMode") == Synth::voiceMode);
     CHECK (devices::findParameter (Synth::info, "unisonVoices") == Synth::unisonVoices);
@@ -246,19 +246,19 @@ TEST_CASE ("The synth's filter darkens its saw, and the filter envelope opens it
 
 TEST_CASE ("The synth's combs: on a note's pitch, Comb + keeps a saw's harmonics and Comb - leaves out its even ones")
 {
-    // After the other types, so that those keep their numbers in saved projects.
+    // The types every Phazite filter offers (dsp/MultimodeFilter.h), in its order.
     const auto& types = Synth::info.parameters[Synth::filterType].choices;
     REQUIRE (types.size() == 9);
-    CHECK (types[(size_t) Synth::FilterType::highPass] == std::string_view ("High Pass"));
-    CHECK (types[(size_t) Synth::FilterType::combPlus] == std::string_view ("Comb +"));
-    CHECK (types[(size_t) Synth::FilterType::combMinus] == std::string_view ("Comb -"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::highPass] == std::string_view ("High Pass"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::combPlus] == std::string_view ("Comb +"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::combMinus] == std::string_view ("Comb -"));
 
     // A saw at A3 (220 Hz) through a comb tuned to it: its first four harmonics, as amplitudes.
     auto values = getSineValues();
     values[Synth::osc1Wave] = 2.0f; // saw
     values[Synth::cutoff] = 220.0f;
     values[Synth::resonance] = 0.5f;
-    const auto harmonicsThrough = [&values] (Synth::FilterType type)
+    const auto harmonicsThrough = [&values] (devices::dsp::FilterMode type)
     {
         values[Synth::filterType] = (float) type;
         Synth synth;
@@ -273,13 +273,13 @@ TEST_CASE ("The synth's combs: on a note's pitch, Comb + keeps a saw's harmonics
     };
 
     // Comb +: all of them on its peaks, as loud against each other as in a saw.
-    const auto plus = harmonicsThrough (Synth::FilterType::combPlus);
+    const auto plus = harmonicsThrough (devices::dsp::FilterMode::combPlus);
     CHECK (plus[1] / plus[0] == doctest::Approx (1.0 / 2.0).epsilon (0.1));
     CHECK (plus[2] / plus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
     CHECK (plus[3] / plus[0] == doctest::Approx (1.0 / 4.0).epsilon (0.1));
 
     // Comb -: the odd ones on its peaks, the even ones gone: hollow, as a square wave is.
-    const auto minus = harmonicsThrough (Synth::FilterType::combMinus);
+    const auto minus = harmonicsThrough (devices::dsp::FilterMode::combMinus);
     CHECK (minus[2] / minus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
     CHECK (minus[1] < 0.01 * minus[0]);
     CHECK (minus[3] < 0.01 * minus[0]);
@@ -288,12 +288,12 @@ TEST_CASE ("The synth's combs: on a note's pitch, Comb + keeps a saw's harmonics
 TEST_CASE ("The synth's notch and 24 dB slope, and its vowel, phaser and sample and hold")
 {
     const auto& types = Synth::info.parameters[Synth::filterType].choices;
-    CHECK (types[(size_t) Synth::FilterType::notch] == std::string_view ("Notch"));
-    CHECK (types[(size_t) Synth::FilterType::vowel] == std::string_view ("Vowel"));
-    CHECK (types[(size_t) Synth::FilterType::phaser] == std::string_view ("Phaser"));
-    CHECK (types[(size_t) Synth::FilterType::sampleAndHold] == std::string_view ("Sample & Hold"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::notch] == std::string_view ("Notch"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::vowel] == std::string_view ("Vowel"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::phaser] == std::string_view ("Phaser"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::sampleAndHold] == std::string_view ("Sample & Hold"));
 
-    // The slope came after the synth's other parameters, at 12 dB, so projects from before sound as they did.
+    // The slope starts at 12 dB, the synth's gentler sound.
     CHECK (Synth::info.parameters[Synth::filterSlope].id == std::string_view ("filterSlope"));
     CHECK (Synth::info.parameters[Synth::filterSlope].defaultValue == doctest::Approx (0.0f));
 
@@ -314,7 +314,7 @@ TEST_CASE ("The synth's notch and 24 dB slope, and its vowel, phaser and sample 
 
     // The notch takes out a sine at its frequency (A4, 440 Hz).
     values = getSineValues();
-    const auto rmsThrough = [&values] (Synth::FilterType type, float frequency)
+    const auto rmsThrough = [&values] (devices::dsp::FilterMode type, float frequency)
     {
         values[Synth::filterType] = (float) type;
         values[Synth::cutoff] = frequency;
@@ -329,14 +329,14 @@ TEST_CASE ("The synth's notch and 24 dB slope, and its vowel, phaser and sample 
         return std::sqrt (sum / (double) (played.size() - 12000));
     };
 
-    CHECK (rmsThrough (Synth::FilterType::notch, 440.0f) < 0.05 * rmsThrough (Synth::FilterType::lowPass, 20000.0f));
+    CHECK (rmsThrough (devices::dsp::FilterMode::notch, 440.0f) < 0.05 * rmsThrough (devices::dsp::FilterMode::lowPass, 20000.0f));
 
     // The vowel, the phaser and the sample and hold play a saw, steadily.
     values = getSineValues();
     values[Synth::osc1Wave] = 2.0f;
     values[Synth::resonance] = 1.0f;
 
-    for (const auto type : { Synth::FilterType::vowel, Synth::FilterType::phaser, Synth::FilterType::sampleAndHold })
+    for (const auto type : { devices::dsp::FilterMode::vowel, devices::dsp::FilterMode::phaser, devices::dsp::FilterMode::sampleAndHold })
     {
         INFO ("type " << (int) type);
         values[Synth::filterType] = (float) type;

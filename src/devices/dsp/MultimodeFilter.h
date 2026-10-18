@@ -1,21 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The filter types of Phazite's filters, the synth's, the wavetable synth's and the Filter device's (roadmap steps 2.10,
-// 2.14 and 2.15), one channel of them, so that every device offers the same types and each sounds the same in all of
-// them (docs/design.md, section 9):
-// - low-pass, high-pass, band-pass and notch at 12 or 24 dB per octave (Filters.h);
+// 2.14 and 2.15), one channel of them, so that every device offers the same types, in the same order and by the same
+// names, and each sounds the same in all of them (docs/design.md, section 9):
+// - low-pass, high-pass, band-pass and notch at 12 or 24 dB per octave, as each device's Slope says (Filters.h);
 // - Comb + and Comb - (CombFilter.h);
 // - Vowel: three band-passes at the formants of a sung vowel, which the cutoff picks, as the second formant's frequency,
 //   from U through O, A and E to I, moving all three beyond them;
 // - Phaser: six all-pass stages fed back, mixed with what goes in, whose three notches the cutoff moves;
 // - Sample & Hold: the sound held at twice the cutoff's rate, aliasing on purpose, as a lo-fi sampler does.
 // The resonance sharpens each: it narrows the formants, feeds the phaser back, and feeds the held sound back to ring at
-// the cutoff. Each device keeps its own curve from resonance to a 12 dB section's Q, so projects sound as they did.
+// the cutoff. A 12 dB section's Q comes from the resonance by getResonanceQ(), but in the synth, whose curve is its own.
 #pragma once
 
 #include "CombFilter.h"
 #include "Filters.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <iterator>
+#include <string_view>
 
 namespace phazite::devices::dsp
 {
@@ -32,13 +36,37 @@ enum class FilterMode
     sampleAndHold
 };
 
+// What each device's Type offers, in the order of FilterMode, a type's value being its mode's number; and its Slope.
+inline constexpr std::string_view filterModeNames[] = { "Low Pass", "High Pass", "Band Pass", "Notch",        "Comb +",
+                                                        "Comb -",   "Vowel",     "Phaser",    "Sample & Hold" };
+inline constexpr std::string_view filterSlopeNames[] = { "12 dB", "24 dB" };
+
+static_assert (std::size (filterModeNames) == (size_t) FilterMode::sampleAndHold + 1);
+
+// A Type's value as its mode, and a Slope's as whether it is 24 dB per octave.
+inline FilterMode toFilterMode (float value) noexcept
+{
+    return (FilterMode) std::clamp ((int) std::lround (value), 0, (int) std::size (filterModeNames) - 1);
+}
+
+inline bool isSteep (float slope) noexcept
+{
+    return slope > 0.5f;
+}
+
+// A 12 dB section's Q for a resonance from 0 to 1: from a Butterworth's (0.71, flat) to 16, ringing.
+inline double getResonanceQ (float resonance) noexcept
+{
+    return 0.70710678 * std::pow (2.0, 4.5 * (double) std::clamp (resonance, 0.0f, 1.0f));
+}
+
 struct FilterSettings
 {
     FilterMode mode = FilterMode::lowPass;
     double frequency = 20000.0; // the cutoff, in hertz
     float resonance = 0.0f;     // from 0 to 1
     bool steep = false;         // 24 dB per octave rather than 12, for low-pass, high-pass, band-pass and notch
-    double q = 0.70710678;      // a 12 dB section's Q, made from the resonance by the device's own curve
+    double q = 0.70710678;      // a 12 dB section's Q, made from the resonance (getResonanceQ())
 };
 
 // What a channel plays with, made once a step for all of them.

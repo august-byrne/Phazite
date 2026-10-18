@@ -18,10 +18,6 @@ namespace
     constexpr std::string_view subOctaves[] = { "-1 Octave", "-2 Octaves" };
     constexpr std::string_view subShapes[] = { "Sine", "Triangle", "Saw", "Square" };
     constexpr std::string_view unisonCounts[] = { "1", "2", "3", "4", "5", "6", "7", "8" };
-    constexpr std::string_view filterTypes[] = {
-        "Low Pass 12", "Low Pass 24", "Band Pass", "High Pass 12", "High Pass 24", "Notch",
-        "Comb +",      "Comb -",      "Vowel",     "Phaser",       "Sample & Hold"
-    }; // as Synth::FilterType
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
     constexpr std::string_view modSources[] = { "None",     "Envelope 2", "Envelope 3", "LFO 1", "LFO 2",
                                                 "Velocity", "Note",       "Mod Wheel",  "Random" };
@@ -123,7 +119,7 @@ namespace
         makePercent ("unisonSpread", "Unison Spread", 0.8f),
         makePercent ("unisonPosition", "Unison Position Spread", 0.0f),
         makeToggle ("filterOn", "Filter On", 1.0f),
-        makeChoice ("filterType", "Filter Type", filterTypes, 1.0f),
+        makeChoice ("filterType", "Filter Type", dsp::filterModeNames, 0.0f),
         { .id = "cutoff",
           .name = "Filter Cutoff",
           .minimum = 20.0f,
@@ -132,6 +128,7 @@ namespace
           .unit = Unit::hertz,
           .midpoint = 632.456f }, // the middle of the range, on a log scale
         makePercent ("resonance", "Filter Resonance", 0.1f),
+        makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 1.0f),
         { .id = "drive", .name = "Filter Drive", .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
         makePercent ("keyTracking", "Filter Key Tracking", 0.5f),
         makeTime ("env1Attack", "Envelope 1 Attack", 0.5f, 2.0f), // never instant, so a note doesn't click
@@ -200,7 +197,6 @@ namespace
     static_assert (Synth::getModParameter (Synth::numModSlots - 1, Synth::modAmount) == Synth::mod8Amount);
     static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::unisonDetune + 1);
     static_assert (std::size (modSources) == (size_t) Synth::ModSource::random + 1);
-    static_assert (std::size (filterTypes) == (size_t) Synth::FilterType::sampleAndHold + 1);
 
     // In a mixer slot: where the first oscillator plays in its table, and the filter.
     constexpr std::string_view keyControls[] = { "osc1Position", "cutoff" };
@@ -281,8 +277,8 @@ namespace
         float detune = 0.0f, positionSpread = 0.0f;
         std::array<float, Synth::maxUnison> places {}, lefts {}, rights {};
         bool stereo = false;
-        bool filterOn = false;
-        Synth::FilterType filterType = Synth::FilterType::lowPass24;
+        bool filterOn = false, steep = true;
+        dsp::FilterMode filterMode = dsp::FilterMode::lowPass;
         float cutoff = 20000.0f, resonance = 0.0f, driveGain = 1.0f, keyTracking = 0.0f;
         std::array<dsp::LfoShape, 2> lfoShapes {};
         std::array<bool, 2> lfoRetrigger {};
@@ -330,7 +326,8 @@ namespace
         }
 
         settings.filterOn = values[Synth::filterOn] > 0.5f;
-        settings.filterType = choiceOf<Synth::FilterType> (values[Synth::filterType]);
+        settings.filterMode = dsp::toFilterMode (values[Synth::filterType]);
+        settings.steep = dsp::isSteep (values[Synth::filterSlope]);
         settings.cutoff = values[Synth::cutoff];
         settings.resonance = values[Synth::resonance];
         settings.driveGain = dsp::decibelsToGain (values[Synth::drive]);
@@ -696,49 +693,6 @@ namespace
     {
         return moves[(size_t) target];
     }
-
-    dsp::FilterMode getFilterMode (Synth::FilterType type) noexcept
-    {
-        using dsp::FilterMode;
-
-        switch (type)
-        {
-            case Synth::FilterType::lowPass12:
-            case Synth::FilterType::lowPass24:
-                return FilterMode::lowPass;
-            case Synth::FilterType::bandPass:
-                return FilterMode::bandPass;
-            case Synth::FilterType::highPass12:
-            case Synth::FilterType::highPass24:
-                return FilterMode::highPass;
-            case Synth::FilterType::notch:
-                return FilterMode::notch;
-            case Synth::FilterType::combPlus:
-                return FilterMode::combPlus;
-            case Synth::FilterType::combMinus:
-                return FilterMode::combMinus;
-            case Synth::FilterType::vowel:
-                return FilterMode::vowel;
-            case Synth::FilterType::phaser:
-                return FilterMode::phaser;
-            case Synth::FilterType::sampleAndHold:
-                return FilterMode::sampleAndHold;
-        }
-
-        return FilterMode::lowPass;
-    }
-
-    // The filter for its type (as Phazite's filter device builds it): 12 dB per octave, its Q rising from a Butterworth's
-    // with the resonance, or 24 for the low-pass and high-pass that say so.
-    dsp::FilterSettings makeFilterSettings (Synth::FilterType type, double cutoffHz, float resonance) noexcept
-    {
-        const auto amount = (double) std::clamp (resonance, 0.0f, 1.0f);
-        return { .mode = getFilterMode (type),
-                 .frequency = cutoffHz,
-                 .resonance = resonance,
-                 .steep = type == Synth::FilterType::lowPass24 || type == Synth::FilterType::highPass24,
-                 .q = 0.70710678 * std::pow (2.0, amount * 4.5) };
-    }
 } // namespace
 
 void WavetableSynth::render (float* left, float* right, int numSamples, std::span<const float> values)
@@ -857,9 +811,13 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 const auto moved = settings.keyTracking * (voice.pitch - 60.0f) + cutoffRange * moveOf (moves, ModTarget::cutoff);
                 const auto frequency =
                     std::clamp ((double) settings.cutoff * std::exp2 ((double) moved / 12.0), lowestCutoff, nyquistLimit);
-                const auto coefficients = dsp::makeMultimode (
-                    makeFilterSettings (settings.filterType, frequency, settings.resonance + moveOf (moves, ModTarget::resonance)),
-                    sampleRate);
+                const auto filterResonance = settings.resonance + moveOf (moves, ModTarget::resonance);
+                const auto coefficients = dsp::makeMultimode ({ .mode = settings.filterMode,
+                                                                .frequency = frequency,
+                                                                .resonance = filterResonance,
+                                                                .steep = settings.steep,
+                                                                .q = dsp::getResonanceQ (filterResonance) },
+                                                              sampleRate);
 
                 for (auto& side : voice.filters)
                     side.set (coefficients, length);

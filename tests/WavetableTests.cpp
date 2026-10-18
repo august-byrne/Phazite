@@ -506,7 +506,7 @@ TEST_CASE ("The wavetable synth's filter darkens its saw, and the default patch 
     auto values = getPlainValues (2.0f / 3.0f);
     const auto open = tenthOf (values);
     values[WavetableSynth::filterOn] = 1.0f;
-    values[WavetableSynth::filterType] = (float) WavetableSynth::FilterType::lowPass24;
+    values[WavetableSynth::filterType] = (float) devices::dsp::FilterMode::lowPass;
     values[WavetableSynth::cutoff] = 400.0f;
     values[WavetableSynth::keyTracking] = 0.0f;
     CHECK (tenthOf (values) < 0.05 * open); // about 35 dB down, an octave and a half above the cutoff
@@ -525,12 +525,12 @@ TEST_CASE ("The wavetable synth's filter darkens its saw, and the default patch 
 
 TEST_CASE ("The wavetable synth's combs: on a note's pitch, Comb + keeps a saw's harmonics and Comb - leaves out its even ones")
 {
-    // After the other types, so that those keep their numbers in saved projects.
+    // The types every Phazite filter offers (dsp/MultimodeFilter.h), in its order.
     const auto& types = WavetableSynth::info.parameters[WavetableSynth::filterType].choices;
-    REQUIRE (types.size() == 11);
-    CHECK (types[(size_t) WavetableSynth::FilterType::notch] == std::string_view ("Notch"));
-    CHECK (types[(size_t) WavetableSynth::FilterType::combPlus] == std::string_view ("Comb +"));
-    CHECK (types[(size_t) WavetableSynth::FilterType::combMinus] == std::string_view ("Comb -"));
+    REQUIRE (types.size() == 9);
+    CHECK (types[(size_t) devices::dsp::FilterMode::notch] == std::string_view ("Notch"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::combPlus] == std::string_view ("Comb +"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::combMinus] == std::string_view ("Comb -"));
 
     // Basic Shapes' saw at A3 (220 Hz) through a comb tuned to it: its first four harmonics.
     auto values = getPlainValues (2.0f / 3.0f);
@@ -538,7 +538,7 @@ TEST_CASE ("The wavetable synth's combs: on a note's pitch, Comb + keeps a saw's
     values[WavetableSynth::cutoff] = 220.0f;
     values[WavetableSynth::resonance] = 0.5f;
     values[WavetableSynth::keyTracking] = 0.0f;
-    const auto harmonicsThrough = [&values] (WavetableSynth::FilterType type)
+    const auto harmonicsThrough = [&values] (devices::dsp::FilterMode type)
     {
         values[WavetableSynth::filterType] = (float) type;
         auto synth = makeSynth();
@@ -551,12 +551,12 @@ TEST_CASE ("The wavetable synth's combs: on a note's pitch, Comb + keeps a saw's
         return levels;
     };
 
-    const auto plus = harmonicsThrough (WavetableSynth::FilterType::combPlus);
+    const auto plus = harmonicsThrough (devices::dsp::FilterMode::combPlus);
     CHECK (plus[1] / plus[0] == doctest::Approx (1.0 / 2.0).epsilon (0.1));
     CHECK (plus[2] / plus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
     CHECK (plus[3] / plus[0] == doctest::Approx (1.0 / 4.0).epsilon (0.1));
 
-    const auto minus = harmonicsThrough (WavetableSynth::FilterType::combMinus);
+    const auto minus = harmonicsThrough (devices::dsp::FilterMode::combMinus);
     CHECK (minus[2] / minus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
     CHECK (minus[1] < 0.01 * minus[0]);
     CHECK (minus[3] < 0.01 * minus[0]);
@@ -580,17 +580,16 @@ TEST_CASE ("The wavetable synth's combs: on a note's pitch, Comb + keeps a saw's
 TEST_CASE ("The wavetable synth's vowel, phaser and sample and hold play its saw, steadily")
 {
     const auto& types = WavetableSynth::info.parameters[WavetableSynth::filterType].choices;
-    CHECK (types[(size_t) WavetableSynth::FilterType::vowel] == std::string_view ("Vowel"));
-    CHECK (types[(size_t) WavetableSynth::FilterType::phaser] == std::string_view ("Phaser"));
-    CHECK (types[(size_t) WavetableSynth::FilterType::sampleAndHold] == std::string_view ("Sample & Hold"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::vowel] == std::string_view ("Vowel"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::phaser] == std::string_view ("Phaser"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::sampleAndHold] == std::string_view ("Sample & Hold"));
 
     auto values = getPlainValues (2.0f / 3.0f);
     values[WavetableSynth::filterOn] = 1.0f;
     values[WavetableSynth::cutoff] = 1000.0f;
     values[WavetableSynth::resonance] = 1.0f;
 
-    for (const auto type :
-         { WavetableSynth::FilterType::vowel, WavetableSynth::FilterType::phaser, WavetableSynth::FilterType::sampleAndHold })
+    for (const auto type : { devices::dsp::FilterMode::vowel, devices::dsp::FilterMode::phaser, devices::dsp::FilterMode::sampleAndHold })
     {
         INFO ("type " << (int) type);
         values[WavetableSynth::filterType] = (float) type;
@@ -607,7 +606,7 @@ TEST_CASE ("The wavetable synth's vowel, phaser and sample and hold play its saw
 
     // Sample and hold at a cutoff of 1 kHz folds a saw's 25th harmonic (2750 Hz at A2) back to 750 Hz, which a plain saw
     // at A2 hasn't (its harmonics are at multiples of 110 Hz).
-    values[WavetableSynth::filterType] = (float) WavetableSynth::FilterType::sampleAndHold;
+    values[WavetableSynth::filterType] = (float) devices::dsp::FilterMode::sampleAndHold;
     values[WavetableSynth::resonance] = 0.0f;
     const auto held = play (*makeSynth(), values, 24000, { noteOn (0, 45) });
     CHECK (measureLevelAt (held.left, 4800, 24000, 750.0) > 0.002);

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's filter (roadmap step 2.10), the "Filter" device: a resonant low-pass, high-pass, band-pass or notch filter
-// to sweep a sound open or closed, 12 or 24 dB per octave, with a drive that saturates what goes into it; or one of the
-// filter types every Phazite filter offers (dsp/MultimodeFilter.h): Comb + and Comb - (step 2.14), whose cutoff sets the
-// pitch of their peaks and whose resonance makes them ring, and Vowel, Phaser and Sample & Hold (step 2.15). The slope
-// counts for the first four. Its cutoff glides rather than jumps, so automation, modulators and a turned knob sweep it
-// smoothly. A new filter changes little: a low-pass open all the way.
+// Phazite's filter (roadmap step 2.10), the "Filter" device, with a drive that saturates what goes into it: one of the
+// filter types every Phazite filter offers (dsp/MultimodeFilter.h), a resonant low-pass, high-pass, band-pass or notch,
+// 12 or 24 dB per octave, to sweep a sound open or closed; Comb + and Comb -, whose cutoff sets the pitch of their peaks
+// and whose resonance makes them ring; or Vowel, Phaser or Sample & Hold. Its cutoff glides rather than jumps, so
+// automation, modulators and a turned knob sweep it smoothly. A new filter changes little: a low-pass open all the way.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -23,26 +22,12 @@ public:
 
     enum Parameter
     {
-        type,
+        filterType, // a dsp::FilterMode
         cutoff,
         resonance,
-        slope,
+        filterSlope,
         drive,
         mix // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
-    };
-
-    // Saved in projects by number: new types go at the end.
-    enum class Type
-    {
-        lowPass,
-        highPass,
-        bandPass,
-        notch,
-        combPlus, // step 2.14
-        combMinus,
-        vowel, // step 2.15
-        phaser,
-        sampleAndHold
     };
 
     static const DeviceInfo info;

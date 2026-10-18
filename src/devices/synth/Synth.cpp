@@ -12,9 +12,6 @@ namespace phazite::devices
 namespace
 {
     constexpr std::string_view waves[] = { "Sine", "Triangle", "Saw", "Square" };
-    constexpr std::string_view filterTypes[] = { "Low Pass", "Band Pass", "High Pass", "Comb +",       "Comb -",
-                                                 "Notch",    "Vowel",     "Phaser",    "Sample & Hold" }; // as Synth::FilterType
-    constexpr std::string_view filterSlopes[] = { "12 dB", "24 dB" };
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
     constexpr std::string_view lfoTargets[] = { "Pitch", "Cutoff", "Level" };
     constexpr std::string_view voiceModes[] = { "Poly", "Mono" };
@@ -59,7 +56,10 @@ namespace
         { .id = "pulseWidth", .name = "Pulse Width", .minimum = 0.05f, .maximum = 0.95f, .defaultValue = 0.5f, .unit = Unit::percent },
         makePercent ("subLevel", "Sub", 0.0f),
         makePercent ("noiseLevel", "Noise", 0.0f),
-        makeChoice ("filterType", "Filter Type", filterTypes, 0.0f),
+        makeChoice ("unisonVoices", "Unison", unisonCounts, 0.0f),
+        { .id = "unisonDetune", .name = "Unison Detune", .maximum = 100.0f, .defaultValue = 25.0f, .unit = Unit::cents },
+        { .id = "unisonSpread", .name = "Unison Spread", .defaultValue = 0.8f, .unit = Unit::percent },
+        makeChoice ("filterType", "Filter Type", dsp::filterModeNames, 0.0f),
         { .id = "cutoff",
           .name = "Cutoff",
           .minimum = 20.0f,
@@ -68,6 +68,7 @@ namespace
           .unit = Unit::hertz,
           .midpoint = 632.456f }, // the middle of the range, on a log scale
         makePercent ("resonance", "Resonance", 0.15f),
+        makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 0.0f), // 12 dB, the synth's gentler sound
         { .id = "filterEnvelope",
           .name = "Filter Envelope",
           .minimum = -48.0f,
@@ -83,8 +84,8 @@ namespace
         makeTime ("decay", "Decay", 0.0f, 300.0f),
         makePercent ("sustain", "Sustain", 0.8f),
         makeTime ("release", "Release", 0.5f, 200.0f),
-        makePercent ("velocity", "Velocity", 0.6f),
         makeChoice ("lfoShape", "LFO Shape", lfoShapes, 0.0f),
+        makeChoice ("lfoTarget", "LFO Target", lfoTargets, 0.0f),
         { .id = "lfoRate",
           .name = "LFO Rate",
           .minimum = 0.05f,
@@ -92,7 +93,6 @@ namespace
           .defaultValue = 5.0f,
           .unit = Unit::hertz,
           .midpoint = 1.0f },
-        makeChoice ("lfoTarget", "LFO Target", lfoTargets, 0.0f),
         makePercent ("lfoDepth", "LFO Depth", 0.0f),
         makeChoice ("voiceMode", "Voices", voiceModes, 0.0f),
         { .id = "glide",
@@ -103,16 +103,11 @@ namespace
           .unit = Unit::milliseconds,
           .midpoint = 200.0f },
         { .id = "bendRange", .name = "Bend Range", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 2.0f, .unit = Unit::semitones },
+        makePercent ("velocity", "Velocity", 0.6f),
         { .id = "level", .name = "Level", .minimum = -36.0f, .maximum = 6.0f, .defaultValue = -6.0f, .unit = Unit::decibels },
-
-        // Step 2.10: unison, whose defaults (one voice) leave projects from before sounding as they did.
-        makeChoice ("unisonVoices", "Unison", unisonCounts, 0.0f),
-        { .id = "unisonDetune", .name = "Unison Detune", .maximum = 100.0f, .defaultValue = 25.0f, .unit = Unit::cents },
-        { .id = "unisonSpread", .name = "Unison Spread", .defaultValue = 0.8f, .unit = Unit::percent },
-
-        // Step 2.15: the filter's slope, whose default (12 dB) leaves projects from before sounding as they did.
-        makeChoice ("filterSlope", "Filter Slope", filterSlopes, 0.0f),
     };
+
+    static_assert (std::size (parameters) == (size_t) Synth::level + 1);
 
     // In a mixer slot: the filter, the synth's most played-with controls.
     constexpr std::string_view keyControls[] = { "cutoff", "resonance" };
@@ -125,37 +120,6 @@ namespace
     Enum choiceOf (float value)
     {
         return static_cast<Enum> (std::lround (value));
-    }
-
-    static_assert (std::size (filterTypes) == (size_t) Synth::FilterType::sampleAndHold + 1);
-
-    dsp::FilterMode getFilterMode (Synth::FilterType type)
-    {
-        using dsp::FilterMode;
-
-        switch (type)
-        {
-            case Synth::FilterType::lowPass:
-                return FilterMode::lowPass;
-            case Synth::FilterType::bandPass:
-                return FilterMode::bandPass;
-            case Synth::FilterType::highPass:
-                return FilterMode::highPass;
-            case Synth::FilterType::combPlus:
-                return FilterMode::combPlus;
-            case Synth::FilterType::combMinus:
-                return FilterMode::combMinus;
-            case Synth::FilterType::notch:
-                return FilterMode::notch;
-            case Synth::FilterType::vowel:
-                return FilterMode::vowel;
-            case Synth::FilterType::phaser:
-                return FilterMode::phaser;
-            case Synth::FilterType::sampleAndHold:
-                return FilterMode::sampleAndHold;
-        }
-
-        return FilterMode::lowPass;
     }
 } // namespace
 
@@ -421,9 +385,9 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 {
     const auto wave1 = choiceOf<dsp::Waveform> (values[osc1Wave]), wave2 = choiceOf<dsp::Waveform> (values[osc2Wave]);
     const auto mix2 = values[oscMix], width = values[pulseWidth], subGain = values[subLevel], noiseGain = values[noiseLevel];
-    const auto mode = getFilterMode (choiceOf<FilterType> (values[filterType]));
-    const auto steep = values[filterSlope] > 0.5f;
-    const auto q = 0.5 * std::pow (50.0, (double) values[resonance]); // a 12 dB section's, from 0.5, flat, to 25, ringing
+    const auto mode = dsp::toFilterMode (values[filterType]);
+    const auto steep = dsp::isSteep (values[filterSlope]);
+    const auto q = 0.5 * std::pow (50.0, (double) values[resonance]); // a 12 dB section's, the synth's own: 0.5, soft, to 25
     const auto outputGain = dsp::decibelsToGain (values[level]);
     const auto lfoAim = choiceOf<LfoTarget> (values[lfoTarget]);
     const auto depth = std::clamp (values[lfoDepth] + modWheel, 0.0f, 1.0f);

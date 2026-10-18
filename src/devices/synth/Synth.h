@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's synth (roadmap step 1.6): a subtractive synth with up to 16 voices. Each voice mixes two band-limited
 // oscillators (the second tuned and detuned against the first), a sine an octave down and noise, through a resonant
-// filter (low-pass, band-pass or high-pass at 12 or 24 dB, or the other types of dsp/MultimodeFilter.h: notch, comb,
-// vowel, phaser, sample and hold) that has an envelope of its own and follows the keys, then an amp envelope. One LFO
-// moves the pitch, the cutoff or the level; the mod wheel adds to it. In mono mode one voice plays, legato, gliding
-// between the keys held, as a bassline does. Pitch bend and the sustain pedal work as on a keyboard. Unison (step 2.10)
-// plays each oscillator up to seven times at once, detuned against each other and spread across the stereo field, for a
-// wide, thick sound (a "supersaw"). Its noise and its unison's starting phases come from fixed seeds, so it renders the
-// same every time.
+// filter (one of the types of dsp/MultimodeFilter.h: low-pass, high-pass, band-pass or notch at 12 or 24 dB, comb, vowel,
+// phaser, sample and hold) that has an envelope of its own and follows the keys, then an amp envelope. One LFO moves the
+// pitch, the cutoff or the level; the mod wheel adds to it. In mono mode one voice plays, legato, gliding between the
+// keys held, as a bassline does. Pitch bend and the sustain pedal work as on a keyboard. Unison plays each oscillator up
+// to seven times at once, detuned against each other and spread across the stereo field, for a wide, thick sound (a
+// "supersaw"). Its noise and its unison's starting phases come from fixed seeds, so it renders the same every time.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -30,6 +29,7 @@ public:
     static constexpr int maxVoices = 16;
     static constexpr int maxUnison = 7; // oscillators each voice plays at once, detuned against each other
 
+    // In the order of the description's parameters, as the editor shows them.
     enum Parameter
     {
         osc1Wave,
@@ -40,9 +40,13 @@ public:
         pulseWidth,
         subLevel,
         noiseLevel,
-        filterType,
+        unisonVoices, // from one voice up to seven, detuned and spread
+        unisonDetune,
+        unisonSpread,
+        filterType, // a dsp::FilterMode
         cutoff,
         resonance,
+        filterSlope,
         filterEnvelope,
         keyTracking,
         filterAttack,
@@ -53,33 +57,15 @@ public:
         decay,
         sustain,
         release,
-        velocity,
         lfoShape,
-        lfoRate,
         lfoTarget,
+        lfoRate,
         lfoDepth,
         voiceMode,
         glide,
         bendRange,
-        level,
-        unisonVoices, // added in step 2.10: from one voice (as before) up to seven, detuned and spread
-        unisonDetune,
-        unisonSpread,
-        filterSlope // added in step 2.15: 12 dB per octave (as before) or 24
-    };
-
-    // Saved in projects by number: new types go at the end.
-    enum class FilterType
-    {
-        lowPass,
-        bandPass,
-        highPass,
-        combPlus, // step 2.14
-        combMinus,
-        notch, // step 2.15
-        vowel,
-        phaser,
-        sampleAndHold
+        velocity,
+        level
     };
 
     enum class LfoTarget

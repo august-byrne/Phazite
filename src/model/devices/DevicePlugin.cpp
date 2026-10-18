@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DevicePlugin.h"
-#include "model/base/internal/Schema.h"
 
 #include <algorithm>
 
@@ -49,9 +48,9 @@ DevicePlugin::DevicePlugin (te::PluginCreationInfo creation, const devices::Devi
     for (const auto& description : info.parameters)
     {
         const auto id = toString (description.id);
-        // Under its ID, but never in the place of a property Tracktion keeps on every plug-in, such as its type.
+        // Under its ID (Schema.h: no ID is a property Tracktion keeps on every plug-in).
         auto* stored = storedValues.add (new juce::CachedValue<float>());
-        stored->referTo (state, schema::getParameterProperty (id), undoManager, description.defaultValue);
+        stored->referTo (state, juce::Identifier (id), undoManager, description.defaultValue);
 
         auto* parameter = addParam (id, toString (description.name), devices::getRange (description));
         parameter->attachToCurrentValue (*stored);

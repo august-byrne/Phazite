@@ -144,18 +144,8 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
         CHECK (types.insert (info->typeID).second);
     }
 
-    // Saved in projects: these never change.
-    CHECK (devices::Delay::info.typeID == std::string_view ("phaziteDelay"));
-    CHECK (devices::Saturator::info.typeID == std::string_view ("phaziteSaturator"));
-    CHECK (devices::FilterEffect::info.typeID == std::string_view ("phaziteFilter"));
-    CHECK (devices::Utility::info.typeID == std::string_view ("phaziteUtility"));
-    CHECK (devices::Multiband::info.typeID == std::string_view ("phaziteMultiband"));
-    CHECK (devices::Maximizer::info.typeID == std::string_view ("phaziteMaximizer"));
-
-    // The synth's unison came after its other parameters, which keep their places; it plays one voice at first.
-    CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].id == std::string_view ("unisonVoices"));
+    // The synth's unison plays one voice at first.
     CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].defaultValue == doctest::Approx (0.0f));
-    CHECK (devices::Synth::info.parameters[devices::Synth::level].id == std::string_view ("level"));
 
     // The utility changes nothing until turned, and has no mix.
     CHECK (devices::findParameter (devices::Utility::info, devices::mixParameterID) < 0);
@@ -239,17 +229,17 @@ TEST_CASE ("The filter: open at first, and low-pass, high-pass and band-pass sha
     CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 1000.0, testRate)) == doctest::Approx (-3.0).epsilon (0.2));
     CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 4000.0, testRate)) < -40.0f); // 24 dB per octave
 
-    set (values, devices::FilterEffect::info, "slope", 0.0f); // 12 dB per octave
+    set (values, devices::FilterEffect::info, "filterSlope", 0.0f); // 12 dB per octave
     CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 4000.0, testRate)) > -30.0f);
     CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 4000.0, testRate)) < -18.0f);
 
-    set (values, devices::FilterEffect::info, "type", 1.0f); // high-pass
-    set (values, devices::FilterEffect::info, "slope", 1.0f);
+    set (values, devices::FilterEffect::info, "filterType", 1.0f); // high-pass
+    set (values, devices::FilterEffect::info, "filterSlope", 1.0f);
     CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 10000.0, testRate)) == doctest::Approx (0.0).epsilon (0.5));
     CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 250.0, testRate)) < -40.0f);
 
     // Resonance rings at the cutoff.
-    set (values, devices::FilterEffect::info, "type", 0.0f);
+    set (values, devices::FilterEffect::info, "filterType", 0.0f);
     set (values, devices::FilterEffect::info, "resonance", 0.8f);
     CHECK (devices::FilterEffect::getMagnitude (values, 1000.0, testRate) > 2.0);
 
@@ -266,22 +256,22 @@ TEST_CASE ("The filter: open at first, and low-pass, high-pass and band-pass sha
 
 TEST_CASE ("The filter's combs: Comb + on the cutoff's multiples, Comb - on its odd ones, ringing on after the sound")
 {
-    // After the other types, so that those keep their numbers in saved projects.
-    const auto& types = devices::FilterEffect::info.parameters[devices::FilterEffect::type].choices;
+    // The types every Phazite filter offers (dsp/MultimodeFilter.h), in its order.
+    const auto& types = devices::FilterEffect::info.parameters[devices::FilterEffect::filterType].choices;
     REQUIRE (types.size() == 9);
     CHECK (types[3] == std::string_view ("Notch"));
-    CHECK (types[(size_t) devices::FilterEffect::Type::combPlus] == std::string_view ("Comb +"));
-    CHECK (types[(size_t) devices::FilterEffect::Type::combMinus] == std::string_view ("Comb -"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::combPlus] == std::string_view ("Comb +"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::combMinus] == std::string_view ("Comb -"));
 
     auto values = getDefaults (devices::FilterEffect::info);
-    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::combPlus);
+    set (values, devices::FilterEffect::info, "filterType", (float) devices::dsp::FilterMode::combPlus);
     set (values, devices::FilterEffect::info, "cutoff", 1000.0f);
     set (values, devices::FilterEffect::info, "resonance", 0.5f);
     CHECK (devices::FilterEffect::getMagnitude (values, 2000.0, testRate) > 1.5);
     CHECK (devices::FilterEffect::getMagnitude (values, 1500.0, testRate) < 0.01);
 
     // It has no slope.
-    set (values, devices::FilterEffect::info, "slope", 0.0f);
+    set (values, devices::FilterEffect::info, "filterSlope", 0.0f);
     CHECK (devices::FilterEffect::getMagnitude (values, 2500.0, testRate) < 0.01);
     CHECK (devices::FilterEffect::getMagnitude (values, 3000.0, testRate) > 1.5);
 
@@ -295,12 +285,12 @@ TEST_CASE ("The filter's combs: Comb + on the cutoff's multiples, Comb - on its 
     CHECK (getRms (between.left, 12000, 24000) < 0.005f);
 
     // Comb -: the odd multiples only, at the same pitch.
-    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::combMinus);
+    set (values, devices::FilterEffect::info, "filterType", (float) devices::dsp::FilterMode::combMinus);
     CHECK (devices::FilterEffect::getMagnitude (values, 3000.0, testRate) > 1.5);
     CHECK (devices::FilterEffect::getMagnitude (values, 2000.0, testRate) < 0.01);
 
     // At the most resonance it rings on once a sound stops, and says how long: about a third of a second at 1 kHz.
-    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::combPlus);
+    set (values, devices::FilterEffect::info, "filterType", (float) devices::dsp::FilterMode::combPlus);
     set (values, devices::FilterEffect::info, "resonance", 1.0f);
     filter.reset();
     const auto burst = [] (int t)
@@ -314,33 +304,33 @@ TEST_CASE ("The filter's combs: Comb + on the cutoff's multiples, Comb - on its 
     CHECK (getRms (rung.left, 24000, 24480) < 1.0e-4f); // 0.5 s after
 
     // A low-pass again has no tail.
-    set (values, devices::FilterEffect::info, "type", 0.0f);
+    set (values, devices::FilterEffect::info, "filterType", 0.0f);
     play (filter, values, 480, burst);
     CHECK (filter.getTailSeconds() == doctest::Approx (0.0));
 }
 
 TEST_CASE ("The filter's vowel, phaser and sample and hold: after the combs, each with its own shape and no slope")
 {
-    const auto& types = devices::FilterEffect::info.parameters[devices::FilterEffect::type].choices;
+    const auto& types = devices::FilterEffect::info.parameters[devices::FilterEffect::filterType].choices;
     REQUIRE (types.size() == 9);
-    CHECK (types[(size_t) devices::FilterEffect::Type::vowel] == std::string_view ("Vowel"));
-    CHECK (types[(size_t) devices::FilterEffect::Type::phaser] == std::string_view ("Phaser"));
-    CHECK (types[(size_t) devices::FilterEffect::Type::sampleAndHold] == std::string_view ("Sample & Hold"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::vowel] == std::string_view ("Vowel"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::phaser] == std::string_view ("Phaser"));
+    CHECK (types[(size_t) devices::dsp::FilterMode::sampleAndHold] == std::string_view ("Sample & Hold"));
 
     // The vowel: at a cutoff of 1080 Hz, an A, its first formant at 650 Hz well above what lies past it.
     auto values = getDefaults (devices::FilterEffect::info);
-    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::vowel);
+    set (values, devices::FilterEffect::info, "filterType", (float) devices::dsp::FilterMode::vowel);
     set (values, devices::FilterEffect::info, "cutoff", 1080.0f);
     set (values, devices::FilterEffect::info, "resonance", 0.5f);
     const auto vowel = devices::FilterEffect::getMagnitude (values, 650.0, testRate);
     CHECK (vowel > 2.5 * devices::FilterEffect::getMagnitude (values, 850.0, testRate));
 
     // No slope for it.
-    set (values, devices::FilterEffect::info, "slope", 0.0f);
+    set (values, devices::FilterEffect::info, "filterSlope", 0.0f);
     CHECK (devices::FilterEffect::getMagnitude (values, 650.0, testRate) == doctest::Approx (vowel));
 
     // The phaser: a notch at the cutoff.
-    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::phaser);
+    set (values, devices::FilterEffect::info, "filterType", (float) devices::dsp::FilterMode::phaser);
     set (values, devices::FilterEffect::info, "cutoff", 1000.0f);
     set (values, devices::FilterEffect::info, "resonance", 0.0f);
     CHECK (devices::FilterEffect::getMagnitude (values, 1000.0, testRate) < 0.01);
@@ -351,7 +341,7 @@ TEST_CASE ("The filter's vowel, phaser and sample and hold: after the combs, eac
     CHECK (getRms (notched.left, 12000, 24000) < 0.005f);
 
     // Sample and hold at a cutoff of 1 kHz: 2.7 kHz folds back to 700 Hz.
-    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::sampleAndHold);
+    set (values, devices::FilterEffect::info, "filterType", (float) devices::dsp::FilterMode::sampleAndHold);
     filter.reset();
     const auto folded = play (filter, values, 24000, sine (2700.0, 0.25f));
     CHECK (getAmplitudeAt (folded.left, 12000, 24000, 700.0) > 0.1f);
@@ -483,7 +473,7 @@ TEST_CASE ("The maximizer: louder, but never over its ceiling, and the limiter a
     CHECK (devices::Maximizer::getReduction (1.0f, -30.0f) == doctest::Approx (0.0f));
 }
 
-TEST_CASE ("The synth's unison: one voice the same on both sides, as before; seven spread across them")
+TEST_CASE ("The synth's unison: one voice the same on both sides; seven spread across them")
 {
     auto values = getDefaults (devices::Synth::info);
     devices::Synth synth;

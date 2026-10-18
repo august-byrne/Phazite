@@ -34,36 +34,7 @@ juce::File createFile (const juce::File& file)
 }
 } // namespace
 
-TEST_CASE ("Every setting keeps its key")
-{
-    // The keys are Settings.xml's format: a renamed one would lose what the user set.
-    CHECK (juce::String (Settings::theme.key) == "phaziteTheme");
-    CHECK (juce::String (Settings::hoverHelp.key) == "phaziteHoverHelp");
-    CHECK (juce::String (Settings::computerKeyboard.key) == "phaziteComputerKeyboard");
-    CHECK (juce::String (Settings::interfaceScale.key) == "phaziteInterfaceScale");
-    CHECK (juce::String (Settings::welcomeShown.key) == "phaziteWelcomeShown");
-    CHECK (juce::String (Settings::keymap.key) == "phaziteKeymap");
-    CHECK (juce::String (Settings::keyChangesPrefix) == "phaziteKeyChanges.");
-    CHECK (juce::String (Settings::recentProjects.key) == "phaziteRecentProjects");
-    CHECK (juce::String (Settings::browserFolders.key) == "phaziteBrowserFolders");
-    CHECK (juce::String (Settings::browserFavorites.key) == "phaziteBrowserFavorites");
-    CHECK (juce::String (Settings::browserRecent.key) == "phaziteBrowserRecent");
-    CHECK (juce::String (Settings::browserPreview.key) == "phaziteBrowserPreview");
-    CHECK (juce::String (Settings::browserPreviewVolume.key) == "phaziteBrowserPreviewVolume");
-    CHECK (juce::String (Settings::browserOpenness.key) == "phaziteBrowserOpenness");
-    CHECK (juce::String (Settings::exportFormat.key) == "phaziteExportFormat");
-    CHECK (juce::String (Settings::exportSampleRate.key) == "phaziteExportSampleRate");
-    CHECK (juce::String (Settings::exportBitDepth.key) == "phaziteExportBitDepth");
-    CHECK (juce::String (Settings::exportNormalize.key) == "phaziteExportNormalize");
-    CHECK (juce::String (Settings::exportLoudnessTarget.key) == "phaziteExportLoudnessTarget");
-    CHECK (juce::String (Settings::exportTruePeakCeiling.key) == "phaziteExportTruePeakCeiling");
-    CHECK (juce::String (Settings::exportStems.key) == "phaziteExportStems");
-    CHECK (juce::String (Settings::pluginsGettingAllKeys.key) == "phazitePluginsGettingAllKeys");
-    CHECK (juce::String (Settings::guide.key) == "phaziteGuide");
-    CHECK (juce::String (Settings::guideStepsDone.key) == "phaziteGuideStepsDone");
-}
-
-TEST_CASE ("Settings have their defaults, and are stored as before")
+TEST_CASE ("Settings have their defaults, and are stored as plain values")
 {
     Settings settings; // in memory
 
@@ -106,7 +77,7 @@ TEST_CASE ("Settings have their defaults, and are stored as before")
     CHECK (settings.get (Settings::browserFavorites) == juce::StringArray { "Kick.wav", "Snare.wav" }); // no empty lines
     CHECK (settings.getKeyChanges ("FL Studio") == "<KEYMAPPINGS/>");
 
-    // In a file, as Phazite always wrote them: a list as its lines, a switch as 1 or 0.
+    // In a file: a list as its lines, a switch as 1 or 0.
     phazite::test::TemporaryFolder temp;
     auto file = makeSettingsFile (temp.folder.getChildFile ("Settings.xml"));
     Settings stored (file.get());

@@ -6,8 +6,6 @@
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "devices/core/Processor.h"
-#include "devices/filter/FilterEffect.h"
-#include "model/base/internal/Schema.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Mixer.h"
@@ -248,7 +246,7 @@ TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a sav
             REQUIRE (device != nullptr);
             auto& values = setTo[type];
 
-            // Each one away from its default, to the other end of its range: the filter's type to Comb -.
+            // Each one away from its default, to the other end of its range: the filters' types to Sample & Hold.
             for (const auto& parameter : info.parameters)
             {
                 const auto value = parameter.defaultValue < parameter.maximum ? parameter.maximum : parameter.minimum;
@@ -289,23 +287,24 @@ TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a sav
     }
 }
 
-TEST_CASE ("The filter's type is kept beside the plug-in's own type, and taken back from a preset")
+TEST_CASE ("No parameter of Phazite's devices is named as a property Tracktion keeps on every plug-in")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    const auto plugin = edit->getPluginCache().createNewPlugin (devices::FilterEffect::typeID, {});
-    auto* filter = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
-    REQUIRE (filter != nullptr);
-    auto* type = filter->findParameter ("type");
-    REQUIRE (type != nullptr);
+    // Its value would take that property's place: a changed value would change the plug-in's type, say, and the project
+    // would lose the device when it next opened.
+    const juce::Identifier tracktions[] = { te::IDs::type,          te::IDs::id,         te::IDs::enabled,           te::IDs::process,
+                                            te::IDs::frozen,        te::IDs::customName, te::IDs::quickParamName,    te::IDs::windowX,
+                                            te::IDs::windowY,       te::IDs::srcChan,    te::IDs::sidechainSourceID, te::IDs::dstChan,
+                                            te::IDs::masterPluginID };
 
-    type->setParameter ((float) devices::FilterEffect::Type::combMinus, juce::sendNotification);
-    CHECK (plugin->state[te::IDs::type].toString() == juce::String (devices::FilterEffect::typeID));
-    CHECK ((float) plugin->state[phazite::schema::phaziteType] == doctest::Approx (5.0f));
+    for (const auto* info : phazite::getOwnDevices())
+    {
+        for (const auto& parameter : info->parameters)
+        {
+            const juce::String id (parameter.id.data(), parameter.id.size());
+            INFO (juce::String (info->typeID.data(), info->typeID.size()) << ": " << id);
 
-    // Its state as a preset keeps it, put back after a change.
-    const auto preset = plugin->state.createCopy();
-    type->setParameter (0.0f, juce::sendNotification);
-    filter->restorePluginStateFromValueTree (preset);
-    CHECK (type->getCurrentValue() == doctest::Approx (5.0f));
-    CHECK (plugin->state[te::IDs::type].toString() == juce::String (devices::FilterEffect::typeID));
+            for (const auto& name : tracktions)
+                CHECK (id != name.toString());
+        }
+    }
 }

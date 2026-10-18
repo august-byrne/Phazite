@@ -11,21 +11,16 @@ namespace phazite::devices
 {
 namespace
 {
-    // In the order of FilterEffect::Type, saved in projects by number.
-    constexpr std::string_view types[] = { "Low Pass", "High Pass", "Band Pass", "Notch",        "Comb +",
-                                           "Comb -",   "Vowel",     "Phaser",    "Sample & Hold" };
-    constexpr std::string_view slopes[] = { "12 dB", "24 dB" };
-
     constexpr float lowestCutoff = 20.0f, highestCutoff = 20000.0f;
 
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
-        { .id = "type",
+        { .id = "filterType",
           .name = "Type",
-          .maximum = (float) std::size (types) - 1.0f,
+          .maximum = (float) std::size (dsp::filterModeNames) - 1.0f,
           .defaultValue = 0.0f,
           .unit = Unit::choice,
-          .choices = types },
+          .choices = dsp::filterModeNames },
         { .id = "cutoff",
           .name = "Cutoff",
           .minimum = lowestCutoff,
@@ -34,12 +29,15 @@ namespace
           .unit = Unit::hertz,
           .midpoint = 632.456f }, // the middle of the range, on a log scale
         { .id = "resonance", .name = "Resonance", .defaultValue = 0.1f, .unit = Unit::percent },
-        { .id = "slope", .name = "Slope", .maximum = 1.0f, .defaultValue = 1.0f, .unit = Unit::choice, .choices = slopes },
+        { .id = "filterSlope",
+          .name = "Slope",
+          .maximum = 1.0f,
+          .defaultValue = 1.0f,
+          .unit = Unit::choice,
+          .choices = dsp::filterSlopeNames },
         { .id = "drive", .name = "Drive", .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
-
-    static_assert (std::size (types) == (size_t) FilterEffect::Type::sampleAndHold + 1);
 
     // In a mixer slot: the sweep.
     constexpr std::string_view keyControls[] = { "cutoff", "resonance" };
@@ -47,46 +45,14 @@ namespace
     constexpr double glideSeconds = 0.01; // how long the cutoff takes to follow a change, about
     constexpr double driveSeconds = 0.02;
 
-    dsp::FilterMode getMode (std::span<const float> values)
-    {
-        using Type = FilterEffect::Type;
-        using dsp::FilterMode;
-
-        switch ((Type) juce::jlimit (0, (int) std::size (types) - 1, (int) std::lround (values[FilterEffect::type])))
-        {
-            case Type::lowPass:
-                return FilterMode::lowPass;
-            case Type::highPass:
-                return FilterMode::highPass;
-            case Type::bandPass:
-                return FilterMode::bandPass;
-            case Type::notch:
-                return FilterMode::notch;
-            case Type::combPlus:
-                return FilterMode::combPlus;
-            case Type::combMinus:
-                return FilterMode::combMinus;
-            case Type::vowel:
-                return FilterMode::vowel;
-            case Type::phaser:
-                return FilterMode::phaser;
-            case Type::sampleAndHold:
-                return FilterMode::sampleAndHold;
-        }
-
-        return FilterMode::lowPass;
-    }
-
-    // The filter at a cutoff: 12 or 24 dB per octave as the slope says (a comb, the vowel, the phaser and the sample
-    // and hold have none), a 12 dB section's Q rising from a Butterworth's with the resonance.
+    // The filter at a cutoff.
     dsp::MultimodeCoefficients makeCoefficients (std::span<const float> values, double cutoffHz, double sampleRate)
     {
-        const auto amount = (double) juce::jlimit (0.0f, 1.0f, values[FilterEffect::resonance]);
-        return dsp::makeMultimode ({ .mode = getMode (values),
+        return dsp::makeMultimode ({ .mode = dsp::toFilterMode (values[FilterEffect::filterType]),
                                      .frequency = cutoffHz,
                                      .resonance = values[FilterEffect::resonance],
-                                     .steep = values[FilterEffect::slope] > 0.5f,
-                                     .q = 0.70710678 * std::pow (2.0, amount * 4.5) },
+                                     .steep = dsp::isSteep (values[FilterEffect::filterSlope]),
+                                     .q = dsp::getResonanceQ (values[FilterEffect::resonance]) },
                                    sampleRate);
     }
 

@@ -77,7 +77,7 @@ TEST_CASE ("The browser's places come in order, the user's folders before Add Fo
                                   "My Sounds", "Add Folder..." });
     CHECK_FALSE (places.back().holdsItems());
 
-    // The keys are those of the places a user left open, which the settings keep: they don't change between versions.
+    // The keys are those of the places a user left open, which the settings keep from one session to the next.
     CHECK (places[0].getKey() == juce::String ("0:Favorites:"));
     CHECK (places[7].getKey() == "7:My Sounds:" + libraries.userFolder.getFullPathName());
     CHECK (places[6].getKey().startsWith ("9:Presets:"));

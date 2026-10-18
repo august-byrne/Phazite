@@ -817,7 +817,7 @@ TEST_SUITE ("realtime-audit")
         auto& notes = getTrack (*edit, 0);
         const auto synth = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
         REQUIRE (phazite::setInstrument (notes, synth) != nullptr);
-        setDeviceValue (synth, "filterType", (float) Synth::FilterType::combPlus);
+        setDeviceValue (synth, "filterType", (float) phazite::devices::dsp::FilterMode::combPlus);
         setDeviceValue (synth, "resonance", 0.8f);
         setDeviceValue (synth, "unisonVoices", 2.0f); // three
         addChords (*edit, notes);
@@ -828,7 +828,7 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
         const auto filter = edit->getPluginCache().createNewPlugin (phazite::devices::FilterEffect::typeID, {});
         REQUIRE (phazite::insertDevice (tone, filter) != nullptr);
-        setDeviceValue (filter, "type", (float) phazite::devices::FilterEffect::Type::combMinus);
+        setDeviceValue (filter, "filterType", (float) phazite::devices::dsp::FilterMode::combMinus);
         setDeviceValue (filter, "resonance", 0.9f);
         auto* cutoff = dynamic_cast<phazite::DevicePlugin*> (filter.get())->findParameter ("cutoff");
 
@@ -851,7 +851,7 @@ TEST_SUITE ("realtime-audit")
         auto& track = getTrack (*edit, 0);
         const auto wavetable = edit->getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
         REQUIRE (phazite::setInstrument (track, wavetable) != nullptr);
-        setDeviceValue (wavetable, "filterType", (float) WavetableSynth::FilterType::combPlus);
+        setDeviceValue (wavetable, "filterType", (float) phazite::devices::dsp::FilterMode::combPlus);
         setDeviceValue (wavetable, "resonance", 0.8f);
         setDeviceValue (wavetable, "unisonVoices", 3.0f); // four
         setDeviceValue (wavetable, "mod1Amount", 0.5f);   // its first slot: Envelope 2 opens the cutoff, here by four octaves
@@ -872,7 +872,7 @@ TEST_SUITE ("realtime-audit")
         auto& notes = getTrack (*edit, 0);
         const auto synth = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
         REQUIRE (phazite::setInstrument (notes, synth) != nullptr);
-        setDeviceValue (synth, "filterType", (float) Synth::FilterType::vowel);
+        setDeviceValue (synth, "filterType", (float) phazite::devices::dsp::FilterMode::vowel);
         setDeviceValue (synth, "resonance", 0.8f);
         addChords (*edit, notes);
 
@@ -881,7 +881,7 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
         const auto filter = edit->getPluginCache().createNewPlugin (phazite::devices::FilterEffect::typeID, {});
         REQUIRE (phazite::insertDevice (tone, filter) != nullptr);
-        setDeviceValue (filter, "type", (float) phazite::devices::FilterEffect::Type::phaser);
+        setDeviceValue (filter, "filterType", (float) phazite::devices::dsp::FilterMode::phaser);
         setDeviceValue (filter, "resonance", 0.9f);
         auto* cutoff = dynamic_cast<phazite::DevicePlugin*> (filter.get())->findParameter ("cutoff");
 
@@ -904,7 +904,7 @@ TEST_SUITE ("realtime-audit")
         auto& track = getTrack (*edit, 0);
         const auto wavetable = edit->getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
         REQUIRE (phazite::setInstrument (track, wavetable) != nullptr);
-        setDeviceValue (wavetable, "filterType", (float) WavetableSynth::FilterType::sampleAndHold);
+        setDeviceValue (wavetable, "filterType", (float) phazite::devices::dsp::FilterMode::sampleAndHold);
         setDeviceValue (wavetable, "resonance", 0.8f);
         setDeviceValue (wavetable, "unisonVoices", 3.0f); // four
         setDeviceValue (wavetable, "mod1Amount", 0.5f);   // its first slot: Envelope 2 opens the cutoff, here by four octaves

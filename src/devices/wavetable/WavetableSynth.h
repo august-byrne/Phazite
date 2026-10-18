@@ -4,11 +4,12 @@
 // or a sound of the user's), each with a pitch, a level and a warp that reshapes its wave (hard sync, bend, pulse width,
 // mirror, or FM or ring modulation from the other oscillator); then a sub oscillator and noise. Unison plays both
 // oscillators up to eight times at once, detuned, spread across the stereo field and across the table. A resonant filter
-// with drive follows (or another type of dsp/MultimodeFilter.h: comb, vowel, phaser, sample and hold); three envelopes
-// (the first shapes the level) and two LFOs, free or starting again with each note; and eight modulation slots, each a
-// source moving a destination by an amount, for each voice on its own, so an envelope sweeps every note's table from its
-// start. 16 voices, or one in mono mode, legato, with glide. It has no effects of its own: Phazite's devices follow it.
-// Its noise, unison phases and random values come from fixed seeds, so it renders the same every time.
+// with drive follows, of any type of dsp/MultimodeFilter.h (low-pass, high-pass, band-pass or notch at 12 or 24 dB, comb,
+// vowel, phaser, sample and hold); three envelopes (the first shapes the level) and two LFOs, free or starting again with
+// each note; and eight modulation slots, each a source moving a destination by an amount, for each voice on its own, so
+// an envelope sweeps every note's table from its start. 16 voices, or one in mono mode, legato, with glide. It has no
+// effects of its own: Phazite's devices follow it. Its noise, unison phases and random values come from fixed seeds, so
+// it renders the same every time.
 #pragma once
 
 #include "Wavetable.h"
@@ -59,9 +60,10 @@ public:
         unisonSpread,
         unisonPosition,
         filterOn,
-        filterType,
+        filterType, // a dsp::FilterMode
         cutoff,
         resonance,
+        filterSlope,
         drive,
         keyTracking,
         env1Attack,
@@ -163,22 +165,6 @@ public:
         mirror,     // the wave read forward, then back
         fm,         // the other oscillator moves its phase
         ringMod     // the other oscillator multiplies it
-    };
-
-    // Saved in projects by number: new types go at the end.
-    enum class FilterType
-    {
-        lowPass12,
-        lowPass24,
-        bandPass,
-        highPass12,
-        highPass24,
-        notch,
-        combPlus, // step 2.14
-        combMinus,
-        vowel, // step 2.15
-        phaser,
-        sampleAndHold
     };
 
     enum class ModSource

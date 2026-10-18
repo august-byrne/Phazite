@@ -201,9 +201,8 @@ namespace
         }
     }
 
-    // The IDs of the parameters whose values a property of a device's state holds: Tracktion's own devices name it after
-    // something else; Phazite's after the parameter, but for one named as Tracktion's own type (Schema.h:
-    // getParameterProperty()).
+    // The IDs of the parameters whose values a property of a device's state holds: Tracktion's fader, folder's VCA and send
+    // name it after something else; Phazite's devices after the parameter.
     juce::StringArray getParametersStoredIn (const juce::ValueTree& device, const juce::Identifier& property)
     {
         const auto type = device[te::IDs::type].toString();
@@ -225,11 +224,7 @@ namespace
         if (type == te::AuxSendPlugin::xmlTypeName)
             return property == te::IDs::auxSendSliderPos ? juce::StringArray { "send level" } : juce::StringArray();
 
-        // The type says which plug-in it is; the Filter device's own Type is elsewhere.
-        if (property == te::IDs::type)
-            return {};
-
-        return { schema::getPropertyParameter (property) };
+        return { property.toString() };
     }
 } // namespace
 

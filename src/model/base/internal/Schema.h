@@ -200,23 +200,8 @@ inline constexpr const char* phaziteLoudnessMeter = "phaziteLoudnessMeter";
 
 // Phazite's own devices (model/devices/internal/Devices.h) are PLUGINs too. Each one's type is the typeID of its description
 // (src/devices/<area>/: "phaziteEq" for the EQ), and its parameters' values are properties of the PLUGIN named by their
-// IDs in that description, as are its automation curves' paramIDs.
-//
-// One parameter's ID is a property Tracktion keeps on every PLUGIN: the Filter device's "type" (devices/filter/
-// FilterEffect.h), as its type is. Its value is "phaziteType", so that it can't take the type's place; its ID stays
-// "type" everywhere else (its automation curve's paramID, a lane's parameter).
-inline const juce::Identifier phaziteType { "phaziteType" };
-
-// The property of a PLUGIN of Phazite's own devices that holds a parameter's value, and the other way round.
-inline juce::Identifier getParameterProperty (const juce::String& parameterID)
-{
-    return parameterID == te::IDs::type.toString() ? phaziteType : juce::Identifier (parameterID);
-}
-
-inline juce::String getPropertyParameter (const juce::Identifier& property)
-{
-    return property == phaziteType ? te::IDs::type.toString() : property.toString();
-}
+// IDs in that description, as are its automation curves' paramIDs. So no parameter's ID may be a property Tracktion keeps
+// on every PLUGIN (type, id, enabled, process...): its value would take that property's place.
 
 // Phazite's drum sampler (devices/drums/DrumSampler.h) also keeps, on its PLUGIN, the sound file each pad plays: a path
 // relative to the project's folder ("Audio/Kick 01.wav"), or none (no property) for the default kit's sound; in a preset,

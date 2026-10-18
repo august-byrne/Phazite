@@ -44,7 +44,7 @@ namespace
             { { "Sub", { "subLevel", "subOctave", "subShape" } },
               { "Noise", { "noiseLevel" } },
               { "Unison", { "unisonVoices", "unisonDetune", "unisonSpread", "unisonPosition" } },
-              { "Filter", { "filterOn", "filterType", "cutoff", "resonance", "drive", "keyTracking" } } },
+              { "Filter", { "filterOn", "filterType", "cutoff", "resonance", "filterSlope", "drive", "keyTracking" } } },
             { { "Envelope 1", { "env1Attack", "env1Decay", "env1Sustain", "env1Release" } },
               { "Envelope 2", { "env2Attack", "env2Decay", "env2Sustain", "env2Release" } },
               { "Envelope 3", { "env3Attack", "env3Decay", "env3Sustain", "env3Release" } } },

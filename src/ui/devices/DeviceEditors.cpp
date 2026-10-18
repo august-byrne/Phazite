@@ -62,7 +62,7 @@ namespace
 
     std::vector<std::vector<DevicePanel::Group>> getFilterLayout()
     {
-        return { { { "Filter", { "type", "cutoff", "resonance", "slope" } }, { "Drive", { "drive" } } } };
+        return { { { "Filter", { "filterType", "cutoff", "resonance", "filterSlope" } }, { "Drive", { "drive" } } } };
     }
 
     std::vector<std::vector<DevicePanel::Group>> getUtilityLayout()
