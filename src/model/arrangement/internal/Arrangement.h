@@ -2,10 +2,11 @@
 // Edits of the song's time line across every track: inserting, removing, moving and copying a range of
 // beats. Sections (Sections.h) and the Insert Time and Remove Time commands use them.
 //
-// Clips that cross a range's edges are split there, so what lies inside goes with the range. Sections are
-// never split: one that an edit cuts into gets shorter or longer instead. Automation goes with the clips.
-// Tempo and key changes move with inserted and removed time, but stay where they are when a range is
-// moved or copied.
+// Clips that cross a range's edges are split there, so what lies inside goes with the range, and so are the chord
+// lane's chords (model/chords/internal/Chords.h) when a range is moved or copied. Sections are never split: one that an
+// edit cuts into gets shorter or longer instead, as a chord does when time is inserted or removed. Automation goes with
+// the clips. Tempo and key changes (the chord lane's too) move with inserted and removed time, but stay where they are
+// when a range is moved or copied.
 #pragma once
 
 #include "model/base/internal/Tracktion.h"

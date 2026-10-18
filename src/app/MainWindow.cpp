@@ -5,6 +5,7 @@
 #include "model/project/internal/Export.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/ExportPanel.h"
+#include "ui/shell/ProgressionsPanel.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
@@ -94,7 +95,8 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     session.onExport = [this] { showExport(); };
     session.onProjectClosing = [this]
     {
-        delete exportWindow.getComponent(); // its export holds the Edit
+        delete exportWindow.getComponent();       // its export holds the Edit
+        delete progressionsWindow.getComponent(); // it plays and changes that project's chords
     };
     session.onProjectChanged = [this]
     {
@@ -119,6 +121,7 @@ MainWindow::~MainWindow()
     // Close the dialogs: they point into the Engine and the commands, which are destroyed after
     // this window, and an export into the project's Edit.
     delete exportWindow.getComponent();
+    delete progressionsWindow.getComponent();
     delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
     delete welcomeWindow.getComponent();
@@ -187,6 +190,15 @@ void MainWindow::addCommands()
                     .description = "Turns MIDI inputs and the computer keyboard on or off.",
                     .synonyms = { "midi keyboard", "controller", "inputs", "devices" },
                     .perform = [this] { showSettings (ui::SettingsPanel::midi); } });
+
+    registry.add ({ .id = "chords.progressions",
+                    .name = "Chord Progressions",
+                    .category = "Chords",
+                    .description = "Common chord progressions, by mood and genre: play one in the song's key and tempo, then put "
+                                   "it on the chord lane.",
+                    .synonyms = { "chords", "progression", "harmony", "chord track", "four chords", "pop chords", "ideas" },
+                    .perform = [this] { showProgressions(); },
+                    .isEnabled = [this] { return session.getContext().hasProject(); } });
 
     registry.add ({ .id = "input.computerKeyboard",
                     .name = "Play Notes with the Computer Keyboard",
@@ -386,6 +398,32 @@ void MainWindow::showExport()
     o.content.setOwned (panel);
 
     exportWindow = o.launchAsync();
+}
+
+void MainWindow::showProgressions()
+{
+    if (progressionsWindow != nullptr)
+    {
+        progressionsWindow->toFront (true);
+        return;
+    }
+
+    if (! session.getContext().hasProject())
+        return;
+
+    auto* panel = new ui::ProgressionsPanel (session.getContext(), *services.previewer);
+    panel->setSize (640, 560);
+
+    juce::DialogWindow::LaunchOptions o;
+    o.dialogTitle = "Chord Progressions";
+    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = true;
+    o.componentToCentreAround = this;
+    o.content.setOwned (panel);
+
+    progressionsWindow = o.launchAsync();
 }
 
 void MainWindow::showWelcomeOnFirstRun()
@@ -614,6 +652,10 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
                 addOne (outlines, getOutlineCommandID (outline.id));
 
             menu.addSubMenu ("Song Outline", outlines);
+
+            // The chord lane's progressions, and the parts made from its chords.
+            menu.addSeparator();
+            add (menu, { "chords.progressions", "chords.makeChordPart", "chords.makeBassLine", "chords.makeArpeggio" });
             break;
         }
 

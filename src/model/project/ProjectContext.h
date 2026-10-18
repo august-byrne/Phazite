@@ -34,6 +34,7 @@ struct SongChanges
     bool automation = false; // automation points added, moved or deleted
     bool modulation = false; // modulators and macros added, deleted or changed, and what they modulate
     bool sections = false;   // sections added, deleted or changed
+    bool chords = false;     // the chord lane's chords and keys (model/chords/ChordModel.h)
     bool tempo = false;      // the tempo or the time signature
     bool view = false;       // how tracks show: their heights, collapsed and pinned ones, drum rows, automation lanes (view state)
 };
@@ -68,6 +69,7 @@ public:
     SongSelection& getSongSelection() noexcept;
     const SongSelection& getSongSelection() const noexcept;
     SongRange& getSongRange() noexcept; // the time range selected across tracks, by beats and IDs
+    const SongRange& getSongRange() const noexcept;
 
     void addListener (Listener*);
     void removeListener (Listener*);

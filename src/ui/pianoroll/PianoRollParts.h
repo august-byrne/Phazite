@@ -68,6 +68,7 @@ struct PianoRoll::NoteGrid : public juce::Component
     std::vector<NoteData> getGhostNotes() const; // other tracks' notes in view
 
     void paintRows (juce::Graphics&, juce::Rectangle<int> area);
+    void paintChordTones (juce::Graphics&, juce::Rectangle<int> area); // the chord lane's chords' notes, in their rows
     void paintNotes (juce::Graphics&);
     void beginDrag (const juce::MouseEvent&);
     juce::Point<int> getGestureStart() const; // where the mouse went down, in the grid as it is now

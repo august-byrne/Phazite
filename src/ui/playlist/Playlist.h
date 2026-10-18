@@ -5,6 +5,7 @@
 // model's playlist by IDs (model/arrangement/PlaylistModel.h).
 #pragma once
 
+#include "ChordLane.h"
 #include "ClipComponent.h"
 #include "SectionsStrip.h"
 #include "TrackHeader.h"
@@ -94,6 +95,8 @@ private:
     int scrollY = 0;
 
     SectionsStrip sectionsStrip; // in the time bar, above the ruler
+    ChordLane chordLane;         // under the time bar, above the tracks
+    ChordLaneHeader chordLaneHeader;
 
     IconButton addTrackButton { "Add track", Icon::plus }; // over the track headers, left of the time bar
     ClipID lastClip;                                       // the clip the Draw and Paint tools place copies of

@@ -202,6 +202,8 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
       selection (projectContext.getSongSelection()),
       range (projectContext.getSongRange()),
       sectionsStrip (*this),
+      chordLane (*this),
+      chordLaneHeader (*this),
       addTrackRow (std::make_unique<AddTrackRow> (*this)),
       lanes (std::make_unique<Lanes> (*this))
 {
@@ -229,7 +231,8 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
         lanes->addAndMakeVisible (layer);
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &sectionsStrip, &headerColumn, lanes.get() })
+    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &sectionsStrip, &chordLaneHeader, &chordLane, &headerColumn,
+                                                             lanes.get() })
         addAndMakeVisible (c);
 
     selection.addChangeListener (this);
@@ -279,6 +282,8 @@ void Playlist::showProject()
 
     TimelineEditor::showProject();
     sectionsStrip.showProject();
+    chordLane.showProject();
+    chordLaneHeader.update();
     addTrackButton.setEnabled (open);
     addTrackRow->setVisible (open);
     rebuild();
@@ -286,9 +291,16 @@ void Playlist::showProject()
 
 void Playlist::songChanged (const SongChanges& changes)
 {
-    // The time bar's sections, which the tempo places in time too.
+    // The time bar's sections and the chord lane's chords, which the tempo places in time too.
     if (changes.sections || changes.tempo)
         sectionsStrip.repaint();
+
+    // A track's key sets the new project's, which an empty lane is in until a key is chosen for it.
+    if (changes.chords || changes.tempo || changes.tracks)
+    {
+        chordLane.repaint();
+        chordLaneHeader.update();
+    }
 
     if (changes.tracks)
     {
@@ -334,6 +346,7 @@ void Playlist::timelineChanged()
     layOutClips();
     lanes->repaint();
     sectionsStrip.repaint();
+    chordLane.repaint();
 }
 
 void Playlist::gridChanged()
@@ -384,6 +397,11 @@ void Playlist::resized()
     addTrackButton.setBounds (timeBar.removeFromLeft (headerWidth).reduced (Space::s, Space::s).withWidth (96));
     sectionsStrip.setBounds (timeBar.removeFromTop (SectionsStrip::preferredHeight));
     ruler.setBounds (timeBar);
+
+    // Under it, the chord lane, with its header over the track headers.
+    auto chordRow = area.removeFromTop (ChordLane::preferredHeight).withTrimmedRight (verticalBarWidth);
+    chordLaneHeader.setBounds (chordRow.removeFromLeft (headerWidth));
+    chordLane.setBounds (chordRow);
 
     verticalScrollBar.setBounds (area.removeFromRight (verticalBarWidth));
     headerColumn.setBounds (area.removeFromLeft (headerWidth));

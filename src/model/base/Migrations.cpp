@@ -112,9 +112,17 @@ namespace
     }
 
     //==========================================================================
+    // Version 6 to 7: version 7 adds the chord lane (CHORDLANE) and parts made from it (phaziteChordPart), which a version
+    // 6 project has none of, so nothing changes; the new version keeps an older Phazite from opening a project with them,
+    // and dropping them.
+    void upgrade6To7 (juce::ValueTree&)
+    {
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
-    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5, upgrade5To6 };
+    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5, upgrade5To6, upgrade6To7 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 

@@ -10,6 +10,7 @@
 //              before version 5 (model/engine/internal/EngineSetup.h, model/automation/internal/Automation.h:
 //              convertAutomationClips()).
 //   Version 6: lanes that collapse.
+//   Version 7: the chord lane and parts made from it.
 // A change to what projects save raises schema::currentVersion (Schema.h) and adds a step here.
 #pragma once
 

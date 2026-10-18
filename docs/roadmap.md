@@ -155,7 +155,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - A static library target, `phazite_core`, holds everything testable without a window. The app links it.
 - A test runner using doctest (MIT, bundled with Tracktion Engine), run by CTest locally and in CI. On Linux it runs headless.
 - *Done when:* CI runs the tests on Windows and Linux.
-- *Status:* done for `app/`, `model/` and `ui/`. Since 2026-10-14 the [architecture track](#architecture-track) organizes them by area, adds `services/`, and makes `app/` a library the tests link. Built-in DSP goes in `devices/` from step 1.6; the chord engine and the sound generator (steps 2.7, 2.8 and 3.1) follow the same rules: no Tracktion or window code in their logic.
+- *Status:* done for `app/`, `model/` and `ui/`. Since 2026-10-14 the [architecture track](#architecture-track) organizes them by area, adds `services/`, and makes `app/` a library the tests link. Built-in DSP goes in `devices/` from step 1.6; the chord engine and the sound generator (steps 2.7, 3.1 and 3.2) follow the same rules: no Tracktion or window code in their logic.
 
 **0.2 Engine hooks (S)**
 - A `PropertyStorage` subclass: a neutral user name (no personal data), the app version and the settings folder.
@@ -368,11 +368,12 @@ Done before this plan (progress since then is under [Status](#status)):
 **2.7 Chord lane and progression outlines (L)**
 - Phazite's chord format and the chord lane.
 - The progression library (about 40): audition and apply, and follow key changes.
-- Chords written to the engine, and chord highlighting in the piano roll.
+- Chord highlighting in the piano roll. (The chords are no longer written to the engine: design section 14 says why.)
 - Generated chord, bass and arpeggio parts.
 - *Done when:*
   - picking a progression for a section plays it in the project key;
   - a bass part generated from it follows the chord lane.
+- *Status:* done (2026-10-18), pending a check by hand ([design section 14](design.md#14-chords)). Chords as plain values (`src/model/chords/ChordValues.h`, tests in `tests/ChordValueTests.cpp`): Roman numerals with accidentals, kinds and inversions, read, written and named in any key, the keys progressions play in, and the notes of twelve part styles, voiced to move little. Forty progressions in `resources/progressions/progressions.json` (`Progressions.h`), by mood and genre. The chord lane in the model (`ChordModel.h`, tests in `tests/ChordModelTests.cpp`): chords and key changes in the project (format version 7), progressions laid over a range, chords added, changed, resized and deleted, each one named undo step; chords that go with the song's time; parts on new tracks with Phazite's synth that follow the chords until their notes are edited. In the window (tests in `tests/ChordLaneTests.cpp`): the lane under the playlist's bar numbers with its menus and a dragged right edge, its header with the song's key, the Chord Progressions window (play and put on the lane), Add menu items and commands for the parts, the inspector's Follows the chords, and the piano roll's tint of chord notes. The chords aren't written into Tracktion's chord track, which nothing would read (design section 14 says why).
 
 **2.8 Sound generator v1** — moved to phase 3, into [step 3.2](#phase-3-v1-polish-milestone-3) (the owner's decision, 2026-10-18). The steps after it keep their numbers.
 
@@ -519,7 +520,7 @@ Roughly in order of value:
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
 | 1. Make a beat | Steps done, pending checks by hand and the milestone 1 check (a usability test with a newcomer and an FL Studio user): steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser), with three rounds of fixes from trying them (2026-10-13); step 1.6 (all six devices, and the starter project on them), step 1.7 (metronome, tempo, recording and Capture), step 1.8 (export to WAV and FLAC, normalized to a loudness) and step 1.9 (first launch, the guide and the new-project window), 2026-10-15 |
-| 2. Finish a track | In progress: steps 2.1 (automation lanes), 2.3 (modulators and macros) and 2.4 (containers and presets) done, pending a check by hand (2026-10-16); 2.2, its automation clips replaced by lanes that go with the music, 2.5, the window (the song in the centre, the Devices view and the properties inspector), and 2.6, the audio clip editor, done, pending a check by hand (2026-10-17); 2.8, the sound generator, moved to phase 3 (2026-10-18) |
+| 2. Finish a track | In progress: steps 2.1 (automation lanes), 2.3 (modulators and macros) and 2.4 (containers and presets) done, pending a check by hand (2026-10-16); 2.2, its automation clips replaced by lanes that go with the music, 2.5, the window (the song in the centre, the Devices view and the properties inspector), and 2.6, the audio clip editor, done, pending a check by hand (2026-10-17); 2.8, the sound generator, moved to phase 3 (2026-10-18); 2.7, the chord lane and progressions, done, pending a check by hand (2026-10-18) |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
 | Architecture track | A0 (2026-10-14), A1 and A2 (2026-10-15) and A3 (2026-10-16) done, A2 pending a check by hand: the UI begins no undo steps (46 when A2 began) and makes no direct edits, the playlist, piano roll and mixer strip are split into a file per part, the browser has a model, and the two editors' tools share one gesture. A3: IDs and beats, views that follow the project, the mixer by IDs, the transport and the engine for the top bar and the settings, the shared time line in Phazite's beats, the playlist by IDs, note IDs saved in the project (format version 3), the piano roll by note IDs and the browser by IDs and plain values; the UI names and includes no Tracktion and compiles without it, and the model's headers that use Tracktion are in `internal/` folders. Next: step 2.1 |

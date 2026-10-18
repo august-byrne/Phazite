@@ -167,6 +167,21 @@ namespace SectionTint
     inline constexpr float edge = 0.6f;
 } // namespace SectionTint
 
+// How the chord lane shows the song's chords (ui/playlist/ChordLane.h): each a block in a wash of the accent color,
+// stronger under the pointer, with a line where it starts, and a line in the warning color where the key changes
+// (alphas); the piano roll's wash over the rows of the notes of the chord there (an alpha of the accent color); the
+// lane's height, and how near a chord's right edge a drag takes the edge (pixels).
+namespace ChordTint
+{
+    inline constexpr float block = 0.16f;
+    inline constexpr float hoveredBlock = 0.28f;
+    inline constexpr float edge = 0.7f;
+    inline constexpr float keyChange = 0.9f;
+    inline constexpr float pianoRollRows = 0.1f;
+    inline constexpr int laneHeight = 24;
+    inline constexpr int grabDistance = 6;
+} // namespace ChordTint
+
 // How an audio clip's fades show, in the playlist and the audio clip editor: what a fade takes away is shaded black above
 // its curve from silence to full volume (alphas), and the curve's thickness.
 namespace FadeTint

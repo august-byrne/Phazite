@@ -20,8 +20,9 @@ namespace phazite::schema
 // 2026-10-14); version 1 saves the grid's size and keys' scales by name; version 2 can hold Phazite's own devices
 // (roadmap step 1.6), which an older Phazite would drop; version 3 gives every note an ID (phaziteNoteID); version 4 adds
 // automation lanes (PHAZITELANE, roadmap step 2.1); version 5 has no automation clips (step 2.2 until 2026-10-17): their
-// curves are their parameters' own automation; version 6 lets lanes collapse (laneCollapsed).
-inline constexpr int currentVersion = 6;
+// curves are their parameters' own automation; version 6 lets lanes collapse (laneCollapsed); version 7 adds the chord
+// lane (CHORDLANE, step 2.7) and parts made from it (phaziteChordPart).
+inline constexpr int currentVersion = 7;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
@@ -149,6 +150,47 @@ inline const juce::Identifier phaziteTip { "phaziteTip" };
 
 // float 0..1, default 0.5: how intense the section is, for the energy curve.
 inline const juce::Identifier phaziteEnergy { "phaziteEnergy" };
+
+//==============================================================================
+// The chord lane (model/chords/ChordModel.h; docs/design.md, section 14): the song's chords, each a Roman numeral in the
+// key there, so that the chords follow when the key changes. Version 7 added it. song
+
+// Child of PHAZITE, added when the first chord or key is written: the chords (CHORD) and the keys they are in (CHORDKEY),
+// in no particular order.
+inline const juce::Identifier CHORDLANE { "CHORDLANE" };
+
+// Child of CHORDLANE: a chord over a stretch of the song. Chords don't overlap.
+inline const juce::Identifier CHORD { "CHORD" };
+
+// On CHORD and CHORDKEY. double, 0 or more: where it starts, in beats from the song's start.
+inline const juce::Identifier chordStart { "start" };
+
+// On CHORD. double, more than 0: how long it lasts, in beats.
+inline const juce::Identifier chordLength { "length" };
+
+// On CHORD. int 1..7: the step of the key's scale its root is on (Numeral::degree in model/chords/ChordValues.h).
+inline const juce::Identifier chordDegree { "degree" };
+
+// On CHORD. int -1, 0 or 1, default 0: the root a semitone under (-1) or over (1) that step, as in "bVII".
+inline const juce::Identifier chordAccidental { "accidental" };
+
+// On CHORD: its kind, "major", "minor", "dominantSeventh", "majorSeventh", "minorSeventh", "suspendedSecond",
+// "suspendedFourth", "diminished", "augmented", "majorSixth", "minorSixth", "dominantNinth", "majorNinth", "power",
+// "halfDiminishedSeventh", "diminishedSeventh" or "minorNinth" (getSavedChordTypeName()).
+inline const juce::Identifier chordType { "type" };
+
+// On CHORD. int, default 0: which of its notes is lowest, 0 for its root, 1 for the next one up, and so on.
+inline const juce::Identifier chordInversion { "inversion" };
+
+// Child of CHORDLANE: the key the chords are in from where it starts (chordStart) to the next one's start, with
+// phaziteKeyRoot and phaziteKeyScale. The first starts at 0; a lane without any is in C major.
+inline const juce::Identifier CHORDKEY { "CHORDKEY" };
+
+// On a MIDICLIP made from the chord lane: the part it is, "sustainedTriads", "sustainedSevenths", "spreadChords",
+// "pulsingChords", "offbeatStabs", "bassRoots", "bassPulses", "bassRootFifth", "bassOctaves", "arpeggioUp",
+// "arpeggioDown" or "arpeggioUpDown" (getSavedPartStyleName()). While its notes are the ones the lane makes for it, they
+// change with the chords. song
+inline const juce::Identifier phaziteChordPart { "phaziteChordPart" };
 
 //==============================================================================
 // On notes: Tracktion's NOTEs, in a MIDI clip's SEQUENCE. song

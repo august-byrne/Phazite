@@ -588,3 +588,21 @@ TEST_CASE ("A version 5 project, whose lanes never collapse, becomes the current
         .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
     CHECK (state.isEquivalentTo (expected));
 }
+
+TEST_CASE ("A version 6 project, which can have no chord lane or parts made from it, becomes the current version with nothing else changed")
+{
+    const auto* version6 = R"(<EDIT><PHAZITE schemaVersion="6"><LASTKEY phaziteKeyRoot="2" phaziteKeyScale="minor"/></PHAZITE>
+        <TRACK id="1003"><MIDICLIP id="1005" start="0.0" length="2.0"><SEQUENCE ver="1"/></MIDICLIP>
+          <PHAZITELANE device="1004" parameter="volume" height="48" collapsed="1"/>
+          <PLUGIN type="volume" id="1004" volume="0.5"/>
+        </TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version6);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
+
+    auto expected = juce::ValueTree::fromXml (version6);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}

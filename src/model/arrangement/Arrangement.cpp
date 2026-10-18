@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Arrangement.h"
 #include "internal/Clips.h"
+#include "model/chords/internal/Chords.h"
 
 namespace phazite
 {
@@ -149,6 +150,8 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
     for (auto* parameter : getAutomatedParameters (edit))
         parameter->getCurve().insertSpace (*parameter, time, timeLength);
 
+    insertLaneTime (edit, fromTracktion (at), fromTracktion (length));
+
     if (! tempoFirst)
         moveTempo();
 }
@@ -198,6 +201,8 @@ void removeTime (te::Edit& edit, te::BeatRange range)
 
     for (auto* parameter : getAutomatedParameters (edit))
         parameter->getCurve().removeRegionAndCloseGap (*parameter, time, &edit.getUndoManager());
+
+    removeLaneTime (edit, fromTracktion (range));
 
     // Tempo and key changes last, as Tracktion's deleteRegionOfTracks() does.
     edit.pitchSequence.deleteRegion (time);
@@ -261,6 +266,8 @@ void moveTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
 
     for (const auto& point : points)
         point.parameter->getCurve().addPoint (tempo.toTime (newPosition (point.beat)), point.value, point.curve, &undoManager);
+
+    moveLaneTime (edit, fromTracktion (range), fromTracktion (destination));
 }
 
 void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination, bool asAliases)
@@ -290,8 +297,10 @@ void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
 
     addEdgePoints (edit, { start, end, destination });
     const auto points = getPointsIn (edit, range);
+    const auto chords = copyLaneChords (edit, fromTracktion (range));
 
     insertTime (edit, destination, length);
+    pasteLaneChords (edit, chords, fromTracktion (destination));
 
     for (const auto& source : sources)
     {

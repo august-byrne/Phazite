@@ -46,6 +46,9 @@ section.outline.lofi
 section.outline.rnb
 section.outline.drumAndBass
 section.outline.techno
+chords.makeChordPart
+chords.makeBassLine
+chords.makeArpeggio
 track.addReturn
 device.group | ctrl + G
 device.ungroup | ctrl + shift + G

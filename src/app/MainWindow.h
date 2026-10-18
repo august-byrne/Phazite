@@ -52,14 +52,15 @@ private:
     ui::AppShell* shell = nullptr;              // owned by the window as its content
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow; // hover help; null when it is turned off
-    juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow;
+    juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow, progressionsWindow;
     juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
     juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
 
     void showSettings (std::optional<ui::SettingsPanel::Tab>); // no tab: Audio, or the open window's tab
     void showPluginList();
     void showWelcome (ui::WelcomePanel::Page);
-    void showExport(); // for the open project's song
+    void showExport();       // for the open project's song
+    void showProgressions(); // the chord progressions, for the open project's chord lane
     void setTheme (ui::ThemeName);
     void setHoverHelp (bool);
     void setInterfaceScale (float);

@@ -81,9 +81,9 @@ void PianoRoll::projectChanged()
 
 void PianoRoll::songChanged (const SongChanges& changes)
 {
-    // Notes and clips, where they are in time, a track's key or drum rows, and its instrument (the toolbar shows it, and a
-    // drum sampler names the rows).
-    if (! (changes.clips || changes.tempo || changes.tracks || changes.view || changes.devices))
+    // Notes and clips, where they are in time, a track's key or drum rows, the chords whose notes its rows show, and its
+    // instrument (the toolbar shows it, and a drum sampler names the rows).
+    if (! (changes.clips || changes.tempo || changes.tracks || changes.view || changes.devices || changes.chords))
         return;
 
     // Clips that left the song go, and the rest repaints. Bar 1 follows a clip moved in the song.

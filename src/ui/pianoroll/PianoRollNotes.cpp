@@ -2,6 +2,7 @@
 // The piano roll's note grid: finding the notes under the mouse, the hint for what it does there, and drawing the rows and
 // notes. What the tools do with the mouse is PianoRollNoteTools.cpp's.
 #include "PianoRollParts.h"
+#include "model/chords/ChordModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -171,6 +172,9 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
 
     paintRows (g, area);
 
+    if (! roll.drumMode)
+        paintChordTones (g, area);
+
     // Where the clips are: a line in the clip's color at each end, and a tint between.
     const auto& timeline = roll.getView();
     const auto shown = roll.getShownClips();
@@ -254,6 +258,35 @@ void PianoRoll::NoteGrid::paintRows (juce::Graphics& g, juce::Rectangle<int> are
         const auto isOctave = ! roll.drumMode && pitch % 12 == 0;
         g.setColour (isOctave ? p.border : p.border.withMultipliedAlpha (0.4f));
         g.fillRect (rowArea.removeFromBottom (1));
+    }
+}
+
+void PianoRoll::NoteGrid::paintChordTones (juce::Graphics& g, juce::Rectangle<int> area)
+{
+    // While each of the chord lane's chords lasts, the rows of its notes are tinted, so that notes that fit it are easy
+    // to find (docs/design.md, section 14).
+    const auto& p = getPalette (*this);
+    const auto& timeline = roll.getView();
+    const auto height = roll.getRowHeight();
+    const auto first = std::max (0, roll.getRowAt (area.getY()));
+    const auto last = roll.getRowAt (area.getBottom() - 1) >= 0 ? roll.getRowAt (area.getBottom() - 1) : roll.getNumRows() - 1;
+    g.setColour (p.accent.withAlpha (ChordTint::pianoRollRows));
+
+    for (const auto& chord : getLaneChords (roll.context))
+    {
+        const auto left = std::max (area.getX(), juce::roundToInt (timeline.beatToX (chord.range.getStart())));
+        const auto right = std::min (area.getRight(), juce::roundToInt (timeline.beatToX (chord.range.getEnd())));
+
+        if (right <= left)
+            continue;
+
+        for (auto row = first; row <= last; ++row)
+        {
+            const auto pitchClass = roll.getPitchForRow (row) % 12;
+
+            if (std::find (chord.pitchClasses.begin(), chord.pitchClasses.end(), pitchClass) != chord.pitchClasses.end())
+                g.fillRect (left, roll.getRowTop (row), right - left, height - 1);
+        }
     }
 }
 

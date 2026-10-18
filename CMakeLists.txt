@@ -135,6 +135,14 @@ target_sources(phazite_core PRIVATE
     src/model/base/Toggles.h
     src/model/base/internal/Schema.h
     src/model/base/internal/Tracktion.h
+    src/model/chords/ChordModel.cpp
+    src/model/chords/ChordModel.h
+    src/model/chords/ChordValues.cpp
+    src/model/chords/ChordValues.h
+    src/model/chords/Chords.cpp
+    src/model/chords/Progressions.cpp
+    src/model/chords/Progressions.h
+    src/model/chords/internal/Chords.h
     src/model/commands/CommandRegistry.cpp
     src/model/commands/CommandRegistry.h
     src/model/commands/SongGesture.cpp
@@ -262,6 +270,8 @@ juce_add_binary_data(phazite_data
         resources/outlines/rnb.outline.json
         resources/outlines/drum_and_bass.outline.json
         resources/outlines/techno.outline.json
+        # Chord progressions (src/model/chords/Progressions.h)
+        resources/progressions/progressions.json
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
         resources/icons/lucide/audio-lines.svg
@@ -449,6 +459,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/pianoroll/PianoRollNotes.cpp
     src/ui/pianoroll/PianoRollParts.h
     src/ui/pianoroll/PianoRollRows.cpp
+    src/ui/playlist/ChordLane.cpp
+    src/ui/playlist/ChordLane.h
     src/ui/playlist/ClipComponent.cpp
     src/ui/playlist/ClipComponent.h
     src/ui/playlist/ClipWaveform.cpp
@@ -481,6 +493,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/NewProjectPanel.h
     src/ui/shell/Panels.cpp
     src/ui/shell/Panels.h
+    src/ui/shell/ProgressionsPanel.cpp
+    src/ui/shell/ProgressionsPanel.h
     src/ui/shell/SettingsPanel.cpp
     src/ui/shell/SettingsPanel.h
     src/ui/shell/TopBar.cpp
@@ -589,6 +603,9 @@ if(PHAZITE_BUILD_TESTS)
         tests/BeatsTests.cpp
         tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
+        tests/ChordLaneTests.cpp
+        tests/ChordModelTests.cpp
+        tests/ChordValueTests.cpp
         tests/ClipTests.cpp
         tests/CommandGoldenTests.cpp
         tests/CommandTests.cpp

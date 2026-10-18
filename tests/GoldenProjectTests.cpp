@@ -16,6 +16,8 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/chords/Progressions.h"
+#include "model/chords/internal/Chords.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
@@ -192,6 +194,19 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     phazite::saveGridSettings (edit, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 8, .triplets = true });
 
     phazite::loopRange (edit, { te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (6.0) });
+
+    // The chord lane: a progression in D minor over the intro and the drop, with a borrowed chord in its second inversion,
+    // a key change to F major for the outro, and a bass line made from the chords that follows them on a track of its own.
+    const auto progression = phazite::Progression::fromJSON (
+        juce::JSON::parse (R"({ "id": "golden", "name": "Golden", "scale": "minor", "chords": "i*2 VI VII/1 iim7b5 V7" })"));
+    REQUIRE (progression.has_value());
+    const auto at = [] (double b) { return phazite::BeatPosition::fromBeats (b); };
+    phazite::setLaneKey (edit, at (0.0), { 2, phazite::Scale::minor });
+    phazite::putProgression (edit, *progression, { at (0.0), at (24.0) });
+    phazite::putLaneChord (edit, { at (20.0), at (24.0) }, { 2, -1, phazite::ChordType::majorSeventh, 2 });
+    phazite::setLaneKey (edit, at (24.0), { 5, phazite::Scale::major });
+    phazite::putLaneChord (edit, { at (24.0), at (32.0) }, { 1, 0, phazite::ChordType::suspendedFourth, 0 });
+    REQUIRE (phazite::addChordPart (edit, phazite::PartStyle::bassRootFifth, { at (0.0), at (32.0) }, nullptr) != nullptr);
 }
 
 //==============================================================================

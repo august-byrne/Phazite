@@ -62,6 +62,9 @@ namespace
                 if (element.hasType (te::IDs::ARRANGERCLIP))
                     return add (pending.sections);
 
+                if (element.hasType (schema::CHORDLANE))
+                    return add (pending.chords);
+
                 if (te::Clip::isClipState (element))
                     return add (pending.clips);
 
@@ -98,6 +101,8 @@ namespace
                 add (pending.view);
             else if (child.hasType (te::IDs::ARRANGERCLIP))
                 add (pending.sections);
+            else if (child.hasType (schema::CHORDLANE))
+                add (pending.chords);
             else if (te::Clip::isClipState (child))
                 add (pending.clips);
             else if (child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK))
@@ -228,6 +233,11 @@ const SongSelection& ProjectContext::getSongSelection() const noexcept
 }
 
 SongRange& ProjectContext::getSongRange() noexcept
+{
+    return *impl->songRange;
+}
+
+const SongRange& ProjectContext::getSongRange() const noexcept
 {
     return *impl->songRange;
 }

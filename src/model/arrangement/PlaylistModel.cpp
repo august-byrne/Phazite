@@ -5,6 +5,7 @@
 #include "internal/Sections.h"
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/chords/internal/Chords.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
@@ -551,6 +552,15 @@ BeatPosition getPlayStartBeat (const ProjectContext& context)
 BeatPosition getTimelineEnd (const ProjectContext& context)
 {
     auto* edit = getEdit (context);
-    return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength()))) : BeatPosition();
+
+    if (edit == nullptr)
+        return {};
+
+    auto end = fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength())));
+
+    for (const auto& chord : getLaneChords (*edit))
+        end = std::max (end, chord.range.getEnd());
+
+    return end;
 }
 } // namespace phazite

@@ -95,6 +95,9 @@ juce::String getScaleName (Scale);        // "Major", "Harmonic Minor"
 juce::String describeKey (const Key&);    // "C major"
 bool isInKey (int pitch, const Key&);
 
+// The semitones of a scale's seven steps above its root, from 0: { 0, 2, 4, 5, 7, 9, 11 } for major.
+std::vector<int> getScaleSteps (Scale);
+
 // A scale as projects save it ("major", "dorian", "harmonicMinor"...), and back: nothing for a name that isn't one of
 // them.
 juce::String getSavedScaleName (Scale);
@@ -108,7 +111,7 @@ int snapToKey (int pitch, const Key&);
 std::vector<NoteData> transpose (std::vector<NoteData>, int steps, const std::optional<Key>& diatonicIn);
 
 //==============================================================================
-// Chords the piano roll stamps with one click.
+// Chords: the kinds the piano roll stamps with one click, and the chord lane's chords have (model/chords/ChordValues.h).
 
 enum class ChordType
 {
@@ -125,7 +128,10 @@ enum class ChordType
     minorSixth,
     dominantNinth,
     majorNinth,
-    power
+    power,
+    halfDiminishedSeventh, // m7b5
+    diminishedSeventh,
+    minorNinth
 };
 
 struct ChordShape
@@ -135,6 +141,7 @@ struct ChordShape
 };
 
 const std::vector<ChordShape>& getChordShapes();
+std::vector<int> getChordIntervals (ChordType);         // semitones above the root, from 0: { 0, 4, 7 } for major
 std::vector<int> getChordPitches (int root, ChordType); // those in the MIDI range
 
 //==============================================================================

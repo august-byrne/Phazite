@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/chords/ChordModel.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/UndoCommands.h"
 #include "model/mixer/internal/Containers.h"
@@ -30,6 +31,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context)
     ui::addTrackViewCommands (registry, context); // right after the model's: the order decides key ties and lists
     addSectionCommands (registry, selection);
     addOutlineCommands (registry, selection);
+    addChordCommands (registry, context);
     addMixerCommands (registry, selection);
     addContainerCommands (registry, selection);
     addAutomationCommands (registry, context);

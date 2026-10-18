@@ -43,28 +43,33 @@ namespace
         return savedScales[0];
     }
 
-    // The chords the piano roll stamps, with Tracktion's.
+    // The chords the piano roll stamps, with their notes' semitones above the root.
     struct ChordStamp
     {
         ChordType type;
-        te::Chord::ChordType tracktionType;
+        std::vector<int> intervals;
         const char* name;
     };
 
-    constexpr ChordStamp chords[] = { { ChordType::major, te::Chord::majorTriad, "Major" },
-                                      { ChordType::minor, te::Chord::minorTriad, "Minor" },
-                                      { ChordType::dominantSeventh, te::Chord::dominatSeventhChord, "7" },
-                                      { ChordType::majorSeventh, te::Chord::majorSeventhChord, "Maj7" },
-                                      { ChordType::minorSeventh, te::Chord::minorSeventhChord, "m7" },
-                                      { ChordType::suspendedSecond, te::Chord::suspendedSecond, "Sus2" },
-                                      { ChordType::suspendedFourth, te::Chord::suspendedFourth, "Sus4" },
-                                      { ChordType::diminished, te::Chord::diminishedTriad, "Dim" },
-                                      { ChordType::augmented, te::Chord::augmentedTriad, "Aug" },
-                                      { ChordType::majorSixth, te::Chord::majorSixthChord, "6" },
-                                      { ChordType::minorSixth, te::Chord::minorSixthChord, "m6" },
-                                      { ChordType::dominantNinth, te::Chord::dominantNinthChord, "9" },
-                                      { ChordType::majorNinth, te::Chord::majorNinthChord, "Maj9" },
-                                      { ChordType::power, te::Chord::powerChord, "Power" } };
+    // clang-format off
+    const ChordStamp chords[] = { { ChordType::major,                 { 0, 4, 7 },          "Major" },
+                                  { ChordType::minor,                 { 0, 3, 7 },          "Minor" },
+                                  { ChordType::dominantSeventh,       { 0, 4, 7, 10 },      "7" },
+                                  { ChordType::majorSeventh,          { 0, 4, 7, 11 },      "Maj7" },
+                                  { ChordType::minorSeventh,          { 0, 3, 7, 10 },      "m7" },
+                                  { ChordType::suspendedSecond,       { 0, 2, 7 },          "Sus2" },
+                                  { ChordType::suspendedFourth,       { 0, 5, 7 },          "Sus4" },
+                                  { ChordType::diminished,            { 0, 3, 6 },          "Dim" },
+                                  { ChordType::augmented,             { 0, 4, 8 },          "Aug" },
+                                  { ChordType::majorSixth,            { 0, 4, 7, 9 },       "6" },
+                                  { ChordType::minorSixth,            { 0, 3, 7, 9 },       "m6" },
+                                  { ChordType::dominantNinth,         { 0, 4, 7, 10, 14 },  "9" },
+                                  { ChordType::majorNinth,            { 0, 4, 7, 11, 14 },  "Maj9" },
+                                  { ChordType::power,                 { 0, 7 },             "Power" },
+                                  { ChordType::halfDiminishedSeventh, { 0, 3, 6, 10 },      "m7b5" },
+                                  { ChordType::diminishedSeventh,     { 0, 3, 6, 9 },       "Dim7" },
+                                  { ChordType::minorNinth,            { 0, 3, 7, 10, 14 },  "m9" } };
+    // clang-format on
 
     // A key, on a track's state or on LASTKEY in the song's Phazite state (model/base/internal/Schema.h). A key exists exactly when
     // its root does.
@@ -153,16 +158,6 @@ namespace
         return juce::jlimit (0, 127, pitch);
     }
 
-    std::vector<int> getScaleSteps (Scale scale)
-    {
-        std::vector<int> steps;
-
-        for (const auto step : te::Scale (toTracktion (scale)).getSteps())
-            steps.push_back (step);
-
-        return steps;
-    }
-
     // Integer division and remainder that round down, so that they also work below 0.
     int floorDivide (int a, int b)
     {
@@ -239,15 +234,6 @@ Scale toScale (te::Scale::ScaleType type)
             return saved.scale;
 
     return Scale::major;
-}
-
-te::Chord::ChordType toTracktion (ChordType type)
-{
-    for (const auto& chord : chords)
-        if (chord.type == type)
-            return chord.tracktionType;
-
-    return te::Chord::majorTriad;
 }
 
 std::vector<NoteData> getNoteData (const std::vector<ClipNote>& notes)
@@ -680,6 +666,16 @@ juce::String describeKey (const Key& key)
     return juce::MidiMessage::getMidiNoteName (key.root, true, false, 0) + " " + getScaleName (key.scale).toLowerCase();
 }
 
+std::vector<int> getScaleSteps (Scale scale)
+{
+    std::vector<int> steps;
+
+    for (const auto step : te::Scale (toTracktion (scale)).getSteps())
+        steps.push_back (step);
+
+    return steps;
+}
+
 bool isInKey (int pitch, const Key& key)
 {
     const auto steps = getScaleSteps (key.scale);
@@ -807,11 +803,20 @@ const std::vector<ChordShape>& getChordShapes()
     return shapes;
 }
 
+std::vector<int> getChordIntervals (ChordType type)
+{
+    for (const auto& chord : chords)
+        if (chord.type == type)
+            return chord.intervals;
+
+    return { 0, 4, 7 };
+}
+
 std::vector<int> getChordPitches (int root, ChordType type)
 {
     std::vector<int> pitches;
 
-    for (const auto step : te::Chord (toTracktion (type)).getSteps())
+    for (const auto step : getChordIntervals (type))
         if (juce::isPositiveAndBelow (root + step, 128))
             pitches.push_back (root + step);
 

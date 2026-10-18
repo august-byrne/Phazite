@@ -5,6 +5,7 @@
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/automation/AutomationModel.h"
+#include "model/chords/ChordModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/transport/TransportModel.h"
 #include "ui/components/Controls.h"
@@ -534,6 +535,10 @@ namespace
             makeUniqueButton.setTooltip ("Makes the clips copies of their own, so that changing them no longer changes the clips "
                                          "they were aliases of");
             makeUniqueButton.onClick = [this] { invokeOnClips ("clip.makeUnique"); };
+            followsChordsToggle.setTitle ("Follows the chords");
+            followsChordsToggle.setTooltip ("A part made from the chord lane changes with the chords until its notes are edited. "
+                                            "Turned on again, its notes are made from the chords again.");
+            followsChordsToggle.onClick = [this] { setFollowsChords (context, clips.front(), followsChordsToggle.getToggleState()); };
 
             // The fade shapes are commands, ticked for the shape the clips have.
             for (int i = 0; i < (int) std::size (fadeShapes); ++i)
@@ -554,6 +559,7 @@ namespace
             addRow ("Muted", &mutedToggle);
             addRow ("Alias", &aliasLabel);
             addRow ({}, &makeUniqueButton);
+            addRow ("Follows the chords", &followsChordsToggle);
             addRow ("Fade in", &fadeInLabel);
             addRow ("Fade out", &fadeOutLabel);
             addRow ("Fade shape", &shapeBox);
@@ -615,6 +621,11 @@ namespace
             aliasLabel.setText (linked ? "Yes: plays what its copies play" : "No", juce::dontSendNotification);
             setRowVisible (makeUniqueButton, linked);
 
+            // A part made from the chord lane: whether its notes change with the chords.
+            const auto part = infos.size() == 1 ? getChordPart (context, first.id) : std::nullopt;
+            followsChordsToggle.setToggleState (part.has_value() && followsChords (context, first.id), juce::dontSendNotification);
+            setRowVisible (followsChordsToggle, part.has_value());
+
             // An audio clip's fades, as parts of its length; a MIDI clip has none.
             fadeInLabel.setText (juce::String (juce::roundToInt (first.fadeIn * 100.0)) + "% of the clip", juce::dontSendNotification);
             fadeOutLabel.setText (juce::String (juce::roundToInt (first.fadeOut * 100.0)) + "% of the clip", juce::dontSendNotification);
@@ -659,7 +670,7 @@ namespace
         ProjectContext& context;
         const std::vector<ClipID> clips;
         juce::Label kindLabel, trackLabel, startLabel, lengthLabel, aliasLabel, fadeInLabel, fadeOutLabel;
-        juce::ToggleButton mutedToggle;
+        juce::ToggleButton mutedToggle, followsChordsToggle;
         juce::TextButton makeUniqueButton { "Make Unique" };
         juce::ComboBox shapeBox;
     };
@@ -898,7 +909,9 @@ void Inspector::songChanged (const SongChanges& changes)
     // What it shows may be gone, or changed.
     showTarget();
 
-    if (page != nullptr && (changes.tracks || changes.clips || changes.sections || changes.devices || changes.automation || changes.tempo))
+    if (page != nullptr
+        && (changes.tracks || changes.clips || changes.sections || changes.chords || changes.devices || changes.automation
+            || changes.tempo))
     {
         page->refresh();
         layOutPage();

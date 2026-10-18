@@ -198,8 +198,8 @@ void moveSection (ProjectContext&, SectionID, BeatPosition destination);
 SectionID copySection (ProjectContext&, SectionID, BeatPosition destination, bool asAliases);
 void resizeSection (ProjectContext&, SectionID, BeatDuration newLength, bool moveRest);
 
-// Where Space plays from (Playback.h), and how far the time line goes: everything on it, sections included (not the
-// song's end, which sections don't make longer), so that an outline can be scrolled to.
+// Where Space plays from (Playback.h), and how far the time line goes: everything on it, sections and chords included
+// (not the song's end, which sections don't make longer), so that an outline can be scrolled to.
 BeatPosition getPlayStartBeat (const ProjectContext&);
 BeatPosition getTimelineEnd (const ProjectContext&);
 } // namespace phazite
