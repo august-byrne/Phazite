@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestPlugin.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Grid.h"
@@ -443,6 +444,7 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
 {
     namespace schema = phazite::schema;
+    phazite::test::TestPlugin testPlugin;
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Views");
     auto& edit = project->getEdit();
@@ -453,12 +455,14 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     REQUIRE (other != nullptr);
     auto* folder = phazite::insertFolder (edit, other, nullptr);
     REQUIRE (folder != nullptr);
-    auto* reverb = phazite::insertDevice (*track, edit.getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}));
-    REQUIRE (reverb != nullptr);
+    auto* plugin = phazite::insertDevice (*track, phazite::test::TestPlugin::create (edit));
+    REQUIRE (plugin != nullptr);
     phazite::test::settle();
 
-    // Without undo steps, so that the view settings below can be seen to make none. Tracktion marks the Edit changed when
-    // its undo history changes (once the message about it arrives), so the project is saved after that.
+    // A first save writes the plug-in's settings into the project, through the undo manager (docs/known-bugs.md, bug 2).
+    // Then without undo steps, so that the view settings below can be seen to make none. Tracktion marks the Edit changed
+    // when its undo history changes (once the message about it arrives), so the project is saved again after that.
+    REQUIRE (project->save().wasOk());
     edit.getUndoManager().clearUndoHistory();
     phazite::test::settle();
     REQUIRE (project->save().wasOk());
@@ -478,8 +482,8 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     phazite::showAllDrumRows (*other);
     phazite::saveGridSettings (edit, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 2 });
     phazite::saveGridSettings (edit, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 10 });
-    reverb->windowState->lastWindowBounds = juce::Rectangle<int> (140, 360, 300, 200);
-    phazite::rememberWindowPosition (*reverb, { 140, 360 });
+    plugin->windowState->lastWindowBounds = juce::Rectangle<int> (140, 360, 300, 200);
+    phazite::rememberWindowPosition (*plugin, { 140, 360 });
     phazite::test::settle();
 
     // No unsaved change, nothing to undo, and nothing for autosave to write.
@@ -497,7 +501,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
 
     // Saved and opened again, they are all there. Tracktion writes where the window was as it saves, through the undo
     // manager, and finds it written.
-    const auto trackID = track->itemID, otherID = other->itemID, folderID = folder->itemID, reverbID = reverb->itemID;
+    const auto trackID = track->itemID, otherID = other->itemID, folderID = folder->itemID, pluginID = plugin->itemID;
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (edit.getUndoManager().canUndo());
     const auto file = project->getFile();
@@ -519,10 +523,10 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (phazite::getHiddenDrumRows (*t) == std::vector<int> { 42 });
     CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::playlist).adaptiveOffset == 2);
     CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::pianoRoll).fixedLevel == 10);
-    const auto reopenedReverb = te::findPluginForID (reopened, reverbID);
-    REQUIRE (reopenedReverb != nullptr);
-    REQUIRE (reopenedReverb->windowState->lastWindowBounds.has_value());
-    CHECK (reopenedReverb->windowState->lastWindowBounds->getPosition() == juce::Point<int> (140, 360));
+    const auto reopenedPlugin = te::findPluginForID (reopened, pluginID);
+    REQUIRE (reopenedPlugin != nullptr);
+    REQUIRE (reopenedPlugin->windowState->lastWindowBounds.has_value());
+    CHECK (reopenedPlugin->windowState->lastWindowBounds->getPosition() == juce::Point<int> (140, 360));
 
     // Everything else is the song or state, which closing without saving would lose: each of these is an unsaved change.
     const auto isUnsavedChange = [&project] (const std::function<void()>& change)

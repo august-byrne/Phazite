@@ -3,6 +3,7 @@
 // devices in a row, each shown whole (an editor for Phazite's own, a container's macros and devices, a plug-in's key
 // knobs and a button for its window), which track it shows as the selection changes or a device's name is clicked in
 // the mixer, the master's devices, and the track's modulators with an editor beside them.
+#include "TestPlugin.h"
 #include "UiTestHelpers.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -35,8 +36,8 @@ juce::Component* findNameButton (juce::Component& panel, const juce::String& nam
     return nullptr;
 }
 
-// An open project with two tracks: A, with an EQ, a compressor and one of Tracktion's built-in reverbs, and B, with a
-// reverb of Phazite's own. "device.show" does what the app's does: it shows the selected device in the view.
+// An open project with two tracks: A, with an EQ, a compressor and a plug-in, and B, with a reverb. "device.show" does
+// what the app's does: it shows the selected device in the view.
 struct Screen
 {
     Screen()
@@ -44,11 +45,9 @@ struct Screen
         edit->ensureNumberOfAudioTracks (2);
         setEdit (context, edit.get());
 
-        for (const auto* type : { "phaziteEq", "phaziteCompressor" })
+        for (const auto* type : { "phaziteEq", "phaziteCompressor", "PhaziteTestEffect" })
             phazite::addEffect (context, track (0), find (type));
 
-        te::getAudioTracks (*edit)[0]->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}),
-                                                                -1, nullptr);
         phazite::addEffect (context, track (1), find ("phaziteReverb"));
 
         registry.add ({ .id = "device.show",
@@ -88,6 +87,7 @@ struct Screen
         return ids;
     }
 
+    phazite::test::TestPlugin testPlugin; // before the Edit that holds one, and gone after it
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
@@ -107,23 +107,23 @@ TEST_CASE ("The Devices view shows the selected track's devices in a row, each w
     REQUIRE (effects.size() == 3);
     auto* eq = view.findPanel (effects[0]);
     auto* compressor = view.findPanel (effects[1]);
-    auto* reverb = view.findPanel (effects[2]);
+    auto* plugin = view.findPanel (effects[2]);
     REQUIRE (eq != nullptr);
     REQUIRE (compressor != nullptr);
-    REQUIRE (reverb != nullptr);
+    REQUIRE (plugin != nullptr);
 
     // Left to right as the sound goes, each as tall as the view.
     CHECK (eq->getScreenX() < compressor->getScreenX());
-    CHECK (compressor->getScreenX() < reverb->getScreenX());
-    CHECK (eq->getScreenY() == reverb->getScreenY());
+    CHECK (compressor->getScreenX() < plugin->getScreenX());
+    CHECK (eq->getScreenY() == plugin->getScreenY());
     CHECK (eq->getHeight() > 300);
 
-    // Phazite's EQ shows its editor, its graph shrunk to fit; Tracktion's reverb has key knobs and a button for its own
-    // window, which Phazite's devices don't have.
+    // Phazite's EQ shows its editor, its graph shrunk to fit; the plug-in has key knobs and a button for its own window,
+    // which Phazite's devices don't have.
     CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).size() == 1);
     CHECK (phazite::test::findComponentWithTitle (*eq, "Open its window") == nullptr);
-    CHECK (phazite::test::findComponentWithTitle (*reverb, "Open its window") != nullptr);
-    CHECK (phazite::test::findAll<phazite::ui::Knob> (*reverb).size() >= 2);
+    CHECK (phazite::test::findComponentWithTitle (*plugin, "Open its window") != nullptr);
+    CHECK (phazite::test::findAll<phazite::ui::Knob> (*plugin).size() >= 2);
     CHECK (phazite::test::findComponentWithTitle (view, "Choose instrument") == nullptr); // no notes to play
 
     // A plain click on a device's name selects it alone; Ctrl adds another.

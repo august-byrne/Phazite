@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer, as it lays out in the window (the inspector: InspectorTests.cpp).
 #include "UiTestHelpers.h"
+#include "devices/reverb/Reverb.h"
+#include "devices/synth/Synth.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -79,8 +81,8 @@ TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks 
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return buttonsIn ("Instrument") == juce::StringArray { "Choose instrument" }; }));
 
     // The instrument has its own slot, and effects go in theirs.
-    auto* synth = phazite::setInstrument (*track, edit->getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {}));
-    auto* reverb = phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}));
+    auto* synth = phazite::setInstrument (*track, edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
+    auto* reverb = phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {}));
     REQUIRE (synth != nullptr);
     REQUIRE (reverb != nullptr);
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return buttonsIn ("Instrument").contains (synth->getName()); }));

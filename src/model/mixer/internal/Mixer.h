@@ -25,8 +25,8 @@ bool isDevice (const te::Plugin&);
 juce::Array<te::Plugin*> getDevices (const te::Track&);
 juce::Array<te::Plugin*> getMasterDevices (const te::Edit&);
 
-// Whether a device has a window of its own (app/PluginWindow.h): a plug-in, or one of Tracktion's built-in devices; not
-// one of Phazite's own, nor a container, which the Devices view shows.
+// Whether a device has a window of its own (app/PluginWindow.h): a plug-in; not one of Phazite's own devices, nor a
+// container, which the Devices view shows.
 bool opensWindow (const te::Plugin&);
 
 // A track's instrument, which turns its notes into sound: its first device, if that is an instrument. Its effects

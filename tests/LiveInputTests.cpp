@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "devices/synth/Synth.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/internal/Project.h"
 
@@ -21,7 +22,7 @@ std::shared_ptr<te::MidiInputDevice> findAllMidiInputs()
 
 void addInstrument (te::AudioTrack& track)
 {
-    track.pluginList.insertPlugin (track.edit.getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {}), 0, nullptr);
+    track.pluginList.insertPlugin (track.edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}), 0, nullptr);
 }
 } // namespace
 

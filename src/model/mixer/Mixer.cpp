@@ -18,12 +18,10 @@ namespace
 {
     constexpr float newSendDb = -6.0f;
 
-    // A device's dry and wet levels, and the value of each at which it passes its sound at full level: 1 for Tracktion's
-    // plug-ins, and a half (dry) and a third (wet) for its reverb, which scales them up.
+    // The dry and wet levels Tracktion gives a plug-in or a container, each passing its sound at full level at 1.
     struct MixLevels
     {
         te::AutomatableParameter::Ptr dry, wet;
-        float dryAtFull = 1.0f, wetAtFull = 1.0f;
     };
 
     std::optional<MixLevels> findMixLevels (te::Plugin& device)
@@ -37,10 +35,7 @@ namespace
         if (dry == nullptr || wet == nullptr)
             return {};
 
-        if (dynamic_cast<te::ReverbPlugin*> (&device) != nullptr)
-            return MixLevels { dry, wet, 0.5f, 1.0f / 3.0f };
-
-        return MixLevels { dry, wet, 1.0f, 1.0f };
+        return MixLevels { dry, wet };
     }
 
     bool isMixLevel (const te::AutomatableParameter& parameter)
@@ -66,7 +61,7 @@ namespace
     // The plug-ins that are part of a channel rather than devices on it.
     bool isChannelPlugin (const te::Plugin& plugin)
     {
-        return isAnyOf<te::VolumeAndPanPlugin, te::LevelMeterPlugin, te::AuxSendPlugin, te::AuxReturnPlugin, te::VCAPlugin, te::TextPlugin,
+        return isAnyOf<te::VolumeAndPanPlugin, te::LevelMeterPlugin, te::AuxSendPlugin, te::AuxReturnPlugin, te::VCAPlugin,
                        te::FreezePointPlugin, LoudnessMeterPlugin> (plugin);
     }
 
@@ -139,7 +134,7 @@ bool isDevice (const te::Plugin& plugin)
 
 bool opensWindow (const te::Plugin& device)
 {
-    return isDevice (device) && ! isContainer (device) && dynamic_cast<const DevicePlugin*> (&device) == nullptr;
+    return dynamic_cast<const te::ExternalPlugin*> (&device) != nullptr;
 }
 
 juce::Array<te::Plugin*> getDevices (const te::Track& track)
@@ -283,8 +278,7 @@ float getMix (te::Plugin& device)
     if (! levels.has_value())
         return 1.0f;
 
-    const auto wet = levels->wet->getCurrentValue() / levels->wetAtFull;
-    const auto dry = levels->dry->getCurrentValue() / levels->dryAtFull;
+    const auto wet = levels->wet->getCurrentValue(), dry = levels->dry->getCurrentValue();
     return wet + dry > 0.0f ? juce::jlimit (0.0f, 1.0f, wet / (wet + dry)) : 1.0f;
 }
 
@@ -299,8 +293,8 @@ void setMix (te::Plugin& device, float mix)
     if (const auto levels = findMixLevels (device))
     {
         const auto wet = juce::jlimit (0.0f, 1.0f, mix);
-        levels->wet->setParameter (wet * levels->wetAtFull, juce::sendNotification);
-        levels->dry->setParameter ((1.0f - wet) * levels->dryAtFull, juce::sendNotification);
+        levels->wet->setParameter (wet, juce::sendNotification);
+        levels->dry->setParameter (1.0f - wet, juce::sendNotification);
     }
 }
 
@@ -328,9 +322,9 @@ DeviceType makeDeviceType (const juce::PluginDescription& description)
 
 std::vector<DeviceType> getDeviceTypes (te::Engine& engine)
 {
-    // Phazite's own devices (roadmap step 1.6), instruments first. Tracktion's lock, allocate or read message-thread state
-    // on the audio thread, so they aren't offered (docs/realtime-audit.md, finding 16); projects that hold its 4OSC synth or
-    // its reverb, which were offered until Phazite had its own, still open and play them.
+    // Phazite's own devices (roadmap step 1.6), instruments first, then the plug-ins found by scanning. Tracktion's
+    // instruments and effects lock, allocate or read message-thread state on the audio thread, so Phazite doesn't use them
+    // (docs/realtime-audit.md, finding 16).
     std::vector<DeviceType> types;
     addOwnDevices (types, devices::DeviceKind::instrument);
     addOwnDevices (types, devices::DeviceKind::effect);
@@ -559,9 +553,7 @@ te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& e
     insertDevice (*created, effect);
 
     // The dry sound reaches the master through the track itself, so a return plays only its effect.
-    if (auto* reverb = dynamic_cast<te::ReverbPlugin*> (effect.get()))
-        reverb->setDry (0.0f);
-    else if (findOwnMix (*effect) != nullptr)
+    if (hasMix (*effect))
         setMix (*effect, 1.0f);
 
     addSend (sender, getReturnBus (*created), false);

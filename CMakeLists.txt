@@ -717,6 +717,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/SoundPackTests.cpp
         tests/SynthTests.cpp
         tests/TestDevices.h
+        tests/TestPlugin.cpp
+        tests/TestPlugin.h
         tests/TempoTests.cpp
         tests/TimelineGestureTests.cpp
         tests/TimelineModelTests.cpp

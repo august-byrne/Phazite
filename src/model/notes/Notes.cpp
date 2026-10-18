@@ -189,15 +189,6 @@ namespace
 
         return tokens.joinIntoString (",");
     }
-
-    te::SamplerPlugin* findSampler (const te::AudioTrack& track)
-    {
-        for (auto* plugin : track.pluginList)
-            if (auto* sampler = dynamic_cast<te::SamplerPlugin*> (plugin))
-                return sampler;
-
-        return nullptr;
-    }
 } // namespace
 
 //==============================================================================
@@ -854,7 +845,7 @@ bool isDrumTrack (const te::AudioTrack& track)
 
     for (auto* plugin : track.pluginList)
         if (isInstrument (*plugin))
-            return dynamic_cast<te::SamplerPlugin*> (plugin) != nullptr || dynamic_cast<DrumSamplerPlugin*> (plugin) != nullptr;
+            return dynamic_cast<DrumSamplerPlugin*> (plugin) != nullptr;
 
     return false;
 }
@@ -866,7 +857,7 @@ void setDrumTrack (te::AudioTrack& track, bool isDrums)
 
 std::optional<std::vector<DrumRow>> getSamplerSounds (const te::AudioTrack& track)
 {
-    // Phazite's drum sampler: a row for each pad.
+    // A row for each of the drum sampler's pads.
     for (auto* plugin : track.pluginList)
     {
         if (const auto* drums = dynamic_cast<const DrumSamplerPlugin*> (plugin))
@@ -880,22 +871,7 @@ std::optional<std::vector<DrumRow>> getSamplerSounds (const te::AudioTrack& trac
         }
     }
 
-    auto* sampler = findSampler (track);
-
-    if (sampler == nullptr)
-        return std::nullopt;
-
-    std::vector<DrumRow> sounds;
-
-    for (int i = 0; i < sampler->getNumSounds(); ++i)
-    {
-        const auto note = sampler->getKeyNote (i);
-
-        if (std::none_of (sounds.begin(), sounds.end(), [note] (const DrumRow& row) { return row.note == note; }))
-            sounds.push_back ({ note, sampler->getSoundName (i) });
-    }
-
-    return sounds;
+    return std::nullopt;
 }
 
 std::vector<int> getNoteNumbersPlayed (const juce::Array<te::MidiClip*>& clips)

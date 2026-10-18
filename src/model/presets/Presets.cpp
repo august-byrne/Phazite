@@ -360,17 +360,11 @@ bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target
 //==============================================================================
 namespace
 {
-    // Whether a preset's device is of a device's kind: the same type, and for a plug-in, the same plug-in.
-    bool isSameKindOfDevice (const te::Plugin& device, const juce::ValueTree& saved)
+    // Whether a preset's device is the same plug-in as a plug-in.
+    bool isSamePlugin (const te::ExternalPlugin& plugin, const juce::ValueTree& saved)
     {
-        if (saved[te::IDs::type].toString() != device.state[te::IDs::type].toString())
-            return false;
-
-        if (dynamic_cast<const te::ExternalPlugin*> (&device) == nullptr)
-            return true;
-
-        for (const auto& property : { te::IDs::uniqueId, te::IDs::name, te::IDs::manufacturer })
-            if (saved[property].toString() != device.state[property].toString())
+        for (const auto& property : { te::IDs::type, te::IDs::uniqueId, te::IDs::name, te::IDs::manufacturer })
+            if (saved[property].toString() != plugin.state[property].toString())
                 return false;
 
         return true;
@@ -454,27 +448,20 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
 {
     auto* edit = getEdit (context);
     const auto device = edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)) : te::Plugin::Ptr();
-    const auto preset = device != nullptr && opensWindow (*device) ? readPreset (file) : juce::ValueTree();
+    auto* plugin = dynamic_cast<te::ExternalPlugin*> (device.get());
+    const auto preset = plugin != nullptr ? readPreset (file) : juce::ValueTree();
 
     if (! preset.isValid() || findKind (preset[schema::presetKind]) != PresetKind::device)
         return false;
 
     const auto saved = preset.getChildWithName (te::IDs::PLUGIN);
 
-    if (! saved.isValid() || ! isSameKindOfDevice (*device, saved))
+    if (! saved.isValid() || ! isSamePlugin (*plugin, saved))
         return false;
 
-    const UndoStep step (*edit, "Load Preset " + file.getFileNameWithoutExtension());
-    auto* plugin = dynamic_cast<te::ExternalPlugin*> (device.get());
-
-    // Tracktion's built-in devices keep their settings and mix as values, which they write through the undo manager.
-    if (plugin == nullptr)
-    {
-        device->restorePluginStateFromValueTree (saved);
-        return true;
-    }
-
     // A plug-in keeps its settings in a block of its own, and its mix as values.
+    const UndoStep step (*edit, "Load Preset " + file.getFileNameWithoutExtension());
+
     if (! edit->getUndoManager().perform (new PluginSettingsAction (*plugin, saved)))
         return false;
 

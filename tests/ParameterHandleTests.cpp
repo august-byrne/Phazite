@@ -4,6 +4,8 @@
 #include "GoldenFiles.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
+#include "TestPlugin.h"
+#include "devices/reverb/Reverb.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
@@ -12,7 +14,7 @@ namespace
 {
 te::Plugin::Ptr addReverb (te::Edit& edit)
 {
-    auto plugin = edit.getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {});
+    auto plugin = edit.getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {});
     te::getAudioTracks (edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
     return plugin;
 }
@@ -24,25 +26,27 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     CHECK_FALSE (empty.isValid());
     CHECK (empty.getValue() == doctest::Approx (0.0f));
 
+    phazite::test::TestPlugin testPlugin;
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    auto reverb = addReverb (*edit);
-    auto handle = phazite::makeParameterHandle (reverb.get(), "room size");
+    te::Plugin::Ptr plugin = phazite::test::TestPlugin::create (*edit);
+    te::getAudioTracks (*edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+    auto handle = phazite::makeParameterHandle (plugin.get(), phazite::test::TestPlugin::toneID);
 
     REQUIRE (handle.isValid());
-    CHECK (handle.refersToSameParameter (phazite::makeParameterHandle (reverb.get(), "room size", "Another Name")));
-    CHECK_FALSE (handle.refersToSameParameter (phazite::makeParameterHandle (reverb.get(), "damping")));
+    CHECK (handle.refersToSameParameter (phazite::makeParameterHandle (plugin.get(), phazite::test::TestPlugin::toneID, "Another Name")));
+    CHECK_FALSE (handle.refersToSameParameter (phazite::makeParameterHandle (plugin.get(), phazite::test::TestPlugin::gainID)));
     CHECK_FALSE (handle.refersToSameParameter (empty));
     CHECK (empty.refersToSameParameter (phazite::ParameterHandle()));
-    CHECK (handle.getName() == juce::String ("Room Size"));
+    CHECK (handle.getName() == juce::String ("Tone"));
     CHECK (handle.getRange().start == doctest::Approx (0.0f));
     CHECK (handle.getRange().end == doctest::Approx (1.0f));
-    CHECK (handle.getDefaultValue().value_or (-1.0f) == doctest::Approx (0.3f));
-    CHECK (handle.getValue() == doctest::Approx (0.3f));
-    CHECK (handle.getText (0.5f) == juce::String ("6")); // Tracktion's reverb writes its room size from 1 to 11
-    CHECK_FALSE (handle.getInfo().has_value());          // not one of Phazite's own devices
+    CHECK (handle.getDefaultValue().value_or (-1.0f) == doctest::Approx (0.5f));
+    CHECK (handle.getValue() == doctest::Approx (0.5f));
+    CHECK (handle.getText (0.25f).startsWith ("0.25")); // as the plug-in writes it
+    CHECK_FALSE (handle.getInfo().has_value());         // not one of Phazite's own devices
 
     // When the project closes, the handle finds nothing and changes nothing.
-    reverb = nullptr;
+    plugin = nullptr;
     edit = nullptr;
     CHECK_FALSE (handle.isValid());
     CHECK (handle.getName().isEmpty());
@@ -59,7 +63,7 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     phazite::test::settle();
     edit->getUndoManager().clearUndoHistory();
 
-    auto handle = phazite::makeParameterHandle (reverb.get(), "room size"); // its steps are called "Change Room Size"
+    auto handle = phazite::makeParameterHandle (reverb.get(), "size"); // its steps are called "Change Size"
 
     // A drag: every value it passes through is one step, however long it takes.
     handle.beginGesture();
@@ -71,22 +75,22 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     handle.endGesture();
     CHECK_FALSE (handle.isInGesture());
     CHECK (handle.getValue() == doctest::Approx (0.8f));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Room Size"));
+    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Size"));
 
     phazite::undo (*edit);
-    CHECK (handle.getValue() == doctest::Approx (0.3f)); // where the drag began, played again
+    CHECK (handle.getValue() == doctest::Approx (0.5f)); // where the drag began, played again
     phazite::redo (*edit);
     CHECK (handle.getValue() == doctest::Approx (0.8f));
 
     // A key press: a step of its own, so undo goes back that far only.
     handle.setValue (0.5f);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Room Size"));
+    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Size"));
     phazite::undo (*edit);
     CHECK (handle.getValue() == doctest::Approx (0.8f));
 
     // A name given for the steps.
     auto damping = phazite::makeParameterHandle (reverb.get(), "damping", "Change Reverb Damping");
-    damping.setValue (0.9f);
+    damping.setValue (9000.0f);
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Reverb Damping"));
 
     // A handle that goes away during a drag keeps the drag's change.
@@ -126,20 +130,20 @@ TEST_CASE ("A gesture begun during another for the same project joins it: a drag
     phazite::test::settle();
     edit->getUndoManager().clearUndoHistory();
 
-    auto room = phazite::makeParameterHandle (reverb.get(), "room size", "Move Both");
+    auto size = phazite::makeParameterHandle (reverb.get(), "size", "Move Both");
     auto damping = phazite::makeParameterHandle (reverb.get(), "damping");
-    room.beginGesture();
+    size.beginGesture();
     damping.beginGesture();
-    CHECK (room.isInGesture());
+    CHECK (size.isInGesture());
     CHECK (damping.isInGesture());
-    room.setValue (0.9f);
-    damping.setValue (0.1f);
+    size.setValue (0.9f);
+    damping.setValue (2000.0f);
     damping.endGesture();
-    room.endGesture();
+    size.endGesture();
     CHECK_FALSE (damping.isInGesture());
 
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Move Both"));
     phazite::undo (*edit);
-    CHECK (room.getValue() == doctest::Approx (0.3f));
-    CHECK (damping.getValue() == doctest::Approx (0.5f));
+    CHECK (size.getValue() == doctest::Approx (0.5f));
+    CHECK (damping.getValue() == doctest::Approx (6000.0f));
 }

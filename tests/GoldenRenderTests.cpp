@@ -4,8 +4,8 @@
 // of the result are compared with a committed fingerprint, so that a change to how Phazite plays a project fails a test.
 // Levels may be toleranceDb apart, and a level below floorDb counts as floorDb: that absorbs the differences between
 // compilers' maths libraries, and where a reverb's tail is cut off. A fingerprint doesn't notice a change of phase only,
-// or of frequency at the same level. Golden renders never use 4OSC (its oscillators start at random phases) or anything
-// else random. GoldenFiles.h says how to regenerate the golden files.
+// or of frequency at the same level. Golden renders never use anything random (Phazite's devices seed their noise and
+// random phases). GoldenFiles.h says how to regenerate the golden files.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"

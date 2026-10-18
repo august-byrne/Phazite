@@ -26,14 +26,13 @@ TEST_CASE ("A drum track shows the usual drums, the notes it plays, in its order
     CHECK (std::none_of (rows.begin(), rows.end(), [] (const phazite::DrumRow& row) { return row.note == 37; }));
     CHECK (getDrumRows (std::nullopt, played, order, {}).size() == 12); // all shown again
 
-    // A sampler's sounds take the usual drums' place, even when it has none.
+    // A drum sampler's pads take the usual drums' place.
     const std::vector<phazite::DrumRow> pads { { 60, "Boom" }, { 62, "Tss" } };
     rows = getDrumRows (pads, played, {}, {});
     REQUIRE (rows.size() == 4);
     CHECK (rows[0].name == juce::String ("Boom"));
     CHECK (rows[2].note == 38);
     CHECK (rows[3].note == 70);
-    CHECK (getDrumRows (std::vector<phazite::DrumRow>(), {}, {}, {}).empty());
 }
 
 TEST_CASE ("Moving a drum row reorders the track's rows")

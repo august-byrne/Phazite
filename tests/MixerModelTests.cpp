@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer as the UI reaches it, by IDs and plain values (src/model/mixer/MixerModel.h).
 #include "TestHelpers.h"
+#include "TestPlugin.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mixer/ContainerModel.h"
@@ -181,6 +182,7 @@ TEST_CASE ("A channel's devices by ID: its instrument, its effects in their orde
 
 TEST_CASE ("A device's channel, its handle for an editor, and whether its controls open in a window of their own")
 {
+    phazite::test::TestPlugin testPlugin;
     Song song;
     auto& context = song.context;
     const auto a = idOf (*song.a);
@@ -205,8 +207,8 @@ TEST_CASE ("A device's channel, its handle for an editor, and whether its contro
     CHECK_FALSE (phazite::getEffects (context, a).front().opensWindow);
     CHECK_FALSE (phazite::getDeviceHandle (context, container).isValid());
 
-    // One of Tracktion's built-in devices has its controls in a window of its own, as a plug-in has.
-    song.a->pluginList.insertPlugin (song.edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}), -1, nullptr);
+    // A plug-in has its controls in a window of its own.
+    phazite::addEffect (context, a, song.find ("PhaziteTestEffect"));
     const auto effects = phazite::getEffects (context, a);
     REQUIRE (effects.size() == 2);
     CHECK (effects.back().opensWindow);

@@ -73,7 +73,7 @@ inline const juce::Identifier phaziteKeyRoot { "phaziteKeyRoot" };
 inline const juce::Identifier phaziteKeyScale { "phaziteKeyScale" };
 
 // On TRACK. bool: the piano roll shows the track's clips in drum mode; none = on while the track's instrument is
-// Tracktion's sampler. view
+// Phazite's drum sampler. view
 inline const juce::Identifier phaziteDrumMode { "phaziteDrumMode" };
 
 // On TRACK: the order of the drum rows, as note numbers separated by commas, top first; rows it doesn't list come

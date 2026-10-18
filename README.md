@@ -375,7 +375,7 @@ The audio thread is the audio callback and everything it calls, such as plug-in,
 - post to the message thread (`triggerAsyncUpdate`, `sendChangeMessage`, `callAsync`): set an atomic flag and poll it from a `juce::Timer` instead;
 - do file or network I/O, log, throw exceptions or run unbounded loops.
 
-Threads share data only through lock-free FIFOs and `std::atomic` values, and parameters are read through `AutomatableParameter::getCurrentValue()`. Tracktion's 4OSC synth, used by the smoke test, breaks these rules: don't copy it or use it for performance measurements. The full list is in [CLAUDE.md](CLAUDE.md#real-time-rules-audio-thread).
+Threads share data only through lock-free FIFOs and `std::atomic` values, and parameters are read through `AutomatableParameter::getCurrentValue()`. Tracktion's own instruments and effects (such as its 4OSC synth) break these rules, so Phazite doesn't use them. The full list is in [CLAUDE.md](CLAUDE.md#real-time-rules-audio-thread).
 
 ### Working with Claude Code
 

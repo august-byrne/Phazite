@@ -117,7 +117,7 @@ te::AudioTrack& getTrack (te::Edit& edit, int index)
     return *te::getAudioTracks (edit)[index];
 }
 
-// Adds a built-in device to a track, after its other devices and before its volume and level meter.
+// Adds a device to a track by its type, after its other devices and before its volume and level meter.
 te::Plugin& addPlugin (te::Track& track, const juce::String& type)
 {
     auto plugin = track.edit.getPluginCache().createNewPlugin (type, {});
@@ -437,24 +437,6 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: built-in effects and a send to a reverb return")
-    {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-
-        auto& track = getTrack (*edit, 0);
-        addPlugin (track, te::EqualiserPlugin::xmlTypeName);
-        addPlugin (track, te::CompressorPlugin::xmlTypeName);
-        addPlugin (track, te::AuxSendPlugin::xmlTypeName); // bus 0
-
-        auto& returnTrack = getTrack (*edit, 1);
-        addPlugin (returnTrack, te::AuxReturnPlugin::xmlTypeName); // bus 0
-        addPlugin (returnTrack, te::ReverbPlugin::xmlTypeName);
-
-        const auto m = playAndMeasure (*edit);
-        report ("Built-in EQ and compressor, and a send to a reverb return", m);
-        checkSteadyPlaybackDoesNotAllocate (m);
-    }
-
     TEST_CASE ("Real-time audit: volume automation and an LFO on pan")
     {
         auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
@@ -490,7 +472,7 @@ TEST_SUITE ("realtime-audit")
 
         auto* reverbReturn = phazite::addReturnTrack (*edit, "Reverb", nullptr);
         REQUIRE (reverbReturn != nullptr);
-        REQUIRE (phazite::insertDevice (*reverbReturn, edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}))
+        REQUIRE (phazite::insertDevice (*reverbReturn, edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {}))
                  != nullptr);
         REQUIRE (phazite::addSend (tone, phazite::getReturnBus (*reverbReturn), false) != nullptr);
 
@@ -998,7 +980,8 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    // These read audio files or use code Phazite is replacing, so they only report.
+    // These read audio files, so they only report; but a frozen track plays a file Phazite made, and its steady playback
+    // must not allocate either.
 
     TEST_CASE ("Real-time audit: a frozen track, its synth's notes played from its frozen file")
     {
@@ -1129,28 +1112,10 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (folder != nullptr);
         edit->moveTrack (&first, te::TrackInsertPoint (folder.get(), nullptr));
         edit->moveTrack (&second, te::TrackInsertPoint (folder.get(), &first));
-        addPlugin (*folder, te::CompressorPlugin::xmlTypeName);
+        addPlugin (*folder, phazite::devices::Compressor::typeID);
 
         const auto m = playAndMeasure (*edit);
         report ("Two tracks in a folder bus with a compressor", m);
-        CHECK (m.peakLevel > 0.01f);
-    }
-
-    TEST_CASE ("Real-time audit: MIDI into Tracktion's 4OSC synth")
-    {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-        auto& track = getTrack (*edit, 0);
-        track.pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {}), 0, nullptr);
-
-        auto clip = track.insertMIDIClip ("Notes", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
-        REQUIRE (clip != nullptr);
-
-        for (int i = 0; i < 8; ++i)
-            clip->getSequence().addNote (48 + i * 2, te::BeatPosition::fromBeats (i * 0.5), te::BeatDuration::fromBeats (0.4), 100, 0,
-                                         nullptr);
-
-        const auto m = playAndMeasure (*edit);
-        report ("MIDI into Tracktion's 4OSC synth", m);
         CHECK (m.peakLevel > 0.01f);
     }
 

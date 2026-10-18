@@ -99,8 +99,8 @@ struct DeviceSlot
     double latencySeconds = 0.0; // how late its sound comes out
     bool isContainer = false;    // a container of effects (ContainerModel.h)
 
-    // A plug-in, or one of Tracktion's built-in devices: its own controls are in a window of its own (showDeviceWindow()).
-    // Phazite's own devices and containers have none: the Devices view shows them whole (docs/design.md, section 9).
+    // A plug-in: its own controls are in a window of its own (showDeviceWindow()). Phazite's own devices and containers have
+    // none: the Devices view shows them whole (docs/design.md, section 9).
     bool opensWindow = false;
 
     // Its sound is in its track's frozen file (FreezeModel.h): its controls are off, and its window shut, until the track

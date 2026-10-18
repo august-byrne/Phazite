@@ -5,6 +5,7 @@
 #include "RealTimePlayback.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -37,7 +38,7 @@ std::shared_ptr<te::MidiInputDevice> waitForAllMidiInputs()
 
 void addInstrument (te::AudioTrack& track)
 {
-    track.pluginList.insertPlugin (track.edit.getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {}), 0, nullptr);
+    track.pluginList.insertPlugin (track.edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}), 0, nullptr);
 }
 
 } // namespace

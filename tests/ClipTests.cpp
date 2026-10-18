@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
@@ -553,7 +554,7 @@ TEST_CASE ("Draw places a copy of the clip used last, or a bar-long MIDI clip on
     phazite::deleteClips ({ &source }, false);
     CHECK (phazite::placeClip (*e.tracks[0], beats (4.0), used.get()) == nullptr);
 
-    e.tracks[0]->pluginList.insertPlugin (e.edit->getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {}), 0, nullptr);
+    e.tracks[0]->pluginList.insertPlugin (e.edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}), 0, nullptr);
     auto* empty = dynamic_cast<te::MidiClip*> (phazite::placeClip (*e.tracks[0], beats (4.0), used.get()));
     REQUIRE (empty != nullptr);
     CHECK (empty->getSequence().getNumNotes() == 0);

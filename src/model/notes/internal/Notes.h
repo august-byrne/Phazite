@@ -142,14 +142,13 @@ void setLastKey (te::Edit&, const Key&);
 //==============================================================================
 // Drum mode (docs/design.md, section 7).
 
-// Whether the piano roll shows the track's clips in drum mode: on for a track whose instrument is
-// Phazite's drum sampler or Tracktion's sampler, unless it was turned off, and for any track it was turned on for.
+// Whether the piano roll shows the track's clips in drum mode: on for a track whose instrument is Phazite's drum sampler,
+// unless it was turned off, and for any track it was turned on for.
 bool isDrumTrack (const te::AudioTrack&);
 void setDrumTrack (te::AudioTrack&, bool);
 
-// What a drum track's rows come from (the piano roll lays them out: ui/pianoroll/DrumRows.h). Phazite's drum sampler's pads,
-// named after what each plays, or Tracktion's sampler's sounds, one row for each note it plays (its first sound for that
-// note), in the sampler's order: nothing for a track without a sampler, and no rows for a sampler without sounds.
+// What a drum track's rows come from (the piano roll lays them out: ui/pianoroll/DrumRows.h): Phazite's drum sampler's
+// pads, named after what each plays, or nothing for a track without one.
 std::optional<std::vector<DrumRow>> getSamplerSounds (const te::AudioTrack&);
 std::vector<int> getNoteNumbersPlayed (const juce::Array<te::MidiClip*>&); // from low to high, each once
 

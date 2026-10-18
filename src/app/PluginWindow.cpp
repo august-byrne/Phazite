@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginWindow.h"
-#include "model/devices/internal/ParameterHandle.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/ProjectContext.h"
 #include "services/Library.h"
 #include "services/Settings.h"
 #include "ui/browser/Browser.h"
-#include "ui/components/Controls.h"
 #include "ui/input/PluginKeys.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -15,74 +13,12 @@ namespace phazite
 {
 namespace
 {
-    constexpr int knobSize = 64, labelHeight = 18, columns = 4;
-
     const PluginWindowServices* services = nullptr; // the main window's, while it is open
 
-    // A knob for each parameter, for Tracktion's built-in devices, which have no editor of their own.
-    class GenericEditor : public te::Plugin::EditorComponent,
-                          private juce::Timer
+    // How the settings know a plug-in in every project: by its format, maker and name ("VST3/Xfer Records/Serum").
+    juce::String getIdentity (const te::ExternalPlugin& plugin)
     {
-    public:
-        explicit GenericEditor (te::Plugin& plugin)
-        {
-            for (auto* parameter : plugin.getAutomatableParameters())
-            {
-                auto* knob = knobs.add (new ui::Knob (parameter->getParameterName(), parameter->getDefaultValue().value_or (0.0f)));
-                auto* attachment = attachments.add (new ui::ParameterAttachment (*knob));
-                attachment->setParameter (makeParameterHandle (&plugin, parameter->paramID));
-                attachment->showDeviceText();
-
-                auto* label = labels.add (new juce::Label ({}, parameter->getParameterName()));
-                label->setJustificationType (juce::Justification::centred);
-                label->setFont (juce::FontOptions (ui::TextSize::small));
-
-                addAndMakeVisible (knob);
-                addAndMakeVisible (label);
-            }
-
-            const auto rows = std::max (1, (knobs.size() + columns - 1) / columns);
-            setSize (columns * (knobSize + ui::Space::l) + ui::Space::l, rows * (knobSize + labelHeight + ui::Space::s) + ui::Space::l);
-            startTimerHz (10);
-        }
-
-        bool allowWindowResizing() override { return false; }
-        juce::ComponentBoundsConstrainer* getBoundsConstrainer() override { return nullptr; }
-
-        void paint (juce::Graphics& g) override { g.fillAll (ui::getPalette (*this).surface); }
-
-        void resized() override
-        {
-            for (int i = 0; i < knobs.size(); ++i)
-            {
-                const auto x = ui::Space::l + (i % columns) * (knobSize + ui::Space::l);
-                const auto y = ui::Space::l + (i / columns) * (knobSize + labelHeight + ui::Space::s);
-                knobs[i]->setBounds (x, y, knobSize, knobSize);
-                labels[i]->setBounds (x - ui::Space::s, y + knobSize, knobSize + 2 * ui::Space::s, labelHeight);
-            }
-        }
-
-    private:
-        juce::OwnedArray<ui::Knob> knobs;
-        juce::OwnedArray<ui::ParameterAttachment> attachments;
-        juce::OwnedArray<juce::Label> labels;
-
-        void timerCallback() override // shows changes from automation, undo and the device's own knobs
-        {
-            for (auto* attachment : attachments)
-                attachment->update();
-        }
-    };
-
-    //==============================================================================
-    // How the settings know a plug-in in every project: by its format, maker and name ("VST3/Xfer Records/Serum"), or
-    // one of Tracktion's built-in devices by its type ("Tracktion/reverb"). The settings keep these: never change them.
-    juce::String getIdentity (te::Plugin& plugin)
-    {
-        if (auto* external = dynamic_cast<te::ExternalPlugin*> (&plugin))
-            return external->desc.pluginFormatName + "/" + external->desc.manufacturerName + "/" + external->desc.name;
-
-        return "Tracktion/" + plugin.getPluginType();
+        return plugin.desc.pluginFormatName + "/" + plugin.desc.manufacturerName + "/" + plugin.desc.name;
     }
 
     void updateWindowsKeys(); // every open window's, after a plug-in's switch changed
@@ -91,7 +27,7 @@ namespace
     class PluginMenu : public juce::MenuBarModel
     {
     public:
-        PluginMenu (te::Plugin& p, juce::Component& w)
+        PluginMenu (te::ExternalPlugin& p, juce::Component& w)
             : plugin (p),
               window (w)
         {
@@ -123,7 +59,7 @@ namespace
         }
 
     private:
-        te::Plugin& plugin;
+        te::ExternalPlugin& plugin;
         juce::Component& window;
         std::unique_ptr<juce::FileChooser> chooser;
 
@@ -236,7 +172,7 @@ namespace
                          private juce::Timer
     {
     public:
-        explicit PluginWindow (te::Plugin& p)
+        explicit PluginWindow (te::ExternalPlugin& p)
             : juce::DocumentWindow (p.getName(), {}, juce::DocumentWindow::closeButton),
               plugin (p),
               menu (p, *this)
@@ -272,14 +208,7 @@ namespace
         void recreateEditor()
         {
             setEditor (nullptr);
-
-            // A plug-in's own editor, or for one of Tracktion's built-in devices a knob for each parameter.
-            auto newEditor = plugin.createEditor();
-
-            if (newEditor == nullptr && dynamic_cast<te::ExternalPlugin*> (&plugin) == nullptr)
-                newEditor = std::make_unique<GenericEditor> (plugin);
-
-            setEditor (std::move (newEditor));
+            setEditor (plugin.createEditor());
         }
 
         void updateKeys() { menu.updateKeys(); }
@@ -303,7 +232,7 @@ namespace
         }
 
     private:
-        te::Plugin& plugin;
+        te::ExternalPlugin& plugin;
         PluginMenu menu;
         std::unique_ptr<te::Plugin::EditorComponent> editor;
         bool storeBounds = false;
@@ -373,16 +302,13 @@ std::unique_ptr<juce::Component> createPluginWindow (te::PluginWindowState& stat
     if (windowState == nullptr)
         return {};
 
-    auto& plugin = windowState->plugin;
-
     // Phazite's own devices and containers show in the Devices view instead.
-    if (! opensWindow (plugin))
-        return {};
+    auto* plugin = dynamic_cast<te::ExternalPlugin*> (&windowState->plugin);
 
-    if (auto* external = dynamic_cast<te::ExternalPlugin*> (&plugin); external != nullptr && external->getAudioPluginInstance() == nullptr)
-        return {}; // it didn't load
+    if (plugin == nullptr || plugin->getAudioPluginInstance() == nullptr)
+        return {}; // not a plug-in, or one that didn't load
 
-    auto window = std::make_unique<PluginWindow> (plugin);
+    auto window = std::make_unique<PluginWindow> (*plugin);
 
     if (! window->hasEditor())
         return {};
@@ -406,7 +332,7 @@ void setPluginWindowServices (const PluginWindowServices* newServices)
     services = newServices;
 }
 
-std::unique_ptr<juce::MenuBarModel> createPluginMenu (te::Plugin& plugin, juce::Component& window)
+std::unique_ptr<juce::MenuBarModel> createPluginMenu (te::ExternalPlugin& plugin, juce::Component& window)
 {
     return std::make_unique<PluginMenu> (plugin, window);
 }

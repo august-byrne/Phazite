@@ -2,6 +2,8 @@
 // The open project as commands and panels find it (src/model/project/ProjectContext.h).
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/delay/Delay.h"
+#include "devices/reverb/Reverb.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -173,13 +175,13 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
 
     // A track renamed and a device put on it at once: one notification of both.
     track->setName ("Bass");
-    track->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}), 0, nullptr);
+    track->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {}), 0, nullptr);
     phazite::test::dispatchPendingMessages();
     CHECK (view.heard.size() == 1);
     CHECK (hear() == "tracks devices");
 
     // Devices and tracks that change places.
-    const auto delay = edit->getPluginCache().createNewPlugin (te::DelayPlugin::xmlTypeName, {});
+    const auto delay = edit->getPluginCache().createNewPlugin (phazite::devices::Delay::typeID, {});
     REQUIRE (delay != nullptr);
     track->pluginList.insertPlugin (delay, 0, nullptr);
     CHECK (hear() == "devices");

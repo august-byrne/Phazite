@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Presets (src/model/presets/PresetModel.h; roadmap step 2.4): what a device's, a container's and a track's preset hold
 // and leave out, reading what a file holds, and putting presets into another project with new IDs as one undo step. Its
-// "done when": a container saved as a preset loads into another project with its macros working. And a device's preset
-// loaded into a device of its kind, as a plug-in window's Load Preset does (step 2.12).
+// "done when": a container saved as a preset loads into another project with its macros working. And a plug-in's preset
+// loaded into the same plug-in, as a plug-in window's Load Preset does (step 2.12).
 #include "TestHelpers.h"
+#include "TestPlugin.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
@@ -388,41 +389,42 @@ TEST_CASE ("What a preset file holds is read from its first element; other files
     CHECK_FALSE (phazite::loadPreset (song.context, file, song.track (0)));
 }
 
-TEST_CASE ("A device's preset loads into a device of its kind with a window of its own, in place of its settings")
+TEST_CASE ("A plug-in's preset loads into the same plug-in, in place of its settings and mix")
 {
+    phazite::test::TestPlugin testPlugin;
     phazite::test::TemporaryFolder temp;
-    Song song (temp.folder, "Rooms");
+    Song song (temp.folder, "Levels");
     auto& edit = song.edit();
     auto* track = te::getAudioTracks (edit)[0];
-    const auto addReverb = [&edit, track]
+    const auto addPlugin = [&edit, track]
     {
-        auto* reverb = dynamic_cast<te::ReverbPlugin*> (
-            phazite::insertDevice (*track, edit.getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {})));
-        REQUIRE (reverb != nullptr);
-        return reverb;
+        auto* plugin = dynamic_cast<te::ExternalPlugin*> (phazite::insertDevice (*track, phazite::test::TestPlugin::create (edit)));
+        REQUIRE (plugin != nullptr);
+        return plugin;
     };
 
-    // A big, wet room in one of Tracktion's reverbs, saved; a small, dry one in another.
-    auto* bigRoom = addReverb();
-    auto* smallRoom = addReverb();
-    bigRoom->setRoomSize (0.9f);
-    bigRoom->setWet (0.6f);
-    smallRoom->setRoomSize (0.2f);
-    smallRoom->setWet (0.1f);
-    const auto file = temp.folder.getChildFile ("Big Room" + juce::String (phazite::presetExtension));
-    REQUIRE (phazite::saveDevicePreset (song.context, phazite::getDeviceID (*bigRoom), file));
+    // A quiet, wet one, saved; and a loud, drier one.
+    using phazite::test::TestPlugin;
+    auto* quiet = addPlugin();
+    auto* loud = addPlugin();
+    TestPlugin::setGain (*quiet, 0.2f);
+    phazite::setMix (*quiet, 0.6f);
+    TestPlugin::setGain (*loud, 0.9f);
+    phazite::setMix (*loud, 0.1f);
+    const auto file = temp.folder.getChildFile ("Quiet" + juce::String (phazite::presetExtension));
+    REQUIRE (phazite::saveDevicePreset (song.context, phazite::getDeviceID (*quiet), file));
     edit.getUndoManager().clearUndoHistory();
 
-    // Loaded into the small room's reverb: its settings, as one undo step named after the preset.
-    REQUIRE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*smallRoom), file));
-    CHECK (smallRoom->getRoomSize() == doctest::Approx (0.9f));
-    CHECK (smallRoom->getWet() == doctest::Approx (0.6f));
-    CHECK (song.describeUndo() == juce::String ("Undo Load Preset Big Room"));
+    // Loaded into the loud one: its settings and mix, as one undo step named after the preset.
+    REQUIRE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), file));
+    CHECK (TestPlugin::getGain (*loud) == doctest::Approx (0.2f));
+    CHECK (phazite::getMix (*loud) == doctest::Approx (0.6f));
+    CHECK (song.describeUndo() == juce::String ("Undo Load Preset Quiet"));
 
     // Undo puts its own settings back, and plays them.
     phazite::undo (edit);
-    CHECK (smallRoom->getRoomSize() == doctest::Approx (0.2f));
-    CHECK (smallRoom->getWet() == doctest::Approx (0.1f));
+    CHECK (TestPlugin::getGain (*loud) == doctest::Approx (0.9f));
+    CHECK (phazite::getMix (*loud) == doctest::Approx (0.1f));
     CHECK_FALSE (edit.getUndoManager().canUndo());
 
     // Not into a device of another kind, nor one of Phazite's own (which has no window), nor a container's or a track's
@@ -437,12 +439,12 @@ TEST_CASE ("A device's preset loads into a device of its kind with a window of i
     REQUIRE (phazite::saveDevicePreset (song.context, container, containerFile));
     edit.getUndoManager().clearUndoHistory();
 
-    CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*smallRoom), eqFile));
-    CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*smallRoom), trackFile));
-    CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*smallRoom), containerFile));
+    CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), eqFile));
+    CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), trackFile));
+    CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), containerFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getEffects (song.context, song.track (0)).back().id, containerFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getContainerDevices (song.context, container)[0].id, eqFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, {}, file));
     CHECK_FALSE (edit.getUndoManager().canUndo());
-    CHECK (smallRoom->getRoomSize() == doctest::Approx (0.2f));
+    CHECK (TestPlugin::getGain (*loud) == doctest::Approx (0.9f));
 }

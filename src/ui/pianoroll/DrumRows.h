@@ -10,9 +10,8 @@
 
 namespace phazite::ui
 {
-// The rows of a drum track: its sampler's sounds if it has a sampler (none for one without sounds), otherwise General
-// MIDI's usual drums; then any other notes its clips play. In the track's order (rows it doesn't mention keep theirs,
-// after them), without the hidden rows.
+// The rows of a drum track: its drum sampler's pads if it has one, otherwise General MIDI's usual drums; then any other
+// notes its clips play. In the track's order (rows it doesn't mention keep theirs, after them), without the hidden rows.
 std::vector<DrumRow> getDrumRows (const std::optional<std::vector<DrumRow>>& samplerSounds, const std::vector<int>& notesPlayed,
                                   const std::vector<int>& order, const std::vector<int>& hidden);
 

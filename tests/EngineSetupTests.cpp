@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "devices/synth/Synth.h"
 #include "model/engine/internal/EngineSetup.h"
 
 using namespace tracktion::literals;
 
 namespace
 {
-// An Edit with one 4OSC track playing a two-bar MIDI clip, so renders and freezes produce audio.
+// An Edit with one track playing a two-bar MIDI clip on Phazite's synth, so renders and freezes produce audio.
 std::unique_ptr<te::Edit> createEditWithSynth (te::Engine& engine, const juce::File& file)
 {
     auto edit = te::createEmptyEdit (engine, file);
     auto* track = te::getAudioTracks (*edit)[0];
 
-    auto synth = edit->getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {});
+    auto synth = edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {});
     track->pluginList.insertPlugin (synth, 0, nullptr);
 
     auto clip = track->insertMIDIClip ("Notes", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);

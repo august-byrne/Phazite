@@ -2,6 +2,7 @@
 // How editors reach Phazite's own devices (src/model/devices/DeviceHandle.h), and the knobs a device gets until it has
 // an editor of its own (src/ui/devices/DeviceEditors.h).
 #include "TestHelpers.h"
+#include "TestPlugin.h"
 #include "devices/eq/Equalizer.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
@@ -22,6 +23,7 @@ te::Plugin::Ptr addDevice (te::Edit& edit, const char* type)
 
 TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
 {
+    phazite::test::TestPlugin testPlugin;
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     auto eq = addDevice (*edit, Equalizer::typeID);
     const auto device = phazite::makeDeviceHandle (*eq);
@@ -34,16 +36,17 @@ TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
     CHECK (device.getProcessor<Equalizer>() != nullptr);
     CHECK (device.getProcessor<phazite::devices::Processor>() != nullptr);
 
-    // Tracktion's own devices aren't Phazite's.
-    auto reverb = addDevice (*edit, te::ReverbPlugin::xmlTypeName);
-    const auto notOurs = phazite::makeDeviceHandle (*reverb);
+    // A plug-in isn't one of Phazite's devices.
+    te::Plugin::Ptr plugin = phazite::test::TestPlugin::create (*edit);
+    te::getAudioTracks (*edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+    const auto notOurs = phazite::makeDeviceHandle (*plugin);
     CHECK_FALSE (notOurs.isValid());
     CHECK (notOurs.getInfo() == nullptr);
     CHECK (notOurs.getProcessor<Equalizer>() == nullptr);
 
     // When the project closes, the handle has nothing.
     eq = nullptr;
-    reverb = nullptr;
+    plugin = nullptr;
     edit = nullptr;
     CHECK_FALSE (device.isValid());
     CHECK (device.getProcessor<Equalizer>() == nullptr);

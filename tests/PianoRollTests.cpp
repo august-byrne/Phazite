@@ -2,6 +2,7 @@
 // The piano roll, driven with the mouse and the selection as the user would.
 #include "GoldenFiles.h"
 #include "UiTestHelpers.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -202,7 +203,7 @@ TEST_CASE ("On a track without an instrument, the piano roll asks for one, since
     REQUIRE (button != nullptr);
     CHECK (button->getButtonText() == juce::String ("Choose instrument"));
 
-    auto synth = screen.edit->getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {});
+    auto synth = screen.edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {});
     REQUIRE (phazite::setInstrument (*screen.tracks[0], synth) != nullptr);
     phazite::test::dispatchPendingMessages();
     CHECK (button->getButtonText() == synth->getName());

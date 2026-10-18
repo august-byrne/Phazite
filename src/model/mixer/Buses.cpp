@@ -43,8 +43,7 @@ void makePlainFolder (te::FolderTrack& folder)
     const auto volumeDb = volume != nullptr ? volume->getVolumeDb() : 0.0f;
 
     for (auto* plugin : folder.pluginList.getPlugins()) // a copy that holds them while they are deleted
-        if (dynamic_cast<te::TextPlugin*> (plugin) == nullptr)
-            plugin->deleteFromParent();
+        plugin->deleteFromParent();
 
     folder.pluginList.insertPlugin (te::VCAPlugin::create(), -1);
 

@@ -28,19 +28,18 @@ Replacing a part of the engine outright is a separate decision, made one capabil
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** fifteen scenarios read no files and use none of the code Phazite is replacing: one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), built-in effects with a send, automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2, automation clips until 2026-10-17), every kind of modulator and a macro moving the EQ (step 2.3), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), and one for each of Phazite's own devices so far (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler). Once playback is running, they must allocate and free nothing on the audio thread, or the tests fail. The other scenarios only report.
+- **Guards:** 22 scenarios must allocate and free nothing on the audio thread once playback is running, or the tests fail. They read no files, but for the frozen track's, which Phazite made: one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2, automation clips until 2026-10-17), every kind of modulator and a macro moving the EQ (step 2.3), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), a frozen track playing its file (step 2.11), and Phazite's own devices (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler; then the devices of step 2.10 in a row, the synth's unison, the wavetable synth, and the filter types of steps 2.14 and 2.15). The other scenarios only report.
 
 ## Results (Windows Debug)
 
-The first column covers the warm-up after playback starts (0.5 s for every scenario but 4OSC, which never settles and so warms up for the longest, 2 s); the second covers the next second. Measured on 2026-10-16; the counts vary a little from run to run, with timing and the file cache.
+The first column covers the warm-up after playback starts (about 0.5 s); the second covers the next second. Measured on 2026-10-16, each scenario added since when it was added, and the two that moved to Phazite's devices on 2026-10-18; the counts vary a little from run to run, with timing and the file cache.
 
 | Scenario | Warm-up | Next 1 s |
 |---|---|---|
 | One empty track | 3 allocations | 0 |
 | The metronome, clicking louder on each bar's first beat | 2 allocations | 0 |
-| Built-in EQ, compressor, and a send to a reverb return | 4 allocations | 0 |
 | Volume automation and an LFO on pan | 2 allocations | 0 |
-| A tone through a bus, with a send to a reverb return, into the loudness meter | 6 allocations | 0 |
+| A tone through a bus, with a send to Phazite's reverb on a return, into the loudness meter | 7 allocations | 0 |
 | Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |
 | Lanes sweeping Phazite's EQ, a cycle a beat, and fading a track's volume | 3 allocations | 0 |
 | Every kind of modulator, and a macro, moving Phazite's EQ | 3 allocations | 0 |
@@ -60,14 +59,13 @@ The first column covers the warm-up after playback starts (0.5 s for every scena
 | A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor | 24 allocations (the same) | 0 |
 | A frozen track: its synth's notes played from its frozen file (step 2.11) | 1 allocation | 0 |
 | An audio clip | 6 allocations, 3 frees (fewer if the file cache hits) | 0 |
-| Two tracks in a folder bus with a compressor | 10 allocations, 3 frees | 0 |
-| MIDI into Tracktion's 4OSC synth | 43 allocations, 15 frees | 1 allocation, 1 free, or more |
+| Two tracks in a folder bus with Phazite's compressor | 13 allocations, 6 frees (a file cache miss logs in Debug builds) | 0 |
 | One empty track with two audio inputs enabled | 8 allocations, 4 frees | 0 |
 | A loop at 120 BPM stretched to 100 BPM, played from its rendered proxy (a loop dropped from the browser) | 12 allocations, 9 frees (from a file cache miss) | 0 |
 | An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from its rendered proxy (as the audio clip editor sets them, step 2.6) | 10 allocations, 6 frees (from a file cache miss) | 0 |
 | A loop at 120 BPM previewed at 100 BPM, stretched as it plays (the browser's preview) | 21 allocations, 14 frees | 0 |
 
-Steady playback is clean everywhere except in 4OSC. Every scenario allocates something in its first blocks, though.
+Steady playback is clean everywhere. Every scenario allocates something in its first blocks, though.
 
 ## Findings and actions
 
@@ -94,7 +92,7 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 - **Why it is mostly harmless:** it stops once every pooled array has been used and their capacity covers the busiest block.
 - **Action:** re-measure with MIDI-heavy projects when MIDI recording lands (step 1.7); reserving capacity up front needs the fork. Report upstream.
 
-**5. 4OSC** (measured and source): allocates for every note (a `juce::MidiBuffer` per block, the MPE note list) and locks on every block. Don't use it: Phazite's own synth replaced it in the starter project and the device list (step 1.6, 2026-10-15).
+**5. 4OSC** (measured and source): allocates for every note (a `juce::MidiBuffer` per block, the MPE note list) and locks on every block. Phazite doesn't use it: its own synth replaced it in the starter project and the device list (step 1.6, 2026-10-15), and since 2026-10-18 projects that held it aren't supported either (the owner's decision: pre-alpha keeps no backward compatibility), so its audit scenario went.
 
 **6. Audio file reading** (measured and source).
 - **What:**
@@ -139,14 +137,14 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 ### Built-in effects
 
 **16. Tracktion's built-in effects** (measured and source).
-- **Measured:** the scenario with the EQ, compressor, reverb and send allocates nothing in steady playback.
+- **Measured** (until 2026-10-18, when its scenario went): the EQ, compressor, reverb and a send allocated nothing in steady playback.
 - **Source:** reading the code finds locks or reallocation on the audio thread in:
   - the 4-band EQ;
   - the sampler, which also allocates for every note;
   - chorus and delay;
   - the patch bays and the channel mapper;
   - the Airwindows wrapper.
-- **Action:** Phazite ships its own devices (steps 1.6 and 2.10), and Tracktion's stay out of Phazite's device list. The list (`phazite::getDeviceTypes()`) offers Phazite's own only. Tracktion's reverb, which reads its parameters atomically and allocates nothing (measured), was offered until Phazite's own reverb replaced it (2026-10-15); projects that hold it still play it. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stay out too.
+- **Action:** Phazite ships its own devices (steps 1.6 and 2.10) and uses none of Tracktion's: its device list (`phazite::getDeviceTypes()`) offers Phazite's own and the plug-ins found by scanning. Tracktion's reverb, which reads its parameters atomically and allocates nothing (measured), was offered until Phazite's own reverb replaced it (2026-10-15), and projects that held it played it until 2026-10-18. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stayed out from the start.
 
 **17. Previews** (measured, step 1.5): the browser's preview plays a loop in an Edit of its own, mixed on the same audio thread as the song, and stretches it as it plays (Tracktion's preview Edit uses no proxy). In its first blocks, SoundTouch grows its buffers (`FIFOSampleBuffer::ensureCapacity`, 10 allocations), and a file cache miss logs in Debug builds; then it allocates nothing. A preview started while the song plays could therefore make it glitch.
 - **Action:** accept it for now: previews are short, and are mostly started while the song is stopped. Later, prime the stretcher on the message thread before the preview starts, or render the preview ahead as the clips do. Report SoundTouch's growing buffers upstream with finding 11.

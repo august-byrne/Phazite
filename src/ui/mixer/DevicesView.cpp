@@ -27,8 +27,8 @@ namespace
     constexpr int macroHeight = macroKnobSize + labelHeight;
 
     //==============================================================================
-    // A plug-in's, or one of Tracktion's built-in devices', key knobs: its mix first, as a strip's slot has it, then the
-    // knobs the model offers, each named; its own controls are in its window.
+    // A plug-in's key knobs: its mix first, as a strip's slot has it, then the knobs the model offers, each named; its own
+    // controls are in its window.
     struct KeyKnobs : public juce::Component
     {
         KeyKnobs (ProjectContext& context, const DeviceSlot& device)
