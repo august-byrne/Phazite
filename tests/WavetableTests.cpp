@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's wavetable synth (src/devices/wavetable/): its tables, kept band-limited at every pitch and read from sounds as
-// Serum writes them, its factory tables, and the synth itself: its pitch, its position moving through the table (by hand and
-// by an envelope for each note), its warps, unison, filter and voices, that it doesn't alias, that it lets go of the
-// tables it no longer plays, and that it plays the same every time.
+// Phazite's wavetable synth (src/devices/wavetable/): its tables, kept band-limited at every pitch and read from sounds
+// as Serum writes them, its factory tables, and the synth itself: its pitch, its position moving through the table (by
+// hand and by an envelope for each note), its warps, unison, filter, combs and voices, that it doesn't alias, that it
+// lets go of the tables it no longer plays, and that it plays the same every time.
 #include "TestHelpers.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/Wavetable.h"
 #include "devices/wavetable/WavetableSynth.h"
 
+#include <array>
 #include <cmath>
 #include <set>
 #include <vector>
@@ -520,6 +521,60 @@ TEST_CASE ("The wavetable synth's filter darkens its saw, and the default patch 
                / measureLevelAt (played.left, from, to, noteFrequency (45));
     };
     CHECK (brightness (0, 2400) > 2.0 * brightness (19200, 24000));
+}
+
+TEST_CASE ("The wavetable synth's combs: on a note's pitch, Comb + keeps a saw's harmonics and Comb - leaves out its even ones")
+{
+    // After the other types, so that those keep their numbers in saved projects.
+    const auto& types = WavetableSynth::info.parameters[WavetableSynth::filterType].choices;
+    REQUIRE (types.size() == 8);
+    CHECK (types[(size_t) WavetableSynth::FilterType::notch] == std::string_view ("Notch"));
+    CHECK (types[(size_t) WavetableSynth::FilterType::combPlus] == std::string_view ("Comb +"));
+    CHECK (types[(size_t) WavetableSynth::FilterType::combMinus] == std::string_view ("Comb -"));
+
+    // Basic Shapes' saw at A3 (220 Hz) through a comb tuned to it: its first four harmonics.
+    auto values = getPlainValues (2.0f / 3.0f);
+    values[WavetableSynth::filterOn] = 1.0f;
+    values[WavetableSynth::cutoff] = 220.0f;
+    values[WavetableSynth::resonance] = 0.5f;
+    values[WavetableSynth::keyTracking] = 0.0f;
+    const auto harmonicsThrough = [&values] (WavetableSynth::FilterType type)
+    {
+        values[WavetableSynth::filterType] = (float) type;
+        auto synth = makeSynth();
+        const auto played = play (*synth, values, 24000, { noteOn (0, 57) });
+        std::array<double, 4> levels {};
+
+        for (size_t h = 0; h < levels.size(); ++h)
+            levels[h] = measureLevelAt (played.left, 4800, 24000, 220.0 * (double) (h + 1));
+
+        return levels;
+    };
+
+    const auto plus = harmonicsThrough (WavetableSynth::FilterType::combPlus);
+    CHECK (plus[1] / plus[0] == doctest::Approx (1.0 / 2.0).epsilon (0.1));
+    CHECK (plus[2] / plus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
+    CHECK (plus[3] / plus[0] == doctest::Approx (1.0 / 4.0).epsilon (0.1));
+
+    const auto minus = harmonicsThrough (WavetableSynth::FilterType::combMinus);
+    CHECK (minus[2] / minus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
+    CHECK (minus[1] < 0.01 * minus[0]);
+    CHECK (minus[3] < 0.01 * minus[0]);
+
+    // Swept by an envelope for each note, it stays steady.
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::envelope2;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::cutoff;
+    values[WavetableSynth::mod1Amount] = 1.0f;
+    values[WavetableSynth::resonance] = 1.0f;
+    const auto swept = play (*makeSynth(), values, 24000, { noteOn (0, 45), noteOn (2400, 52), noteOn (4800, 57) });
+    auto peak = 0.0f;
+
+    for (const auto sample : swept.left)
+        peak = std::max (peak, std::abs (sample));
+
+    CHECK (std::isfinite (peak));
+    CHECK (peak > 0.05f);
+    CHECK (peak < 4.0f);
 }
 
 TEST_CASE ("The wavetable synth plays 16 voices, glides in mono mode, and plays the same every time")

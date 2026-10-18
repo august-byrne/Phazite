@@ -23,8 +23,10 @@ namespace phazite::schema
 // curves are their parameters' own automation; version 6 lets lanes collapse (laneCollapsed); version 7 adds the chord
 // lane (CHORDLANE, step 2.7) and parts made from it (phaziteChordPart); version 8 can hold the devices of step 2.10 (the
 // delay, saturator, filter, utility, multiband dynamics and maximizer) and the synth's unison, which an older Phazite would
-// drop or play without; version 9 can hold the wavetable synth (step 2.13), with what its oscillators play.
-inline constexpr int currentVersion = 9;
+// drop or play without; version 9 can hold the wavetable synth (step 2.13), with what its oscillators play; version 10
+// can choose the comb filters of step 2.14 (filter types after the others, in the synth, the wavetable synth and the
+// Filter device), which an older Phazite would play as another filter.
+inline constexpr int currentVersion = 10;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
@@ -218,6 +220,23 @@ inline constexpr const char* phaziteLoudnessMeter = "phaziteLoudnessMeter";
 // (src/devices/<area>/: "phaziteEq" for the EQ), and its parameters' values are properties of the PLUGIN named by their
 // IDs in that description, as are its automation curves' paramIDs. Those IDs are part of the format: they never
 // change, and changing what one holds needs a new version and a migration, as anything here does.
+//
+// One parameter's ID is a property Tracktion keeps on every PLUGIN: the Filter device's "type" (devices/filter/
+// FilterEffect.h), as its type is. Since version 10 its value is "phaziteType"; its ID stays "type" everywhere else (its
+// automation curve's paramID, a lane's parameter). Until then the value took the place of the PLUGIN's type, so that a
+// Filter whose type had been changed didn't open again: the migration to version 10 gives such a PLUGIN its type back.
+inline const juce::Identifier phaziteType { "phaziteType" };
+
+// The property of a PLUGIN of Phazite's own devices that holds a parameter's value, and the other way round.
+inline juce::Identifier getParameterProperty (const juce::String& parameterID)
+{
+    return parameterID == te::IDs::type.toString() ? phaziteType : juce::Identifier (parameterID);
+}
+
+inline juce::String getPropertyParameter (const juce::Identifier& property)
+{
+    return property == phaziteType ? te::IDs::type.toString() : property.toString();
+}
 
 // Phazite's drum sampler (devices/drums/DrumSampler.h) also keeps, on its PLUGIN, the sound file each pad plays: a path
 // relative to the project's folder ("Audio/Kick 01.wav"), or none (no property) for the default kit's sound; in a preset,

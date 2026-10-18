@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A device's thin Tracktion plug-in (src/model/devices/internal/DevicePlugin.h), with the devices made for tests
-// (TestDevices.h): an effect (a gain) and an instrument that plays the velocity of the note it holds.
+// (TestDevices.h): an effect (a gain) and an instrument that plays the velocity of the note it holds; and Phazite's own
+// devices keeping their parameters' values in a project.
+#include "GoldenFiles.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "devices/core/Processor.h"
+#include "devices/filter/FilterEffect.h"
+#include "model/base/internal/Schema.h"
 #include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/Devices.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
+
+#include <map>
 
 using namespace tracktion::literals;
 
@@ -209,4 +218,94 @@ TEST_CASE ("An effect's mix blends its sound with what came in, lined up with it
     CHECK (click.getSample (0, TestDelay::latency) == doctest::Approx (0.0f)); // half the click and half of it upside down
 
     device.baseClassDeinitialise();
+}
+
+TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a save and a reopen, and its type with them")
+{
+    phazite::test::TemporaryFolder temp;
+    juce::File file;
+    std::map<juce::String, std::vector<float>> setTo; // each device's type, and the values its parameters were set to
+
+    {
+        juce::String error;
+        const auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Devices", error);
+        REQUIRE (project != nullptr);
+        auto& edit = project->getEdit();
+        const auto own = phazite::getOwnDevices();
+        edit.ensureNumberOfAudioTracks ((int) own.size());
+
+        for (size_t d = 0; d < own.size(); ++d)
+        {
+            const auto& info = *own[d];
+            const juce::String type (info.typeID.data(), info.typeID.size());
+            INFO (type);
+            auto& track = *te::getAudioTracks (edit)[(int) d];
+            const auto plugin = edit.getPluginCache().createNewPlugin (type, {});
+            const auto* placed = info.kind == devices::DeviceKind::instrument ? phazite::setInstrument (track, plugin)
+                                                                              : phazite::insertDevice (track, plugin);
+            REQUIRE (placed != nullptr);
+            auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+            REQUIRE (device != nullptr);
+            auto& values = setTo[type];
+
+            // Each one away from its default, to the other end of its range: the filter's type to Comb -.
+            for (const auto& parameter : info.parameters)
+            {
+                const auto value = parameter.defaultValue < parameter.maximum ? parameter.maximum : parameter.minimum;
+                device->findParameter (parameter.id)->setParameter (value, juce::sendNotification);
+                values.push_back (value);
+            }
+
+            CHECK (plugin->state[te::IDs::type].toString() == type);
+        }
+
+        phazite::test::settle();
+        REQUIRE (project->save().wasOk());
+        file = project->getFile();
+    }
+
+    juce::String error;
+    const auto project = phazite::Project::open (phazite::test::getEngine(), file, false, error);
+    REQUIRE (project != nullptr);
+
+    for (const auto& [type, values] : setTo)
+    {
+        INFO (type);
+        phazite::DevicePlugin* device = nullptr;
+
+        for (auto* plugin : te::getAllPlugins (project->getEdit(), false))
+            if (plugin->getPluginType() == type)
+                device = dynamic_cast<phazite::DevicePlugin*> (plugin);
+
+        REQUIRE (device != nullptr);
+        const auto parameters = device->getAutomatableParameters();
+        REQUIRE (parameters.size() == (int) values.size());
+
+        for (size_t i = 0; i < values.size(); ++i)
+        {
+            INFO (parameters[(int) i]->paramID);
+            CHECK (parameters[(int) i]->getCurrentValue() == doctest::Approx (values[i]));
+        }
+    }
+}
+
+TEST_CASE ("The filter's type is kept beside the plug-in's own type, and taken back from a preset")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    const auto plugin = edit->getPluginCache().createNewPlugin (devices::FilterEffect::typeID, {});
+    auto* filter = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+    REQUIRE (filter != nullptr);
+    auto* type = filter->findParameter ("type");
+    REQUIRE (type != nullptr);
+
+    type->setParameter ((float) devices::FilterEffect::Type::combMinus, juce::sendNotification);
+    CHECK (plugin->state[te::IDs::type].toString() == juce::String (devices::FilterEffect::typeID));
+    CHECK ((float) plugin->state[phazite::schema::phaziteType] == doctest::Approx (5.0f));
+
+    // Its state as a preset keeps it, put back after a change.
+    const auto preset = plugin->state.createCopy();
+    type->setParameter (0.0f, juce::sendNotification);
+    filter->restorePluginStateFromValueTree (preset);
+    CHECK (type->getCurrentValue() == doctest::Approx (5.0f));
+    CHECK (plugin->state[te::IDs::type].toString() == juce::String (devices::FilterEffect::typeID));
 }

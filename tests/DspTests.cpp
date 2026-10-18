@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The building blocks of Phazite's devices' DSP (src/devices/dsp/): filters, envelopes, oscillators, random numbers,
-// delay lines.
+// The building blocks of Phazite's devices' DSP (src/devices/dsp/): filters, comb filters, envelopes, oscillators, random
+// numbers, delay lines.
 #include "TestHelpers.h"
+#include "devices/dsp/CombFilter.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Filters.h"
@@ -48,6 +49,54 @@ double measureDecibels (const dsp::FilterCoefficients& c, double frequency)
     }
 
     return 10.0 * std::log10 (output / input);
+}
+
+dsp::CombFilter makeCombFilter (const dsp::CombCoefficients& coefficients)
+{
+    dsp::CombFilter comb;
+    comb.prepare (dsp::getLongestCombDelay (20.0, testRate));
+    comb.setTarget (coefficients, 16); // the first after preparing: at once
+    return comb;
+}
+
+// A sine through a comb: its level once the comb has settled, relative to the sine's, as a gain.
+double measureCombGain (const dsp::CombCoefficients& coefficients, double frequency)
+{
+    auto comb = makeCombFilter (coefficients);
+    const auto settle = (int) testRate, measure = (int) testRate / 2;
+    double input = 0.0, output = 0.0;
+
+    for (int i = 0; i < settle + measure; ++i)
+    {
+        const auto x = (float) std::sin (twoPi * frequency * i / testRate);
+        const auto y = comb.process (x);
+
+        if (i >= settle)
+        {
+            input += (double) x * x;
+            output += (double) y * y;
+        }
+    }
+
+    return std::sqrt (output / input);
+}
+
+// The RMS level of white noise through a comb, once it has settled.
+double measureNoiseThrough (const dsp::CombCoefficients& coefficients)
+{
+    auto comb = makeCombFilter (coefficients);
+    dsp::Random noise (0x5eedu);
+    auto sum = 0.0;
+
+    for (int i = 0; i < 3 * (int) testRate; ++i)
+    {
+        const auto y = comb.process (noise.nextBipolar());
+
+        if (i >= (int) testRate)
+            sum += (double) y * y;
+    }
+
+    return std::sqrt (sum / (2.0 * testRate));
 }
 
 // How many times a signal goes from below zero to zero or above.
@@ -383,6 +432,161 @@ TEST_CASE ("A delay line returns what was pushed, also between samples")
 
     line.reset();
     CHECK (line.read (100) == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("A comb's peaks fall on its frequency's multiples, Comb -'s on its odd ones, with notches between, as it reports")
+{
+    // At half resonance its peaks rise by 4.25 dB.
+    const auto plus = dsp::makeComb (false, 1000.0, testRate, 0.5f);
+    const auto peak = std::pow (0.02, -0.5 * 0.25);
+
+    for (const auto frequency : { 1000.0, 2000.0, 3000.0 })
+    {
+        INFO (frequency << " Hz");
+        CHECK (dsp::getMagnitude (plus, frequency, testRate) == doctest::Approx (peak).epsilon (0.001));
+        CHECK (measureCombGain (plus, frequency) == doctest::Approx (peak).epsilon (0.01));
+    }
+
+    for (const auto frequency : { 500.0, 1500.0, 2500.0 })
+    {
+        INFO (frequency << " Hz");
+        CHECK (dsp::getMagnitude (plus, frequency, testRate) < 1.0e-6);
+        CHECK (measureCombGain (plus, frequency) < 0.001);
+    }
+
+    // Comb -: at the same pitch, its even multiples gone, and anything steady with them.
+    const auto minus = dsp::makeComb (true, 1000.0, testRate, 0.5f);
+
+    for (const auto frequency : { 1000.0, 3000.0 })
+        CHECK (measureCombGain (minus, frequency) == doctest::Approx (peak).epsilon (0.01));
+
+    for (const auto frequency : { 2000.0, 4000.0 })
+        CHECK (measureCombGain (minus, frequency) < 0.001);
+
+    CHECK (dsp::getMagnitude (minus, 0.0, testRate) < 1.0e-6);
+
+    // With its delay between samples (700 Hz: 68.6 samples), it sounds as it reports too.
+    const auto between = dsp::makeComb (false, 700.0, testRate, 0.7f);
+
+    for (const auto frequency : { 700.0, 2100.0 })
+        CHECK (measureCombGain (between, frequency) == doctest::Approx (dsp::getMagnitude (between, frequency, testRate)).epsilon (0.02));
+
+    for (const auto frequency : { 1050.0, 2450.0 })
+        CHECK (measureCombGain (between, frequency) < 0.01);
+}
+
+TEST_CASE ("Resonance sharpens a comb's peaks into a ring as long as it reports, rising as much as the rest falls")
+{
+    const auto none = dsp::makeComb (false, 1000.0, testRate, 0.0f), most = dsp::makeComb (false, 1000.0, testRate, 1.0f);
+
+    // The peaks rise from 0 to 8.5 dB...
+    CHECK (dsp::getMagnitude (none, 1000.0, testRate) == doctest::Approx (1.0).epsilon (0.001));
+    CHECK (toDecibels (dsp::getMagnitude (most, 1000.0, testRate)) == doctest::Approx (8.49).epsilon (0.01));
+
+    // ... and narrow: a quarter of the way to the next one, little is left.
+    CHECK (dsp::getMagnitude (none, 1250.0, testRate) == doctest::Approx (std::sqrt (0.5)).epsilon (0.001));
+    CHECK (dsp::getMagnitude (most, 1250.0, testRate) < 0.05);
+
+    // White noise, spread over peaks and notches alike, falls by as much as the peaks rise.
+    CHECK (toDecibels (measureNoiseThrough (most) / measureNoiseThrough (none)) == doctest::Approx (-8.49).epsilon (0.1));
+
+    // At its most, a comb at 440 Hz rings for about 0.8 s; at half, losing 1.3 dB a time round, about 0.1 s.
+    const auto ringing = dsp::makeComb (false, 440.0, testRate, 1.0f);
+    CHECK (dsp::getRingSeconds (ringing, testRate) == doctest::Approx (0.78).epsilon (0.02));
+    CHECK (dsp::getRingSeconds (dsp::makeComb (false, 440.0, testRate, 0.5f), testRate) == doctest::Approx (0.105).epsilon (0.02));
+
+    // A click through it: the time until it has fallen by 60 dB, from the level of its first round.
+    auto comb = makeCombFilter (ringing);
+    const auto period = (int) std::lround (testRate / 440.0);
+    std::vector<double> rounds; // each period's RMS level
+
+    for (int n = 0; n < 2 * (int) testRate;)
+    {
+        auto sum = 0.0;
+
+        for (int k = 0; k < period; ++k, ++n)
+        {
+            const auto y = comb.process (n == 0 ? 1.0f : 0.0f);
+            sum += (double) y * y;
+        }
+
+        rounds.push_back (std::sqrt (sum / period));
+    }
+
+    const auto first = rounds[1]; // the first round back from the delay
+    auto fallen = rounds.size();
+
+    for (size_t r = 1; r < rounds.size(); ++r)
+    {
+        if (rounds[r] < first * 0.001)
+        {
+            fallen = r;
+            break;
+        }
+    }
+
+    CHECK ((double) fallen * period / testRate == doctest::Approx (dsp::getRingSeconds (ringing, testRate)).epsilon (0.15));
+}
+
+TEST_CASE ("A comb glides to a new frequency rather than jumping, so that it doesn't click, and a reset silences it")
+{
+    // A 50 Hz sine through a comb at 100 Hz falls in a notch; at 50 Hz, on a peak. Jumping from one to the other at the
+    // sine's crest would jump by its whole size; gliding over 16 samples, it rises within a few.
+    auto comb = makeCombFilter (dsp::makeComb (false, 100.0, testRate, 0.0f));
+    const auto crest = 24240; // the sine at its top
+    std::vector<float> out;
+
+    for (int i = 0; i < 48000; ++i)
+    {
+        if (i == crest)
+            comb.setTarget (dsp::makeComb (false, 50.0, testRate, 0.0f), 16);
+
+        out.push_back (comb.process (0.5f * (float) std::sin (twoPi * 50.0 * i / testRate)));
+    }
+
+    CHECK (std::abs (out[(size_t) crest - 1]) < 0.01f);
+    CHECK (out[(size_t) crest + 960] > 0.45f); // a cycle later, at the crest again
+    auto largestStep = 0.0f;
+
+    for (size_t i = (size_t) crest - 100; i < (size_t) crest + 100; ++i)
+        largestStep = std::max (largestStep, std::abs (out[i] - out[i - 1]));
+
+    CHECK (largestStep < 0.1f);
+
+    comb.reset();
+    auto left = 0.0f;
+
+    for (int i = 0; i < 4800; ++i)
+        left = std::max (left, std::abs (comb.process (0.0f)));
+
+    CHECK (left == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("A comb stays steady at its most resonance, swept up and down the whole range on loud noise")
+{
+    for (const auto negative : { false, true })
+    {
+        INFO ((negative ? "Comb -" : "Comb +"));
+        dsp::CombFilter comb;
+        comb.prepare (dsp::getLongestCombDelay (20.0, testRate));
+        dsp::Random noise (0xc0b5u);
+        const auto length = 4 * (int) testRate;
+        auto peak = 0.0f;
+
+        for (int start = 0; start < length; start += 16)
+        {
+            // From 20 Hz to 20 kHz and back, the same number of octaves each step.
+            const auto along = (double) start / length;
+            const auto octaves = 9.97 * (along < 0.5 ? 2.0 * along : 2.0 - 2.0 * along);
+            comb.setTarget (dsp::makeComb (negative, 20.0 * std::pow (2.0, octaves), testRate, 1.0f), 16);
+
+            for (int i = 0; i < 16; ++i)
+                peak = std::max (peak, std::abs (comb.process (noise.nextBipolar())));
+        }
+
+        CHECK (std::isfinite (peak));
+        CHECK (peak < 8.0f);
+    }
 }
 
 TEST_CASE ("Decibels, saturation and note frequencies")

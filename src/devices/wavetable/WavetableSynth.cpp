@@ -18,7 +18,8 @@ namespace
     constexpr std::string_view subOctaves[] = { "-1 Octave", "-2 Octaves" };
     constexpr std::string_view subShapes[] = { "Sine", "Triangle", "Saw", "Square" };
     constexpr std::string_view unisonCounts[] = { "1", "2", "3", "4", "5", "6", "7", "8" };
-    constexpr std::string_view filterTypes[] = { "Low Pass 12", "Low Pass 24", "Band Pass", "High Pass 12", "High Pass 24", "Notch" };
+    constexpr std::string_view filterTypes[] = { "Low Pass 12",  "Low Pass 24", "Band Pass", "High Pass 12",
+                                                 "High Pass 24", "Notch",       "Comb +",    "Comb -" }; // as Synth::FilterType
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
     constexpr std::string_view modSources[] = { "None",     "Envelope 2", "Envelope 3", "LFO 1", "LFO 2",
                                                 "Velocity", "Note",       "Mod Wheel",  "Random" };
@@ -197,6 +198,7 @@ namespace
     static_assert (Synth::getModParameter (Synth::numModSlots - 1, Synth::modAmount) == Synth::mod8Amount);
     static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::unisonDetune + 1);
     static_assert (std::size (modSources) == (size_t) Synth::ModSource::random + 1);
+    static_assert (std::size (filterTypes) == (size_t) Synth::FilterType::combMinus + 1);
 
     // In a mixer slot: where the first oscillator plays in its table, and the filter.
     constexpr std::string_view keyControls[] = { "osc1Position", "cutoff" };
@@ -208,6 +210,8 @@ namespace
     constexpr float pitchRange = 24.0f;   // semitones
     constexpr float cutoffRange = 96.0f;  // semitones: eight octaves
     constexpr float detuneRange = 100.0f; // cents
+
+    constexpr double lowestCutoff = 20.0; // where modulation can take the filter, at the lowest
 
     template <typename Enum>
     Enum choiceOf (float value)
@@ -413,6 +417,9 @@ void WavetableSynth::prepare (double newSampleRate, int)
 
         for (auto& lfo : voice.lfos)
             lfo.prepare (controlRate);
+
+        for (auto& comb : voice.combs)
+            comb.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
     }
 
     for (auto& lfo : freeLfos)
@@ -437,6 +444,9 @@ void WavetableSynth::reset()
         for (auto& side : voice.filters)
             for (auto& filter : side)
                 filter.reset();
+
+        for (auto& comb : voice.combs)
+            comb.reset();
     }
 
     for (size_t i = 0; i < freeLfos.size(); ++i)
@@ -511,6 +521,9 @@ void WavetableSynth::startVoice (Voice& voice)
     for (auto& side : voice.filters)
         for (auto& filter : side)
             filter.reset();
+
+    for (auto& comb : voice.combs)
+        comb.reset();
 
     for (size_t i = 0; i < voice.lfos.size(); ++i)
         voice.lfos[i].reset (0.0f, lfoSeed + (std::uint32_t) (notesPlayed * 2 + i));
@@ -824,13 +837,30 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 voice.sub.setFrequency (dsp::noteToFrequency ((double) basePitch - 12.0 * settings.subOctaves), sampleRate);
 
             voice.numSections = 0;
+            voice.combOn = false;
 
             if (settings.filterOn)
             {
                 const auto moved = settings.keyTracking * (voice.pitch - 60.0f) + cutoffRange * moveOf (moves, ModTarget::cutoff);
-                const auto frequency = std::clamp ((double) settings.cutoff * std::exp2 ((double) moved / 12.0), 20.0, nyquistLimit);
-                voice.numSections = makeSections (settings.filterType, frequency, sampleRate,
-                                                  settings.resonance + moveOf (moves, ModTarget::resonance), voice.sections);
+                const auto frequency =
+                    std::clamp ((double) settings.cutoff * std::exp2 ((double) moved / 12.0), lowestCutoff, nyquistLimit);
+                const auto filterResonance = settings.resonance + moveOf (moves, ModTarget::resonance);
+
+                if (settings.filterType == FilterType::combPlus || settings.filterType == FilterType::combMinus)
+                {
+                    // The comb's delay glides to its new length over the step.
+                    const auto comb = dsp::makeComb (settings.filterType == FilterType::combMinus, frequency, sampleRate, filterResonance);
+
+                    for (auto& side : voice.combs)
+                        side.setTarget (comb, length);
+
+                    voice.combOn = true;
+                }
+                else
+                {
+                    voice.numSections = makeSections (settings.filterType, frequency, sampleRate, filterResonance, voice.sections);
+                }
+
                 voice.driveGain = settings.driveGain;
             }
 
@@ -954,10 +984,13 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 {
                     auto x = sides[(size_t) channel];
 
-                    if (voice.numSections > 0)
+                    if (voice.numSections > 0 || voice.combOn)
                     {
                         if (voice.driveGain > 1.0001f)
                             x = dsp::softClip (x * voice.driveGain) / voice.driveGain;
+
+                        if (voice.combOn)
+                            x = voice.combs[(size_t) channel].process (x);
 
                         for (int s = 0; s < voice.numSections; ++s)
                             x = voice.filters[(size_t) s][(size_t) channel].process (x, voice.sections[(size_t) s]);

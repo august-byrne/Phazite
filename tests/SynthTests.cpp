@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's synth (src/devices/synth/Synth.h): its pitch and velocity, its voices, filter, pitch bend, mono glide and
-// sustain pedal, and that it plays the same every time.
+// Phazite's synth (src/devices/synth/Synth.h): its pitch and velocity, its voices, filter and combs, pitch bend, mono
+// glide and sustain pedal, and that it plays the same every time.
 #include "TestHelpers.h"
 #include "devices/dsp/Math.h"
 #include "devices/synth/Synth.h"
 
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -240,6 +241,47 @@ TEST_CASE ("The synth's filter darkens its saw, and the filter envelope opens it
     // An envelope of +48 semitones opens the 500 Hz filter at the note's start and closes it as it decays.
     const auto swept = trebleOf (500.0f, 48.0f);
     CHECK (swept.first > 5.0 * swept.second);
+}
+
+TEST_CASE ("The synth's combs: on a note's pitch, Comb + keeps a saw's harmonics and Comb - leaves out its even ones")
+{
+    // After the other types, so that those keep their numbers in saved projects.
+    const auto& types = Synth::info.parameters[Synth::filterType].choices;
+    REQUIRE (types.size() == 5);
+    CHECK (types[(size_t) Synth::FilterType::highPass] == std::string_view ("High Pass"));
+    CHECK (types[(size_t) Synth::FilterType::combPlus] == std::string_view ("Comb +"));
+    CHECK (types[(size_t) Synth::FilterType::combMinus] == std::string_view ("Comb -"));
+
+    // A saw at A3 (220 Hz) through a comb tuned to it: its first four harmonics, as amplitudes.
+    auto values = getSineValues();
+    values[Synth::osc1Wave] = 2.0f; // saw
+    values[Synth::cutoff] = 220.0f;
+    values[Synth::resonance] = 0.5f;
+    const auto harmonicsThrough = [&values] (Synth::FilterType type)
+    {
+        values[Synth::filterType] = (float) type;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        const auto played = play (synth, values, 24000, { noteOn (0, 57) });
+        std::array<double, 4> levels {};
+
+        for (size_t h = 0; h < levels.size(); ++h)
+            levels[h] = measureLevelAt (played, 4800, 24000, 220.0 * (double) (h + 1));
+
+        return levels;
+    };
+
+    // Comb +: all of them on its peaks, as loud against each other as in a saw.
+    const auto plus = harmonicsThrough (Synth::FilterType::combPlus);
+    CHECK (plus[1] / plus[0] == doctest::Approx (1.0 / 2.0).epsilon (0.1));
+    CHECK (plus[2] / plus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
+    CHECK (plus[3] / plus[0] == doctest::Approx (1.0 / 4.0).epsilon (0.1));
+
+    // Comb -: the odd ones on its peaks, the even ones gone: hollow, as a square wave is.
+    const auto minus = harmonicsThrough (Synth::FilterType::combMinus);
+    CHECK (minus[2] / minus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
+    CHECK (minus[1] < 0.01 * minus[0]);
+    CHECK (minus[3] < 0.01 * minus[0]);
 }
 
 TEST_CASE ("The synth bends its pitch, and glides from key to key in mono mode without starting again")

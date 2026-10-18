@@ -637,3 +637,42 @@ TEST_CASE ("A version 8 project, which can hold no wavetable synth, becomes the 
         .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
     CHECK (state.isEquivalentTo (expected));
 }
+
+TEST_CASE ("A version 9 project, which chooses no comb filter, becomes the current version with nothing else changed")
+{
+    const auto* version9 = R"(<EDIT><PHAZITE schemaVersion="9"/>
+        <TRACK id="1003"><PLUGIN type="phaziteWavetable" id="1004" filterType="5" osc2Wavetable="Vowels"/>
+        <PLUGIN type="phaziteFilter" id="1005" cutoff="500"/></TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version9);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
+
+    auto expected = juce::ValueTree::fromXml (version9);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}
+
+TEST_CASE ("A Filter whose Type had taken the place of its plug-in's type before version 10 gets both back")
+{
+    // A track's Filter set to High Pass, and one in a container's rack set back to Low Pass, as version 9 saved them.
+    const auto* version9 = R"(<EDIT><PHAZITE schemaVersion="9"/>
+        <TRACK id="1003"><PLUGIN type="1.0" id="1004" cutoff="500"/><PLUGIN type="phaziteSynth" id="1005"/></TRACK>
+        <RACKS><RACK id="1006"><PLUGIN type="0.0" id="1007"/></RACK></RACKS></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version9);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+
+    const auto track = state.getChildWithName (te::IDs::TRACK);
+    const auto highPass = track.getChild (0), synth = track.getChild (1);
+    CHECK (highPass[te::IDs::type].toString() == juce::String ("phaziteFilter"));
+    CHECK ((float) highPass[phazite::schema::phaziteType] == doctest::Approx (1.0f));
+    CHECK ((float) highPass["cutoff"] == doctest::Approx (500.0f));
+    CHECK (synth[te::IDs::type].toString() == juce::String ("phaziteSynth"));
+    CHECK_FALSE (synth.hasProperty (phazite::schema::phaziteType));
+
+    const auto inRack = state.getChildWithName (te::IDs::RACKS).getChild (0).getChild (0);
+    CHECK (inRack[te::IDs::type].toString() == juce::String ("phaziteFilter"));
+    CHECK ((float) inRack[phazite::schema::phaziteType] == doctest::Approx (0.0f));
+}

@@ -264,6 +264,61 @@ TEST_CASE ("The filter: open at first, and low-pass, high-pass and band-pass sha
     CHECK (getRms (high.left, 12000, 24000) < 0.005f);
 }
 
+TEST_CASE ("The filter's combs: Comb + on the cutoff's multiples, Comb - on its odd ones, ringing on after the sound")
+{
+    // After the other types, so that those keep their numbers in saved projects.
+    const auto& types = devices::FilterEffect::info.parameters[devices::FilterEffect::type].choices;
+    REQUIRE (types.size() == 6);
+    CHECK (types[3] == std::string_view ("Notch"));
+    CHECK (types[(size_t) devices::FilterEffect::Type::combPlus] == std::string_view ("Comb +"));
+    CHECK (types[(size_t) devices::FilterEffect::Type::combMinus] == std::string_view ("Comb -"));
+
+    auto values = getDefaults (devices::FilterEffect::info);
+    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::combPlus);
+    set (values, devices::FilterEffect::info, "cutoff", 1000.0f);
+    set (values, devices::FilterEffect::info, "resonance", 0.5f);
+    CHECK (devices::FilterEffect::getMagnitude (values, 2000.0, testRate) > 1.5);
+    CHECK (devices::FilterEffect::getMagnitude (values, 1500.0, testRate) < 0.01);
+
+    // It has no slope.
+    set (values, devices::FilterEffect::info, "slope", 0.0f);
+    CHECK (devices::FilterEffect::getMagnitude (values, 2500.0, testRate) < 0.01);
+    CHECK (devices::FilterEffect::getMagnitude (values, 3000.0, testRate) > 1.5);
+
+    // Played: a tone on a peak comes through, louder; one between them goes.
+    devices::FilterEffect filter;
+    filter.prepare (testRate, testBlockSize);
+    const auto onPeak = play (filter, values, 24000, sine (2000.0, 0.25f));
+    filter.reset();
+    const auto between = play (filter, values, 24000, sine (1500.0, 0.25f));
+    CHECK (getRms (onPeak.left, 12000, 24000) > 0.25f);
+    CHECK (getRms (between.left, 12000, 24000) < 0.005f);
+
+    // Comb -: the odd multiples only, at the same pitch.
+    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::combMinus);
+    CHECK (devices::FilterEffect::getMagnitude (values, 3000.0, testRate) > 1.5);
+    CHECK (devices::FilterEffect::getMagnitude (values, 2000.0, testRate) < 0.01);
+
+    // At the most resonance it rings on once a sound stops, and says how long: about a third of a second at 1 kHz.
+    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::combPlus);
+    set (values, devices::FilterEffect::info, "resonance", 1.0f);
+    filter.reset();
+    const auto burst = [] (int t)
+    {
+        const auto value = t < 480 ? 0.5f * (float) std::sin (twoPi * 1000.0 * t / testRate) : 0.0f;
+        return std::pair { value, value };
+    };
+    const auto rung = play (filter, values, 48000, burst);
+    CHECK (filter.getTailSeconds() == doctest::Approx (0.343).epsilon (0.02));
+    CHECK (getRms (rung.left, 4800, 5280) > 0.01f);     // 0.1 s after
+    CHECK (getRms (rung.left, 24000, 24480) < 1.0e-4f); // 0.5 s after
+
+    // A low-pass again has no tail.
+    set (values, devices::FilterEffect::info, "type", 0.0f);
+    play (filter, values, 480, burst);
+    CHECK (filter.getTailSeconds() == doctest::Approx (0.0));
+}
+
 TEST_CASE ("The utility: gain, balance, width, bass in mono and polarity")
 {
     auto values = getDefaults (devices::Utility::info);

@@ -389,6 +389,28 @@ void checkSteadyPlaybackDoesNotAllocate (const Measurement& m)
         CHECK (m.steady.frees == 0);
     }
 }
+
+// Sets one of the parameters of one of Phazite's devices.
+void setDeviceValue (const te::Plugin::Ptr& plugin, const char* id, float value)
+{
+    auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+    REQUIRE (device != nullptr);
+    device->findParameter (id)->setParameter (value, juce::sendNotification);
+}
+
+// Chords a sixteenth long, one after another for two bars, so that the busiest blocks (one chord's ends with the next's
+// starts) come from the first beat, within the warm-up: Tracktion's MIDI arrays grow on the busiest block (finding 4).
+// One track of them at most: with more, the arrays the graph pools for them can carry MIDI for the first time later on.
+void addChords (te::Edit& edit, te::AudioTrack& track)
+{
+    auto clip = track.insertMIDIClip ("Chords", edit.tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+    REQUIRE (clip != nullptr);
+
+    for (int i = 0; i < 32; ++i)
+        for (const auto note : { 48, 52, 55, 59 })
+            clip->getSequence().addNote (note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25), te::BeatDuration::fromBeats (0.25),
+                                         100, 0, nullptr);
+}
 } // namespace
 
 //==============================================================================
@@ -800,6 +822,62 @@ TEST_SUITE ("realtime-audit")
         report ("Phazite's filter, saturator, multiband, delay, utility and maximizer in a row, the filter swept", m);
         CHECK (m.peakLevel > 0.001f);
         CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // the maximizer's ceiling
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: comb filters swept on Phazite's synth, chords a sixteenth apart, and on its filter, on a tone")
+    {
+        using phazite::devices::Synth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        edit->ensureNumberOfAudioTracks (2);
+
+        // The synth's Comb +, swept by its filter envelope at each note, in unison.
+        auto& notes = getTrack (*edit, 0);
+        const auto synth = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
+        REQUIRE (phazite::setInstrument (notes, synth) != nullptr);
+        setDeviceValue (synth, "filterType", (float) Synth::FilterType::combPlus);
+        setDeviceValue (synth, "resonance", 0.8f);
+        setDeviceValue (synth, "unisonVoices", 2.0f); // three
+        addChords (*edit, notes);
+
+        // The filter's Comb - on a tone, swept by a lane and ringing. On a track of its own: after an instrument, a lane
+        // would make Tracktion pass the notes on in pieces of blocks, moving their arrays around more (finding 4).
+        auto& tone = getTrack (*edit, 1);
+        REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
+        const auto filter = edit->getPluginCache().createNewPlugin (phazite::devices::FilterEffect::typeID, {});
+        REQUIRE (phazite::insertDevice (tone, filter) != nullptr);
+        setDeviceValue (filter, "type", (float) phazite::devices::FilterEffect::Type::combMinus);
+        setDeviceValue (filter, "resonance", 0.9f);
+        auto* cutoff = dynamic_cast<phazite::DevicePlugin*> (filter.get())->findParameter ("cutoff");
+
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat)), 100.0f, 0.0f, nullptr);
+            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat + 0.5)), 4000.0f, 0.0f, nullptr);
+        }
+
+        const auto m = playAndMeasure (*edit);
+        report ("Comb filters swept on Phazite's synth, chords a sixteenth apart, and on its filter, on a tone", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's wavetable synth's comb, swept by an envelope at each note, chords a sixteenth apart")
+    {
+        using phazite::devices::WavetableSynth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        const auto wavetable = edit->getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
+        REQUIRE (phazite::setInstrument (track, wavetable) != nullptr);
+        setDeviceValue (wavetable, "filterType", (float) WavetableSynth::FilterType::combPlus);
+        setDeviceValue (wavetable, "resonance", 0.8f);
+        setDeviceValue (wavetable, "unisonVoices", 3.0f); // four
+        setDeviceValue (wavetable, "mod1Amount", 0.5f);   // its first slot: Envelope 2 opens the cutoff, here by four octaves
+        addChords (*edit, track);
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's wavetable synth's comb, swept by an envelope at each note, chords a sixteenth apart", m);
+        CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

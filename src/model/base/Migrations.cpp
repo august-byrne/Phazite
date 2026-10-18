@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Migrations.h"
+#include "devices/filter/FilterEffect.h"
 #include "internal/Schema.h"
 
 #include <algorithm>
@@ -135,10 +136,38 @@ namespace
     }
 
     //==========================================================================
+    // Version 9 to 10: version 10 can choose the comb filters of step 2.14, new filter types after the others, which a
+    // version 9 project chooses none of; the new version keeps an older Phazite from opening a project that chooses one
+    // and playing another filter instead. And it keeps the Filter device's Type in phaziteType (Schema.h): until then its
+    // value took the place of the PLUGIN's type, which Tracktion then dropped. No other plug-in's type is a number, so a
+    // PLUGIN whose type is a number is such a Filter: it gets its type back, and its Type its own place.
+    void giveFiltersTheirType (juce::ValueTree state)
+    {
+        if (state.hasType (te::IDs::PLUGIN))
+        {
+            const auto type = state[te::IDs::type].toString();
+
+            if (type.isNotEmpty() && type.containsOnly ("0123456789.-"))
+            {
+                state.setProperty (schema::phaziteType, type.getFloatValue(), nullptr);
+                state.setProperty (te::IDs::type, devices::FilterEffect::typeID, nullptr);
+            }
+        }
+
+        for (auto child : state)
+            giveFiltersTheirType (child);
+    }
+
+    void upgrade9To10 (juce::ValueTree& editState)
+    {
+        giveFiltersTheirType (editState);
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
     constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5,
-                               upgrade5To6, upgrade6To7, upgrade7To8, upgrade8To9 };
+                               upgrade5To6, upgrade6To7, upgrade7To8, upgrade8To9, upgrade9To10 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 
