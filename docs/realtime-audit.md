@@ -142,6 +142,7 @@ Steady playback is clean everywhere except in 4OSC. Every scenario allocates som
 
 **17. Previews** (measured, step 1.5): the browser's preview plays a loop in an Edit of its own, mixed on the same audio thread as the song, and stretches it as it plays (Tracktion's preview Edit uses no proxy). In its first blocks, SoundTouch grows its buffers (`FIFOSampleBuffer::ensureCapacity`, 10 allocations), and a file cache miss logs in Debug builds; then it allocates nothing. A preview started while the song plays could therefore make it glitch.
 - **Action:** accept it for now: previews are short, and are mostly started while the song is stopped. Later, prime the stretcher on the message thread before the preview starts, or render the preview ahead as the clips do. Report SoundTouch's growing buffers upstream with finding 11.
+- **Signalsmith Stretch instead** (measured 2026-10-17, Release build, a voice-like stereo recording sped up from 120 to 140 BPM): it would take 1.5% of each 512-sample block on average, against SoundTouch's 0.13%, and, with its 150 ms delay, 45% of one block to catch up each time the preview loops or jumps, where SoundTouch takes 1%. Previews stay on SoundTouch even if clips move to Signalsmith ([design section 23](design.md#23-tracktion-engine-what-it-gives-and-what-we-build)).
 
 ### Data races
 
