@@ -676,3 +676,19 @@ TEST_CASE ("A Filter whose Type had taken the place of its plug-in's type before
     CHECK (inRack[te::IDs::type].toString() == juce::String ("phaziteFilter"));
     CHECK ((float) inRack[phazite::schema::phaziteType] == doctest::Approx (0.0f));
 }
+
+TEST_CASE ("A version 10 project, which chooses none of step 2.15's filter types, becomes the current version unchanged")
+{
+    const auto* version10 = R"(<EDIT><PHAZITE schemaVersion="10"/>
+        <TRACK id="1003"><PLUGIN type="phaziteSynth" id="1004" filterType="4" resonance="0.5"/>
+        <PLUGIN type="phaziteFilter" id="1005" phaziteType="5"/></TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version10);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
+
+    auto expected = juce::ValueTree::fromXml (version10);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}

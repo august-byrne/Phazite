@@ -164,10 +164,19 @@ namespace
     }
 
     //==========================================================================
+    // Version 10 to 11: version 11 can choose the filter types of step 2.15 (the vowel, phaser and sample and hold, and
+    // the synth's notch), after the others, and the synth's 24 dB slope, a new parameter whose default is the 12 dB a
+    // version 10 project plays; so nothing changes, and the new version keeps an older Phazite from opening a project
+    // that chooses them and playing another filter instead.
+    void upgrade10To11 (juce::ValueTree&)
+    {
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
-    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5,
-                               upgrade5To6, upgrade6To7, upgrade7To8, upgrade8To9, upgrade9To10 };
+    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4,  upgrade4To5,  upgrade5To6,
+                               upgrade6To7, upgrade7To8, upgrade8To9, upgrade9To10, upgrade10To11 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 

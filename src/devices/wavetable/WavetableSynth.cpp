@@ -18,8 +18,10 @@ namespace
     constexpr std::string_view subOctaves[] = { "-1 Octave", "-2 Octaves" };
     constexpr std::string_view subShapes[] = { "Sine", "Triangle", "Saw", "Square" };
     constexpr std::string_view unisonCounts[] = { "1", "2", "3", "4", "5", "6", "7", "8" };
-    constexpr std::string_view filterTypes[] = { "Low Pass 12",  "Low Pass 24", "Band Pass", "High Pass 12",
-                                                 "High Pass 24", "Notch",       "Comb +",    "Comb -" }; // as Synth::FilterType
+    constexpr std::string_view filterTypes[] = {
+        "Low Pass 12", "Low Pass 24", "Band Pass", "High Pass 12", "High Pass 24", "Notch",
+        "Comb +",      "Comb -",      "Vowel",     "Phaser",       "Sample & Hold"
+    }; // as Synth::FilterType
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
     constexpr std::string_view modSources[] = { "None",     "Envelope 2", "Envelope 3", "LFO 1", "LFO 2",
                                                 "Velocity", "Note",       "Mod Wheel",  "Random" };
@@ -198,7 +200,7 @@ namespace
     static_assert (Synth::getModParameter (Synth::numModSlots - 1, Synth::modAmount) == Synth::mod8Amount);
     static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::unisonDetune + 1);
     static_assert (std::size (modSources) == (size_t) Synth::ModSource::random + 1);
-    static_assert (std::size (filterTypes) == (size_t) Synth::FilterType::combMinus + 1);
+    static_assert (std::size (filterTypes) == (size_t) Synth::FilterType::sampleAndHold + 1);
 
     // In a mixer slot: where the first oscillator plays in its table, and the filter.
     constexpr std::string_view keyControls[] = { "osc1Position", "cutoff" };
@@ -418,8 +420,8 @@ void WavetableSynth::prepare (double newSampleRate, int)
         for (auto& lfo : voice.lfos)
             lfo.prepare (controlRate);
 
-        for (auto& comb : voice.combs)
-            comb.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
+        for (auto& filter : voice.filters)
+            filter.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
     }
 
     for (auto& lfo : freeLfos)
@@ -441,12 +443,8 @@ void WavetableSynth::reset()
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
         voice.phases.setSeed (unisonSeed + (std::uint32_t) index);
 
-        for (auto& side : voice.filters)
-            for (auto& filter : side)
-                filter.reset();
-
-        for (auto& comb : voice.combs)
-            comb.reset();
+        for (auto& filter : voice.filters)
+            filter.reset();
     }
 
     for (size_t i = 0; i < freeLfos.size(); ++i)
@@ -518,12 +516,8 @@ void WavetableSynth::startVoice (Voice& voice)
 
     voice.sub.setPhase (0.0f);
 
-    for (auto& side : voice.filters)
-        for (auto& filter : side)
-            filter.reset();
-
-    for (auto& comb : voice.combs)
-        comb.reset();
+    for (auto& filter : voice.filters)
+        filter.reset();
 
     for (size_t i = 0; i < voice.lfos.size(); ++i)
         voice.lfos[i].reset (0.0f, lfoSeed + (std::uint32_t) (notesPlayed * 2 + i));
@@ -703,28 +697,47 @@ namespace
         return moves[(size_t) target];
     }
 
-    // The filter's sections for its type: one for 12 dB per octave, band-pass and notch; two for 24, the second carrying
-    // the resonance (as Phazite's filter device builds them).
-    int makeSections (Synth::FilterType type, double cutoffHz, double sampleRate, float resonance,
-                      std::array<dsp::FilterCoefficients, 2>& sections) noexcept
+    dsp::FilterMode getFilterMode (Synth::FilterType type) noexcept
     {
-        const auto amount = (double) std::clamp (resonance, 0.0f, 1.0f);
-        const auto lowPass = type == Synth::FilterType::lowPass12 || type == Synth::FilterType::lowPass24;
-        const auto highPass = type == Synth::FilterType::highPass12 || type == Synth::FilterType::highPass24;
-        auto shape = lowPass ? dsp::FilterShape::lowPass : (highPass ? dsp::FilterShape::highPass : dsp::FilterShape::bandPass);
+        using dsp::FilterMode;
 
-        if (type == Synth::FilterType::notch)
-            shape = dsp::FilterShape::notch;
-
-        if (type == Synth::FilterType::lowPass24 || type == Synth::FilterType::highPass24)
+        switch (type)
         {
-            sections[0] = dsp::makeFilter (shape, cutoffHz, sampleRate, dsp::getButterworthQ (4, 0));
-            sections[1] = dsp::makeFilter (shape, cutoffHz, sampleRate, dsp::getButterworthQ (4, 1) * std::pow (2.0, amount * 4.0));
-            return 2;
+            case Synth::FilterType::lowPass12:
+            case Synth::FilterType::lowPass24:
+                return FilterMode::lowPass;
+            case Synth::FilterType::bandPass:
+                return FilterMode::bandPass;
+            case Synth::FilterType::highPass12:
+            case Synth::FilterType::highPass24:
+                return FilterMode::highPass;
+            case Synth::FilterType::notch:
+                return FilterMode::notch;
+            case Synth::FilterType::combPlus:
+                return FilterMode::combPlus;
+            case Synth::FilterType::combMinus:
+                return FilterMode::combMinus;
+            case Synth::FilterType::vowel:
+                return FilterMode::vowel;
+            case Synth::FilterType::phaser:
+                return FilterMode::phaser;
+            case Synth::FilterType::sampleAndHold:
+                return FilterMode::sampleAndHold;
         }
 
-        sections[0] = dsp::makeFilter (shape, cutoffHz, sampleRate, 0.70710678 * std::pow (2.0, amount * 4.5));
-        return 1;
+        return FilterMode::lowPass;
+    }
+
+    // The filter for its type (as Phazite's filter device builds it): 12 dB per octave, its Q rising from a Butterworth's
+    // with the resonance, or 24 for the low-pass and high-pass that say so.
+    dsp::FilterSettings makeFilterSettings (Synth::FilterType type, double cutoffHz, float resonance) noexcept
+    {
+        const auto amount = (double) std::clamp (resonance, 0.0f, 1.0f);
+        return { .mode = getFilterMode (type),
+                 .frequency = cutoffHz,
+                 .resonance = resonance,
+                 .steep = type == Synth::FilterType::lowPass24 || type == Synth::FilterType::highPass24,
+                 .q = 0.70710678 * std::pow (2.0, amount * 4.5) };
     }
 } // namespace
 
@@ -836,30 +849,20 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
             if (voice.subGain > 0.0f)
                 voice.sub.setFrequency (dsp::noteToFrequency ((double) basePitch - 12.0 * settings.subOctaves), sampleRate);
 
-            voice.numSections = 0;
-            voice.combOn = false;
+            voice.filtering = settings.filterOn;
 
             if (settings.filterOn)
             {
+                // The same filter on both sides; a comb's delay glides to its new length over the step.
                 const auto moved = settings.keyTracking * (voice.pitch - 60.0f) + cutoffRange * moveOf (moves, ModTarget::cutoff);
                 const auto frequency =
                     std::clamp ((double) settings.cutoff * std::exp2 ((double) moved / 12.0), lowestCutoff, nyquistLimit);
-                const auto filterResonance = settings.resonance + moveOf (moves, ModTarget::resonance);
+                const auto coefficients = dsp::makeMultimode (
+                    makeFilterSettings (settings.filterType, frequency, settings.resonance + moveOf (moves, ModTarget::resonance)),
+                    sampleRate);
 
-                if (settings.filterType == FilterType::combPlus || settings.filterType == FilterType::combMinus)
-                {
-                    // The comb's delay glides to its new length over the step.
-                    const auto comb = dsp::makeComb (settings.filterType == FilterType::combMinus, frequency, sampleRate, filterResonance);
-
-                    for (auto& side : voice.combs)
-                        side.setTarget (comb, length);
-
-                    voice.combOn = true;
-                }
-                else
-                {
-                    voice.numSections = makeSections (settings.filterType, frequency, sampleRate, filterResonance, voice.sections);
-                }
+                for (auto& side : voice.filters)
+                    side.set (coefficients, length);
 
                 voice.driveGain = settings.driveGain;
             }
@@ -984,16 +987,12 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 {
                     auto x = sides[(size_t) channel];
 
-                    if (voice.numSections > 0 || voice.combOn)
+                    if (voice.filtering)
                     {
                         if (voice.driveGain > 1.0001f)
                             x = dsp::softClip (x * voice.driveGain) / voice.driveGain;
 
-                        if (voice.combOn)
-                            x = voice.combs[(size_t) channel].process (x);
-
-                        for (int s = 0; s < voice.numSections; ++s)
-                            x = voice.filters[(size_t) s][(size_t) channel].process (x, voice.sections[(size_t) s]);
+                        x = voice.filters[(size_t) channel].process (x);
                     }
 
                     sides[(size_t) channel] = x;

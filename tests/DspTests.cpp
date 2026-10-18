@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The building blocks of Phazite's devices' DSP (src/devices/dsp/): filters, comb filters, envelopes, oscillators, random
-// numbers, delay lines.
+// The building blocks of Phazite's devices' DSP (src/devices/dsp/): filters, comb filters, the filter types every Phazite
+// filter offers, envelopes, oscillators, random numbers, delay lines.
 #include "TestHelpers.h"
 #include "devices/dsp/CombFilter.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Filters.h"
 #include "devices/dsp/Math.h"
+#include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
 #include "devices/dsp/Random.h"
 
@@ -97,6 +98,61 @@ double measureNoiseThrough (const dsp::CombCoefficients& coefficients)
     }
 
     return std::sqrt (sum / (2.0 * testRate));
+}
+
+// One of the filter types at a cutoff, with a 12 dB section's Q as the Filter device's.
+dsp::MultimodeCoefficients makeType (dsp::FilterMode mode, double cutoff, float resonance, bool steep = false)
+{
+    return dsp::makeMultimode ({ .mode = mode,
+                                 .frequency = cutoff,
+                                 .resonance = resonance,
+                                 .steep = steep,
+                                 .q = 0.70710678 * std::pow (2.0, (double) resonance * 4.5) },
+                               testRate);
+}
+
+dsp::MultimodeFilter makeMultimodeFilter (const dsp::MultimodeCoefficients& coefficients)
+{
+    dsp::MultimodeFilter filter;
+    filter.prepare (dsp::getLongestCombDelay (20.0, testRate));
+    filter.set (coefficients, 0);
+    return filter;
+}
+
+// A sine through one of the filter types: its level once settled, relative to the sine's, as a gain.
+double measureMultimodeGain (const dsp::MultimodeCoefficients& coefficients, double frequency)
+{
+    auto filter = makeMultimodeFilter (coefficients);
+    const auto settle = (int) testRate, measure = (int) testRate / 2;
+    double input = 0.0, output = 0.0;
+
+    for (int i = 0; i < settle + measure; ++i)
+    {
+        const auto x = (float) std::sin (twoPi * frequency * i / testRate);
+        const auto y = filter.process (x);
+
+        if (i >= settle)
+        {
+            input += (double) x * x;
+            output += (double) y * y;
+        }
+    }
+
+    return std::sqrt (output / input);
+}
+
+// How strong a frequency is in a stretch of sound, as an amplitude: its DFT there.
+double measureAmplitudeAt (const std::vector<float>& sound, size_t from, size_t to, double frequency)
+{
+    auto re = 0.0, im = 0.0;
+
+    for (auto i = from; i < to; ++i)
+    {
+        re += sound[i] * std::cos (twoPi * frequency * (double) i / testRate);
+        im += sound[i] * std::sin (twoPi * frequency * (double) i / testRate);
+    }
+
+    return 2.0 * std::sqrt (re * re + im * im) / (double) (to - from);
 }
 
 // How many times a signal goes from below zero to zero or above.
@@ -582,6 +638,158 @@ TEST_CASE ("A comb stays steady at its most resonance, swept up and down the who
 
             for (int i = 0; i < 16; ++i)
                 peak = std::max (peak, std::abs (comb.process (noise.nextBipolar())));
+        }
+
+        CHECK (std::isfinite (peak));
+        CHECK (peak < 8.0f);
+    }
+}
+
+TEST_CASE ("Each of Phazite's filter types sounds as it reports")
+{
+    using dsp::FilterMode;
+
+    struct Type
+    {
+        FilterMode mode;
+        bool steep;
+        float resonance;
+    };
+
+    for (const auto& type :
+         { Type { FilterMode::lowPass, false, 0.3f }, Type { FilterMode::lowPass, true, 0.3f }, Type { FilterMode::highPass, true, 0.3f },
+           Type { FilterMode::bandPass, false, 0.5f }, Type { FilterMode::bandPass, true, 0.5f }, Type { FilterMode::notch, true, 0.2f },
+           Type { FilterMode::combPlus, false, 0.5f }, Type { FilterMode::vowel, false, 0.5f }, Type { FilterMode::phaser, false, 0.0f },
+           Type { FilterMode::phaser, false, 0.8f } })
+    {
+        const auto coefficients = makeType (type.mode, 1000.0, type.resonance, type.steep);
+
+        for (const auto frequency : { 250.0, 700.0, 1000.0, 1700.0, 4000.0 })
+        {
+            INFO ("type " << (int) type.mode << (type.steep ? " at 24 dB" : "") << ", " << frequency << " Hz");
+            const auto reported = dsp::getMagnitude (coefficients, frequency, testRate);
+            CHECK (std::abs (measureMultimodeGain (coefficients, frequency) - reported) < 0.01 + 0.03 * reported);
+        }
+    }
+}
+
+TEST_CASE ("The vowel filter's formants are a sung vowel's, which the cutoff picks from U through O, A and E to I")
+{
+    const auto vowel = [] (double cutoff, float resonance) { return makeType (dsp::FilterMode::vowel, cutoff, resonance); };
+    const auto gain = [] (const dsp::MultimodeCoefficients& coefficients, double frequency)
+    { return dsp::getMagnitude (coefficients, frequency, testRate); };
+
+    // A, the cutoff at its second formant: peaks at 650, 1080 and 2650 Hz, well above what lies between them, the first
+    // the loudest.
+    const auto a = vowel (1080.0, 0.5f);
+    CHECK (gain (a, 650.0) > 2.5 * gain (a, 850.0));
+    CHECK (gain (a, 1080.0) > 3.0 * gain (a, 1800.0));
+    CHECK (gain (a, 2650.0) > 3.0 * gain (a, 1800.0));
+    CHECK (gain (a, 650.0) > gain (a, 1080.0));
+
+    // U at the bottom and I at the top, with first formants of their own (350 and 290 Hz).
+    CHECK (gain (vowel (600.0, 0.5f), 350.0) > 3.0 * gain (vowel (600.0, 0.5f), 470.0));
+    CHECK (gain (vowel (1870.0, 0.5f), 290.0) > 3.0 * gain (vowel (1870.0, 0.5f), 450.0));
+
+    // Between two vowels the second formant is the cutoff, and beyond I the formants move with it.
+    for (const auto cutoff : { 1300.0, 1800.0, 3740.0 })
+    {
+        INFO (cutoff << " Hz");
+        const auto between = vowel (cutoff, 0.5f);
+        CHECK (gain (between, cutoff) > 1.5 * gain (between, cutoff * 1.1));
+        CHECK (gain (between, cutoff) > 1.5 * gain (between, cutoff / 1.1));
+    }
+
+    // Resonance narrows the formants.
+    const auto wide = vowel (1080.0, 0.0f), narrow = vowel (1080.0, 1.0f);
+    CHECK (gain (narrow, 700.0) / gain (narrow, 650.0) < 0.5 * gain (wide, 700.0) / gain (wide, 650.0));
+}
+
+TEST_CASE ("The phaser's notches sit at a quarter of the cutoff, the cutoff and nearly four times it, and feedback raises its peaks")
+{
+    constexpr auto pi = juce::MathConstants<double>::pi;
+
+    // Where the stages' phase turns against what goes in by an odd number of half turns: tan (15, 45 and 75 degrees)
+    // times the cutoff, as the bilinear transform warps it; the peaks between, at whole turns.
+    const auto at = [pi] (double ratio, double cutoff) { return testRate / pi * std::atan (ratio * std::tan (pi * cutoff / testRate)); };
+
+    for (const auto cutoff : { 1000.0, 2000.0 })
+    {
+        INFO (cutoff << " Hz");
+        const auto plain = makeType (dsp::FilterMode::phaser, cutoff, 0.0f);
+
+        for (const auto degrees : { 15.0, 45.0, 75.0 })
+            CHECK (dsp::getMagnitude (plain, at (std::tan (degrees * pi / 180.0), cutoff), testRate) < 0.01);
+
+        // At the most feedback the peaks rise by 3.4 dB, as much at any cutoff: the loop is solved at once.
+        const auto peak = at (std::tan (pi / 6.0), cutoff);
+        CHECK (dsp::getMagnitude (plain, peak, testRate) == doctest::Approx (1.0).epsilon (0.01));
+        CHECK (toDecibels (dsp::getMagnitude (makeType (dsp::FilterMode::phaser, cutoff, 1.0f), peak, testRate))
+               == doctest::Approx (3.4).epsilon (0.05));
+    }
+}
+
+TEST_CASE ("Sample and hold keeps the sound at twice the cutoff's rate, folding back what lies above it")
+{
+    const auto through = [] (float resonance, double cutoff, const auto& input)
+    {
+        auto hold = makeMultimodeFilter (makeType (dsp::FilterMode::sampleAndHold, cutoff, resonance));
+        std::vector<float> out;
+
+        for (int i = 0; i < 9600; ++i)
+            out.push_back (hold.process (input (i)));
+
+        return out;
+    };
+
+    const auto sine = [] (double frequency)
+    { return [frequency] (int i) { return 0.5f * (float) std::sin (twoPi * frequency * i / testRate); }; };
+
+    // A cutoff of 1 kHz holds each sample for 24 at 48 kHz: 2.7 kHz, above it, folds back to 700 Hz, and 200 Hz comes
+    // through nearly whole.
+    const auto folded = through (0.0f, 1000.0, sine (2700.0));
+    auto changes = 0;
+
+    for (size_t i = 1; i < 4800; ++i)
+        changes += std::abs (folded[i] - folded[i - 1]) > 1.0e-6f ? 1 : 0;
+
+    CHECK (changes >= 190);
+    CHECK (changes <= 200);
+    CHECK (measureAmplitudeAt (folded, 4800, 9600, 700.0) > 0.1);
+    CHECK (measureAmplitudeAt (through (0.0f, 1000.0, sine (200.0)), 4800, 9600, 200.0) > 0.45);
+
+    // Resonance rings at the cutoff: a tone near it louder, what is steady at its level.
+    const auto plainTone = measureAmplitudeAt (through (0.0f, 1000.0, sine (950.0)), 4800, 9600, 950.0);
+    CHECK (measureAmplitudeAt (through (1.0f, 1000.0, sine (950.0)), 4800, 9600, 950.0) > 2.0 * plainTone);
+    CHECK (through (1.0f, 1000.0, [] (int) { return 0.5f; }).back() == doctest::Approx (0.5f).epsilon (0.001));
+
+    // At half the sample rate or above, with no resonance, it changes nothing.
+    const auto open = through (0.0f, 24000.0, sine (5000.0));
+    CHECK (open[100] == doctest::Approx (0.5f * (float) std::sin (twoPi * 5000.0 * 100 / testRate)));
+}
+
+TEST_CASE ("Phazite's combs, vowel, phaser and sample and hold stay steady at their most resonance, swept on loud noise")
+{
+    using dsp::FilterMode;
+
+    for (const auto mode :
+         { FilterMode::combPlus, FilterMode::combMinus, FilterMode::vowel, FilterMode::phaser, FilterMode::sampleAndHold })
+    {
+        INFO ("type " << (int) mode);
+        dsp::MultimodeFilter filter;
+        filter.prepare (dsp::getLongestCombDelay (20.0, testRate));
+        dsp::Random noise (0x5a5au);
+        const auto length = 2 * (int) testRate;
+        auto peak = 0.0f;
+
+        for (int start = 0; start < length; start += 16)
+        {
+            // From 20 Hz to 20 kHz and back, the same number of octaves each step.
+            const auto along = (double) start / length;
+            filter.set (makeType (mode, 20.0 * std::pow (2.0, 9.97 * (along < 0.5 ? 2.0 * along : 2.0 - 2.0 * along)), 1.0f), 16);
+
+            for (int i = 0; i < 16; ++i)
+                peak = std::max (peak, std::abs (filter.process (noise.nextBipolar())));
         }
 
         CHECK (std::isfinite (peak));

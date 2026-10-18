@@ -80,12 +80,17 @@ FilterCoefficients makeFilter (FilterShape shape, double frequency, double sampl
 
 double getMagnitude (const FilterCoefficients& c, double frequency, double sampleRate)
 {
+    return std::abs (getResponse (c, frequency, sampleRate));
+}
+
+std::complex<double> getResponse (const FilterCoefficients& c, double frequency, double sampleRate)
+{
     frequency = std::clamp (frequency, 0.0, 0.4999 * sampleRate);
     const auto w = std::tan (juce::MathConstants<double>::pi * frequency / sampleRate) / (double) c.g;
     const std::complex<double> s (0.0, w);
     const auto denominator = s * s + (double) c.k * s + 1.0;
     const auto numerator = (double) c.m0 * denominator + (double) c.m1 * s + (double) c.m2;
-    return std::abs (numerator / denominator);
+    return numerator / denominator;
 }
 
 double getButterworthQ (int order, int section)

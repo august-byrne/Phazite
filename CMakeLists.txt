@@ -80,6 +80,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/Filters.cpp
     src/devices/dsp/Filters.h
     src/devices/dsp/Math.h
+    src/devices/dsp/MultimodeFilter.cpp
+    src/devices/dsp/MultimodeFilter.h
     src/devices/dsp/Oscillators.h
     src/devices/dsp/Random.h
     src/devices/dynamics/Compressor.cpp

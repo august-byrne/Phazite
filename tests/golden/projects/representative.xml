@@ -38,7 +38,7 @@
            gridTriplets="0"
            loopFollowsSong="0"
            outline="golden"
-           schemaVersion="10">
+           schemaVersion="11">
     <CHORDLANE>
       <CHORD degree="1"
              length="8"

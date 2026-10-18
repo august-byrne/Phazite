@@ -39,7 +39,7 @@ namespace
         return { { { "Oscillators",
                      { "osc1Wave", "osc2Wave", "osc2Pitch", "osc2Detune", "oscMix", "pulseWidth", "subLevel", "noiseLevel" } },
                    { "Unison", { "unisonVoices", "unisonDetune", "unisonSpread" } } },
-                 { { "Filter", { "filterType", "cutoff", "resonance", "filterEnvelope", "keyTracking" } },
+                 { { "Filter", { "filterType", "cutoff", "resonance", "filterSlope", "filterEnvelope", "keyTracking" } },
                    { "Filter Envelope", { "filterAttack", "filterDecay", "filterSustain", "filterRelease" } } },
                  { { "Amp Envelope", { "attack", "decay", "sustain", "release" } },
                    { "LFO", { "lfoShape", "lfoTarget", "lfoRate", "lfoDepth" } } },

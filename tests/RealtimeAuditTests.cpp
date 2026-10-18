@@ -881,6 +881,59 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: the synth's vowel swept by its filter envelope, chords a sixteenth apart, and the filter's phaser")
+    {
+        using phazite::devices::Synth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        edit->ensureNumberOfAudioTracks (2);
+
+        auto& notes = getTrack (*edit, 0);
+        const auto synth = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
+        REQUIRE (phazite::setInstrument (notes, synth) != nullptr);
+        setDeviceValue (synth, "filterType", (float) Synth::FilterType::vowel);
+        setDeviceValue (synth, "resonance", 0.8f);
+        addChords (*edit, notes);
+
+        // The filter's phaser on a tone, swept by a lane, on a track of its own (finding 4).
+        auto& tone = getTrack (*edit, 1);
+        REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
+        const auto filter = edit->getPluginCache().createNewPlugin (phazite::devices::FilterEffect::typeID, {});
+        REQUIRE (phazite::insertDevice (tone, filter) != nullptr);
+        setDeviceValue (filter, "type", (float) phazite::devices::FilterEffect::Type::phaser);
+        setDeviceValue (filter, "resonance", 0.9f);
+        auto* cutoff = dynamic_cast<phazite::DevicePlugin*> (filter.get())->findParameter ("cutoff");
+
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat)), 200.0f, 0.0f, nullptr);
+            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat + 0.5)), 5000.0f, 0.0f, nullptr);
+        }
+
+        const auto m = playAndMeasure (*edit);
+        report ("The synth's vowel swept by its filter envelope, chords a sixteenth apart, and the filter's phaser", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's wavetable synth's sample and hold, swept by an envelope at each note, chords a sixteenth apart")
+    {
+        using phazite::devices::WavetableSynth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        const auto wavetable = edit->getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
+        REQUIRE (phazite::setInstrument (track, wavetable) != nullptr);
+        setDeviceValue (wavetable, "filterType", (float) WavetableSynth::FilterType::sampleAndHold);
+        setDeviceValue (wavetable, "resonance", 0.8f);
+        setDeviceValue (wavetable, "unisonVoices", 3.0f); // four
+        setDeviceValue (wavetable, "mod1Amount", 0.5f);   // its first slot: Envelope 2 opens the cutoff, here by four octaves
+        addChords (*edit, track);
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's wavetable synth's sample and hold, swept by an envelope at each note, chords a sixteenth apart", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: notes recorded from the computer keyboard onto Phazite's synth")
     {
         using phazite::devices::Synth;

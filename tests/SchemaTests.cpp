@@ -67,7 +67,7 @@ TEST_CASE ("The names Phazite writes into project files stay the same")
     CHECK (schema::getOscillatorWavetableFile (1).toString() == juce::String ("osc2WavetableFile"));
 
     // The format version projects are saved in now (Migrations.h upgrades older ones).
-    CHECK (schema::currentVersion == 10);
+    CHECK (schema::currentVersion == 11);
 }
 
 TEST_CASE ("Reading Phazite's state doesn't add it")

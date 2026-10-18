@@ -25,8 +25,10 @@ namespace phazite::schema
 // delay, saturator, filter, utility, multiband dynamics and maximizer) and the synth's unison, which an older Phazite would
 // drop or play without; version 9 can hold the wavetable synth (step 2.13), with what its oscillators play; version 10
 // can choose the comb filters of step 2.14 (filter types after the others, in the synth, the wavetable synth and the
-// Filter device), which an older Phazite would play as another filter.
-inline constexpr int currentVersion = 10;
+// Filter device), which an older Phazite would play as another filter; version 11 can choose the vowel, phaser and sample
+// and hold of step 2.15 in all three, and the synth's notch and 24 dB slope (filterSlope), which an older Phazite would
+// play as another filter, or at 12 dB.
+inline constexpr int currentVersion = 11;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).

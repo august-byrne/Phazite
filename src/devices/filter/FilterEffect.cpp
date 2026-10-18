@@ -12,7 +12,8 @@ namespace phazite::devices
 namespace
 {
     // In the order of FilterEffect::Type, saved in projects by number.
-    constexpr std::string_view types[] = { "Low Pass", "High Pass", "Band Pass", "Notch", "Comb +", "Comb -" };
+    constexpr std::string_view types[] = { "Low Pass", "High Pass", "Band Pass", "Notch",        "Comb +",
+                                           "Comb -",   "Vowel",     "Phaser",    "Sample & Hold" };
     constexpr std::string_view slopes[] = { "12 dB", "24 dB" };
 
     constexpr float lowestCutoff = 20.0f, highestCutoff = 20000.0f;
@@ -38,66 +39,55 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
+    static_assert (std::size (types) == (size_t) FilterEffect::Type::sampleAndHold + 1);
+
     // In a mixer slot: the sweep.
     constexpr std::string_view keyControls[] = { "cutoff", "resonance" };
 
     constexpr double glideSeconds = 0.01; // how long the cutoff takes to follow a change, about
     constexpr double driveSeconds = 0.02;
 
-    struct Sections
+    dsp::FilterMode getMode (std::span<const float> values)
     {
-        std::array<dsp::FilterCoefficients, 2> coefficients;
-        int count = 1;
-    };
+        using Type = FilterEffect::Type;
+        using dsp::FilterMode;
 
-    FilterEffect::Type getType (std::span<const float> values)
-    {
-        return (FilterEffect::Type) juce::jlimit (0, (int) std::size (types) - 1, (int) std::lround (values[FilterEffect::type]));
-    }
-
-    bool isComb (FilterEffect::Type kind)
-    {
-        return kind == FilterEffect::Type::combPlus || kind == FilterEffect::Type::combMinus;
-    }
-
-    dsp::CombCoefficients makeComb (std::span<const float> values, double cutoffHz, double sampleRate)
-    {
-        return dsp::makeComb (getType (values) == FilterEffect::Type::combMinus, cutoffHz, sampleRate, values[FilterEffect::resonance]);
-    }
-
-    // The filter's sections: one for 12 dB per octave; two for 24, the second carrying the resonance (as a fourth-order
-    // Butterworth's sections do, -3 dB at the cutoff without it).
-    Sections makeSections (std::span<const float> values, double cutoffHz, double sampleRate)
-    {
-        const auto kind = getType (values);
-        const auto steep = values[FilterEffect::slope] > 0.5f;
-        const auto amount = (double) juce::jlimit (0.0f, 1.0f, values[FilterEffect::resonance]);
-
-        auto shape = dsp::FilterShape::lowPass;
-
-        if (kind == FilterEffect::Type::highPass)
-            shape = dsp::FilterShape::highPass;
-        else if (kind == FilterEffect::Type::bandPass)
-            shape = dsp::FilterShape::bandPass;
-        else if (kind == FilterEffect::Type::notch)
-            shape = dsp::FilterShape::notch;
-
-        Sections sections;
-
-        if (! steep)
+        switch ((Type) juce::jlimit (0, (int) std::size (types) - 1, (int) std::lround (values[FilterEffect::type])))
         {
-            sections.coefficients[0] = dsp::makeFilter (shape, cutoffHz, sampleRate, 0.70710678 * std::pow (2.0, amount * 4.5));
-            return sections;
+            case Type::lowPass:
+                return FilterMode::lowPass;
+            case Type::highPass:
+                return FilterMode::highPass;
+            case Type::bandPass:
+                return FilterMode::bandPass;
+            case Type::notch:
+                return FilterMode::notch;
+            case Type::combPlus:
+                return FilterMode::combPlus;
+            case Type::combMinus:
+                return FilterMode::combMinus;
+            case Type::vowel:
+                return FilterMode::vowel;
+            case Type::phaser:
+                return FilterMode::phaser;
+            case Type::sampleAndHold:
+                return FilterMode::sampleAndHold;
         }
 
-        // Band-pass and notch get two alike, narrower and deeper; low-pass and high-pass a Butterworth pair.
-        const auto plain = shape == dsp::FilterShape::bandPass || shape == dsp::FilterShape::notch;
-        const auto firstQ = plain ? 0.70710678 * std::pow (2.0, amount * 4.5) : dsp::getButterworthQ (4, 0);
-        const auto secondQ = plain ? firstQ : dsp::getButterworthQ (4, 1) * std::pow (2.0, amount * 4.0);
-        sections.coefficients[0] = dsp::makeFilter (shape, cutoffHz, sampleRate, firstQ);
-        sections.coefficients[1] = dsp::makeFilter (shape, cutoffHz, sampleRate, secondQ);
-        sections.count = 2;
-        return sections;
+        return FilterMode::lowPass;
+    }
+
+    // The filter at a cutoff: 12 or 24 dB per octave as the slope says (a comb, the vowel, the phaser and the sample
+    // and hold have none), a 12 dB section's Q rising from a Butterworth's with the resonance.
+    dsp::MultimodeCoefficients makeCoefficients (std::span<const float> values, double cutoffHz, double sampleRate)
+    {
+        const auto amount = (double) juce::jlimit (0.0f, 1.0f, values[FilterEffect::resonance]);
+        return dsp::makeMultimode ({ .mode = getMode (values),
+                                     .frequency = cutoffHz,
+                                     .resonance = values[FilterEffect::resonance],
+                                     .steep = values[FilterEffect::slope] > 0.5f,
+                                     .q = 0.70710678 * std::pow (2.0, amount * 4.5) },
+                                   sampleRate);
     }
 
     float toOctaves (float hertz) noexcept
@@ -119,16 +109,7 @@ const DeviceInfo FilterEffect::info { .typeID = typeID,
 
 double FilterEffect::getMagnitude (std::span<const float> values, double frequency, double sampleRate)
 {
-    if (isComb (getType (values)))
-        return dsp::getMagnitude (makeComb (values, values[cutoff], sampleRate), frequency, sampleRate);
-
-    const auto sections = makeSections (values, values[cutoff], sampleRate);
-    auto magnitude = 1.0;
-
-    for (int i = 0; i < sections.count; ++i)
-        magnitude *= dsp::getMagnitude (sections.coefficients[(size_t) i], frequency, sampleRate);
-
-    return magnitude;
+    return dsp::getMagnitude (makeCoefficients (values, values[cutoff], sampleRate), frequency, sampleRate);
 }
 
 void FilterEffect::prepare (double newSampleRate, int)
@@ -137,20 +118,16 @@ void FilterEffect::prepare (double newSampleRate, int)
     glide = (float) (1.0 - std::exp (-1.0 / (glideSeconds * sampleRate)));
     driveSmoothing = (float) (1.0 - std::exp (-1.0 / (driveSeconds * sampleRate)));
 
-    for (auto& comb : combs)
-        comb.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
+    for (auto& filter : filters)
+        filter.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
 
     reset();
 }
 
 void FilterEffect::reset()
 {
-    for (auto& section : stages)
-        for (auto& filter : section)
-            filter.reset();
-
-    for (auto& comb : combs)
-        comb.reset();
+    for (auto& filter : filters)
+        filter.reset();
 
     isFirstBlock = true;
 }
@@ -175,37 +152,22 @@ void FilterEffect::process (const ProcessContext& block)
         isFirstBlock = false;
     }
 
-    // A comb chosen again starts silent, rather than with what it held when it was last played.
-    const auto comb = isComb (getType (values));
-
-    if (comb && ! wasComb)
-        for (auto& each : combs)
-            each.reset();
-
-    wasComb = comb;
-
-    auto sections = makeSections (values, toHertz (octaves), sampleRate);
-    auto combCoefficients = makeComb (values, toHertz (octaves), sampleRate);
+    auto coefficients = makeCoefficients (values, toHertz (octaves), sampleRate);
 
     for (int start = 0; start < block.numSamples; start += coefficientStep)
     {
         const auto end = std::min (block.numSamples, start + coefficientStep);
 
-        // The cutoff glides in octaves, so a sweep sounds even all the way; new coefficients every few samples.
+        // The cutoff glides in octaves, so a sweep sounds even all the way; new coefficients every few samples, a comb's
+        // delay gliding between them too.
         if (std::abs (targetOctaves - octaves) > 1.0e-4f)
         {
             octaves += (targetOctaves - octaves) * (1.0f - std::pow (1.0f - glide, (float) (end - start)));
-
-            if (comb)
-                combCoefficients = makeComb (values, toHertz (octaves), sampleRate);
-            else
-                sections = makeSections (values, toHertz (octaves), sampleRate);
+            coefficients = makeCoefficients (values, toHertz (octaves), sampleRate);
         }
 
-        // The comb's delay glides between them too.
-        if (comb)
-            for (int channel = 0; channel < numChannels; ++channel)
-                combs[(size_t) channel].setTarget (combCoefficients, end - start);
+        for (int channel = 0; channel < numChannels; ++channel)
+            filters[(size_t) channel].set (coefficients, end - start);
 
         for (int i = start; i < end; ++i)
         {
@@ -220,27 +182,15 @@ void FilterEffect::process (const ProcessContext& block)
                 if (driven)
                     x = dsp::softClip (x * driveGain) / driveGain;
 
-                if (comb)
-                {
-                    x = combs[(size_t) channel].process (x);
-                }
-                else
-                {
-                    for (int s = 0; s < sections.count; ++s)
-                        x = stages[(size_t) s][(size_t) channel].process (x, sections.coefficients[(size_t) s]);
-                }
-
-                block.channels[channel][i] = x;
+                block.channels[channel][i] = filters[(size_t) channel].process (x);
             }
         }
     }
 
-    // How long a comb rings once its input stops: at the lower of where its cutoff is and where it is gliding to, the longer.
-    tailSeconds.store (comb ? (float) dsp::getRingSeconds (dsp::makeComb (getType (values) == Type::combMinus,
-                                                                          std::min (toHertz (octaves), (double) values[cutoff]), sampleRate,
-                                                                          values[resonance]),
-                                                           sampleRate)
-                            : 0.0f,
-                       std::memory_order_relaxed);
+    // How long a comb rings once its input stops: at the lower of where its cutoff is and where it is gliding to, the
+    // longer. The other types fall silent within a few milliseconds.
+    const auto lowest = makeCoefficients (values, std::min (toHertz (octaves), (double) values[cutoff]), sampleRate);
+    const auto comb = lowest.mode == dsp::FilterMode::combPlus || lowest.mode == dsp::FilterMode::combMinus;
+    tailSeconds.store (comb ? (float) dsp::getRingSeconds (lowest.comb, sampleRate) : 0.0f, std::memory_order_relaxed);
 }
 } // namespace phazite::devices

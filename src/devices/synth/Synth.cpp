@@ -12,7 +12,9 @@ namespace phazite::devices
 namespace
 {
     constexpr std::string_view waves[] = { "Sine", "Triangle", "Saw", "Square" };
-    constexpr std::string_view filterTypes[] = { "Low Pass", "Band Pass", "High Pass", "Comb +", "Comb -" }; // as Synth::FilterType
+    constexpr std::string_view filterTypes[] = { "Low Pass", "Band Pass", "High Pass", "Comb +",       "Comb -",
+                                                 "Notch",    "Vowel",     "Phaser",    "Sample & Hold" }; // as Synth::FilterType
+    constexpr std::string_view filterSlopes[] = { "12 dB", "24 dB" };
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
     constexpr std::string_view lfoTargets[] = { "Pitch", "Cutoff", "Level" };
     constexpr std::string_view voiceModes[] = { "Poly", "Mono" };
@@ -107,6 +109,9 @@ namespace
         makeChoice ("unisonVoices", "Unison", unisonCounts, 0.0f),
         { .id = "unisonDetune", .name = "Unison Detune", .maximum = 100.0f, .defaultValue = 25.0f, .unit = Unit::cents },
         { .id = "unisonSpread", .name = "Unison Spread", .defaultValue = 0.8f, .unit = Unit::percent },
+
+        // Step 2.15: the filter's slope, whose default (12 dB) leaves projects from before sounding as they did.
+        makeChoice ("filterSlope", "Filter Slope", filterSlopes, 0.0f),
     };
 
     // In a mixer slot: the filter, the synth's most played-with controls.
@@ -120,6 +125,37 @@ namespace
     Enum choiceOf (float value)
     {
         return static_cast<Enum> (std::lround (value));
+    }
+
+    static_assert (std::size (filterTypes) == (size_t) Synth::FilterType::sampleAndHold + 1);
+
+    dsp::FilterMode getFilterMode (Synth::FilterType type)
+    {
+        using dsp::FilterMode;
+
+        switch (type)
+        {
+            case Synth::FilterType::lowPass:
+                return FilterMode::lowPass;
+            case Synth::FilterType::bandPass:
+                return FilterMode::bandPass;
+            case Synth::FilterType::highPass:
+                return FilterMode::highPass;
+            case Synth::FilterType::combPlus:
+                return FilterMode::combPlus;
+            case Synth::FilterType::combMinus:
+                return FilterMode::combMinus;
+            case Synth::FilterType::notch:
+                return FilterMode::notch;
+            case Synth::FilterType::vowel:
+                return FilterMode::vowel;
+            case Synth::FilterType::phaser:
+                return FilterMode::phaser;
+            case Synth::FilterType::sampleAndHold:
+                return FilterMode::sampleAndHold;
+        }
+
+        return FilterMode::lowPass;
     }
 } // namespace
 
@@ -137,8 +173,8 @@ void Synth::prepare (double newSampleRate, int)
     {
         voice.amp.prepare (sampleRate);
         voice.filterEnvelope.prepare (sampleRate);
-        voice.comb.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
-        voice.combRight.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
+        for (auto& filter : voice.filters)
+            filter.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
     }
 
     lfo.prepare (sampleRate);
@@ -152,15 +188,14 @@ void Synth::reset()
         auto& voice = voices[index];
         voice.amp.reset();
         voice.filterEnvelope.reset();
-        voice.filter.reset();
         voice.note = -1;
         voice.held = voice.sustained = false;
         voice.filterEnvelopeLevel = 0.0f;
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
         voice.unisonPhases.setSeed (unisonSeed + (std::uint32_t) index);
-        voice.filterRight.reset();
-        voice.comb.reset();
-        voice.combRight.reset();
+
+        for (auto& filter : voice.filters)
+            filter.reset();
     }
 
     lfo.reset();
@@ -264,10 +299,10 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
         }
 
         voice.sub.setPhase (0.0f);
-        voice.filter.reset();
-        voice.filterRight.reset();
-        voice.comb.reset();
-        voice.combRight.reset();
+
+        for (auto& filter : voice.filters)
+            filter.reset();
+
         voice.filterEnvelopeLevel = 0.0f;
     }
 
@@ -386,9 +421,9 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 {
     const auto wave1 = choiceOf<dsp::Waveform> (values[osc1Wave]), wave2 = choiceOf<dsp::Waveform> (values[osc2Wave]);
     const auto mix2 = values[oscMix], width = values[pulseWidth], subGain = values[subLevel], noiseGain = values[noiseLevel];
-    const auto type = choiceOf<FilterType> (values[filterType]);
-    const auto comb = type == FilterType::combPlus || type == FilterType::combMinus;
-    const auto q = 0.5 * std::pow (50.0, (double) values[resonance]); // from 0.5, flat, to 25, ringing
+    const auto mode = getFilterMode (choiceOf<FilterType> (values[filterType]));
+    const auto steep = values[filterSlope] > 0.5f;
+    const auto q = 0.5 * std::pow (50.0, (double) values[resonance]); // a 12 dB section's, from 0.5, flat, to 25, ringing
     const auto outputGain = dsp::decibelsToGain (values[level]);
     const auto lfoAim = choiceOf<LfoTarget> (values[lfoTarget]);
     const auto depth = std::clamp (values[lfoDepth] + modWheel, 0.0f, 1.0f);
@@ -449,28 +484,12 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 values[filterEnvelope] * voice.filterEnvelopeLevel + values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
             const auto filterFrequency = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
 
-            if (comb)
-            {
-                // The comb's delay glides to its new length over the step.
-                const auto combCoefficients = dsp::makeComb (type == FilterType::combMinus, filterFrequency, sampleRate, values[resonance]);
-                voice.comb.setTarget (combCoefficients, length);
-                voice.combRight.setTarget (combCoefficients, length);
-            }
-            else
-            {
-                voice.coefficients = dsp::makeFilter (dsp::FilterShape::lowPass, filterFrequency, sampleRate, q);
-            }
+            // The same filter on both sides; a comb's delay glides to its new length over the step.
+            const auto coefficients = dsp::makeMultimode (
+                { .mode = mode, .frequency = filterFrequency, .resonance = values[resonance], .steep = steep, .q = q }, sampleRate);
 
-            // What the filter's type asks for of its outputs, or the comb's.
-            const auto filtered = [type, comb, &voice] (dsp::Filter& filter, dsp::CombFilter& combFilter, float input)
-            {
-                if (comb)
-                    return combFilter.process (input);
-
-                const auto outputs = filter.processAll (input, voice.coefficients);
-                return type == FilterType::lowPass ? outputs.low
-                                                   : (type == FilterType::bandPass ? outputs.band * voice.coefficients.k : outputs.high);
-            };
+            for (auto& filter : voice.filters)
+                filter.set (coefficients, length);
 
             for (int i = 0; i < length; ++i)
             {
@@ -518,7 +537,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 if (! stereo)
                 {
                     // One filter, the same sound on both sides, as before unison.
-                    const auto out = filtered (voice.filter, voice.comb, mono) * gain;
+                    const auto out = voice.filters[0].process (mono) * gain;
                     left[start + i] += out;
 
                     if (right != nullptr)
@@ -527,8 +546,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                     continue;
                 }
 
-                left[start + i] += filtered (voice.filter, voice.comb, soundLeft) * gain;
-                right[start + i] += filtered (voice.filterRight, voice.combRight, soundRight) * gain;
+                left[start + i] += voice.filters[0].process (soundLeft) * gain;
+                right[start + i] += voice.filters[1].process (soundRight) * gain;
             }
 
             if (! voice.amp.isActive())

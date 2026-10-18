@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cmath>
+#include <complex>
 
 namespace phazite::devices::dsp
 {
@@ -33,8 +34,10 @@ struct FilterCoefficients
 // bell and the shelves only.
 FilterCoefficients makeFilter (FilterShape, double frequency, double sampleRate, double q, double gainDecibels = 0.0);
 
-// The filter's gain (not in decibels) at a frequency.
+// The filter's gain (not in decibels) at a frequency; and its response there, its gain and phase, for filters whose
+// sections are added together.
 double getMagnitude (const FilterCoefficients&, double frequency, double sampleRate);
+std::complex<double> getResponse (const FilterCoefficients&, double frequency, double sampleRate);
 
 // The Q of each second-order section of a Butterworth filter of an even order (2, 4, 6 or 8), whose sections in a
 // row give a maximally flat slope of 6 dB per octave per order, -3 dB at the cutoff. Section must be below order / 2.
@@ -55,6 +58,18 @@ public:
         ic1 = 2.0f * v1 - ic1;
         ic2 = 2.0f * v2 - ic2;
         return c.m0 * input + c.m1 * v1 + c.m2 * v2;
+    }
+
+    // What the next sample's output will be, before process() takes its input: gain * input + offset. For filters inside
+    // a feedback loop, so that the loop is solved at once rather than a sample late.
+    struct Instant
+    {
+        float gain, offset;
+    };
+
+    Instant getInstant (const FilterCoefficients& c) const noexcept
+    {
+        return { c.m0 + c.m1 * c.a2 + c.m2 * c.a3, c.m1 * (c.a1 * ic1 - c.a2 * ic2) + c.m2 * (ic2 + c.a2 * ic1 - c.a3 * ic2) };
     }
 
     // The low-pass, band-pass and high-pass outputs at once, for a filter whose shape moves between them.

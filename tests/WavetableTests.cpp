@@ -527,7 +527,7 @@ TEST_CASE ("The wavetable synth's combs: on a note's pitch, Comb + keeps a saw's
 {
     // After the other types, so that those keep their numbers in saved projects.
     const auto& types = WavetableSynth::info.parameters[WavetableSynth::filterType].choices;
-    REQUIRE (types.size() == 8);
+    REQUIRE (types.size() == 11);
     CHECK (types[(size_t) WavetableSynth::FilterType::notch] == std::string_view ("Notch"));
     CHECK (types[(size_t) WavetableSynth::FilterType::combPlus] == std::string_view ("Comb +"));
     CHECK (types[(size_t) WavetableSynth::FilterType::combMinus] == std::string_view ("Comb -"));
@@ -575,6 +575,45 @@ TEST_CASE ("The wavetable synth's combs: on a note's pitch, Comb + keeps a saw's
     CHECK (std::isfinite (peak));
     CHECK (peak > 0.05f);
     CHECK (peak < 4.0f);
+}
+
+TEST_CASE ("The wavetable synth's vowel, phaser and sample and hold play its saw, steadily")
+{
+    const auto& types = WavetableSynth::info.parameters[WavetableSynth::filterType].choices;
+    CHECK (types[(size_t) WavetableSynth::FilterType::vowel] == std::string_view ("Vowel"));
+    CHECK (types[(size_t) WavetableSynth::FilterType::phaser] == std::string_view ("Phaser"));
+    CHECK (types[(size_t) WavetableSynth::FilterType::sampleAndHold] == std::string_view ("Sample & Hold"));
+
+    auto values = getPlainValues (2.0f / 3.0f);
+    values[WavetableSynth::filterOn] = 1.0f;
+    values[WavetableSynth::cutoff] = 1000.0f;
+    values[WavetableSynth::resonance] = 1.0f;
+
+    for (const auto type :
+         { WavetableSynth::FilterType::vowel, WavetableSynth::FilterType::phaser, WavetableSynth::FilterType::sampleAndHold })
+    {
+        INFO ("type " << (int) type);
+        values[WavetableSynth::filterType] = (float) type;
+        const auto played = play (*makeSynth(), values, 24000, { noteOn (0, 45), noteOn (2400, 52) });
+        auto peak = 0.0f;
+
+        for (const auto sample : played.left)
+            peak = std::max (peak, std::abs (sample));
+
+        CHECK (std::isfinite (peak));
+        CHECK (peak > 0.05f);
+        CHECK (peak < 4.0f);
+    }
+
+    // Sample and hold at a cutoff of 1 kHz folds a saw's 25th harmonic (2750 Hz at A2) back to 750 Hz, which a plain saw
+    // at A2 hasn't (its harmonics are at multiples of 110 Hz).
+    values[WavetableSynth::filterType] = (float) WavetableSynth::FilterType::sampleAndHold;
+    values[WavetableSynth::resonance] = 0.0f;
+    const auto held = play (*makeSynth(), values, 24000, { noteOn (0, 45) });
+    CHECK (measureLevelAt (held.left, 4800, 24000, 750.0) > 0.002);
+    values[WavetableSynth::filterOn] = 0.0f;
+    const auto plain = play (*makeSynth(), values, 24000, { noteOn (0, 45) });
+    CHECK (measureLevelAt (plain.left, 4800, 24000, 750.0) < 0.0005);
 }
 
 TEST_CASE ("The wavetable synth plays 16 voices, glides in mono mode, and plays the same every time")

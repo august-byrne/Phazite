@@ -157,10 +157,11 @@ TEST_CASE ("The synth's description holds together")
 {
     REQUIRE (devices::isValid (Synth::info));
     CHECK (Synth::info.kind == devices::DeviceKind::instrument);
-    CHECK (Synth::info.parameters.size() == (size_t) Synth::unisonSpread + 1);
+    CHECK (Synth::info.parameters.size() == (size_t) Synth::filterSlope + 1);
     CHECK (devices::findParameter (Synth::info, "cutoff") == Synth::cutoff);
     CHECK (devices::findParameter (Synth::info, "voiceMode") == Synth::voiceMode);
     CHECK (devices::findParameter (Synth::info, "unisonVoices") == Synth::unisonVoices);
+    CHECK (devices::findParameter (Synth::info, "filterSlope") == Synth::filterSlope);
 }
 
 TEST_CASE ("A synth note plays at its pitch, as loud as its velocity says")
@@ -247,7 +248,7 @@ TEST_CASE ("The synth's combs: on a note's pitch, Comb + keeps a saw's harmonics
 {
     // After the other types, so that those keep their numbers in saved projects.
     const auto& types = Synth::info.parameters[Synth::filterType].choices;
-    REQUIRE (types.size() == 5);
+    REQUIRE (types.size() == 9);
     CHECK (types[(size_t) Synth::FilterType::highPass] == std::string_view ("High Pass"));
     CHECK (types[(size_t) Synth::FilterType::combPlus] == std::string_view ("Comb +"));
     CHECK (types[(size_t) Synth::FilterType::combMinus] == std::string_view ("Comb -"));
@@ -282,6 +283,72 @@ TEST_CASE ("The synth's combs: on a note's pitch, Comb + keeps a saw's harmonics
     CHECK (minus[2] / minus[0] == doctest::Approx (1.0 / 3.0).epsilon (0.1));
     CHECK (minus[1] < 0.01 * minus[0]);
     CHECK (minus[3] < 0.01 * minus[0]);
+}
+
+TEST_CASE ("The synth's notch and 24 dB slope, and its vowel, phaser and sample and hold")
+{
+    const auto& types = Synth::info.parameters[Synth::filterType].choices;
+    CHECK (types[(size_t) Synth::FilterType::notch] == std::string_view ("Notch"));
+    CHECK (types[(size_t) Synth::FilterType::vowel] == std::string_view ("Vowel"));
+    CHECK (types[(size_t) Synth::FilterType::phaser] == std::string_view ("Phaser"));
+    CHECK (types[(size_t) Synth::FilterType::sampleAndHold] == std::string_view ("Sample & Hold"));
+
+    // The slope came after the synth's other parameters, at 12 dB, so projects from before sound as they did.
+    CHECK (Synth::info.parameters[Synth::filterSlope].id == std::string_view ("filterSlope"));
+    CHECK (Synth::info.parameters[Synth::filterSlope].defaultValue == doctest::Approx (0.0f));
+
+    // A saw at A2 (110 Hz) through a low-pass at 500 Hz: at 24 dB, its 27th harmonic falls much further.
+    auto values = getSineValues();
+    values[Synth::osc1Wave] = 2.0f; // saw
+    values[Synth::cutoff] = 500.0f;
+    const auto trebleAt = [&values] (float slope)
+    {
+        values[Synth::filterSlope] = slope;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        const auto played = play (synth, values, 24000, { noteOn (0, 45) });
+        return measureLevelAt (played, 4800, 24000, 2970.0);
+    };
+
+    CHECK (trebleAt (1.0f) < 0.1 * trebleAt (0.0f));
+
+    // The notch takes out a sine at its frequency (A4, 440 Hz).
+    values = getSineValues();
+    const auto rmsThrough = [&values] (Synth::FilterType type, float frequency)
+    {
+        values[Synth::filterType] = (float) type;
+        values[Synth::cutoff] = frequency;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        const auto played = play (synth, values, 24000, { noteOn (0, 69) });
+        auto sum = 0.0;
+
+        for (size_t i = 12000; i < played.size(); ++i)
+            sum += (double) played[i] * played[i];
+
+        return std::sqrt (sum / (double) (played.size() - 12000));
+    };
+
+    CHECK (rmsThrough (Synth::FilterType::notch, 440.0f) < 0.05 * rmsThrough (Synth::FilterType::lowPass, 20000.0f));
+
+    // The vowel, the phaser and the sample and hold play a saw, steadily.
+    values = getSineValues();
+    values[Synth::osc1Wave] = 2.0f;
+    values[Synth::resonance] = 1.0f;
+
+    for (const auto type : { Synth::FilterType::vowel, Synth::FilterType::phaser, Synth::FilterType::sampleAndHold })
+    {
+        INFO ("type " << (int) type);
+        values[Synth::filterType] = (float) type;
+        values[Synth::cutoff] = 1000.0f;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        const auto played = play (synth, values, 24000, { noteOn (0, 45), noteOn (2400, 52) });
+        const auto peak = peakOf (played, 0, played.size());
+        CHECK (std::isfinite (peak));
+        CHECK (peak > 0.05f);
+        CHECK (peak < 4.0f);
+    }
 }
 
 TEST_CASE ("The synth bends its pitch, and glides from key to key in mono mode without starting again")

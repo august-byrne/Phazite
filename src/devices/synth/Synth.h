@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's synth (roadmap step 1.6): a subtractive synth with up to 16 voices. Each voice mixes two band-limited
 // oscillators (the second tuned and detuned against the first), a sine an octave down and noise, through a resonant
-// filter (low-pass, band-pass, high-pass or, since step 2.14, a comb: dsp/CombFilter.h) that has an envelope of its own
-// and follows the keys, then an amp envelope. One LFO moves the pitch, the cutoff or the level; the mod wheel adds to it.
-// In mono mode one voice plays, legato, gliding between the keys held, as a bassline does. Pitch bend and the sustain
-// pedal work as on a keyboard. Unison (step 2.10) plays each oscillator up to seven times at once, detuned against each
-// other and spread across the stereo field, for a wide, thick sound (a "supersaw"). Its noise and its unison's starting
-// phases come from fixed seeds, so it renders the same every time.
+// filter (low-pass, band-pass or high-pass at 12 or 24 dB, or the other types of dsp/MultimodeFilter.h: notch, comb,
+// vowel, phaser, sample and hold) that has an envelope of its own and follows the keys, then an amp envelope. One LFO
+// moves the pitch, the cutoff or the level; the mod wheel adds to it. In mono mode one voice plays, legato, gliding
+// between the keys held, as a bassline does. Pitch bend and the sustain pedal work as on a keyboard. Unison (step 2.10)
+// plays each oscillator up to seven times at once, detuned against each other and spread across the stereo field, for a
+// wide, thick sound (a "supersaw"). Its noise and its unison's starting phases come from fixed seeds, so it renders the
+// same every time.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
-#include "devices/dsp/CombFilter.h"
 #include "devices/dsp/Envelopes.h"
-#include "devices/dsp/Filters.h"
+#include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
 #include "devices/dsp/Random.h"
 
@@ -64,7 +64,8 @@ public:
         level,
         unisonVoices, // added in step 2.10: from one voice (as before) up to seven, detuned and spread
         unisonDetune,
-        unisonSpread
+        unisonSpread,
+        filterSlope // added in step 2.15: 12 dB per octave (as before) or 24
     };
 
     // Saved in projects by number: new types go at the end.
@@ -74,7 +75,11 @@ public:
         bandPass,
         highPass,
         combPlus, // step 2.14
-        combMinus
+        combMinus,
+        notch, // step 2.15
+        vowel,
+        phaser,
+        sampleAndHold
     };
 
     enum class LfoTarget
@@ -111,9 +116,7 @@ private:
         dsp::Random unisonPhases; // where the unison's oscillators start, the same every time
         dsp::Random noise;
         dsp::Adsr amp, filterEnvelope;
-        dsp::Filter filter, filterRight; // the right one only while unison spreads the voice across the stereo field
-        dsp::FilterCoefficients coefficients;
-        dsp::CombFilter comb, combRight; // in their place for Comb + and Comb -
+        std::array<dsp::MultimodeFilter, 2> filters; // the second only while unison spreads the voice across the stereo field
         float filterEnvelopeLevel = 0.0f;
     };
 

@@ -4,19 +4,18 @@
 // or a sound of the user's), each with a pitch, a level and a warp that reshapes its wave (hard sync, bend, pulse width,
 // mirror, or FM or ring modulation from the other oscillator); then a sub oscillator and noise. Unison plays both
 // oscillators up to eight times at once, detuned, spread across the stereo field and across the table. A resonant filter
-// with drive follows (or, since step 2.14, a comb: dsp/CombFilter.h); three envelopes (the first shapes the level) and
-// two LFOs, free or starting again with each note; and eight modulation slots, each a source moving a destination by an
-// amount, for each voice on its own, so an envelope sweeps every note's table from its start. 16 voices, or one in mono
-// mode, legato, with glide. It has no effects of its own: Phazite's devices follow it. Its noise, unison phases and
-// random values come from fixed seeds, so it renders the same every time.
+// with drive follows (or another type of dsp/MultimodeFilter.h: comb, vowel, phaser, sample and hold); three envelopes
+// (the first shapes the level) and two LFOs, free or starting again with each note; and eight modulation slots, each a
+// source moving a destination by an amount, for each voice on its own, so an envelope sweeps every note's table from its
+// start. 16 voices, or one in mono mode, legato, with glide. It has no effects of its own: Phazite's devices follow it.
+// Its noise, unison phases and random values come from fixed seeds, so it renders the same every time.
 #pragma once
 
 #include "Wavetable.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
-#include "devices/dsp/CombFilter.h"
 #include "devices/dsp/Envelopes.h"
-#include "devices/dsp/Filters.h"
+#include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
 #include "devices/dsp/Random.h"
 
@@ -176,7 +175,10 @@ public:
         highPass24,
         notch,
         combPlus, // step 2.14
-        combMinus
+        combMinus,
+        vowel, // step 2.15
+        phaser,
+        sampleAndHold
     };
 
     enum class ModSource
@@ -268,13 +270,10 @@ private:
         std::array<OscillatorRun, numOscillators> oscillators;
         dsp::Oscillator sub;
         dsp::Random noise, phases;
-        dsp::Adsr amp, envelope2, envelope3;               // the second and third at the control rate
-        std::array<dsp::Lfo, 2> lfos;                      // those that start again with each note, at the control rate
-        std::array<std::array<dsp::Filter, 2>, 2> filters; // two sections, each side
-        std::array<dsp::FilterCoefficients, 2> sections;
-        int numSections = 0;                  // 0 while the filter is off or a comb
-        std::array<dsp::CombFilter, 2> combs; // each side, for Comb + and Comb -
-        bool combOn = false;
+        dsp::Adsr amp, envelope2, envelope3;         // the second and third at the control rate
+        std::array<dsp::Lfo, 2> lfos;                // those that start again with each note, at the control rate
+        std::array<dsp::MultimodeFilter, 2> filters; // each side
+        bool filtering = false;                      // the filter is on
         float subGain = 0.0f, noiseGain = 0.0f, gainLeft = 1.0f, gainRight = 1.0f, driveGain = 1.0f;
     };
 

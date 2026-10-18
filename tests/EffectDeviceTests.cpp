@@ -268,7 +268,7 @@ TEST_CASE ("The filter's combs: Comb + on the cutoff's multiples, Comb - on its 
 {
     // After the other types, so that those keep their numbers in saved projects.
     const auto& types = devices::FilterEffect::info.parameters[devices::FilterEffect::type].choices;
-    REQUIRE (types.size() == 6);
+    REQUIRE (types.size() == 9);
     CHECK (types[3] == std::string_view ("Notch"));
     CHECK (types[(size_t) devices::FilterEffect::Type::combPlus] == std::string_view ("Comb +"));
     CHECK (types[(size_t) devices::FilterEffect::Type::combMinus] == std::string_view ("Comb -"));
@@ -316,6 +316,45 @@ TEST_CASE ("The filter's combs: Comb + on the cutoff's multiples, Comb - on its 
     // A low-pass again has no tail.
     set (values, devices::FilterEffect::info, "type", 0.0f);
     play (filter, values, 480, burst);
+    CHECK (filter.getTailSeconds() == doctest::Approx (0.0));
+}
+
+TEST_CASE ("The filter's vowel, phaser and sample and hold: after the combs, each with its own shape and no slope")
+{
+    const auto& types = devices::FilterEffect::info.parameters[devices::FilterEffect::type].choices;
+    REQUIRE (types.size() == 9);
+    CHECK (types[(size_t) devices::FilterEffect::Type::vowel] == std::string_view ("Vowel"));
+    CHECK (types[(size_t) devices::FilterEffect::Type::phaser] == std::string_view ("Phaser"));
+    CHECK (types[(size_t) devices::FilterEffect::Type::sampleAndHold] == std::string_view ("Sample & Hold"));
+
+    // The vowel: at a cutoff of 1080 Hz, an A, its first formant at 650 Hz well above what lies past it.
+    auto values = getDefaults (devices::FilterEffect::info);
+    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::vowel);
+    set (values, devices::FilterEffect::info, "cutoff", 1080.0f);
+    set (values, devices::FilterEffect::info, "resonance", 0.5f);
+    const auto vowel = devices::FilterEffect::getMagnitude (values, 650.0, testRate);
+    CHECK (vowel > 2.5 * devices::FilterEffect::getMagnitude (values, 850.0, testRate));
+
+    // No slope for it.
+    set (values, devices::FilterEffect::info, "slope", 0.0f);
+    CHECK (devices::FilterEffect::getMagnitude (values, 650.0, testRate) == doctest::Approx (vowel));
+
+    // The phaser: a notch at the cutoff.
+    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::phaser);
+    set (values, devices::FilterEffect::info, "cutoff", 1000.0f);
+    set (values, devices::FilterEffect::info, "resonance", 0.0f);
+    CHECK (devices::FilterEffect::getMagnitude (values, 1000.0, testRate) < 0.01);
+
+    devices::FilterEffect filter;
+    filter.prepare (testRate, testBlockSize);
+    const auto notched = play (filter, values, 24000, sine (1000.0, 0.25f));
+    CHECK (getRms (notched.left, 12000, 24000) < 0.005f);
+
+    // Sample and hold at a cutoff of 1 kHz: 2.7 kHz folds back to 700 Hz.
+    set (values, devices::FilterEffect::info, "type", (float) devices::FilterEffect::Type::sampleAndHold);
+    filter.reset();
+    const auto folded = play (filter, values, 24000, sine (2700.0, 0.25f));
+    CHECK (getAmplitudeAt (folded.left, 12000, 24000, 700.0) > 0.1f);
     CHECK (filter.getTailSeconds() == doctest::Approx (0.0));
 }
 
