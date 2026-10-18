@@ -23,7 +23,7 @@ public:
     // Clears up the folders in parentFolder that earlier Phazites left and no Phazite uses now. Those whose project closed
     // with nothing to restore are deleted. Of the others, whose changes were saved automatically after the project was
     // made (Project::hasNewerAutosave(): Phazite didn't close properly), returns the project of the newest, for the app
-    // to offer to restore; the rest wait for a later start, as do those saved by a newer Phazite. Nothing if there is none.
+    // to offer to restore; the rest wait for a later start. Nothing if there is none.
     static juce::File findProjectToRestore (te::Engine&, const juce::File& parentFolder);
 
     // Holds the folder of a project that findProjectToRestore() found: for the project restored from it, or to delete

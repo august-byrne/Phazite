@@ -54,61 +54,6 @@ namespace
     }
 
     //==========================================================================
-    // Version 4's automation clips (convertAutomationClips()): a MIDI clip that held a curve rather than notes.
-    bool isVersion4AutomationClip (const te::Clip& clip)
-    {
-        return dynamic_cast<const te::MidiClip*> (&clip) != nullptr
-               && clip.state.getChildWithName (te::IDs::AUTOMATIONCURVES).getChildWithName (te::IDs::AUTOMATIONCURVEMODIFIER).isValid();
-    }
-
-    // A clip's curve becomes the parameter's own over where the clip plays, without undo steps.
-    void convertClipCurve (const te::Clip& clip, const te::AutomationCurve& clipCurve, te::AutomatableParameter& parameter)
-    {
-        if (clipCurve.getNumPoints() == 0)
-            return;
-
-        auto& tempo = clip.edit.tempoSequence;
-        auto& own = parameter.getCurve();
-
-        // Where the clip plays, and where its curve's beat 0 is (its content's start), in song beats.
-        const auto times = clip.getPosition().time;
-        const auto start = tempo.toBeats (times.getStart()), end = tempo.toBeats (times.getEnd());
-        const auto origin = tempo.toBeats (clip.getTimeOfContentBeat (te::BeatPosition()));
-        const auto valueOfClipAt = [&clipCurve, origin] (te::BeatPosition beat)
-        { return clipCurve.getValueAt (te::BeatPosition::fromBeats ((beat - origin).inBeats()), clipCurve.getPointValue (0)); };
-
-        // Before and after the clip, the parameter played its own curve, or its value.
-        const auto value = parameter.getCurrentBaseValue();
-        const auto before = own.getValueAt (times.getStart(), value), after = own.getValueAt (times.getEnd(), value);
-
-        for (auto i = own.getNumPoints(); --i >= 0;)
-            if (times.containsInclusive (te::toTime (own.getPointPosition (i), tempo)))
-                own.removePoint (i, nullptr);
-
-        const auto add = [&own] (te::BeatPosition beat, float pointValue, float bend)
-        { own.addPoint (toCurvePosition (own, fromTracktion (beat)), pointValue, bend, nullptr); };
-
-        // Jumps to the clip's curve at its start, which bends on to its next point as it did, and back at its end.
-        const auto beatOf = [&clipCurve, &tempo, origin] (int index)
-        { return origin + (te::toBeats (clipCurve.getPointPosition (index), tempo) - te::BeatPosition()); };
-        auto bendAtStart = 0.0f;
-
-        for (int i = 0; i < clipCurve.getNumPoints(); ++i)
-            if (beatOf (i) <= start)
-                bendAtStart = clipCurve.getPointCurve (i);
-
-        add (start, before, 0.0f);
-        add (start, valueOfClipAt (start), bendAtStart);
-
-        for (int i = 0; i < clipCurve.getNumPoints(); ++i)
-            if (const auto beat = beatOf (i); beat > start && beat < end)
-                add (beat, clipCurve.getPointValue (i), clipCurve.getPointCurve (i));
-
-        add (end, valueOfClipAt (end), 0.0f);
-        add (end, after, 0.0f);
-    }
-
-    //==========================================================================
     // Automation that goes with clips (moveAutomation(), deleteAutomation()).
     const auto justBefore = BeatDuration::fromBeats (1.0e-4); // where an edge's point on the side before it goes
 
@@ -683,55 +628,6 @@ void deleteAutomation (const std::vector<AutomationStretch>& stretches, bool clo
             followCurve (*parameter);
         }
     }
-}
-
-//==============================================================================
-void convertAutomationClips (te::Edit& edit)
-{
-    // Earliest first, so that where two set one parameter at once, the later one's curve stays.
-    juce::Array<te::Clip*> clips;
-
-    for (auto* track : te::getClipTracks (edit))
-        for (auto* clip : track->getClips())
-            if (isVersion4AutomationClip (*clip))
-                clips.add (clip);
-
-    std::stable_sort (clips.begin(), clips.end(),
-                      [] (const te::Clip* a, const te::Clip* b) { return a->getPosition().getStart() < b->getPosition().getStart(); });
-
-    juce::Array<te::AudioTrack*> holders;
-    juce::ReferenceCountedArray<te::AutomatableParameter> converted;
-
-    for (auto* clip : clips)
-    {
-        if (auto* list = clip->getAutomationCurveList (false))
-        {
-            for (const auto& modifier : list->getItems())
-            {
-                if (const auto parameter = te::getParameter (*modifier))
-                {
-                    convertClipCurve (*clip, modifier->getCurve (te::CurveModifierType::absolute).curve, *parameter);
-                    parameter->removeModifier (*modifier);
-                    converted.addIfNotAlreadyThere (parameter);
-                }
-            }
-        }
-
-        if (auto* track = dynamic_cast<te::AudioTrack*> (clip->getTrack()))
-            holders.addIfNotAlreadyThere (track);
-
-        clip->removeFromParent();
-    }
-
-    // The tracks Phazite made for the master's and folders' automation clips, which hold nothing now.
-    for (auto* track : holders)
-        if (track->getName() == "Automation" && track->getClips().isEmpty() && getDevices (*track).isEmpty())
-            edit.deleteTrack (track);
-
-    for (auto* parameter : converted)
-        followCurve (*parameter);
-
-    edit.getUndoManager().clearUndoHistory();
 }
 
 //==============================================================================

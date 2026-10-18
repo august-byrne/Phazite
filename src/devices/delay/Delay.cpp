@@ -17,7 +17,7 @@ namespace
     constexpr double noteBeats[] = { 0.125, 1.0 / 6.0, 0.25, 0.375, 1.0 / 3.0, 0.5, 0.75, 2.0 / 3.0, 1.0, 1.5, 4.0 / 3.0, 2.0, 3.0, 4.0 };
     static_assert (std::size (noteValues) == std::size (noteBeats));
 
-    // The IDs are saved in projects: never change them.
+    // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         { .id = "sync", .name = "Sync", .maximum = 1.0f, .defaultValue = 1.0f, .unit = Unit::toggle },
         { .id = "time",

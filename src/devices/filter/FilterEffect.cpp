@@ -18,7 +18,7 @@ namespace
 
     constexpr float lowestCutoff = 20.0f, highestCutoff = 20000.0f;
 
-    // The IDs are saved in projects: never change them.
+    // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         { .id = "type",
           .name = "Type",

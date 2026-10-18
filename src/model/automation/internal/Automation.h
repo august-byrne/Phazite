@@ -2,8 +2,8 @@
 // Automation's Tracktion side (model/automation/AutomationModel.h), for the model, the app and tests: parameters by their
 // ParameterRefs, the points of a parameter's curve in beats, the lanes a track shows (Schema.h: PHAZITELANE), the selected
 // points as Tracktion's selection manager holds them, automation that keeps its beats when the tempo changes, the
-// watcher that remembers the parameter touched last and gives recorded automation an undo step of its own, and the
-// conversion of the automation clips projects held up to version 4. Not for the UI.
+// watcher that remembers the parameter touched last and gives recorded automation an undo step of its own. Not for the
+// UI.
 #pragma once
 
 #include "model/automation/AutomationValues.h"
@@ -70,16 +70,6 @@ void moveAutomation (const std::vector<AutomationStretch>&, BeatDuration distanc
 // what comes after a stretch moves back by its length, as the track's clips do (arrangement/internal/Clips.h:
 // deleteTimeRange()).
 void deleteAutomation (const std::vector<AutomationStretch>&, bool closeGap);
-
-//==============================================================================
-// The automation clips of projects up to version 4 (base/Migrations.h): MIDI clips without notes whose curve (Tracktion's
-// clip automation) set a parameter while they played, and outside them the parameter's own automation or value. Each
-// becomes the parameter's own automation over the clip's place in the song, which jumps to the clip's curve where the
-// clip started and back where it ended, as the clip played; then the clip goes, and so does a track named Automation
-// that it leaves empty, without devices (Phazite made one for the master's and folders' clips). It needs the song's
-// tempo, so it runs once the Edit is made from such a project (engine/internal/EngineSetup.h: createEditFromState()),
-// and leaves no undo steps.
-void convertAutomationClips (te::Edit&);
 
 //==============================================================================
 // The lanes a track shows (getAutomationLanes()): those it keeps (Schema.h: PHAZITELANE), of devices on it, then one for
@@ -192,8 +182,7 @@ bool isWritingAutomation (const te::Edit&);
 bool isAutomatedValue (const juce::ValueTree&, const juce::Identifier& property);
 
 // Puts back, in a saved project's state before its Edit is made, the values its parameters were set to by hand where they
-// were saved while something else set them to others (a modulator, or up to version 4 an automation clip's curve):
-// Tracktion saves those in the device's state too, and puts them back for plug-ins, but not for its own devices and
-// Phazite's, which would then start at the values played.
+// were saved while something else set them to others (a modulator): Tracktion saves those in the device's state too, and
+// puts them back for plug-ins, but not for Phazite's devices, which would then start at the values played.
 void restoreValuesSetByHand (juce::ValueTree& editState);
 } // namespace phazite

@@ -16,7 +16,7 @@ namespace
     constexpr std::string_view bandTypes[] = { "Low Cut", "Low Shelf", "Bell", "Notch", "High Shelf", "High Cut" };
     constexpr std::string_view slopes[] = { "12 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct" };
 
-    // The bands' parameter IDs, saved in projects (never change them), and names.
+    // The bands' parameter IDs, saved in projects, and names.
     constexpr std::string_view onIDs[] = { "band1On", "band2On", "band3On", "band4On", "band5On", "band6On", "band7On", "band8On" };
     constexpr std::string_view typeIDs[] = { "band1Type", "band2Type", "band3Type", "band4Type",
                                              "band5Type", "band6Type", "band7Type", "band8Type" };

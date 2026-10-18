@@ -8,7 +8,6 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
-#include "model/base/Migrations.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/internal/Mixer.h"
@@ -78,11 +77,9 @@ TEST_CASE ("A new project creates its folder, subfolders and file")
 
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // In the current format, in memory and in the file.
-    CHECK (phazite::getSchemaVersion (project->getEdit().state) == phazite::schema::currentVersion);
-    const auto saved = phazite::test::readXml (project->getFile());
-    REQUIRE (saved->getChildByName ("PHAZITE") != nullptr);
-    CHECK (saved->getChildByName ("PHAZITE")->getIntAttribute ("schemaVersion") == phazite::schema::currentVersion);
+    // With Phazite's state, in memory and in the file.
+    CHECK (phazite::findPhaziteState (project->getEdit()).isValid());
+    CHECK (phazite::test::readXml (project->getFile())->getChildByName ("PHAZITE") != nullptr);
 
     // A second project with the same name would overwrite the first, so it is refused.
     juce::String error;

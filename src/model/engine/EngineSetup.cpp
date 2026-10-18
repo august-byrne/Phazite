@@ -2,7 +2,6 @@
 #include "internal/EngineSetup.h"
 #include "internal/LoudnessMeterPlugin.h"
 #include "model/automation/internal/Automation.h"
-#include "model/base/Migrations.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Freeze.h"
@@ -171,16 +170,10 @@ std::unique_ptr<te::Edit> loadEdit (te::Engine& engine, const juce::File& file)
     if (! file.existsAsFile())
         return {};
 
-    auto state = te::loadEditFromFile (engine, file, te::ProjectItemID {});
-    const auto savedVersion = getSchemaVersion (state);
-
-    if (! state.isValid() || ! migrateToCurrentSchema (state))
-        return {};
-
-    return createEditFromState (engine, state, file, savedVersion);
+    return createEditFromState (engine, te::loadEditFromFile (engine, file, te::ProjectItemID {}), file);
 }
 
-std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& file, int savedVersion,
+std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& file,
                                                const juce::File& cacheFolder)
 {
     if (! state.isValid())
@@ -206,18 +199,6 @@ std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::V
     {
         edit->setTempDirectory (cacheFolder);
         restoreFrozenTracks (*edit, frozenTracks);
-    }
-
-    // The upgrade that needs the song's tempo (Migrations.h): the automation clips of projects saved before version 5.
-    constexpr auto versionWithoutAutomationClips = 5;
-
-    if (edit != nullptr && savedVersion < versionWithoutAutomationClips)
-    {
-        const auto wasChanged = edit->hasChangedSinceSaved();
-        convertAutomationClips (*edit);
-
-        if (! wasChanged)
-            edit->resetChangedStatus();
     }
 
     return edit;

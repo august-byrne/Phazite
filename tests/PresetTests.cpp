@@ -185,7 +185,6 @@ TEST_CASE ("A device's preset holds its settings and mix, not its automation, ou
     CHECK (preset[phazite::schema::presetKind].toString() == juce::String ("device"));
     CHECK (preset[phazite::schema::presetDevice].toString() == juce::String ("Compressor"));
     CHECK_FALSE (preset.hasProperty (phazite::schema::presetInstrument));
-    CHECK ((int) preset[phazite::schema::schemaVersion] == phazite::schema::currentVersion);
 
     const auto saved = preset.getChildWithName (te::IDs::PLUGIN);
     REQUIRE (saved.isValid());
@@ -361,7 +360,7 @@ TEST_CASE ("A drum sampler's preset brings its sounds into the project that take
     CHECK (second.project->getAudioFolder().getChildFile ("Boom.wav").existsAsFile());
 }
 
-TEST_CASE ("What a preset file holds is read from its first element; other files and newer presets aren't presets")
+TEST_CASE ("What a preset file holds is read from its first element; other files aren't presets")
 {
     phazite::test::TemporaryFolder temp;
     const auto file = temp.folder.getChildFile ("A" + juce::String (phazite::presetExtension));
@@ -371,21 +370,15 @@ TEST_CASE ("What a preset file holds is read from its first element; other files
 
     juce::ValueTree preset (phazite::schema::PHAZITEPRESET);
     preset.setProperty (phazite::schema::presetKind, "track", nullptr);
-    preset.setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
     REQUIRE (phazite::writePreset (preset, file));
     REQUIRE (phazite::readPresetInfo (file).has_value());
     CHECK (phazite::readPresetInfo (file)->kind == phazite::PresetKind::track);
 
-    // One a newer Phazite saved, or of a kind there is none of.
-    preset.setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion + 1, nullptr);
-    REQUIRE (phazite::writePreset (preset, file));
-    CHECK_FALSE (phazite::readPresetInfo (file).has_value());
-    CHECK_FALSE (phazite::readPreset (file).isValid());
-
-    preset.setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    // One of a kind there is none of.
     preset.setProperty (phazite::schema::presetKind, "song", nullptr);
     REQUIRE (phazite::writePreset (preset, file));
     CHECK_FALSE (phazite::readPresetInfo (file).has_value());
+    CHECK_FALSE (phazite::readPreset (file).isValid());
 
     // A file that isn't one at all, and a preset that loads nothing.
     REQUIRE (file.replaceWithText ("not a preset"));

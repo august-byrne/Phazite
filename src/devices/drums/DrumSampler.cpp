@@ -17,7 +17,7 @@ namespace
 
     constexpr std::string_view chokeGroups[] = { "Off", "1", "2", "3", "4" };
 
-    // The pads' parameter IDs, saved in projects (never change them), and names.
+    // The pads' parameter IDs, saved in projects, and names.
     constexpr std::string_view levelIDs[] = { "pad1Level",  "pad2Level",  "pad3Level",  "pad4Level",  "pad5Level",  "pad6Level",
                                               "pad7Level",  "pad8Level",  "pad9Level",  "pad10Level", "pad11Level", "pad12Level",
                                               "pad13Level", "pad14Level", "pad15Level", "pad16Level" };

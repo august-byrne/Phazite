@@ -107,12 +107,6 @@ void checkProjectGolden (const juce::String& relativePath, const juce::XmlElemen
 void checkGoldenText (const juce::String& relativePath, const juce::String& actualText,
                       const std::function<juce::StringArray (const juce::String& expected, const juce::String& actual)>& compareTexts);
 
-// Keeps a project as an earlier version saved it (tests/golden/legacy), to check that later versions still open it as
-// the same song. Written only while updating and only if the file is missing (it is never regenerated), and only from
-// a save by that version: 'source' paths get '/' separators, so that it opens on every OS, and INPUTDEVICES loses the
-// machine's inputs.
-void freezeLegacyInput (const juce::String& relativePath, const juce::XmlElement& rawSave, const juce::String& requiredAppVersion);
-
 //==============================================================================
 // No personal data in saved projects (docs/design.md, section 22).
 

@@ -6,7 +6,7 @@ namespace phazite::ui
 {
 namespace
 {
-    // A step's name, as the settings keep it: never rename one.
+    // A step's name, as the settings keep it.
     const char* getName (Guide::Step step)
     {
         switch (step)

@@ -84,9 +84,6 @@ juce::File UnsavedFolder::findProjectToRestore (te::Engine& engine, const juce::
             continue;
         }
 
-        if (Project::isFromNewerPhazite (engine, file))
-            continue; // for the version that opens it
-
         if (const auto time = Project::getAutosaveFile (file).getLastModificationTime(); newest == juce::File() || time > newestTime)
         {
             newest = file;

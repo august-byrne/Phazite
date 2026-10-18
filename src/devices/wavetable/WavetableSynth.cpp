@@ -98,7 +98,7 @@ namespace
     constexpr float sawPosition = 2.0f / 3.0f; // the saw in the first factory table, Basic Shapes
     constexpr float quarterNote = 8.0f;        // among the divisions
 
-    // In the order of WavetableSynth::Parameter. The IDs are saved in projects: never change them.
+    // In the order of WavetableSynth::Parameter. The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         makeToggle ("osc1On", "Osc 1 On", 1.0f),
         makePercent ("osc1Position", "Osc 1 Position", sawPosition),

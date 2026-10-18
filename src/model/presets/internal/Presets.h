@@ -9,12 +9,12 @@
 namespace phazite
 {
 // A preset of a device (of a container: with its rack type and macros) or of a track (with its containers' rack types),
-// in the current format, as PresetModel.h says what each holds.
+// as PresetModel.h says what each holds.
 juce::ValueTree makeDevicePreset (te::Plugin&);
 juce::ValueTree makeTrackPreset (te::Track&);
 
-// A preset file's contents, brought up to date as a project's are (Migrations.h); invalid for a file that isn't a preset,
-// or one of a newer Phazite. And writing one, replacing what the file held; true if it did.
+// A preset file's contents; invalid for a file that isn't a preset. And writing one, replacing what the file held; true
+// if it did.
 juce::ValueTree readPreset (const juce::File&);
 bool writePreset (const juce::ValueTree&, const juce::File&);
 

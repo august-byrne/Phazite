@@ -91,16 +91,13 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions);
 UIBehaviour& getUIBehaviour (te::Engine&);
 
 // Loads a saved Edit on the message thread, as Phazite's rules require (Tracktion's EditLoader builds
-// Edits on a background thread), upgraded to the current project format (model/base/Migrations.h). Returns nullptr if
-// the file can't be loaded, or was saved by a newer Phazite.
+// Edits on a background thread). Returns nullptr if the file can't be loaded.
 std::unique_ptr<te::Edit> loadEdit (te::Engine&, const juce::File&);
 
-// Creates an Edit for editing from a saved state, already upgraded (migrateToCurrentSchema()), that saves to a file. It
-// keeps the state's saved ID, or makes a new one, and the values parameters were set to by hand
-// (model/automation/internal/Automation.h: restoreValuesSetByHand()). savedVersion is the format the state was saved in,
-// before the upgrade: the upgrades that need the Edit are made here (model/base/Migrations.h), without undo steps or
-// unsaved changes. cacheFolder, if given, becomes the Edit's temporary folder, where its frozen tracks' files are, so
-// that they open frozen (model/mixer/internal/Freeze.h).
-std::unique_ptr<te::Edit> createEditFromState (te::Engine&, const juce::ValueTree& state, const juce::File& file, int savedVersion,
+// Creates an Edit for editing from a saved state, that saves to a file. It keeps the state's saved ID, or makes a new
+// one, and the values parameters were set to by hand (model/automation/internal/Automation.h: restoreValuesSetByHand()).
+// cacheFolder, if given, becomes the Edit's temporary folder, where its frozen tracks' files are, so that they open
+// frozen (model/mixer/internal/Freeze.h).
+std::unique_ptr<te::Edit> createEditFromState (te::Engine&, const juce::ValueTree& state, const juce::File& file,
                                                const juce::File& cacheFolder = {});
 } // namespace phazite

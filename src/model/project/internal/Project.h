@@ -36,13 +36,9 @@ public:
     static std::unique_ptr<Project> create (te::Engine&, const juce::File& parentFolder, const juce::String& name, juce::String& error,
                                             const std::function<void (te::Edit&)>& addContent = {});
 
-    // Opens a saved project, upgraded to the current project format (model/base/Migrations.h): the file itself changes
-    // when the project is saved. With restoreAutosave it opens the autosaved changes instead (see hasNewerAutosave());
-    // saving then still writes to the project file. A project saved by a newer Phazite isn't opened.
+    // Opens a saved project. With restoreAutosave it opens the autosaved changes instead (see hasNewerAutosave()); saving
+    // then still writes to the project file.
     static std::unique_ptr<Project> open (te::Engine&, const juce::File& projectFile, bool restoreAutosave, juce::String& error);
-
-    // Whether the file was saved by a newer Phazite, which open() doesn't open (design question 17).
-    static bool isFromNewerPhazite (te::Engine&, const juce::File& projectFile);
 
     // True if the project has an autosave from a session that ended without saving or closing the
     // project, such as a crash: saving and closing both delete the autosave.
@@ -63,8 +59,8 @@ public:
     juce::File getBackupsFolder() const { return getFolder().getChildFile ("Backups"); }
     juce::File getCacheFolder() const { return getCacheFolder (file); }
 
-    // Phazite's own data in the project file, next to the engine's (phazite::getPhaziteState(), model/base/internal/Schema.h). Every
-    // project has it: it holds the format version.
+    // Phazite's own data in the project file, next to the engine's (phazite::getPhaziteState(), model/base/internal/Schema.h),
+    // which every project has.
     juce::ValueTree getPhaziteState();
 
     // Whether the project holds anything it didn't hold when it was opened (with Phazite's parts added) or last saved,

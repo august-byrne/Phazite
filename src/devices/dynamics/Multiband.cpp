@@ -11,7 +11,7 @@ namespace phazite::devices
 {
 namespace
 {
-    // The IDs are saved in projects: never change them.
+    // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         { .id = "depth", .name = "Depth", .defaultValue = 0.5f, .unit = Unit::percent },
         { .id = "time", .name = "Time", .defaultValue = 0.5f, .unit = Unit::percent },

@@ -11,7 +11,7 @@ namespace phazite::devices
 {
 namespace
 {
-    // The IDs are saved in projects: never change them.
+    // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         { .id = "threshold", .name = "Threshold", .minimum = -60.0f, .maximum = 0.0f, .defaultValue = -18.0f, .unit = Unit::decibels },
         { .id = "ratio", .name = "Ratio", .minimum = 1.0f, .maximum = 20.0f, .defaultValue = 4.0f, .unit = Unit::ratio, .midpoint = 4.0f },

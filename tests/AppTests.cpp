@@ -237,42 +237,33 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 10000));
 }
 
-TEST_CASE ("A project from a newer Phazite stays in Open Recent, and startup opens the next one")
+TEST_CASE ("A project that doesn't open leaves Open Recent, and startup makes a first project instead")
 {
     auto& engine = phazite::test::getEngine();
     phazite::test::TemporaryFolder temp;
     const auto projects = temp.folder.getChildFile ("Projects");
-    REQUIRE (projects.createDirectory().wasOk());
-    const auto a = createClosedProject (projects, "A");
 
-    // B: a copy of A, saved by a newer Phazite.
-    const auto folderB = projects.getChildFile ("B");
-    REQUIRE (a.getParentDirectory().copyDirectoryTo (folderB));
-    const auto b = folderB.getChildFile (juce::String ("B") + phazite::Project::fileExtension);
-    REQUIRE (folderB.getChildFile (a.getFileName()).moveFileTo (b));
-    auto xml = phazite::test::readXml (b);
-    REQUIRE (xml->getChildByName ("PHAZITE") != nullptr);
-    xml->getChildByName ("PHAZITE")->setAttribute ("schemaVersion", phazite::schema::currentVersion + 1);
-    REQUIRE (xml->writeTo (b));
+    // A project file that holds no project.
+    const auto broken = projects.getChildFile (juce::String ("Broken/Broken") + phazite::Project::fileExtension);
+    REQUIRE (broken.create().wasOk());
+    REQUIRE (broken.replaceWithText ("Not a project"));
 
     phazite::Settings settings;
     phazite::RecentProjects recent (settings);
-    recent.add (a);
-    recent.add (b); // the most recent
+    recent.add (broken);
 
     phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, projects, temp.folder.getChildFile ("Unsaved"));
     juce::StringArray errors;
     session.onError = [&errors] (const juce::String&, const juce::String& message) { errors.add (message); };
     session.openAtStartup();
 
-    // A opens instead, after an error that says why B didn't, and B stays in Open Recent for the version that opens it.
-    REQUIRE (session.getProject() != nullptr);
-    CHECK (session.getProject()->getFile() == a);
+    // An error says why, the file is left as it was, and a first project opens.
     REQUIRE (errors.size() == 1);
-    CHECK (errors[0].contains ("newer"));
-    CHECK (recent.getProjects().contains (a));
-    CHECK (recent.getProjects().contains (b));
-    CHECK_FALSE (session.isUntitled()); // no first project was made
+    CHECK (errors[0].contains (broken.getFullPathName()));
+    CHECK (broken.loadFileAsString() == juce::String ("Not a project"));
+    CHECK_FALSE (recent.getProjects().contains (broken));
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.isUntitled());
 }
 
 TEST_CASE ("A new project is untitled until its first save asks what to call it and where it goes")

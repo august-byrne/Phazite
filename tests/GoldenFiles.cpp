@@ -156,19 +156,6 @@ namespace
             renumberLinks (*child, linkIDs);
     }
 
-    // freezeLegacyInput(): 'source' paths with '/' separators, which every OS reads, and none of this machine's inputs.
-    void makePortable (juce::XmlElement& element)
-    {
-        if (element.hasAttribute ("source"))
-            element.setAttribute ("source", element.getStringAttribute ("source").replaceCharacter ('\\', '/'));
-
-        if (element.hasTagName ("INPUTDEVICES"))
-            element.deleteAllChildElements();
-
-        for (auto* child : element.getChildIterator())
-            makePortable (*child);
-    }
-
     //==============================================================================
     juce::String getTag (const juce::XmlElement& element)
     {
@@ -620,27 +607,6 @@ void checkGoldenText (const juce::String& relativePath, const juce::String& actu
                       const std::function<juce::StringArray (const juce::String& expected, const juce::String& actual)>& compareTexts)
 {
     checkGolden (relativePath, actualText, "Phazite's output", compareTexts);
-}
-
-void freezeLegacyInput (const juce::String& relativePath, const juce::XmlElement& rawSave, const juce::String& requiredAppVersion)
-{
-    const auto file = getGoldenFolder().getChildFile (relativePath);
-
-    if (file.existsAsFile() || ! isUpdatingGoldenFiles())
-        return;
-
-    // A legacy file shows what one version saved; it can't be made by another.
-    REQUIRE (rawSave.getStringAttribute ("appVersion") == requiredAppVersion);
-
-    juce::XmlElement frozen (rawSave);
-    makePortable (frozen);
-
-    juce::XmlElement::TextFormat format;
-    format.newLineChars = "\n";
-
-    REQUIRE (file.getParentDirectory().createDirectory().wasOk());
-    REQUIRE (frozen.writeTo (file, format));
-    MESSAGE (("Updated tests/golden/" + relativePath).toStdString());
 }
 
 //==============================================================================

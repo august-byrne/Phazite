@@ -13,7 +13,7 @@ namespace
 {
     using Harmonics = Wavetable::Harmonics;
 
-    // Never rename one: projects keep an oscillator's table by its name.
+    // Projects keep an oscillator's table by its name.
     constexpr std::string_view names[] = { "Basic Shapes", "Pulse Width", "Saw Build", "Square Build", "Vowels", "Sync",   "FM",
                                            "FM Hollow",    "Fold",        "Digital",   "Comb",         "Growl",  "Spectra" };
     constexpr int numTables = (int) std::size (names);

@@ -49,7 +49,7 @@ namespace
         return { .id = id, .name = name, .defaultValue = defaultValue, .unit = Unit::percent };
     }
 
-    // In the order of Synth::Parameter. The IDs are saved in projects: never change them.
+    // In the order of Synth::Parameter. The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         makeChoice ("osc1Wave", "Osc 1 Wave", waves, 2.0f),
         makeChoice ("osc2Wave", "Osc 2 Wave", waves, 2.0f),

@@ -8,8 +8,7 @@
 
 namespace phazite::ui
 {
-// The user's changes to the bridge's keymap, as XML, and back. Changes that earlier versions saved in JUCE's numbered
-// format can't be matched to commands reliably, so restoring leaves them out.
+// The user's changes to the bridge's keymap, as XML, and back. Restoring skips what names no command.
 juce::String getKeyChanges (const CommandBridge&);
 void restoreKeyChanges (CommandBridge&, const juce::String& xml);
 

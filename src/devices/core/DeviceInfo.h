@@ -2,7 +2,7 @@
 // What a device is and what its parameters are, without any engine (docs/design.md, section 24). The DSP of each of
 // Phazite's devices describes itself with these: its thin Tracktion plug-in (src/model/devices/) turns the parameters
 // into automatable ones, editors show them, and the DSP reads their current values. Type and parameter IDs are saved
-// in projects, so never change one (model/base/internal/Schema.h).
+// in projects (model/base/internal/Schema.h).
 #pragma once
 
 #include <juce_core/juce_core.h>
@@ -32,7 +32,7 @@ enum class Unit
 
 struct ParameterInfo
 {
-    std::string_view id;   // saved in projects: never change it
+    std::string_view id;   // saved in projects
     std::string_view name; // what editors call it, such as "Cutoff"
     float minimum = 0.0f;
     float maximum = 1.0f;
@@ -66,7 +66,7 @@ enum class DeviceKind
 
 struct DeviceInfo
 {
-    std::string_view typeID; // saved in projects as the device's type: never change it
+    std::string_view typeID; // saved in projects as the device's type
     std::string_view name;   // what menus and the mixer call it, such as "Synth"
     DeviceKind kind = DeviceKind::effect;
     std::span<const ParameterInfo> parameters {};

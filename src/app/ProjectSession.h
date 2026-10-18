@@ -109,10 +109,6 @@ private:
     void saveThen (std::function<void (bool saved)>);
     void chooseWhereToSave (const juce::File& suggested, std::function<void (const juce::File&)>);
     bool moveUntitledTo (const juce::File& chosen);
-
-    // Opens the first of the recent projects after one that failed to open that this Phazite can open, or else makes a
-    // first project.
-    void openNextRecentProject (const juce::File& failed);
     void showError (const juce::String& title, const juce::String& message);
 
     // The selection changed, so live MIDI follows it; or the audio or MIDI devices changed, so live

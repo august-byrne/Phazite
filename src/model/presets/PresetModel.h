@@ -33,8 +33,7 @@ struct PresetInfo
 inline constexpr const char* presetExtension = ".phazitepreset";
 bool isPresetFile (const juce::File&); // by its extension
 
-// What a preset file holds, from its first element; nothing for a file that isn't a preset Phazite can read (one of a
-// newer Phazite's).
+// What a preset file holds, from its first element; nothing for a file that isn't a preset.
 std::optional<PresetInfo> readPresetInfo (const juce::File&);
 
 // The folder a device's presets go in, among the user's presets: the device's name ("EQ"), or "Containers"; and the one

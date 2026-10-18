@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Everything Phazite writes into a project file besides Tracktion's own data: the names of its elements, properties
 // and plug-in type, each defined once, here, with where it is stored and what it holds. Code reads and writes them
-// only through these names. Never rename one: projects saved before would lose what it held. A change to what one
-// holds needs a new schema version and a migration.
+// only through these names.
 //
 // Kinds: song = part of the song, changed in undo steps; view = how the project is shown, saved but never an undo
 // step; state = remembered by the project, not an undo step.
@@ -16,29 +15,11 @@
 namespace phazite::schema
 {
 //==============================================================================
-// The project format's version (src/model/base/Migrations.h). Files without schemaVersion are version 0 (saved up to
-// 2026-10-14); version 1 saves the grid's size and keys' scales by name; version 2 can hold Phazite's own devices
-// (roadmap step 1.6), which an older Phazite would drop; version 3 gives every note an ID (phaziteNoteID); version 4 adds
-// automation lanes (PHAZITELANE, roadmap step 2.1); version 5 has no automation clips (step 2.2 until 2026-10-17): their
-// curves are their parameters' own automation; version 6 lets lanes collapse (laneCollapsed); version 7 adds the chord
-// lane (CHORDLANE, step 2.7) and parts made from it (phaziteChordPart); version 8 can hold the devices of step 2.10 (the
-// delay, saturator, filter, utility, multiband dynamics and maximizer) and the synth's unison, which an older Phazite would
-// drop or play without; version 9 can hold the wavetable synth (step 2.13), with what its oscillators play; version 10
-// can choose the comb filters of step 2.14 (filter types after the others, in the synth, the wavetable synth and the
-// Filter device), which an older Phazite would play as another filter; version 11 can choose the vowel, phaser and sample
-// and hold of step 2.15 in all three, and the synth's notch and 24 dB slope (filterSlope), which an older Phazite would
-// play as another filter, or at 12 dB.
-inline constexpr int currentVersion = 11;
-
-//==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
 
-// Child of EDIT, added when something is first written to it.
+// Child of EDIT. Every project has one (Project adds it as the project opens); another Edit gets one when something is
+// first written to it.
 inline const juce::Identifier PHAZITE { "PHAZITE" };
-
-// On PHAZITE. int: the project format's version (currentVersion) when the project was saved. (Not 'version': tests write
-// that name.) state
-inline const juce::Identifier schemaVersion { "schemaVersion" };
 
 // On PHAZITE. bool, default true: the loop follows the song (getSongLoopRange()); false while a range is looped on
 // purpose. Written only when it changes. state
@@ -63,7 +44,7 @@ inline const juce::Identifier gridAdaptive { "gridAdaptive" };
 inline const juce::Identifier gridOffset { "gridOffset" };
 
 // The size of a fixed grid, used while gridAdaptive is off: "1/16 beat", "1/8 beat", "1/4 beat" (the default), "1/2 beat",
-// "1 beat", "1 bar", "2 bars", "4 bars" or "8 bars". (Version 0 saved a Tracktion snap level instead: Migrations.cpp.)
+// "1 beat", "1 bar", "2 bars", "4 bars" or "8 bars".
 inline const juce::Identifier gridStep { "gridStep" };
 
 // bool, default false: the grid divides beats into triplets.
@@ -87,8 +68,7 @@ inline const juce::Identifier phaziteCollapsed { "phaziteCollapsed" };
 inline const juce::Identifier phazitePinned { "phazitePinned" };
 
 // A key, on a TRACK (song) and on LASTKEY (state): the root, int 0..11 (0 is C), none = no key; and the scale: "major",
-// "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor". (Version 0 saved
-// Tracktion's scale numbers instead.)
+// "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor".
 inline const juce::Identifier phaziteKeyRoot { "phaziteKeyRoot" };
 inline const juce::Identifier phaziteKeyScale { "phaziteKeyScale" };
 
@@ -109,7 +89,7 @@ inline const juce::Identifier phaziteBus { "phaziteBus" };
 // Child of TRACK, FOLDERTRACK and MASTERTRACK, one for each automation lane the playlist shows under the track, in their
 // order (docs/design.md, section 10): the automation of a parameter of one of the track's devices, its volume and pan
 // included. A lane of a device that isn't on the track any more is ignored, and a parameter with automation but no lane
-// here shows one after these. Version 4 added them. view
+// here shows one after these. view
 inline const juce::Identifier PHAZITELANE { "PHAZITELANE" };
 
 // On PHAZITELANE: the device, by the EditItemID Tracktion saves it with ("1042").
@@ -118,11 +98,11 @@ inline const juce::Identifier laneDevice { "device" };
 // On PHAZITELANE: the parameter, by its ID in its device (the paramID of its automation curve in Tracktion's AUTOMATIONCURVE).
 inline const juce::Identifier laneParameter { "parameter" };
 
-// On PHAZITELANE. int 32..320 (24..320 up to version 5), default 48: the lane's height in the playlist while it isn't
-// collapsed, in pixels at an interface scale of 100%.
+// On PHAZITELANE. int 32..320, default 48: the lane's height in the playlist while it isn't collapsed, in pixels at an
+// interface scale of 100%.
 inline const juce::Identifier laneHeight { "height" };
 
-// On PHAZITELANE. true, or none: the lane shows as a thin row. Version 6 added it.
+// On PHAZITELANE. true, or none: the lane shows as a thin row.
 inline const juce::Identifier laneCollapsed { "collapsed" };
 
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; Project's isUncountedProperty()
@@ -166,7 +146,7 @@ inline const juce::Identifier phaziteEnergy { "phaziteEnergy" };
 
 //==============================================================================
 // The chord lane (model/chords/ChordModel.h; docs/design.md, section 14): the song's chords, each a Roman numeral in the
-// key there, so that the chords follow when the key changes. Version 7 added it. song
+// key there, so that the chords follow when the key changes. song
 
 // Child of PHAZITE, added when the first chord or key is written: the chords (CHORD) and the keys they are in (CHORDKEY),
 // in no particular order.
@@ -211,7 +191,7 @@ inline const juce::Identifier phaziteChordPart { "phaziteChordPart" };
 // int, 1 or more: the note's ID (NoteID, model/base/IDs.h), which no other note of its clip has, so that selections, undo
 // and scripts can name one note (decided 2026-10-14). A copy of a clip, an alias too, keeps its notes' IDs. Each note
 // gets one when it is added (model/notes/internal/Notes.h: NoteIDKeeper), and any that has none when a project opens or is saved
-// (assignNoteIDs()). Version 3 added them.
+// (assignNoteIDs()).
 inline const juce::Identifier phaziteNoteID { "phaziteNoteID" };
 
 //==============================================================================
@@ -220,13 +200,11 @@ inline constexpr const char* phaziteLoudnessMeter = "phaziteLoudnessMeter";
 
 // Phazite's own devices (model/devices/internal/Devices.h) are PLUGINs too. Each one's type is the typeID of its description
 // (src/devices/<area>/: "phaziteEq" for the EQ), and its parameters' values are properties of the PLUGIN named by their
-// IDs in that description, as are its automation curves' paramIDs. Those IDs are part of the format: they never
-// change, and changing what one holds needs a new version and a migration, as anything here does.
+// IDs in that description, as are its automation curves' paramIDs.
 //
 // One parameter's ID is a property Tracktion keeps on every PLUGIN: the Filter device's "type" (devices/filter/
-// FilterEffect.h), as its type is. Since version 10 its value is "phaziteType"; its ID stays "type" everywhere else (its
-// automation curve's paramID, a lane's parameter). Until then the value took the place of the PLUGIN's type, so that a
-// Filter whose type had been changed didn't open again: the migration to version 10 gives such a PLUGIN its type back.
+// FilterEffect.h), as its type is. Its value is "phaziteType", so that it can't take the type's place; its ID stays
+// "type" everywhere else (its automation curve's paramID, a lane's parameter).
 inline const juce::Identifier phaziteType { "phaziteType" };
 
 // The property of a PLUGIN of Phazite's own devices that holds a parameter's value, and the other way round.
@@ -255,8 +233,7 @@ inline const juce::Identifier& getPadSound (int pad)
 // oscillators plays: "osc1Wavetable" and "osc2Wavetable" name one of its factory tables (devices/wavetable/
 // FactoryWavetables.h: "Vowels"; with none, or a name that is none of theirs, the first, "Basic Shapes"), and
 // "osc1WavetableFile" and "osc2WavetableFile" a sound file it plays instead while they are there: a path relative to the
-// project's folder ("Audio/Growl.wav"), or in a preset its full path. osc counts from 0. Version 9 added them, with the
-// synth.
+// project's folder ("Audio/Growl.wav"), or in a preset its full path. osc counts from 0.
 inline const juce::Identifier& getOscillatorWavetable (int osc)
 {
     static const juce::Identifier names[] = { "osc1Wavetable", "osc2Wavetable" };
@@ -271,8 +248,7 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
 
 //==============================================================================
 // Presets (model/presets/PresetModel.h): files of their own (".phazitepreset"), outside any project, that hold a device,
-// a container or a track as a project holds them (Tracktion's elements with Phazite's names above), in the project format
-// of the version that saved them, which is brought up to date as a project's is (Migrations.h).
+// a container or a track as a project holds them (Tracktion's elements with Phazite's names above).
 
 // The element at a preset file's root. Its children: a device preset's PLUGIN; a container preset's PLUGIN (a rack) and
 // the RACK it plays; a track preset's TRACK, with the RACKs its containers play.
@@ -286,9 +262,6 @@ inline const juce::Identifier presetDevice { "device" };
 
 // On PHAZITEPRESET. bool, default false: a device preset's device is an instrument.
 inline const juce::Identifier presetInstrument { "instrument" };
-
-// On PHAZITEPRESET, as on PHAZITE: the project format's version (currentVersion) of what it holds.
-// (schemaVersion, above)
 } // namespace phazite::schema
 
 namespace phazite

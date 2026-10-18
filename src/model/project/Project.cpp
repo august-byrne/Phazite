@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Project.h"
 #include "model/automation/internal/Automation.h"
-#include "model/base/Migrations.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
@@ -32,13 +31,12 @@ namespace
         return a == b && b == a;
     }
 
-    // What every project has, added before the project watches for changes: the format version it is in, the master's
-    // loudness meter, and an ID for each note. It isn't the user's change, so it is neither an undo step nor an unsaved
-    // change.
+    // What every project has, added before the project watches for changes: Phazite's state, the master's loudness meter,
+    // and an ID for each note. It isn't the user's change, so it is neither an undo step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
-        writeCurrentSchemaVersion (edit.state);
+        getPhaziteState (edit);
         ensureLoudnessMeter (edit);
         assignNoteIDs (edit);
         edit.getUndoManager().clearUndoHistory();
@@ -137,18 +135,8 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
 
     // Loads on this, the message thread: Tracktion's EditLoader would use a background thread.
     const auto sourceFile = useAutosave ? autosaveFile : projectFile;
-    auto state = te::loadEditFromFile (engine, sourceFile, readSavedID (sourceFile));
-    const auto savedVersion = getSchemaVersion (state);
-
-    // Projects saved by an earlier Phazite are upgraded before the Edit is made; a newer Phazite's can't be read.
-    if (! migrateToCurrentSchema (state))
-    {
-        error = "The project file " + projectFile.getFullPathName() + " was saved by a newer version of Phazite (project format "
-                + juce::String (savedVersion) + "). Update Phazite to open it.";
-        return {};
-    }
-
-    auto edit = createEditFromState (engine, state, projectFile, savedVersion, getCacheFolder (projectFile));
+    const auto state = te::loadEditFromFile (engine, sourceFile, readSavedID (sourceFile));
+    auto edit = createEditFromState (engine, state, projectFile, getCacheFolder (projectFile));
 
     if (edit == nullptr)
     {
@@ -166,11 +154,6 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
     }
 
     return project;
-}
-
-bool Project::isFromNewerPhazite (te::Engine& engine, const juce::File& projectFile)
-{
-    return getSchemaVersion (te::loadEditFromFile (engine, projectFile, te::ProjectItemID {})) > schema::currentVersion;
 }
 
 bool Project::hasNewerAutosave (const juce::File& projectFile)

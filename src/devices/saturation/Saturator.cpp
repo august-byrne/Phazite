@@ -12,7 +12,7 @@ namespace
 {
     constexpr std::string_view shapes[] = { "Soft", "Tape", "Tube", "Hard", "Fold" };
 
-    // The IDs are saved in projects: never change them.
+    // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         { .id = "drive", .name = "Drive", .maximum = 36.0f, .defaultValue = 6.0f, .unit = Unit::decibels },
         { .id = "shape",

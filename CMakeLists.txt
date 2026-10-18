@@ -152,8 +152,6 @@ target_sources(phazite_core PRIVATE
     src/model/automation/internal/Automation.h
     src/model/base/Beats.h
     src/model/base/IDs.h
-    src/model/base/Migrations.cpp
-    src/model/base/Migrations.h
     src/model/base/Schema.cpp
     src/model/base/Toggles.h
     src/model/base/internal/Schema.h
@@ -684,7 +682,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/LiveInputTests.cpp
         tests/MessageQueueTests.cpp
         tests/MetronomeTests.cpp
-        tests/MigrationTests.cpp
         tests/ModulationModelTests.cpp
         tests/ModulationUiTests.cpp
         tests/MixerModelTests.cpp

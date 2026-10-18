@@ -3,7 +3,6 @@
 #include "PresetModel.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
-#include "model/base/Migrations.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
@@ -40,7 +39,6 @@ namespace
     {
         juce::ValueTree preset (schema::PHAZITEPRESET);
         preset.setProperty (schema::presetKind, kind, nullptr);
-        preset.setProperty (schema::schemaVersion, schema::currentVersion, nullptr);
         return preset;
     }
 
@@ -105,36 +103,6 @@ namespace
 
         rack.flushStateToValueTree();
         return copyForPreset (rack.edit, rack.state, modulatorsInside);
-    }
-
-    // Brings what a preset holds up to date as a project's state is (Migrations.h), in which it is wrapped meanwhile.
-    bool migratePreset (juce::ValueTree& preset)
-    {
-        juce::ValueTree project (te::IDs::EDIT), phaziteState (schema::PHAZITE);
-        phaziteState.setProperty (schema::schemaVersion, preset[schema::schemaVersion], nullptr);
-        project.appendChild (phaziteState, nullptr);
-
-        while (preset.getNumChildren() > 0)
-        {
-            auto child = preset.getChild (0);
-            preset.removeChild (0, nullptr);
-            project.appendChild (child, nullptr);
-        }
-
-        const auto upToDate = migrateToCurrentSchema (project);
-        project.removeChild (phaziteState, nullptr);
-
-        while (project.getNumChildren() > 0)
-        {
-            auto child = project.getChild (0);
-            project.removeChild (0, nullptr);
-            preset.appendChild (child, nullptr);
-        }
-
-        if (upToDate)
-            preset.setProperty (schema::schemaVersion, schema::currentVersion, nullptr);
-
-        return upToDate;
     }
 
     // A volume plug-in's volume and pan, from its state in a track preset, with what modulates them.
@@ -228,8 +196,7 @@ juce::ValueTree readPreset (const juce::File& file)
 
     auto preset = juce::ValueTree::fromXml (*xml);
 
-    if (! preset.hasType (schema::PHAZITEPRESET) || ! findKind (preset[schema::presetKind]).has_value()
-        || ! preset.hasProperty (schema::schemaVersion) || ! migratePreset (preset))
+    if (! preset.hasType (schema::PHAZITEPRESET) || ! findKind (preset[schema::presetKind]).has_value())
         return {};
 
     return preset;
@@ -332,7 +299,7 @@ std::optional<PresetInfo> readPresetInfo (const juce::File& file)
 
     const auto kind = findKind (root->getStringAttribute (schema::presetKind.toString()));
 
-    if (! kind.has_value() || root->getIntAttribute (schema::schemaVersion.toString(), schema::currentVersion + 1) > schema::currentVersion)
+    if (! kind.has_value())
         return {};
 
     return PresetInfo { *kind, root->getStringAttribute (schema::presetDevice.toString()),

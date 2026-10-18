@@ -445,8 +445,5 @@ TEST_SUITE ("golden")
 
         phazite::test::checkSameProject ("in the autosave", *saves.first, *autosave);
         phazite::test::checkSameProject ("saved as a copy", *saves.first, *copy);
-
-        // Today's save is the 0.1.0 project that MigrationTests.cpp opens; it is kept once and never regenerated.
-        phazite::test::freezeLegacyInput ("legacy/0.1.0-representative.phazite", *saves.rawSecond, "0.1.0");
     }
 }

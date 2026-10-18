@@ -390,7 +390,7 @@ TEST_CASE ("The chord lane and its parts are saved, and read back the same")
     // A copy of the project's state, opened as another Edit, reads the same chords, and its part still follows them.
     const phazite::test::TemporaryFolder temp;
     auto copy = phazite::createEditFromState (phazite::test::getEngine(), song.edit->state.createCopy(),
-                                              temp.folder.getChildFile ("Copy.tracktionedit"), phazite::schema::currentVersion);
+                                              temp.folder.getChildFile ("Copy.tracktionedit"));
     REQUIRE (copy != nullptr);
     phazite::ProjectContext other { phazite::test::getEngineContext() };
     setEdit (other, copy.get());

@@ -37,8 +37,7 @@
            gridStep="1/4 beat"
            gridTriplets="0"
            loopFollowsSong="0"
-           outline="golden"
-           schemaVersion="11">
+           outline="golden">
     <CHORDLANE>
       <CHORD degree="1"
              length="8"
