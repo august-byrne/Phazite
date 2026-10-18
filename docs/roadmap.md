@@ -374,14 +374,7 @@ Done before this plan (progress since then is under [Status](#status)):
   - picking a progression for a section plays it in the project key;
   - a bass part generated from it follows the chord lane.
 
-**2.8 Sound generator v1 (L)**
-- **The drum synth device:** kick, 808, snare, clap, hats, tom, rim and percussion.
-- **The generator panel:**
-  - a grid of sounds, with audition in context;
-  - keep, favorite and lock;
-  - more like this, and history.
-- **Project fit and recipes:** sounds fit the project's key, tempo and loudness, and each keeps its recipe.
-- *Done when:* generating, auditioning in the loop and keeping a kick tuned to the song's key works end to end, and a kept sound reopens with its recipe.
+**2.8 Sound generator v1** — moved to phase 3, into [step 3.2](#phase-3-v1-polish-milestone-3) (the owner's decision, 2026-10-18). The steps after it keep their numbers.
 
 **2.9 Mixer depth (M)**
 - The sidechain source picker, the routing view, and a per-track CPU meter.
@@ -418,11 +411,17 @@ Done before this plan (progress since then is under [Status](#status)):
   - each suggestion explains itself;
   - accepting one is a single undo step.
 
-**3.2 Sound generator, part 2 (M)**
-- Breeding favorites.
-- Kit-aware generation, which complements the drums already used.
-- Automatic tags.
-- *Done when:* breeding two favorite kicks produces new kicks with traits of both.
+**3.2 Sound generator (XL)** (its first part was step 2.8 until the owner moved it here, 2026-10-18)
+- **The drum synth device:** kick, 808, snare, clap, hats, tom, rim and percussion.
+- **The generator panel:**
+  - a grid of sounds, with audition in context;
+  - keep, favorite and lock;
+  - more like this, and history.
+- **Project fit and recipes:** sounds fit the project's key, tempo and loudness, and each keeps its recipe.
+- **Then:** breeding favorites, kit-aware generation (which complements the drums already used), and automatic tags.
+- *Done when:*
+  - generating, auditioning in the loop and keeping a kick tuned to the song's key works end to end, and a kept sound reopens with its recipe;
+  - breeding two favorite kicks produces new kicks with traits of both.
 
 **3.3 Stability (XL)**
 - A scan timeout.
@@ -498,6 +497,7 @@ Roughly in order of value:
 - **Architecture:** keep to the rules in `CLAUDE.md`, which `tools/check-architecture.sh` checks; each step moves the area it touches toward the [architecture track](#architecture-track)'s structure.
 - **Performance:** benchmarks for audio CPU and UI frame time, tracked from phase 1 onward.
 - **Documentation:** keep [design.md](design.md) and this roadmap current, and update the status table after each step.
+- **Known bugs:** [known-bugs.md](known-bugs.md) lists the bugs found and not fixed yet; each is fixed before v1 unless the owner says otherwise.
 - **Licences:** check every new dependency, model or dataset against the list in `CLAUDE.md` before using it.
 
 ## Risks
@@ -519,7 +519,7 @@ Roughly in order of value:
 |---|---|
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
 | 1. Make a beat | Steps done, pending checks by hand and the milestone 1 check (a usability test with a newcomer and an FL Studio user): steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser), with three rounds of fixes from trying them (2026-10-13); step 1.6 (all six devices, and the starter project on them), step 1.7 (metronome, tempo, recording and Capture), step 1.8 (export to WAV and FLAC, normalized to a loudness) and step 1.9 (first launch, the guide and the new-project window), 2026-10-15 |
-| 2. Finish a track | In progress: steps 2.1 (automation lanes), 2.3 (modulators and macros) and 2.4 (containers and presets) done, pending a check by hand (2026-10-16); 2.2, its automation clips replaced by lanes that go with the music, 2.5, the window (the song in the centre, the Devices view and the properties inspector), and 2.6, the audio clip editor, done, pending a check by hand (2026-10-17) |
+| 2. Finish a track | In progress: steps 2.1 (automation lanes), 2.3 (modulators and macros) and 2.4 (containers and presets) done, pending a check by hand (2026-10-16); 2.2, its automation clips replaced by lanes that go with the music, 2.5, the window (the song in the centre, the Devices view and the properties inspector), and 2.6, the audio clip editor, done, pending a check by hand (2026-10-17); 2.8, the sound generator, moved to phase 3 (2026-10-18) |
 | 3. v1 polish | Not started |
 | 4. v1 release | Not started |
 | Architecture track | A0 (2026-10-14), A1 and A2 (2026-10-15) and A3 (2026-10-16) done, A2 pending a check by hand: the UI begins no undo steps (46 when A2 began) and makes no direct edits, the playlist, piano roll and mixer strip are split into a file per part, the browser has a model, and the two editors' tools share one gesture. A3: IDs and beats, views that follow the project, the mixer by IDs, the transport and the engine for the top bar and the settings, the shared time line in Phazite's beats, the playlist by IDs, note IDs saved in the project (format version 3), the piano roll by note IDs and the browser by IDs and plain values; the UI names and includes no Tracktion and compiles without it, and the model's headers that use Tracktion are in `internal/` folders. Next: step 2.1 |
