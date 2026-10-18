@@ -13,11 +13,17 @@
 #include "AudioThreadMonitor.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/delay/Delay.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
+#include "devices/dynamics/Maximizer.h"
+#include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/filter/FilterEffect.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
+#include "devices/utility/Utility.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -680,6 +686,72 @@ TEST_SUITE ("realtime-audit")
         const auto m = playAndMeasure (*edit);
         report ("MIDI into Phazite's synth, notes overlapping, with noise and its LFO", m);
         CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's synth with seven unison voices, spread wide")
+    {
+        using phazite::devices::Synth;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
+        device->findParameter ("unisonVoices")->setParameter (6.0f, juce::sendNotification); // seven
+        device->findParameter ("unisonDetune")->setParameter (40.0f, juce::sendNotification);
+
+        // Chords a sixteenth long, one after another, so that the busiest blocks (one chord's ends with the next's starts)
+        // come from the first beat, within the warm-up: Tracktion's MIDI arrays grow on the busiest block (finding 4).
+        auto clip = track.insertMIDIClip ("Chords", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        REQUIRE (clip != nullptr);
+
+        for (int i = 0; i < 32; ++i)
+            for (const auto note : { 48, 52, 55, 59 })
+                clip->getSequence().addNote (note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25), te::BeatDuration::fromBeats (0.25),
+                                             100, 0, nullptr);
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's synth with seven unison voices, spread wide", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, utility and maximizer in a row, the filter swept")
+    {
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+
+        phazite::DevicePlugin* filter = nullptr;
+
+        for (const auto* type :
+             { phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID, phazite::devices::Multiband::typeID,
+               phazite::devices::Delay::typeID, phazite::devices::Utility::typeID, phazite::devices::Maximizer::typeID })
+        {
+            const auto plugin = edit->getPluginCache().createNewPlugin (type, {});
+            auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+            REQUIRE (device != nullptr);
+            REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
+
+            if (filter == nullptr)
+                filter = device;
+        }
+
+        // The filter swept by a lane, a cycle a beat, so its cutoff glides all the time; the others well into their work.
+        auto* cutoff = filter->findParameter ("cutoff");
+        REQUIRE (cutoff != nullptr);
+
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat)), 200.0f, 0.0f, nullptr);
+            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat + 0.5)), 8000.0f, 0.0f, nullptr);
+        }
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's filter, saturator, multiband, delay, utility and maximizer in a row, the filter swept", m);
+        CHECK (m.peakLevel > 0.001f);
+        CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // the maximizer's ceiling
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

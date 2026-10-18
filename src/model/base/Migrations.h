@@ -11,6 +11,7 @@
 //              convertAutomationClips()).
 //   Version 6: lanes that collapse.
 //   Version 7: the chord lane and parts made from it.
+//   Version 8: the devices of step 2.10 and the synth's unison.
 // A change to what projects save raises schema::currentVersion (Schema.h) and adds a step here.
 #pragma once
 

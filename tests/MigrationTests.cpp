@@ -606,3 +606,19 @@ TEST_CASE ("A version 6 project, which can have no chord lane or parts made from
         .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
     CHECK (state.isEquivalentTo (expected));
 }
+
+TEST_CASE ("A version 7 project, which can hold none of step 2.10's devices, becomes the current version with nothing else changed")
+{
+    const auto* version7 =
+        R"(<EDIT><PHAZITE schemaVersion="7"><CHORDLANE><CHORD start="0" length="4" degree="1" type="major"/></CHORDLANE></PHAZITE>
+        <TRACK id="1003"><PLUGIN type="phaziteSynth" id="1004" cutoff="1200"/></TRACK></EDIT>)";
+    auto state = juce::ValueTree::fromXml (version7);
+    REQUIRE (state.isValid());
+    REQUIRE (phazite::migrateToCurrentSchema (state));
+    CHECK (phazite::getSchemaVersion (state) == phazite::schema::currentVersion);
+
+    auto expected = juce::ValueTree::fromXml (version7);
+    expected.getChildWithName (phazite::schema::PHAZITE)
+        .setProperty (phazite::schema::schemaVersion, phazite::schema::currentVersion, nullptr);
+    CHECK (state.isEquivalentTo (expected));
+}

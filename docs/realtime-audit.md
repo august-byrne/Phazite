@@ -49,6 +49,8 @@ The first column covers the warm-up after playback starts (0.5 s for every scena
 | Phazite's limiter on the master, pushed 12 dB, with its meters read | 2 allocations | 0 |
 | Phazite's reverb on a return, with an 8-second decay | 4 allocations | 0 |
 | MIDI into Phazite's synth, notes overlapping, with noise and its LFO | 24 allocations (Tracktion's MIDI message arrays, used for the first time as Tracktion passes them between its nodes) | 0 |
+| Phazite's synth with seven unison voices, spread wide, playing chords a sixteenth apart (step 2.10) | about 22 allocations (the same) | 0 |
+| Phazite's filter, saturator, multiband, delay, utility and maximizer in a row on a tone, the filter swept by a lane (step 2.10) | 2 allocations | 0 |
 | Notes recorded from the computer keyboard onto Phazite's synth | 20 allocations (the same) | 0 |
 | A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor | 24 allocations (the same) | 0 |
 | An audio clip | 6 allocations, 3 frees (fewer if the file cache hits) | 0 |

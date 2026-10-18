@@ -21,8 +21,10 @@ namespace phazite::schema
 // (roadmap step 1.6), which an older Phazite would drop; version 3 gives every note an ID (phaziteNoteID); version 4 adds
 // automation lanes (PHAZITELANE, roadmap step 2.1); version 5 has no automation clips (step 2.2 until 2026-10-17): their
 // curves are their parameters' own automation; version 6 lets lanes collapse (laneCollapsed); version 7 adds the chord
-// lane (CHORDLANE, step 2.7) and parts made from it (phaziteChordPart).
-inline constexpr int currentVersion = 7;
+// lane (CHORDLANE, step 2.7) and parts made from it (phaziteChordPart); version 8 can hold the devices of step 2.10 (the
+// delay, saturator, filter, utility, multiband dynamics and maximizer) and the synth's unison, which an older Phazite would
+// drop or play without.
+inline constexpr int currentVersion = 8;
 
 //==============================================================================
 // Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).

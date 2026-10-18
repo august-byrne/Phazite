@@ -6,12 +6,18 @@
 #include "EqEditor.h"
 #include "LimiterEditor.h"
 #include "ReverbEditor.h"
+#include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
+#include "devices/dynamics/Maximizer.h"
+#include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/filter/FilterEffect.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
+#include "devices/utility/Utility.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -29,12 +35,53 @@ namespace
     std::vector<std::vector<DevicePanel::Group>> getSynthLayout()
     {
         return { { { "Oscillators",
-                     { "osc1Wave", "osc2Wave", "osc2Pitch", "osc2Detune", "oscMix", "pulseWidth", "subLevel", "noiseLevel" } } },
+                     { "osc1Wave", "osc2Wave", "osc2Pitch", "osc2Detune", "oscMix", "pulseWidth", "subLevel", "noiseLevel" } },
+                   { "Unison", { "unisonVoices", "unisonDetune", "unisonSpread" } } },
                  { { "Filter", { "filterType", "cutoff", "resonance", "filterEnvelope", "keyTracking" } },
                    { "Filter Envelope", { "filterAttack", "filterDecay", "filterSustain", "filterRelease" } } },
                  { { "Amp Envelope", { "attack", "decay", "sustain", "release" } },
                    { "LFO", { "lfoShape", "lfoTarget", "lfoRate", "lfoDepth" } } },
                  { { "Play", { "voiceMode", "glide", "bendRange", "velocity", "level" } } } };
+    }
+
+    // The effects of step 2.10, each a panel of its controls in the order the sound goes through them (their mix is in
+    // the Devices view's header).
+    std::vector<std::vector<DevicePanel::Group>> getDelayLayout()
+    {
+        return { { { "Time", { "sync", "time", "milliseconds" } },
+                   { "Echoes", { "feedback", "pingPong" } },
+                   { "Tone", { "lowCut", "highCut" } } } };
+    }
+
+    std::vector<std::vector<DevicePanel::Group>> getSaturatorLayout()
+    {
+        return { { { "Drive", { "drive", "shape" } }, { "Tone", { "tone" } }, { "Output", { "output", "autoGain" } } } };
+    }
+
+    std::vector<std::vector<DevicePanel::Group>> getFilterLayout()
+    {
+        return { { { "Filter", { "type", "cutoff", "resonance", "slope" } }, { "Drive", { "drive" } } } };
+    }
+
+    std::vector<std::vector<DevicePanel::Group>> getUtilityLayout()
+    {
+        return { { { "Level", { "gain", "balance" } },
+                   { "Stereo", { "width", "bassMono", "bassMonoFrequency" } },
+                   { "Polarity", { "invertLeft", "invertRight" } } } };
+    }
+
+    std::vector<std::vector<DevicePanel::Group>> getMultibandLayout()
+    {
+        return { { { "Amount", { "depth", "time", "upward", "downward" } }, { "Gain", { "inputGain", "outputGain" } } },
+                 { { "Bands", { "lowFrequency", "highFrequency", "lowGain", "midGain", "highGain" } } } };
+    }
+
+    std::vector<std::vector<DevicePanel::Group>> getMaximizerLayout()
+    {
+        return { { { "Gain", { "gain" } },
+                   { "Squeeze", { "lowSqueeze", "midSqueeze", "highSqueeze" } },
+                   { "Limiter", { "ceiling", "release" } } },
+                 { { "Bands", { "lowFrequency", "highFrequency", "lowLevel", "midLevel", "highLevel" } } } };
     }
 } // namespace
 
@@ -62,6 +109,24 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::DrumSampler::typeID)
         return std::make_unique<DrumSamplerEditor> (device);
+
+    if (info->typeID == devices::Delay::typeID)
+        return std::make_unique<DevicePanel> (device, getDelayLayout());
+
+    if (info->typeID == devices::Saturator::typeID)
+        return std::make_unique<DevicePanel> (device, getSaturatorLayout());
+
+    if (info->typeID == devices::FilterEffect::typeID)
+        return std::make_unique<DevicePanel> (device, getFilterLayout());
+
+    if (info->typeID == devices::Utility::typeID)
+        return std::make_unique<DevicePanel> (device, getUtilityLayout());
+
+    if (info->typeID == devices::Multiband::typeID)
+        return std::make_unique<DevicePanel> (device, getMultibandLayout());
+
+    if (info->typeID == devices::Maximizer::typeID)
+        return std::make_unique<DevicePanel> (device, getMaximizerLayout());
 
     return std::make_unique<DeviceKnobs> (device);
 }

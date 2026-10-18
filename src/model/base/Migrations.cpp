@@ -120,9 +120,17 @@ namespace
     }
 
     //==========================================================================
+    // Version 7 to 8: version 8 can hold the devices of step 2.10 and the synth's unison, which a version 7 project has
+    // none of (a synth without the unison's parameters plays one voice, as it did), so nothing changes; the new version
+    // keeps an older Phazite from opening a project with them, and dropping them or playing it without.
+    void upgrade7To8 (juce::ValueTree&)
+    {
+    }
+
+    //==========================================================================
     // Each version's upgrade to the next: steps[n] upgrades version n.
     using Step = void (*) (juce::ValueTree&);
-    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5, upgrade5To6, upgrade6To7 };
+    constexpr Step steps[] = { upgrade0To1, upgrade1To2, upgrade2To3, upgrade3To4, upgrade4To5, upgrade5To6, upgrade6To7, upgrade7To8 };
     static_assert (std::size (steps) == (size_t) schema::currentVersion, "every version but the current one needs an upgrade");
 } // namespace
 

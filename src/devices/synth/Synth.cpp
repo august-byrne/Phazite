@@ -16,6 +16,7 @@ namespace
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
     constexpr std::string_view lfoTargets[] = { "Pitch", "Cutoff", "Level" };
     constexpr std::string_view voiceModes[] = { "Poly", "Mono" };
+    constexpr std::string_view unisonCounts[] = { "1", "2", "3", "4", "5", "6", "7" };
 
     // An envelope's time, from minimum to 10 s, with 300 ms halfway along its knob.
     constexpr ParameterInfo makeTime (std::string_view id, std::string_view name, float minimum, float defaultValue)
@@ -101,13 +102,18 @@ namespace
           .midpoint = 200.0f },
         { .id = "bendRange", .name = "Bend Range", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 2.0f, .unit = Unit::semitones },
         { .id = "level", .name = "Level", .minimum = -36.0f, .maximum = 6.0f, .defaultValue = -6.0f, .unit = Unit::decibels },
+
+        // Step 2.10: unison, whose defaults (one voice) leave projects from before sounding as they did.
+        makeChoice ("unisonVoices", "Unison", unisonCounts, 0.0f),
+        { .id = "unisonDetune", .name = "Unison Detune", .maximum = 100.0f, .defaultValue = 25.0f, .unit = Unit::cents },
+        { .id = "unisonSpread", .name = "Unison Spread", .defaultValue = 0.8f, .unit = Unit::percent },
     };
 
     // In a mixer slot: the filter, the synth's most played-with controls.
     constexpr std::string_view keyControls[] = { "cutoff", "resonance" };
 
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
-    constexpr std::uint32_t noiseSeed = 0x51a7e5u;
+    constexpr std::uint32_t noiseSeed = 0x51a7e5u, unisonSeed = 0x0715e5u;
 
     template <typename Enum>
     Enum choiceOf (float value)
@@ -148,6 +154,8 @@ void Synth::reset()
         voice.held = voice.sustained = false;
         voice.filterEnvelopeLevel = 0.0f;
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
+        voice.unisonPhases.setSeed (unisonSeed + (std::uint32_t) index);
+        voice.filterRight.reset();
     }
 
     lfo.reset();
@@ -239,10 +247,20 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
 
     if (! voice.amp.isActive())
     {
-        voice.osc1.setPhase (0.0f);
-        voice.osc2.setPhase (0.0f);
+        // The first oscillators from the start of their waves, as always; the unison's others anywhere, so they don't
+        // start in phase and sweep.
+        voice.osc1[0].setPhase (0.0f);
+        voice.osc2[0].setPhase (0.0f);
+
+        for (size_t u = 1; u < (size_t) maxUnison; ++u)
+        {
+            voice.osc1[u].setPhase (voice.unisonPhases.nextUnipolar());
+            voice.osc2[u].setPhase (voice.unisonPhases.nextUnipolar());
+        }
+
         voice.sub.setPhase (0.0f);
         voice.filter.reset();
+        voice.filterRight.reset();
         voice.filterEnvelopeLevel = 0.0f;
     }
 
@@ -373,6 +391,22 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
     const auto osc2Offset = values[osc2Pitch] + values[osc2Detune] * 0.01f;
     const auto nyquistLimit = 0.45 * sampleRate;
 
+    // Unison: each oscillator's detune (in semitones) and its place between the speakers, spread evenly from one side to
+    // the other, at a level that keeps the voice's loudness (each the square root of their number down).
+    const auto numUnison = std::clamp (choiceOf<int> (values[unisonVoices]) + 1, 1, maxUnison);
+    const auto stereo = numUnison > 1 && right != nullptr;
+    const auto unisonNorm = 1.0f / std::sqrt ((float) numUnison);
+    std::array<float, maxUnison> detunes {}, lefts {}, rights {};
+
+    for (int u = 0; u < numUnison; ++u)
+    {
+        const auto place = numUnison > 1 ? 2.0f * (float) u / (float) (numUnison - 1) - 1.0f : 0.0f; // -1 to 1
+        const auto angle = 0.78539816f * (1.0f + place * values[unisonSpread]);                      // 0 to pi/2
+        detunes[(size_t) u] = place * values[unisonDetune] * 0.01f;
+        lefts[(size_t) u] = unisonNorm * 1.41421356f * std::cos (angle);
+        rights[(size_t) u] = unisonNorm * 1.41421356f * std::sin (angle);
+    }
+
     for (int start = 0; start < numSamples; start += controlStep)
     {
         const auto length = std::min (controlStep, numSamples - start);
@@ -393,8 +427,14 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
             voice.pitch += (voice.target - voice.pitch) * glideStep;
             const auto semitones = (double) (voice.pitch + bent + pitchMove);
             const auto frequency = dsp::noteToFrequency (semitones);
-            voice.osc1.setFrequency (frequency, sampleRate);
-            voice.osc2.setFrequency (dsp::noteToFrequency (semitones + osc2Offset), sampleRate);
+
+            for (int u = 0; u < numUnison; ++u)
+            {
+                const auto detune = (double) detunes[(size_t) u];
+                voice.osc1[(size_t) u].setFrequency (dsp::noteToFrequency (semitones + detune), sampleRate);
+                voice.osc2[(size_t) u].setFrequency (dsp::noteToFrequency (semitones + osc2Offset + detune), sampleRate);
+            }
+
             voice.sub.setFrequency (0.5 * frequency, sampleRate);
 
             const auto moves =
@@ -402,31 +442,69 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
             const auto filterFrequency = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), 20.0, nyquistLimit);
             voice.coefficients = dsp::makeFilter (dsp::FilterShape::lowPass, filterFrequency, sampleRate, q);
 
+            const auto pick = [type, &voice] (const dsp::Filter::Outputs& outputs)
+            {
+                return type == FilterType::lowPass ? outputs.low
+                                                   : (type == FilterType::bandPass ? outputs.band * voice.coefficients.k : outputs.high);
+            };
+
             for (int i = 0; i < length; ++i)
             {
-                auto sound = (1.0f - mix2) * voice.osc1.next (wave1, width) + mix2 * voice.osc2.next (wave2, width);
+                // The oscillators (spread across the sides while unison is stereo), then the sub and the noise in the middle.
+                auto mono = 0.0f, soundLeft = 0.0f, soundRight = 0.0f;
+
+                if (numUnison == 1)
+                {
+                    mono = (1.0f - mix2) * voice.osc1[0].next (wave1, width) + mix2 * voice.osc2[0].next (wave2, width);
+                }
+                else
+                {
+                    for (int u = 0; u < numUnison; ++u)
+                    {
+                        const auto sound =
+                            (1.0f - mix2) * voice.osc1[(size_t) u].next (wave1, width) + mix2 * voice.osc2[(size_t) u].next (wave2, width);
+                        mono += sound * unisonNorm;
+                        soundLeft += sound * lefts[(size_t) u];
+                        soundRight += sound * rights[(size_t) u];
+                    }
+                }
 
                 if (subGain > 0.0f)
-                    sound += subGain * voice.sub.next (dsp::Waveform::sine);
+                {
+                    const auto sub = subGain * voice.sub.next (dsp::Waveform::sine);
+                    mono += sub;
+                    soundLeft += sub;
+                    soundRight += sub;
+                }
 
                 if (noiseGain > 0.0f)
-                    sound += noiseGain * voice.noise.nextBipolar();
+                {
+                    const auto noise = noiseGain * voice.noise.nextBipolar();
+                    mono += noise;
+                    soundLeft += noise;
+                    soundRight += noise;
+                }
 
-                const auto outputs = voice.filter.processAll (sound, voice.coefficients);
-                const auto filtered = type == FilterType::lowPass
-                                          ? outputs.low
-                                          : (type == FilterType::bandPass ? outputs.band * voice.coefficients.k : outputs.high);
                 voice.filterEnvelopeLevel = voice.filterEnvelope.next();
                 auto gain = voice.amp.next() * voice.velocityGain * outputGain;
 
                 if (lfoAim == LfoTarget::level)
                     gain *= 1.0f - depth * 0.5f * (1.0f + moved[(size_t) i]);
 
-                const auto out = filtered * gain;
-                left[start + i] += out;
+                if (! stereo)
+                {
+                    // One filter, the same sound on both sides, as before unison.
+                    const auto out = pick (voice.filter.processAll (mono, voice.coefficients)) * gain;
+                    left[start + i] += out;
 
-                if (right != nullptr)
-                    right[start + i] += out;
+                    if (right != nullptr)
+                        right[start + i] += out;
+
+                    continue;
+                }
+
+                left[start + i] += pick (voice.filter.processAll (soundLeft, voice.coefficients)) * gain;
+                right[start + i] += pick (voice.filterRight.processAll (soundRight, voice.coefficients)) * gain;
             }
 
             if (! voice.amp.isActive())

@@ -66,10 +66,13 @@ target_sources(phazite_core PRIVATE
     src/devices/core/SampleTap.h
     src/devices/core/Spectrum.cpp
     src/devices/core/Spectrum.h
+    src/devices/delay/Delay.cpp
+    src/devices/delay/Delay.h
     src/devices/drums/DrumSampler.cpp
     src/devices/drums/DrumSampler.h
     src/devices/drums/DrumSynthesis.cpp
     src/devices/drums/DrumSynthesis.h
+    src/devices/dsp/Crossover.h
     src/devices/dsp/DelayLine.h
     src/devices/dsp/Envelopes.h
     src/devices/dsp/Filters.cpp
@@ -81,12 +84,22 @@ target_sources(phazite_core PRIVATE
     src/devices/dynamics/Compressor.h
     src/devices/dynamics/Limiter.cpp
     src/devices/dynamics/Limiter.h
+    src/devices/dynamics/Maximizer.cpp
+    src/devices/dynamics/Maximizer.h
+    src/devices/dynamics/Multiband.cpp
+    src/devices/dynamics/Multiband.h
     src/devices/eq/Equalizer.cpp
     src/devices/eq/Equalizer.h
+    src/devices/filter/FilterEffect.cpp
+    src/devices/filter/FilterEffect.h
     src/devices/reverb/Reverb.cpp
     src/devices/reverb/Reverb.h
+    src/devices/saturation/Saturator.cpp
+    src/devices/saturation/Saturator.h
     src/devices/synth/Synth.cpp
     src/devices/synth/Synth.h
+    src/devices/utility/Utility.cpp
+    src/devices/utility/Utility.h
     src/model/arrangement/Arrangement.cpp
     src/model/arrangement/AudioClipModel.cpp
     src/model/arrangement/AudioClipModel.h
@@ -628,6 +641,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DrumSamplerTests.cpp
         tests/DspTests.cpp
         tests/EngineSetupTests.cpp
+        tests/EffectDeviceTests.cpp
         tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
         tests/ExportTests.cpp

@@ -156,9 +156,10 @@ TEST_CASE ("The synth's description holds together")
 {
     REQUIRE (devices::isValid (Synth::info));
     CHECK (Synth::info.kind == devices::DeviceKind::instrument);
-    CHECK (Synth::info.parameters.size() == (size_t) Synth::level + 1);
+    CHECK (Synth::info.parameters.size() == (size_t) Synth::unisonSpread + 1);
     CHECK (devices::findParameter (Synth::info, "cutoff") == Synth::cutoff);
     CHECK (devices::findParameter (Synth::info, "voiceMode") == Synth::voiceMode);
+    CHECK (devices::findParameter (Synth::info, "unisonVoices") == Synth::unisonVoices);
 }
 
 TEST_CASE ("A synth note plays at its pitch, as loud as its velocity says")

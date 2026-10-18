@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A device editor's controls in rows of titled groups, such as a synth's oscillators, filter and envelopes, built from
-// the device's description: a knob for each parameter, with its name and value under it, or a list for one that picks
-// a choice. Within a group, a name that starts with the group's first word drops it ("Filter Attack" is "Attack" under
-// "Filter Envelope"); the control's title, which screen readers read, keeps the whole name. Given less height than it
-// makes itself, as a Devices view may give it, its groups move side by side, in fewer rows.
+// the device's description: a knob for each parameter, with its name and value under it, a list for one that picks a
+// choice, or a switch for one that is on or off. Within a group, a name that starts with the group's first word drops it
+// ("Filter Attack" is "Attack" under "Filter Envelope"); the control's title, which screen readers read, keeps the whole
+// name. Given less height than it makes itself, as a Devices view may give it, its groups move side by side, in fewer
+// rows.
 #pragma once
 
 #include "DeviceEditors.h"
@@ -32,7 +33,8 @@ public:
     DevicePanel (const DeviceHandle&, const std::vector<std::vector<Group>>& rows);
     ~DevicePanel() override;
 
-    // The control for a parameter: a Knob, or a juce::ComboBox for a choice; nullptr if the panel has none.
+    // The control for a parameter: a Knob, a juce::ComboBox for a choice, or a juce::ToggleButton for a switch; nullptr if
+    // the panel has none.
     juce::Component* findControl (std::string_view parameterID) const;
 
     // Shows changes made elsewhere (automation, undo); a timer does it 10 times a second.
@@ -50,8 +52,10 @@ private:
         std::string_view id;
         std::unique_ptr<Knob> knob;
         std::unique_ptr<juce::ComboBox> box;
+        std::unique_ptr<juce::ToggleButton> toggle; // for a parameter that is on or off
         std::unique_ptr<ParameterAttachment> knobAttachment;
         std::unique_ptr<ChoiceAttachment> boxAttachment;
+        std::unique_ptr<ToggleAttachment> toggleAttachment;
         std::unique_ptr<juce::Label> name, value;
     };
 

@@ -83,6 +83,14 @@ DevicePanel::DevicePanel (const DeviceHandle& device, const std::vector<std::vec
                     control->boxAttachment->setParameter (device.getParameter (parameter.id));
                     addAndMakeVisible (*control->box);
                 }
+                else if (parameter.unit == devices::Unit::toggle)
+                {
+                    control->toggle = std::make_unique<juce::ToggleButton>();
+                    control->toggle->setTitle (fullName);
+                    control->toggleAttachment = std::make_unique<ToggleAttachment> (*control->toggle);
+                    control->toggleAttachment->setParameter (device.getParameter (parameter.id));
+                    addAndMakeVisible (*control->toggle);
+                }
                 else
                 {
                     control->knob = std::make_unique<Knob> (fullName, parameter.defaultValue);
@@ -127,6 +135,9 @@ juce::Component* DevicePanel::findControl (std::string_view parameterID) const
             if (control->knob != nullptr)
                 return control->knob.get();
 
+            if (control->toggle != nullptr)
+                return control->toggle.get();
+
             return control->box.get();
         }
     }
@@ -146,6 +157,9 @@ void DevicePanel::refresh()
 
         if (control->boxAttachment != nullptr)
             control->boxAttachment->update();
+
+        if (control->toggleAttachment != nullptr)
+            control->toggleAttachment->update();
     }
 }
 
@@ -197,6 +211,8 @@ void DevicePanel::resized()
 
                 if (control.knob != nullptr)
                     control.knob->setBounds (top.withSizeKeepingCentre (knobSize, knobSize));
+                else if (control.toggle != nullptr)
+                    control.toggle->setBounds (top.withSizeKeepingCentre (controlHeight, controlHeight));
                 else
                     control.box->setBounds (top.withSizeKeepingCentre (width - Space::s, controlHeight));
 

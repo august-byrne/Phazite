@@ -1,0 +1,448 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The devices of roadmap step 2.10, as DSP (src/devices/): the delay's timing and ping-pong, the saturator's curves and
+// level, the filter's response, the utility's gain, balance, width, bass mono and polarity, the multiband dynamics'
+// flat split and both-way squeeze, the maximizer's ceiling, and the synth's unison.
+#include "TestHelpers.h"
+#include "devices/delay/Delay.h"
+#include "devices/dynamics/Maximizer.h"
+#include "devices/dynamics/Multiband.h"
+#include "devices/filter/FilterEffect.h"
+#include "devices/saturation/Saturator.h"
+#include "devices/synth/Synth.h"
+#include "devices/utility/Utility.h"
+
+#include <cmath>
+#include <set>
+#include <vector>
+
+namespace
+{
+namespace devices = phazite::devices;
+constexpr double testRate = 48000.0;
+constexpr int testBlockSize = 480;
+constexpr double twoPi = juce::MathConstants<double>::twoPi;
+
+std::vector<float> getDefaults (const devices::DeviceInfo& info)
+{
+    std::vector<float> values;
+
+    for (const auto& parameter : info.parameters)
+        values.push_back (parameter.defaultValue);
+
+    return values;
+}
+
+void set (std::vector<float>& values, const devices::DeviceInfo& info, std::string_view id, float value)
+{
+    const auto index = devices::findParameter (info, id);
+    REQUIRE (index >= 0);
+    values[(size_t) index] = value;
+}
+
+// A stereo sound: its two channels.
+struct Stereo
+{
+    std::vector<float> left, right;
+};
+
+// Plays a processor in blocks of 10 ms at 48 kHz on a sound (input gives each channel's sample at a time) and returns
+// what comes out, at the tempo given.
+template <typename Input>
+Stereo play (devices::Processor& processor, const std::vector<float>& values, int numSamples, Input input, double tempo = 120.0)
+{
+    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    Stereo played;
+
+    for (int done = 0; done < numSamples; done += testBlockSize)
+    {
+        const auto length = std::min (testBlockSize, numSamples - done);
+
+        for (int i = 0; i < length; ++i)
+        {
+            const auto [left, right] = input (done + i);
+            buffer.setSample (0, i, left);
+            buffer.setSample (1, i, right);
+        }
+
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = length;
+        context.parameters = values;
+        context.tempo = tempo;
+        processor.process (context);
+
+        for (int i = 0; i < length; ++i)
+        {
+            played.left.push_back (buffer.getSample (0, i));
+            played.right.push_back (buffer.getSample (1, i));
+        }
+    }
+
+    return played;
+}
+
+auto sine (double frequency, float amplitude)
+{
+    return [frequency, amplitude] (int t)
+    {
+        const auto value = amplitude * (float) std::sin (twoPi * frequency * t / testRate);
+        return std::pair { value, value };
+    };
+}
+
+float getRms (const std::vector<float>& sound, size_t from, size_t to)
+{
+    auto sum = 0.0;
+
+    for (auto i = from; i < std::min (to, sound.size()); ++i)
+        sum += (double) sound[i] * sound[i];
+
+    return (float) std::sqrt (sum / (double) std::max<size_t> (1, std::min (to, sound.size()) - from));
+}
+
+float getPeak (const std::vector<float>& sound, size_t from, size_t to)
+{
+    auto peak = 0.0f;
+
+    for (auto i = from; i < std::min (to, sound.size()); ++i)
+        peak = std::max (peak, std::abs (sound[i]));
+
+    return peak;
+}
+
+float toDecibels (float gain)
+{
+    return 20.0f * std::log10 (std::max (gain, 1.0e-9f));
+}
+
+// How strong a frequency is in a sound (its amplitude), from a single bin of a Fourier transform.
+float getAmplitudeAt (const std::vector<float>& sound, size_t from, size_t to, double frequency)
+{
+    auto re = 0.0, im = 0.0;
+
+    for (auto i = from; i < to; ++i)
+    {
+        re += sound[i] * std::cos (twoPi * frequency * (double) i / testRate);
+        im += sound[i] * std::sin (twoPi * frequency * (double) i / testRate);
+    }
+
+    return (float) (2.0 * std::sqrt (re * re + im * im) / (double) (to - from));
+}
+} // namespace
+
+TEST_CASE ("The devices of step 2.10 describe themselves, with type and parameter IDs of their own")
+{
+    std::set<std::string_view> types;
+
+    for (const auto* info : { &devices::Delay::info, &devices::Saturator::info, &devices::FilterEffect::info, &devices::Utility::info,
+                              &devices::Multiband::info, &devices::Maximizer::info, &devices::Synth::info })
+    {
+        INFO (std::string (info->typeID));
+        CHECK (devices::isValid (*info));
+        CHECK (types.insert (info->typeID).second);
+    }
+
+    // Saved in projects: these never change.
+    CHECK (devices::Delay::info.typeID == std::string_view ("phaziteDelay"));
+    CHECK (devices::Saturator::info.typeID == std::string_view ("phaziteSaturator"));
+    CHECK (devices::FilterEffect::info.typeID == std::string_view ("phaziteFilter"));
+    CHECK (devices::Utility::info.typeID == std::string_view ("phaziteUtility"));
+    CHECK (devices::Multiband::info.typeID == std::string_view ("phaziteMultiband"));
+    CHECK (devices::Maximizer::info.typeID == std::string_view ("phaziteMaximizer"));
+
+    // The synth's unison came after its other parameters, which keep their places; it plays one voice at first.
+    CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].id == std::string_view ("unisonVoices"));
+    CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].defaultValue == doctest::Approx (0.0f));
+    CHECK (devices::Synth::info.parameters[devices::Synth::level].id == std::string_view ("level"));
+
+    // The utility changes nothing until turned, and has no mix.
+    CHECK (devices::findParameter (devices::Utility::info, devices::mixParameterID) < 0);
+}
+
+TEST_CASE ("The delay: echoes on the beat at the song's tempo, fewer each time, and bouncing in ping-pong")
+{
+    auto values = getDefaults (devices::Delay::info);
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0) == doctest::Approx (0.375)); // a dotted eighth
+    set (values, devices::Delay::info, "time", 8.0f);                                   // a quarter
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0) == doctest::Approx (0.5));
+    CHECK (devices::Delay::getDelaySeconds (values, 90.0) == doctest::Approx (60.0 / 90.0));
+    set (values, devices::Delay::info, "time", 13.0f); // a bar, at 30 BPM 8 seconds: the most is 5
+    CHECK (devices::Delay::getDelaySeconds (values, 30.0) == doctest::Approx (devices::Delay::maximumSeconds));
+    set (values, devices::Delay::info, "sync", 0.0f);
+    set (values, devices::Delay::info, "milliseconds", 250.0f);
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0) == doctest::Approx (0.25));
+
+    // An impulse with a quarter-note echo at 120 BPM: the first echo half a second later, the second smaller.
+    values = getDefaults (devices::Delay::info);
+    set (values, devices::Delay::info, "time", 8.0f);
+    devices::Delay delay;
+    delay.prepare (testRate, testBlockSize);
+    const auto impulse = [] (int t) { return std::pair { t == 0 ? 1.0f : 0.0f, t == 0 ? 1.0f : 0.0f }; };
+    const auto out = play (delay, values, 60000, impulse);
+
+    CHECK (getPeak (out.left, 0, 23900) < 1.0e-4f);
+    const auto first = getPeak (out.left, 23900, 24500), second = getPeak (out.left, 47900, 48500);
+    CHECK (first > 0.05f);
+    CHECK (second > 0.01f);
+    CHECK (second < first * 0.5f);
+    CHECK (delay.getTailSeconds() > 1.0);
+
+    // Ping-pong: the first echo on the left, the next on the right.
+    set (values, devices::Delay::info, "pingPong", 1.0f);
+    delay.reset();
+    const auto bounced = play (delay, values, 60000, impulse);
+    CHECK (getPeak (bounced.left, 23900, 24500) > 0.02f);
+    CHECK (getPeak (bounced.right, 23900, 24500) < 1.0e-3f);
+    CHECK (getPeak (bounced.right, 47900, 48500) > 0.005f);
+}
+
+TEST_CASE ("The saturator: curves that round peaks off, harmonics when driven, and auto gain that keeps quiet sound level")
+{
+    using Shape = devices::Saturator::Shape;
+
+    for (const auto shape : { Shape::soft, Shape::tape, Shape::tube, Shape::hard })
+    {
+        CHECK (std::abs (devices::Saturator::shapeSample (shape, 0.0f)) < 1.0e-6f);
+        CHECK (devices::Saturator::shapeSample (shape, 0.5f) > devices::Saturator::shapeSample (shape, 0.25f));
+        CHECK (std::abs (devices::Saturator::shapeSample (shape, 10.0f)) <= 1.0f + 1.0e-4f);
+    }
+
+    CHECK (std::abs (devices::Saturator::shapeSample (Shape::fold, 2.0f)) < 1.0e-3f); // folded back down
+
+    // A quiet sine at the default drive, with auto gain: about as loud as it came in.
+    auto values = getDefaults (devices::Saturator::info);
+    devices::Saturator saturator;
+    saturator.prepare (testRate, testBlockSize);
+    const auto quiet = play (saturator, values, 24000, sine (440.0, 0.01f));
+    CHECK (toDecibels (getRms (quiet.left, 12000, 24000)) == doctest::Approx (toDecibels (0.01f / std::sqrt (2.0f))).epsilon (0.03));
+
+    // A loud sine driven hard: its peaks held down, and the third harmonic there.
+    set (values, devices::Saturator::info, "drive", 24.0f);
+    set (values, devices::Saturator::info, "autoGain", 0.0f);
+    saturator.reset();
+    const auto loud = play (saturator, values, 24000, sine (440.0, 0.5f));
+    CHECK (getPeak (loud.left, 12000, 24000) < 1.1f);
+    CHECK (getAmplitudeAt (loud.left, 12000, 24000, 1320.0) > 0.05f);
+    CHECK (saturator.getLatencySamples() >= 0);
+}
+
+TEST_CASE ("The filter: open at first, and low-pass, high-pass and band-pass shapes that fall as steeply as their slope")
+{
+    auto values = getDefaults (devices::FilterEffect::info);
+    CHECK (devices::FilterEffect::getMagnitude (values, 1000.0, testRate) == doctest::Approx (1.0).epsilon (0.02));
+
+    set (values, devices::FilterEffect::info, "cutoff", 1000.0f);
+    set (values, devices::FilterEffect::info, "resonance", 0.0f);
+    CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 100.0, testRate)) == doctest::Approx (0.0).epsilon (0.5));
+    CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 1000.0, testRate)) == doctest::Approx (-3.0).epsilon (0.2));
+    CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 4000.0, testRate)) < -40.0f); // 24 dB per octave
+
+    set (values, devices::FilterEffect::info, "slope", 0.0f); // 12 dB per octave
+    CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 4000.0, testRate)) > -30.0f);
+    CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 4000.0, testRate)) < -18.0f);
+
+    set (values, devices::FilterEffect::info, "type", 1.0f); // high-pass
+    set (values, devices::FilterEffect::info, "slope", 1.0f);
+    CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 10000.0, testRate)) == doctest::Approx (0.0).epsilon (0.5));
+    CHECK (toDecibels ((float) devices::FilterEffect::getMagnitude (values, 250.0, testRate)) < -40.0f);
+
+    // Resonance rings at the cutoff.
+    set (values, devices::FilterEffect::info, "type", 0.0f);
+    set (values, devices::FilterEffect::info, "resonance", 0.8f);
+    CHECK (devices::FilterEffect::getMagnitude (values, 1000.0, testRate) > 2.0);
+
+    // Played: a low tone through, a high one gone.
+    set (values, devices::FilterEffect::info, "resonance", 0.0f);
+    devices::FilterEffect filter;
+    filter.prepare (testRate, testBlockSize);
+    const auto low = play (filter, values, 24000, sine (100.0, 0.5f));
+    filter.reset();
+    const auto high = play (filter, values, 24000, sine (8000.0, 0.5f));
+    CHECK (getRms (low.left, 12000, 24000) > 0.3f);
+    CHECK (getRms (high.left, 12000, 24000) < 0.005f);
+}
+
+TEST_CASE ("The utility: gain, balance, width, bass in mono and polarity")
+{
+    auto values = getDefaults (devices::Utility::info);
+    devices::Utility utility;
+    utility.prepare (testRate, testBlockSize);
+    const auto apart = [] (int t)
+    {
+        const auto value = 0.5f * (float) std::sin (twoPi * 1000.0 * t / testRate);
+        return std::pair { value, 0.5f * value };
+    };
+
+    // As it was, at first.
+    const auto unchanged = play (utility, values, 4800, apart);
+    CHECK (getRms (unchanged.left, 2400, 4800) == doctest::Approx (0.5f / std::sqrt (2.0f)).epsilon (0.01));
+    CHECK (getRms (unchanged.right, 2400, 4800) == doctest::Approx (0.25f / std::sqrt (2.0f)).epsilon (0.01));
+
+    set (values, devices::Utility::info, "gain", 6.0f);
+    utility.reset();
+    const auto louder = play (utility, values, 4800, apart);
+    CHECK (getRms (louder.left, 2400, 4800) == doctest::Approx (0.5f / std::sqrt (2.0f) * 1.9953f).epsilon (0.01));
+
+    set (values, devices::Utility::info, "gain", 0.0f);
+    set (values, devices::Utility::info, "balance", -1.0f); // all the way left: the right silent
+    utility.reset();
+    const auto left = play (utility, values, 4800, apart);
+    CHECK (getRms (left.right, 2400, 4800) < 1.0e-4f);
+    CHECK (getRms (left.left, 2400, 4800) == doctest::Approx (0.5f / std::sqrt (2.0f)).epsilon (0.01));
+
+    set (values, devices::Utility::info, "balance", 0.0f);
+    set (values, devices::Utility::info, "width", 0.0f); // mono: both sides alike
+    utility.reset();
+    const auto mono = play (utility, values, 4800, apart);
+
+    for (size_t i = 2400; i < 4800; i += 97)
+        CHECK (mono.left[i] == doctest::Approx (mono.right[i]).epsilon (1.0e-4));
+
+    set (values, devices::Utility::info, "width", 1.0f);
+    set (values, devices::Utility::info, "invertLeft", 1.0f);
+    utility.reset();
+    const auto flipped = play (utility, values, 4800, apart);
+    CHECK (flipped.left[3000] == doctest::Approx (-unchanged.left[3000]).epsilon (1.0e-3));
+
+    // Bass in mono: a low tone out of phase cancels; a high one stays as it was.
+    set (values, devices::Utility::info, "invertLeft", 0.0f);
+    set (values, devices::Utility::info, "bassMono", 1.0f);
+    const auto opposite = [] (double frequency)
+    {
+        return [frequency] (int t)
+        {
+            const auto value = 0.5f * (float) std::sin (twoPi * frequency * t / testRate);
+            return std::pair { value, -value };
+        };
+    };
+
+    utility.reset();
+    const auto bass = play (utility, values, 48000, opposite (40.0));
+    utility.reset();
+    const auto treble = play (utility, values, 48000, opposite (4000.0));
+    CHECK (getRms (bass.left, 24000, 48000) < 0.03f);
+    CHECK (getRms (treble.left, 24000, 48000) > 0.3f);
+}
+
+TEST_CASE ("The multiband dynamics: a flat split, quiet sound brought up and loud sound turned down")
+{
+    auto values = getDefaults (devices::Multiband::info);
+
+    // Its curve: loud down, quiet up, silence left alone.
+    set (values, devices::Multiband::info, "depth", 1.0f);
+    CHECK (devices::Multiband::getGainChange (values, -6.0f) < -10.0f);
+    CHECK (devices::Multiband::getGainChange (values, -55.0f) > 5.0f);
+    CHECK (devices::Multiband::getGainChange (values, -120.0f) == doctest::Approx (0.0f));
+    CHECK (devices::Multiband::getGainChange (values, -35.0f) == doctest::Approx (0.0f));
+
+    // With no depth, every frequency comes out as loud as it went in.
+    set (values, devices::Multiband::info, "depth", 0.0f);
+    devices::Multiband multiband;
+    multiband.prepare (testRate, testBlockSize);
+
+    for (const auto frequency : { 50.0, 90.0, 1000.0, 2500.0, 8000.0 })
+    {
+        INFO (frequency);
+        multiband.reset();
+        const auto out = play (multiband, values, 48000, sine (frequency, 0.25f));
+        CHECK (toDecibels (getRms (out.left, 24000, 48000)) == doctest::Approx (toDecibels (0.25f / std::sqrt (2.0f))).epsilon (0.02));
+    }
+
+    // At full depth: a quiet tone louder, a loud one quieter.
+    set (values, devices::Multiband::info, "depth", 1.0f);
+    multiband.reset();
+    const auto quiet = play (multiband, values, 96000, sine (1000.0, 0.001f));
+    multiband.reset();
+    const auto loud = play (multiband, values, 96000, sine (1000.0, 0.8f));
+    CHECK (getRms (quiet.left, 48000, 96000) > 2.0f * 0.001f / std::sqrt (2.0f));
+    CHECK (getRms (loud.left, 48000, 96000) < 0.5f * 0.8f / std::sqrt (2.0f));
+}
+
+TEST_CASE ("The maximizer: louder, but never over its ceiling, and the limiter alone with nothing turned")
+{
+    auto values = getDefaults (devices::Maximizer::info);
+    devices::Maximizer maximizer;
+    maximizer.prepare (testRate, testBlockSize);
+    const auto latency = (size_t) maximizer.getLatencySamples();
+
+    // Without gain or squeeze, a quiet tone comes out as it went in, after the limiter's look-ahead.
+    set (values, devices::Maximizer::info, "lowSqueeze", 0.0f);
+    set (values, devices::Maximizer::info, "midSqueeze", 0.0f);
+    set (values, devices::Maximizer::info, "highSqueeze", 0.0f);
+    const auto plain = play (maximizer, values, 48000, sine (440.0, 0.1f));
+    CHECK (toDecibels (getRms (plain.left, 24000, 48000)) == doctest::Approx (toDecibels (0.1f / std::sqrt (2.0f))).epsilon (0.02));
+
+    // Pushed 18 dB with the default squeeze: much louder, and never over the ceiling, -1 dB.
+    values = getDefaults (devices::Maximizer::info);
+    set (values, devices::Maximizer::info, "gain", 18.0f);
+    maximizer.reset();
+    const auto pushed = play (maximizer, values, 96000, sine (220.0, 0.25f));
+    CHECK (getRms (pushed.left, 48000, 96000) > 1.5f * 0.25f / std::sqrt (2.0f));
+    CHECK (getPeak (pushed.left, latency, 96000) <= juce::Decibels::decibelsToGain (-1.0f) * 1.0001f);
+    CHECK (getPeak (pushed.right, latency, 96000) <= juce::Decibels::decibelsToGain (-1.0f) * 1.0001f);
+
+    // A band's squeeze turns it down once it is loud.
+    CHECK (devices::Maximizer::getReduction (1.0f, 0.0f) > 6.0f);
+    CHECK (devices::Maximizer::getReduction (0.0f, 0.0f) == doctest::Approx (0.0f));
+    CHECK (devices::Maximizer::getReduction (1.0f, -30.0f) == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("The synth's unison: one voice the same on both sides, as before; seven spread across them")
+{
+    auto values = getDefaults (devices::Synth::info);
+    devices::Synth synth;
+    synth.prepare (testRate, testBlockSize);
+
+    // Plays a held note for half a second and returns what came out.
+    const auto playNote = [&synth] (const std::vector<float>& parameters)
+    {
+        synth.reset();
+        juce::AudioBuffer<float> buffer (2, testBlockSize);
+        Stereo played;
+
+        for (int block = 0; block < 50; ++block)
+        {
+            buffer.clear();
+            float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+            const devices::NoteEvent on { devices::NoteEvent::Type::noteOn, 0, 57, 1.0f };
+            devices::ProcessContext context;
+            context.channels = channels;
+            context.numChannels = 2;
+            context.numSamples = testBlockSize;
+            context.parameters = parameters;
+
+            if (block == 0)
+                context.events = std::span<const devices::NoteEvent> (&on, 1);
+
+            synth.process (context);
+
+            for (int i = 0; i < testBlockSize; ++i)
+            {
+                played.left.push_back (buffer.getSample (0, i));
+                played.right.push_back (buffer.getSample (1, i));
+            }
+        }
+
+        return played;
+    };
+
+    const auto one = playNote (values);
+
+    for (size_t i = 4800; i < 24000; i += 101)
+        CHECK (one.left[i] == doctest::Approx (one.right[i]));
+
+    set (values, devices::Synth::info, "unisonVoices", 6.0f); // seven
+    const auto seven = playNote (values);
+    auto difference = 0.0f;
+
+    for (size_t i = 4800; i < 24000; ++i)
+        difference = std::max (difference, std::abs (seven.left[i] - seven.right[i]));
+
+    CHECK (difference > 0.01f);
+
+    // About as loud: within 6 dB.
+    const auto oneLevel = toDecibels (getRms (one.left, 4800, 24000)), sevenLevel = toDecibels (getRms (seven.left, 4800, 24000));
+    CHECK (std::abs (oneLevel - sevenLevel) < 6.0f);
+}

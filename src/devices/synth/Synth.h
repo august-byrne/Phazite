@@ -3,8 +3,9 @@
 // oscillators (the second tuned and detuned against the first), a sine an octave down and noise, through a resonant
 // filter that has an envelope of its own and follows the keys, then an amp envelope. One LFO moves the pitch, the
 // cutoff or the level; the mod wheel adds to it. In mono mode one voice plays, legato, gliding between the keys held,
-// as a bassline does. Pitch bend and the sustain pedal work as on a keyboard. Its noise comes from fixed seeds, so it
-// renders the same every time.
+// as a bassline does. Pitch bend and the sustain pedal work as on a keyboard. Unison (step 2.10) plays each oscillator up
+// to seven times at once, detuned against each other and spread across the stereo field, for a wide, thick sound (a
+// "supersaw"). Its noise and its unison's starting phases come from fixed seeds, so it renders the same every time.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -25,6 +26,7 @@ class Synth final : public Processor
 public:
     static constexpr const char* typeID = "phaziteSynth";
     static constexpr int maxVoices = 16;
+    static constexpr int maxUnison = 7; // oscillators each voice plays at once, detuned against each other
 
     enum Parameter
     {
@@ -57,7 +59,10 @@ public:
         voiceMode,
         glide,
         bendRange,
-        level
+        level,
+        unisonVoices, // added in step 2.10: from one voice (as before) up to seven, detuned and spread
+        unisonDetune,
+        unisonSpread
     };
 
     enum class FilterType
@@ -94,12 +99,14 @@ private:
         bool held = false;      // its key is down
         bool sustained = false; // its key is up but the sustain pedal holds it
         float velocityGain = 1.0f;
-        float pitch = 60.0f, target = 60.0f; // in semitones, gliding to the target
-        std::uint64_t started = 0;           // when it began, so that the oldest is taken first
-        dsp::Oscillator osc1, osc2, sub;
+        float pitch = 60.0f, target = 60.0f;               // in semitones, gliding to the target
+        std::uint64_t started = 0;                         // when it began, so that the oldest is taken first
+        std::array<dsp::Oscillator, maxUnison> osc1, osc2; // one of each per unison voice
+        dsp::Oscillator sub;
+        dsp::Random unisonPhases; // where the unison's oscillators start, the same every time
         dsp::Random noise;
         dsp::Adsr amp, filterEnvelope;
-        dsp::Filter filter;
+        dsp::Filter filter, filterRight; // the right one only while unison spreads the voice across the stereo field
         dsp::FilterCoefficients coefficients;
         float filterEnvelopeLevel = 0.0f;
     };
