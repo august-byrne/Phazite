@@ -56,11 +56,11 @@ juce::File getStemsFolder (const juce::File& songFile);
 struct ExportReport
 {
     juce::Result result = juce::Result::ok();
-    juce::File file;
+    juce::File file {};
     double seconds = 0.0;
     double integratedLufs = -100.0; // -100 for silence, or for less than 400 ms of sound
     double truePeakDb = -100.0;
-    juce::Array<juce::File> stems;
+    juce::Array<juce::File> stems {};
 };
 
 // How many LU the file is under the loudness target because the true-peak ceiling held its gain back (as Tracktion's
