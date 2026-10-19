@@ -411,9 +411,12 @@ TEST_CASE ("A plug-in's preset loads into the same plug-in, in place of its sett
     phazite::setMix (*quiet, 0.6f);
     TestPlugin::setGain (*loud, 0.9f);
     phazite::setMix (*loud, 0.1f);
+    edit.getUndoManager().clearUndoHistory();
+
+    // Saving the preset stores the plug-in's settings in the project, but is no undo step.
     const auto file = temp.folder.getChildFile ("Quiet" + juce::String (phazite::presetExtension));
     REQUIRE (phazite::saveDevicePreset (song.context, phazite::getDeviceID (*quiet), file));
-    edit.getUndoManager().clearUndoHistory();
+    CHECK_FALSE (edit.getUndoManager().canUndo());
 
     // Loaded into the loud one: its settings and mix, as one undo step named after the preset.
     REQUIRE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), file));

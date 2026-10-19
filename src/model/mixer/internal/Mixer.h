@@ -58,8 +58,8 @@ void moveDevice (te::Plugin&, int newIndex);
 void setDeviceOn (te::Plugin&, bool on);
 
 // Where a device's own window was last (docs/design.md, section 9): view state, written without an undo step, which the
-// project saves, so that the window opens there again. Tracktion writes it as it saves too, through the undo manager,
-// but finds it written already.
+// project saves, so that the window opens there again. A save stores it too (model/devices/internal/DeviceStates.h),
+// and finds it written already.
 void rememberWindowPosition (te::Plugin&, juce::Point<int> topLeft);
 
 // The parameters a device's slot shows as small knobs, by ID: its quick control, then the first others (not the dry

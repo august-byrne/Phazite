@@ -120,8 +120,8 @@ inline bool isGridProperty (const juce::Identifier& p)
     return p == gridSnap || p == gridAdaptive || p == gridOffset || p == gridStep || p == gridTriplets;
 }
 
-// Tracktion's names, which Phazite writes as view settings since step 2.12 (model/mixer/internal/Mixer.h:
-// rememberWindowPosition()): Tracktion wrote them through the undo manager as it saved.
+// Tracktion's names, which Phazite writes as view settings, without the undo manager (model/mixer/internal/Mixer.h:
+// rememberWindowPosition(), and model/devices/internal/DeviceStates.h as it saves).
 inline bool isDeviceViewProperty (const juce::Identifier& p)
 {
     return p == te::IDs::windowX || p == te::IDs::windowY;

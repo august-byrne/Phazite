@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginWindow.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/ProjectContext.h"
@@ -198,7 +199,7 @@ namespace
                 keys->unwatch (*this);
 
             storeBounds = false;
-            plugin.edit.flushPluginStateIfNeeded (plugin);
+            storeDeviceState (plugin); // the settings changed in the window, into the project, outside the undo history
             setEditor (nullptr);
             setMenuBar (nullptr); // before the menu goes
         }

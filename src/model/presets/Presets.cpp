@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -91,7 +92,7 @@ namespace
 
     juce::ValueTree copyDeviceForPreset (te::Plugin& device, const juce::Array<te::EditItemID>& modulatorsInside)
     {
-        device.flushPluginStateToValueTree();
+        storeDeviceState (device);
         return copyForPreset (device.edit, device.state, modulatorsInside);
     }
 
@@ -101,7 +102,7 @@ namespace
         for (auto* macro : rack.getMacroParameters())
             modulatorsInside.add (te::EditItemID::fromID (macro->state));
 
-        rack.flushStateToValueTree();
+        storeDeviceStates (rack);
         return copyForPreset (rack.edit, rack.state, modulatorsInside);
     }
 
@@ -152,7 +153,7 @@ juce::ValueTree makeTrackPreset (te::Track& track)
 {
     auto& edit = track.edit;
     auto preset = makePreset (trackKind);
-    track.flushStateToValueTree();
+    storeDeviceStates (track);
 
     // Its modulators and macros, which may modulate what it holds.
     juce::Array<te::EditItemID> modulators;
@@ -370,27 +371,12 @@ namespace
         return true;
     }
 
-    // A plug-in's own settings as they are now, as Tracktion writes them when it saves (ExternalPlugin's
-    // flushPluginStateToValueTree(), which writes through the undo manager): its state block and its program.
+    // A plug-in's state with its own settings as they are now (its state block and its program), which this stores in the
+    // project first, outside the undo history.
     juce::ValueTree getSettingsNow (te::ExternalPlugin& plugin)
     {
-        auto settings = plugin.state.createCopy();
-
-        if (auto* instance = plugin.getAudioPluginInstance())
-        {
-            juce::MemoryBlock block;
-            instance->suspendProcessing (true);
-            instance->getStateInformation (block);
-            instance->suspendProcessing (false);
-
-            if (block.getSize() > 0)
-                settings.setProperty (te::IDs::state, block.toBase64Encoding(), nullptr);
-
-            if (instance->getNumPrograms() > 0)
-                settings.setProperty (te::IDs::programNum, instance->getCurrentProgram(), nullptr);
-        }
-
-        return settings;
+        storeDeviceState (plugin);
+        return plugin.state.createCopy();
     }
 
     // A plug-in's own settings, which Tracktion keeps as a block that the plug-in reads only when it loads: put into the

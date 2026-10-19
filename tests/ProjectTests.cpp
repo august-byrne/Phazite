@@ -19,6 +19,7 @@
 #include "ui/playlist/TrackHeights.h"
 
 #include <functional>
+#include <utility>
 
 namespace
 {
@@ -459,14 +460,14 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     REQUIRE (plugin != nullptr);
     phazite::test::settle();
 
-    // A first save writes the plug-in's settings into the project, through the undo manager (docs/known-bugs.md, bug 2).
-    // Then without undo steps, so that the view settings below can be seen to make none. Tracktion marks the Edit changed
-    // when its undo history changes (once the message about it arrives), so the project is saved again after that.
-    REQUIRE (project->save().wasOk());
+    // Without undo steps, so that the view settings below can be seen to make none. Tracktion marks the Edit changed when
+    // its undo history changes (once the message about it arrives), so the project is saved after that; the save stores
+    // the plug-in's settings, but is no undo step.
     edit.getUndoManager().clearUndoHistory();
     phazite::test::settle();
     REQUIRE (project->save().wasOk());
     REQUIRE_FALSE (project->hasUnsavedChanges());
+    REQUIRE_FALSE (edit.getUndoManager().canUndo());
 
     // Every view setting: tracks' heights (one shown so short that it collapses), a collapsed folder, a pinned track, drum
     // mode and rows, both editors' grids, which gives the piano roll's its element, and where a device's window was (as the
@@ -499,8 +500,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     project->getPhaziteState().setProperty (schema::outline, "pop", nullptr);
     CHECK (project->hasUnsavedChanges());
 
-    // Saved and opened again, they are all there. Tracktion writes where the window was as it saves, through the undo
-    // manager, and finds it written.
+    // Saved and opened again, they are all there. The save stores where the window was too, and finds it written.
     const auto trackID = track->itemID, otherID = other->itemID, folderID = folder->itemID, pluginID = plugin->itemID;
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (edit.getUndoManager().canUndo());
@@ -551,6 +551,61 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     REQUIRE (section != nullptr);
     CHECK (isUnsavedChange ([section] { section->state.setProperty (schema::phaziteRole, "chorus", nullptr); }));
     CHECK (isUnsavedChange ([section] { section->state.setProperty (schema::phaziteEnergy, 0.9f, nullptr); }));
+}
+
+TEST_CASE ("Saving stores plug-ins' own settings, without an undo step")
+{
+    using phazite::test::TestPlugin;
+    TestPlugin testPlugin;
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Settings");
+    auto& edit = project->getEdit();
+    auto* track = phazite::insertTrack (edit, nullptr, nullptr);
+    REQUIRE (track != nullptr);
+    auto* plugin = dynamic_cast<te::ExternalPlugin*> (phazite::insertDevice (*track, TestPlugin::create (edit)));
+    REQUIRE (plugin != nullptr);
+
+    // Saved without undo steps. (Tracktion moves the new track into its place among the project's elements once the
+    // message loop runs, through the undo manager, and marks the Edit changed when its undo history changes.)
+    phazite::test::settle();
+    edit.getUndoManager().clearUndoHistory();
+    phazite::test::settle();
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+    REQUIRE_FALSE (edit.getUndoManager().canUndo());
+
+    // Its gain turned in its window: Tracktion notices within half a second, and it is an unsaved change. Saved, it is in
+    // the project, with nothing to undo and nothing unsaved.
+    TestPlugin::setGain (*plugin, 0.25f);
+    phazite::test::settle (1000);
+    CHECK (project->hasUnsavedChanges());
+    REQUIRE (project->save().wasOk());
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    // Nor do autosave and saving a copy add an undo step.
+    TestPlugin::setGain (*plugin, 0.5f);
+    phazite::test::settle (1000);
+    REQUIRE (project->autosave().wasOk());
+    CHECK (phazite::Project::getAutosaveFile (project->getFile()).existsAsFile());
+    juce::String error;
+    const auto copy = project->saveCopyAs (temp.folder, "Copy", error);
+    REQUIRE (copy.existsAsFile());
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+
+    // Opened again, the project plays the gain it was saved with, and the copy the one it had then.
+    const auto file = project->getFile();
+    const auto pluginID = plugin->itemID;
+    project = nullptr;
+
+    for (const auto& [saved, gain] : { std::pair (file, 0.25f), std::pair (copy, 0.5f) })
+    {
+        auto opened = openProject (saved);
+        REQUIRE (opened != nullptr);
+        auto* reopened = dynamic_cast<te::ExternalPlugin*> (te::findPluginForID (opened->getEdit(), pluginID).get());
+        REQUIRE (reopened != nullptr);
+        CHECK (TestPlugin::getGain (*reopened) == doctest::Approx (gain));
+    }
 }
 
 TEST_CASE ("Switching the loop on or off, or between the song and a range, is saved but isn't an unsaved change")

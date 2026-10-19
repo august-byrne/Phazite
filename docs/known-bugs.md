@@ -26,26 +26,3 @@ timing bug", to be fixed at a later date (2026-10-18).*
 - **How to test it:** render a clip of clicks on every beat offline, as export does, followed, stretched and pitched,
   and find where each click's energy lands; a test should hold it within a millisecond of its beat. The measurement of
   2026-10-17 did this in a temporary test, not kept.
-
-## 2. Saving a project puts its plug-ins' settings into the undo history
-
-*Found 2026-10-18, when the tests started using a stand-in plug-in (`tests/TestPlugin.h`) instead of Tracktion's
-reverb, which never showed it.*
-
-- **How it shows:** after a plug-in's own settings change (a knob turned in its window, a preset loaded in it), the
-  next save adds Tracktion's copy of those settings to the undo history: to the last undo step, or as a step of its own
-  if the history was empty. Undoing it takes the settings in the project back to what the plug-in had before, while the
-  plug-in keeps playing its new ones, and the project shows an unsaved change; the next save writes them again.
-- **Why:** every save, and the autosave, runs Tracktion's `Edit::flushState()`, whose `ExternalPlugin::
-  flushPluginStateToValueTree()` writes the plug-in's settings block, program, name, maker, IDs and channel layout
-  into its state through the Edit's undo manager. Tracktion's own reverb kept its settings in the state already, so
-  its flush wrote nothing new.
-- **How to fix:** write those properties before the save, past the undo manager, so that the flush finds them written
-  and records nothing: flush into a transaction of its own, take the copy it wrote, take the transaction back out with
-  `UndoManager::undoCurrentTransactionOnly()` (which drops it and keeps the redo history), and write the copy's
-  properties again without an undo manager, while `Project` ignores the notifications (`isWriting`). Check that the
-  undo manager's change message, which makes Tracktion mark the Edit changed, doesn't leave the saved project showing
-  an unsaved change. Or, upstream, let `flushPluginStateToValueTree()` write without the undo manager.
-- **How to test it:** in `tests/ProjectTests.cpp`, the view settings test saves once to write the stand-in plug-in's
-  settings before it clears the undo history; save straight after the plug-in's gain changes instead, and check that
-  nothing can be undone.

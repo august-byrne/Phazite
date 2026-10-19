@@ -176,6 +176,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/DeviceHandle.h
     src/model/devices/DeviceFiles.cpp
     src/model/devices/DevicePlugin.cpp
+    src/model/devices/DeviceStates.cpp
     src/model/devices/DrumKit.cpp
     src/model/devices/DrumSamplerPlugin.cpp
     src/model/devices/Devices.cpp
@@ -187,6 +188,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/internal/DeviceFiles.h
     src/model/devices/internal/DeviceHandle.h
     src/model/devices/internal/DevicePlugin.h
+    src/model/devices/internal/DeviceStates.h
     src/model/devices/internal/Devices.h
     src/model/devices/internal/DrumKit.h
     src/model/devices/internal/DrumSamplerPlugin.h
@@ -657,6 +659,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DeviceInfoTests.cpp
         tests/DevicePanelTests.cpp
         tests/DevicePluginTests.cpp
+        tests/DeviceStatesTests.cpp
         tests/DevicesViewTests.cpp
         tests/DrumRowTests.cpp
         tests/DrumSamplerEditorTests.cpp

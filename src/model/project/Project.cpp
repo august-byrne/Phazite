@@ -2,6 +2,7 @@
 #include "internal/Project.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mixer/internal/Freeze.h"
@@ -43,6 +44,24 @@ namespace
 
         if (! wasChanged)
             edit.resetChangedStatus();
+    }
+
+    // What a save writes that the Edit doesn't hold yet: the devices' states as they are now, outside the undo history
+    // (model/devices/internal/DeviceStates.h), and IDs for the notes that have none (those a new project's content added
+    // before it was open).
+    void storeForSaving (te::Edit& edit)
+    {
+        storeDeviceStates (edit);
+        assignNoteIDs (edit);
+    }
+
+    // Writes a project into a file, through a temporary file that takes its place once it is whole. (Tracktion's save
+    // also writes MIDI-learn mappings and control surfaces' settings, which Phazite doesn't use.)
+    bool writeProjectFile (const juce::ValueTree& state, const juce::File& file)
+    {
+        const auto xml = state.createXml();
+        juce::TemporaryFile temporary (file);
+        return xml != nullptr && xml->writeTo (temporary.getFile()) && temporary.overwriteTargetFileWithTemporary();
     }
 
     // Makes the folder <parentFolder>/<name>, named as files can be, for a project of that name, or sets error and
@@ -212,21 +231,15 @@ juce::Result Project::save()
 
     backUpProjectFile();
 
-    bool saved = false;
-
     {
-        // Saving writes plug-in states into the Edit's state, and IDs for the notes that have none yet (those a new
-        // project's content added before it was open); that isn't a change by the user.
-        const juce::ScopedValueSetter<bool> writing (isWriting, true);
-        assignNoteIDs (*edit);
+        const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
+        storeForSaving (*edit);
 
-        // No dialogs, save even if Tracktion sees no change, don't offer to discard. With these
-        // arguments Tracktion saves synchronously: write a temporary file, then rename it.
-        te::EditFileOperations (*edit).save (false, true, false, [&saved] (bool ok) { saved = ok; });
+        if (! writeProjectFile (edit->state, file))
+            return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ".");
+
+        edit->resetChangedStatus(); // Tracktion's flag, which the undo history and plug-ins' own changes set
     }
-
-    if (! saved)
-        return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ".");
 
     changedSinceSave = false;
     changedSinceAutosave = false;
@@ -248,13 +261,9 @@ juce::Result Project::autosave()
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
-        edit->flushState(); // the plug-ins' current states, and notes' IDs, as a save writes them
-        assignNoteIDs (*edit);
+        storeForSaving (*edit);
 
-        const auto xml = edit->state.createXml();
-        juce::TemporaryFile temporary (target);
-
-        if (xml == nullptr || ! xml->writeTo (temporary.getFile()) || ! temporary.overwriteTargetFileWithTemporary())
+        if (! writeProjectFile (edit->state, target))
             return juce::Result::fail ("Phazite couldn't write the autosave " + target.getFullPathName() + ".");
     }
 
@@ -272,14 +281,13 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
         return {};
 
     const juce::ScopedValueSetter<bool> writing (isWriting, true);
-    edit->flushState(); // the plug-ins' current states, and notes' IDs, as a save writes them
-    assignNoteIDs (*edit);
+    storeForSaving (*edit);
 
     // The copy is a project of its own, so it gets an ID of its own.
     auto state = edit->state.createCopy();
     state.setProperty (te::IDs::projectID, te::ProjectItemID::createNewID (te::ProjectID {}).toString(), nullptr);
 
-    if (const auto xml = state.createXml(); xml == nullptr || ! xml->writeTo (newFile))
+    if (! writeProjectFile (state, newFile))
     {
         newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
         error = "Phazite couldn't write the project file " + newFile.getFullPathName() + ".";

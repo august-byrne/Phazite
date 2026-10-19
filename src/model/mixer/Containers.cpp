@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Containers.h"
 #include "internal/Mixer.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
 
 #include <algorithm>
@@ -99,7 +100,7 @@ namespace
                 continue;
 
             // A copy of its rack type with new IDs, whose devices the copy's modulators modulate.
-            container->type->flushStateToValueTree();
+            storeDeviceStates (*container->type);
             auto rackState = container->type->state.createCopy();
             te::EditItemID::IDMap ids;
             te::EditItemID::remapIDs (rackState, nullptr, edit, &ids);
@@ -243,7 +244,7 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
         if (device->getSidechainSourceID().isValid())
             device->setSidechainSourceID ({});
 
-        device->flushPluginStateToValueTree();
+        storeDeviceState (*device);
         rack->addPlugin (device, { 0.5f, 0.5f }, false);
     }
 

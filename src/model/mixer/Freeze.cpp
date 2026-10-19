@@ -63,8 +63,9 @@ namespace
         return {};
     }
 
-    // Properties that Tracktion writes into a device's state without the device's sound changing: the frozen switch, a
-    // plug-in window's place, and a plug-in's own saved state, which a save writes again; and the IDs Phazite gives notes.
+    // Properties written into a device's state without the device's sound changing: Tracktion's frozen switch, a plug-in
+    // window's place, and a plug-in's own saved state, which every save stores again (model/devices/internal/
+    // DeviceStates.h); and the IDs Phazite gives notes.
     bool isIgnoredProperty (const juce::Identifier& property)
     {
         return property == te::IDs::frozen || schema::isDeviceViewProperty (property) || property == te::IDs::state

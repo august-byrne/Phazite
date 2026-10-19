@@ -5,6 +5,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Sidechain.h"
@@ -415,12 +416,18 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
     juce::Array<te::Track*> copies;
 
     for (auto* track : tracks)
+    {
+        // The copy takes the devices' states as they are now (Tracktion stores those of the track's own devices as it
+        // copies, but through the undo manager: model/devices/internal/DeviceStates.h).
+        storeDeviceStates (*track);
+
         if (auto copy = track->edit.copyTrack (track, getInsertPointAfter (*track)))
         {
             const auto inContainers = copyContainers (*track, *copy); // its containers hold devices of their own,
             copyLanes (*track, *copy, inContainers);                  // and its lanes show its own devices
             copies.add (copy.get());
         }
+    }
 
     if (selection != nullptr)
     {
