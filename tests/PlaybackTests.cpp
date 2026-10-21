@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "HostedDevice.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/drums/DrumSampler.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/StarterProject.h"
 #include "model/transport/internal/Playback.h"
 
@@ -372,4 +376,58 @@ TEST_CASE ("The loop's functions")
     CHECK_FALSE (phazite::isLoopingSong (*song.edit));
     phazite::loopSections ({});
     CHECK (song.getLoop() == "0.000-6.000");
+}
+
+TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and goes back to the play start")
+{
+    // As when Stop comes just as the loop goes round and its first notes begin: a drum hit, or a synth note with a long
+    // release, at the song's start, played, then stopped as soon as it is heard.
+    auto& engine = phazite::test::getEngine();
+    phazite::test::HostedDevice device;
+
+    const auto leftAfterStop = [&] (const char* type, int note, double length, float release)
+    {
+        auto edit = te::Edit::createSingleTrackEdit (engine);
+        auto& track = *te::getAudioTracks (*edit)[0];
+        auto instrument = edit->getPluginCache().createNewPlugin (type, {});
+        REQUIRE (phazite::setInstrument (track, instrument) != nullptr);
+
+        if (release > 0.0f)
+            instrument->getAutomatableParameterByID ("release")->setParameter (release, juce::sendNotification);
+
+        auto clip = track.insertMIDIClip ("Note", edit->tempoSequence.toTime ({ beats (0.0), beats (8.0) }), nullptr);
+        clip->getSequence().addNote (note, beats (0.0), te::BeatDuration::fromBeats (length), 110, 0, nullptr);
+        edit->getTransport().ensureContextAllocated();
+        phazite::test::settle (300);
+
+        phazite::playOrStop (*edit);
+        auto heard = false;
+        device.process (40,
+                        [&heard] (const juce::AudioBuffer<float>& buffer, int)
+                        {
+                            heard = buffer.getMagnitude (0, buffer.getNumSamples()) > 0.05f;
+                            return heard;
+                        });
+        REQUIRE (heard);
+
+        // Space: the block after it lets the notes go, and fades out those that had only just begun.
+        phazite::playOrStop (*edit);
+        auto left = 0.0f;
+        device.process (40,
+                        [&left] (const juce::AudioBuffer<float>& buffer, int block)
+                        {
+                            if (block >= 2)
+                                left = std::max (left, buffer.getMagnitude (0, buffer.getNumSamples()));
+
+                            return false;
+                        });
+
+        // Back at the play start, though playback stopped within 200 ms of starting.
+        phazite::test::dispatchMessagesUntil ([] { return false; }, 400);
+        CHECK (edit->getTransport().getPosition() == te::TimePosition());
+        return left;
+    };
+
+    CHECK (leftAfterStop (phazite::devices::DrumSampler::typeID, 36, 0.25, 0.0f) < 1.0e-4f);
+    CHECK (leftAfterStop (phazite::devices::Synth::typeID, 60, 4.0, 400.0f) < 1.0e-4f);
 }

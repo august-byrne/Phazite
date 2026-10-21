@@ -104,11 +104,15 @@ private:
         dsp::Adsr amp, filterEnvelope;
         std::array<dsp::MultimodeFilter, 2> filters; // the second only while unison spreads the voice across the stereo field
         float filterEnvelopeLevel = 0.0f;
-        float fade = 1.0f, fadeStep = 0.0f; // fading out, from a voice taken for another note (stealFadeSeconds)
+        float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, or cut as playback stopped
+        int age = 0;                        // the samples since its note began (up to a limit)
     };
 
     double sampleRate = 44100.0;
-    static constexpr double stealFadeSeconds = 0.003;
+    static constexpr double stealFadeSeconds = 0.003; // a voice taken for another note fades out over this
+    static constexpr double stopFadeSeconds = 0.01;   // a note that had only just begun when playback stopped, over this
+    static constexpr double justBegunSeconds = 0.1;   // how young that is
+    bool songPlaying = false;                         // as the block being processed began
 
     // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
     std::array<Voice, maxVoices + 1> voices;

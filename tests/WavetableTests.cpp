@@ -62,9 +62,10 @@ struct Played
     std::vector<float> left, right;
 };
 
-// Plays the synth in blocks (of testBlockSize samples unless given), with events at their samples from the start.
+// Plays the synth in blocks (of testBlockSize samples unless given), with events at their samples from the start. The song
+// plays in the blocks that begin before playingUntil.
 Played play (WavetableSynth& synth, const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& events,
-             int blockSize = testBlockSize)
+             int blockSize = testBlockSize, int playingUntil = 0)
 {
     juce::AudioBuffer<float> buffer (2, blockSize);
     Played played;
@@ -92,6 +93,7 @@ Played play (WavetableSynth& synth, const std::vector<float>& values, int numSam
         block.numSamples = length;
         block.parameters = values;
         block.events = inBlock;
+        block.isPlaying = done < playingUntil;
         synth.process (block);
 
         for (int i = 0; i < length; ++i)
@@ -687,6 +689,28 @@ TEST_CASE ("The wavetable synth's modulation keeps its time, however blocks and 
 
     CHECK (loudest > 0.1f);
     CHECK (largest < 1.0e-4f);
+}
+
+TEST_CASE ("Stopping playback cuts the wavetable synth's notes that had only just begun, and lets the others ring out")
+{
+    // C3 from the start, and C5 begun 5 ms before all notes off at 0.5 s: from 20 ms to 100 ms after it, how much is left
+    // of each, played on the first table's sine.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::env1Release] = 200.0f;
+    constexpr int offAt = 24064; // a block's start
+    const std::vector<NoteEvent> events { noteOn (0, 48), noteOn (offAt - 240, 72), { NoteEvent::Type::allNotesOff, offAt, 0, 0.0f } };
+
+    // Stopped: C5 is gone, while C3 rings out over its release.
+    auto stoppedSynth = makeSynth();
+    const auto stopped = play (*stoppedSynth, values, 48000, events, testBlockSize, offAt);
+    CHECK (measureLevelAt (stopped.left, offAt + 960, offAt + 4800, noteFrequency (72)) < 0.001);
+    CHECK (measureLevelAt (stopped.left, offAt + 960, offAt + 4800, noteFrequency (48)) > 0.05);
+
+    // A jump while playing lets both ring out.
+    auto jumpedSynth = makeSynth();
+    const auto jumped = play (*jumpedSynth, values, 48000, events, testBlockSize, 48000);
+    CHECK (measureLevelAt (jumped.left, offAt + 960, offAt + 4800, noteFrequency (72)) > 0.05);
+    CHECK (measureLevelAt (jumped.left, offAt + 960, offAt + 4800, noteFrequency (48)) > 0.05);
 }
 
 TEST_CASE ("The wavetable synth lets go of a table it no longer plays once the audio thread can't be reading it")

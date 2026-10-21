@@ -261,7 +261,8 @@ private:
         std::array<dsp::MultimodeFilter, 2> filters; // each side
         bool filtering = false;                      // the filter is on
         bool stepPending = true;                     // it (re)started since the last control step: its values are due
-        float fade = 1.0f, fadeStep = 0.0f;          // fading out, from a voice taken for another note (stealFadeSeconds)
+        float fade = 1.0f, fadeStep = 0.0f;          // fading out: taken for another note, or cut as playback stopped
+        int age = 0;                                 // the samples since its note began (up to a limit)
         float subGain = 0.0f, noiseGain = 0.0f, gainLeft = 1.0f, gainRight = 1.0f, driveGain = 1.0f;
     };
 
@@ -273,7 +274,10 @@ private:
 
     double sampleRate = 44100.0;
     double aliasLimit = 0.5; // the highest frequency, as a fraction of the sample rate, whose alias stays above hearing
-    static constexpr double stealFadeSeconds = 0.003;
+    static constexpr double stealFadeSeconds = 0.003; // a voice taken for another note fades out over this
+    static constexpr double stopFadeSeconds = 0.01;   // a note that had only just begun when playback stopped, over this
+    static constexpr double justBegunSeconds = 0.1;   // how young that is
+    bool songPlaying = false;                         // as the block being processed began
 
     // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
     std::array<Voice, maxVoices + 1> voices;

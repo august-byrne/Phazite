@@ -51,10 +51,10 @@ struct Stereo
 };
 
 // Plays the sampler in blocks, with events at their samples from the start; beforeBlock (the samples done) is called
-// before each block.
+// before each block. The song plays in the blocks that begin before playingUntil.
 template <typename BeforeBlock>
 Stereo play (DrumSampler& sampler, const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& events,
-             BeforeBlock beforeBlock)
+             BeforeBlock beforeBlock, int playingUntil = 0)
 {
     juce::AudioBuffer<float> buffer (2, testBlockSize);
     Stereo played;
@@ -83,6 +83,7 @@ Stereo play (DrumSampler& sampler, const std::vector<float>& values, int numSamp
         block.numSamples = length;
         block.parameters = values;
         block.events = inBlock;
+        block.isPlaying = done < playingUntil;
         sampler.process (block);
 
         for (int i = 0; i < length; ++i)
@@ -326,4 +327,26 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
     phazite::clearPadSound (*drums, 0);
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Reset Pad 1"));
     CHECK_FALSE (drums->getSampler().hasOwnSound (0));
+}
+
+TEST_CASE ("Stopping playback cuts the hits that had only just begun, and lets the others ring")
+{
+    // A hit, then all notes off at 0.5 s: from 20 ms after it, what is left of the hit.
+    const auto leftAfter = [] (int note, int hitAt, bool stopped)
+    {
+        constexpr int offAt = 24064; // a block's start
+        DrumSampler sampler;
+        sampler.prepare (testRate, testBlockSize);
+        const auto played = play (
+            sampler, getDefaults(), 48000, { noteOn (hitAt, note), { NoteEvent::Type::allNotesOff, offAt, 0, 0.0f } }, [] (int) {},
+            stopped ? offAt : 48000);
+        return peakOf (played.left, offAt + 960, offAt + 9600);
+    };
+
+    // The open hat begun 5 ms before Stop, as the loop's first hit is when Stop comes as it goes round: gone.
+    CHECK (leftAfter (46, 24064 - 240, true) < 1.0e-6f);
+
+    // A jump while playing lets it ring, and so does Stop a hit begun long before (the crash, 0.5 s before).
+    CHECK (leftAfter (46, 24064 - 240, false) > 0.01f);
+    CHECK (leftAfter (49, 0, true) > 0.01f);
 }

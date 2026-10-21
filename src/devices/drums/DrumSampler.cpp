@@ -66,6 +66,7 @@ namespace
 
     constexpr float longestLength = 10000.0f; // ms: a length this long plays the whole sound
     constexpr double fadeSeconds = 0.01;      // how long a cut or choked sound takes to stop
+    constexpr double justBegunSeconds = 0.1;  // a hit this young when playback stops is cut
     constexpr int kitChokeGroup = 1;          // the hats, which stop each other
 
     constexpr bool isHat (int pad)
@@ -392,6 +393,13 @@ void DrumSampler::process (const ProcessContext& block)
 
             if (event.type == NoteEvent::Type::noteOn && juce::isPositiveAndBelow (pad, numPads))
                 hit (pad, event.value, values);
+
+            // Playback stopped: hits that had only just begun fade out, so that nothing the song began just before Stop
+            // sounds after it (the loop's first hits, when Stop came as it went round). Older hits ring on.
+            if (event.type == NoteEvent::Type::allNotesOff && ! block.isPlaying)
+                for (auto& voice : voices)
+                    if (voice.pad >= 0 && voice.played < justBegunSeconds * sampleRate)
+                        voice.fadeStep = std::max (voice.fadeStep, (float) (1.0 / (fadeSeconds * sampleRate)));
         }
 
         const auto until = next < block.events.size() ? std::min (block.numSamples, block.events[next].sample) : block.numSamples;

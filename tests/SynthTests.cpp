@@ -54,10 +54,11 @@ NoteEvent noteOff (int sample, int note)
 }
 
 // Plays the synth in blocks (of testBlockSize samples unless given), with events at their samples from the start, and
-// returns its left channel; after each block, afterBlock (the samples done) is called.
+// returns its left channel; after each block, afterBlock (the samples done) is called. The song plays in the blocks that
+// begin before playingUntil.
 template <typename AfterBlock>
 std::vector<float> play (Synth& synth, const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& events,
-                         AfterBlock afterBlock, int blockSize = testBlockSize)
+                         AfterBlock afterBlock, int blockSize = testBlockSize, int playingUntil = 0)
 {
     juce::AudioBuffer<float> buffer (2, blockSize);
     std::vector<float> played;
@@ -85,6 +86,7 @@ std::vector<float> play (Synth& synth, const std::vector<float>& values, int num
         block.numSamples = length;
         block.parameters = values;
         block.events = inBlock;
+        block.isPlaying = done < playingUntil;
         synth.process (block);
         afterBlock (done + length);
 
@@ -425,6 +427,33 @@ TEST_CASE ("A note that takes a sounding voice fades it out, and starts from sil
     const auto risen = measureLevelAt (played, 9600, 14400, 830.6);
     CHECK (risen > 0.5);
     CHECK (rising < 0.3 * risen);
+}
+
+TEST_CASE ("Stopping playback cuts the notes that had only just begun, and lets the others ring out")
+{
+    // C3 from the start, and C5 begun 5 ms before all notes off at 0.5 s, as the loop's first notes are when Stop comes as
+    // it goes round: from 20 ms to 100 ms after it, how much is left of each.
+    auto values = getSineValues();
+    values[Synth::release] = 200.0f;
+    constexpr int offAt = 24064; // a block's start
+    const std::vector<NoteEvent> events { noteOn (0, 48), noteOn (offAt - 240, 72), { NoteEvent::Type::allNotesOff, offAt, 0, 0.0f } };
+
+    const auto playUntil = [&] (int playingUntil)
+    {
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        return play (synth, values, 48000, events, [] (int) {}, testBlockSize, playingUntil);
+    };
+
+    // Stopped: C5 is gone, while C3 rings out over its release.
+    const auto stopped = playUntil (offAt);
+    CHECK (measureLevelAt (stopped, offAt + 960, offAt + 4800, 523.25) < 0.001);
+    CHECK (measureLevelAt (stopped, offAt + 960, offAt + 4800, 130.81) > 0.1);
+
+    // A jump while playing lets both ring out.
+    const auto jumped = playUntil (48000);
+    CHECK (measureLevelAt (jumped, offAt + 960, offAt + 4800, 523.25) > 0.1);
+    CHECK (measureLevelAt (jumped, offAt + 960, offAt + 4800, 130.81) > 0.1);
 }
 
 TEST_CASE ("The synth's sustain pedal holds notes until it lifts, and it plays the same every time")

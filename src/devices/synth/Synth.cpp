@@ -224,9 +224,11 @@ void Synth::stealVoice (Voice& voice)
     fading = voice;
     fading.note = -1;
     fading.held = fading.sustained = false;
-    fading.fadeStep = (float) (1.0 / (stealFadeSeconds * sampleRate));
+    fading.fadeStep = std::max (fading.fadeStep, (float) (1.0 / (stealFadeSeconds * sampleRate)));
     voice.amp.reset();
     voice.filterEnvelope.reset();
+    voice.fade = 1.0f;
+    voice.fadeStep = 0.0f;
 }
 
 void Synth::startNote (int note, float velocityValue, std::span<const float> values)
@@ -249,6 +251,11 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
         heldKeys[(size_t) numHeld++] = note;
 
         auto& voice = voices[0];
+
+        // A voice still fading out after playback stopped hands that fade to the voice that fades out what is taken.
+        if (voice.fadeStep > 0.0f)
+            stealVoice (voice);
+
         const auto legato = voice.amp.isActive() && voice.held;
         voice.note = note;
         voice.target = (float) note;
@@ -259,6 +266,7 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
         {
             voice.velocityGain = gain;
             voice.pitch = from;
+            voice.age = 0;
             voice.amp.noteOn();
             voice.filterEnvelope.noteOn();
         }
@@ -268,7 +276,7 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
 
     auto& voice = findVoiceFor (note);
 
-    if (voice.amp.isActive() && voice.note != note)
+    if (voice.amp.isActive() && (voice.note != note || voice.fadeStep > 0.0f))
         stealVoice (voice);
 
     if (! voice.amp.isActive())
@@ -299,6 +307,7 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
     voice.target = (float) note;
     voice.pitch = from;
     voice.started = ++notesPlayed;
+    voice.age = 0;
     voice.amp.noteOn();
     voice.filterEnvelope.noteOn();
 }
@@ -392,14 +401,28 @@ void Synth::handle (const NoteEvent& event, std::span<const float> values)
             break;
 
         case NoteEvent::Type::allNotesOff:
+        {
             numHeld = 0;
             pedalDown = false;
 
+            // Playback stopped or jumped: every note lets go. Those that had only just begun when it stopped fade out at
+            // once too, so that nothing the song began just before Stop sounds after it: the loop's first notes, when Stop
+            // came as it went round.
+            const auto stopStep = (float) (1.0 / (stopFadeSeconds * sampleRate));
+
             for (auto& voice : voices)
-                if (voice.amp.isActive())
-                    releaseVoice (voice);
+            {
+                if (! voice.amp.isActive())
+                    continue;
+
+                releaseVoice (voice);
+
+                if (! songPlaying && voice.age < justBegunSeconds * sampleRate)
+                    voice.fadeStep = std::max (voice.fadeStep, stopStep);
+            }
 
             break;
+        }
     }
 }
 
@@ -454,6 +477,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
         {
             if (! voice.amp.isActive())
                 continue;
+
+            voice.age = std::min (voice.age + length, 1 << 30);
 
             // Pitch and filter, once per step.
             voice.pitch += (voice.target - voice.pitch) * glideStep;
@@ -520,7 +545,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 voice.filterEnvelopeLevel = voice.filterEnvelope.next();
                 auto gain = voice.amp.next() * voice.velocityGain * outputGain * voice.fade;
 
-                // A voice taken for another note fades out (stealVoice()); faded, it is free.
+                // A voice taken for another note, or cut as playback stopped, fades out; faded, it is free.
                 if (voice.fadeStep > 0.0f && (voice.fade -= voice.fadeStep) <= 0.0f)
                 {
                     voice.fade = 1.0f;
@@ -560,6 +585,8 @@ void Synth::process (const ProcessContext& block)
 
     if (block.numChannels == 0)
         return;
+
+    songPlaying = block.isPlaying;
 
     // A switch between poly and mono lets go of every note, so that none is left hanging.
     const auto mode = choiceOf<int> (values[voiceMode]);

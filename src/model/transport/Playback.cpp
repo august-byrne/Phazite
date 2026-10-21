@@ -199,7 +199,14 @@ void stopAndReturn (te::Edit& edit)
 {
     stopPlaying (edit);
     auto& transport = edit.getTransport();
-    transport.setPosition (transport.startPosition);
+    const auto start = transport.startPosition.get();
+    const auto alreadyThere = transport.getPosition() == start;
+    transport.setPosition (start);
+
+    // For 200 ms after playback starts, Tracktion's position still reads as where it started, so setting it there again
+    // changes nothing, and the playhead would stay where it stopped: the change is sent anyway.
+    if (alreadyThere)
+        transport.state.sendPropertyChangeMessage (te::IDs::position);
 }
 
 //==============================================================================

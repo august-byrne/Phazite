@@ -17,7 +17,7 @@ struct NoteEvent
         noteOff,
         pitchBend,  // value: from -1 to 1
         controller, // number: the controller; value: from 0 to 1
-        allNotesOff // every note stops at once: playback stopped or jumped
+        allNotesOff // every note lets go: playback stopped or jumped; when it stopped, those that only just began stop at once
     };
 
     Type type = Type::noteOn;

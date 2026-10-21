@@ -514,10 +514,12 @@ void WavetableSynth::stealVoice (Voice& voice)
     fading = voice;
     fading.note = -1;
     fading.held = fading.sustained = false;
-    fading.fadeStep = (float) (1.0 / (stealFadeSeconds * sampleRate));
+    fading.fadeStep = std::max (fading.fadeStep, (float) (1.0 / (stealFadeSeconds * sampleRate)));
     voice.amp.reset();
     voice.envelope2.reset();
     voice.envelope3.reset();
+    voice.fade = 1.0f;
+    voice.fadeStep = 0.0f;
 }
 
 // A voice that was silent starts its waves from scratch: the first unison voice of each oscillator from the start of its
@@ -562,6 +564,11 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
         heldKeys[(size_t) numHeld++] = note;
 
         auto& voice = voices[0];
+
+        // A voice still fading out after playback stopped hands that fade to the voice that fades out what is taken.
+        if (voice.fadeStep > 0.0f)
+            stealVoice (voice);
+
         const auto legato = voice.amp.isActive() && voice.held;
         voice.note = note;
         voice.target = (float) note;
@@ -578,6 +585,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
             voice.random = noteRandom.nextUnipolar();
             voice.pitch = from;
             voice.started = ++notesPlayed;
+            voice.age = 0;
             voice.amp.noteOn();
             voice.envelope2.noteOn();
             voice.envelope3.noteOn();
@@ -589,7 +597,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
 
     auto& voice = findVoiceFor (note);
 
-    if (voice.amp.isActive() && voice.note != note)
+    if (voice.amp.isActive() && (voice.note != note || voice.fadeStep > 0.0f))
         stealVoice (voice);
 
     if (! voice.amp.isActive())
@@ -604,6 +612,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
     voice.target = (float) note;
     voice.pitch = from;
     voice.started = ++notesPlayed;
+    voice.age = 0;
     voice.amp.noteOn();
     voice.envelope2.noteOn();
     voice.envelope3.noteOn();
@@ -699,14 +708,28 @@ void WavetableSynth::handle (const NoteEvent& event, std::span<const float> valu
             break;
 
         case NoteEvent::Type::allNotesOff:
+        {
             numHeld = 0;
             pedalDown = false;
 
+            // Playback stopped or jumped: every note lets go. Those that had only just begun when it stopped fade out at
+            // once too, so that nothing the song began just before Stop sounds after it: the loop's first notes, when Stop
+            // came as it went round.
+            const auto stopStep = (float) (1.0 / (stopFadeSeconds * sampleRate));
+
             for (auto& voice : voices)
-                if (voice.amp.isActive())
-                    releaseVoice (voice);
+            {
+                if (! voice.amp.isActive())
+                    continue;
+
+                releaseVoice (voice);
+
+                if (! songPlaying && voice.age < justBegunSeconds * sampleRate)
+                    voice.fadeStep = std::max (voice.fadeStep, stopStep);
+            }
 
             break;
+        }
     }
 }
 
@@ -754,6 +777,8 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
         {
             if (! voice.amp.isActive())
                 continue;
+
+            voice.age = std::min (voice.age + length, 1 << 30);
 
             //==================================================================
             // Once a control step, and when the voice (re)starts: the pitch, the modulation, the oscillators' frames and
@@ -1004,7 +1029,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
 
                 const auto gain = voice.amp.next() * voice.velocityGain * settings.outputGain * voice.fade;
 
-                // A voice taken for another note fades out (stealVoice()); faded, it is free.
+                // A voice taken for another note, or cut as playback stopped, fades out; faded, it is free.
                 if (voice.fadeStep > 0.0f && (voice.fade -= voice.fadeStep) <= 0.0f)
                 {
                     voice.fade = 1.0f;
@@ -1032,6 +1057,8 @@ void WavetableSynth::process (const ProcessContext& block)
 
     if (block.numChannels == 0)
         return;
+
+    songPlaying = block.isPlaying;
 
     // A switch between poly and mono lets go of every note, so that none is left hanging.
     const auto mode = choiceOf<int> (values[voiceMode]);
