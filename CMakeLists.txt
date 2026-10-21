@@ -213,17 +213,21 @@ target_sources(phazite_core PRIVATE
     src/model/devices/internal/Wavetables.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
+    src/model/engine/AudioDevices.cpp
+    src/model/engine/AudioDevices.h
     src/model/engine/EngineContext.cpp
     src/model/engine/EngineContext.h
     src/model/engine/EngineSetup.cpp
     src/model/engine/LiveInput.cpp
     src/model/engine/LoudnessMeterPlugin.cpp
+    src/model/engine/PluginScanner.cpp
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
     src/model/engine/internal/EngineContext.h
     src/model/engine/internal/EngineSetup.h
     src/model/engine/internal/LiveInput.h
     src/model/engine/internal/LoudnessMeterPlugin.h
+    src/model/engine/internal/PluginScanner.h
     src/model/engine/internal/Preview.h
     src/model/mixer/Buses.cpp
     src/model/mixer/ContainerModel.cpp
@@ -355,6 +359,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/star.svg
         resources/icons/lucide/volume-x.svg
         resources/icons/lucide/x.svg
+        resources/icons/lucide/zap.svg
         resources/icons/lucide/zoom-in.svg)
 
 target_link_libraries(phazite_core PRIVATE phazite_data)
@@ -378,6 +383,8 @@ if(WIN32)
     # ASIO drivers, the low-latency standard for audio interfaces on Windows. JUCE bundles Steinberg's
     # ASIO SDK 2.3.4 headers, which Phazite uses under the SDK's GPLv3 option (AGPL-compatible).
     target_compile_definitions(phazite_core PRIVATE JUCE_ASIO=1)
+    # Windows' device tree, to tell a Bluetooth output (src/model/engine/AudioDevices.cpp).
+    target_link_libraries(phazite_core PRIVATE cfgmgr32)
 endif()
 
 target_link_libraries(phazite_core
@@ -590,7 +597,9 @@ target_sources(phazite_app PRIVATE
     src/app/PluginWindow.cpp
     src/app/PluginWindow.h
     src/app/ProjectSession.cpp
-    src/app/ProjectSession.h)
+    src/app/ProjectSession.h
+    src/app/RunMarker.cpp
+    src/app/RunMarker.h)
 
 phazite_use_core(phazite_app)
 target_link_libraries(phazite_app PRIVATE phazite_ui)
@@ -650,6 +659,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppShellTests.cpp
         tests/AppTests.cpp
         tests/AudioClipEditorTests.cpp
+        tests/AudioDevicesTests.cpp
+        tests/AudioSettingsTests.cpp
         tests/AudioClipModelTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h

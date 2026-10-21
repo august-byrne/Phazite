@@ -355,8 +355,9 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
         return;
     }
 
-    auto* panel = new ui::WelcomePanel (services.soundPack, engine.getDeviceManager().deviceManager, commands.getKeymap().name,
-                                        [this] (const juce::String& name) { setKeymap (name); });
+    auto* panel = new ui::WelcomePanel (
+        services.soundPack, engine.getDeviceManager().deviceManager, commands.getKeymap().name,
+        [this] (const juce::String& name) { setKeymap (name); }, [this] { return services.engineContext->getAudioOutput().isBluetooth; });
     panel->setSize (600, 560);
     panel->showPage (page);
     welcomePanel = panel;

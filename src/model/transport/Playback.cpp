@@ -4,6 +4,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/EngineSetup.h"
 
 namespace phazite
 {
@@ -209,6 +210,16 @@ void stopAndReturn (te::Edit& edit)
         transport.state.sendPropertyChangeMessage (te::IDs::position);
 }
 
+bool isLowLatencyOn (const te::Edit& edit)
+{
+    return isLowLatency (edit.engine);
+}
+
+void toggleLowLatency (te::Edit& edit)
+{
+    setLowLatency (edit.engine, ! isLowLatency (edit.engine));
+}
+
 //==============================================================================
 SongFollower::SongFollower (te::Edit& e)
     : edit (e),
@@ -321,6 +332,17 @@ void addTransportCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .synonyms = { "end", "last", "fast forward" },
                     .perform = withEdit (selection, goToEnd),
                     .isEnabled = hasEdit });
+
+    // As Cubase's Constrain Delay Compensation and Studio One's Low Latency Monitoring do (docs/design.md, section 20).
+    registry.add ({ .id = "transport.lowLatency",
+                    .name = "Low Latency",
+                    .category = "Transport",
+                    .description = "While on, what you play has no delay to wait for: devices that look ahead are bypassed, delay "
+                                   "compensation is off and the buffer shrinks. Turn it off to mix.",
+                    .synonyms = { "latency", "delay", "lag", "monitoring", "buffer", "delay compensation", "live" },
+                    .perform = withEdit (selection, toggleLowLatency),
+                    .isEnabled = hasEdit,
+                    .isTicked = ifEdit (selection, isLowLatencyOn) });
 }
 
 void addLoopCommands (CommandRegistry& registry, te::SelectionManager& selection, RangeSelection& range)

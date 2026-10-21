@@ -144,4 +144,13 @@ void routeLiveMidiInput (te::Edit& edit)
         }
     }
 }
+
+void closeMidiOutputs (te::Engine& engine)
+{
+    auto& devices = engine.getDeviceManager();
+
+    for (int i = 0; i < devices.getNumMidiOutDevices(); ++i)
+        if (auto* output = devices.getMidiOutDevice (i); output != nullptr && output->isEnabled())
+            output->setEnabled (false);
+}
 } // namespace phazite

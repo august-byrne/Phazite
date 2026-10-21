@@ -6,6 +6,7 @@ transport.playStop | spacebar
 transport.playPause | shift + spacebar
 transport.goToStart | home
 transport.goToEnd | end
+transport.lowLatency
 edit.delete | delete, backspace
 edit.deleteAndCloseGap
 edit.duplicate | ctrl + D

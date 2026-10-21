@@ -56,12 +56,13 @@ double millisecondsOf (const std::function<void()>& f)
 // One device, as a benchmark plays it.
 struct DeviceCase
 {
-    juce::String name;
-    std::function<std::unique_ptr<dev::Processor>()> make;
+    // Every member has a default, so that the cases can leave any of them out (GCC's -Wmissing-field-initializers).
+    juce::String name {};
+    std::function<std::unique_ptr<dev::Processor>()> make {};
     const dev::DeviceInfo* info = nullptr;
-    int notes = 0;                                 // for an instrument: held from the start; drums hit again every 12 blocks
-    std::function<void (std::vector<float>&)> set; // changes to the defaults
-    bool silentInput = false;                      // for an effect: silence instead of noise
+    int notes = 0;                                    // for an instrument: held from the start; drums hit again every 12 blocks
+    std::function<void (std::vector<float>&)> set {}; // changes to the defaults
+    bool silentInput = false;                         // for an effect: silence instead of noise
 };
 
 template <typename Device>
@@ -310,6 +311,7 @@ TEST_CASE ("Benchmark: a live note's way through Tracktion" * doctest::test_suit
     playNote ("With a limiter on the master too");
 
     MESSAGE (report);
+    limiter = nullptr; // before its Edit
     edit = nullptr;
 }
 
@@ -530,9 +532,32 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     REQUIRE (project->save().wasOk());
     phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
     te::getAudioTracks (*edit)[5]->state.sendPropertyChangeMessage (te::IDs::name);
-    report << "| The check for unsaved changes, comparing the whole song | "
+    report << "| The check for unsaved changes after a notification that changes nothing | "
            << milliseconds (millisecondsOf ([&] { project->hasUnsavedChanges(); })) << " |\n";
     report << "| Save | " << milliseconds (millisecondsOf ([&] { REQUIRE (project->save().wasOk()); }), 1) << " |\n";
+
+    // Autosave: what the UI thread does (the devices' states and a copy of the song), the rest on a background thread.
+    te::getAudioTracks (*edit)[3]->setName ("Changed");
+    phazite::test::dispatchPendingMessages();
+    report << "| Autosave, on the UI thread | " << milliseconds (millisecondsOf ([&] { project->autosaveInBackground(); }), 1) << " |\n";
+    phazite::test::runTimersUntil ([project] { return ! project->isAutosaving(); }, 10000);
+
+    // A note moved, as a drag moves it a grid step at a time: the views and Tracktion's rebuild of the playback graph.
+    edit->getTransport().ensureContextAllocated();
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    auto* note = firstClip->getSequence().getNote (0);
+    REQUIRE (note != nullptr);
+    double moving = 0.0;
+
+    for (int step = 1; step <= 10; ++step)
+        moving += millisecondsOf (
+            [&]
+            {
+                note->setStartAndLength (te::BeatPosition::fromBeats (0.25 * step), note->getLengthBeats(), &edit->getUndoManager());
+                phazite::test::dispatchMessagesUntil ([] { return false; }, 30); // Tracktion rebuilds on a timer
+            });
+
+    report << "| A note moved a step, with what follows (the views, the graph's rebuild) | " << milliseconds (moving / 10 - 30.0) << " |\n";
 
     MESSAGE (report);
 }

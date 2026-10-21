@@ -235,3 +235,38 @@ the golden renders and makes MSVC and GCC differ).
    monitoring). Recommended, off at first; or none.
 3. **Bluetooth outputs:** say what they cost in the settings and on the welcome page (recommended), or also offer to
    switch to a wired output when there is one.
+
+## 7. After the plan (2026-10-21)
+
+Measured again with `phazite_tests.exe --test-suite=benchmark --no-skip` from the `windows-profile` build, on the same PC.
+
+| What | Before | After | Done when |
+|---|---|---|---|
+| A stopped 20-track song (a synth, an EQ, a compressor and a reverb each) | 17 % of a core | 1.96 % | under 2 % |
+| The same, playing chords | 29 % | 26 % | |
+| Synth: 16 notes with 7-voice unison | 6.4 % | 4.55 % (-29 %) | 30 % less |
+| Wavetable: 8 notes, full unison | 6.0 % | 3.50 % (-42 %) | 30 % less |
+| Compressor | 0.24 % | 0.19 % | |
+| A parameter's change, as the views handle it | 5.5 ms | 0.02 ms | under 0.5 ms |
+| The unsaved-changes check after a notification | 12.7 ms | 0.78 ms | under 1 ms |
+| Autosave, on the UI thread | 56 ms | 5.4 ms | under 15 ms |
+| Save (16 tracks, 16,384 notes) | 114 ms | 115 ms | |
+| The whole window painted | 13.7 ms | 11.3 ms | |
+| A note moved a step, with the views and the playback graph's rebuild | not measured | 2.8 ms | |
+
+What each part became (roadmap step 2.16 has the files):
+- **C** as planned, except that a first run doesn't pick ASIO by itself (design.md, section 20, says why); the Audio
+  settings suggest it when drivers are installed. The key-to-sound check with a wired output is left for the owner.
+- **D:** devices sleep on silence (A1); the loudness meter rests after 3.5 s of silence; worker threads, the preview's
+  graph, the clip launcher and MIDI outputs (A2, A3); the instruments' unison ratios and filter coefficients, and the
+  wavetable's inner loop a step at a time without FM (A4, A6); every device glides its continuous parameters over each
+  block (A7). Of A5, only the compressor's maths changed: the multiband's and maximizer's need approximations of `log10`
+  and `pow` that would change their sound, for under 1 % of a core each that sleeping already saves on silence. Tracktion's
+  128-sample automation pieces stay: with Phazite's devices reading values once a block they would lag a block.
+- **E:** parameter changes (U1), autosave on a background thread that waits while the song plays (U2; an explicit Save
+  still writes on the UI thread, which the user waits for anyway), the unsaved-changes check (U3), hidden editors, meters
+  and strips (U5), controls' parameter lookups (U5) and slow browser searches (U7). A drag's rebuilds (U4) cost 2.8 ms a
+  step, so they stay as they are. The EQ's and compressor's repaints and the piano roll's note cache go with the devices'
+  new editors and the piano roll's next work; the 4-second MIDI rescan and keys over plug-in windows are left as they are.
+- **F** as planned. A plug-in that crashes as it loads can't be tested without one: check by hand with a crashing VST3.
+- It found [known bug 3](known-bugs.md): two Limiter-type devices can silence live notes.

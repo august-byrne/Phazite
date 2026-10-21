@@ -2,6 +2,7 @@
 #include "internal/LoudnessMeterPlugin.h"
 #include "model/base/internal/Schema.h"
 
+#include <algorithm>
 #include <array>
 
 namespace phazite
@@ -30,6 +31,8 @@ void LoudnessMeterPlugin::initialise (const te::PluginInitialisationInfo& info)
     // All the meter's allocation happens here, before the audio thread uses it: Tracktion calls this on the
     // message thread, when the sample rate or block size changes, not while processing.
     meter.prepare (info.sampleRate, 2, info.blockSizeSamples);
+    sleepAfterSamples = (int) (sleepAfterSeconds * info.sampleRate);
+    silentSamples = 0;
 }
 
 void LoudnessMeterPlugin::applyToBuffer (const te::PluginRenderContext& context)
@@ -42,10 +45,18 @@ void LoudnessMeterPlugin::applyToBuffer (const te::PluginRenderContext& context)
     const auto numChannels = std::min (buffer.getNumChannels(), maxChannels);
     std::array<const float*, maxChannels> channels {};
 
-    for (int channel = 0; channel < numChannels; ++channel)
-        channels[(size_t) channel] = buffer.getReadPointer (channel, context.bufferStartSample);
+    auto silent = true;
 
-    meter.process (channels.data(), numChannels, context.bufferNumSamples);
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        channels[(size_t) channel] = buffer.getReadPointer (channel, context.bufferStartSample);
+        silent = silent && buffer.getMagnitude (channel, context.bufferStartSample, context.bufferNumSamples) <= 1.0e-6f;
+    }
+
+    silentSamples = silent ? std::min (silentSamples + context.bufferNumSamples, sleepAfterSamples) : 0;
+
+    if (silentSamples < sleepAfterSamples || edit.isRendering())
+        meter.process (channels.data(), numChannels, context.bufferNumSamples);
 }
 
 //==============================================================================

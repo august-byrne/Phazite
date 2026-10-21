@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EngineContext.h"
+#include "AudioDevices.h"
 #include "internal/EngineContext.h"
+#include "internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
 
 namespace phazite
@@ -8,6 +10,10 @@ namespace phazite
 struct EngineContext::Impl
 {
     te::Engine& engine;
+
+    // Whether the output last asked about is Bluetooth, which takes a look through Windows' devices to find out.
+    juce::String checkedOutput {};
+    bool checkedIsBluetooth = false;
 };
 
 std::unique_ptr<EngineContext> createEngineContext (te::Engine& engine)
@@ -35,6 +41,51 @@ juce::AudioDeviceManager& EngineContext::getAudioDeviceManager()
 double EngineContext::getCpuUsage() const
 {
     return impl->engine.getDeviceManager().getCpuUsage();
+}
+
+EngineContext::AudioOutput EngineContext::getAudioOutput() const
+{
+    auto& devices = impl->engine.getDeviceManager().deviceManager;
+    AudioOutput output;
+    auto* device = devices.getCurrentAudioDevice();
+
+    if (device == nullptr || ! device->isOpen())
+        return output;
+
+    output.isOpen = true;
+    output.type = devices.getCurrentAudioDeviceType();
+    output.name = devices.getAudioDeviceSetup().outputDeviceName;
+    output.sampleRate = device->getCurrentSampleRate();
+    output.bufferSamples = device->getCurrentBufferSizeSamples();
+
+    if (output.sampleRate > 0.0)
+    {
+        output.bufferSeconds = output.bufferSamples / output.sampleRate;
+        output.latencySeconds = device->getOutputLatencyInSamples() / output.sampleRate;
+    }
+
+    if (const auto key = output.type + "\n" + output.name; key != impl->checkedOutput)
+    {
+        impl->checkedOutput = key;
+        impl->checkedIsBluetooth = isBluetoothOutput (output.type, output.name);
+    }
+
+    output.isBluetooth = impl->checkedIsBluetooth;
+    return output;
+}
+
+bool EngineContext::isLowLatency() const
+{
+    return phazite::isLowLatency (impl->engine);
+}
+
+bool EngineContext::hasAsioDrivers() const
+{
+    for (auto* type : impl->engine.getDeviceManager().deviceManager.getAvailableDeviceTypes())
+        if (type->getTypeName() == "ASIO")
+            return ! type->getDeviceNames().isEmpty();
+
+    return false;
 }
 
 std::vector<EngineContext::MidiInput> EngineContext::getMidiInputs() const

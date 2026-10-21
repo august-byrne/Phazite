@@ -20,6 +20,7 @@ namespace phazite::ui
 {
 class AppShell : public juce::Component,
                  private juce::FocusChangeListener,
+                 private juce::ChangeListener,
                  private ProjectContext::Listener
 {
 public:
@@ -64,12 +65,14 @@ public:
 
     // For tests.
     HintBar& getHintBar() noexcept { return hintBar; }
+    bool showsOpening() const noexcept { return openingLabel.isVisible(); } // for tests
     Guide& getGuide() noexcept { return guide; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
+    EngineContext& engineContext;
     CommandBridge& commands;
     KeyDispatcher& shortcutKeys; // for the windows of detached panels
     ProjectContext& projectContext;
@@ -88,7 +91,8 @@ private:
     SongViews songViews { playlist, mixer }; // the centre
     EditorDock editorDock { projectContext, pianoRoll, audioClipEditor, devices };
     HintBar hintBar;
-    Guide guide; // the hint bar's next step for newcomers
+    Guide guide;              // the hint bar's next step for newcomers
+    juce::Label openingLabel; // over the centre until a project is open: what the window shows as Phazite starts
 
     // The editor used last, which the time line's commands (zoom, grid, tools, nudge) act on.
     TimelineEditor* activeEditor = nullptr;
@@ -123,6 +127,12 @@ private:
     std::unique_ptr<PanelWindow> browserWindow, inspectorWindow, editorWindow; // null while docked
 
     void updateLayout();
+
+    // "No audio output" in the hint bar while none plays, which a click on it takes to the audio settings (docs/performance-
+    // audit.md, R3): the device failed to open, or went (unplugged, or Bluetooth that disconnected).
+    void updateAudioAlert();
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { updateAudioAlert(); } // the audio devices changed
+
     void showEditor (EditorDock::Tab);   // or hides it if it is showing, as FL Studio's F7 does
     void showSongView (SongViews::Tab);  // in the centre
     void revealEditor (EditorDock::Tab); // shows it, even if it is showing already

@@ -14,8 +14,8 @@
 
 namespace phazite::ui
 {
-// The bar along the top: play, loop, the metronome, the tempo and time signature, CPU, the master level and volume,
-// the computer keyboard and the command search. (A key is a track's, so the piano roll shows it.)
+// The bar along the top: play, loop, the metronome, low latency, the tempo and time signature, CPU, the master level and
+// volume, the computer keyboard and the command search. (A key is a track's, so the piano roll shows it.)
 class TopBar : public juce::Component,
                private ProjectContext::Listener,
                private juce::Timer
@@ -54,7 +54,8 @@ private:
     };
 
     IconButton playButton { "Play", Icon::play }, captureButton { "Capture", Icon::capture }, loopButton { "Loop", Icon::loop },
-        keyboardButton { "Computer keyboard", Icon::keyboard }, searchButton { "Search commands", Icon::search };
+        lowLatencyButton { "Low latency", Icon::lowLatency }, keyboardButton { "Computer keyboard", Icon::keyboard },
+        searchButton { "Search commands", Icon::search };
     OptionsButton recordButton { "Record", Icon::record }, metronomeButton { "Metronome", Icon::metronome };
     NumberField tempoField;               // dragged, scrolled or typed, a drag being one undo step
     TempoHandle tempo;                    // the open project's, which owns those steps

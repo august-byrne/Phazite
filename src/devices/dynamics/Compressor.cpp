@@ -128,7 +128,10 @@ void Compressor::process (const ProcessContext& block)
         isFirstBlock = false;
     }
 
-    auto loudest = -120.0f, most = 0.0f;
+    // Under the knee's start there is nothing to turn down, which the peak tells without its decibels; and the gain is
+    // worked out again only when it changes (docs/performance-audit.md, A5).
+    const auto kneeStartGain = dsp::decibelsToGain (thresholdDecibels - 0.5f * kneeDecibels);
+    auto loudestPeak = 0.0f, most = 0.0f;
 
     for (int i = 0; i < block.numSamples; ++i)
     {
@@ -137,19 +140,25 @@ void Compressor::process (const ProcessContext& block)
         for (int channel = 0; channel < numHeard; ++channel)
             peak = std::max (peak, std::abs (lowCuts[(size_t) channel].process (heard[channel][i], lowCut)));
 
-        const auto level = dsp::gainToDecibels (peak);
-        const auto amount = reduction.process (computeReduction (level, thresholdDecibels, slope, kneeDecibels));
+        const auto wanted =
+            peak <= kneeStartGain ? 0.0f : computeReduction (dsp::gainToDecibels (peak), thresholdDecibels, slope, kneeDecibels);
+        const auto amount = reduction.process (wanted);
         makeupDecibels += (targetMakeup - makeupDecibels) * makeupSmoothing;
-        const auto gain = dsp::decibelsToGain (makeupDecibels - amount);
+
+        if (const auto gainDecibels = makeupDecibels - amount; ! juce::exactlyEqual (gainDecibels, lastGainDecibels))
+        {
+            lastGainDecibels = gainDecibels;
+            lastGain = dsp::decibelsToGain (gainDecibels);
+        }
 
         for (int channel = 0; channel < numChannels; ++channel)
-            block.channels[channel][i] *= gain;
+            block.channels[channel][i] *= lastGain;
 
-        loudest = std::max (loudest, level);
+        loudestPeak = std::max (loudestPeak, peak);
         most = std::max (most, amount);
     }
 
-    levelMeter.raise (loudest);
+    levelMeter.raise (dsp::gainToDecibels (loudestPeak));
     reductionMeter.raise (most);
 }
 } // namespace phazite::devices

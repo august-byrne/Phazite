@@ -213,6 +213,14 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     phazite::rememberWindowPosition (*delay, { 200, 120 });
     CHECK (hear().empty());
 
+    // Nor is a parameter's value, which a knob's drag sets at each move: controls read it as they show it. A device
+    // switched off is a change.
+    delay->getAutomatableParameterByID ("feedback")->setParameter (0.7f, juce::sendNotification);
+    track->getVolumePlugin()->volParam->setParameter (0.5f, juce::sendNotification);
+    CHECK (hear().empty());
+    delay->setEnabled (false);
+    CHECK (hear() == "devices");
+
     // Changes not yet told are the closing project's: none come after another opens.
     track->setName ("Lead");
     setEdit (context, nullptr);

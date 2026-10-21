@@ -2,6 +2,7 @@
 #include "internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 
@@ -787,6 +788,24 @@ bool isAutomatedValue (const juce::ValueTree& tree, const juce::Identifier& prop
     for (const auto& assignment : tree.getChildWithName (te::IDs::MODIFIERASSIGNMENTS))
         if (parameters.contains (assignment[te::IDs::paramID].toString()))
             return true;
+
+    return false;
+}
+
+bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)
+{
+    if (! tree.hasType (te::IDs::PLUGIN))
+        return false;
+
+    const auto type = tree[te::IDs::type].toString();
+
+    // Tracktion's fader, VCA and send keep theirs under names of their own; Phazite's devices under the parameters' IDs.
+    if (type == te::VolumeAndPanPlugin::xmlTypeName || type == te::VCAPlugin::xmlTypeName || type == te::AuxSendPlugin::xmlTypeName)
+        return ! getParametersStoredIn (tree, property).isEmpty();
+
+    for (const auto* info : getOwnDevices())
+        if (type == juce::String (info->typeID.data(), info->typeID.size()))
+            return devices::findParameter (*info, property.toString().toStdString()) >= 0;
 
     return false;
 }

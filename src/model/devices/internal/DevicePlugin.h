@@ -66,12 +66,21 @@ private:
     // te::Plugin let go of its parameters, and the destructor detaches them after that.
     std::vector<te::AutomatableParameter::Ptr> parameters;
     std::vector<float> currentValues; // what the DSP reads, written on the audio thread
+
+    // Each parameter's value now, and as the last block went (which a continuous one glides from, a stretch of
+    // smoothingStep at a time: docs/performance-audit.md, A7); and which are continuous, rather than choices and switches.
+    static constexpr int smoothingStep = 32;
+    std::vector<float> targetValues, previousValues;
+    std::vector<bool> glides;
+    bool hasPreviousValues = false;
+    void keepValues() noexcept;
     std::array<devices::NoteEvent, maximumEvents> events {};
 
     juce::AudioBuffer<float> stereo; // for a mono channel: sized in initialise(), as long as the stretches played at once
     std::optional<te::tempo::Sequence::Position> tempoPosition;
     int latencySamples = 0;
     double latencySeconds = 0.0;
+    bool isBypassedForLowLatency() const;
 
     // Whether a track feeds the sidechain, set as each playback graph is built: its sound then comes in as the buffer's
     // third and fourth channels, after the device's own two.
@@ -82,6 +91,14 @@ private:
     float appliedMix = 1.0f; // where the last stretch's ramp ended
     juce::AudioBuffer<float> dry;
     std::array<devices::dsp::DelayLine, 2> dryDelays;
+
+    // Asleep (docs/performance-audit.md, A1): once what comes in and what it plays have been silent for sleepAfterSeconds
+    // (and longer than its latency), with nothing to play, it skips its work until sound, a note or an event comes in.
+    // Never in a render, which plays everything as the song has it.
+    static constexpr float silence = 1.0e-6f; // -120 dBFS
+    static constexpr double sleepAfterSeconds = 0.25;
+    int silentSamples = 0, sleepAfterSamples = 0;
+    bool asleep = false;
 
     int collectEvents (const te::PluginRenderContext&);
     void mixWithDry (float* const* wet, int length, float targetMix);

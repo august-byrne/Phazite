@@ -3,6 +3,7 @@
 #include "TestHelpers.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/synth/Synth.h"
+#include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/internal/Project.h"
 
@@ -182,4 +183,103 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     limiter->setEnabled (false);
     phazite::test::settle (500);
     CHECK (playNote() == atOnce);
+}
+
+TEST_CASE ("Low latency plays live notes without delay compensation, and back with it when it is off")
+{
+    auto& engine = phazite::test::getEngine();
+    REQUIRE (findAllMidiInputs() != nullptr);
+    phazite::test::HostedDevice device;
+
+    // A limiter, which looks ahead, on another track. (Two limiters lose live notes: docs/known-bugs.md.)
+    auto edit = te::Edit::createSingleTrackEdit (engine);
+    edit->ensureNumberOfAudioTracks (2);
+    const auto tracks = te::getAudioTracks (*edit);
+    addInstrument (*tracks[0]);
+    tracks[1]->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {}), 0, nullptr);
+    phazite::routeLiveMidiInput (*edit);
+    edit->getTransport().ensureContextAllocated();
+    phazite::test::settle (500);
+
+    const auto playNote = [&]
+    {
+        device.process (50);
+        phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
+        const auto samples = device.samplesToFirstSound();
+        phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOff (1, 60));
+        device.process (200);
+        return samples;
+    };
+
+    const auto compensated = playNote();
+    CHECK (compensated > 90); // the limiter's look-ahead, about 99 samples
+
+    phazite::setLowLatency (engine, true);
+    phazite::test::settle (500);
+    CHECK (phazite::isLowLatency (engine));
+    const auto low = playNote();
+    CHECK (low >= 0);
+    CHECK (low < 16);
+
+    phazite::setLowLatency (engine, false);
+    phazite::test::settle (500);
+    CHECK (playNote() == compensated);
+}
+
+TEST_CASE ("Low latency leaves what renders play as the song has it")
+{
+    // A synth's chord into a limiter on the master, which low latency would bypass while playing.
+    auto& engine = phazite::test::getEngine();
+    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto& track = *te::getAudioTracks (*edit)[0];
+    addInstrument (track);
+    auto clip =
+        track.insertMIDIClip ("Chord", edit->tempoSequence.toTime ({ te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }), nullptr);
+
+    for (int note : { 48, 55, 60, 64 })
+        clip->getSequence().addNote (note, te::BeatPosition(), te::BeatDuration::fromBeats (3.0), 120, 0, nullptr);
+
+    auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
+    edit->getMasterPluginList().insertPlugin (limiter, 0, nullptr);
+    limiter->getAutomatableParameterByID ("gain")->setParameter (12.0f, juce::sendNotification);
+
+    const auto render = [&edit]
+    {
+        juce::TemporaryFile wav (".wav");
+        te::Renderer::Parameters params (*edit);
+        params.destFile = wav.getFile();
+        params.audioFormat = edit->engine.getAudioFileFormatManager().getWavFormat();
+        params.bitDepth = 32;
+        params.sampleRateForAudio = 48000.0;
+        params.blockSizeForAudio = 512;
+        params.time = te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.0));
+        params.tracksToDo = te::toBitSet (te::getAllTracks (*edit));
+        params.useMasterPlugins = true;
+        params.canRenderInMono = false;
+        params.ditheringEnabled = false;
+        REQUIRE (te::Renderer::renderToFile ("Low latency test", params) == params.destFile);
+
+        const std::unique_ptr<juce::AudioFormatReader> reader (
+            edit->engine.getAudioFileFormatManager().readFormatManager.createReaderFor (wav.getFile()));
+        REQUIRE (reader != nullptr);
+        juce::AudioBuffer<float> audio ((int) reader->numChannels, (int) reader->lengthInSamples);
+        REQUIRE (reader->read (&audio, 0, audio.getNumSamples(), 0, true, true));
+        return audio;
+    };
+
+    const auto asItIs = render();
+    phazite::setLowLatency (engine, true);
+    const auto whileLow = render();
+    phazite::setLowLatency (engine, false);
+
+    REQUIRE (asItIs.getNumSamples() == whileLow.getNumSamples());
+    CHECK (asItIs.getMagnitude (0, asItIs.getNumSamples()) > 0.5f);
+    CHECK (asItIs.getMagnitude (0, asItIs.getNumSamples()) < 0.95f); // the limiter's ceiling, -1 dB
+
+    auto largest = 0.0f;
+
+    for (int i = 0; i < asItIs.getNumSamples(); ++i)
+        largest = std::max (largest, std::abs (asItIs.getSample (0, i) - whileLow.getSample (0, i)));
+
+    CHECK (largest < 1.0e-6f);
 }

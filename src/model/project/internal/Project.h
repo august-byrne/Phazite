@@ -78,6 +78,13 @@ public:
     // Whether anything changed since the last save or autosave: what autosave() would write. Message thread only.
     bool hasChangesToAutosave();
 
+    // As autosave(), with the state copied here and its XML made and written on a background thread, so that the window
+    // and what is played don't wait for it (docs/performance-audit.md, U2). Nothing while one is being written. Whether the
+    // last one failed is told once, by takeAutosaveFailure(), and its changes are written again at the next.
+    void autosaveInBackground();
+    bool isAutosaving() const;
+    bool takeAutosaveFailure();
+
     // Saves the project as it is now, unsaved changes included, as a new project <parentFolder>/<name>
     // with copies of its Audio, Generated and Renders folders and an ID of its own. This project and
     // its file stay as they are. Returns the new project file, or sets error and returns an empty
@@ -97,6 +104,9 @@ private:
     std::unique_ptr<te::Edit> edit;
     juce::File file;
     std::unique_ptr<SongFollower> songFollower; // keeps the loop around the song, and stops at its end (Playback.h)
+
+    class BackgroundWriter; // one file at a time; its destructor waits for the one under way
+    std::unique_ptr<BackgroundWriter> autosaveWriter;
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
 
     // The project as it was when it was opened, with Phazite's parts added, or last saved. Tracktion sends notifications
@@ -104,9 +114,12 @@ private:
     // mute switch so that editors redraw, and aliases copy their notes to each other again; and JUCE notifies a value
     // written again as another type. So while the project has no unsaved changes, a notification only sets
     // mayHaveChanged, and hasUnsavedChanges() and autosave() compare the project with this copy, once. Never listen to it
-    // or change it.
+    // or change it. Only the elements of the Edit's state that notified are compared (the tracks, the tempo...), unless the
+    // state itself did, such as when a track was added (docs/performance-audit.md, U3).
     juce::ValueTree savedState;
     bool mayHaveChanged = false;
+    juce::Array<juce::ValueTree> elementsToCompare;
+    bool compareAll = false;
 
     // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated, Renders and Cache folders, and
     // returns the project file that goes in it. If the name is empty, the folder exists or something can't be written, sets
@@ -145,21 +158,28 @@ private:
 };
 
 //==============================================================================
-// Autosaves a project while it has unsaved changes: the first time soon after the first change, then once changes have
-// waited a few minutes, and at once when a recording ends (what a crash would lose most of). Never while recording: the
-// recording isn't in the song until it ends.
+// Autosaves a project while it has unsaved changes, on a background thread (Project::autosaveInBackground()): the first
+// time soon after the first change, then once changes have waited a few minutes, and at once when a recording ends (what
+// a crash would lose most of). Never while recording: the recording isn't in the song until it ends. While the song
+// plays, it waits for it to stop, for at most maxWaitWhilePlayingSeconds.
 class AutosaveTimer : private juce::Timer
 {
 public:
     explicit AutosaveTimer (Project&, int intervalSeconds = 120, int firstDelaySeconds = 15);
     ~AutosaveTimer() override;
 
+    // Called once when failuresToReport autosaves in a row have failed (docs/performance-audit.md, R7).
+    std::function<void()> onRepeatedFailures;
+    static constexpr int failuresToReport = 3;
+    static constexpr int maxWaitWhilePlayingSeconds = 600;
+
 private:
     Project& project;
     const int intervalSeconds, firstDelaySeconds;
     juce::uint32 changedSince = 0; // when the timer first saw a change not yet autosaved (the millisecond counter), or 0
     bool autosavedOnce = false;
-    bool wasRecording = false;
+    bool wasRecording = false, wasAutosaving = false;
+    int failures = 0; // in a row
 
     void timerCallback() override;
 };

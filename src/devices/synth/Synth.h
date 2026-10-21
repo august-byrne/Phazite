@@ -103,6 +103,8 @@ private:
         dsp::Random noise;
         dsp::Adsr amp, filterEnvelope;
         std::array<dsp::MultimodeFilter, 2> filters; // the second only while unison spreads the voice across the stereo field
+        dsp::FilterSettings filterSettings {};       // what they were last set to,
+        bool filterIsSet = false;                    // if they were since the voice started
         float filterEnvelopeLevel = 0.0f;
         float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, or cut as playback stopped
         int age = 0;                        // the samples since its note began (up to a limit)

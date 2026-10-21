@@ -10,6 +10,8 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 
+#include <algorithm>
+
 namespace phazite
 {
 namespace
@@ -188,10 +190,51 @@ juce::File Project::getAutosaveFile (const juce::File& projectFile)
 }
 
 //==============================================================================
+class Project::BackgroundWriter : private juce::Thread
+{
+public:
+    BackgroundWriter()
+        : juce::Thread ("Phazite autosave")
+    {
+    }
+
+    ~BackgroundWriter() override { stopThread (30000); } // a write under way is never cut short: run() doesn't check
+
+    bool isBusy() const noexcept { return busy.load(); }
+    bool takeFailure() noexcept { return failed.exchange (false); }
+    void wait() { waitForThreadToExit (30000); }
+
+    // Writes a state that nothing else changes (a copy) into a file.
+    void write (juce::ValueTree copy, const juce::File& target)
+    {
+        jassert (! isBusy());
+        wait(); // the last write's thread, which has finished its work, is gone
+        state = std::move (copy);
+        file = target;
+        busy = true;
+        startThread();
+    }
+
+private:
+    juce::ValueTree state;
+    juce::File file;
+    std::atomic<bool> busy { false }, failed { false };
+
+    void run() override
+    {
+        if (! writeProjectFile (state, file))
+            failed = true;
+
+        state = {};
+        busy = false;
+    }
+};
+
 Project::Project (std::unique_ptr<te::Edit> e, const juce::File& f)
     : edit (std::move (e)),
       file (f),
-      songFollower (std::make_unique<SongFollower> (*edit))
+      songFollower (std::make_unique<SongFollower> (*edit)),
+      autosaveWriter (std::make_unique<BackgroundWriter>())
 {
     // The Edit's temporary folder, where its frozen tracks' files are, is the project's Cache folder (opening the project
     // made it so already, as the frozen tracks needed it). Closing the project empties it of what nothing uses; opening it
@@ -208,6 +251,7 @@ Project::~Project()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
+    autosaveWriter = nullptr; // before the autosave goes
     songFollower = nullptr;
     edit->state.removeListener (this);
     getAutosaveFile (file).deleteFile();
@@ -230,6 +274,7 @@ juce::Result Project::save()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
+    autosaveWriter->wait(); // an autosave being written, which this makes old
     backUpProjectFile();
 
     {
@@ -252,6 +297,7 @@ juce::Result Project::save()
 juce::Result Project::autosave()
 {
     JUCE_ASSERT_MESSAGE_THREAD
+    autosaveWriter->wait();
     compareWithSavedState();
 
     if (! changedSinceAutosave)
@@ -277,6 +323,40 @@ bool Project::hasChangesToAutosave()
     JUCE_ASSERT_MESSAGE_THREAD
     compareWithSavedState();
     return changedSinceAutosave;
+}
+
+void Project::autosaveInBackground()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    compareWithSavedState();
+
+    if (! changedSinceAutosave || autosaveWriter->isBusy())
+        return;
+
+    const auto target = getAutosaveFile (file);
+    target.getParentDirectory().createDirectory();
+
+    {
+        const juce::ScopedValueSetter<bool> writing (isWriting, true);
+        storeForSaving (*edit);
+        autosaveWriter->write (edit->state.createCopy(), target);
+    }
+
+    changedSinceAutosave = false;
+}
+
+bool Project::isAutosaving() const
+{
+    return autosaveWriter->isBusy();
+}
+
+bool Project::takeAutosaveFailure()
+{
+    if (! autosaveWriter->takeFailure())
+        return false;
+
+    changedSinceAutosave = true; // written again at the next
+    return true;
 }
 
 juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::String& name, juce::String& error)
@@ -308,6 +388,7 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
 juce::Result Project::moveTo (const juce::File& parentFolder, const juce::String& name)
 {
     JUCE_ASSERT_MESSAGE_THREAD
+    autosaveWriter->wait(); // its autosave goes with it
 
     juce::String error;
     const auto newFile = makeFolderWithFiles (parentFolder, name, error);
@@ -395,7 +476,8 @@ void Project::backUpProjectFile()
 void Project::rememberSavedState()
 {
     savedState = edit->state.createCopy();
-    mayHaveChanged = false;
+    mayHaveChanged = compareAll = false;
+    elementsToCompare.clearQuick();
 }
 
 void Project::compareWithSavedState()
@@ -403,9 +485,21 @@ void Project::compareWithSavedState()
     if (! mayHaveChanged)
         return;
 
-    mayHaveChanged = false;
+    // The elements that notified, each with its copy at the same place in savedState: the Edit's own elements keep their
+    // places unless one was added or removed, which notifies the state itself.
+    const auto isSame = [this] (const juce::ValueTree& element)
+    {
+        const auto index = edit->state.indexOf (element);
+        return index >= 0 && index < savedState.getNumChildren() && holdTheSameProject (element, savedState.getChild (index));
+    };
 
-    if (! holdTheSameProject (edit->state, savedState))
+    const auto same = compareAll ? holdTheSameProject (edit->state, savedState)
+                                 : std::all_of (elementsToCompare.begin(), elementsToCompare.end(), isSame);
+
+    mayHaveChanged = compareAll = false;
+    elementsToCompare.clearQuick();
+
+    if (! same)
     {
         changedSinceSave = true;
         changedSinceAutosave = true;
@@ -418,9 +512,22 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
         return;
 
     if (changedSinceSave)
+    {
         changedSinceAutosave = true;
+        return;
+    }
+
+    // Perhaps nothing changed: compared with savedState when asked, the element of the Edit's state it is in.
+    mayHaveChanged = true;
+    auto element = tree;
+
+    while (element.getParent().isValid() && element.getParent() != edit->state)
+        element = element.getParent();
+
+    if (element == edit->state || element.getParent() != edit->state)
+        compareAll = true;
     else
-        mayHaveChanged = true; // perhaps nothing changed: compared with savedState when asked
+        elementsToCompare.addIfNotAlreadyThere (element);
 }
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
@@ -526,7 +633,26 @@ void AutosaveTimer::timerCallback()
     const auto recordingEnded = wasRecording && ! recording;
     wasRecording = recording;
 
-    if (recording)
+    // A write that finished: one that failed counts its changes as not autosaved, so they are written again, and after a
+    // few in a row the app says so. The project file itself is untouched.
+    if (const auto autosaving = project.isAutosaving(); wasAutosaving && ! autosaving)
+    {
+        if (! project.takeAutosaveFailure())
+        {
+            failures = 0;
+        }
+        else
+        {
+            juce::Logger::writeToLog ("Autosave failed: " + Project::getAutosaveFile (project.getFile()).getFullPathName());
+
+            if (++failures == failuresToReport && onRepeatedFailures != nullptr)
+                onRepeatedFailures();
+        }
+    }
+
+    wasAutosaving = project.isAutosaving();
+
+    if (recording || wasAutosaving)
         return;
 
     if (! project.hasChangesToAutosave())
@@ -540,11 +666,15 @@ void AutosaveTimer::timerCallback()
     if (changedSince == 0)
         changedSince = now;
 
+    // Due once changes have waited; while the song plays, once it stops, unless it plays on for too long.
     const auto wait = (juce::uint32) (autosavedOnce ? intervalSeconds : firstDelaySeconds) * 1000;
+    const auto waited = now - changedSince;
+    const auto playing = project.getEdit().getTransport().isPlaying();
 
-    // A failed autosave is tried again a second later; the project file itself is untouched.
-    if ((recordingEnded || now - changedSince >= wait) && project.autosave().wasOk())
+    if (recordingEnded || (waited >= wait && (! playing || waited >= wait + (juce::uint32) maxWaitWhilePlayingSeconds * 1000)))
     {
+        project.autosaveInBackground();
+        wasAutosaving = project.isAutosaving();
         autosavedOnce = true;
         changedSince = 0;
     }

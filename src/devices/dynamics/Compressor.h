@@ -52,6 +52,7 @@ private:
     double sampleRate = 44100.0;
     float makeupSmoothing = 0.001f; // of the way to the makeup gain, per sample
     float makeupDecibels = 0.0f;
+    float lastGainDecibels = 0.0f, lastGain = 1.0f; // the gain last worked out
     bool isFirstBlock = true;
     dsp::LevelFollower reduction;          // in decibels: rising with the attack, falling with the release
     std::array<dsp::Filter, 2> lowCuts {}; // the detector's, per channel

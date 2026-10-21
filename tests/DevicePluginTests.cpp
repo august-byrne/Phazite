@@ -308,3 +308,90 @@ TEST_CASE ("No parameter of Phazite's devices is named as a property Tracktion k
         }
     }
 }
+
+TEST_CASE ("A device sleeps once what comes in and what it plays have been silent a while, and wakes at the first sound")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    te::Plugin::Ptr keepGain, keepTone;
+    auto& effect = createDevice (*edit, TestGain::typeID, keepGain);
+    auto& gain = dynamic_cast<TestGain&> (effect.getProcessor());
+    auto& instrument = createDevice (*edit, TestTone::typeID, keepTone);
+    auto& tone = dynamic_cast<TestTone&> (instrument.getProcessor());
+    effect.baseClassInitialise ({ 0_tp, testRate, testBlock });
+    instrument.baseClassInitialise ({ 0_tp, testRate, testBlock });
+    effect.findParameter ("gain")->setParameter (-6.0206f, juce::sendNotification);
+    juce::AudioBuffer<float> buffer (2, testBlock);
+
+    // A quarter of a second of silence (24 blocks), then each sleeps.
+    for (int block = 0; block < 30; ++block)
+    {
+        buffer.clear();
+        effect.applyToBuffer (makeContext (buffer));
+        instrument.applyToBuffer (makeContext (buffer));
+    }
+
+    CHECK (gain.processed == 24);
+    CHECK (tone.processed == 24);
+
+    // The first sound wakes the effect, which treats it whole.
+    for (int channel = 0; channel < 2; ++channel)
+        juce::FloatVectorOperations::fill (buffer.getWritePointer (channel), 1.0f, testBlock);
+
+    effect.applyToBuffer (makeContext (buffer));
+    CHECK (gain.processed == 25);
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (0.5f).epsilon (0.001));
+
+    // A note wakes the instrument, which plays it from its sample.
+    te::MidiMessageArray midi;
+    midi.addMidiMessage (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0.001, te::MPESourceID {}); // sample 48
+    buffer.clear();
+    instrument.applyToBuffer (makeContext (buffer, &midi));
+    CHECK (tone.processed == 25);
+    CHECK (buffer.getSample (0, 47) == doctest::Approx (0.0f));
+    CHECK (buffer.getSample (0, 48) == doctest::Approx (1.0f));
+
+    effect.baseClassDeinitialise();
+    instrument.baseClassDeinitialise();
+}
+
+TEST_CASE ("A continuous parameter that moves between blocks glides there over the next, while choices jump")
+{
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    te::Plugin::Ptr keep;
+    auto& device = createDevice (*edit, TestGain::typeID, keep);
+    auto& gain = dynamic_cast<TestGain&> (device.getProcessor());
+    device.baseClassInitialise ({ 0_tp, testRate, testBlock });
+    juce::AudioBuffer<float> buffer (2, testBlock);
+
+    const auto play = [&]
+    {
+        for (int channel = 0; channel < 2; ++channel)
+            juce::FloatVectorOperations::fill (buffer.getWritePointer (channel), 1.0f, testBlock);
+
+        device.applyToBuffer (makeContext (buffer));
+    };
+
+    play();
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (1.0f));
+    CHECK (gain.processed == 1); // a block that changes nothing plays whole
+
+    // From 0 dB to -6 dB: a step of the way each 32 samples, there by the block's end.
+    device.findParameter ("gain")->setParameter (-6.0206f, juce::sendNotification);
+    play();
+    CHECK (gain.processed == 1 + testBlock / 32);
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (juce::Decibels::decibelsToGain (-6.0206f / 16.0f)).epsilon (0.001));
+    CHECK (buffer.getSample (0, testBlock - 1) == doctest::Approx (0.5f).epsilon (0.001));
+
+    for (int i = 32; i < testBlock; i += 32)
+        CHECK (buffer.getSample (0, i) < buffer.getSample (0, i - 32));
+
+    // Settled: the next block plays whole again. A choice that changes jumps, with no glide.
+    play();
+    CHECK (gain.processed == 2 + testBlock / 32);
+    device.findParameter ("mode")->setParameter (1.0f, juce::sendNotification);
+    play();
+    CHECK (gain.processed == 3 + testBlock / 32);
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (-0.5f).epsilon (0.001));
+
+    device.baseClassDeinitialise();
+}

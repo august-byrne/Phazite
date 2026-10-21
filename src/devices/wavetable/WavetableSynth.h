@@ -311,5 +311,6 @@ private:
     void stealVoice (Voice&);
     void render (float* left, float* right, int numSamples, std::span<const float> parameters);
     void freeRetired();
+    static void renderStep (const OscillatorRun&, Reader&, float* out, int length) noexcept;
 };
 } // namespace phazite::devices

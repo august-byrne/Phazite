@@ -60,7 +60,8 @@ struct Playlist::AddTrackRow : public juce::Button
 // draws the chosen shape; Delete deletes the points it passes; Select selects. Each drag is one undo step. Collapsed, it
 // shows the line in a thin row, and a double-click expands it.
 struct Playlist::AutomationLaneView : public juce::Component,
-                                      public juce::SettableTooltipClient
+                                      public juce::SettableTooltipClient,
+                                      private juce::Timer
 {
     AutomationLaneView (Playlist&, TrackID, const ParameterRef&);
 
@@ -99,6 +100,11 @@ struct Playlist::AutomationLaneView : public juce::Component,
     juce::Colour colour;
     bool collapsed = false;
     std::vector<AutomationPoint> points; // as shown
+    float shownValue = 0.0f;             // without points: the value its dashed line shows
+
+    // Without points, the line shows the parameter's value, which a knob may move at any time: read a few times a second,
+    // rather than heard of as a change to the song (docs/performance-audit.md, U1).
+    void timerCallback() override;
 
     Drag drag = Drag::none, pendingDrag = Drag::none;
     TimelineGesture gesture;

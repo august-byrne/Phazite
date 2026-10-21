@@ -430,6 +430,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     searchField.setTitle ("Search sounds, instruments and effects");
     searchField.setFont (juce::FontOptions (TextSize::body));
     searchField.addListener (this);
+    searchDelay.search = [this] { updateSearch(); };
     searchField.onNavigationKey = [this] (const juce::KeyPress& key)
     {
         if (key != juce::KeyPress::downKey)
@@ -597,8 +598,17 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
         });
 }
 
+void Browser::textEditorTextChanged (juce::TextEditor&)
+{
+    if (lastSearchMilliseconds > slowSearchMilliseconds && searchField.getText().trim().isNotEmpty())
+        searchDelay.startTimer (150);
+    else
+        updateSearch();
+}
+
 void Browser::updateSearch()
 {
+    searchDelay.stopTimer();
     const auto query = searchField.getText().trim();
 
     if (query.isEmpty())
@@ -607,8 +617,10 @@ void Browser::updateSearch()
         return;
     }
 
+    const auto started = juce::Time::getMillisecondCounterHiRes();
     searchRoot->clearSubItems();
     addRows (*searchRoot, model.search (query));
+    lastSearchMilliseconds = juce::Time::getMillisecondCounterHiRes() - started;
 
     tree->setRootItem (searchRoot.get());
 }

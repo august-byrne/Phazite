@@ -594,6 +594,9 @@ void LevelMeter::setSource (LevelSource newSource)
 
 void LevelMeter::timerCallback()
 {
+    if (! isShowing()) // behind another tab, or in a hidden panel (docs/performance-audit.md, U5)
+        return;
+
     source.refresh();
     const bool hasSource = source.isMeasuring();
     const bool mono = hasSource && source.getNumChannels() == 1;

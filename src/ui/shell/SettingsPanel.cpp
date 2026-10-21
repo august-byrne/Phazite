@@ -4,7 +4,7 @@
 #include "model/transport/TransportModel.h"
 #include "ui/theme/LookAndFeel.h"
 
-#include <juce_audio_utils/juce_audio_utils.h> // AudioDeviceSelectorComponent
+#include <cmath>
 
 namespace phazite::ui
 {
@@ -17,7 +17,151 @@ namespace
         label.setText (text, juce::dontSendNotification);
         label.setFont (juce::FontOptions (TextSize::title, juce::Font::bold));
     }
+
+    // How tall a label's text is, wrapped to a width.
+    int getTextHeight (const juce::Label& label, int width)
+    {
+        if (label.getText().isEmpty())
+            return 0;
+
+        juce::AttributedString text (label.getText());
+        text.setFont (label.getFont());
+        juce::TextLayout layout;
+        layout.createLayout (text, (float) width);
+        return (int) std::ceil (layout.getHeight()) + Space::xs;
+    }
 } // namespace
+
+//==============================================================================
+DelayDescription describeDelay (const EngineContext::AudioOutput& output, const DelayCompensation& compensation, bool lowLatency,
+                                bool hasAsioDrivers)
+{
+    DelayDescription description;
+
+    if (! output.isOpen)
+    {
+        description.lines.add ("No audio output is open, so nothing can be heard: choose one above.");
+        return description;
+    }
+
+    const auto ms = [] (double seconds)
+    {
+        const auto milliseconds = seconds * 1000.0;
+        return juce::String (milliseconds, milliseconds < 100.0 ? 1 : 0) + " ms";
+    };
+
+    const auto shortest = output.latencySeconds + (lowLatency ? 0.0 : compensation.seconds);
+    auto& lines = description.lines;
+    lines.add ("A note you play sounds " + ms (shortest) + " to " + ms (shortest + output.bufferSeconds) + " later"
+               + (output.isBluetooth ? ", and Bluetooth adds more." : "."));
+    lines.add ("The buffer: " + juce::String (output.bufferSamples) + " samples, " + ms (output.bufferSeconds)
+               + ", which a note waits for at most.");
+    lines.add ("The output: " + ms (output.latencySeconds) + ", as its driver reports it.");
+
+    if (lowLatency)
+    {
+        lines.add ("Delay compensation: off, as Low Latency is on; Phazite's devices that look ahead are bypassed.");
+    }
+    else if (compensation.seconds > 0.0)
+    {
+        juce::StringArray late;
+
+        for (const auto& [name, seconds] : compensation.devices)
+            if (late.size() < 3)
+                late.add (name + " (" + ms (seconds) + ")");
+
+        lines.add ("Delay compensation: " + ms (compensation.seconds) + ", for " + late.joinIntoString (", ")
+                   + ". Low Latency, in the top bar, turns it off while you play.");
+    }
+    else
+    {
+        lines.add ("Delay compensation: none, as no device in this song looks ahead.");
+    }
+
+    if (hasAsioDrivers && ! output.type.equalsIgnoreCase ("ASIO"))
+        lines.add ("With an audio interface, choose ASIO above, then its driver: sound comes with less delay.");
+
+    if (output.isBluetooth)
+        description.warning = "This output is Bluetooth, which adds about 150 to 250 ms that no driver reports: fine for listening, "
+                              "too slow for playing and recording. For those, plug in wired headphones or speakers and choose them "
+                              "above.";
+
+    return description;
+}
+
+//==============================================================================
+AudioSettings::AudioSettings (EngineContext& e, const ProjectContext& context)
+    : engine (e),
+      projectContext (context),
+      // No inputs to 512 inputs, 1 to 512 outputs, as stereo pairs; nothing behind a button. MIDI inputs are in their own
+      // tab, because Tracktion (not JUCE's device manager) opens them.
+      selector (e.getAudioDeviceManager(), 0, 512, 1, 512, false, false, true, false)
+{
+    setTitle ("Audio");
+    viewport.setViewedComponent (&selector, false);
+    viewport.setScrollBarsShown (true, false);
+    makeHeading (delayHeading, "Delay");
+
+    for (auto* label : { &delayText, &warning })
+    {
+        label->setJustificationType (juce::Justification::topLeft);
+        label->setMinimumHorizontalScale (1.0f);
+    }
+
+    delayText.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+    warning.setColour (juce::Label::textColourId, getPalette (*this).warning);
+
+    for (auto* c : std::initializer_list<juce::Component*> { &viewport, &delayHeading, &delayText, &warning })
+        addAndMakeVisible (c);
+
+    engine.addChangeListener (this);
+    startTimer (1000);
+    update();
+}
+
+AudioSettings::~AudioSettings()
+{
+    engine.removeChangeListener (this);
+}
+
+void AudioSettings::update()
+{
+    const auto description =
+        describeDelay (engine.getAudioOutput(), getDelayCompensation (projectContext), engine.isLowLatency(), engine.hasAsioDrivers());
+    const auto text = description.lines.joinIntoString ("\n");
+
+    if (text != delayText.getText() || description.warning != warning.getText())
+    {
+        delayText.setText (text, juce::dontSendNotification);
+        warning.setText (description.warning, juce::dontSendNotification);
+        warning.setVisible (description.warning.isNotEmpty());
+        resized();
+    }
+}
+
+void AudioSettings::paint (juce::Graphics& g)
+{
+    g.fillAll (getPalette (*this).surface);
+}
+
+void AudioSettings::resized()
+{
+    // The delay's text under the device settings, as tall as it needs.
+    auto area = getLocalBounds().reduced (Space::l);
+    const auto textHeight = getTextHeight (delayText, area.getWidth());
+    const auto warningHeight = warning.isVisible() ? getTextHeight (warning, area.getWidth()) + Space::s : 0;
+    auto bottom = area.removeFromBottom (rowHeight + textHeight + warningHeight);
+    area.removeFromBottom (Space::m);
+
+    viewport.setBounds (area);
+    selector.setSize (viewport.getMaximumVisibleWidth(), selector.getHeight()); // it sets its own height to what it shows
+
+    delayHeading.setBounds (bottom.removeFromTop (rowHeight));
+    delayText.setBounds (bottom.removeFromTop (textHeight));
+
+    if (warning.isVisible())
+        warning.setBounds (bottom.withTrimmedTop (Space::s));
+}
 
 //==============================================================================
 MidiSettings::MidiSettings (EngineContext& e, ComputerKeyboard& keyboard, const ProjectContext& context)
@@ -151,12 +295,8 @@ SettingsPanel::SettingsPanel (EngineContext& engine, CommandBridge& commands, Co
 
     const auto background = getPalette (*this).surface;
 
-    // The device type (including ASIO on Windows), device, sample rate and buffer size; 0 to 512 inputs
-    // and 1 to 512 outputs, shown as stereo pairs, with the advanced options behind a button. MIDI
-    // inputs are in their own tab, because Tracktion (not JUCE's device manager) opens them. The
-    // Engine saves changes in its settings.
-    addTab ("Audio", background,
-            new juce::AudioDeviceSelectorComponent (engine.getAudioDeviceManager(), 0, 512, 1, 512, false, false, true, true), true);
+    // The Engine saves the audio settings' changes in its settings.
+    addTab ("Audio", background, new AudioSettings (engine, context), true);
     addTab ("MIDI", background, new MidiSettings (engine, computerKeyboard, context), true);
     addTab ("Shortcuts", background, new ShortcutSettings (commands, std::move (chooseKeymap)), true);
 }

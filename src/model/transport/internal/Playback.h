@@ -79,6 +79,10 @@ void playOrPause (te::Edit&);
 // Stops playback and puts the playhead back where playback starts.
 void stopAndReturn (te::Edit&);
 
+// The Low Latency switch, for the session (model/engine/internal/EngineSetup.h: setLowLatency()).
+bool isLowLatencyOn (const te::Edit&);
+void toggleLowLatency (te::Edit&);
+
 //==============================================================================
 // Follows where an Edit's song ends, as clips are added, moved, trimmed or deleted and the tempo changes: keeps the
 // loop around the song while the loop follows it, and stops playback that doesn't loop at the song's end, rather
@@ -110,7 +114,8 @@ private:
 };
 
 //==============================================================================
-// The transport's commands, for the selection manager's Edit: Play / Stop, Play / Pause, Go to Start and Go to End.
+// The transport's commands, for the selection manager's Edit: Play / Stop, Play / Pause, Go to Start, Go to End and Low
+// Latency.
 void addTransportCommands (CommandRegistry&, te::SelectionManager&);
 
 // The loop's commands: Loop (on or off), Loop Selection (the time range selected in the playlist), Loop

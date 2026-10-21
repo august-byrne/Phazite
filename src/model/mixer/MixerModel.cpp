@@ -15,6 +15,8 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
+
 namespace phazite
 {
 namespace
@@ -712,5 +714,38 @@ void resetLoudness (ProjectContext& context)
     if (auto* edit = getEdit (context))
         if (auto* meter = findLoudnessMeter (*edit))
             meter->resetReadings();
+}
+
+//==============================================================================
+DelayCompensation getDelayCompensation (const ProjectContext& context)
+{
+    DelayCompensation compensation;
+    auto* edit = getEdit (context);
+
+    if (edit == nullptr)
+        return compensation;
+
+    for (auto* track : te::getAllTracks (*edit))
+        for (auto* plugin : track->pluginList.getPlugins())
+            if (plugin->isEnabled())
+                if (const auto latency = plugin->getLatencySeconds(); latency > 0.0)
+                    compensation.devices.push_back (
+                        { plugin->getName() + " on " + (track->isMasterTrack() ? juce::String ("Master") : track->getName()), latency });
+
+    std::stable_sort (compensation.devices.begin(), compensation.devices.end(),
+                      [] (const auto& a, const auto& b) { return a.second > b.second; });
+
+    // What the playback graph waits for, the longest of its paths; the latest device without one.
+    if (edit->isLatencyCompensationEnabled())
+    {
+        const auto rate = edit->engine.getDeviceManager().getSampleRate();
+
+        if (auto* playback = edit->getTransport().getCurrentPlaybackContext(); playback != nullptr && rate > 0.0)
+            compensation.seconds = playback->getLatencySamples() / rate;
+        else if (! compensation.devices.empty())
+            compensation.seconds = compensation.devices.front().second;
+    }
+
+    return compensation;
 }
 } // namespace phazite

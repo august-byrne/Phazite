@@ -44,8 +44,9 @@ enum class Icon
     effect,
     preview,
     download,
-    close, // closes something
-    frozen // a frozen track: it plays a file of its sound
+    close,     // closes something
+    frozen,    // a frozen track: it plays a file of its sound
+    lowLatency // the Low Latency switch: a lightning bolt
 };
 
 // The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read. A filled icon has its shape

@@ -132,7 +132,11 @@ Steady playback is clean everywhere. Every scenario allocates something in its f
 
 **14. The click track** (source): reads message-thread values on the audio thread without synchronisation. That's a data race rather than a lock. ThreadSanitizer in CI should show it. Report upstream.
 
-**15. The clip launcher** (source): uses spin locks, and its follow actions have unbounded loops. The launcher waits until after v1 (decision 2), so revisit then.
+**15. The clip launcher** (source): uses spin locks, and its follow actions have unbounded loops. The launcher waits until after v1 (decision 2), so revisit then. Since 2026-10-21 Phazite turns clip slots off (`EngineBehaviour::areClipSlotsEnabled()`), so tracks have none of its nodes.
+
+**22. Live MIDI** (source; found by the performance audit, 2026-10-21, finding R8).
+- **What:** a note played live goes through two locks the audio thread takes too: the MIDI input device's (`MidiInputDevice`, taken by the thread that delivers the note) and the live input node's (`MidiInputDeviceNode::incomingMessagesMutex` and `liveMessagesMutex`, taken on the audio thread each block). They are held briefly and contended only while a note arrives as a block is processed.
+- **Action:** report upstream, with a lock-free FIFO from the delivering thread to the node as the fix. Watch it in the benchmark of a live note (`tests/Benchmarks.cpp`).
 
 ### Built-in effects
 

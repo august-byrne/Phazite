@@ -3,8 +3,10 @@
 // projects. Nothing here may reach a dialog (an AlertWindow, a FileChooser or a menu): Linux CI has no display.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestPlugin.h"
 #include "app/AppServices.h"
 #include "app/ProjectSession.h"
+#include "app/RunMarker.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/base/internal/Schema.h"
@@ -468,4 +470,97 @@ TEST_CASE ("An untitled song's recordings survive a crash before its first autos
     CHECK (notices == juce::StringArray { "Recordings recovered" });
     CHECK (session.getProject()->hasUnsavedChanges());
     CHECK_FALSE (edit.getUndoManager().canUndo());
+}
+
+TEST_CASE ("The run marker tells a start after Phazite didn't close properly")
+{
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Running");
+
+    {
+        const phazite::RunMarker marker (file);
+        CHECK_FALSE (marker.didLastRunEndBadly());
+        CHECK (file.existsAsFile());
+    }
+
+    CHECK_FALSE (file.exists());     // closed properly
+    REQUIRE (file.create().wasOk()); // as a crash leaves it
+    const phazite::RunMarker afterCrash (file);
+    CHECK (afterCrash.didLastRunEndBadly());
+}
+
+TEST_CASE ("After a crash, Phazite asks how to open the last project, and can open it with its plug-ins off")
+{
+    using AfterCrash = phazite::ProjectSession::AfterCrash;
+    auto& engine = phazite::test::getEngine();
+    const phazite::test::TestPlugin testPlugin;
+    phazite::test::TemporaryFolder temp;
+    const auto projects = temp.folder.getChildFile ("Projects");
+    const auto unsaved = temp.folder.getChildFile ("Unsaved");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+
+    // The last project open, with a plug-in on its first track.
+    juce::File file;
+
+    {
+        juce::String error;
+        auto project = phazite::Project::create (engine, projects, "Crashing", error);
+        REQUIRE (project != nullptr);
+        te::getAudioTracks (project->getEdit())[0]->pluginList.insertPlugin (phazite::test::TestPlugin::create (project->getEdit()), 0,
+                                                                             nullptr);
+        REQUIRE (project->save().wasOk());
+        file = project->getFile();
+    }
+
+    recent.add (file);
+
+    const auto openAfterCrash = [&] (AfterCrash choice, juce::StringArray& notices)
+    {
+        auto session = std::make_unique<phazite::ProjectSession> (engine, phazite::getUIBehaviour (engine), recent, projects, unsaved);
+        juce::Array<juce::File> asked;
+        session->askAfterCrash = [&asked, choice] (const juce::File& projectFile, std::function<void (AfterCrash)> callback)
+        {
+            asked.add (projectFile);
+            callback (choice);
+        };
+        session->onNotice = [&notices] (const juce::String& title, const juce::String&) { notices.add (title); };
+        session->openAtStartup (true);
+        CHECK (asked == juce::Array<juce::File> { file });
+        return session;
+    };
+
+    const auto getPlugin = [] (phazite::ProjectSession& session)
+    {
+        REQUIRE (session.getProject() != nullptr);
+        return dynamic_cast<te::ExternalPlugin*> (
+            te::getAudioTracks (session.getProject()->getEdit())[0]->pluginList.getPlugins()[0].get());
+    };
+
+    // With its plug-ins off: the plug-in stays unloaded, and Phazite says so; the next project loads them again.
+    {
+        juce::StringArray notices;
+        auto session = openAfterCrash (AfterCrash::openWithoutPlugins, notices);
+        auto* plugin = getPlugin (*session);
+        REQUIRE (plugin != nullptr);
+        CHECK (plugin->getAudioPluginInstance() == nullptr);
+        CHECK (notices == juce::StringArray { "Plug-ins off" });
+    }
+
+    {
+        juce::StringArray notices;
+        auto session = openAfterCrash (AfterCrash::open, notices);
+        auto* plugin = getPlugin (*session);
+        REQUIRE (plugin != nullptr);
+        CHECK (plugin->getAudioPluginInstance() != nullptr);
+        CHECK (notices.isEmpty());
+    }
+
+    // Or not at all: a new project instead.
+    {
+        juce::StringArray notices;
+        auto session = openAfterCrash (AfterCrash::startNew, notices);
+        REQUIRE (session->getProject() != nullptr);
+        CHECK (session->getProject()->getFile() != file);
+    }
 }

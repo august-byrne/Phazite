@@ -31,6 +31,11 @@ bool setLiveMidiTrack (te::AudioTrack&);
 // stopped. Call it when a project opens and whenever the MIDI devices change.
 void routeLiveMidiInput (te::Edit&);
 
+// Phazite sends no MIDI out yet, so it closes the MIDI outputs Tracktion opens: the first it finds on a first run, and
+// those earlier settings left on, such as Windows' GS Wavetable Synth (docs/performance-audit.md, A3). They list again
+// as they are plugged in, so this runs whenever the devices change.
+void closeMidiOutputs (te::Engine&);
+
 // True if the track has an instrument (a synth or sampler plug-in) that live MIDI input can play.
 bool hasInstrument (const te::AudioTrack&);
 

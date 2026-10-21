@@ -218,6 +218,30 @@ TEST_CASE ("The master's loudness meter reads a stereo sine at its level")
     CHECK (readings.momentaryValid);
     CHECK (readings.momentaryLufs == doctest::Approx (-20.0f).epsilon (0.02));
     CHECK (readings.truePeakDb == doctest::Approx (-20.0f).epsilon (0.02));
+
+    // After 3.5 s of silence the readings have fallen, and it rests; the next sound is measured again at once.
+    buffer.clear();
+
+    for (int block = 0; block < 400; ++block)
+        meter->applyToBuffer ({ &buffer, 0, blockSize, nullptr, 0.0, {}, true, false, false, false });
+
+    CHECK (meter->getReadings().momentaryLufs < -60.0f);
+    meter->resetReadings();
+
+    for (int block = 0; block < 100; ++block)
+    {
+        for (int i = 0; i < blockSize; ++i)
+        {
+            const auto sample = amplitude * (float) std::sin (phase);
+            buffer.setSample (0, i, sample);
+            buffer.setSample (1, i, sample);
+            phase += juce::MathConstants<double>::twoPi * 1000.0 / sampleRate;
+        }
+
+        meter->applyToBuffer ({ &buffer, 0, blockSize, nullptr, 0.0, {}, true, false, false, false });
+    }
+
+    CHECK (meter->getReadings().momentaryLufs == doctest::Approx (-20.0f).epsilon (0.02));
 }
 
 TEST_CASE ("The device list offers Phazite's own devices, instruments first, and none of Tracktion's")

@@ -12,9 +12,13 @@ struct Welcome
 {
     explicit Welcome (const phazite::SoundPack::Release& release, const juce::String& keymapName = "Phazite")
         : soundPack (packs.folder, release),
-          panel (soundPack, deviceManager, keymapName, [this] (const juce::String& name) { chosenKeymaps.add (name); })
+          panel (
+              soundPack, deviceManager, keymapName, [this] (const juce::String& name) { chosenKeymaps.add (name); },
+              [this] { return bluetooth; })
     {
     }
+
+    bool bluetooth = false; // what the output is, as the panel asks
 
     phazite::test::TemporaryFolder packs;
     phazite::SoundPack soundPack;
@@ -146,4 +150,22 @@ TEST_CASE ("The welcome window says why a download failed, and offers it again")
     CHECK (page.getMainButton().getButtonText()
            == juce::String (phazite::SoundPack::canDownload() ? "Try Again" : "Open the Download Page"));
     CHECK (w.panel.getCloseButton().getButtonText() == juce::String ("Not Now"));
+}
+
+TEST_CASE ("The welcome window's sound page warns while the output is Bluetooth")
+{
+    phazite::test::PackRelease source;
+    Welcome w (source.release);
+    w.click (w.panel.getNextButton());
+    CHECK_FALSE (w.panel.getSoundPage().warnsOfBluetooth());
+
+    // The output changes to Bluetooth headphones: the device manager says so.
+    w.bluetooth = true;
+    w.deviceManager.sendSynchronousChangeMessage();
+    CHECK (w.panel.getSoundPage().warnsOfBluetooth());
+    phazite::test::checkChildrenApart (w.panel.getSoundPage());
+
+    w.bluetooth = false;
+    w.deviceManager.sendSynchronousChangeMessage();
+    CHECK_FALSE (w.panel.getSoundPage().warnsOfBluetooth());
 }

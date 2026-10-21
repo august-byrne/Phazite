@@ -256,6 +256,71 @@ namespace
     }
 } // namespace
 
+// One oscillator's unison voice over a stretch, its warp chosen once rather than at each sample, as render() plays it sample
+// by sample. Not for FM, which reads the other oscillator's last sample.
+void WavetableSynth::renderStep (const OscillatorRun& run, Reader& reader, float* out, int length) noexcept
+{
+    const auto& from = reader.from;
+    const auto& to = reader.to;
+    const auto morph = reader.morph, dt = reader.increment, amount = run.warpAmount;
+    auto t = reader.phase;
+    const auto advance = [&t, dt] { t = t + dt < 1.0f ? t + dt : t + dt - 1.0f; };
+
+    switch (run.warp)
+    {
+        case Warp::sync:
+        {
+            // The jump back to the wave's start when the note's cycle ends, smoothed (PolyBLEP).
+            const auto jump = readAt (from, to, morph, 0.0f) - readAt (from, to, morph, wrap (run.syncRatio));
+
+            for (int i = 0; i < length; ++i, advance())
+            {
+                out[i] = readAt (from, to, morph, wrap (t * run.syncRatio));
+
+                if (t < dt || t > 1.0f - dt)
+                    out[i] += 0.5f * jump * dsp::polyBlep (t, dt);
+            }
+
+            break;
+        }
+
+        case Warp::bendUp:
+        case Warp::bendDown:
+            for (int i = 0; i < length; ++i, advance())
+                out[i] = readAt (from, to, morph, wrap (t * run.bend / (1.0f + (run.bend - 1.0f) * t)));
+
+            break;
+
+        case Warp::pulseWidth:
+            for (int i = 0; i < length; ++i, advance())
+                out[i] = readAt (from, to, morph, t < run.pulseWidth ? wrap (t / run.pulseWidth) : 0.0f);
+
+            break;
+
+        case Warp::mirror:
+            for (int i = 0; i < length; ++i, advance())
+            {
+                // Read forward to the middle, then back: heard as much as the amount says.
+                out[i] = readAt (from, to, morph, t);
+
+                if (amount > 0.0f)
+                    out[i] += amount * (readAt (from, to, morph, wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t)) - out[i]);
+            }
+
+            break;
+
+        case Warp::fm: // render() plays it sample by sample
+        case Warp::none:
+        case Warp::ringMod:
+            for (int i = 0; i < length; ++i, advance())
+                out[i] = readAt (from, to, morph, t);
+
+            break;
+    }
+
+    reader.phase = t;
+}
+
 const DeviceInfo WavetableSynth::info { .typeID = typeID,
                                         .name = "Wavetable",
                                         .kind = DeviceKind::instrument,
@@ -754,6 +819,10 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                                                                  tables[1].load (std::memory_order_acquire) };
     const auto nyquistLimit = 0.45 * sampleRate;
 
+    // Each oscillator's pitch as a ratio of the other's, for the warps that follow it.
+    const std::array<float, numOscillators> otherRatios { std::exp2 ((settings.pitch[1] - settings.pitch[0]) / 12.0f),
+                                                          std::exp2 ((settings.pitch[0] - settings.pitch[1]) / 12.0f) };
+
     for (int start = 0; start < numSamples;)
     {
         // The control rate keeps its own grid of controlStep samples across blocks and the events that split them, so that
@@ -810,6 +879,12 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 const auto basePitch = voice.pitch + settings.bent + pitchRange * moveOf (moves, ModTarget::pitch);
                 const auto detune = std::max (0.0f, settings.detune + detuneRange * moveOf (moves, ModTarget::unisonDetune));
 
+                // Each unison voice's pitch as a ratio of its oscillator's, the same for both (docs/performance-audit.md, A4).
+                std::array<double, maxUnison> unisonRatios {};
+
+                for (int u = 0; u < settings.unison; ++u)
+                    unisonRatios[(size_t) u] = std::exp2 ((double) (settings.places[(size_t) u] * detune) * 0.01 / 12.0);
+
                 for (int osc = 0; osc < numOscillators; ++osc)
                 {
                     auto& run = voice.oscillators[(size_t) osc];
@@ -832,17 +907,15 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
 
                     const auto semitones =
                         (double) (basePitch + settings.pitch[(size_t) osc] + pitchRange * moveOf (moves, targetOf (ModTarget::osc1Pitch)));
-                    const auto other = 1 - osc;
-                    const auto otherRatio = std::exp2 ((settings.pitch[(size_t) other] - settings.pitch[(size_t) osc]) / 12.0f);
-                    const auto speed = getWarpSpeed (run.warp, run.warpAmount, otherRatio);
+                    const auto speed = getWarpSpeed (run.warp, run.warpAmount, otherRatios[(size_t) osc]);
 
                     // Each unison voice's pitch, then the level that its fastest allows.
+                    const auto oscillatorIncrement = dsp::noteToFrequency (semitones) / sampleRate;
                     auto fastest = 0.0;
 
                     for (int u = 0; u < settings.unison; ++u)
                     {
-                        const auto cents = (double) (settings.places[(size_t) u] * detune);
-                        const auto increment = std::min (0.49, dsp::noteToFrequency (semitones + 0.01 * cents) / sampleRate);
+                        const auto increment = std::min (0.49, oscillatorIncrement * unisonRatios[(size_t) u]);
                         run.readers[(size_t) u].increment = (float) increment;
                         fastest = std::max (fastest, increment);
                     }
@@ -903,11 +976,52 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
             auto& osc1Run = voice.oscillators[0];
             auto& osc2Run = voice.oscillators[1];
 
+            // Without FM, which reads the other oscillator sample by sample, each oscillator's unison voices play the stretch
+            // first (renderStep()), and are mixed after: the same sums, in the same order (docs/performance-audit.md, A6).
+            const auto blockwise = ! ((osc1Run.on && osc1Run.warp == Warp::fm) || (osc2Run.on && osc2Run.warp == Warp::fm));
+            std::array<float, controlStep> stepLefts {}, stepRights {};
+
+            if (blockwise)
+            {
+                for (int u = 0; u < settings.unison; ++u)
+                {
+                    std::array<std::array<float, controlStep>, numOscillators> raws {};
+
+                    for (int osc = 0; osc < numOscillators; ++osc)
+                        if (auto& run = voice.oscillators[(size_t) osc]; run.on)
+                            renderStep (run, run.readers[(size_t) u], raws[(size_t) osc].data(), length);
+
+                    const auto& panned = osc1Run.on ? osc1Run.readers[(size_t) u] : osc2Run.readers[(size_t) u];
+
+                    for (int i = 0; i < length; ++i)
+                    {
+                        // Ring modulation: by the other oscillator as it is now.
+                        auto out1 = raws[0][(size_t) i], out2 = raws[1][(size_t) i];
+
+                        if (osc1Run.on && osc1Run.warp == Warp::ringMod && osc2Run.on)
+                            out1 *= 1.0f - osc1Run.warpAmount + osc1Run.warpAmount * raws[1][(size_t) i];
+
+                        if (osc2Run.on && osc2Run.warp == Warp::ringMod && osc1Run.on)
+                            out2 *= 1.0f - osc2Run.warpAmount + osc2Run.warpAmount * raws[0][(size_t) i];
+
+                        const auto sound = (osc1Run.on ? out1 * osc1Run.level : 0.0f) + (osc2Run.on ? out2 * osc2Run.level : 0.0f);
+                        stepLefts[(size_t) i] += sound * panned.left;
+                        stepRights[(size_t) i] += sound * panned.right;
+                    }
+
+                    if (length > 0)
+                    {
+                        osc1Run.readers[(size_t) u].last = raws[0][(size_t) length - 1];
+                        osc2Run.readers[(size_t) u].last = raws[1][(size_t) length - 1];
+                    }
+                }
+            }
+
             for (int i = 0; i < length; ++i)
             {
-                auto soundLeft = 0.0f, soundRight = 0.0f;
+                auto soundLeft = stepLefts[(size_t) i], soundRight = stepRights[(size_t) i];
 
-                for (int u = 0; u < settings.unison; ++u)
+                for (int u = 0; u < settings.unison && ! blockwise; ++u)
                 {
                     std::array<float, numOscillators> raw {};
 

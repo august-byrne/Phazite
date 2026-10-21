@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DevicePlugin.h"
+#include "model/engine/internal/EngineSetup.h"
 
 #include <algorithm>
 
@@ -56,6 +57,9 @@ DevicePlugin::DevicePlugin (te::PluginCreationInfo creation, const devices::Devi
         parameter->attachToCurrentValue (*stored);
         parameters.push_back (parameter);
         currentValues.push_back (description.defaultValue);
+        targetValues.push_back (description.defaultValue);
+        previousValues.push_back (description.defaultValue);
+        glides.push_back (description.unit != devices::Unit::choice && description.unit != devices::Unit::toggle);
     }
 
     // An effect's mix, which this applies (an instrument has none).
@@ -124,7 +128,13 @@ double DevicePlugin::getTailLength() const
 
 double DevicePlugin::getLatencySeconds()
 {
-    return latencySeconds;
+    return isBypassedForLowLatency() ? 0.0 : latencySeconds;
+}
+
+bool DevicePlugin::isBypassedForLowLatency() const
+{
+    // Never in a render (an export, freeze or bounce), which plays everything as the song has it.
+    return latencySeconds > lowLatencyLimitSeconds && isLowLatency (engine) && ! edit.isRendering();
 }
 
 void DevicePlugin::getChannelNames (juce::StringArray* ins, juce::StringArray* outs)
@@ -151,6 +161,10 @@ void DevicePlugin::initialise (const te::PluginInitialisationInfo& info)
     tempoPosition.emplace (te::createPosition (edit.tempoSequence));
     latencySamples = processor->getLatencySamples();
     latencySeconds = latencySamples / info.sampleRate;
+    sleepAfterSamples = std::max ((int) (sleepAfterSeconds * info.sampleRate), 2 * latencySamples);
+    silentSamples = 0;
+    asleep = false;
+    hasPreviousValues = false;
 
     if (mixIndex >= 0)
     {
@@ -178,6 +192,9 @@ void DevicePlugin::updateSidechain()
 void DevicePlugin::reset()
 {
     processor->reset();
+    silentSamples = 0;
+    asleep = false;
+    hasPreviousValues = false;
 
     for (auto& delay : dryDelays)
         delay.reset();
@@ -215,11 +232,29 @@ int DevicePlugin::collectEvents (const te::PluginRenderContext& context)
 
 void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
 {
-    if (context.destBuffer == nullptr || context.bufferNumSamples <= 0)
+    // A device that looks ahead lets the sound through as it comes while low latency is on (model/engine/internal/EngineSetup.h).
+    if (context.destBuffer == nullptr || context.bufferNumSamples <= 0 || isBypassedForLowLatency())
         return;
 
+    // Each parameter's value now. A continuous one that moved since the last block glides there over this one, in stretches
+    // of smoothingStep, rather than jumping, so automation and modulation don't step (docs/performance-audit.md, A7).
+    auto gliding = false;
+
     for (size_t i = 0; i < parameters.size(); ++i)
-        currentValues[i] = devices::constrain (deviceInfo.parameters[i], parameters[i]->getCurrentValue());
+    {
+        targetValues[i] = devices::constrain (deviceInfo.parameters[i], parameters[i]->getCurrentValue());
+        currentValues[i] = targetValues[i];
+        gliding = gliding || (glides[i] && hasPreviousValues && ! juce::exactlyEqual (previousValues[i], targetValues[i]));
+    }
+
+    const auto glideFrom = [this] (int done, int length, int numSamples)
+    {
+        const auto along = (float) (done + length) / (float) numSamples;
+
+        for (size_t i = 0; i < currentValues.size(); ++i)
+            if (glides[i])
+                currentValues[i] = previousValues[i] + (targetValues[i] - previousValues[i]) * along;
+    };
 
     const auto numEvents = collectEvents (context);
     devices::ProcessContext block;
@@ -235,7 +270,7 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
     auto& buffer = *context.destBuffer;
     const auto start = context.bufferStartSample, numSamples = context.bufferNumSamples;
     const auto isMono = buffer.getNumChannels() < 2;
-    const auto targetMix = mixIndex >= 0 ? currentValues[(size_t) mixIndex] : 1.0f;
+    const auto targetMix = mixIndex >= 0 ? targetValues[(size_t) mixIndex] : 1.0f;
 
     // The sidechain's sound, after the device's own two channels. A graph built before the source changed may still
     // play a block or two without it.
@@ -244,6 +279,30 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
     if (isSynth()) // its own channels, not a sidechain's
         for (int channel = 0; channel < std::min (2, buffer.getNumChannels()); ++channel)
             buffer.clear (channel, start, numSamples);
+
+    // Nothing to play: no events, and silence in (on its own channels and its sidechain's).
+    const auto isQuiet = [&buffer, start, numSamples] (int firstChannel, int numChannels)
+    {
+        for (int channel = firstChannel; channel < firstChannel + numChannels; ++channel)
+            if (buffer.getMagnitude (channel, start, numSamples) > silence)
+                return false;
+
+        return true;
+    };
+
+    const auto quietIn =
+        numEvents == 0 && (isSynth() || isQuiet (0, std::min (2, buffer.getNumChannels()))) && (! hasSidechain || isQuiet (2, 2));
+
+    if (asleep && quietIn && ! edit.isRendering())
+    {
+        for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
+            buffer.clear (channel, start, numSamples);
+
+        keepValues();
+        return;
+    }
+
+    asleep = false;
 
     const float* sidechain[2] = {};
 
@@ -259,7 +318,10 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
 
     for (int done = 0; done < numSamples;)
     {
-        const auto length = std::min (numSamples - done, stereo.getNumSamples());
+        const auto length = std::min (numSamples - done, gliding ? smoothingStep : stereo.getNumSamples());
+
+        if (gliding)
+            glideFrom (done, length, numSamples);
         float* channels[2];
 
         if (isMono)
@@ -313,8 +375,27 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
         done += length;
     }
 
+    keepValues();
+
+    // Silent in and out long enough: asleep from the next block.
+    if (quietIn && isQuiet (0, std::min (2, buffer.getNumChannels())))
+    {
+        silentSamples = std::min (silentSamples + numSamples, sleepAfterSamples);
+        asleep = silentSamples >= sleepAfterSamples && ! edit.isRendering();
+    }
+    else
+    {
+        silentSamples = 0;
+    }
+
     for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
         buffer.clear (channel, start, numSamples);
+}
+
+void DevicePlugin::keepValues() noexcept
+{
+    std::copy (targetValues.begin(), targetValues.end(), previousValues.begin());
+    hasPreviousValues = true;
 }
 
 void DevicePlugin::mixWithDry (float* const* wet, int length, float targetMix)

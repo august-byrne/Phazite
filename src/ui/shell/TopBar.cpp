@@ -43,6 +43,7 @@ TopBar::TopBar (EngineContext& e, CommandBridge& bridge, ComputerKeyboard& keybo
         commands.invoke ("transport.metronome");
         metronomeButton.setToggleState (isCommandTicked ("transport.metronome"), juce::dontSendNotification);
     };
+    lowLatencyButton.onClick = [this] { commands.invoke ("transport.lowLatency"); };
     keyboardButton.onClick = [this] { commands.invoke ("input.computerKeyboard"); };
 
     searchButton.setButtonText ("Search commands");
@@ -71,7 +72,7 @@ TopBar::TopBar (EngineContext& e, CommandBridge& bridge, ComputerKeyboard& keybo
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
     for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &captureButton, &loopButton, &metronomeButton,
-                                                               &timeSignatureButton, &keyboardButton, &searchButton })
+                                                               &lowLatencyButton, &timeSignatureButton, &keyboardButton, &searchButton })
     {
         button->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (button);
@@ -116,6 +117,10 @@ void TopBar::refreshTooltips()
                                          "transport.loop"));
     metronomeButton.setTooltip (withShortcut (
         commands, "Metronome: clicks on every beat while the song plays. Right-click for the count-in", "transport.metronome"));
+    lowLatencyButton.setTooltip (withShortcut (commands,
+                                               "Low latency: while on, what you play has no delay to wait for. Devices that look ahead "
+                                               "are bypassed, delay compensation is off and the buffer shrinks. Turn it off to mix",
+                                               "transport.lowLatency"));
     searchButton.setTooltip (withShortcut (commands, "Find and run any command by typing part of its name", "view.commandPalette"));
 
     shownKeyboardState = -1; // its tooltip names a shortcut too
@@ -247,6 +252,7 @@ void TopBar::resized()
     captureButton.setBounds (area.removeFromLeft (44));
     loopButton.setBounds (area.removeFromLeft (44));
     metronomeButton.setBounds (area.removeFromLeft (44));
+    lowLatencyButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::m);
     tempoField.setBounds (area.removeFromLeft (96));
     area.removeFromLeft (Space::xs);
@@ -288,6 +294,8 @@ void TopBar::timerCallback()
     loopButton.setToggleState (isLoopOn (projectContext), juce::dontSendNotification);
     metronomeButton.setEnabled (open);
     metronomeButton.setToggleState (isCommandTicked ("transport.metronome"), juce::dontSendNotification);
+    lowLatencyButton.setEnabled (open);
+    lowLatencyButton.setToggleState (isCommandTicked ("transport.lowLatency"), juce::dontSendNotification);
     updateTempo();
 
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getCpuUsage() * 100.0)) + "%", juce::dontSendNotification);

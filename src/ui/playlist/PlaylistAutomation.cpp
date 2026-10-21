@@ -78,6 +78,13 @@ Playlist::AutomationLaneView::AutomationLaneView (Playlist& p, TrackID t, const 
     setTitle ("Automation lane");
     setOpaque (false); // the playlist's grid shows through
     refreshPoints();
+    startTimerHz (10);
+}
+
+void Playlist::AutomationLaneView::timerCallback()
+{
+    if (points.empty() && isShowing() && ! juce::exactlyEqual (handle.getValue(), shownValue))
+        repaint();
 }
 
 void Playlist::AutomationLaneView::update (juce::Colour newColour, bool isCollapsed)
@@ -309,7 +316,8 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
     if (points.empty())
     {
         // Without automation, where the parameter is now, dashed.
-        const auto y = valueToY (handle.getValue());
+        shownValue = handle.getValue();
+        const auto y = valueToY (shownValue);
         const float dashes[] = { 4.0f, 4.0f };
         g.setColour (colour.withAlpha (LaneTint::idleLine));
         g.drawDashedLine ({ (float) clip.getX(), y, (float) clip.getRight(), y }, dashes, 2, 1.0f);

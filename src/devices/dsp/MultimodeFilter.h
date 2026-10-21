@@ -15,6 +15,8 @@
 #include "CombFilter.h"
 #include "Filters.h"
 
+#include <juce_core/juce_core.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -68,6 +70,12 @@ struct FilterSettings
     bool steep = false;         // 24 dB per octave rather than 12, for low-pass, high-pass, band-pass and notch
     double q = 0.70710678;      // a 12 dB section's Q, made from the resonance (getResonanceQ())
 };
+
+inline bool areSame (const FilterSettings& a, const FilterSettings& b) noexcept
+{
+    return a.mode == b.mode && juce::exactlyEqual (a.frequency, b.frequency) && juce::exactlyEqual (a.resonance, b.resonance)
+           && a.steep == b.steep && juce::exactlyEqual (a.q, b.q);
+}
 
 // What a channel plays with, made once a step for all of them.
 struct MultimodeCoefficients

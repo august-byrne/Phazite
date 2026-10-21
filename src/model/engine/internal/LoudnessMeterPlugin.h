@@ -39,6 +39,11 @@ private:
     static constexpr int maxChannels = 8;
     te::LoudnessMeter meter;
 
+    // After a short-term window of silence its readings have fallen as far as they go, and it stops measuring until
+    // sound comes again (docs/performance-audit.md, A1): the 4x-oversampled true peak costs most of a stopped master.
+    static constexpr double sleepAfterSeconds = 3.5;
+    int silentSamples = 0, sleepAfterSamples = 0;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LoudnessMeterPlugin)
 };
 

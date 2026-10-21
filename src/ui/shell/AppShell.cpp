@@ -74,7 +74,8 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 //==============================================================================
 AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher& keys, ComputerKeyboard& keyboard, ProjectContext& context,
                     Settings& s, SoundPack& pack, Library& l, Previewer& p)
-    : commands (bridge),
+    : engineContext (engine),
+      commands (bridge),
       shortcutKeys (keys),
       projectContext (context),
       library (l),
@@ -152,11 +153,24 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     setActiveEditor (&playlist);
     juce::Desktop::getInstance().addFocusChangeListener (this);
     projectContext.addListener (this);
+    engineContext.addChangeListener (this);
+    updateAudioAlert();
+
+    // Until a project is open, as Phazite starts: the window shows at once, painted, while the project loads (docs/
+    // performance-audit.md, R4).
+    openingLabel.setText ("Opening...", juce::dontSendNotification);
+    openingLabel.setJustificationType (juce::Justification::centred);
+    openingLabel.setFont (juce::FontOptions (TextSize::heading));
+    openingLabel.setColour (juce::Label::backgroundColourId, getPalette (*this).surface);
+    openingLabel.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+    addChildComponent (openingLabel);
+    openingLabel.setVisible (! projectContext.hasProject());
     setLayout (Layout::full);
 }
 
 AppShell::~AppShell() // here, where PanelWindow is complete
 {
+    engineContext.removeChangeListener (this);
     projectContext.removeListener (this);
     computerKeyboard.onNotePlayed = nullptr; // the keyboard is the main window's, and outlives this
     juce::Desktop::getInstance().removeFocusChangeListener (this);
@@ -185,6 +199,7 @@ void AppShell::setActiveEditor (TimelineEditor* editor)
 
 void AppShell::projectChanged()
 {
+    openingLabel.setVisible (! projectContext.hasProject());
     previewer.stop(); // which may be in time with the project that closes
 
     // A menu's choices name the items of the project that was open, and the new one's can have the same IDs.
@@ -428,6 +443,15 @@ void AppShell::paint (juce::Graphics& g)
     g.fillAll (getPalette (*this).border); // shows through the dividers
 }
 
+void AppShell::updateAudioAlert()
+{
+    if (engineContext.getAudioOutput().isOpen)
+        hintBar.setAlert ({}, nullptr);
+    else
+        hintBar.setAlert ("No audio output: nothing can be heard. Click here to choose one in the audio settings.",
+                          [this] { commands.invoke ("options.audioSettings"); });
+}
+
 void AppShell::resized()
 {
     auto area = getLocalBounds();
@@ -439,6 +463,7 @@ void AppShell::resized()
                                  inspectorWindow == nullptr ? &inspector : nullptr };
     columns.layOutComponents (items, 5, area.getX(), area.getY(), area.getWidth(), area.getHeight(), false, true);
     placeDetachButtons();
+    openingLabel.setBounds (area);
 }
 
 void AppShell::placeDetachButtons()

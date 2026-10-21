@@ -41,6 +41,9 @@ ProjectSession::~ProjectSession()
 
 void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source != &getSelection())
+        closeMidiOutputs (engine);
+
     if (project == nullptr)
         return;
 
@@ -55,14 +58,73 @@ bool ProjectSession::isUntitled() const
     return project != nullptr && projectUnsavedFolder != nullptr && project->getFile().isAChildOf (projectUnsavedFolder->getFolder());
 }
 
-void ProjectSession::openAtStartup()
+void ProjectSession::openAtStartup (bool afterCrash)
 {
     // An untitled project that an earlier Phazite didn't close properly, such as in a crash, comes first: its changes are
     // nowhere else.
-    if (const auto leftover = UnsavedFolder::findProjectToRestore (engine, unsavedFolder); leftover != juce::File())
-        askWhetherToRestore (leftover, true, [this, leftover] (bool restore) { restoreUntitled (leftover, restore); });
-    else
-        openRecentOrFirst();
+    const auto leftover = UnsavedFolder::findProjectToRestore (engine, unsavedFolder);
+
+    const auto openAsUsual = [this, leftover]
+    {
+        if (leftover != juce::File())
+            askWhetherToRestore (leftover, true, [this, leftover] (bool restore) { restoreUntitled (leftover, restore); });
+        else
+            openRecentOrFirst();
+    };
+
+    const auto recentProjects = recent.getProjects();
+    const auto last = leftover != juce::File() ? leftover : (recentProjects.isEmpty() ? juce::File() : recentProjects.getFirst());
+
+    if (! afterCrash || last == juce::File())
+    {
+        openAsUsual();
+        return;
+    }
+
+    askHowToOpenAfterCrash (last,
+                            [this, openAsUsual] (AfterCrash choice)
+                            {
+                                if (choice == AfterCrash::startNew)
+                                {
+                                    createFirstProject();
+                                    return;
+                                }
+
+                                if (choice == AfterCrash::openWithoutPlugins)
+                                {
+                                    pluginsOffUntilOpen = true;
+                                    setPluginsLoad (engine, false);
+                                }
+
+                                openAsUsual();
+                            });
+}
+
+void ProjectSession::askHowToOpenAfterCrash (const juce::File& file, std::function<void (AfterCrash)> callback)
+{
+    if (askAfterCrash != nullptr)
+    {
+        askAfterCrash (file, std::move (callback));
+        return;
+    }
+
+    const auto options = juce::MessageBoxOptions()
+                             .withIconType (juce::MessageBoxIconType::WarningIcon)
+                             .withTitle ("Phazite didn't close properly")
+                             .withMessage ("The last time, \"" + file.getFileNameWithoutExtension()
+                                           + "\" was open. If a plug-in in it crashed Phazite, open it with its plug-ins off: they "
+                                             "stay as they were, silent, until it opens again.")
+                             .withButton ("Open")
+                             .withButton ("Open with Plug-ins Off")
+                             .withButton ("Start a New Project")
+                             .withAssociatedComponent (dialogParent);
+
+    // With three buttons, JUCE reports the first as 1, the second as 2 and the last as 0.
+    juce::AlertWindow::showAsync (
+        options, [callback] (int result)
+        { callback (result == 1   ? AfterCrash::open
+                    : result == 2 ? AfterCrash::openWithoutPlugins
+                                  : AfterCrash::startNew); });
 }
 
 void ProjectSession::openRecentOrFirst()
@@ -440,10 +502,27 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
     project = std::move (newProject);                    // the previous project closes here, deleting its autosave
     projectUnsavedFolder = std::move (newUnsavedFolder); // and then the folder it was made in, if it was untitled
 
+    // Plug-ins load again for the next project, once the one that opens without them is open.
+    if (std::exchange (pluginsOffUntilOpen, false))
+    {
+        setPluginsLoad (engine, true);
+
+        if (project != nullptr)
+            showNotice ("Plug-ins off", "\"" + project->getFile().getFileNameWithoutExtension()
+                                            + "\" is open with its plug-ins off: they stay as they were, silent. Open it again "
+                                              "(File > Open Recent) to turn them on.");
+    }
+
     if (project != nullptr)
     {
         setEdit (context, &project->getEdit());
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
+        autosaveTimer->onRepeatedFailures = [this]
+        {
+            showError ("Autosave failed",
+                       "Phazite couldn't save your changes automatically, " + juce::String (AutosaveTimer::failuresToReport)
+                           + " times in a row. Save the project to keep them, and check that its folder can be written to.");
+        };
 
         if (! isUntitled()) // it is in Open Recent once it is saved
             recent.add (project->getFile());
@@ -474,6 +553,8 @@ void ProjectSession::showNotice (const juce::String& title, const juce::String& 
 
 void ProjectSession::showError (const juce::String& title, const juce::String& message)
 {
+    juce::Logger::writeToLog (title + ": " + message);
+
     if (onError != nullptr)
     {
         onError (title, message);

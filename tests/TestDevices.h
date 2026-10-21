@@ -50,6 +50,7 @@ struct TestGain final : devices::Processor
 
         lastValues.assign (block.parameters.begin(), block.parameters.end());
         lastNumChannels = block.numChannels;
+        ++processed;
     }
 
     int getLatencySamples() const override { return 64; }
@@ -58,6 +59,7 @@ struct TestGain final : devices::Processor
     bool prepared = false;
     std::vector<float> lastValues;
     int lastNumChannels = 0;
+    int processed = 0; // stretches
 };
 
 inline constexpr devices::ParameterInfo testToneParameters[] = {
@@ -78,6 +80,7 @@ struct TestTone final : devices::Processor
 
     void process (const devices::ProcessContext& block) override
     {
+        ++processed;
         received.insert (received.end(), block.events.begin(), block.events.end());
         size_t next = 0;
 
@@ -100,6 +103,7 @@ struct TestTone final : devices::Processor
 
     float held = 0.0f;
     std::vector<devices::NoteEvent> received;
+    int processed = 0; // stretches
 };
 
 inline constexpr devices::ParameterInfo testDelayParameters[] = {

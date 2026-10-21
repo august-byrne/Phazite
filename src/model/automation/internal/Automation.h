@@ -181,6 +181,10 @@ bool isWritingAutomation (const te::Edit&);
 // step (Edit::hasChangedSinceSaved()).
 bool isAutomatedValue (const juce::ValueTree&, const juce::Identifier& property);
 
+// Whether a property of a device's state is where one of its parameters keeps its value: a knob turned, a fader moved.
+// Controls read values as they show them, so views needn't hear of these (model/project/ProjectContext.h).
+bool isParameterValue (const juce::ValueTree&, const juce::Identifier& property);
+
 // Puts back, in a saved project's state before its Edit is made, the values its parameters were set to by hand where they
 // were saved while something else set them to others (a modulator): Tracktion saves those in the device's state too, and
 // puts them back for plug-ins, but not for Phazite's devices, which would then start at the values played.

@@ -23,9 +23,33 @@ void HintBar::paint (juce::Graphics& g)
     g.setColour (p.border);
     g.fillRect (getLocalBounds().removeFromTop (1));
 
-    g.setColour (p.textMuted);
+    g.setColour (alert.isNotEmpty() ? p.warning : p.textMuted);
     g.setFont (juce::FontOptions (TextSize::small));
-    g.drawText (hint, getLocalBounds().reduced (Space::s, 0), juce::Justification::centredLeft, true);
+    g.drawText (alert.isNotEmpty() ? alert : hint, getLocalBounds().reduced (Space::s, 0), juce::Justification::centredLeft, true);
+}
+
+void HintBar::setAlert (const juce::String& text, std::function<void()> fix)
+{
+    if (text == alert)
+        return;
+
+    alert = text;
+    fixAlert = std::move (fix);
+    setMouseCursor (alert.isNotEmpty() && fixAlert != nullptr ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    setDescription (alert);
+
+    // Screen readers say it as it comes.
+    if (alert.isNotEmpty())
+        if (auto* handler = getAccessibilityHandler())
+            handler->postAnnouncement (alert, juce::AccessibilityHandler::AnnouncementPriority::high);
+
+    repaint();
+}
+
+void HintBar::mouseUp (const juce::MouseEvent& e)
+{
+    if (alert.isNotEmpty() && fixAlert != nullptr && e.mouseWasClicked())
+        fixAlert();
 }
 
 void HintBar::timerCallback()
@@ -49,7 +73,9 @@ void HintBar::timerCallback()
     if (text != hint)
     {
         hint = text;
-        repaint();
+
+        if (alert.isEmpty())
+            repaint();
     }
 }
 } // namespace phazite::ui

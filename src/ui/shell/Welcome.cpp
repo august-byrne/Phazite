@@ -112,8 +112,9 @@ void ComingFromPage::resized()
 }
 
 //==============================================================================
-SoundPage::SoundPage (juce::AudioDeviceManager& manager)
-    : deviceManager (manager)
+SoundPage::SoundPage (juce::AudioDeviceManager& manager, std::function<bool()> isBluetooth)
+    : deviceManager (manager),
+      isOutputBluetooth (std::move (isBluetooth))
 {
     setTitle ("Sound");
     makeTitle (title, "Hear Phazite");
@@ -128,7 +129,11 @@ SoundPage::SoundPage (juce::AudioDeviceManager& manager)
     help.setText ("With an audio interface, choose it as the output: sound comes with less delay.", juce::dontSendNotification);
 #endif
 
-    for (auto* label : { &about, &help })
+    warning.setText ("This output is Bluetooth, which adds about 150 to 250 ms between a key and its sound: fine for listening, "
+                     "too slow for playing. For playing and recording, plug in wired headphones or speakers and choose them below.",
+                     juce::dontSendNotification);
+
+    for (auto* label : { &about, &help, &warning })
         label->setJustificationType (juce::Justification::topLeft);
 
     testButton.setTooltip ("Plays a beep through the output chosen below");
@@ -137,10 +142,27 @@ SoundPage::SoundPage (juce::AudioDeviceManager& manager)
     for (auto* c : std::initializer_list<juce::Component*> { &title, &about, &testButton, &help })
         addAndMakeVisible (c);
 
+    addChildComponent (warning);
+    deviceManager.addChangeListener (this);
+    changeListenerCallback (nullptr);
     lookAndFeelChanged();
 }
 
-SoundPage::~SoundPage() = default;
+SoundPage::~SoundPage()
+{
+    deviceManager.removeChangeListener (this);
+}
+
+void SoundPage::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    const auto bluetooth = isOutputBluetooth != nullptr && isOutputBluetooth();
+
+    if (bluetooth != warning.isVisible())
+    {
+        warning.setVisible (bluetooth);
+        resized();
+    }
+}
 
 void SoundPage::visibilityChanged()
 {
@@ -160,6 +182,7 @@ void SoundPage::lookAndFeelChanged()
     const auto& p = getPalette (*this);
     about.setColour (juce::Label::textColourId, p.textMuted);
     help.setColour (juce::Label::textColourId, p.textMuted);
+    warning.setColour (juce::Label::textColourId, p.warning);
     setPrimary (testButton, true);
 }
 
@@ -174,6 +197,12 @@ void SoundPage::resized()
     area.removeFromTop (Space::m);
     help.setBounds (area.removeFromBottom (helpHeight));
     area.removeFromBottom (Space::s);
+
+    if (warning.isVisible())
+    {
+        warning.setBounds (area.removeFromBottom (helpHeight));
+        area.removeFromBottom (Space::s);
+    }
 
     if (deviceChooser != nullptr)
         deviceChooser->setBounds (area);
@@ -331,10 +360,10 @@ void SoundPackPage::resized()
 
 //==============================================================================
 WelcomePanel::WelcomePanel (SoundPack& pack, juce::AudioDeviceManager& deviceManager, const juce::String& keymapName,
-                            std::function<void (const juce::String&)> chooseKeymap)
+                            std::function<void (const juce::String&)> chooseKeymap, std::function<bool()> isOutputBluetooth)
     : soundPack (pack),
       comingFromPage (keymapName, std::move (chooseKeymap)),
-      soundPage (deviceManager),
+      soundPage (deviceManager, std::move (isOutputBluetooth)),
       soundPackPage (pack)
 {
     setTitle ("Welcome to Phazite");

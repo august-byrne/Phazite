@@ -7,6 +7,7 @@ after start:
   transport.playPause: on "Play / Pause"
   transport.goToStart: on "Go to Start"
   transport.goToEnd: on "Go to End"
+  transport.lowLatency: on "Low Latency"
   edit.delete: off "Delete"
   edit.deleteAndCloseGap: off "Delete and Close Gap"
   edit.duplicate: off "Duplicate"

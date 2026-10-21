@@ -133,7 +133,21 @@ private:
     bool isPreviewing (const LibraryItem&) const;
     bool isPreviewOn() const;
 
-    void textEditorTextChanged (juce::TextEditor&) override { updateSearch(); }
+    // A search through a big library takes a while: once one has, typing waits for the keys to pause (docs/performance-
+    // audit.md, U7). Small ones search at each key.
+    struct SearchDelay : juce::Timer
+    {
+        std::function<void()> search;
+        void timerCallback() override
+        {
+            stopTimer();
+            search();
+        }
+    } searchDelay;
+    double lastSearchMilliseconds = 0.0;
+    static constexpr double slowSearchMilliseconds = 5.0;
+
+    void textEditorTextChanged (juce::TextEditor&) override;
     void textEditorReturnKeyPressed (juce::TextEditor&) override { focusTree(); }
     void textEditorEscapeKeyPressed (juce::TextEditor&) override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the sound pack's download went on

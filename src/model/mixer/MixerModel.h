@@ -16,6 +16,7 @@
 #include <juce_graphics/juce_graphics.h>
 
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -241,4 +242,16 @@ struct Loudness
 
 std::optional<Loudness> getLoudness (const ProjectContext&); // nothing without a project, or a loudness meter on its master
 void resetLoudness (ProjectContext&);
+
+//==============================================================================
+// Delay compensation (docs/design.md, section 20): how long all of the song's sound waits so that every track's comes out
+// with the latest device's, what is played live too; none while low latency is on, which turns it off. And the devices
+// that look ahead, switched on, latest first, each named with its channel ("Limiter on Master") and its latency.
+struct DelayCompensation
+{
+    double seconds = 0.0;
+    std::vector<std::pair<juce::String, double>> devices;
+};
+
+DelayCompensation getDelayCompensation (const ProjectContext&);
 } // namespace phazite

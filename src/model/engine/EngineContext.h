@@ -24,6 +24,27 @@ public:
     // How much of the time available for each audio block the engine uses, from 0 to 1.
     double getCpuUsage() const;
 
+    // The audio output as it plays now: its driver and device, the sample rate and buffer, and the latency its driver
+    // reports (from the engine's output to the device's, the buffer included); and whether it is Bluetooth, whose own
+    // delay, about 150 to 250 ms more, no driver reports (model/engine/AudioDevices.h). isOpen is false without one.
+    struct AudioOutput
+    {
+        bool isOpen = false;
+        juce::String type, name;
+        double sampleRate = 0.0;
+        int bufferSamples = 0;
+        double bufferSeconds = 0.0, latencySeconds = 0.0;
+        bool isBluetooth = false;
+    };
+
+    AudioOutput getAudioOutput() const;
+
+    // Whether any ASIO driver is installed (Windows): an audio interface's own gives the lowest delay.
+    bool hasAsioDrivers() const;
+
+    // Whether the Low Latency switch is on (the command transport.lowLatency; model/engine/internal/EngineSetup.h).
+    bool isLowLatency() const;
+
     // The MIDI devices connected, each on or off. The Engine opens them (not JUCE's device manager), and what they
     // play goes to the track live MIDI plays.
     struct MidiInput

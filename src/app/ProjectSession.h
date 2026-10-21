@@ -53,9 +53,21 @@ public:
     // calls back with the answer; untitled if the project was never saved. Unset, a dialog asks; tests answer themselves.
     std::function<void (const juce::File& projectFile, bool untitled, std::function<void (bool restore)>)> askToRestore;
 
+    // After Phazite didn't close properly (a crash, perhaps in a plug-in of the project that was open), asks how to open that
+    // project (docs/performance-audit.md, R2): as usual, with its plug-ins off, or not, starting a new one. Unset, a dialog
+    // asks; tests answer themselves.
+    enum class AfterCrash
+    {
+        open,
+        openWithoutPlugins,
+        startNew
+    };
+
+    std::function<void (const juce::File& projectFile, std::function<void (AfterCrash)>)> askAfterCrash;
+
     // Restores the untitled project an earlier Phazite didn't close properly, if the user wants it, or opens the most
-    // recent project (offering to restore its autosave), or makes a first project.
-    void openAtStartup();
+    // recent project (offering to restore its autosave), or makes a first project; after a crash, asking how first.
+    void openAtStartup (bool afterCrash = false);
 
     void newProject(); // the new-project window
     void openProject();
@@ -103,6 +115,8 @@ private:
     void open (const juce::File&, bool restoreAutosave);
     void restoreUntitled (const juce::File&, bool restore);
     void askWhetherToRestore (const juce::File&, bool untitled, std::function<void (bool restore)>);
+    void askHowToOpenAfterCrash (const juce::File&, std::function<void (AfterCrash)>);
+    bool pluginsOffUntilOpen = false; // the project opening opens with its plug-ins off
     void createFirstProject();
     void selectSynthTrack(); // in a new project that has one (findSynthTrack())
 

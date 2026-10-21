@@ -182,3 +182,16 @@ TEST_SUITE ("golden")
                                         { return phazite::test::compareLines (expected, actual, 40); });
     }
 }
+
+TEST_CASE ("The window shows Opening... until a project is open, and says when no audio output plays")
+{
+    Screen screen;
+    CHECK (screen.shell.showsOpening());
+
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (screen.shell.showsOpening());
+
+    // The tests open no audio device: the hint bar says so, in place of its hints.
+    CHECK (screen.shell.getHintBar().getAlert().startsWith ("No audio output"));
+}

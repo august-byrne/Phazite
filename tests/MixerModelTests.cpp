@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer as the UI reaches it, by IDs and plain values (src/model/mixer/MixerModel.h).
+#include "HostedDevice.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
@@ -288,4 +290,42 @@ TEST_CASE ("A volume fader's positions stand for levels in decibels")
     CHECK (phazite::faderPositionToDecibels (phazite::decibelsToFaderPosition (-12.0f)) == doctest::Approx (-12.0f).epsilon (0.001));
     CHECK (phazite::decibelsToFaderPosition (-6.0f) < phazite::decibelsToFaderPosition (0.0f));
     CHECK (phazite::decibelsToFaderPosition (6.0f) == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("Delay compensation: how long the song's sound waits, and for which devices")
+{
+    // Played through a device, as the app has it: devices know their latency once playback has prepared them.
+    phazite::test::HostedDevice device;
+    Song song;
+    auto& context = song.context;
+    song.edit->getTransport().ensureContextAllocated();
+    CHECK (phazite::getDelayCompensation (context).devices.empty());
+    CHECK (phazite::getDelayCompensation (context).seconds == 0.0);
+
+    // A limiter on B and one on the master look ahead; an EQ doesn't, nor a limiter that is off.
+    phazite::addEffect (context, idOf (*song.b), song.find ("phaziteLimiter"));
+    phazite::addEffect (context, idOf (*song.a), song.find ("phaziteEq"));
+    phazite::addEffect (context, {}, song.find ("phaziteLimiter"));
+    phazite::addEffect (context, idOf (*song.a), song.find ("phaziteLimiter"));
+    phazite::setDeviceOn (context, phazite::getEffects (context, idOf (*song.a)).back().id, false);
+
+    phazite::test::settle (300);
+    device.process (20);
+    const auto compensation = phazite::getDelayCompensation (context);
+    REQUIRE (compensation.devices.size() == 2);
+    CHECK (juce::StringArray { compensation.devices[0].first, compensation.devices[1].first }
+           == juce::StringArray { "Limiter on Master", "Limiter on B" });
+    CHECK (compensation.devices[0].second == compensation.devices[1].second);
+    CHECK (compensation.devices[0].second > 0.001);
+    CHECK (compensation.devices[0].second < 0.005);
+    CHECK (compensation.seconds == doctest::Approx (2.0 * compensation.devices[0].second).epsilon (0.02)); // B's, then the master's
+
+    // Low latency turns it off; Phazite's devices that look ahead are bypassed then, so report none.
+    phazite::setLowLatency (phazite::test::getEngine(), true);
+    CHECK (phazite::getDelayCompensation (context).seconds == 0.0);
+    CHECK (phazite::getDelayCompensation (context).devices.empty());
+    phazite::setLowLatency (phazite::test::getEngine(), false);
+    phazite::test::settle (300);
+    device.process (20);
+    CHECK (phazite::getDelayCompensation (context).seconds == doctest::Approx (compensation.seconds));
 }

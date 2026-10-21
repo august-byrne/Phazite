@@ -24,6 +24,9 @@ struct ParameterHandle::Impl
     juce::String createName;
     juce::NormalisableRange<float> rangeUntilMade;
 
+    // Where a device's parameter was in its list, once found (find()).
+    mutable int foundAt = -1;
+
     te::Plugin* locateDevice() const
     {
         auto* track = owner.get();
@@ -40,8 +43,18 @@ struct ParameterHandle::Impl
             return {};
         }
 
+        // A device's, which controls ask for several times a tick: looked for where it was in the device's list and checked
+        // by its ID, rather than found by name each time (docs/performance-audit.md, U5). Nothing is held between calls: a
+        // parameter mustn't outlive its device, and a plug-in makes its parameters again as it reloads.
         if (auto* p = plugin.get())
-            return p->getAutomatableParameterByID (parameterID);
+        {
+            if (auto parameter = p->getAutomatableParameter (foundAt); parameter != nullptr && parameter->paramID == parameterID)
+                return parameter;
+
+            auto parameter = p->getAutomatableParameterByID (parameterID);
+            foundAt = p->indexOfAutomatableParameter (parameter);
+            return parameter;
+        }
 
         if (auto* m = modifier.get())
             return m->getAutomatableParameterByID (parameterID);

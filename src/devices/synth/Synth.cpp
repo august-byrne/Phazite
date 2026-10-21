@@ -162,6 +162,8 @@ void Synth::reset()
 
         for (auto& filter : voice.filters)
             filter.reset();
+
+        voice.filterIsSet = false;
     }
 
     lfo.reset();
@@ -297,6 +299,7 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
         for (auto& filter : voice.filters)
             filter.reset();
 
+        voice.filterIsSet = false;
         voice.filterEnvelopeLevel = 0.0f;
     }
 
@@ -449,6 +452,11 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
     const auto unisonNorm = 1.0f / std::sqrt ((float) numUnison);
     std::array<float, maxUnison> detunes {}, lefts {}, rights {};
 
+    // Each oscillator's pitch as a ratio of the voice's, worked out once a block rather than at each voice's every step
+    // (docs/performance-audit.md, A4).
+    std::array<double, maxUnison> ratios1 {}, ratios2 {};
+    const auto osc2Ratio = std::exp2 ((double) osc2Offset / 12.0);
+
     for (int u = 0; u < numUnison; ++u)
     {
         const auto place = numUnison > 1 ? 2.0f * (float) u / (float) (numUnison - 1) - 1.0f : 0.0f; // -1 to 1
@@ -456,6 +464,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
         detunes[(size_t) u] = place * values[unisonDetune] * 0.01f;
         lefts[(size_t) u] = unisonNorm * 1.41421356f * std::cos (angle);
         rights[(size_t) u] = unisonNorm * 1.41421356f * std::sin (angle);
+        ratios1[(size_t) u] = std::exp2 ((double) detunes[(size_t) u] / 12.0);
+        ratios2[(size_t) u] = ratios1[(size_t) u] * osc2Ratio;
     }
 
     for (int start = 0; start < numSamples; start += controlStep)
@@ -487,9 +497,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 
             for (int u = 0; u < numUnison; ++u)
             {
-                const auto detune = (double) detunes[(size_t) u];
-                voice.osc1[(size_t) u].setFrequency (dsp::noteToFrequency (semitones + detune), sampleRate);
-                voice.osc2[(size_t) u].setFrequency (dsp::noteToFrequency (semitones + osc2Offset + detune), sampleRate);
+                voice.osc1[(size_t) u].setFrequency (frequency * ratios1[(size_t) u], sampleRate);
+                voice.osc2[(size_t) u].setFrequency (frequency * ratios2[(size_t) u], sampleRate);
             }
 
             voice.sub.setFrequency (0.5 * frequency, sampleRate);
@@ -498,12 +507,24 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 values[filterEnvelope] * voice.filterEnvelopeLevel + values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
             const auto filterFrequency = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
 
-            // The same filter on both sides; a comb's delay glides to its new length over the step.
-            const auto coefficients = dsp::makeMultimode (
-                { .mode = mode, .frequency = filterFrequency, .resonance = values[resonance], .steep = steep, .q = q }, sampleRate);
+            // The same filter on both sides; a comb's delay glides to its new length over the step. Made again only when its
+            // settings change: a held note's often don't.
+            const dsp::FilterSettings filterSettings { .mode = mode,
+                                                       .frequency = filterFrequency,
+                                                       .resonance = values[resonance],
+                                                       .steep = steep,
+                                                       .q = q };
 
-            for (auto& filter : voice.filters)
-                filter.set (coefficients, length);
+            if (! voice.filterIsSet || ! dsp::areSame (filterSettings, voice.filterSettings))
+            {
+                const auto coefficients = dsp::makeMultimode (filterSettings, sampleRate);
+
+                for (auto& filter : voice.filters)
+                    filter.set (coefficients, length);
+
+                voice.filterSettings = filterSettings;
+                voice.filterIsSet = true;
+            }
 
             for (int i = 0; i < length; ++i)
             {

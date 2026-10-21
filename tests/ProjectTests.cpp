@@ -656,3 +656,48 @@ TEST_CASE ("Switching the loop on or off, or between the song and a range, is sa
     CHECK_FALSE (phazite::doesLoopFollowSong (project->getEdit()));
     CHECK (project->getEdit().getTransport().getLoopRange().getStart().inSeconds() == doctest::Approx (1.0));
 }
+
+TEST_CASE ("Autosave writes in the background, and says once when it fails")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Background");
+    const auto autosaveFile = phazite::Project::getAutosaveFile (project->getFile());
+    const auto waitForIt = [&project] { return phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }, 5000); };
+
+    project->getPhaziteState().setProperty (phazite::schema::outline, "pop", nullptr);
+    project->autosaveInBackground();
+    REQUIRE (waitForIt());
+    CHECK (autosaveFile.existsAsFile());
+    CHECK_FALSE (project->takeAutosaveFailure());
+    CHECK_FALSE (project->hasChangesToAutosave());
+
+    // A file where its folder goes: the write fails, which is told once, and the change is written again at the next.
+    const auto backups = autosaveFile.getParentDirectory();
+    REQUIRE (backups.deleteRecursively());
+    REQUIRE (backups.create().wasOk());
+    project->getPhaziteState().setProperty (phazite::schema::outline, "rock", nullptr);
+    project->autosaveInBackground();
+    REQUIRE (waitForIt());
+    CHECK (project->takeAutosaveFailure());
+    CHECK_FALSE (project->takeAutosaveFailure());
+    CHECK (project->hasChangesToAutosave());
+    REQUIRE (backups.deleteFile());
+}
+
+TEST_CASE ("Autosave waits while the song plays")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Playing");
+    const auto autosaveFile = phazite::Project::getAutosaveFile (project->getFile());
+    phazite::AutosaveTimer timer (*project, 120, 1);
+    auto& transport = project->getEdit().getTransport();
+    transport.play (false);
+    REQUIRE (transport.isPlaying());
+
+    project->getPhaziteState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::runTimersUntil ([] { return false; }, 2500);
+    CHECK_FALSE (autosaveFile.exists());
+
+    transport.stop (false, false);
+    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }, 4000));
+}

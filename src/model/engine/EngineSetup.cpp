@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/EngineSetup.h"
+#include "AudioDevices.h"
 #include "internal/LoudnessMeterPlugin.h"
+#include "internal/PluginScanner.h"
 #include "model/automation/internal/Automation.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
@@ -56,10 +58,12 @@ bool EngineBehaviour::canScanPluginsOutOfProcess()
     return options.scanPluginsOutOfProcess && ! PHAZITE_TSAN;
 }
 
-// Tracktion processes audio on the audio callback's thread plus (this number - 1) worker threads.
+// Tracktion processes audio on the audio callback's thread plus (this number - 1) worker threads, which it wakes every
+// block and which spin before they sleep. Not one per logical CPU, as Tracktion would: the second thread of a core adds
+// little to audio, and the UI and the system need a core of their own (docs/performance-audit.md, A2).
 int EngineBehaviour::getNumberOfCPUsToUseForAudio()
 {
-    return options.numAudioThreads > 0 ? options.numAudioThreads : te::EngineBehaviour::getNumberOfCPUsToUseForAudio();
+    return options.numAudioThreads > 0 ? options.numAudioThreads : std::max (1, juce::SystemStats::getNumPhysicalCpus() - 1);
 }
 
 // A device switched off leaves the playback graph, which Tracktion rebuilds when one is switched on or off: otherwise it
@@ -68,6 +72,106 @@ int EngineBehaviour::getNumberOfCPUsToUseForAudio()
 bool EngineBehaviour::shouldBypassedPluginsBeRemovedFromPlaybackGraph()
 {
     return true;
+}
+
+//==============================================================================
+namespace
+{
+    // createEngine() always installs a phazite::EngineBehaviour.
+    EngineBehaviour& getBehaviour (te::Engine& engine)
+    {
+        return static_cast<EngineBehaviour&> (engine.getEngineBehaviour());
+    }
+
+    // Sets the output's buffer outside what is saved (JUCE saves setups chosen as such only), with each Edit's playback
+    // made again for it, as Tracktion's own low-latency monitoring does.
+    void setBufferSize (te::Engine& engine, int bufferSize)
+    {
+        auto& devices = engine.getDeviceManager().deviceManager;
+        auto setup = devices.getAudioDeviceSetup();
+        setup.bufferSize = bufferSize;
+
+        juce::Array<te::Edit*> playing;
+
+        for (auto* edit : engine.getActiveEdits().getEdits())
+        {
+            if (edit->getTransport().isPlaying())
+                playing.add (edit);
+
+            edit->getTransport().freePlaybackContext();
+        }
+
+        devices.setAudioDeviceSetup (setup, false);
+
+        for (auto* edit : engine.getActiveEdits().getEdits())
+            edit->getTransport().ensureContextAllocated();
+
+        for (auto* edit : playing)
+            edit->getTransport().play (true);
+    }
+} // namespace
+
+bool isLowLatency (te::Engine& engine)
+{
+    return getBehaviour (engine).lowLatency.load (std::memory_order_relaxed);
+}
+
+void setLowLatency (te::Engine& engine, bool on)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    auto& behaviour = getBehaviour (engine);
+
+    if (behaviour.lowLatency.exchange (on) == on)
+        return;
+
+    // Every Edit plays without delay compensation, and its devices' latencies are read again as its graph is rebuilt.
+    for (auto* edit : engine.getActiveEdits().getEdits())
+    {
+        edit->setLatencyCompensationEnabled (! on);
+        edit->restartPlayback();
+    }
+
+    auto* device = engine.getDeviceManager().deviceManager.getCurrentAudioDevice();
+
+    if (device == nullptr)
+        return;
+
+    if (on)
+    {
+        const auto current = device->getCurrentBufferSizeSamples();
+
+        if (const auto smaller = chooseLowLatencyBufferSize (device->getAvailableBufferSizes()); smaller.has_value() && *smaller < current)
+        {
+            behaviour.bufferBeforeLowLatency = current;
+            behaviour.lowLatencyBuffer = *smaller;
+            setBufferSize (engine, *smaller);
+        }
+    }
+    else if (behaviour.bufferBeforeLowLatency > 0)
+    {
+        // Back as it was, unless the settings changed it meanwhile.
+        if (device->getCurrentBufferSizeSamples() == behaviour.lowLatencyBuffer)
+            setBufferSize (engine, behaviour.bufferBeforeLowLatency);
+
+        behaviour.bufferBeforeLowLatency = behaviour.lowLatencyBuffer = 0;
+    }
+}
+
+bool EngineBehaviour::shouldLoadPlugin (te::ExternalPlugin&)
+{
+    return loadsPlugins.load();
+}
+
+void setPluginsLoad (te::Engine& engine, bool load)
+{
+    getBehaviour (engine).loadsPlugins = load;
+}
+
+// Phazite has no clip launcher (until after v1: docs/design.md, section 26), so no track needs the nodes Tracktion adds
+// to every one for its clip slots (docs/performance-audit.md, A3).
+bool EngineBehaviour::areClipSlotsEnabled()
+{
+    return false;
 }
 
 // Don't open the microphone until the user asks for an input.
@@ -149,8 +253,13 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
     auto storage = o.propertyStorage != nullptr ? std::move (o.propertyStorage) : std::make_unique<PropertyStorage> (o.applicationName);
     auto ui = o.uiBehaviour != nullptr ? std::move (o.uiBehaviour) : std::make_unique<UIBehaviour>();
     const bool openDevices = o.behaviour.openAudioDevice;
+    const bool firstRun = openDevices && storage->getXmlProperty (te::SettingID::audio_device_setup) == nullptr;
 
     auto engine = std::make_unique<te::Engine> (std::move (storage), std::move (ui), std::make_unique<EngineBehaviour> (o.behaviour));
+
+    // Plug-ins scanned in a child copy, with a time limit for each.
+    if (engine->getPluginManager().usesSeparateProcessForScanning())
+        usePluginScannerWithTimeLimit (*engine);
 
     // Phazite's own plug-in types, which projects can hold.
     engine->getPluginManager().createBuiltInType<LoudnessMeterPlugin>();
@@ -161,6 +270,11 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
     // plays into "All MIDI Ins") would only work 4 seconds after startup. Ask again, once it is done.
     if (openDevices)
         engine->getDeviceManager().rescanMidiDeviceList();
+
+    // With no audio setup saved yet, Tracktion opened the default output as Windows shares it; Low Latency Mode instead
+    // where it offers a small buffer (docs/design.md, section 20).
+    if (firstRun)
+        chooseLowLatencySetup (engine->getDeviceManager().deviceManager);
 
     return engine;
 }
@@ -202,6 +316,10 @@ std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::V
 
     auto edit = te::Edit::createEdit (
         { engine, state, id, te::Edit::forEditing, nullptr, te::Edit::getDefaultNumUndoLevels(), [file] { return file; }, {} });
+
+    // While low latency is on, without delay compensation (setLowLatency()).
+    if (edit != nullptr)
+        edit->setLatencyCompensationEnabled (! isLowLatency (engine));
 
     if (edit != nullptr && cacheFolder != juce::File())
     {

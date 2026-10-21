@@ -884,14 +884,18 @@ void TimelineEditor::timerCallback()
     if (! timelineContext.hasProject())
         return;
 
-    // Smooth while playing; otherwise only often enough to notice moves made elsewhere.
-    const auto playing = isPlaying (timelineContext);
+    // Smooth while playing where it shows; otherwise only often enough to notice moves made elsewhere. An editor that
+    // doesn't show draws nothing (docs/performance-audit.md, U5).
+    const auto playing = isPlaying (timelineContext) && isShowing();
 
     if (playing != wasPlaying)
     {
         wasPlaying = playing;
         startTimerHz (playing ? 60 : 5);
     }
+
+    if (! isShowing())
+        return;
 
     // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end).
     if (playing && followPlayback && ! horizontalScrollBar.isMouseButtonDown())

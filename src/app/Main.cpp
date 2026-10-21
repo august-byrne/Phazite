@@ -7,6 +7,7 @@
 #include "AppUIBehaviour.h"
 #include "MainWindow.h"
 #include "ProjectSession.h"
+#include "RunMarker.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/project/internal/StarterProject.h"
@@ -25,8 +26,19 @@ public:
     const juce::String getApplicationName() override { return JUCE_APPLICATION_NAME_STRING; }
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
 
-    // Must stay true: the out-of-process scanner relaunches this exe with "--PluginScan:<pipe>".
-    bool moreThanOneInstanceAllowed() override { return true; }
+    // One Phazite at a time: a second start brings the first forward instead (two would autosave the same project, and the
+    // first to close would delete its autosave: docs/performance-audit.md, R6). The out-of-process scanner runs this exe
+    // again with "--PluginScan:<pipe>", which must start.
+    bool moreThanOneInstanceAllowed() override { return getCommandLineParameters().contains ("--PluginScan"); }
+
+    void anotherInstanceStarted (const juce::String&) override
+    {
+        if (mainWindow != nullptr)
+        {
+            mainWindow->setMinimised (false);
+            mainWindow->toFront (true);
+        }
+    }
 
     void initialise (const juce::String& commandLine) override
     {
@@ -42,9 +54,16 @@ public:
             return;
         }
 
+        // A log of what happened, for a report of what went wrong (%APPDATA%\Phazite\Phazite.log), kept short: JUCE trims
+        // the start of an old one (docs/performance-audit.md, R7).
+        logger.reset (juce::FileLogger::createDefaultAppLogger ("Phazite", "Phazite.log", "Phazite " + getApplicationVersion()));
+        juce::Logger::setCurrentLogger (logger.get());
+
         // The Engine opens the default audio device and loads the saved plug-in list (settings live in
         // %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in a child copy of this exe (see above).
         engine = createEngine ({ .uiBehaviour = std::make_unique<AppUIBehaviour>() });
+        runMarker = std::make_unique<RunMarker> (engine->getPropertyStorage().getAppPrefsFolder().getChildFile ("Running"));
+        logAudioOutput();
         services = std::make_unique<AppServices> (*engine);
 
         lookAndFeel = std::make_unique<ui::LookAndFeel>();
@@ -63,7 +82,11 @@ public:
         ui::loadKeySettings (*commandBridge, services->settings);
         mainWindow->getShell().refreshShortcutTexts();
 
-        session->openAtStartup();
+        // The window shows, painted ("Opening..."), before the project loads, which can take a while.
+        if (auto* peer = mainWindow->getPeer())
+            peer->performAnyPendingRepaintsNow();
+
+        session->openAtStartup (runMarker->didLastRunEndBadly());
         mainWindow->showWelcomeOnFirstRun();
     }
 
@@ -83,6 +106,22 @@ public:
         lookAndFeel = nullptr;
         services = nullptr;
         engine = nullptr;
+        runMarker = nullptr; // closed properly
+
+        juce::Logger::writeToLog ("Phazite closed.");
+        juce::Logger::setCurrentLogger (nullptr);
+        logger = nullptr;
+    }
+
+    // What plays the sound, in the log.
+    void logAudioOutput()
+    {
+        if (auto* device = engine->getDeviceManager().deviceManager.getCurrentAudioDevice())
+            juce::Logger::writeToLog ("Audio output: " + device->getTypeName() + ", " + device->getName() + ", "
+                                      + juce::String (device->getCurrentSampleRate()) + " Hz, "
+                                      + juce::String (device->getCurrentBufferSizeSamples()) + " samples");
+        else
+            juce::Logger::writeToLog ("No audio output is open.");
     }
 
     void systemRequestedQuit() override
@@ -111,7 +150,9 @@ public:
 private:
     // Declaration order matters: members are destroyed in reverse order, so even if shutdown() is
     // never called, the window goes first and the Engine last.
+    std::unique_ptr<juce::FileLogger> logger;
     std::unique_ptr<te::Engine> engine;
+    std::unique_ptr<RunMarker> runMarker;
     std::unique_ptr<AppServices> services;
     std::unique_ptr<ui::LookAndFeel> lookAndFeel;
     std::unique_ptr<CommandRegistry> commands;

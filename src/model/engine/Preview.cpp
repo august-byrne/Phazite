@@ -7,12 +7,38 @@
 
 namespace phazite
 {
-struct Previewer::Impl
+struct Previewer::Impl : private juce::Timer
 {
     explicit Impl (te::Engine& e)
         : engine (e)
     {
     }
+
+    ~Impl() override { stopTimer(); }
+
+    // Stops the sound and lets its playback graph go, which Tracktion would otherwise keep at work for the rest of the
+    // session (docs/performance-audit.md, A3).
+    void release()
+    {
+        stopTimer();
+
+        if (edit != nullptr)
+        {
+            edit->getTransport().stop (false, false);
+            edit->getTransport().freePlaybackContext();
+        }
+    }
+
+    // A sound that plays once is released once it has played to its end; Tracktion would play silence after it.
+    void timerCallback() override
+    {
+        if (edit == nullptr || ! edit->getTransport().isPlaying())
+            stopTimer();
+        else if (! repeating && edit->getTransport().getPosition() >= te::toPosition (edit->getLength()))
+            release();
+    }
+
+    void watch() { startTimer (250); }
 
     te::Engine& engine;
     std::unique_ptr<te::Edit> edit;
@@ -70,6 +96,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
     transport.looping = impl->repeating;
     transport.setPosition (te::TimePosition());
     transport.play (false);
+    impl->watch();
     keepInTime (context);
     return true;
 }
@@ -95,9 +122,7 @@ void Previewer::keepInTime (const ProjectContext& context)
 
 void Previewer::stop()
 {
-    if (impl->edit != nullptr)
-        impl->edit->getTransport().stop (false, false);
-
+    impl->release();
     impl->file = juce::File();
     impl->inTime = false;
     impl->repeating = false;

@@ -38,11 +38,13 @@ private:
 
 //==============================================================================
 // The audio output: JUCE's device chooser (made when the page first shows: it scans the devices), a button that plays a
-// test sound through the output chosen, and what to do when nothing is heard.
-class SoundPage : public juce::Component
+// test sound through the output chosen, and what to do when nothing is heard; and a warning while the output is
+// Bluetooth (docs/design.md, section 20), as isOutputBluetooth says.
+class SoundPage : public juce::Component,
+                  private juce::ChangeListener
 {
 public:
-    explicit SoundPage (juce::AudioDeviceManager&);
+    SoundPage (juce::AudioDeviceManager&, std::function<bool()> isOutputBluetooth);
     ~SoundPage() override;
 
     void resized() override;
@@ -52,12 +54,16 @@ public:
     // For tests.
     juce::TextButton& getTestButton() noexcept { return testButton; }
     juce::Component* getDeviceChooser() noexcept { return deviceChooser.get(); }
+    bool warnsOfBluetooth() const noexcept { return warning.isVisible(); }
 
 private:
     juce::AudioDeviceManager& deviceManager;
-    juce::Label title, about, help;
+    const std::function<bool()> isOutputBluetooth;
+    juce::Label title, about, help, warning;
     juce::TextButton testButton { "Play a Test Sound" };
     std::unique_ptr<juce::Component> deviceChooser;
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override; // the output changed
 };
 
 //==============================================================================
@@ -107,9 +113,10 @@ public:
 
     static constexpr int numPages = 3;
 
-    // keymapName: the keymap in use. chooseKeymap: switches to another (the main window's).
+    // keymapName: the keymap in use. chooseKeymap: switches to another (the main window's). isOutputBluetooth: whether
+    // the output is Bluetooth (EngineContext::getAudioOutput()); none, for an output never Bluetooth.
     WelcomePanel (SoundPack&, juce::AudioDeviceManager&, const juce::String& keymapName,
-                  std::function<void (const juce::String& keymapName)> chooseKeymap);
+                  std::function<void (const juce::String& keymapName)> chooseKeymap, std::function<bool()> isOutputBluetooth = {});
     ~WelcomePanel() override;
 
     void showPage (Page);

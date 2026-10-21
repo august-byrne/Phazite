@@ -20,9 +20,16 @@ public:
     juce::String getHint() const { return hint; } // what it shows now
     void paint (juce::Graphics&) override;
 
+    // Something wrong that needs the user, such as no audio output: shown in place of the hints, in the warning color, until
+    // cleared (an empty text); a click runs fix.
+    void setAlert (const juce::String& text, std::function<void()> fix);
+    juce::String getAlert() const { return alert; }
+    void mouseUp (const juce::MouseEvent&) override;
+
 private:
     std::function<juce::String()> defaultHint;
-    juce::String hint;
+    juce::String hint, alert;
+    std::function<void()> fixAlert;
 
     void timerCallback() override; // checks the component under the pointer; repaints only on change
 };

@@ -84,6 +84,8 @@ namespace
                 return "x.svg";
             case Icon::frozen:
                 return "snowflake.svg";
+            case Icon::lowLatency:
+                return "zap.svg";
         }
 
         return "";
