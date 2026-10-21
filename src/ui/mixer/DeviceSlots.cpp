@@ -60,9 +60,11 @@ struct DeviceSlots::Slot : public juce::Component
                                              : juce::String ("it whole in the Devices view, under the mixer");
         const auto more =
             owner.kind == Kind::instrument ? juce::String ("replace or remove it") : juce::String ("move, group or remove it");
-        nameButton.setTooltip (device.frozen
-                                   ? "Frozen with its track: unfreeze the track (its snowflake) to change it"
-                                   : "Shows " + what + ". Ctrl-click to select it with others; right-click to turn it off, " + more);
+        const auto listens =
+            device.sidechain.track.isValid() ? ". Listens to " + device.sidechain.name + " (its sidechain)" : juce::String();
+        nameButton.setTooltip (device.frozen ? "Frozen with its track: unfreeze the track (its snowflake) to change it"
+                                             : "Shows " + what + listens
+                                                   + ". Ctrl-click to select it with others; right-click to turn it off, " + more);
         power.setToggleState (device.isOn, juce::dontSendNotification);
 
         // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
@@ -86,13 +88,19 @@ struct DeviceSlots::Slot : public juce::Component
             mixAttachment->update();
     }
 
-    // A selected device, behind its controls.
+    // A selected device, behind its controls; and along its left edge, the colour of the track its sidechain listens to.
     void paint (juce::Graphics& g) override
     {
         if (owner.context.getSongSelection().isSelected (shown.id))
         {
             g.setColour (getPalette (*this).accent.withAlpha (selectionWash));
             g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
+        }
+
+        if (shown.sidechain.track.isValid())
+        {
+            g.setColour (shown.sidechain.colour);
+            g.fillRect (getLocalBounds().removeFromLeft (strip::sidechainStripeWidth));
         }
     }
 
@@ -347,23 +355,6 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
                 .setAction ([&projectContext, parameter = automated.parameter] { showAutomationLane (projectContext, parameter); }));
 
     menu.addSubMenu ("Automate", automate, automate.getNumItems() > 0);
-
-    // A device with a sidechain (a compressor that ducks under a kick, a plug-in with a sidechain input): what it listens
-    // to, the sound passing through it or another track's.
-    if (hasSidechain (projectContext, id))
-    {
-        juce::PopupMenu sidechain;
-        const auto source = getSidechainSource (projectContext, id);
-        sidechain.addItem ("Off: the sound passing through it", true, ! source.isValid(),
-                           act ([&projectContext, id] { setSidechainSource (projectContext, id, {}); }));
-        sidechain.addSeparator();
-
-        for (const auto& choice : getSidechainChoices (projectContext, id))
-            sidechain.addItem (choice.name, true, choice.track == source,
-                               act ([&projectContext, id, from = choice.track] { setSidechainSource (projectContext, id, from); }));
-
-        menu.addSubMenu ("Sidechain", sidechain);
-    }
 
     menu.addSeparator();
 

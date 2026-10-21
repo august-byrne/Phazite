@@ -6,6 +6,9 @@
 #pragma once
 
 #include "model/base/internal/Tracktion.h"
+#include "model/mixer/SidechainChoice.h"
+
+#include <vector>
 
 namespace phazite
 {
@@ -24,9 +27,24 @@ juce::Array<te::AudioTrack*> getSidechainSources (te::Plugin&);
 // The track a device's sidechain listens to, or nullptr when it listens to the sound passing through it.
 te::AudioTrack* getSidechainSource (te::Plugin&);
 
+// The same, with its name and colour, as the Devices view and the mixer show it; nothing for none.
+SidechainChoice describeSidechainSource (te::Plugin&);
+
+// Every audio track but one, in the song's order, with its colour, and why a device on that one couldn't listen to it:
+// its sound comes from that track, which would make a loop (getSidechainSources()). With none, every track, as a device
+// on the master hears them. describeSidechainChoices() gives them for a device's sidechain, if it has one.
+std::vector<SidechainChoice> describeTracksToListenTo (te::Edit&, te::Track* listener);
+std::vector<SidechainChoice> describeSidechainChoices (te::Plugin&);
+
 // Makes a device's sidechain listen to a track, one of getSidechainSources(), or with nullptr to the sound passing
-// through it, as one undo step.
+// through it, as one undo step. Phazite's compressor, still as it was made, starts ducking then, in the same step:
+// quick to clamp down (1 ms), slow to let go (150 ms), deep (8:1 from -30 dB); and hearing only below 150 Hz when the
+// source plays a drum sampler, so that a kick ducks it and the snare and hats don't.
 void setSidechainSource (te::Plugin&, te::AudioTrack* source);
+
+// Puts Phazite's compressor after a track's effects, ducking under another track (setSidechainSource()), as one undo step
+// ("Duck Bass Under Kick"). Returns the compressor, or nullptr when the key would make a loop.
+te::Plugin* duckUnder (te::AudioTrack& ducked, te::AudioTrack& key);
 
 // Points the sidechains that listen to these tracks, or to tracks inside them, back at the sound passing through each
 // device: for tracks about to be deleted. Joins the caller's undo step.

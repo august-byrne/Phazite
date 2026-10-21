@@ -443,7 +443,8 @@ void RoutingView::connect (TrackID from, juce::Point<int> where)
     {
         const auto choices = getSidechainChoices (context, *device);
 
-        if (std::any_of (choices.begin(), choices.end(), [from] (const DeviceHandle::SidechainChoice& c) { return c.track == from; }))
+        if (std::any_of (choices.begin(), choices.end(),
+                         [from] (const SidechainChoice& c) { return c.track == from && c.whyNot.isEmpty(); }))
             setSidechainSource (context, *device, from);
 
         return;

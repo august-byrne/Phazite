@@ -2,6 +2,7 @@
 // The playlist's track headers: clicking, dragging (into the browser too) and their menus; adding tracks at the end; and the
 // playlist's commands.
 #include "PlaylistParts.h"
+#include "ui/devices/SidechainMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/input/LibraryDrag.h"
 
@@ -88,7 +89,9 @@ void Playlist::showTrackMenu (TrackID track)
     juce::PopupMenu menu;
 
     // The master's row is there for its lanes, which its chevron collapses: it has no menu.
-    if (const auto row = getRowOf (track); row >= 0 && rows[(size_t) row].track.kind == TrackType::master)
+    const auto row = getRowOf (track);
+
+    if (row >= 0 && rows[(size_t) row].track.kind == TrackType::master)
         return;
 
     addCommandItems (menu, bridge, { "edit.rename", "track.color" });
@@ -107,6 +110,14 @@ void Playlist::showTrackMenu (TrackID track)
     addCommandItems (menu, bridge, { "edit.duplicate", "edit.delete" });
     menu.addSeparator();
     addCommandItems (menu, bridge, { "track.freeze", "track.bounceInPlace" });
+
+    // A track's sound ducking under another's, as one step: a compressor listening to that track (SidechainMenus.h).
+    if (row >= 0 && rows[(size_t) row].track.kind == TrackType::track)
+    {
+        const auto duck = makeDuckUnderMenu (context, track);
+        menu.addSubMenu ("Duck Under", duck, duck.getNumItems() > 0);
+    }
+
     menu.addSeparator();
     addCommandItems (menu, bridge, { "track.savePreset" });
     menu.addSeparator();

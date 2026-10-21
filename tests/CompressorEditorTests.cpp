@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The compressor's editor (src/ui/devices/CompressorEditor.h): its knobs, its curve, its meters, and the track its
-// sidechain listens to.
+// The compressor's editor (src/ui/devices/CompressorEditor.h): its knobs, its curve, its meters, and its key's cuts with
+// Listen.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -9,7 +9,6 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/mixer/internal/Sidechain.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DeviceEditors.h"
 
@@ -92,30 +91,24 @@ TEST_CASE ("The compressor's editor shows its knobs, and dragging across its cur
     CHECK (song.valueOf ("threshold") == doctest::Approx (-18.0f));
 }
 
-TEST_CASE ("The compressor's editor picks the track its sidechain listens to")
+TEST_CASE ("The compressor's editor has its key's cuts, and Listen plays the key while it shows")
 {
     Song song;
     phazite::ui::CompressorEditor editor ((phazite::makeDeviceHandle (*song.compressor)));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    CHECK (editor.findControl ("keyLowCut") != nullptr);
+    CHECK (editor.findControl ("keyHighCut") != nullptr);
 
-    // Off, then the tracks other than the bass.
-    auto& box = editor.getSidechainBox();
-    REQUIRE (box.getNumItems() == 3);
-    CHECK (box.getText() == juce::String ("Off"));
-    CHECK (box.getItemText (1) == juce::String ("Kick"));
-    CHECK (box.getItemText (2) == juce::String ("Keys"));
-
-    box.setSelectedItemIndex (1, juce::sendNotificationSync);
-    auto* source = phazite::getSidechainSource (*song.compressor);
-    REQUIRE (source != nullptr);
-    CHECK (source->getName() == juce::String ("Kick"));
-    CHECK (phazite::describeUndo (song.edit.get()) == juce::String ("Undo Sidechain from Kick"));
-
-    // Undo shows on the box.
-    phazite::undo (*song.edit);
+    // Off at first; on, the compressor plays its key, as long as the editor asks (each refresh).
+    auto* compressor = phazite::makeDeviceHandle (*song.compressor).getProcessor<Compressor>();
+    REQUIRE (compressor != nullptr);
     editor.refresh();
-    CHECK (phazite::getSidechainSource (*song.compressor) == nullptr);
-    CHECK (box.getText() == juce::String ("Off"));
+    CHECK_FALSE (compressor->isPlayingKey());
+    phazite::test::Mouse mouse (editor.getListenButton());
+    mouse.click (editor.getListenButton().getLocalBounds().getCentre());
+    CHECK (editor.getListenButton().getToggleState());
+    editor.refresh();
+    CHECK (compressor->isPlayingKey());
 }
 
 TEST_CASE ("The compressor's editor shows the level it hears and how far it turns the sound down")

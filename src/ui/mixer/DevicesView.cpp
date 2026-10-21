@@ -8,6 +8,7 @@
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/devices/ModulatorEditor.h"
+#include "ui/devices/SidechainMenus.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
@@ -19,7 +20,7 @@ using namespace strip;
 namespace
 {
     constexpr int columnWidth = 200; // the channel's name and its modulators
-    constexpr int powerWidth = 36, windowButtonWidth = 28;
+    constexpr int powerWidth = 36, windowButtonWidth = 28, sidechainWidth = 104;
     constexpr int keyKnobColumns = 4, maxKeyKnobs = 8; // a plug-in's key knobs
     constexpr int labelHeight = 18;                    // a knob's name under it
     constexpr int addButtonWidth = 110;                // "+ Effect", "Choose instrument"
@@ -170,8 +171,8 @@ struct ContainerBody : public juce::Component
 };
 
 //==============================================================================
-// A device: its header (an on/off switch, its name, and a plug-in's window button) over what shows it, scrolled up and
-// down when the view is shorter than it.
+// A device: its header (an on/off switch, its name, what its sidechain listens to if it has one, its mix and a plug-in's
+// window button) over what shows it, scrolled up and down when the view is shorter than it.
 struct DevicesView::Panel : public juce::Component
 {
     Panel (DevicesView& v, const DeviceSlot& device, DevicePlace p, TrackID channelTrack)
@@ -198,6 +199,19 @@ struct DevicesView::Panel : public juce::Component
         // Every effect's mix, in one place: its header, as FL Studio's mixer slots have it (a container's is beside its macros).
         if (device.hasMix && ! device.isContainer)
             addMixKnob (*this, mixKnob, mixAttachment, view.context, device);
+
+        // What its sidechain listens to: the one place to choose it (ui/devices/SidechainMenus.h).
+        if (device.hasSidechain)
+        {
+            sidechainButton = std::make_unique<SidechainButton> (view.context, device.id);
+            const juce::Component::SafePointer<DevicesView> safeView (&view);
+            sidechainButton->onChange = [safeView]
+            {
+                if (safeView != nullptr)
+                    safeView->songChanged ({ .devices = true });
+            };
+            addAndMakeVisible (*sidechainButton);
+        }
 
         if (device.opensWindow)
         {
@@ -235,8 +249,11 @@ struct DevicesView::Panel : public juce::Component
                                                     : "Click to select it; right-click for its menu");
         power.setToggleState (device.isOn, juce::dontSendNotification);
 
+        if (sidechainButton != nullptr)
+            sidechainButton->show (device.sidechain);
+
         // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
-        for (auto* control : std::initializer_list<juce::Component*> { &power, &bodyView, windowButton.get() })
+        for (auto* control : std::initializer_list<juce::Component*> { &power, &bodyView, windowButton.get(), sidechainButton.get() })
             if (control != nullptr)
                 control->setEnabled (! device.frozen);
 
@@ -359,6 +376,10 @@ struct DevicesView::Panel : public juce::Component
         if (! mixKnob.isEmpty())
             mixKnob.getFirst()->setBounds (header.removeFromRight (header.getHeight()));
 
+        if (sidechainButton != nullptr)
+            sidechainButton->setBounds (
+                header.removeFromRight (std::min (sidechainWidth, header.getWidth() / 2)).withTrimmedRight (Space::xs));
+
         nameButton.setBounds (header);
         bodyView.setBounds (area);
 
@@ -374,7 +395,8 @@ struct DevicesView::Panel : public juce::Component
     MenuButton nameButton;
     juce::OwnedArray<Knob> mixKnob; // an effect's
     std::unique_ptr<MixAttachment> mixAttachment;
-    std::unique_ptr<IconButton> windowButton; // a plug-in's
+    std::unique_ptr<IconButton> windowButton;         // a plug-in's
+    std::unique_ptr<SidechainButton> sidechainButton; // a device's that has a sidechain
     std::unique_ptr<juce::Component> body;
     juce::Viewport bodyView;
 };

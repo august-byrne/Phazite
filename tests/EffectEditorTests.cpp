@@ -284,7 +284,7 @@ TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its
     CHECK (editor.getCarrierText() == juce::String ("Buzz C3"));
     song.plugin->getAutomatableParameterByID ("carrier")->setParameter (3.0f, juce::sendNotification);
     juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
-    CHECK (editor.getCarrierText() == juce::String ("Track: none feeds its sidechain"));
+    CHECK (editor.getCarrierText() == juce::String ("Track: pick one with Sidechain, above"));
 
     // From the fifth band's column to the seventh's: the carrier's bands up by as far (10.6 semitones), one step.
     auto& bands = editor.getBands();

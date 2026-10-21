@@ -107,6 +107,10 @@ struct DeviceSlot
     // Its sound is in its track's frozen file (FreezeModel.h): its controls are off, and its window shut, until the track
     // is unfrozen.
     bool frozen = false;
+
+    // It can listen to another track (a sidechain): the one it does, if any, with its name and colour.
+    bool hasSidechain = false;
+    SidechainChoice sidechain {};
 };
 
 std::optional<DeviceSlot> getInstrument (const ProjectContext&, TrackID);
@@ -197,13 +201,20 @@ bool canChooseOutput (const ProjectContext&, TrackID);
 void setOutput (ProjectContext&, TrackID, TrackID bus);
 
 //==============================================================================
-// A device's sidechain (docs/design.md, section 8), Phazite's own or a plug-in's: whether it has one, the tracks it can
-// listen to (none whose sound comes from its own), the one it listens to (none: the sound passing through it), and
-// choosing one, as one undo step.
+// A device's sidechain (docs/design.md, section 8), Phazite's own or a plug-in's: whether it has one, every track but its
+// own with why it can't listen to one whose sound comes from its own, the one it listens to (none: the sound passing
+// through it), and choosing one, as one undo step (Phazite's compressor, still as it was made, starts ducking then:
+// internal/Sidechain.h).
 bool hasSidechain (const ProjectContext&, DeviceID);
-std::vector<DeviceHandle::SidechainChoice> getSidechainChoices (const ProjectContext&, DeviceID);
+std::vector<SidechainChoice> getSidechainChoices (const ProjectContext&, DeviceID);
 TrackID getSidechainSource (const ProjectContext&, DeviceID);
 void setSidechainSource (ProjectContext&, DeviceID, TrackID source);
+
+// Ducking a track under another, as one undo step ("Duck Bass Under Kick"): Phazite's compressor after its effects, its
+// sidechain listening to the other. The tracks it can duck under: every track but itself, with why not one whose sound
+// comes from it. Returns the compressor.
+std::vector<SidechainChoice> getDuckUnderChoices (const ProjectContext&, TrackID ducked);
+DeviceID duckUnder (ProjectContext&, TrackID ducked, TrackID key);
 
 //==============================================================================
 // How much of each block's time a channel's devices take to process, from 0 to 1, as Tracktion measures each device (its

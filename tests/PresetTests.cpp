@@ -177,8 +177,7 @@ TEST_CASE ("A device's preset holds its settings and mix, not its automation, ou
     phazite::addAutomationPoint (context, threshold, { phazite::BeatPosition::fromBeats (4.0), -6.0f });
     const auto lfo = phazite::addModulator (context, track, ModulatorType::lfo);
     phazite::modulate (context, lfo, threshold, 0.25f);
-    auto device = phazite::makeDeviceHandle (*te::findPluginForID (song.edit(), phazite::toTracktion (compressor)));
-    device.setSidechainSource (other);
+    phazite::setSidechainSource (context, compressor, other);
     phazite::setDeviceOn (context, compressor, false);
 
     const auto preset = phazite::makeDevicePreset (*te::findPluginForID (song.edit(), phazite::toTracktion (compressor)));

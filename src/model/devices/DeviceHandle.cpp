@@ -58,33 +58,10 @@ ParameterHandle DeviceHandle::getParameter (std::string_view id, const juce::Str
     return {};
 }
 
-std::vector<DeviceHandle::SidechainChoice> DeviceHandle::getSidechainChoices() const
+SidechainChoice DeviceHandle::getSidechainSource() const
 {
-    std::vector<SidechainChoice> choices;
-
-    if (auto* device = pluginOf (impl))
-        for (auto* track : getSidechainSources (*device))
-            choices.push_back ({ getTrackID (*track), track->getName() });
-
-    return choices;
-}
-
-DeviceHandle::SidechainChoice DeviceHandle::getSidechainSource() const
-{
-    if (auto* device = pluginOf (impl))
-        if (auto* track = phazite::getSidechainSource (*device))
-            return { getTrackID (*track), track->getName() };
-
-    return {};
-}
-
-void DeviceHandle::setSidechainSource (TrackID id) const
-{
-    if (auto* device = pluginOf (impl))
-    {
-        auto* track = id.isValid() ? te::findTrackForID (device->edit, toTracktion (id)) : nullptr;
-        phazite::setSidechainSource (*device, dynamic_cast<te::AudioTrack*> (track));
-    }
+    auto* device = pluginOf (impl);
+    return device != nullptr ? describeSidechainSource (*device) : SidechainChoice();
 }
 
 juce::String DeviceHandle::getPadName (int pad) const

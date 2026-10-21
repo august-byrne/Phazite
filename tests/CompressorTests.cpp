@@ -109,7 +109,8 @@ TEST_CASE ("The compressor's description holds together")
     REQUIRE (devices::isValid (Compressor::info));
     CHECK (Compressor::info.parameters.size() == (size_t) Compressor::mix + 1);
     CHECK (devices::findParameter (Compressor::info, "threshold") == Compressor::threshold);
-    CHECK (devices::findParameter (Compressor::info, "sidechainLowCut") == Compressor::sidechainLowCut);
+    CHECK (devices::findParameter (Compressor::info, "keyLowCut") == Compressor::keyLowCut);
+    CHECK (devices::findParameter (Compressor::info, "keyHighCut") == Compressor::keyHighCut);
     CHECK (devices::findParameter (Compressor::info, "mix") == Compressor::mix); // which its thin plug-in applies
 }
 
@@ -240,7 +241,7 @@ TEST_CASE ("The compressor listens to its sidechain when one feeds it, and to bo
     }
 }
 
-TEST_CASE ("The compressor's low cut keeps bass from pushing it, and its meters show what it did")
+TEST_CASE ("The compressor's key low cut keeps bass from pushing it, and its meters show what it did")
 {
     auto values = getTestValues();
     const auto bass = [] (int t, int) { return (float) (0.5 * std::sin (juce::MathConstants<double>::twoPi * 30.0 * t / testRate)); };
@@ -248,7 +249,7 @@ TEST_CASE ("The compressor's low cut keeps bass from pushing it, and its meters 
     // The most it turned a 30 Hz sine down by, over its last half second.
     const auto mostReduction = [&] (float lowCut)
     {
-        values[Compressor::sidechainLowCut] = lowCut;
+        values[Compressor::keyLowCut] = lowCut;
         Compressor compressor;
         compressor.prepare (testRate, testBlockSize);
         play (compressor, values, 24000, bass);
@@ -273,4 +274,75 @@ TEST_CASE ("The compressor's low cut keeps bass from pushing it, and its meters 
     CHECK (compressor.getReductionMeter().take() == doctest::Approx (15.0f).epsilon (0.001));
     CHECK (compressor.getLevelMeter().take() == doctest::Approx (-120.0f));
     CHECK (compressor.getReductionMeter().take() == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("The compressor's key high cut lets a kick duck the sound, and not hats on the same track")
+{
+    // A key of two parts: a 50 Hz kick for the first half second, then 8 kHz hats as loud.
+    auto values = getTestValues();
+    const auto key = [] (int t, int)
+    {
+        const auto hertz = t < 24000 ? 50.0 : 8000.0;
+        return (float) (0.5 * std::sin (juce::MathConstants<double>::twoPi * hertz * t / testRate));
+    };
+
+    const auto reductions = [&] (float highCut)
+    {
+        values[Compressor::keyHighCut] = highCut;
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        play (compressor, values, 24000, [] (int t, int) { return steady (t, -30.0f); }, key);
+        const auto kick = compressor.getReductionMeter().take();
+        play (
+            compressor, values, 24000, [] (int t, int) { return steady (t, -30.0f); },
+            [&key] (int t, int c) { return key (t + 24000, c); });
+        compressor.getReductionMeter().take(); // the kick's release
+        play (
+            compressor, values, 24000, [] (int t, int) { return steady (t, -30.0f); },
+            [&key] (int t, int c) { return key (t + 24000, c); });
+        return std::pair { kick, compressor.getReductionMeter().take() };
+    };
+
+    // Off at first: both duck it. At 150 Hz, the kick does and the hats don't.
+    const auto [kickOff, hatsOff] = reductions (20000.0f);
+    CHECK (kickOff > 6.0f);
+    CHECK (hatsOff > 6.0f);
+    const auto [kickCut, hatsCut] = reductions (150.0f);
+    CHECK (kickCut > 6.0f);
+    CHECK (hatsCut < 1.0f);
+}
+
+TEST_CASE ("The compressor plays its key while its editor listens, through its cuts, and stops half a second after it last asks")
+{
+    auto values = getTestValues();
+    values[Compressor::keyLowCut] = 300.0f;
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    CHECK_FALSE (compressor.overridesMix());
+
+    // The sound is a tone; the key is a 1 kHz sine with a 30 Hz rumble, which the low cut takes away.
+    const auto sound = [] (int t, int) { return steady (t, -30.0f); };
+    const auto key = [] (int t, int)
+    {
+        const auto at = juce::MathConstants<double>::twoPi * t / testRate;
+        return (float) (0.25 * std::sin (1000.0 * at) + 0.5 * std::sin (30.0 * at));
+    };
+
+    compressor.listenToKey();
+    CHECK (compressor.isPlayingKey());
+    const auto heard = play (compressor, values, 4800, sound, key);
+    CHECK (compressor.overridesMix());
+    auto loudest = 0.0f;
+
+    for (int i = 2400; i < 4800; ++i)
+        loudest = std::max (loudest, std::abs (heard[0][(size_t) i]));
+
+    CHECK (loudest == doctest::Approx (0.25f).epsilon (0.1)); // the 1 kHz sine, and not the rumble
+
+    // Half a second on by the clock, unless asked again, it stops, whether it played meanwhile or not; and fades back to the
+    // sound.
+    juce::Thread::sleep (600);
+    CHECK_FALSE (compressor.isPlayingKey());
+    play (compressor, values, 4800, sound, key);
+    CHECK_FALSE (compressor.overridesMix());
 }

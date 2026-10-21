@@ -74,8 +74,8 @@ namespace
 
 DeviceSlot makeDeviceSlot (te::Plugin& device)
 {
-    return { getDeviceID (device),       device.getName(),     device.isEnabled(),   hasMix (device),
-             device.getLatencySeconds(), isContainer (device), opensWindow (device), isFrozenDevice (device) };
+    return { getDeviceID (device), device.getName(),     device.isEnabled(),      hasMix (device),       device.getLatencySeconds(),
+             isContainer (device), opensWindow (device), isFrozenDevice (device), hasSidechain (device), describeSidechainSource (device) };
 }
 
 //==============================================================================
@@ -611,15 +611,10 @@ bool hasSidechain (const ProjectContext& context, DeviceID id)
     return device != nullptr && phazite::hasSidechain (*device);
 }
 
-std::vector<DeviceHandle::SidechainChoice> getSidechainChoices (const ProjectContext& context, DeviceID id)
+std::vector<SidechainChoice> getSidechainChoices (const ProjectContext& context, DeviceID id)
 {
-    std::vector<DeviceHandle::SidechainChoice> choices;
-
-    if (auto* device = findDevice (context, id))
-        for (auto* source : getSidechainSources (*device))
-            choices.push_back ({ getTrackID (*source), source->getName() });
-
-    return choices;
+    auto* device = findDevice (context, id);
+    return device != nullptr ? describeSidechainChoices (*device) : std::vector<SidechainChoice>();
 }
 
 TrackID getSidechainSource (const ProjectContext& context, DeviceID id)
@@ -636,6 +631,20 @@ void setSidechainSource (ProjectContext& context, DeviceID id, TrackID sourceID)
 
     if (device != nullptr && (source != nullptr || ! sourceID.isValid()))
         phazite::setSidechainSource (*device, source);
+}
+
+std::vector<SidechainChoice> getDuckUnderChoices (const ProjectContext& context, TrackID id)
+{
+    auto* ducked = dynamic_cast<te::AudioTrack*> (findTrack (context, id));
+    return ducked != nullptr ? describeTracksToListenTo (ducked->edit, ducked) : std::vector<SidechainChoice>();
+}
+
+DeviceID duckUnder (ProjectContext& context, TrackID duckedID, TrackID keyID)
+{
+    auto* ducked = dynamic_cast<te::AudioTrack*> (findTrack (context, duckedID));
+    auto* key = dynamic_cast<te::AudioTrack*> (findTrack (context, keyID));
+    auto* compressor = ducked != nullptr && key != nullptr ? phazite::duckUnder (*ducked, *key) : nullptr;
+    return compressor != nullptr ? getDeviceID (*compressor) : DeviceID();
 }
 
 //==============================================================================

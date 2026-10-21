@@ -64,7 +64,7 @@ public:
         }
 
         const auto source = device.getSidechainSource();
-        return source.track.isValid() ? "Track: " + source.name : juce::String ("Track: none feeds its sidechain");
+        return source.track.isValid() ? "Track: " + source.name : juce::String ("Track: pick one with Sidechain, above");
     }
 
     bool needsTrack() const

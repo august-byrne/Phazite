@@ -11,6 +11,7 @@
 #include "devices/core/Processor.h"
 #include "devices/wavetable/Wavetable.h"
 #include "model/base/IDs.h"
+#include "model/mixer/SidechainChoice.h"
 
 #include <memory>
 #include <string_view>
@@ -29,17 +30,8 @@ public:
     // The parameter with that ID; its changes are undo steps named "Change" and its name, or undoName.
     ParameterHandle getParameter (std::string_view id, const juce::String& undoName = {}) const;
 
-    // A track a device's sidechain can listen to (model/mixer/internal/Sidechain.h), or none: the sound passing through the
-    // device.
-    struct SidechainChoice
-    {
-        TrackID track;
-        juce::String name;
-    };
-
-    std::vector<SidechainChoice> getSidechainChoices() const; // in the song's order
+    // The track its sidechain listens to, or none.
     SidechainChoice getSidechainSource() const;
-    void setSidechainSource (TrackID) const; // one of the choices, or none; as one undo step
 
     // The drum sampler's pads (model/devices/internal/DrumKit.h): what each plays, and putting a sound file on one, or the kit's
     // sound back, as undo steps. setPadSound() returns false for a file that isn't a sound.

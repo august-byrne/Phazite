@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Sidechain.h"
+#include "devices/dynamics/Compressor.h"
+#include "internal/Mixer.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/DrumKit.h"
 
 namespace phazite
 {
@@ -39,6 +44,49 @@ namespace
                 return true;
 
         return false;
+    }
+
+    SidechainChoice describe (te::AudioTrack& track)
+    {
+        return { getTrackID (track), track.getName(), getTrackColour (track, getPlaylistTracks (track.edit).indexOf (&track)) };
+    }
+
+    bool playsDrumSampler (te::AudioTrack& track)
+    {
+        for (auto* plugin : track.pluginList)
+            if (isDrumSampler (*plugin))
+                return true;
+
+        return false;
+    }
+
+    // A compressor still as it was made starts ducking, joining the caller's step (setSidechainSource()).
+    void startDucking (te::Plugin& plugin, te::AudioTrack& source)
+    {
+        using devices::Compressor;
+        auto* device = dynamic_cast<DevicePlugin*> (&plugin);
+
+        if (device == nullptr || device->getDeviceInfo().typeID != Compressor::typeID)
+            return;
+
+        for (const auto& parameter : Compressor::info.parameters)
+            if (auto* value = device->findParameter (parameter.id);
+                value == nullptr || std::abs (value->getCurrentValue() - parameter.defaultValue) > 1.0e-4f)
+                return;
+
+        const auto set = [device] (std::string_view id, float value)
+        {
+            if (auto* parameter = device->findParameter (id))
+                parameter->setParameter (value, juce::sendNotification);
+        };
+
+        set ("threshold", -30.0f);
+        set ("ratio", 8.0f);
+        set ("attack", 1.0f);
+        set ("release", 150.0f);
+
+        if (playsDrumSampler (source))
+            set ("keyHighCut", 150.0f);
     }
 } // namespace
 
@@ -96,6 +144,41 @@ te::AudioTrack* getSidechainSource (te::Plugin& plugin)
     return source.isValid() ? dynamic_cast<te::AudioTrack*> (te::findTrackForID (plugin.edit, source)) : nullptr;
 }
 
+SidechainChoice describeSidechainSource (te::Plugin& plugin)
+{
+    auto* source = getSidechainSource (plugin);
+    return source != nullptr ? describe (*source) : SidechainChoice();
+}
+
+std::vector<SidechainChoice> describeTracksToListenTo (te::Edit& edit, te::Track* listener)
+{
+    std::vector<SidechainChoice> choices;
+    const auto fed = listener != nullptr ? getTracksFedBy (*listener) : juce::Array<te::Track*>();
+
+    for (auto* track : te::getAudioTracks (edit))
+    {
+        if (track == listener)
+            continue;
+
+        auto choice = describe (*track);
+
+        if (fed.contains (track))
+            choice.whyNot = "its sound comes from " + listener->getName();
+
+        choices.push_back (choice);
+    }
+
+    return choices;
+}
+
+std::vector<SidechainChoice> describeSidechainChoices (te::Plugin& plugin)
+{
+    if (! hasSidechain (plugin))
+        return {};
+
+    return describeTracksToListenTo (plugin.edit, plugin.getOwnerTrack());
+}
+
 void setSidechainSource (te::Plugin& plugin, te::AudioTrack* source)
 {
     if (source == getSidechainSource (plugin) || (source != nullptr && ! getSidechainSources (plugin).contains (source)))
@@ -107,6 +190,23 @@ void setSidechainSource (te::Plugin& plugin, te::AudioTrack* source)
     // The source's two channels go to the sidechain's inputs: the routing Tracktion guesses for a device's inputs.
     if (source != nullptr && plugin.getNumWires() == 0)
         plugin.guessSidechainRouting();
+
+    if (source != nullptr)
+        startDucking (plugin, *source);
+}
+
+te::Plugin* duckUnder (te::AudioTrack& ducked, te::AudioTrack& key)
+{
+    if (&ducked == &key || getTracksFedBy (ducked).contains (&key))
+        return nullptr;
+
+    const UndoStep step (ducked.edit, "Duck " + ducked.getName() + " Under " + key.getName());
+    auto* compressor = insertDevice (ducked, ducked.edit.getPluginCache().createNewPlugin (devices::Compressor::typeID, {}));
+
+    if (compressor != nullptr)
+        setSidechainSource (*compressor, &key);
+
+    return compressor;
 }
 
 void forgetSidechainSources (const juce::Array<te::Track*>& tracks)

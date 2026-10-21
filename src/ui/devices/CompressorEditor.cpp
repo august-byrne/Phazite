@@ -156,71 +156,37 @@ private:
 };
 
 //==============================================================================
-// Lists the tracks the sidechain can listen to as it opens, since tracks come and go, and picks one as an undo step.
-class CompressorEditor::SourceBox : public juce::ComboBox
+// The key's cuts, and Listen beside them: while it is on and the editor shows, the compressor plays its key, through its
+// cuts, instead of the sound (Compressor::listenToKey(), which the refresh asks for again and again), to hear what makes it
+// duck. Hidden, or with the editor gone, the sound comes back within half a second.
+class CompressorEditor::KeyPart : public juce::Component
 {
 public:
-    explicit SourceBox (CompressorEditor& e)
-        : editor (e)
+    explicit KeyPart (ParameterControls& c)
+        : controls (c)
     {
-        setTitle ("Sidechain");
-        setTooltip ("The track the compressor listens to, such as a kick that turns a bass down; Off listens to the sound passing "
-                    "through it");
-        onChange = [this] { pick(); };
-        list();
+        listen.setTitle ("Listen");
+        listen.setTooltip ("Plays what the compressor listens to, through its cuts, instead of the sound, to hear what makes it duck");
+        listen.setClickingTogglesState (true);
+        addAndMakeVisible (controls);
+        addAndMakeVisible (listen);
     }
 
-    void showPopup() override
+    int getPreferredWidth() const { return controls.getPreferredWidth() + Space::xs + listenWidth; }
+
+    void resized() override
     {
-        list();
-        juce::ComboBox::showPopup();
+        auto area = getLocalBounds();
+        controls.setBounds (area.removeFromLeft (controls.getPreferredWidth()));
+        area.removeFromLeft (Space::xs);
+        listen.setBounds (area.withSizeKeepingCentre (area.getWidth(), controlHeight));
     }
 
-    // Shows the source the sidechain has now, once it has changed (with Undo, say).
-    void update()
-    {
-        const auto source = editor.device.getSidechainSource();
-
-        if (source.track != shown.track || source.name != shown.name)
-            list();
-    }
+    ParameterControls& controls;
+    juce::TextButton listen { "Listen" };
 
 private:
-    CompressorEditor& editor;
-    std::vector<DeviceHandle::SidechainChoice> choices; // the tracks listed, from the box's second item on
-    DeviceHandle::SidechainChoice shown;
-
-    void list()
-    {
-        choices = editor.device.getSidechainChoices();
-        shown = editor.device.getSidechainSource();
-
-        // A source that would now make a loop still shows, though it isn't offered.
-        if (shown.track.isValid()
-            && std::none_of (choices.begin(), choices.end(), [this] (const auto& choice) { return choice.track == shown.track; }))
-            choices.insert (choices.begin(), shown);
-
-        clear (juce::dontSendNotification);
-        addItem ("Off", 1);
-        auto selected = 1;
-
-        for (size_t i = 0; i < choices.size(); ++i)
-        {
-            addItem (choices[i].name, (int) i + 2);
-
-            if (choices[i].track == shown.track)
-                selected = (int) i + 2;
-        }
-
-        setSelectedId (selected, juce::dontSendNotification);
-    }
-
-    void pick()
-    {
-        const auto index = getSelectedId() - 2;
-        editor.device.setSidechainSource (index >= 0 && index < (int) choices.size() ? choices[(size_t) index].track : TrackID());
-        list();
-    }
+    static constexpr int listenWidth = 64;
 };
 
 //==============================================================================
@@ -266,8 +232,6 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle)
 
     auto& shownActivity = keep (std::make_unique<Activity> (*this));
     activity = &shownActivity;
-    auto& box = keep (std::make_unique<SourceBox> (*this));
-    sourceBox = &box;
 
     // The meters' first readings would show what played before the editor opened.
     if (auto* compressor = device.getProcessor<Compressor>())
@@ -279,12 +243,13 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle)
     const auto main = makeControlsPart ("Squeeze", { "threshold", "ratio" }, 2, ParameterControls::Size::large);
     const auto timing = makeControlsPart ("Timing", { "attack", "release" }, 2);
     const auto shape = makeControlsPart ("Shape", { "knee", "makeup" }, 2);
-    const auto cellWidth = ParameterControls::getCellWidth (ParameterControls::Size::compact);
-    const auto key = makeControlsPart ("Key", { "sidechainLowCut" }, 1, ParameterControls::Size::compact, { "Low Cut" });
+    auto& cuts = makeControls ({ "keyLowCut", "keyHighCut" }, 2, ParameterControls::Size::compact, "Key", { "Low Cut", "High Cut" });
+    auto& shownKey = keep (std::make_unique<KeyPart> (cuts));
+    keyPart = &shownKey;
 
     setParts ({ { { "Activity", &shownActivity, 340, 196, 110, true } },
                 { main, timing },
-                { shape, { "Sidechain", &box, 2 * cellWidth, controlHeight, controlHeight }, key } });
+                { shape, { "Key", &shownKey, shownKey.getPreferredWidth(), cuts.getPreferredHeight(), cuts.getPreferredHeight() } } });
 }
 
 CompressorEditor::~CompressorEditor()
@@ -303,9 +268,9 @@ LevelHistoryView& CompressorEditor::getHistory()
     return activity->history;
 }
 
-juce::ComboBox& CompressorEditor::getSidechainBox()
+juce::Button& CompressorEditor::getListenButton()
 {
-    return *sourceBox;
+    return keyPart->listen;
 }
 
 juce::Point<float> CompressorEditor::getGraphPosition (float inputDecibels, float outputDecibels) const
@@ -335,9 +300,12 @@ void CompressorEditor::refresh()
         }
 
         activity->history.push (level, output, reduction);
+
+        // Listen: the key, for as long as the editor shows and asks.
+        if (keyPart->listen.getToggleState())
+            compressor->listenToKey();
     }
 
-    sourceBox->update();
     activity->graph.repaint();
 }
 } // namespace phazite::ui

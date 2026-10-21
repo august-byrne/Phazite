@@ -278,3 +278,34 @@ TEST_CASE ("The Devices view shows its track's modulators, a macro with its knob
     phazite::removeModulator (screen.context, phazite::getModulators (screen.context, screen.track (0))[0].id);
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "LFO 1") == nullptr; }));
 }
+
+TEST_CASE ("A device with a sidechain shows in its header what it listens to: the one place to choose it")
+{
+    Screen screen;
+    auto& view = screen.view;
+    const auto effects = screen.effects (0);
+    REQUIRE (effects.size() == 3);
+
+    const auto findSidechain = [&view, &effects] (size_t effect)
+    {
+        auto* panel = view.findPanel (effects[effect]);
+        REQUIRE (panel != nullptr);
+        return dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "Sidechain"));
+    };
+
+    // The EQ has none; the compressor's listens to the sound passing through it, at first.
+    CHECK (findSidechain (0) == nullptr);
+    auto* button = findSidechain (1);
+    REQUIRE (button != nullptr);
+    CHECK (button->getButtonText() == juce::String ("Sidechain"));
+
+    // Listening to the other track: its name, once the view has heard.
+    phazite::setSidechainSource (screen.context, effects[1], screen.track (1));
+    phazite::test::dispatchPendingMessages();
+    button = findSidechain (1);
+    REQUIRE (button != nullptr);
+    const auto other = phazite::getChannel (screen.context, screen.track (1));
+    REQUIRE (other.has_value());
+    CHECK (button->getButtonText() == other->name);
+    phazite::test::checkChildrenApart (view);
+}

@@ -66,5 +66,9 @@ public:
 
     // How long its sound goes on after its input stops, in seconds (a reverb's tail).
     virtual double getTailSeconds() const { return 0.0; }
+
+    // Whether it plays something other than its effect now, such as a compressor letting its key be heard: its thin
+    // plug-in then passes what it plays on whole, whatever its mix. Real-time safe.
+    virtual bool overridesMix() const noexcept { return false; }
 };
 } // namespace phazite::devices

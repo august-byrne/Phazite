@@ -254,6 +254,7 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/MixerModel.cpp
     src/model/mixer/MixerModel.h
     src/model/mixer/Sidechain.cpp
+    src/model/mixer/SidechainChoice.h
     src/model/mixer/internal/Buses.h
     src/model/mixer/internal/Containers.h
     src/model/mixer/internal/Freeze.h
@@ -507,6 +508,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/ReverbEditor.h
     src/ui/devices/SaturatorEditor.cpp
     src/ui/devices/SaturatorEditor.h
+    src/ui/devices/SidechainMenus.cpp
+    src/ui/devices/SidechainMenus.h
     src/ui/devices/StereoExpanderEditor.cpp
     src/ui/devices/StereoExpanderEditor.h
     src/ui/devices/SweepPicture.cpp

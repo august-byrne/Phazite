@@ -2,8 +2,9 @@
 // The compressor's editor (roadmap step 1.6, devices/dynamics/Compressor.h): its curve, with a dot riding it at the level the
 // detector hears and a meter of how far it turns the sound down; beside it the last seconds, as FabFilter's compressor shows
 // them, what it hears (pale), what goes out and how far it turned the sound down (red, from the top), with the threshold a
-// line across; its Threshold and Ratio, large, then the rest, and the track its sidechain listens to. Dragging across the
-// curve, or the threshold's line up or down, moves the threshold, as one undo step.
+// line across; its Threshold and Ratio, large, then the rest, and its key's cuts with Listen, which plays the key instead of
+// the sound while the editor shows (the track its sidechain listens to is chosen in its header: SidechainMenus.h).
+// Dragging across the curve, or the threshold's line up or down, moves the threshold, as one undo step.
 #pragma once
 
 #include "DeviceEditorBase.h"
@@ -23,7 +24,7 @@ public:
 
     juce::Component& getGraph();
     LevelHistoryView& getHistory();
-    juce::ComboBox& getSidechainBox();
+    juce::Button& getListenButton(); // plays the key instead of the sound, while on and showing
 
     // Where the graph draws a level in (x) and out (y), in decibels, in its own coordinates.
     juce::Point<float> getGraphPosition (float inputDecibels, float outputDecibels) const;
@@ -32,12 +33,13 @@ public:
     float getShownLevel() const noexcept { return shownLevel; }
     float getShownReduction() const noexcept { return shownReduction; }
 
-    // Brings the curve, the meters, the history and the sidechain's source up to date; the ticker does it.
+    // Brings the curve, the meters and the history up to date, and keeps the key playing while Listen is on; the ticker does
+    // it.
     void refresh();
 
 private:
     class Graph;
-    class SourceBox;
+    class KeyPart;
     class Activity;
 
     std::vector<ParameterHandle> parameters; // every parameter, in the compressor's order, for the curve
@@ -45,7 +47,7 @@ private:
     float shownLevel, shownReduction = 0.0f;
 
     Activity* activity = nullptr;
-    SourceBox* sourceBox = nullptr;
+    KeyPart* keyPart = nullptr;
 
     void tick() override { refresh(); }
 };

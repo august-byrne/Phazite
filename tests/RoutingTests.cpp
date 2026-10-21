@@ -11,6 +11,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/devices/SidechainMenus.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/RoutingView.h"
 
@@ -326,4 +327,54 @@ TEST_CASE ("A strip has a send knob for every return, and one drag sends the tra
     auto* cpu = phazite::test::findComponentWithTitle (strip, "CPU");
     REQUIRE (cpu != nullptr);
     CHECK (cpu->isVisible());
+}
+
+TEST_CASE ("The sidechain's menu lists Off and every other track, greys one that would make a loop with why, and picks one")
+{
+    Mix mix;
+    const auto compressor = phazite::getDeviceID (*mix.compressor);
+
+    // The keys' sound comes from the bass, through a compressor on the keys that listens to it.
+    auto* onKeys = phazite::insertDevice (*mix.keys, mix.edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
+    REQUIRE (onKeys != nullptr);
+    phazite::setSidechainSource (mix.context, phazite::getDeviceID (*onKeys), mix.id (mix.bass));
+
+    const auto itemsOf = [] (juce::PopupMenu& menu)
+    {
+        std::vector<juce::PopupMenu::Item> items;
+
+        for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+            if (! it.getItem().isSeparator)
+                items.push_back (it.getItem());
+
+        return items;
+    };
+
+    auto menu = phazite::ui::makeSidechainMenu (mix.context, compressor);
+    auto items = itemsOf (menu);
+    REQUIRE (items.size() == 5);
+    CHECK (items[0].text == juce::String ("Off: the sound passing through it"));
+    CHECK (items[0].isTicked);
+    CHECK (items[1].text == juce::String ("Kick"));
+    CHECK (items[2].text == juce::String ("Keys (its sound comes from Bass)"));
+    CHECK_FALSE (items[2].isEnabled);
+    CHECK (items[3].text == juce::String ("Reverb"));
+
+    // Kick: one step, the compressor ducking, and its slot in the mixer shows where it listens.
+    items[1].action();
+    CHECK (mix.describeUndo() == juce::String ("Undo Sidechain from Kick"));
+    CHECK (mix.compressor->getAutomatableParameterByID ("ratio")->getCurrentValue() == doctest::Approx (8.0f));
+    const auto slots = phazite::getEffects (mix.context, mix.id (mix.bass));
+    REQUIRE (slots.size() == 1);
+    CHECK (slots[0].hasSidechain);
+    CHECK (slots[0].sidechain.name == juce::String ("Kick"));
+
+    // Duck Under, from the track's menu: the keys can't (their sound comes from the bass); Kick adds a second compressor.
+    auto duck = phazite::ui::makeDuckUnderMenu (mix.context, mix.id (mix.bass));
+    auto ducks = itemsOf (duck);
+    REQUIRE (ducks.size() == 4);
+    CHECK_FALSE (ducks[1].isEnabled);
+    ducks[0].action();
+    CHECK (mix.describeUndo() == juce::String ("Undo Duck Bass Under Kick"));
+    CHECK (phazite::getEffects (mix.context, mix.id (mix.bass)).size() == 2);
 }

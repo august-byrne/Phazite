@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Sidechains (model/mixer/internal/Sidechain.h): which tracks a device can listen to, picking one as an undo step, forgetting a
-// deleted one, and the source's sound reaching the device as the song plays.
+// Sidechains (model/mixer/internal/Sidechain.h): which tracks a device can listen to, and why not the others, picking one as an
+// undo step (a compressor as it was made starting to duck in it), Duck Under, forgetting a deleted source, and the
+// source's sound reaching the device as the song plays.
 #include "TestDevices.h"
 #include "TestHelpers.h"
+#include "devices/drums/DrumSampler.h"
+#include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 
@@ -156,4 +160,86 @@ TEST_CASE ("A sidechain's source reaches the device as the song plays, muted or 
     // A muted kick still feeds the sidechain, the way a "ghost" kick ducks a bass.
     phazite::setSidechainSource (ducker, song.kick);
     CHECK (renderPeak (*song.edit) > 0.5f * kickAlone);
+}
+
+TEST_CASE ("A sidechain's choices name every track but the device's own, in their colours, and why one would make a loop")
+{
+    Song song;
+    auto& ducker = song.add (*song.bass, TestSidechain::typeID);
+    phazite::setSidechainSource (song.add (*song.keys, TestSidechain::typeID), song.bass); // the keys' sound comes from the bass
+
+    const auto choices = phazite::describeSidechainChoices (ducker);
+    REQUIRE (choices.size() == 2);
+    CHECK (choices[0].name == juce::String ("Kick"));
+    CHECK (choices[0].whyNot.isEmpty());
+    CHECK (choices[1].name == juce::String ("Keys"));
+    CHECK (choices[1].whyNot == juce::String ("its sound comes from Bass"));
+    CHECK (choices[0].colour == phazite::getTrackColour (*song.kick, 0));
+
+    // As the mixer shows the device: what it listens to.
+    CHECK_FALSE (phazite::describeSidechainSource (ducker).track.isValid());
+    phazite::setSidechainSource (ducker, song.kick);
+    CHECK (phazite::describeSidechainSource (ducker).name == juce::String ("Kick"));
+
+    // A device with no sidechain has no choices.
+    CHECK (phazite::describeSidechainChoices (song.add (*song.keys, TestGain::typeID)).empty());
+}
+
+TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidechain is first chosen, in the same undo step")
+{
+    using phazite::devices::Compressor;
+    Song song;
+    const auto valueOf = [] (te::Plugin& device, const char* id) { return device.getAutomatableParameterByID (id)->getCurrentValue(); };
+    const auto addCompressor = [&song] (te::Track& track) -> te::Plugin&
+    { return *phazite::insertDevice (track, song.edit->getPluginCache().createNewPlugin (Compressor::typeID, {})); };
+
+    // On the bass, from the kick: quick, slow to let go, deep; the key whole, as the kick plays no drum sampler.
+    auto& compressor = addCompressor (*song.bass);
+    song.edit->getUndoManager().clearUndoHistory();
+    phazite::setSidechainSource (compressor, song.kick);
+    CHECK (valueOf (compressor, "threshold") == doctest::Approx (-30.0f));
+    CHECK (valueOf (compressor, "ratio") == doctest::Approx (8.0f));
+    CHECK (valueOf (compressor, "attack") == doctest::Approx (1.0f));
+    CHECK (valueOf (compressor, "release") == doctest::Approx (150.0f));
+    CHECK (valueOf (compressor, "keyHighCut") == doctest::Approx (20000.0f));
+    CHECK (song.edit->getUndoManager().getUndoDescription() == juce::String ("Sidechain from Kick"));
+
+    // One step: undo puts back both the source and the settings.
+    phazite::undo (*song.edit);
+    CHECK (phazite::getSidechainSource (compressor) == nullptr);
+    CHECK (valueOf (compressor, "threshold") == doctest::Approx (-18.0f));
+    CHECK (valueOf (compressor, "attack") == doctest::Approx (10.0f));
+
+    // A compressor already set its own way keeps its settings.
+    compressor.getAutomatableParameterByID ("ratio")->setParameter (2.0f, juce::sendNotification);
+    phazite::setSidechainSource (compressor, song.kick);
+    CHECK (valueOf (compressor, "ratio") == doctest::Approx (2.0f));
+    CHECK (valueOf (compressor, "threshold") == doctest::Approx (-18.0f));
+
+    // A source that plays a drum sampler: only its lows, so that the kick ducks the keys and the hats don't.
+    REQUIRE (phazite::setInstrument (*song.kick, song.edit->getPluginCache().createNewPlugin (phazite::devices::DrumSampler::typeID, {}))
+             != nullptr);
+    auto& onKeys = addCompressor (*song.keys);
+    phazite::setSidechainSource (onKeys, song.kick);
+    CHECK (valueOf (onKeys, "keyHighCut") == doctest::Approx (150.0f));
+}
+
+TEST_CASE ("Duck Under puts a compressor on a track, ducking under another, as one undo step")
+{
+    Song song;
+    song.edit->getUndoManager().clearUndoHistory();
+    auto* compressor = phazite::duckUnder (*song.bass, *song.kick);
+    REQUIRE (compressor != nullptr);
+    CHECK (compressor->getOwnerTrack() == song.bass);
+    CHECK (phazite::getSidechainSource (*compressor) == song.kick);
+    CHECK (compressor->getAutomatableParameterByID ("ratio")->getCurrentValue() == doctest::Approx (8.0f));
+    CHECK (song.edit->getUndoManager().getUndoDescription() == juce::String ("Duck Bass Under Kick"));
+
+    phazite::undo (*song.edit);
+    CHECK (song.bass->pluginList.getPluginsOfType<phazite::DevicePlugin>().isEmpty());
+
+    // Not under its own sound, nor under a track whose sound comes from it.
+    CHECK (phazite::duckUnder (*song.bass, *song.bass) == nullptr);
+    phazite::setSidechainSource (song.add (*song.keys, TestSidechain::typeID), song.bass);
+    CHECK (phazite::duckUnder (*song.bass, *song.keys) == nullptr);
 }

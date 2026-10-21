@@ -370,8 +370,9 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
 
         processor->process (block);
 
+        // Its mix, unless it plays something else for now (a compressor's key, to listen to).
         if (mixIndex >= 0)
-            mixWithDry (channels, length, targetMix);
+            mixWithDry (channels, length, processor->overridesMix() ? 1.0f : targetMix);
 
         if (isMono)
         {

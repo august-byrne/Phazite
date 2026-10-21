@@ -31,20 +31,29 @@ namespace
           .midpoint = 100.0f },
         { .id = "knee", .name = "Knee", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 6.0f, .unit = Unit::decibels },
         { .id = "makeup", .name = "Makeup", .minimum = -12.0f, .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
-        { .id = "sidechainLowCut",
-          .name = "Sidechain Low Cut",
+        { .id = "keyLowCut",
+          .name = "Key Low Cut",
           .minimum = 20.0f,
           .maximum = 500.0f,
           .defaultValue = 20.0f,
           .unit = Unit::hertz,
           .midpoint = 100.0f },
+        { .id = "keyHighCut",
+          .name = "Key High Cut",
+          .minimum = 100.0f,
+          .maximum = 20000.0f,
+          .defaultValue = 20000.0f,
+          .unit = Unit::hertz,
+          .midpoint = 1500.0f },
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
     // In a mixer slot: how loud it starts and how hard it pushes.
     constexpr std::string_view keyControls[] = { "threshold", "ratio" };
 
-    constexpr double makeupSeconds = 0.02; // how long a change of the makeup gain takes, about
+    constexpr double makeupSeconds = 0.02;   // how long a change of the makeup gain takes, about
+    constexpr float highCutOff = 19999.0f;   // the key's high cut at its top: off
+    constexpr double keyFadeSeconds = 0.005; // between the key and the sound, as Listen turns on or off
 
     // How many decibels a level goes down by: (1 - 1 / ratio) of the way it goes over the threshold, easing in across
     // the knee, which is centred on the threshold (Giannoulis, Massberg and Reiss, "Digital Dynamic Range Compressor
@@ -88,6 +97,7 @@ void Compressor::prepare (double newSampleRate, int)
     sampleRate = newSampleRate;
     reduction.prepare (sampleRate);
     makeupSmoothing = (float) (1.0 - std::exp (-1.0 / (makeupSeconds * sampleRate)));
+    keyStep = (float) std::min (1.0, 1.0 / (keyFadeSeconds * sampleRate));
     reset();
 }
 
@@ -98,7 +108,12 @@ void Compressor::reset()
     for (auto& filter : lowCuts)
         filter.reset();
 
+    for (auto& channel : highCuts)
+        for (auto& filter : channel)
+            filter.reset();
+
     isFirstBlock = true;
+    keyShare = 0.0f;
 }
 
 void Compressor::process (const ProcessContext& block)
@@ -119,7 +134,11 @@ void Compressor::process (const ProcessContext& block)
 
     const auto thresholdDecibels = values[threshold], kneeDecibels = values[knee], targetMakeup = values[makeup];
     const auto slope = getSlope (values[ratio]);
-    const auto lowCut = dsp::makeFilter (dsp::FilterShape::highPass, values[sidechainLowCut], sampleRate, 0.70710678);
+    const auto lowCut = dsp::makeFilter (dsp::FilterShape::highPass, values[keyLowCut], sampleRate, 0.70710678);
+    const auto cutsHigh = values[keyHighCut] < highCutOff;
+    const std::array highCut { dsp::makeFilter (dsp::FilterShape::lowPass, values[keyHighCut], sampleRate, dsp::getButterworthQ (4, 0)),
+                               dsp::makeFilter (dsp::FilterShape::lowPass, values[keyHighCut], sampleRate, dsp::getButterworthQ (4, 1)) };
+    const auto keyWanted = isPlayingKey() ? 1.0f : 0.0f;
     reduction.setTimes (values[attack] * 0.001f, values[release] * 0.001f);
 
     if (isFirstBlock)
@@ -135,10 +154,21 @@ void Compressor::process (const ProcessContext& block)
 
     for (int i = 0; i < block.numSamples; ++i)
     {
+        // The key, through its cuts.
         auto peak = 0.0f;
+        std::array<float, 2> key {};
 
         for (int channel = 0; channel < numHeard; ++channel)
-            peak = std::max (peak, std::abs (lowCuts[(size_t) channel].process (heard[channel][i], lowCut)));
+        {
+            auto& cut = highCuts[(size_t) channel];
+            auto x = lowCuts[(size_t) channel].process (heard[channel][i], lowCut);
+
+            if (cutsHigh)
+                x = cut[1].process (cut[0].process (x, highCut[0]), highCut[1]);
+
+            key[(size_t) channel] = x;
+            peak = std::max (peak, std::abs (x));
+        }
 
         const auto wanted =
             peak <= kneeStartGain ? 0.0f : computeReduction (dsp::gainToDecibels (peak), thresholdDecibels, slope, kneeDecibels);
@@ -151,8 +181,14 @@ void Compressor::process (const ProcessContext& block)
             lastGain = dsp::decibelsToGain (gainDecibels);
         }
 
+        // The sound, turned down; or what it hears, to listen to, faded in and out.
+        keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
+
         for (int channel = 0; channel < numChannels; ++channel)
-            block.channels[channel][i] *= lastGain;
+        {
+            const auto turnedDown = block.channels[channel][i] * lastGain;
+            block.channels[channel][i] = turnedDown + keyShare * (key[(size_t) std::min (channel, numHeard - 1)] - turnedDown);
+        }
 
         loudestPeak = std::max (loudestPeak, peak);
         most = std::max (most, amount);
