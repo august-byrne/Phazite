@@ -21,14 +21,20 @@ public:
     static std::unique_ptr<UnsavedFolder> create (te::Engine&, const juce::File& parentFolder);
 
     // Clears up the folders in parentFolder that earlier Phazites left and no Phazite uses now. Those whose project closed
-    // with nothing to restore are deleted. Of the others, whose changes were saved automatically after the project was
-    // made (Project::hasNewerAutosave(): Phazite didn't close properly), returns the project of the newest, for the app
-    // to offer to restore; the rest wait for a later start. Nothing if there is none.
+    // with nothing to restore are deleted. Of the others (Phazite didn't close properly), whose changes were saved
+    // automatically after the project was made (Project::hasNewerAutosave()) or which hold sound files it recorded,
+    // imported or rendered, returns the project of the one changed last, for the app to offer to restore; the rest wait
+    // for a later start. Nothing if there is none.
     static juce::File findProjectToRestore (te::Engine&, const juce::File& parentFolder);
 
     // Holds the folder of a project that findProjectToRestore() found: for the project restored from it, or to delete
     // it. Nothing if another Phazite holds it now.
     static std::unique_ptr<UnsavedFolder> takeOver (te::Engine&, const juce::File& projectFile);
+
+    // Puts the sound files in a restored project's Audio folder that none of its clips plays at the song's start, each on a
+    // track of its own named after it, as dropping them on the playlist would: recordings that a crash left behind, made
+    // after the last autosave. Part of restoring the project: an unsaved change, but no undo step. Returns how many.
+    static int recoverUnusedAudio (te::Edit&);
 
     ~UnsavedFolder();
 

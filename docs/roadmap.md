@@ -417,6 +417,11 @@ Done before this plan (progress since then is under [Status](#status)):
 - *Done when:* the synth has a notch and a 24 dB slope; the synth, the wavetable synth and the Filter device offer a vowel the cutoff moves through, a phaser and a sample and hold; projects from before sound as they did; and they pass the real-time audit.
 - *Status:* done (2026-10-18), pending a check by hand and A/B listening. `src/devices/dsp/MultimodeFilter.h` holds every type, with each device's own resonance curve; the synth's **Notch** and **Filter Slope** (12 or 24 dB), and **Vowel** (a tenor's formants from Csound's table, the cutoff as the second formant, from U to I), **Phaser** (six all-pass stages, three notches, feedback) and **Sample & Hold** (twice the cutoff's rate, resonance ringing at the cutoff) after the other types of all three. Tests in `tests/DspTests.cpp`, `tests/EffectDeviceTests.cpp`, `tests/SynthTests.cpp` and `tests/WavetableTests.cpp`, and two real-time audit scenarios. Since 2026-10-18 all three offer the types as one list (`dsp::filterModeNames`), each with a Slope.
 
+**2.16 Performance (M)** (the owner's request, 2026-10-21: "a lag between when I press a note on the keyboard, and when I hear the sound", and a thorough audit of Phazite's performance)
+- The audit and its plan are in [performance-audit.md](performance-audit.md): measuring (A), correctness first (B), latency you can see and choose (C), idle and audio CPU (D), the UI thread (E) and robustness (F), with the owner's three decisions ([design section 20](design.md#20-performance)).
+- *Done when:* each part's "Done when" in the audit holds, and its tables are measured again.
+- *Status:* in progress. A and B done (2026-10-21): the benchmark suite (`--test-suite=benchmark`, `tests/Benchmarks.cpp`) and the `windows-profile` preset; untitled recordings that survive a crash, key taps that always play, look-ahead devices that drop their latency when off, the wavetable synth's modulation and the glides on time, and voice stealing that fades. Tests in `tests/AppTests.cpp`, `tests/ProjectTests.cpp`, `tests/LiveInputTests.cpp`, `tests/SynthTests.cpp` and `tests/WavetableTests.cpp`.
+
 **Milestone 2 check:** produce a complete track, from first idea to master, with automation and modulation, using Phazite and your own plug-ins.
 
 ## Phase 3: v1 polish (milestone 3)

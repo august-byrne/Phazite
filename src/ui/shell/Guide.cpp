@@ -42,7 +42,8 @@ namespace
 
 Guide::Guide (CommandBridge& bridge, Settings& s)
     : commands (bridge),
-      settings (s)
+      settings (s),
+      done (s.get (Settings::guideStepsDone))
 {
     commands.getRegistry().addListener (this);
 }
@@ -54,7 +55,7 @@ Guide::~Guide()
 
 bool Guide::isDone (Step step) const
 {
-    return settings.get (Settings::guideStepsDone).contains (getName (step));
+    return done.contains (getName (step));
 }
 
 std::optional<Guide::Step> Guide::getNextStep() const
@@ -71,7 +72,6 @@ void Guide::markDone (Step step)
     if (isDone (step))
         return;
 
-    auto done = settings.get (Settings::guideStepsDone);
     done.add (getName (step));
     settings.set (Settings::guideStepsDone, done);
 }

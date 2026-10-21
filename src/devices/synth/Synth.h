@@ -104,10 +104,14 @@ private:
         dsp::Adsr amp, filterEnvelope;
         std::array<dsp::MultimodeFilter, 2> filters; // the second only while unison spreads the voice across the stereo field
         float filterEnvelopeLevel = 0.0f;
+        float fade = 1.0f, fadeStep = 0.0f; // fading out, from a voice taken for another note (stealFadeSeconds)
     };
 
     double sampleRate = 44100.0;
-    std::array<Voice, maxVoices> voices;
+    static constexpr double stealFadeSeconds = 0.003;
+
+    // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
+    std::array<Voice, maxVoices + 1> voices;
     std::array<int, maxHeld> heldKeys {}; // mono mode's keys down, oldest first
     int numHeld = 0;
     std::uint64_t notesPlayed = 0;
@@ -124,6 +128,7 @@ private:
     void stopNote (int note, std::span<const float> parameters);
     void releaseVoice (Voice&);
     Voice& findVoiceFor (int note);
+    void stealVoice (Voice&);
     void render (float* left, float* right, int numSamples, std::span<const float> parameters);
 };
 } // namespace phazite::devices

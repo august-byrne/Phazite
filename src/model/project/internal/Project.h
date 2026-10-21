@@ -75,6 +75,9 @@ public:
     // Writes the autosave if anything changed since the last save or autosave.
     juce::Result autosave();
 
+    // Whether anything changed since the last save or autosave: what autosave() would write. Message thread only.
+    bool hasChangesToAutosave();
+
     // Saves the project as it is now, unsaved changes included, as a new project <parentFolder>/<name>
     // with copies of its Audio, Generated and Renders folders and an ID of its own. This project and
     // its file stay as they are. Returns the new project file, or sets error and returns an empty
@@ -142,15 +145,22 @@ private:
 };
 
 //==============================================================================
-// Autosaves a project every few minutes while it has unsaved changes.
+// Autosaves a project while it has unsaved changes: the first time soon after the first change, then once changes have
+// waited a few minutes, and at once when a recording ends (what a crash would lose most of). Never while recording: the
+// recording isn't in the song until it ends.
 class AutosaveTimer : private juce::Timer
 {
 public:
-    explicit AutosaveTimer (Project&, int intervalSeconds = 120);
+    explicit AutosaveTimer (Project&, int intervalSeconds = 120, int firstDelaySeconds = 15);
     ~AutosaveTimer() override;
 
 private:
     Project& project;
+    const int intervalSeconds, firstDelaySeconds;
+    juce::uint32 changedSince = 0; // when the timer first saw a change not yet autosaved (the millisecond counter), or 0
+    bool autosavedOnce = false;
+    bool wasRecording = false;
+
     void timerCallback() override;
 };
 } // namespace phazite

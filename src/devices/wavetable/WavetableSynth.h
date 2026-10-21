@@ -260,6 +260,8 @@ private:
         std::array<dsp::Lfo, 2> lfos;                // those that start again with each note, at the control rate
         std::array<dsp::MultimodeFilter, 2> filters; // each side
         bool filtering = false;                      // the filter is on
+        bool stepPending = true;                     // it (re)started since the last control step: its values are due
+        float fade = 1.0f, fadeStep = 0.0f;          // fading out, from a voice taken for another note (stealFadeSeconds)
         float subGain = 0.0f, noiseGain = 0.0f, gainLeft = 1.0f, gainRight = 1.0f, driveGain = 1.0f;
     };
 
@@ -271,10 +273,14 @@ private:
 
     double sampleRate = 44100.0;
     double aliasLimit = 0.5; // the highest frequency, as a fraction of the sample rate, whose alias stays above hearing
-    std::array<Voice, maxVoices> voices;
+    static constexpr double stealFadeSeconds = 0.003;
+
+    // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
+    std::array<Voice, maxVoices + 1> voices;
     std::array<int, maxHeld> heldKeys {};
     int numHeld = 0;
     std::uint64_t notesPlayed = 0;
+    int samplesLeftInStep = 0; // of the control step under way, which goes on across blocks and the events that split them
     float lastNote = -1.0f;
     float bend = 0.0f, modWheel = 0.0f;
     bool pedalDown = false;
@@ -298,6 +304,7 @@ private:
     void startVoice (Voice&);
     void releaseVoice (Voice&);
     Voice& findVoiceFor (int note);
+    void stealVoice (Voice&);
     void render (float* left, float* right, int numSamples, std::span<const float> parameters);
     void freeRetired();
 };

@@ -118,7 +118,7 @@ The first run prints `checked out` for each of the three submodules. Run the sam
 
 ### 4. Configure and build
 
-Configuring finds the compiler and prepares a build folder, `build\<preset>`; building compiles and links Phazite. The presets live in [CMakePresets.json](CMakePresets.json): `windows-debug` for development and debugging, `windows-release` for an optimized app (use it in both commands); `cmake --list-presets` lists them.
+Configuring finds the compiler and prepares a build folder, `build\<preset>`; building compiles and links Phazite. The presets live in [CMakePresets.json](CMakePresets.json): `windows-debug` for stepping through code in a debugger, `windows-profile` for playing and testing every day (as fast as Release, with debug symbols for profiling and crash dumps), and `windows-release` for the optimized app alone (use the same preset in both commands); `cmake --list-presets` lists them. A Debug build runs audio 3 to 20 times slower ([docs/performance-audit.md](docs/performance-audit.md)): play music in `windows-profile` or `windows-release`.
 
 ```powershell
 cmake --preset windows-debug
@@ -137,6 +137,7 @@ ctest --preset windows-debug
 | Preset | App |
 |---|---|
 | `windows-debug` | `build\windows-debug\Phazite_artefacts\Debug\Phazite.exe` (about 50 MB, plus about 0.5 GB next to it: `Phazite.pdb` with the debug symbols and `Phazite.ilk` for incremental linking) |
+| `windows-profile` | `build\windows-profile\Phazite_artefacts\RelWithDebInfo\Phazite.exe` (optimized as Release, with `Phazite.pdb` next to it) |
 | `windows-release` | `build\windows-release\Phazite_artefacts\Release\Phazite.exe` (about 12 MB, no debug symbols) |
 
 Start it from File Explorer or PowerShell, or with F5 in [VS Code](#vs-code). This is what you should see:
@@ -303,7 +304,7 @@ Under WSL2, the window should appear on the Windows desktop through WSLg (WSL's 
 ### VS Code
 
 1. Install VS Code from https://code.visualstudio.com if you don't have it. Open the repository folder (File > Open Folder) and trust it when VS Code asks, or through the Restricted Mode banner: the C/C++ and CMake Tools extensions stay disabled until you do. Install the recommended extensions when VS Code offers them: C/C++ and CMake Tools (the setup script installs both if VS Code was already there), Claude Code, and WSL once you use WSL. Saving a C/C++ file formats it in the project's style (see [Coding guidelines](#coding-guidelines)).
-2. Pick a preset with **CMake: Select Configure Preset** from the Command Palette (Ctrl+Shift+P), for example `windows-debug`. VS Code then builds exactly like the terminal, without a Developer PowerShell.
+2. Pick a preset with **CMake: Select Configure Preset** from the Command Palette (Ctrl+Shift+P): `windows-profile` to play and test (it runs as fast as Release), `windows-debug` to step through code. VS Code then builds exactly like the terminal, without a Developer PowerShell.
 3. Run **CMake: Configure** once. VS Code doesn't configure when it opens the folder, and CMake Tools only gets IntelliSense data and launch targets from build folders it configured itself, so do this once even for a folder you built in a terminal.
 4. Choose a launch configuration in the Run and Debug view and press F5:
 
@@ -314,7 +315,7 @@ Under WSL2, the window should appear on the Windows desktop through WSLg (WSL's 
 | Open crash dump (Windows, Debug build) | Asks for a `.dmp` file and opens it with the `windows-debug` build's symbols. |
 | Phazite (Linux / WSL, gdb) | Like the first, with gdb (untested). |
 
-Once the setup script has turned crash dumps on, a crash outside a debugger leaves `Phazite.exe.<pid>.dmp` in `%LOCALAPPDATA%\CrashDumps` (in PowerShell: `$env:LOCALAPPDATA\CrashDumps`). Only `windows-debug` builds have symbols, so reproduce Release crashes in a Debug build. A full dump holds Phazite's whole memory, so never attach one to a public issue; share the call stack instead.
+Once the setup script has turned crash dumps on, a crash outside a debugger leaves `Phazite.exe.<pid>.dmp` in `%LOCALAPPDATA%\CrashDumps` (in PowerShell: `$env:LOCALAPPDATA\CrashDumps`). Only `windows-debug` and `windows-profile` builds have symbols, so reproduce Release crashes in one of those. A full dump holds Phazite's whole memory, so never attach one to a public issue; share the call stack instead.
 
 ### Command line
 

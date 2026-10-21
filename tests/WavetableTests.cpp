@@ -62,16 +62,17 @@ struct Played
     std::vector<float> left, right;
 };
 
-// Plays the synth in blocks, with events at their samples from the start.
-Played play (WavetableSynth& synth, const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& events)
+// Plays the synth in blocks (of testBlockSize samples unless given), with events at their samples from the start.
+Played play (WavetableSynth& synth, const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& events,
+             int blockSize = testBlockSize)
 {
-    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    juce::AudioBuffer<float> buffer (2, blockSize);
     Played played;
     std::vector<NoteEvent> inBlock;
 
-    for (int done = 0; done < numSamples; done += testBlockSize)
+    for (int done = 0; done < numSamples; done += blockSize)
     {
-        const auto length = std::min (testBlockSize, numSamples - done);
+        const auto length = std::min (blockSize, numSamples - done);
         buffer.clear();
         inBlock.clear();
 
@@ -655,6 +656,37 @@ TEST_CASE ("The wavetable synth plays 16 voices, glides in mono mode, and plays 
     const auto again = play (*second, values, 24000, notes);
     CHECK (once.left == again.left);
     CHECK (once.right == again.right);
+}
+
+TEST_CASE ("The wavetable synth's modulation keeps its time, however blocks and notes split the samples")
+{
+    // LFO 1 moves the volume and an envelope the table position: a note held, and another that comes and goes, played in
+    // the usual blocks and in blocks of 37 samples, sound the same.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::lfo1Rate] = 7.0f;
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::lfo1;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::volume;
+    values[WavetableSynth::mod1Amount] = 1.0f;
+    values[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::envelope2;
+    values[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::osc1Position;
+    values[WavetableSynth::mod2Amount] = 1.0f;
+    const std::vector<NoteEvent> events { noteOn (0, 60), noteOn (1000, 67), noteOff (5003, 67) };
+
+    auto inBlocks = makeSynth();
+    auto inPieces = makeSynth();
+    const auto steady = play (*inBlocks, values, 24000, events);
+    const auto split = play (*inPieces, values, 24000, events, 37);
+
+    auto largest = 0.0f, loudest = 0.0f;
+
+    for (size_t i = 0; i < steady.left.size(); ++i)
+    {
+        largest = std::max (largest, std::abs (steady.left[i] - split.left[i]));
+        loudest = std::max (loudest, std::abs (steady.left[i]));
+    }
+
+    CHECK (loudest > 0.1f);
+    CHECK (largest < 1.0e-4f);
 }
 
 TEST_CASE ("The wavetable synth lets go of a table it no longer plays once the audio thread can't be reading it")

@@ -174,6 +174,27 @@ TEST_CASE ("Autosave writes nothing when nothing changed")
     CHECK_FALSE (phazite::Project::getAutosaveFile (project->getFile()).exists());
 }
 
+TEST_CASE ("Autosave comes soon after the first change, then waits its interval")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Timed");
+    const auto autosaveFile = phazite::Project::getAutosaveFile (project->getFile());
+
+    // As the app has it, but the first autosave a second after the first change rather than 15 s.
+    phazite::AutosaveTimer timer (*project, 120, 1);
+    phazite::test::runTimersUntil ([] { return false; }, 1500);
+    CHECK_FALSE (autosaveFile.exists()); // nothing changed
+
+    project->getPhaziteState().setProperty (phazite::schema::outline, "pop", nullptr);
+    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }, 4000));
+
+    // The next change waits for the interval.
+    const auto first = autosaveFile.loadFileAsString();
+    project->getPhaziteState().setProperty (phazite::schema::outline, "rock", nullptr);
+    phazite::test::runTimersUntil ([] { return false; }, 2500);
+    CHECK (autosaveFile.loadFileAsString() == first);
+}
+
 TEST_CASE ("Save As makes a copy with the unsaved changes, and leaves the original file alone")
 {
     TemporaryFolder temp;

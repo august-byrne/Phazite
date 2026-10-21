@@ -92,8 +92,18 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
 {
     setTitle ("Phazite");
 
-    // The guide's steps that no command does.
-    computerKeyboard.onNotePlayed = [this] { guide.markDone (Guide::Step::playNotes); };
+    // The guide's steps that no command does. The first note's step is saved after the notes played with it have gone out:
+    // marking it writes the settings file.
+    computerKeyboard.onNotePlayed = [this]
+    {
+        if (! guide.isDone (Guide::Step::playNotes))
+            juce::MessageManager::callAsync (
+                [shell = juce::Component::SafePointer<AppShell> (this)]
+                {
+                    if (shell != nullptr)
+                        shell->guide.markDone (Guide::Step::playNotes);
+                });
+    };
     browser.onUsed = [this] (const LibraryItem&) { guide.markDone (Guide::Step::addSound); };
     hintBar.setDefaultHint ([this] { return getDefaultHint(); });
 

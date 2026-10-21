@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/UnsavedProjects.h"
 #include "internal/Project.h"
+#include "model/arrangement/internal/Import.h"
 #include "model/engine/AppInfo.h"
+
+#include <algorithm>
+#include <optional>
 
 namespace phazite
 {
@@ -38,6 +42,24 @@ namespace
             engine.getAudioFileManager().releaseFile (te::AudioFile (engine, file));
 
         folder.deleteRecursively();
+    }
+
+    // When a project was last changed, as far as a crash left it: its autosave, or the newest of the files it made or brought
+    // in (recordings, imported audio, renders), which are in its folder only. Nothing if it holds neither: nothing to
+    // restore.
+    std::optional<juce::Time> findLastChange (const juce::File& projectFile)
+    {
+        std::optional<juce::Time> last;
+
+        if (Project::hasNewerAutosave (projectFile))
+            last = Project::getAutosaveFile (projectFile).getLastModificationTime();
+
+        for (const auto* name : { "Audio", "Generated", "Renders" })
+            for (const auto& file : projectFile.getSiblingFile (name).findChildFiles (juce::File::findFiles, true))
+                if (const auto time = file.getLastModificationTime(); ! last.has_value() || time > *last)
+                    last = time;
+
+        return last;
     }
 } // namespace
 
@@ -77,17 +99,18 @@ juce::File UnsavedFolder::findProjectToRestore (te::Engine& engine, const juce::
             continue; // another Phazite has its project open
 
         const auto file = findProjectFileIn (folder);
+        const auto lastChange = file.existsAsFile() ? findLastChange (file) : std::nullopt;
 
-        if (! file.existsAsFile() || ! Project::hasNewerAutosave (file))
+        if (! lastChange.has_value())
         {
             deleteFolder (engine, folder); // nothing to restore
             continue;
         }
 
-        if (const auto time = Project::getAutosaveFile (file).getLastModificationTime(); newest == juce::File() || time > newestTime)
+        if (newest == juce::File() || *lastChange > newestTime)
         {
             newest = file;
-            newestTime = time;
+            newestTime = *lastChange;
         }
     }
 
@@ -115,5 +138,33 @@ UnsavedFolder::UnsavedFolder (te::Engine& e, const juce::File& f, std::unique_pt
 UnsavedFolder::~UnsavedFolder()
 {
     deleteFolder (engine, folder);
+}
+
+int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
+{
+    juce::Array<juce::File> played;
+
+    for (auto* track : te::getAudioTracks (edit))
+        for (auto* clip : track->getClips())
+            if (auto* audio = dynamic_cast<te::WaveAudioClip*> (clip))
+                played.add (audio->getOriginalFile());
+
+    // In the order they were made, as they were recorded.
+    auto unused = edit.editFileRetriever().getSiblingFile ("Audio").findChildFiles (juce::File::findFiles, true);
+    unused.removeIf ([&] (const juce::File& file) { return played.contains (file) || getFileKind (edit.engine, file) != FileKind::audio; });
+    std::sort (unused.begin(), unused.end(),
+               [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() < b.getLastModificationTime(); });
+
+    if (unused.isEmpty())
+        return 0;
+
+    juce::StringArray paths;
+
+    for (const auto& file : unused)
+        paths.add (file.getFullPathName());
+
+    const auto added = importFiles (edit, paths, nullptr, te::BeatPosition());
+    edit.getUndoManager().clearUndoHistory(); // the project was just opened: restoring it is no undo step
+    return added.size();
 }
 } // namespace phazite

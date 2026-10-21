@@ -53,19 +53,19 @@ NoteEvent noteOff (int sample, int note)
     return { NoteEvent::Type::noteOff, sample, note, 0.0f };
 }
 
-// Plays the synth in blocks, with events at their samples from the start, and returns its left channel; after each
-// block, afterBlock (the samples done) is called.
+// Plays the synth in blocks (of testBlockSize samples unless given), with events at their samples from the start, and
+// returns its left channel; after each block, afterBlock (the samples done) is called.
 template <typename AfterBlock>
 std::vector<float> play (Synth& synth, const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& events,
-                         AfterBlock afterBlock)
+                         AfterBlock afterBlock, int blockSize = testBlockSize)
 {
-    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    juce::AudioBuffer<float> buffer (2, blockSize);
     std::vector<float> played;
     std::vector<NoteEvent> inBlock;
 
-    for (int done = 0; done < numSamples; done += testBlockSize)
+    for (int done = 0; done < numSamples; done += blockSize)
     {
-        const auto length = std::min (testBlockSize, numSamples - done);
+        const auto length = std::min (blockSize, numSamples - done);
         buffer.clear();
         inBlock.clear();
 
@@ -377,6 +377,54 @@ TEST_CASE ("The synth bends its pitch, and glides from key to key in mono mode w
     back.prepare (testRate, testBlockSize);
     played = play (back, values, 48000, { noteOn (0, 60), noteOn (4800, 72), noteOff (9600, 72) });
     CHECK (measureFrequency (played, 24000, 48000) == doctest::Approx (261.63).epsilon (0.002));
+}
+
+TEST_CASE ("The synth's glide keeps its time, however blocks and notes split the samples")
+{
+    // Mono, a 100 ms glide from C4 up to C5: played in the usual blocks, and in blocks of 37 samples.
+    auto values = getSineValues();
+    values[Synth::voiceMode] = 1.0f;
+    values[Synth::glide] = 100.0f;
+    const std::vector<NoteEvent> events { noteOn (0, 60), noteOn (4800, 72) };
+
+    Synth inBlocks, inPieces;
+    inBlocks.prepare (testRate, testBlockSize);
+    inPieces.prepare (testRate, testBlockSize);
+    const auto steady = play (inBlocks, values, 14400, events, [] (int) {});
+    const auto split = play (inPieces, values, 14400, events, [] (int) {}, 37);
+
+    // Halfway through the glide, both are at the same pitch.
+    const auto expected = measureFrequency (steady, 7000, 8000);
+    CHECK (expected > 300.0);
+    CHECK (expected < 500.0);
+    CHECK (measureFrequency (split, 7000, 8000) == doctest::Approx (expected).epsilon (0.002));
+}
+
+TEST_CASE ("A note that takes a sounding voice fades it out, and starts from silence")
+{
+    // All 16 voices hold a note; a 17th takes the oldest. With a 50 ms attack, the new note rises from silence.
+    auto values = getSineValues();
+    values[Synth::attack] = 50.0f;
+    std::vector<NoteEvent> events;
+
+    for (int n = 0; n < Synth::maxVoices; ++n)
+        events.push_back (noteOn (0, 40 + n));
+
+    events.push_back (noteOn (4800, 80));
+    Synth synth;
+    synth.prepare (testRate, testBlockSize);
+    std::vector<int> voicesAfter;
+    const auto played = play (synth, values, 14400, events, [&] (int) { voicesAfter.push_back (synth.getActiveVoices()); });
+
+    // Just after the 17th note, the voice it took fades out besides the 16; 3 ms later it is gone.
+    CHECK (voicesAfter[18] == Synth::maxVoices + 1); // the block from 4608 to 4864
+    CHECK (voicesAfter[19] == Synth::maxVoices);
+
+    // The new note (830.6 Hz) starts quietly, then reaches its level.
+    const auto rising = measureLevelAt (played, 4810, 5050, 830.6);
+    const auto risen = measureLevelAt (played, 9600, 14400, 830.6);
+    CHECK (risen > 0.5);
+    CHECK (rising < 0.3 * risen);
 }
 
 TEST_CASE ("The synth's sustain pedal holds notes until it lifts, and it plays the same every time")

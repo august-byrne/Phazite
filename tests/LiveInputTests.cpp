@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "HostedDevice.h"
 #include "TestHelpers.h"
+#include "devices/dynamics/Limiter.h"
 #include "devices/synth/Synth.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/internal/Project.h"
@@ -137,4 +139,47 @@ TEST_CASE ("The computer keyboard's notes play into All MIDI Ins")
 
     phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOff (1, 62));
     CHECK_FALSE (keys.isNoteOn (1, 62));
+}
+
+TEST_CASE ("A live note sounds at once, and waits only for devices that are switched on and look ahead")
+{
+    auto& engine = phazite::test::getEngine();
+    REQUIRE (findAllMidiInputs() != nullptr);
+    phazite::test::HostedDevice device;
+
+    auto edit = te::Edit::createSingleTrackEdit (engine);
+    edit->ensureNumberOfAudioTracks (2);
+    const auto tracks = te::getAudioTracks (*edit);
+    addInstrument (*tracks[0]);
+    phazite::routeLiveMidiInput (*edit);
+    edit->getTransport().ensureContextAllocated();
+    phazite::test::settle (500);
+
+    // A note played between two blocks, as the computer keyboard plays one: when it sounds, from the next block's start.
+    const auto playNote = [&]
+    {
+        device.process (50);
+        phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
+        const auto samples = device.samplesToFirstSound();
+        phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOff (1, 60));
+        device.process (200);
+        return samples;
+    };
+
+    const auto atOnce = playNote();
+    CHECK (atOnce >= 0);
+    CHECK (atOnce < 16);
+
+    // A limiter on another track looks ahead, and delay compensation holds what is played back to match it...
+    auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
+    tracks[1]->pluginList.insertPlugin (limiter, 0, nullptr);
+    phazite::test::settle (500);
+    const auto latency = juce::roundToInt (limiter->getLatencySeconds() * phazite::test::HostedDevice::sampleRate);
+    REQUIRE (latency > 0);
+    CHECK (playNote() == atOnce + latency);
+
+    // ...but not once it is switched off.
+    limiter->setEnabled (false);
+    phazite::test::settle (500);
+    CHECK (playNote() == atOnce);
 }

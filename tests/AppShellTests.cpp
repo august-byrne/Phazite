@@ -2,59 +2,15 @@
 // The main window's content built as the app builds it (Main.cpp and MainWindow), without a screen: the session, the
 // services, AppShell and the commands, in the app's order. Nothing here may open a dialog, popup or window (the palette,
 // the plug-in picker, Detach, New, Open or Save As): Linux CI has no display.
+#include "AppScreen.h"
 #include "GoldenFiles.h"
-#include "UiTestHelpers.h"
-#include "app/AppCommands.h"
-#include "app/AppServices.h"
-#include "app/ProjectSession.h"
 #include "model/project/internal/ProjectContext.h"
-#include "ui/input/CommandBridge.h"
-#include "ui/input/KeyDispatcher.h"
-#include "ui/shell/AppShell.h"
 
 #include <algorithm>
 
 namespace
 {
-// Members in the order the app makes them, so that they go in the order the app destroys them.
-struct Screen
-{
-    Screen()
-    {
-        // As Main.cpp and MainWindow do.
-        phazite::addSongCommands (registry, session.getContext(), renders);
-        session.addCommands (registry);
-        shell.addCommands (registry);
-
-        // The dialogs answer themselves: the save dialog with what it suggests, the restore question with no.
-        session.chooseSaveFile = [] (const juce::File& suggested, std::function<void (const juce::File&)> callback)
-        { callback (suggested); };
-        session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (false); };
-        phazite::test::dispatchPendingMessages();
-    }
-
-    ~Screen()
-    {
-        phazite::test::runTimersUntil ([this] { return ! services.library.isIndexing(); }, 10000);
-    }
-
-    te::Engine& engine = phazite::test::getEngine();
-    phazite::test::TemporaryFolder temp;
-    phazite::AppServices services { engine,
-                                    { .settingsInMemory = true,
-                                      .packsFolder = temp.folder.getChildFile ("Packs"),
-                                      .presetsFolder = temp.folder.getChildFile ("Presets") } };
-    phazite::test::RenderHost renders; // the main window's part
-    phazite::CommandRegistry registry;
-    phazite::ui::CommandBridge commands { registry };
-    phazite::ui::KeyDispatcher shortcutKeys { commands };
-    phazite::ProjectSession session { engine, phazite::getUIBehaviour (engine), services.recentProjects,
-                                      temp.folder.getChildFile ("Projects"), temp.folder.getChildFile ("Unsaved") };
-    phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
-    phazite::ui::AppShell shell { *services.engineContext, commands,           shortcutKeys,     keyboard,           session.getContext(),
-                                  services.settings,       services.soundPack, services.library, *services.previewer };
-    phazite::test::TestWindow window { shell, 1280, 800 };
-};
+using Screen = phazite::test::AppScreen;
 
 // The window's parts, as checkChildrenApart() checks them, except the panels' detach buttons ("Move the browser to its
 // own window"), which sit in their panel's top right corner on purpose: each lies inside a panel.
@@ -194,9 +150,12 @@ TEST_CASE ("The hint bar shows the guide's next step, which a note on the comput
     REQUIRE (screen.registry.invoke ("transport.playStop"));
     CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().contains ("on your computer keyboard"); }));
 
-    // A note played on the computer keyboard, as its keys reach it.
+    // A note played on the computer keyboard, as its keys reach it. The guide moves on after the note has gone out, in a
+    // message of its own, so that saving the step doesn't delay the note.
     screen.keyboard.update ([] (int keyCode) { return keyCode == 'a'; }, {});
     screen.keyboard.update ([] (int) { return false; }, {});
+    CHECK_FALSE (screen.shell.getGuide().isDone (phazite::ui::Guide::Step::playNotes));
+    phazite::test::dispatchPendingMessages();
     CHECK (screen.shell.getGuide().isDone (phazite::ui::Guide::Step::playNotes));
     CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().contains ("drag a sound from the browser"); }));
 }

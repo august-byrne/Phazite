@@ -427,3 +427,45 @@ TEST_CASE ("At startup, Phazite offers to restore an untitled project it didn't 
     CHECK (held->getFolder().isDirectory());
 #endif
 }
+
+TEST_CASE ("An untitled song's recordings survive a crash before its first autosave")
+{
+    auto& engine = phazite::test::getEngine();
+    phazite::test::TemporaryFolder temp;
+    const auto projects = temp.folder.getChildFile ("Projects");
+    const auto unsaved = temp.folder.getChildFile ("Unsaved");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+
+    // A song that recorded a take, then crashed before anything saved it automatically: the take is in its Audio folder
+    // only.
+    const auto crashed = leaveUntitledProject (unsaved.getChildFile ("2026-10-21 10-00-00"), false);
+    const auto take = phazite::test::writeSound (crashed.getSiblingFile ("Audio").getChildFile ("Take 1.wav"), 1.0);
+
+    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, projects, unsaved);
+    juce::Array<juce::File> asked;
+    juce::StringArray notices;
+    session.askToRestore = [&asked] (const juce::File& file, bool, std::function<void (bool)> callback)
+    {
+        asked.add (file);
+        callback (true);
+    };
+    session.onNotice = [&notices] (const juce::String& title, const juce::String&) { notices.add (title); };
+    session.openAtStartup();
+
+    // Offered and restored: the take is back in the song, at its start, as an unsaved change and no undo step.
+    CHECK (asked == juce::Array<juce::File> { crashed });
+    REQUIRE (session.getProject() != nullptr);
+    auto& edit = session.getProject()->getEdit();
+    juce::Array<juce::File> played;
+
+    for (auto* track : te::getAudioTracks (edit))
+        for (auto* clip : track->getClips())
+            if (auto* audio = dynamic_cast<te::WaveAudioClip*> (clip))
+                played.add (audio->getOriginalFile());
+
+    CHECK (played == juce::Array<juce::File> { take });
+    CHECK (notices == juce::StringArray { "Recordings recovered" });
+    CHECK (session.getProject()->hasUnsavedChanges());
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+}

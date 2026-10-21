@@ -82,7 +82,16 @@ void ProjectSession::restoreUntitled (const juce::File& file, bool restore)
 
         if (auto restored = Project::open (engine, file, true, error))
         {
+            // Recordings made after the last autosave, which a crash left out of the song, come back on tracks of their own.
+            const auto recovered = UnsavedFolder::recoverUnusedAudio (restored->getEdit());
             setProject (std::move (restored), std::move (folder));
+
+            if (recovered > 0)
+                showNotice ("Recordings recovered", juce::String (recovered)
+                                                        + (recovered == 1 ? " recording that wasn't in the song yet is"
+                                                                          : " recordings that weren't in the song yet are")
+                                                        + " on new tracks at the start of the song.");
+
             return;
         }
 
@@ -444,6 +453,23 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
 
     if (onProjectChanged != nullptr)
         onProjectChanged();
+}
+
+void ProjectSession::showNotice (const juce::String& title, const juce::String& message)
+{
+    if (onNotice != nullptr)
+    {
+        onNotice (title, message);
+        return;
+    }
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::InfoIcon)
+                                      .withTitle (title)
+                                      .withMessage (message)
+                                      .withButton ("OK")
+                                      .withAssociatedComponent (dialogParent),
+                                  static_cast<juce::ModalComponentManager::Callback*> (nullptr));
 }
 
 void ProjectSession::showError (const juce::String& title, const juce::String& message)

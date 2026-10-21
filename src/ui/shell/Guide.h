@@ -51,6 +51,7 @@ public:
 private:
     CommandBridge& commands;
     Settings& settings;
+    juce::StringArray done; // the steps done, by name: the settings' list, read once (only the guide writes it)
 
     void commandAdded (const Command&) override {}
     void commandInvoked (const Command&) override; // play, record, capture and export are steps

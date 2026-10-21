@@ -62,6 +62,14 @@ int EngineBehaviour::getNumberOfCPUsToUseForAudio()
     return options.numAudioThreads > 0 ? options.numAudioThreads : te::EngineBehaviour::getNumberOfCPUsToUseForAudio();
 }
 
+// A device switched off leaves the playback graph, which Tracktion rebuilds when one is switched on or off: otherwise it
+// would keep its latency in the delay compensation, holding back every other track (and what is played live) for nothing,
+// while its own track's sound passed it undelayed (docs/performance-audit.md, A8).
+bool EngineBehaviour::shouldBypassedPluginsBeRemovedFromPlaybackGraph()
+{
+    return true;
+}
+
 // Don't open the microphone until the user asks for an input.
 bool EngineBehaviour::shouldOpenAudioInputByDefault()
 {

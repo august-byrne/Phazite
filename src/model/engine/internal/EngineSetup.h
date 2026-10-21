@@ -39,6 +39,7 @@ public:
     bool shouldOpenAudioInputByDefault() override;
     te::EditLimits getEditLimits() override;
     juce::File getDefaultFolderForAudioRecordings (te::Edit&) override;
+    bool shouldBypassedPluginsBeRemovedFromPlaybackGraph() override;
 
 private:
     Options options;

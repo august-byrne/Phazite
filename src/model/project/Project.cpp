@@ -8,6 +8,7 @@
 #include "model/mixer/internal/Freeze.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
 
 namespace phazite
 {
@@ -271,6 +272,13 @@ juce::Result Project::autosave()
     return juce::Result::ok();
 }
 
+bool Project::hasChangesToAutosave()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    compareWithSavedState();
+    return changedSinceAutosave;
+}
+
 juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::String& name, juce::String& error)
 {
     JUCE_ASSERT_MESSAGE_THREAD
@@ -499,10 +507,12 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTre
 }
 
 //==============================================================================
-AutosaveTimer::AutosaveTimer (Project& p, int intervalSeconds)
-    : project (p)
+AutosaveTimer::AutosaveTimer (Project& p, int interval, int firstDelay)
+    : project (p),
+      intervalSeconds (interval),
+      firstDelaySeconds (firstDelay)
 {
-    startTimer (intervalSeconds * 1000);
+    startTimer (1000);
 }
 
 AutosaveTimer::~AutosaveTimer()
@@ -512,7 +522,31 @@ AutosaveTimer::~AutosaveTimer()
 
 void AutosaveTimer::timerCallback()
 {
-    // A failed autosave is retried at the next interval; the project file itself is untouched.
-    [[maybe_unused]] const auto result = project.autosave();
+    const auto recording = isRecording (project.getEdit());
+    const auto recordingEnded = wasRecording && ! recording;
+    wasRecording = recording;
+
+    if (recording)
+        return;
+
+    if (! project.hasChangesToAutosave())
+    {
+        changedSince = 0;
+        return;
+    }
+
+    const auto now = juce::Time::getMillisecondCounter();
+
+    if (changedSince == 0)
+        changedSince = now;
+
+    const auto wait = (juce::uint32) (autosavedOnce ? intervalSeconds : firstDelaySeconds) * 1000;
+
+    // A failed autosave is tried again a second later; the project file itself is untouched.
+    if ((recordingEnded || now - changedSince >= wait) && project.autosave().wasOk())
+    {
+        autosavedOnce = true;
+        changedSince = 0;
+    }
 }
 } // namespace phazite

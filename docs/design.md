@@ -834,6 +834,12 @@ No permissively licensed drum-generation model was found. This table summarizes 
 
 **Heavy tracks:** freeze and bounce in place relieve them, and a per-track CPU meter shows where the time goes. After v1, tracks that aren't being edited can be pre-rendered in the background, like Digital Performer's PreGen.
 
+**Latency** (the owner's decisions, 2026-10-21, from the [performance audit](performance-audit.md)):
+- **First run:** Phazite picks "Windows Audio (Low Latency Mode)" with a buffer of 128 to 256 samples where the output offers one, and Windows' shared mode with the device's own buffer otherwise. It doesn't pick ASIO by itself: an ASIO driver takes its device from every other app, and which driver belongs to the output in use is only a guess from names. The audio settings say that an audio interface's own ASIO driver gives the lowest delay.
+- **Low latency switch:** a "Low latency" switch in the top bar, as Cubase's Constrain Delay Compensation and Studio One's Low Latency Monitoring do, off at first: while it is on, devices that look ahead (the Limiter and the Maximizer, and plug-ins that report latency) are bypassed and the buffer shrinks, so that what is played live has no delay compensation.
+- **Bluetooth outputs:** the audio settings and the welcome window say when the output is Bluetooth, and what it costs (about 150 to 250 ms between a key and its sound), and suggest a wired output for playing and recording.
+- **Shown:** the audio settings show the buffer and the output's latency in milliseconds, and the song's delay compensation.
+
 ## 21. Accessibility
 
 - **Keyboard:** every action can be reached from the keyboard: the command palette, moving focus between panels, and arrow-key editing of notes and automation points.
@@ -1083,6 +1089,7 @@ Raised by the comb filters (2026-10-18), the audit the owner asked for:
 | 2026-10-18 | Step 2.15, more filter types, the owner's choice of the recommendations of question 20 ([section 9](#9-devices-containers-and-presets)): every filter type in one shared piece of code; the synth's notch and 12 or 24 dB slope (12 at first); Vowel, three formants of a sung vowel (Csound's tenor table) that the cutoff picks from U to I as their second formant; Phaser, six all-pass stages with feedback, three notches the cutoff moves; Sample & Hold at twice the cutoff's rate, resonance ringing at the cutoff; all after the other types, in all three filters; format version 11 |
 | 2026-10-18 | The owner: Phazite is pre-alpha, so projects (and presets and settings) saved by earlier builds needn't be supported until the owner says so ([section 18](#18-projects-saving-and-export)). The format versions and migrations, the frozen 0.1.0 project of the golden tests and the code kept for projects from before Phazite had its own devices go, and so does anything else kept only for old saves, as it is found; names and IDs that projects save may change. Question 17 waits until compatibility starts |
 | 2026-10-18 | Freed from keeping saved numbers, the synth, the wavetable synth and the Filter device offer the filter types as one list, in one order (low-pass, high-pass, band-pass, notch, Comb +, Comb -, Vowel, Phaser, Sample & Hold), with a Slope in each (the wavetable synth's 12 and 24 dB types became its Slope) and the same parameter IDs (filterType, filterSlope); the synth's parameters follow its editor's order. Each device's sound at its defaults stays as it was |
+| 2026-10-21 | The owner asked for a performance audit after noticing a lag between a key and its sound (Bluetooth headphones, it turned out), and accepted its plan ([performance-audit.md](performance-audit.md), roadmap step 2.16) and its three recommendations ([section 20](#20-performance)): Low Latency Mode at 128 to 256 samples on first run where offered, a "Low latency" switch in the top bar, off at first, and a warning in the settings and on the welcome window when the output is Bluetooth |
 
 ## Appendix A. Research summary
 

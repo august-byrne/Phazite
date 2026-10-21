@@ -35,6 +35,13 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     },
     {
+      "name": "windows-profile",
+      "displayName": "Windows Profile (MSVC + Ninja: Release with symbols)",
+      "description": "As fast as Release, with debug symbols: for playing and testing every day, profiling, and reading crash dumps of an optimised build (CMakeLists.txt makes RelWithDebInfo inline and link as Release does).",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
       "name": "linux-base",
       "hidden": true,
       "inherits": "base",
@@ -89,6 +96,7 @@
     },
     { "name": "windows-debug",   "inherits": "windows-build-base", "configurePreset": "windows-debug" },
     { "name": "windows-release", "inherits": "windows-build-base", "configurePreset": "windows-release" },
+    { "name": "windows-profile", "inherits": "windows-build-base", "configurePreset": "windows-profile" },
     { "name": "linux-debug",     "inherits": "linux-build-base",   "configurePreset": "linux-debug" },
     { "name": "linux-release",   "inherits": "linux-build-base",   "configurePreset": "linux-release" },
     { "name": "linux-asan",      "inherits": "linux-build-base",   "configurePreset": "linux-asan" },
@@ -116,6 +124,7 @@
     },
     { "name": "windows-debug",   "inherits": "windows-test-base", "configurePreset": "windows-debug" },
     { "name": "windows-release", "inherits": "windows-test-base", "configurePreset": "windows-release" },
+    { "name": "windows-profile", "inherits": "windows-test-base", "configurePreset": "windows-profile" },
     { "name": "linux-debug",     "inherits": "linux-test-base",   "configurePreset": "linux-debug" },
     { "name": "linux-release",   "inherits": "linux-test-base",   "configurePreset": "linux-release" },
     {

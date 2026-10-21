@@ -155,6 +155,8 @@ void Synth::reset()
         voice.note = -1;
         voice.held = voice.sustained = false;
         voice.filterEnvelopeLevel = 0.0f;
+        voice.fade = 1.0f;
+        voice.fadeStep = 0.0f;
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
         voice.unisonPhases.setSeed (unisonSeed + (std::uint32_t) index);
 
@@ -185,29 +187,46 @@ void Synth::releaseVoice (Voice& voice)
 
 Synth::Voice& Synth::findVoiceFor (int note)
 {
-    // The voice playing this note already, then a free one, then the one ringing out longest, then the oldest.
-    for (auto& voice : voices)
+    // The voice playing this note already, then a free one, then the one ringing out longest, then the oldest: among
+    // those that play notes, not the last, which fades out a voice taken (stealVoice()).
+    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
+
+    for (auto& voice : playing)
         if (voice.note == note && voice.amp.isActive())
             return voice;
 
-    for (auto& voice : voices)
+    for (auto& voice : playing)
         if (! voice.amp.isActive())
             return voice;
 
     Voice* oldest = nullptr;
 
-    for (auto& voice : voices)
+    for (auto& voice : playing)
         if (! voice.held && ! voice.sustained && (oldest == nullptr || voice.started < oldest->started))
             oldest = &voice;
 
     if (oldest != nullptr)
         return *oldest;
 
-    for (auto& voice : voices)
+    for (auto& voice : playing)
         if (oldest == nullptr || voice.started < oldest->started)
             oldest = &voice;
 
     return *oldest;
+}
+
+void Synth::stealVoice (Voice& voice)
+{
+    // What it played fades out from a copy of it, over a few milliseconds, while it starts the new note from silence:
+    // no jump to the new note at the old one's level. The copy reuses the last voice's memory (every voice is prepared
+    // alike), so this doesn't allocate.
+    auto& fading = voices[(size_t) maxVoices];
+    fading = voice;
+    fading.note = -1;
+    fading.held = fading.sustained = false;
+    fading.fadeStep = (float) (1.0 / (stealFadeSeconds * sampleRate));
+    voice.amp.reset();
+    voice.filterEnvelope.reset();
 }
 
 void Synth::startNote (int note, float velocityValue, std::span<const float> values)
@@ -248,6 +267,9 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
     }
 
     auto& voice = findVoiceFor (note);
+
+    if (voice.amp.isActive() && voice.note != note)
+        stealVoice (voice);
 
     if (! voice.amp.isActive())
     {
@@ -393,7 +415,6 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
     const auto depth = std::clamp (values[lfoDepth] + modWheel, 0.0f, 1.0f);
     const auto lfoWave = choiceOf<dsp::LfoShape> (values[lfoShape]);
     const auto glideSamples = (double) values[glide] * 0.001 * sampleRate;
-    const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-controlStep / glideSamples));
     const auto bent = bend * values[bendRange];
     const auto osc2Offset = values[osc2Pitch] + values[osc2Detune] * 0.01f;
     const auto nyquistLimit = 0.45 * sampleRate;
@@ -418,6 +439,10 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
     {
         const auto length = std::min (controlStep, numSamples - start);
         std::array<float, controlStep> moved {};
+
+        // The glide moves as far as this stretch's length takes it: a step that a block's end or an event cuts short moves
+        // less, so the glide keeps its time however the samples come.
+        const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-length / glideSamples));
 
         for (int i = 0; i < length; ++i)
             moved[(size_t) i] = lfo.next (lfoWave);
@@ -493,7 +518,15 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 }
 
                 voice.filterEnvelopeLevel = voice.filterEnvelope.next();
-                auto gain = voice.amp.next() * voice.velocityGain * outputGain;
+                auto gain = voice.amp.next() * voice.velocityGain * outputGain * voice.fade;
+
+                // A voice taken for another note fades out (stealVoice()); faded, it is free.
+                if (voice.fadeStep > 0.0f && (voice.fade -= voice.fadeStep) <= 0.0f)
+                {
+                    voice.fade = 1.0f;
+                    voice.fadeStep = 0.0f;
+                    voice.amp.reset();
+                }
 
                 if (lfoAim == LfoTarget::level)
                     gain *= 1.0f - depth * 0.5f * (1.0f + moved[(size_t) i]);

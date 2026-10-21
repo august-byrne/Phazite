@@ -4,8 +4,36 @@
 #include <algorithm>
 #include <string_view>
 
+// Last, so that its macros can't change the headers above.
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+#endif
+
 namespace phazite::ui
 {
+namespace
+{
+    // Whether a key was down when the key message being handled was sent. JUCE's KeyPress::isKeyCurrentlyDown() reads the
+    // key as it is now (GetAsyncKeyState() on Windows): a quick tap is over by then if the UI thread was busy until after
+    // it, and played no note (docs/performance-audit.md, U6). GetKeyState() keeps step with the messages instead, so the
+    // tap plays its note late rather than never. Elsewhere JUCE keeps the keys' state from the messages itself.
+    bool wasKeyDown (int keyCode)
+    {
+#if JUCE_WINDOWS
+        const auto scanned = VkKeyScanW ((WCHAR) keyCode) & 0xff;
+        return (GetKeyState (scanned != 0xff ? scanned : keyCode) & 0x8000) != 0;
+#else
+        return juce::KeyPress::isKeyCurrentlyDown (keyCode);
+#endif
+    }
+} // namespace
+
 ComputerKeyboard::ComputerKeyboard (std::function<void (const juce::MidiMessage&)> send)
     : sendMessage (std::move (send))
 {
@@ -133,8 +161,7 @@ bool ComputerKeyboard::takesKey (const juce::KeyPress& key) const
 
 bool ComputerKeyboard::keyStateChanged (bool, juce::Component*)
 {
-    return update ([] (int keyCode) { return juce::KeyPress::isKeyCurrentlyDown (keyCode); },
-                   juce::ModifierKeys::getCurrentModifiersRealtime());
+    return update (wasKeyDown, juce::ModifierKeys::getCurrentModifiersRealtime());
 }
 
 bool ComputerKeyboard::isShortcut (juce::ModifierKeys modifiers)

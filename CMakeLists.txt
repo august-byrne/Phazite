@@ -25,6 +25,22 @@ set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedd
 if(MSVC)
     message(STATUS "Phazite: MSVC ${CMAKE_CXX_COMPILER_VERSION} from ${VS_INSTALLATION_PATH}, "
                    "Windows SDK ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+
+    # RelWithDebInfo (the windows-profile preset) is Release with symbols: it inlines as much as Release does (CMake's
+    # default for it is /Ob1) and links as Release does (CMake's default links it incrementally, which sends every call
+    # through a jump stub and turns /OPT off), so that it plays, and measures, as Release does.
+    string(REPLACE "/Ob1" "/Ob2" CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO}")
+    string(REPLACE "/Ob1" "/Ob2" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+
+    foreach(_phazite_kind EXE SHARED MODULE)
+        set(_phazite_flags "${CMAKE_${_phazite_kind}_LINKER_FLAGS_RELWITHDEBINFO}")
+
+        if(NOT _phazite_flags MATCHES "/INCREMENTAL:NO")
+            string(REGEX REPLACE "/INCREMENTAL(:YES)?" "/INCREMENTAL:NO" _phazite_flags "${_phazite_flags}")
+        endif()
+
+        set(CMAKE_${_phazite_kind}_LINKER_FLAGS_RELWITHDEBINFO "${_phazite_flags} /OPT:REF /OPT:ICF")
+    endforeach()
 endif()
 
 # JUCE builds its "juceaide" helper during configure with a second, nested CMake run that is not given
@@ -630,6 +646,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestMain.cpp
         tests/TestHelpers.h
         tests/AppInfoTests.cpp
+        tests/AppScreen.h
         tests/AppShellTests.cpp
         tests/AppTests.cpp
         tests/AudioClipEditorTests.cpp
@@ -640,6 +657,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AutomationLaneTests.cpp
         tests/AutomationModelTests.cpp
         tests/BeatsTests.cpp
+        tests/Benchmarks.cpp
         tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
         tests/ChordLaneTests.cpp
@@ -676,6 +694,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/GoldenProjectTests.cpp
         tests/GoldenRenderTests.cpp
         tests/GuideTests.cpp
+        tests/HostedDevice.h
         tests/IconTests.cpp
         tests/ImportTests.cpp
         tests/InspectorTests.cpp

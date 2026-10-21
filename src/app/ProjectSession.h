@@ -41,7 +41,8 @@ public:
     std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
     std::function<void()> onExport;          // shows the export window (the main window's), for Export Song
     juce::Component* dialogParent = nullptr; // dialogs appear over this
-    std::function<void (const juce::String& title, const juce::String& message)> onError; // shows an error; unset, a dialog
+    std::function<void (const juce::String& title, const juce::String& message)> onError;  // shows an error; unset, a dialog
+    std::function<void (const juce::String& title, const juce::String& message)> onNotice; // says what Phazite did; unset, a dialog
 
     // Asks what to call the project and where it goes, from a suggested file, for its first save and Save As, and calls
     // back with the file chosen, <folder>/<name> (the project's own folder is made there), or with no file if the user
@@ -110,6 +111,7 @@ private:
     void chooseWhereToSave (const juce::File& suggested, std::function<void (const juce::File&)>);
     bool moveUntitledTo (const juce::File& chosen);
     void showError (const juce::String& title, const juce::String& message);
+    void showNotice (const juce::String& title, const juce::String& message);
 
     // The selection changed, so live MIDI follows it; or the audio or MIDI devices changed, so live
     // MIDI goes to the project again (see routeLiveMidiInput()).
