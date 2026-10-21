@@ -13,8 +13,10 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/ModulatorDrag.h"
+#include "ui/devices/CompressorEditor.h"
 #include "ui/devices/EqEditor.h"
 #include "ui/devices/ModulatorEditor.h"
+#include "ui/devices/SynthEditor.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/DevicesView.h"
@@ -97,7 +99,7 @@ struct Screen
 };
 } // namespace
 
-TEST_CASE ("The Devices view shows the selected track's devices in a row, each whole")
+TEST_CASE ("The Effects page shows the selected track's effects in a row, as cards folded but one")
 {
     Screen screen;
     auto& view = screen.view;
@@ -118,9 +120,22 @@ TEST_CASE ("The Devices view shows the selected track's devices in a row, each w
     CHECK (eq->getScreenY() == plugin->getScreenY());
     CHECK (eq->getHeight() > 300);
 
-    // Phazite's EQ shows its editor, its graph shrunk to fit; the plug-in has key knobs and a button for its own window,
-    // which Phazite's devices don't have.
+    // Folded at first to their key knobs, narrow; the EQ's chevron opens it, its whole editor with its graph shrunk to fit,
+    // and opening the compressor folds it again. The plug-in has key knobs and a button for its own window, which Phazite's
+    // devices don't have.
+    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).isEmpty());
+    CHECK (eq->getWidth() < 250);
+    auto* open = phazite::test::findComponentWithTitle (*eq, "Open");
+    REQUIRE (open != nullptr);
+    phazite::test::Mouse openMouse (*open);
+    openMouse.click (open->getLocalBounds().getCentre());
+    CHECK (view.isOpen (effects[0]));
     CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).size() == 1);
+    CHECK (eq->getWidth() > 300);
+    view.setOpen (effects[1], true);
+    CHECK_FALSE (view.isOpen (effects[0]));
+    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).isEmpty());
+    CHECK (phazite::test::findAll<phazite::ui::CompressorEditor> (*compressor).size() == 1);
     CHECK (phazite::test::findComponentWithTitle (*eq, "Open its window") == nullptr);
     CHECK (phazite::test::findComponentWithTitle (*plugin, "Open its window") != nullptr);
     CHECK (phazite::test::findAll<phazite::ui::Knob> (*plugin).size() >= 2);
@@ -145,6 +160,68 @@ TEST_CASE ("The Devices view shows the selected track's devices in a row, each w
     CHECK_FALSE (phazite::getEffects (screen.context, screen.track (0))[1].isOn);
     CHECK (phazite::describeUndo (screen.edit.get()).isNotEmpty());
     phazite::test::checkChildrenApart (view);
+
+    // Showing the plug-in, whose card doesn't open, leaves the open card open.
+    view.showDevice (effects[2]);
+    CHECK (view.isOpen (effects[1]));
+
+    // Each page keeps its own cards while the other shows: the same ones come back.
+    using Page = phazite::ui::DevicesView::Page;
+    view.showPage (Page::instrument);
+    view.showPage (Page::effects);
+    CHECK (view.findPanel (effects[0]) == eq);
+
+    // An effect just added opens, the others folding, even while the Instrument page shows.
+    view.showPage (Page::instrument);
+    phazite::addEffect (screen.context, screen.track (0), screen.find ("phaziteDelay"));
+    phazite::test::dispatchPendingMessages();
+    view.showPage (Page::effects);
+    const auto delay = phazite::getEffects (screen.context, screen.track (0)).back().id;
+    CHECK (view.isOpen (delay));
+    CHECK_FALSE (view.isOpen (effects[1]));
+}
+
+TEST_CASE ("The Instrument page shows the track's instrument alone, as wide as the page, or why it has none")
+{
+    using Page = phazite::ui::DevicesView::Page;
+    Screen screen;
+    auto& view = screen.view;
+    view.showPage (Page::instrument);
+    const auto effects = screen.effects (0);
+
+    // Track A has none yet: a button that adds one, and none of its effects.
+    const auto buttons = phazite::test::findAll<juce::TextButton> (view);
+    CHECK (std::any_of (buttons.begin(), buttons.end(),
+                        [] (juce::TextButton* button) { return button->isShowing() && button->getButtonText() == "+ Instrument"; }));
+    CHECK (view.findPanel (effects[0]) == nullptr);
+
+    // With the synth: its editor alone, as wide as the page, and its page as the one it is on.
+    phazite::chooseInstrument (screen.context, screen.track (0), screen.find ("phaziteSynth"));
+    phazite::test::dispatchPendingMessages();
+    const auto instrument = phazite::getInstrument (screen.context, screen.track (0));
+    REQUIRE (instrument.has_value());
+    auto* panel = view.findPanel (instrument->id);
+    REQUIRE (panel != nullptr);
+    CHECK (phazite::test::findAll<phazite::ui::SynthEditor> (*panel).size() == 1);
+    CHECK (panel->getWidth() > 1000);
+    CHECK (view.getPageOf (instrument->id) == Page::instrument);
+    CHECK (view.getPageOf (effects[0]) == Page::effects);
+    phazite::test::checkChildrenApart (view);
+
+    // The effects are on the other page, without it; shown from elsewhere, a device brings its own page.
+    view.showPage (Page::effects);
+    CHECK (view.findPanel (instrument->id) == nullptr);
+    CHECK (view.findPanel (effects[0]) != nullptr);
+    view.showDevice (instrument->id);
+    CHECK (view.getPage() == Page::instrument);
+
+    // The master has none, and says why.
+    phazite::addEffect (screen.context, {}, screen.find ("phaziteLimiter"));
+    view.showDevice (phazite::getEffects (screen.context, {}).back().id);
+    view.showPage (Page::instrument);
+    const auto labels = phazite::test::findAll<juce::Label> (view);
+    CHECK (std::any_of (labels.begin(), labels.end(), [] (juce::Label* label)
+                        { return label->isShowing() && label->getText().startsWith ("The master has no instrument"); }));
 }
 
 TEST_CASE ("The Devices view follows the selection, and a click on a device's name in the mixer shows it there")
@@ -188,7 +265,7 @@ TEST_CASE ("The Devices view follows the selection, and a click on a device's na
     setEdit (screen.context, screen.edit.get());
 }
 
-TEST_CASE ("A container shows its macros and its devices in line; a macro dropped on a device's knob modulates it")
+TEST_CASE ("A container shows its macros and its devices in line, as cards; a macro dropped on a device's knob modulates it")
 {
     Screen screen;
     const auto effects = screen.effects (0);
@@ -196,7 +273,7 @@ TEST_CASE ("A container shows its macros and its devices in line; a macro droppe
     REQUIRE (container.isValid());
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return screen.view.findPanel (container) != nullptr; }));
 
-    // Its devices show whole inside it, after its eight macros.
+    // Grouped, it opens: its devices inside it, after its eight macros, as cards.
     auto* panel = screen.view.findPanel (container);
     auto* eq = screen.view.findPanel (effects[0]);
     auto* compressor = screen.view.findPanel (effects[1]);
@@ -206,6 +283,17 @@ TEST_CASE ("A container shows its macros and its devices in line; a macro droppe
     CHECK (eq->getScreenX() < compressor->getScreenX());
     CHECK (phazite::test::findComponentWithTitle (*panel, "Macro 1") != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*panel, "Macro 8") != nullptr);
+    phazite::test::checkChildrenApart (*panel);
+
+    // A card inside it opening widens the container's card to hold it (the compressor's was open before it was grouped,
+    // and stays so: it folds first).
+    screen.view.setOpen (effects[1], false);
+    const auto foldedWidth = panel->getWidth();
+    screen.view.setOpen (effects[0], true);
+    eq = screen.view.findPanel (effects[0]);
+    REQUIRE (eq != nullptr);
+    CHECK (panel->getWidth() > foldedWidth + 100);
+    CHECK (panel->getLocalArea (eq, eq->getLocalBounds()).getRight() <= panel->getWidth());
     phazite::test::checkChildrenApart (*panel);
 
     // The first macro, dropped on the compressor's threshold: it modulates it.

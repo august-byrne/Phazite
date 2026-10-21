@@ -11,6 +11,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/audioclip/AudioClipEditor.h"
+#include "ui/mixer/DevicesView.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/shell/Panels.h"
 
@@ -278,7 +279,7 @@ TEST_CASE ("The editor dock's first tab shows the piano roll or the audio clip e
     EditorScreen screen;
     phazite::ui::PianoRoll pianoRoll { screen.commands, screen.context };
     phazite::ui::AudioClipEditor audioEditor { screen.commands, screen.context };
-    juce::Component devices;
+    phazite::ui::DevicesView devices { screen.commands, screen.context };
     phazite::ui::EditorDock dock { screen.context, pianoRoll, audioEditor, devices };
     phazite::test::TestWindow dockWindow { dock, 1000, 400 };
     auto& selection = screen.context.getSongSelection();

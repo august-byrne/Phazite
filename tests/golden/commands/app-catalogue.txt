@@ -90,7 +90,8 @@ view.toggleBrowser | ctrl + alt + B
 view.toggleInspector
 view.toggleEditor
 view.pianoRoll | F7
-view.devices | F6
+view.instrument | F6
+view.effects | shift + F6
 device.show
 view.playlist | F5
 view.mixer | F9

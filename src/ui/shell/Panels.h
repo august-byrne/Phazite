@@ -12,6 +12,7 @@
 namespace phazite::ui
 {
 class AudioClipEditor;
+class DevicesView;
 class PianoRoll;
 class TimelineEditor;
 
@@ -37,8 +38,9 @@ public:
 //==============================================================================
 // The editor dock under the centre: the selection, in detail. Its first tab is the editor of the selected clip, named for
 // what it shows: the piano roll for MIDI clips, the audio clip editor for audio clips, as the song's selection asks
-// (model/arrangement/AudioClipModel.h: getClipTypeToEdit()); its second, the selected track's devices (DevicesView.h). The
-// views belong to the window; the dock only shows them.
+// (model/arrangement/AudioClipModel.h: getClipTypeToEdit()); then the selected track's instrument, apart, and its effects
+// (the owner, 2026-10-21: an instrument looked like another effect), two pages of the one Devices view (DevicesView.h),
+// which the tab chosen shows. The views belong to the window; the dock only shows them.
 class EditorDock : public juce::TabbedComponent,
                    private juce::ChangeListener
 {
@@ -46,10 +48,11 @@ public:
     enum Tab
     {
         clipEditor,
-        devices
+        instrument,
+        effects
     };
 
-    EditorDock (ProjectContext&, PianoRoll&, AudioClipEditor&, juce::Component& devicesPanel);
+    EditorDock (ProjectContext&, PianoRoll&, AudioClipEditor&, DevicesView&);
     ~EditorDock() override;
 
     void showTab (Tab tab) { setCurrentTabIndex (tab); }
@@ -67,10 +70,12 @@ private:
     ProjectContext& context;
     PianoRoll& pianoRoll;
     AudioClipEditor& audioClipEditor;
+    DevicesView& devicesView;
     std::unique_ptr<ClipTab> clipTab;
     bool showingAudio = false;
 
     void showClipEditor (ClipType);
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection changed: what it asks the first tab to show
+    void currentTabChanged (int, const juce::String&) override;      // the Devices view's page, for the device tabs
 };
 } // namespace phazite::ui

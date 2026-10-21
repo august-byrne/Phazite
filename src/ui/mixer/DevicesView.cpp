@@ -26,14 +26,20 @@ namespace
     constexpr int addButtonWidth = 110;                // "+ Effect", "Choose instrument"
     constexpr int macroColumns = 4, macroWidth = 72, macroKnobSize = 44;
     constexpr int macroHeight = macroKnobSize + labelHeight;
+    constexpr int foldedWidth = 184, foldButtonWidth = 22; // an effect's card, folded
+    constexpr int foldedKnobs = 2;                         // its key knobs then, beside its mix in its header
 
     //==============================================================================
-    // A plug-in's key knobs, which the model offers, each named (its mix is in the header); its own controls are in its window.
+    // A device's key knobs, which the model offers, each named (its mix is in the header): a plug-in's, whose own controls
+    // are in its window, or a folded card's, compact.
     struct KeyKnobs : public juce::Component
     {
-        KeyKnobs (ProjectContext& context, const DeviceSlot& device)
+        KeyKnobs (ProjectContext& context, const DeviceSlot& device, int maximum = maxKeyKnobs, int columnsShown = keyKnobColumns,
+                  int sizeShown = knobSize)
+            : columns (columnsShown),
+              size (sizeShown)
         {
-            for (auto& control : getKeyControls (context, device.id, maxKeyKnobs))
+            for (auto& control : getKeyControls (context, device.id, maximum))
                 addParameterKnob (*this, knobs, attachments, std::move (control));
 
             for (auto* knob : knobs)
@@ -45,8 +51,8 @@ namespace
                 addAndMakeVisible (name);
             }
 
-            const auto rows = std::max (1, (knobs.size() + keyKnobColumns - 1) / keyKnobColumns);
-            setSize (keyKnobColumns * (knobSize + Space::l) + Space::l, rows * (knobSize + labelHeight + Space::s) + Space::l);
+            const auto rows = std::max (1, (knobs.size() + columns - 1) / columns);
+            setSize (columns * (size + Space::l) + Space::l, rows * (size + labelHeight + Space::s) + Space::l);
         }
 
         void updateValues()
@@ -59,13 +65,14 @@ namespace
         {
             for (int i = 0; i < knobs.size(); ++i)
             {
-                const auto x = Space::l + (i % keyKnobColumns) * (knobSize + Space::l);
-                const auto y = Space::l + (i / keyKnobColumns) * (knobSize + labelHeight + Space::s);
-                knobs[i]->setBounds (x, y, knobSize, knobSize);
-                names[i]->setBounds (x - Space::s, y + knobSize, knobSize + 2 * Space::s, labelHeight);
+                const auto x = Space::l + (i % columns) * (size + Space::l);
+                const auto y = Space::l + (i / columns) * (size + labelHeight + Space::s);
+                knobs[i]->setBounds (x, y, size, size);
+                names[i]->setBounds (x - Space::s, y + size, size + 2 * Space::s, labelHeight);
             }
         }
 
+        const int columns, size;
         juce::OwnedArray<Knob> knobs;
         juce::OwnedArray<ParameterAttachment> attachments;
         juce::OwnedArray<juce::Label> names;
@@ -125,15 +132,17 @@ namespace
 } // namespace
 
 //==============================================================================
-// Devices in a row, left to right as the sound goes through them: a channel's (its instrument first, or a button that
-// adds one, then its effects and a button that adds one), or a container's.
+// A channel's instrument (or a button that chooses one), on the Instrument page; or devices in a row, left to right as the
+// sound goes through them, folded but one: a channel's effects and a button that adds one, or a container's.
 struct DevicesView::Row : public juce::Component
 {
-    Row (DevicesView&, TrackID channelTrack, DeviceID container); // the master's with an empty track and container
+    // The master's with an empty track and container.
+    Row (DevicesView&, TrackID channelTrack, DeviceID container, Page = Page::effects);
     ~Row() override;
 
     void refresh(); // new panels if the devices changed, else their names and switches
     void updateValues();
+    void setOpen (DeviceID, bool); // that card open, the others folded
     int getPreferredWidth() const;
     void resized() override;
 
@@ -143,9 +152,12 @@ struct DevicesView::Row : public juce::Component
     DevicesView& view;
     const TrackID track;
     const DeviceID container;
+    const Page page;
     juce::OwnedArray<Panel> panels;
     std::vector<DeviceID> shown;
+    bool refreshed = false; // once: then a device that appears is one just added, and opens
     juce::TextButton instrumentButton, addButton { "+ Effect" };
+    juce::Label instrumentHint; // beside the button that chooses one
 };
 
 //==============================================================================
@@ -171,8 +183,9 @@ struct ContainerBody : public juce::Component
 };
 
 //==============================================================================
-// A device: its header (an on/off switch, its name, what its sidechain listens to if it has one, its mix and a plug-in's
-// window button) over what shows it, scrolled up and down when the view is shorter than it.
+// A device: its header (an on/off switch, a chevron that folds or opens an effect's card, its name, what its sidechain
+// listens to if it has one, its mix and a plug-in's window button) over what shows it: folded, its key knobs; open, the
+// whole of it, scrolled up and down when the view is shorter than it. An instrument's header is in its track's colour.
 struct DevicesView::Panel : public juce::Component
 {
     Panel (DevicesView& v, const DeviceSlot& device, DevicePlace p, TrackID channelTrack)
@@ -195,6 +208,15 @@ struct DevicesView::Panel : public juce::Component
             else
                 select (mods);
         };
+
+        // An effect's card folds to its key knobs and opens to the whole of it; a plug-in's controls are in its window.
+        if (place != DevicePlace::instrument && ! device.opensWindow)
+        {
+            foldButton = std::make_unique<IconButton> ("Open", Icon::folded);
+            foldButton->setQuiet (true);
+            foldButton->onClick = [this] { view.setOpen (shown.id, folded); };
+            addAndMakeVisible (*foldButton);
+        }
 
         // Every effect's mix, in one place: its header, as FL Studio's mixer slots have it (a container's is beside its macros).
         if (device.hasMix && ! device.isContainer)
@@ -221,21 +243,52 @@ struct DevicesView::Panel : public juce::Component
             addAndMakeVisible (*windowButton);
         }
 
-        // What shows it: one of Phazite's own devices' editor, a container's macros and devices, or a plug-in's key knobs.
-        if (device.isContainer)
-            body = std::make_unique<ContainerBody> (view, view.context, device);
-        else if (! device.opensWindow)
-            body = createDeviceEditor (getDeviceHandle (view.context, device.id));
-
-        if (body == nullptr)
-            body = std::make_unique<KeyKnobs> (view.context, device);
-
-        bodyView.setViewedComponent (body.get(), false);
         bodyView.setScrollBarsShown (true, false);
         addAndMakeVisible (bodyView);
         addAndMakeVisible (power);
         addAndMakeVisible (nameButton);
+        setFolded (foldButton != nullptr && ! view.isOpen (device.id), true);
         show (device);
+    }
+
+    bool isFoldable() const noexcept { return foldButton != nullptr; }
+
+    // Folds the card to its key knobs, or opens it to the whole of it.
+    void setFolded (bool shouldFold, bool force = false)
+    {
+        if (! isFoldable())
+            shouldFold = false;
+
+        if (shouldFold == folded && ! force)
+            return;
+
+        folded = shouldFold;
+        bodyView.setViewedComponent (nullptr, false);
+        body = nullptr;
+
+        // What shows it: folded, its key knobs; open, one of Phazite's own devices' editor or a container's macros and
+        // devices; a plug-in, its key knobs.
+        if (folded)
+            body = std::make_unique<KeyKnobs> (view.context, shown, foldedKnobs, foldedKnobs, compactKnobSize);
+        else if (shown.isContainer)
+            body = std::make_unique<ContainerBody> (view, view.context, shown);
+        else if (! shown.opensWindow)
+            body = createDeviceEditor (getDeviceHandle (view.context, shown.id));
+
+        if (body == nullptr)
+            body = std::make_unique<KeyKnobs> (view.context, shown);
+
+        bodyView.setViewedComponent (body.get(), false);
+
+        if (foldButton != nullptr)
+        {
+            foldButton->setIcon (folded ? Icon::folded : Icon::expanded);
+            foldButton->setTitle (folded ? "Open" : "Fold");
+            foldButton->setTooltip (folded ? "Opens it, to all its controls (and folds the one that was open)"
+                                           : "Folds it to its key knobs");
+        }
+
+        resized();
     }
 
     void show (const DeviceSlot& device)
@@ -315,7 +368,7 @@ struct DevicesView::Panel : public juce::Component
     }
 
     // As wide as what shows it at that height (an editor that reflows is wider when shorter), and a scroll bar if it is
-    // taller than the view.
+    // taller than the view; a folded card, its own width.
     int getBodyWidth (int bodyHeight) const
     {
         if (auto* containerBody = dynamic_cast<ContainerBody*> (body.get()))
@@ -329,6 +382,9 @@ struct DevicesView::Panel : public juce::Component
 
     int getPreferredWidth (int height) const
     {
+        if (folded)
+            return foldedWidth;
+
         const auto bodyHeight = height - controlHeight;
         const auto scrolls = dynamic_cast<ContainerBody*> (body.get()) == nullptr && getBodyHeight (bodyHeight) > bodyHeight;
         return getBodyWidth (bodyHeight) + (scrolls ? bodyView.getScrollBarThickness() : 0);
@@ -353,6 +409,14 @@ struct DevicesView::Panel : public juce::Component
         g.setColour (p.surfaceRaised);
         g.fillRoundedRectangle (area, cornerRadius);
 
+        // An instrument's header in its track's colour: the instrument apart from the effects.
+        if (place == DevicePlace::instrument)
+            if (const auto owner = phazite::getChannel (view.context, track))
+            {
+                g.setColour (owner->colour.withAlpha (TrackTint::header));
+                g.fillRoundedRectangle (area.withHeight ((float) controlHeight), cornerRadius);
+            }
+
         // A selected device stands out, as a selected slot does in the mixer.
         if (view.context.getSongSelection().isSelected (shown.id))
         {
@@ -370,6 +434,9 @@ struct DevicesView::Panel : public juce::Component
         power.setBounds (header.removeFromLeft (powerWidth));
         header.removeFromLeft (Space::xs);
 
+        if (foldButton != nullptr)
+            foldButton->setBounds (header.removeFromLeft (foldButtonWidth));
+
         if (windowButton != nullptr)
             windowButton->setBounds (header.removeFromRight (windowButtonWidth));
 
@@ -383,18 +450,35 @@ struct DevicesView::Panel : public juce::Component
         nameButton.setBounds (header);
         bodyView.setBounds (area);
 
+        if (body == nullptr)
+            return;
+
+        // The instrument, as wide as the dock: an editor that wraps its parts into rows where it is narrower, as tall as
+        // that takes, scrolled up and down.
+        if (place == DevicePlace::instrument)
+        {
+            const auto width = area.getWidth() - bodyView.getScrollBarThickness();
+
+            if (auto* flexible = dynamic_cast<const FlexibleHeight*> (body.get()))
+                body->setSize (width, std::max ({ flexible->getHeightForWidth (width), flexible->getMinimumHeight(), area.getHeight() }));
+
+            return;
+        }
+
         const auto bodyHeight = getBodyHeight (area.getHeight());
-        body->setSize (getBodyWidth (area.getHeight()), bodyHeight);
+        body->setSize (folded ? area.getWidth() : getBodyWidth (area.getHeight()), bodyHeight);
     }
 
     DevicesView& view;
     const DevicePlace place;
     const TrackID track;
     DeviceSlot shown;
+    bool folded = false;
     juce::TextButton power;
     MenuButton nameButton;
     juce::OwnedArray<Knob> mixKnob; // an effect's
     std::unique_ptr<MixAttachment> mixAttachment;
+    std::unique_ptr<IconButton> foldButton;           // an effect's that opens: one of Phazite's own, or a container
     std::unique_ptr<IconButton> windowButton;         // a plug-in's
     std::unique_ptr<SidechainButton> sidechainButton; // a device's that has a sidechain
     std::unique_ptr<juce::Component> body;
@@ -402,18 +486,23 @@ struct DevicesView::Panel : public juce::Component
 };
 
 //==============================================================================
-DevicesView::Row::Row (DevicesView& v, TrackID channelTrack, DeviceID containerID)
+DevicesView::Row::Row (DevicesView& v, TrackID channelTrack, DeviceID containerID, Page shownPage)
     : view (v),
       track (channelTrack),
-      container (containerID)
+      container (containerID),
+      page (containerID.isValid() ? Page::effects : shownPage)
 {
-    setTitle (container.isValid() ? "Container's devices" : "Devices");
+    setTitle (container.isValid() ? "Container's devices" : page == Page::instrument ? "Instrument" : "Effects");
     instrumentButton.onClick = [this] { showInstrumentMenu (view.context, track, instrumentButton); };
     addButton.onClick = [this] { showAddMenu(); };
     addButton.setTooltip (container.isValid() ? "Adds an effect after the container's devices: built in or a plug-in"
                                               : "Adds an effect, which changes the sound, such as a reverb: built in or a plug-in");
-    addAndMakeVisible (instrumentButton);
-    addAndMakeVisible (addButton);
+    instrumentHint.setFont (juce::FontOptions (TextSize::small));
+    instrumentHint.setText ("An instrument plays the track's notes: a synth or a sampler, built in or a plug-in",
+                            juce::dontSendNotification);
+    addChildComponent (instrumentButton);
+    addChildComponent (instrumentHint);
+    addChildComponent (addButton);
     refresh();
 }
 
@@ -424,12 +513,13 @@ std::vector<DeviceSlot> DevicesView::Row::getDevices() const
     if (container.isValid())
         return getContainerDevices (view.context, container);
 
-    auto devices = getEffects (view.context, track);
+    if (page == Page::effects)
+        return getEffects (view.context, track);
 
     if (const auto instrument = track.isValid() ? getInstrument (view.context, track) : std::nullopt)
-        devices.insert (devices.begin(), *instrument);
+        return { *instrument };
 
-    return devices;
+    return {};
 }
 
 void DevicesView::Row::refresh()
@@ -438,17 +528,26 @@ void DevicesView::Row::refresh()
 
     if (getIDs (devices) != shown)
     {
+        // An effect that wasn't here before, once the row has shown its devices, was just added: it opens (one of Phazite's
+        // own, or a container: a plug-in's controls are in its window).
+        std::optional<DeviceID> added;
+
+        if (refreshed && page == Page::effects)
+            for (const auto& device : devices)
+                if (std::find (shown.begin(), shown.end(), device.id) == shown.end() && ! device.opensWindow)
+                    added = device.id;
+
         panels.clear();
         shown = getIDs (devices);
+        const auto place = container.isValid()        ? DevicePlace::inContainer
+                           : page == Page::instrument ? DevicePlace::instrument
+                                                      : DevicePlace::effect;
 
         for (const auto& device : devices)
-        {
-            const auto place = container.isValid() ? DevicePlace::inContainer
-                               : track.isValid() && getInstrument (view.context, track).has_value() && device.id == devices.front().id
-                                   ? DevicePlace::instrument
-                                   : DevicePlace::effect;
             addAndMakeVisible (panels.add (new Panel (view, device, place, track)));
-        }
+
+        if (added.has_value())
+            view.setOpen (*added, true);
     }
     else
     {
@@ -456,19 +555,23 @@ void DevicesView::Row::refresh()
             panels[(int) i]->show (devices[i]);
     }
 
-    // A track without an instrument has a button for one first, which asks for one while its notes make no sound.
+    refreshed = true;
+
+    // On the Instrument page, a track without one has a button that chooses one, which asks for one while its notes make
+    // no sound; the Effects page ends with a button that adds an effect.
     const auto trackChannel = track.isValid() ? phazite::getChannel (view.context, track) : std::nullopt;
-    const auto needsButton = ! container.isValid() && track.isValid() && canHoldInstrument (view.context, track)
-                             && ! getInstrument (view.context, track).has_value();
+    const auto needsButton = page == Page::instrument && track.isValid() && canHoldInstrument (view.context, track) && devices.empty();
     const auto needs = trackChannel.has_value() && trackChannel->needsInstrument;
     const auto& p = getPalette (view);
     instrumentButton.setVisible (needsButton);
+    instrumentHint.setVisible (needsButton);
     instrumentButton.setButtonText (needs ? "Choose instrument" : "+ Instrument");
     instrumentButton.setTooltip (needs ? "This track has notes, but no instrument to play them, so they make no sound. Choose one: a "
                                          "synth or a sampler"
                                        : "Adds an instrument, which plays the track's notes: a synth or a sampler, built in or a plug-in");
     instrumentButton.setColour (juce::TextButton::buttonColourId,
                                 needs ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint) : p.surfaceRaised);
+    addButton.setVisible (page == Page::effects);
     addButton.setEnabled (view.context.hasProject());
     resized();
 }
@@ -479,27 +582,46 @@ void DevicesView::Row::updateValues()
         panel->updateValues();
 }
 
+void DevicesView::Row::setOpen (DeviceID id, bool open)
+{
+    for (auto* panel : panels)
+        if (panel->isFoldable())
+            panel->setFolded (! (open && panel->shown.id == id));
+
+    resized();
+}
+
 int DevicesView::Row::getPreferredWidth() const
 {
     auto width = Space::s;
 
-    if (instrumentButton.isVisible())
-        width += addButtonWidth + Space::s;
-
     for (auto* panel : panels)
         width += panel->getPreferredWidth (getHeight()) + Space::s;
 
-    return width + addButtonWidth + Space::s;
+    return width + (addButton.isVisible() ? addButtonWidth + Space::s : 0);
 }
 
 void DevicesView::Row::resized()
 {
     auto area = getLocalBounds().reduced (0, Space::s).withTrimmedLeft (Space::s);
 
-    if (instrumentButton.isVisible())
+    // The instrument: the whole page.
+    if (page == Page::instrument)
     {
-        instrumentButton.setBounds (area.removeFromLeft (addButtonWidth).removeFromTop (controlHeight));
-        area.removeFromLeft (Space::s);
+        area = area.withTrimmedRight (Space::s);
+
+        if (instrumentButton.isVisible())
+        {
+            auto line = area.removeFromTop (controlHeight);
+            instrumentButton.setBounds (line.removeFromLeft (addButtonWidth));
+            line.removeFromLeft (Space::s);
+            instrumentHint.setBounds (line);
+        }
+
+        for (auto* panel : panels)
+            panel->setBounds (area);
+
+        return;
     }
 
     for (auto* panel : panels)
@@ -622,6 +744,10 @@ DevicesView::DevicesView (CommandBridge& bridge, ProjectContext& projectContext)
     for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &kindLabel, &modulatorsHeading, &modulatorsView, &rowView })
         addAndMakeVisible (c);
 
+    noInstrument.setFont (juce::FontOptions (TextSize::body));
+    noInstrument.setJustificationType (juce::Justification::topLeft);
+    addChildComponent (noInstrument);
+
     context.addListener (this);
     context.getSongSelection().addChangeListener (this);
     followSelection();
@@ -651,7 +777,75 @@ juce::Component* DevicesView::findPanel (DeviceID id) const
         return nullptr;
     };
 
-    return row != nullptr ? search (*row) : nullptr;
+    auto* shown = getShownRow();
+    return shown != nullptr ? search (*shown) : nullptr;
+}
+
+DevicesView::Page DevicesView::getPageOf (DeviceID id) const
+{
+    if (const auto deviceChannel = getDeviceChannel (context, id); deviceChannel.has_value() && deviceChannel->isValid())
+        if (const auto instrument = getInstrument (context, *deviceChannel); instrument.has_value() && instrument->id == id)
+            return Page::instrument;
+
+    return Page::effects;
+}
+
+void DevicesView::showPage (Page newPage)
+{
+    if (newPage == page)
+        return;
+
+    page = newPage;
+    rowView.setScrollBarsShown (false, page == Page::effects);
+    rowView.setViewedComponent (getShownRow(), false);
+    showWhyNoInstrument();
+    layOutRow();
+}
+
+bool DevicesView::isOpen (DeviceID id) const
+{
+    return openCards.count (id) > 0;
+}
+
+void DevicesView::setOpen (DeviceID id, bool open)
+{
+    // The row that holds it, a channel's or a container's: its other cards fold.
+    const std::function<Row*(Row&)> search = [&search, id] (Row& in) -> Row*
+    {
+        for (auto* panel : in.panels)
+        {
+            if (panel->shown.id == id)
+                return &in;
+
+            if (auto* containerBody = dynamic_cast<ContainerBody*> (panel->body.get()))
+                if (auto* found = search (*containerBody->devices))
+                    return found;
+        }
+
+        return nullptr;
+    };
+
+    auto* holder = effectsRow != nullptr ? search (*effectsRow) : nullptr;
+
+    // A plug-in's card doesn't open (its controls are in its window): the open one stays.
+    if (holder != nullptr)
+        for (auto* panel : holder->panels)
+            if (panel->shown.id == id && ! panel->isFoldable())
+                return;
+
+    if (holder != nullptr)
+        for (auto* panel : holder->panels)
+            openCards.erase (panel->shown.id);
+
+    if (open)
+        openCards.insert (id);
+    else
+        openCards.erase (id);
+
+    if (holder != nullptr)
+        holder->setOpen (id, open);
+
+    layOutRow();
 }
 
 void DevicesView::showDevice (DeviceID id)
@@ -659,7 +853,18 @@ void DevicesView::showDevice (DeviceID id)
     if (const auto deviceChannel = getDeviceChannel (context, id))
         setChannel (deviceChannel);
 
-    if (auto* panel = findPanel (id))
+    // On its page; an effect's card open, and its container's, if it is in one.
+    showPage (getPageOf (id));
+
+    if (page == Page::effects)
+    {
+        if (const auto inside = getContainerOf (context, id); inside.isValid())
+            setOpen (inside, true);
+
+        setOpen (id, true);
+    }
+
+    if (auto* panel = findPanel (id); panel != nullptr && page == Page::effects)
     {
         // Into view, sideways, with as much of it as fits.
         const auto bounds = rowView.getViewedComponent()->getLocalArea (panel, panel->getLocalBounds());
@@ -698,24 +903,43 @@ void DevicesView::followSelection()
 
 void DevicesView::setChannel (std::optional<TrackID> newChannel)
 {
-    if (newChannel == channel && (row != nullptr) == newChannel.has_value())
+    if (newChannel == channel && (effectsRow != nullptr) == newChannel.has_value())
         return;
 
     channel = newChannel;
     modulatorEditor = nullptr;
     rowView.setViewedComponent (nullptr, false);
-    row = nullptr;
+    instrumentRow = nullptr;
+    effectsRow = nullptr;
 
+    // Both pages, so that each keeps its state (its scroll, its editors' tabs) while the other shows.
     if (channel.has_value())
     {
-        row = std::make_unique<Row> (*this, *channel, DeviceID());
-        rowView.setViewedComponent (row.get(), false);
+        instrumentRow = std::make_unique<Row> (*this, *channel, DeviceID(), Page::instrument);
+        effectsRow = std::make_unique<Row> (*this, *channel, DeviceID(), Page::effects);
+        rowView.setViewedComponent (getShownRow(), false);
     }
+
+    showWhyNoInstrument();
 
     // The master's modulators are its track's.
     modulators.setTrack (! channel.has_value() ? TrackID() : channel->isValid() ? *channel : getMasterTrack (context));
     showChannelName();
     resized();
+}
+
+void DevicesView::showWhyNoInstrument()
+{
+    // On the Instrument page, a channel that can't hold one says why, and where its effects are.
+    const auto shown = channel.has_value() && channel->isValid() ? phazite::getChannel (context, *channel) : std::nullopt;
+    const auto why = ! channel.has_value() || page != Page::instrument ? juce::String()
+                     : ! channel->isValid() ? juce::String ("The master has no instrument: every track's sound comes to it.")
+                     : canHoldInstrument (context, *channel) ? juce::String()
+                     : shown.has_value() && shown->kind == ChannelKind::returnTrack
+                         ? juce::String ("A return has no instrument: its sound comes from the tracks that send to it.")
+                         : juce::String ("A folder has no instrument: its sound comes from its tracks.");
+    noInstrument.setText (why.isEmpty() ? why : why + " Its effects are in the Effects tab.", juce::dontSendNotification);
+    noInstrument.setVisible (why.isNotEmpty());
 }
 
 void DevicesView::showChannelName()
@@ -795,23 +1019,40 @@ void DevicesView::resized()
             area.removeFromLeft (modulatorEditor->getWidth() + Space::s).getTopLeft().translated (Space::s, Space::s));
 
     rowView.setBounds (area);
+    noInstrument.setBounds (area.reduced (Space::m));
     layOutRow();
 }
 
 void DevicesView::layOutRow()
 {
+    auto* row = getShownRow();
+
     if (row == nullptr)
         return;
 
+    // The instrument: the whole page, which its panel scrolls up and down.
+    if (page == Page::instrument)
+    {
+        row->setSize (rowView.getWidth(), rowView.getHeight());
+        row->resized();
+        return;
+    }
+
+    // The effects: as wide as their cards, one open (a container's card as wide as its own cards); laid out again even when
+    // that width is the same, as a card inside a container that opens or folds changes the container's.
     const auto height = rowView.getHeight() - rowView.getScrollBarThickness();
     row->setSize (row->getWidth(), height); // the panels' widths depend on the height
     row->setSize (std::max (row->getPreferredWidth(), rowView.getWidth()), height);
+    row->resized();
 }
 
 void DevicesView::projectChanged()
 {
+    openCards.clear(); // another project's devices can have the same IDs
     channel.reset();
-    row = nullptr;
+    rowView.setViewedComponent (nullptr, false);
+    instrumentRow = nullptr;
+    effectsRow = nullptr;
     followSelection();
 }
 
@@ -832,9 +1073,11 @@ void DevicesView::songChanged (const SongChanges& changes)
 
     if (changes.devices || changes.clips)
     {
-        if (row != nullptr)
-            row->refresh();
+        for (auto* row : { instrumentRow.get(), effectsRow.get() })
+            if (row != nullptr)
+                row->refresh();
 
+        showWhyNoInstrument();
         layOutRow();
     }
 
@@ -847,7 +1090,7 @@ void DevicesView::changeListenerCallback (juce::ChangeBroadcaster*)
     followSelection();
 
     // The panels show which devices are selected, those in containers too.
-    if (row != nullptr)
+    if (auto* row = getShownRow())
         row->repaint();
 }
 
@@ -856,7 +1099,7 @@ void DevicesView::timerCallback()
     if (! isShowing())
         return;
 
-    if (row != nullptr)
+    if (auto* row = getShownRow())
         row->updateValues();
 
     modulators.updateValues();

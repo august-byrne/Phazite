@@ -60,8 +60,8 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 
     for (const auto* id : { "view.toggleBrowser", "view.toggleBrowser", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll",
-                            "view.devices", "view.mixer", "view.playlist", "view.toggleEditor", "view.toggleEditor", "view.layoutBeat",
-                            "view.layoutMix", "view.layoutFull" })
+                            "view.instrument", "view.effects", "view.mixer", "view.playlist", "view.toggleEditor", "view.toggleEditor",
+                            "view.layoutBeat", "view.layoutMix", "view.layoutFull" })
     {
         INFO ("after " << id);
         CHECK (screen.registry.invoke (id));
@@ -78,17 +78,17 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK (song->getTabNames() == juce::StringArray { "Playlist", "Mixer" });
     auto* dock = dynamic_cast<juce::TabbedComponent*> (&screen.shell.getPanel (phazite::ui::AppShell::DetachablePanel::editor));
     REQUIRE (dock != nullptr);
-    CHECK (dock->getTabNames() == juce::StringArray { "Piano roll", "Devices" });
+    CHECK (dock->getTabNames() == juce::StringArray { "Piano roll", "Instrument", "Effects" });
 
     // F9's command shows the mixer in the centre, F5's the playlist again; the Mix layout shows the mixer over the
-    // selected track's devices.
+    // selected track's effects.
     REQUIRE (screen.registry.invoke ("view.mixer"));
     CHECK (song->getCurrentTabName() == juce::String ("Mixer"));
     REQUIRE (screen.registry.invoke ("view.playlist"));
     CHECK (song->getCurrentTabName() == juce::String ("Playlist"));
     REQUIRE (screen.registry.invoke ("view.layoutMix"));
     CHECK (song->getCurrentTabName() == juce::String ("Mixer"));
-    CHECK (dock->getCurrentTabName() == juce::String ("Devices"));
+    CHECK (dock->getCurrentTabName() == juce::String ("Effects"));
     REQUIRE (screen.registry.invoke ("view.layoutFull"));
     CHECK (song->getCurrentTabName() == juce::String ("Playlist"));
 

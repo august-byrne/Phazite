@@ -330,16 +330,14 @@ namespace
             muteSolo.setTrack (track);
 
             instrumentButton.onClick = [this] { instrumentClicked(); };
-            devicesButton.setTooltip ("Shows the track's instrument and effects in the Devices view, under the playlist");
-            devicesButton.onClick = [this]
+            effectsButton.setTooltip ("Shows the track's effects in the Effects tab, under the playlist, the first one selected");
+            effectsButton.onClick = [this]
             {
-                const auto effects = getEffects (context, track);
-                const auto instrument = getInstrument (context, track);
-
-                if (instrument.has_value())
-                    showDevice (context, commands, *instrument);
-                else if (! effects.empty())
-                    showDevice (context, commands, effects.front());
+                if (const auto effects = getEffects (context, track); ! effects.empty())
+                {
+                    context.getSongSelection().selectOnly (effects.front().id);
+                    commands.invoke ("device.show");
+                }
             };
 
             addSendButton.setTooltip ("Sends some of this track to a return track, which holds an effect that several tracks "
@@ -375,7 +373,7 @@ namespace
             addRow ("Mute, solo", &muteSolo);
             addRow ("Output", &outputButton);
             addRow ("Instrument", &instrumentButton);
-            addRow ("Devices", &devicesButton);
+            addRow ("Effects", &effectsButton);
             addRow ("Automation", &modeBox);
             addRow ("Lanes", &lanesButton);
             sendsHeadingIndex = (int) rows.size();
@@ -419,7 +417,7 @@ namespace
             instrumentButton.setButtonText (instrument.has_value()     ? instrument->name
                                             : channel->needsInstrument ? juce::String ("Choose instrument")
                                                                        : juce::String ("+ Instrument"));
-            instrumentButton.setTooltip (instrument.has_value() ? "Shows the instrument in the Devices view"
+            instrumentButton.setTooltip (instrument.has_value() ? "Shows the instrument in the Instrument tab"
                                                                 : "Adds an instrument, which plays the track's notes");
 
             const auto effects = getEffects (context, track);
@@ -428,8 +426,8 @@ namespace
             for (const auto& effect : effects)
                 names.add (effect.name);
 
-            devicesButton.setButtonText (names.isEmpty() ? juce::String ("No effects") : names.joinIntoString (", "));
-            devicesButton.setEnabled (instrument.has_value() || ! effects.empty());
+            effectsButton.setButtonText (names.isEmpty() ? juce::String ("No effects") : names.joinIntoString (", "));
+            effectsButton.setEnabled (! effects.empty());
 
             modeBox.setSelectedId ((int) getAutomationMode (context, track) + 1, juce::dontSendNotification);
             const auto lanes = (int) getAutomationLanes (context, track).size();
@@ -531,7 +529,7 @@ namespace
         Fader pan { Fader::Direction::horizontal, "Pan", 0.0 };
         ParameterAttachment volumeAttachment { volume }, panAttachment { pan };
         MuteSoloButtons muteSolo;
-        juce::TextButton instrumentButton, devicesButton, lanesButton, addSendButton { "+ Send" };
+        juce::TextButton instrumentButton, effectsButton, lanesButton, addSendButton { "+ Send" };
         juce::ComboBox modeBox;
         juce::OwnedArray<SendRow> sendRows;
         std::vector<TrackID> shownReturns; // the returns the send rows are for

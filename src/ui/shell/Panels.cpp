@@ -3,6 +3,7 @@
 #include "model/arrangement/AudioClipModel.h"
 #include "model/project/ProjectContext.h"
 #include "ui/audioclip/AudioClipEditor.h"
+#include "ui/mixer/DevicesView.h"
 #include "ui/pianoroll/PianoRoll.h"
 
 namespace phazite::ui
@@ -41,11 +42,12 @@ struct EditorDock::ClipTab : public juce::Component
     }
 };
 
-EditorDock::EditorDock (ProjectContext& projectContext, PianoRoll& notes, AudioClipEditor& audio, juce::Component& devicesPanel)
+EditorDock::EditorDock (ProjectContext& projectContext, PianoRoll& notes, AudioClipEditor& audio, DevicesView& devices)
     : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop),
       context (projectContext),
       pianoRoll (notes),
       audioClipEditor (audio),
+      devicesView (devices),
       clipTab (std::make_unique<ClipTab> (notes, audio))
 {
     setTitle ("Editor");
@@ -56,7 +58,8 @@ EditorDock::EditorDock (ProjectContext& projectContext, PianoRoll& notes, AudioC
 
     // Automation has no tab: it is edited in its lanes, under its tracks in the playlist (docs/design.md, section 10).
     addTab ("Piano roll", background, clipTab.get(), false);
-    addTab ("Devices", background, &devicesPanel, false);
+    addTab ("Instrument", background, &devicesView, false); // the same view in both: the tab chosen picks its page
+    addTab ("Effects", background, &devicesView, false);
     context.getSongSelection().addChangeListener (this);
 }
 
@@ -98,5 +101,11 @@ void EditorDock::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     if (const auto type = getClipTypeToEdit (context))
         showClipEditor (*type);
+}
+
+void EditorDock::currentTabChanged (int index, const juce::String&)
+{
+    if (index == instrument || index == effects)
+        devicesView.showPage (index == instrument ? DevicesView::Page::instrument : DevicesView::Page::effects);
 }
 } // namespace phazite::ui

@@ -213,7 +213,7 @@ void AppShell::setLayout (Layout layout)
     editorShown = true;
     editorShare = layout == Layout::mix ? 0.4 : 0.45; // tall enough for most devices' editors, and mixing gives the mixer more
     songViews.showTab (layout == Layout::mix ? SongViews::mixer : SongViews::playlist);
-    editorDock.showTab (layout == Layout::mix ? EditorDock::devices : EditorDock::clipEditor);
+    editorDock.showTab (layout == Layout::mix ? EditorDock::effects : EditorDock::clipEditor);
     updateLayout();
 }
 
@@ -265,7 +265,8 @@ void AppShell::showSelectedDevice()
     if (const auto selected = projectContext.getSongSelection().getDevices(); ! selected.empty())
         devices.showDevice (selected.front());
 
-    revealEditor (EditorDock::devices);
+    // The tab of the page the device is on: its track's instrument, or the effects.
+    revealEditor (devices.getPage() == DevicesView::Page::instrument ? EditorDock::instrument : EditorDock::effects);
 }
 
 void AppShell::showCommandPalette()
@@ -569,13 +570,17 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .perform = [this] { showEditor (EditorDock::clipEditor); },
                     .currentName = [this] { return editorDock.showsAudioClip() ? juce::String ("Audio Clip Editor") : juce::String(); } });
 
-    add ("view.devices", "Devices", "Shows the selected track's instrument and effects, or hides them if they are showing.",
-         { "effects", "instrument", "device view", "chain", "plug-ins" }, [this] { showEditor (EditorDock::devices); });
+    add ("view.instrument", "Instrument", "Shows the selected track's instrument, or hides it if it is showing.",
+         { "synth", "sampler", "device view", "channel rack" }, [this] { showEditor (EditorDock::instrument); });
+
+    add ("view.effects", "Effects", "Shows the selected track's effects, or hides them if they are showing.",
+         { "devices", "device view", "chain", "plug-ins", "fx" }, [this] { showEditor (EditorDock::effects); });
 
     registry.add ({ .id = "device.show",
                     .name = "Show Device",
                     .category = "Device",
-                    .description = "Shows the selected device in the Devices view, under the playlist or the mixer.",
+                    .description = "Shows the selected device under the playlist or the mixer: an instrument in the Instrument tab, an "
+                                   "effect in the Effects tab.",
                     .synonyms = { "edit", "open", "effect", "instrument", "plug-in" },
                     .perform = [this] { showSelectedDevice(); },
                     .isEnabled = [this] { return ! projectContext.getSongSelection().getDevices().empty(); } });
