@@ -80,6 +80,28 @@ namespace Space
 inline constexpr int controlHeight = 28;
 inline constexpr float cornerRadius = 4.0f;
 
+// The main window's bars and panels (ui/shell/AppShell.h, PanelLayout.h).
+namespace Shell
+{
+    inline constexpr int transportBarHeight = 44; // play, record, the tempo and the master level
+    inline constexpr int hintBarHeight = 24;      // what the control under the pointer does
+    inline constexpr int dividerSize = 5;         // between panels, dragged to size them
+    inline constexpr float dividerLit = 0.5f;     // the accent's alpha on a divider under the pointer
+    inline constexpr int panelButtonSize = 26;    // in a panel's top right corner: maximize, detach and hide
+
+    // What a panel's buttons take of its top right corner, with their margins, so that what is there leaves them room.
+    constexpr int getPanelCornerWidth (int buttons)
+    {
+        return buttons * panelButtonSize + buttons * (Space::xs / 2);
+    }
+
+    inline constexpr int minimumBrowserWidth = 160, maximumBrowserWidth = 480, browserWidth = 240;
+    inline constexpr int minimumInspectorWidth = 180, maximumInspectorWidth = 420, inspectorWidth = 260;
+    inline constexpr int minimumCentreWidth = 300, minimumCentreHeight = 120; // the song's views, and the editor dock
+    inline constexpr double minimumEditorShare = 0.1, maximumEditorShare = 0.85, editorShare = 0.45; // of the centre's height
+    inline constexpr double mixEditorShare = 0.4; // in the Mix layout, which gives the mixer more
+} // namespace Shell
+
 // Each kind of built-in device's colour (ui/devices/DeviceTint.h), so that each has a character of its own and its kind shows at
 // a glance: the dynamics warm, the EQ and the filter cyan, the saturator red, the delay and the reverb blue, the phaser and
 // the flanger green, the stereo expander teal and the vocoder pink; instruments keep the accent. Each is at least 3:1

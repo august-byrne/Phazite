@@ -60,6 +60,7 @@
     "view.instrument": [ "F6" ],
     "view.effects": [ "shift + F6" ],
     "view.toggleBrowser": [ "alt + F8" ],
+    "view.maximizeSong": [ "F12" ],
     "device.add": [ "F8" ],
     "view.playlist": [ "F5" ],
     "view.mixer": [ "F9" ],

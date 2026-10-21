@@ -132,8 +132,7 @@ struct Inspector::Page : public juce::Component
     {
         setTitle (kindName);
         title.setFont (juce::FontOptions (TextSize::title, juce::Font::bold));
-        title.setMinimumHorizontalScale (1.0f);
-        addAndMakeVisible (title);
+        title.setMinimumHorizontalScale (1.0f); // the inspector shows it, over the rows, which scroll
     }
 
     virtual void refresh() {}      // the song changed: what it shows, as it is now
@@ -176,7 +175,7 @@ struct Inspector::Page : public juce::Component
 
     int getPreferredHeight (int width) const
     {
-        auto height = Space::m + titleHeight + Space::s;
+        auto height = 0;
 
         for (const auto& row : rows)
             if (row.visible)
@@ -185,22 +184,9 @@ struct Inspector::Page : public juce::Component
         return height + Space::m;
     }
 
-    void paint (juce::Graphics& g) override
-    {
-        // The color of what it shows, beside its title, as a track's header has its track's.
-        if (! colour.isTransparent())
-        {
-            g.setColour (colour);
-            g.fillRect (title.getBounds().withX (0).withWidth (colourBarHeight));
-        }
-    }
-
     void resized() override
     {
-        auto area = getLocalBounds().reduced (Space::m);
-        title.setBounds (area.removeFromTop (titleHeight));
-        area.removeFromTop (Space::s);
-
+        auto area = getLocalBounds().reduced (Space::m, 0).withTrimmedBottom (Space::m);
         const auto stacked = isStacked (getWidth());
 
         for (auto& row : rows)
@@ -894,9 +880,12 @@ void Inspector::showTarget()
     }
 
     if (page != nullptr)
+    {
         view.setViewedComponent (page.get(), false);
+        addAndMakeVisible (page->title); // over the rows, which scroll under it
+    }
 
-    layOutPage();
+    resized();
 }
 
 void Inspector::layOutPage()
@@ -906,16 +895,35 @@ void Inspector::layOutPage()
         const auto width = std::max (1, view.getWidth() - view.getScrollBarThickness());
         page->setSize (width, std::max (view.getHeight(), page->getPreferredHeight (width)));
     }
+
+    repaint(); // the title's colour bar
 }
 
 void Inspector::paint (juce::Graphics& g)
 {
     g.fillAll (getPalette (*this).surface);
+
+    // The color of what it shows, beside its title, as a track's header has its track's.
+    if (page != nullptr && ! page->colour.isTransparent())
+    {
+        g.setColour (page->colour);
+        g.fillRect (page->title.getBounds().withX (0).withWidth (colourBarHeight));
+    }
 }
 
 void Inspector::resized()
 {
-    view.setBounds (getLocalBounds());
+    // The page's title over its rows, which scroll under it; the panel's buttons beside the title, in its top right corner.
+    auto area = getLocalBounds();
+    auto header = area.removeFromTop (Space::m + titleHeight + Space::s);
+
+    if (page != nullptr)
+        page->title.setBounds (header.reduced (Space::m, 0)
+                                   .withTrimmedTop (Space::m)
+                                   .withHeight (titleHeight)
+                                   .withTrimmedRight (Shell::getPanelCornerWidth (3) + Space::xs - Space::m));
+
+    view.setBounds (area);
     layOutPage();
 }
 

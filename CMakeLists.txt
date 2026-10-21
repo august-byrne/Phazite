@@ -351,11 +351,17 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/headphones.svg
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/magnet.svg
+        resources/icons/lucide/maximize-2.svg
         resources/icons/lucide/metronome.svg
+        resources/icons/lucide/minimize-2.svg
         resources/icons/lucide/mouse-pointer-2.svg
         resources/icons/lucide/move-horizontal.svg
         resources/icons/lucide/music.svg
         resources/icons/lucide/paintbrush.svg
+        resources/icons/lucide/panel-bottom-close.svg
+        resources/icons/lucide/panel-left-close.svg
+        resources/icons/lucide/panel-right-close.svg
+        resources/icons/lucide/panel-top-close.svg
         resources/icons/lucide/pencil.svg
         resources/icons/lucide/piano.svg
         resources/icons/lucide/play.svg
@@ -602,6 +608,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/HintBar.h
     src/ui/shell/NewProjectPanel.cpp
     src/ui/shell/NewProjectPanel.h
+    src/ui/shell/PanelLayout.cpp
+    src/ui/shell/PanelLayout.h
     src/ui/shell/Panels.cpp
     src/ui/shell/Panels.h
     src/ui/shell/ProgressionsPanel.cpp
@@ -777,6 +785,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/NoteIDTests.cpp
         tests/NoteTests.cpp
         tests/NotesModelTests.cpp
+        tests/PanelLayoutTests.cpp
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp

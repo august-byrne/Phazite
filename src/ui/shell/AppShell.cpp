@@ -11,16 +11,7 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr int topBarHeight = 44;
-    constexpr int hintBarHeight = 24;
-    constexpr int dividerSize = 5;
-    constexpr int detachButtonSize = 26;
-
-    // A StretchableLayoutManager item that is either shown with these sizes, or collapsed to nothing.
-    void setItem (juce::StretchableLayoutManager& layout, int index, bool shown, double minimum, double maximum, double preferred)
-    {
-        layout.setItemLayout (index, shown ? minimum : 0.0, shown ? maximum : 0.0, shown ? preferred : 0.0);
-    }
+    constexpr std::array<Panel, 4> allPanels { Panel::browser, Panel::song, Panel::editor, Panel::inspector };
 
     // Where a panel's own window goes: on another monitor if there is one, otherwise over the main window.
     juce::Rectangle<int> choosePanelWindowBounds (const juce::Component& mainWindowContent, juce::Point<int> size)
@@ -78,6 +69,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       commands (bridge),
       shortcutKeys (keys),
       projectContext (context),
+      settings (s),
       library (l),
       previewer (p),
       computerKeyboard (keyboard),
@@ -124,26 +116,21 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     browser.onShowSoundPack = [this] { commands.invoke ("help.phaziteSounds"); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &topBar, &browser, &browserDivider, &centre, &inspectorDivider, &inspector,
-                                                             &hintBar, &browserDetachButton, &inspectorDetachButton })
+                                                             &hintBar, &browserButtons, &inspectorButtons })
         addAndMakeVisible (c);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &songViews, &editorDivider, &editorDock, &editorDetachButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &songViews, &editorDivider, &editorDock, &songButtons, &editorButtons })
         centre.addAndMakeVisible (c);
 
-    centre.onResize = [this]
-    {
-        // A panel in its own window is that window's to lay out: an empty space here.
-        juce::Component* items[] = { &songViews, &editorDivider, editorWindow == nullptr ? &editorDock : nullptr };
-        rows.layOutComponents (items, 3, 0, 0, centre.getWidth(), centre.getHeight(), true, true);
-        placeDetachButtons();
-    };
+    centre.onResize = [this] { layOutCentre(); };
 
-    for (const auto which : { DetachablePanel::browser, DetachablePanel::inspector, DetachablePanel::editor })
-    {
-        auto& button = getDetachButton (which);
-        button.setTooltip ("Moves this panel to a window of its own, for example on a second monitor. Close that window to put it back");
-        button.onClick = [this, which] { setDetached (which, true); };
-    }
+    // Dragged, the dividers size the panels beside them.
+    browserDivider.onDragStart = [this] { sizeAtDragStart = browser.getWidth(); };
+    browserDivider.onDrag = [this] (int distance) { dragDivider (Panel::browser, distance); };
+    inspectorDivider.onDragStart = [this] { sizeAtDragStart = inspector.getWidth(); };
+    inspectorDivider.onDrag = [this] (int distance) { dragDivider (Panel::inspector, distance); };
+    editorDivider.onDragStart = [this] { sizeAtDragStart = editorDock.getHeight(); };
+    editorDivider.onDrag = [this] (int distance) { dragDivider (Panel::editor, distance); };
 
     // Clicking in an editor makes it the one the time line's commands act on; so does the keyboard focus
     // moving into it.
@@ -165,7 +152,10 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     openingLabel.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
     addChildComponent (openingLabel);
     openingLabel.setVisible (! projectContext.hasProject());
-    setLayout (Layout::full);
+
+    // The panels as they were left, or every panel.
+    panels.setFromText (settings.get (Settings::panelLayout));
+    updateLayout();
 }
 
 AppShell::~AppShell() // here, where PanelWindow is complete
@@ -178,6 +168,11 @@ AppShell::~AppShell() // here, where PanelWindow is complete
 
 void AppShell::globalFocusChanged (juce::Component* focused)
 {
+    // The panel in use, which "Maximize the Panel in Use" fills the window with.
+    for (const auto panel : allPanels)
+        if (focused != nullptr && getPanel (panel).isParentOf (focused))
+            panelInUse = panel;
+
     // Focus that moves elsewhere (to the mixer, say) leaves the last editor active.
     for (auto* c = focused; c != nullptr; c = c->getParentComponent())
     {
@@ -208,10 +203,17 @@ void AppShell::projectChanged()
 
 void AppShell::setLayout (Layout layout)
 {
-    browserShown = layout != Layout::mix;
-    inspectorShown = layout != Layout::beat;
-    editorShown = true;
-    editorShare = layout == Layout::mix ? 0.4 : 0.45; // tall enough for most devices' editors, and mixing gives the mixer more
+    panels.restore();
+
+    for (const auto panel : allPanels)
+        panels.show (panel);
+
+    if (layout == Layout::mix)
+        panels.hide (Panel::browser);
+    else if (layout == Layout::beat)
+        panels.hide (Panel::inspector);
+
+    panels.editorShare = layout == Layout::mix ? Shell::mixEditorShare : Shell::editorShare; // tall enough for most devices' editors
     songViews.showTab (layout == Layout::mix ? SongViews::mixer : SongViews::playlist);
     editorDock.showTab (layout == Layout::mix ? EditorDock::effects : EditorDock::clipEditor);
     updateLayout();
@@ -228,13 +230,13 @@ void AppShell::showEditor (EditorDock::Tab tab)
     }
 
     // Like FL Studio's F7: show that editor, or hide it if it is already showing.
-    if (editorShown && editorDock.getCurrentTabIndex() == tab)
+    if (panels.takesRoom (Panel::editor) && editorDock.getCurrentTabIndex() == tab)
     {
-        editorShown = false;
+        panels.hide (Panel::editor);
     }
     else
     {
-        editorShown = true;
+        panels.show (Panel::editor);
         editorDock.showTab (tab);
     }
 
@@ -244,6 +246,12 @@ void AppShell::showEditor (EditorDock::Tab tab)
 void AppShell::showSongView (SongViews::Tab tab)
 {
     songViews.showTab (tab);
+
+    if (! panels.takesRoom (Panel::song))
+    {
+        panels.show (Panel::song);
+        updateLayout();
+    }
 }
 
 void AppShell::revealEditor (EditorDock::Tab tab)
@@ -256,7 +264,7 @@ void AppShell::revealEditor (EditorDock::Tab tab)
         return;
     }
 
-    editorShown = true;
+    panels.show (Panel::editor);
     updateLayout();
 }
 
@@ -304,8 +312,11 @@ bool AppShell::placeItem (const LibraryItem& item)
 }
 
 //==============================================================================
-void AppShell::setDetached (DetachablePanel which, bool detached)
+void AppShell::setDetached (Panel which, bool detached)
 {
+    if (which == Panel::song)
+        return; // the song's views stay in the main window
+
     auto& window = getWindow (which);
 
     if (detached == (window != nullptr))
@@ -320,7 +331,14 @@ void AppShell::setDetached (DetachablePanel which, bool detached)
 
     if (detached)
     {
-        const juce::Point<int> size (juce::jmax (panel.getWidth(), 360), juce::jmax (panel.getHeight(), 400));
+        // As large as it shows here, or as it would beside the others while it fills the window.
+        const auto width = ! panels.isMaximized (which) ? panel.getWidth()
+                           : which == Panel::browser    ? panels.browserWidth
+                           : which == Panel::inspector  ? panels.inspectorWidth
+                                                        : centre.getWidth();
+        const auto height =
+            panels.isMaximized (which) && which == Panel::editor ? panels.getEditorHeight (centre.getHeight()) : panel.getHeight();
+        const juce::Point<int> size (juce::jmax (width, 360), juce::jmax (height, 400));
 
         window = std::make_unique<PanelWindow> (panel, choosePanelWindowBounds (*this, size), shortcutKeys,
                                                 [safeThis = juce::Component::SafePointer<AppShell> (this), which]
@@ -338,87 +356,118 @@ void AppShell::setDetached (DetachablePanel which, bool detached)
     else
     {
         window = nullptr; // gives the panel back
-        auto& parent = which == DetachablePanel::editor ? static_cast<juce::Component&> (centre) : static_cast<juce::Component&> (*this);
+        auto& parent = which == Panel::editor ? static_cast<juce::Component&> (centre) : static_cast<juce::Component&> (*this);
         parent.addChildComponent (panel);
-        getDetachButton (which).toFront (false);
+        getButtons (which).toFront (false);
     }
 
+    panels.setDetached (which, detached);
     updateLayout();
 }
 
-bool AppShell::isDetached (DetachablePanel which) const
+bool AppShell::isDetached (Panel which) const
 {
-    return getWindow (which) != nullptr;
+    return panels.isDetached (which);
 }
 
-juce::Component& AppShell::getPanel (DetachablePanel which)
+juce::Component& AppShell::getPanel (Panel which)
 {
     switch (which)
     {
-        case DetachablePanel::browser:
+        case Panel::browser:
             return browser;
-        case DetachablePanel::inspector:
+        case Panel::song:
+            return songViews;
+        case Panel::inspector:
             return inspector;
-        case DetachablePanel::editor:
+        case Panel::editor:
         default:
             return editorDock;
     }
 }
 
-IconButton& AppShell::getDetachButton (DetachablePanel which)
+PanelButtons& AppShell::getButtons (Panel which)
 {
     switch (which)
     {
-        case DetachablePanel::browser:
-            return browserDetachButton;
-        case DetachablePanel::inspector:
-            return inspectorDetachButton;
-        case DetachablePanel::editor:
+        case Panel::browser:
+            return browserButtons;
+        case Panel::song:
+            return songButtons;
+        case Panel::inspector:
+            return inspectorButtons;
+        case Panel::editor:
         default:
-            return editorDetachButton;
+            return editorButtons;
     }
 }
 
-std::unique_ptr<AppShell::PanelWindow>& AppShell::getWindow (DetachablePanel which)
+std::unique_ptr<AppShell::PanelWindow>& AppShell::getWindow (Panel which)
 {
+    jassert (which != Panel::song);
+
     switch (which)
     {
-        case DetachablePanel::browser:
+        case Panel::browser:
             return browserWindow;
-        case DetachablePanel::inspector:
+        case Panel::inspector:
             return inspectorWindow;
-        case DetachablePanel::editor:
+        case Panel::song:
+        case Panel::editor:
         default:
             return editorWindow;
     }
 }
 
-const std::unique_ptr<AppShell::PanelWindow>& AppShell::getWindow (DetachablePanel which) const
+void AppShell::togglePanel (Panel panel)
 {
-    return const_cast<AppShell&> (*this).getWindow (which);
+    panels.toggle (panel);
+    updateLayout();
+}
+
+void AppShell::toggleMaximized (Panel panel)
+{
+    panels.toggleMaximized (panel);
+    updateLayout();
+}
+
+void AppShell::maximizePanelInUse()
+{
+    // The one the keyboard focus was in last, if it still shows here; or the song's views.
+    if (panels.getMaximized().has_value())
+        panels.restore();
+    else
+        panels.maximize (panels.takesRoom (panelInUse) ? panelInUse : Panel::song);
+
+    updateLayout();
+}
+
+void AppShell::toggleMixer()
+{
+    showSongView (panels.takesRoom (Panel::song) && songViews.getTab() == SongViews::mixer ? SongViews::playlist : SongViews::mixer);
+}
+
+TimelineEditor* AppShell::getTimelineEditorInUse()
+{
+    // The editor used last, while it shows; or one that shows, the playlist first.
+    if (activeEditor != nullptr && activeEditor->isActive() && activeEditor->isShowing())
+        return activeEditor;
+
+    if (! playlist.isShowing() && editorDock.getClipEditor().isShowing())
+        return &editorDock.getClipEditor();
+
+    return &playlist;
 }
 
 //==============================================================================
 void AppShell::updateLayout()
 {
-    // A panel in its own window takes no room here.
-    const bool browserDocked = browserShown && browserWindow == nullptr;
-    const bool inspectorDocked = inspectorShown && inspectorWindow == nullptr;
-    const bool editorDocked = editorShown && editorWindow == nullptr;
+    // A panel in its own window, or behind a maximized one, takes no room here; panels in their own windows stay visible
+    // there.
+    const auto browserDocked = panels.takesRoom (Panel::browser), songDocked = panels.takesRoom (Panel::song);
+    const auto editorDocked = panels.takesRoom (Panel::editor), inspectorDocked = panels.takesRoom (Panel::inspector);
+    const auto centreDocked = songDocked || editorDocked;
 
-    columns.clearAllItems();
-    setItem (columns, 0, browserDocked, 160, 480, 240);
-    setItem (columns, 1, browserDocked, dividerSize, dividerSize, dividerSize);
-    columns.setItemLayout (2, 300, -1.0, -1.0);
-    setItem (columns, 3, inspectorDocked, dividerSize, dividerSize, dividerSize);
-    setItem (columns, 4, inspectorDocked, 180, 420, 260);
-
-    rows.clearAllItems();
-    rows.setItemLayout (0, 120, -1.0, editorDocked ? -(1.0 - editorShare) : -1.0);
-    setItem (rows, 1, editorDocked, dividerSize, dividerSize, dividerSize);
-    setItem (rows, 2, editorDocked, 120, -0.85, -editorShare);
-
-    // Panels in their own windows stay visible there.
     if (browserWindow == nullptr)
         browser.setVisible (browserDocked);
 
@@ -428,15 +477,56 @@ void AppShell::updateLayout()
     if (editorWindow == nullptr)
         editorDock.setVisible (editorDocked);
 
-    browserDivider.setVisible (browserDocked);
-    inspectorDivider.setVisible (inspectorDocked);
-    editorDivider.setVisible (editorDocked);
-    browserDetachButton.setVisible (browserDocked);
-    inspectorDetachButton.setVisible (inspectorDocked);
-    editorDetachButton.setVisible (editorDocked);
+    songViews.setVisible (songDocked);
+    centre.setVisible (centreDocked);
+    browserDivider.setVisible (browserDocked && centreDocked);
+    inspectorDivider.setVisible (inspectorDocked && centreDocked);
+    editorDivider.setVisible (songDocked && editorDocked);
+
+    for (const auto panel : allPanels)
+    {
+        auto& buttons = getButtons (panel);
+        buttons.setVisible (panels.takesRoom (panel));
+        buttons.update (panels);
+    }
+
+    // (A sound the browser previews stops as the browser goes out of sight: Browser::visibilityChanged().)
+    resized();
+    layOutCentre();
+    settings.set (Settings::panelLayout, panels.toText());
+}
+
+void AppShell::dragDivider (Panel panel, int distance)
+{
+    // Where the drag began, moved by the distance, as far as the window has room: the centre keeps its least, and the
+    // panels keep what is shown.
+    const auto roomBeside = [this] (Panel other)
+    {
+        const auto otherWidth = panels.takesRoom (other) ? getPanel (other).getWidth() + Shell::dividerSize : 0;
+        return getWidth() - otherWidth - Shell::dividerSize - Shell::minimumCentreWidth;
+    };
+
+    if (panel == Panel::browser)
+    {
+        const auto most = juce::jlimit (Shell::minimumBrowserWidth, Shell::maximumBrowserWidth, roomBeside (Panel::inspector));
+        panels.browserWidth = juce::jlimit (Shell::minimumBrowserWidth, most, sizeAtDragStart + distance);
+    }
+    else if (panel == Panel::inspector)
+    {
+        const auto most = juce::jlimit (Shell::minimumInspectorWidth, Shell::maximumInspectorWidth, roomBeside (Panel::browser));
+        panels.inspectorWidth = juce::jlimit (Shell::minimumInspectorWidth, most, sizeAtDragStart - distance);
+    }
+    else if (centre.getHeight() > 0)
+    {
+        const auto height = centre.getHeight();
+        const auto most = juce::jmax (Shell::minimumCentreHeight, height - Shell::dividerSize - Shell::minimumCentreHeight);
+        panels.editorShare = juce::jlimit (Shell::minimumEditorShare, Shell::maximumEditorShare,
+                                           juce::jlimit (Shell::minimumCentreHeight, most, sizeAtDragStart - distance) / (double) height);
+    }
 
     resized();
-    centre.resized();
+    layOutCentre();
+    settings.set (Settings::panelLayout, panels.toText());
 }
 
 void AppShell::paint (juce::Graphics& g)
@@ -456,34 +546,73 @@ void AppShell::updateAudioAlert()
 void AppShell::resized()
 {
     auto area = getLocalBounds();
-    topBar.setBounds (area.removeFromTop (topBarHeight));
-    hintBar.setBounds (area.removeFromBottom (hintBarHeight));
-
-    // A panel in its own window is that window's to lay out: an empty space here.
-    juce::Component* items[] = { browserWindow == nullptr ? &browser : nullptr, &browserDivider, &centre, &inspectorDivider,
-                                 inspectorWindow == nullptr ? &inspector : nullptr };
-    columns.layOutComponents (items, 5, area.getX(), area.getY(), area.getWidth(), area.getHeight(), false, true);
-    placeDetachButtons();
+    topBar.setBounds (area.removeFromTop (Shell::transportBarHeight));
+    hintBar.setBounds (area.removeFromBottom (Shell::hintBarHeight));
     openingLabel.setBounds (area);
+
+    // The side panels at the widths they keep, as far as the window has room, and the centre between them. A panel in its
+    // own window is that window's to lay out.
+    const auto sides = panels.getSideWidths (area.getWidth());
+    const auto centreDocked = panels.takesRoom (Panel::song) || panels.takesRoom (Panel::editor);
+
+    if (panels.takesRoom (Panel::browser))
+    {
+        browser.setBounds (area.removeFromLeft (sides.browser));
+
+        if (centreDocked)
+            browserDivider.setBounds (area.removeFromLeft (Shell::dividerSize));
+    }
+
+    if (panels.takesRoom (Panel::inspector))
+    {
+        inspector.setBounds (area.removeFromRight (sides.inspector));
+
+        if (centreDocked)
+            inspectorDivider.setBounds (area.removeFromRight (Shell::dividerSize));
+    }
+
+    if (centreDocked)
+        centre.setBounds (area);
+
+    placePanelButtons();
 }
 
-void AppShell::placeDetachButtons()
+void AppShell::layOutCentre()
 {
-    const auto corner = [] (juce::Rectangle<int> panelBounds)
+    // The editor dock under the song's views, at its share of the height, or either alone.
+    auto area = centre.getLocalBounds();
+    const auto songDocked = panels.takesRoom (Panel::song), editorDocked = panels.takesRoom (Panel::editor);
+
+    if (songDocked && editorDocked)
     {
-        return panelBounds.removeFromTop (detachButtonSize + Space::xs)
-            .removeFromRight (detachButtonSize + Space::xs)
-            .reduced (Space::xs / 2);
-    };
+        editorDock.setBounds (area.removeFromBottom (panels.getEditorHeight (area.getHeight())));
+        editorDivider.setBounds (area.removeFromBottom (Shell::dividerSize));
+    }
+    else if (editorDocked)
+    {
+        editorDock.setBounds (area);
+    }
 
-    if (browserWindow == nullptr)
-        browserDetachButton.setBounds (corner (browser.getBounds()));
+    if (songDocked)
+        songViews.setBounds (area);
 
-    if (inspectorWindow == nullptr)
-        inspectorDetachButton.setBounds (corner (inspector.getBounds()));
+    placePanelButtons();
+}
 
-    if (editorWindow == nullptr)
-        editorDetachButton.setBounds (corner (editorDock.getBounds())); // both in centre's coordinates
+void AppShell::placePanelButtons()
+{
+    // In each docked panel's top right corner, in its parent's coordinates (the centre's, for the song's views and the
+    // editor dock).
+    for (const auto panel : allPanels)
+    {
+        if (panel != Panel::song && getWindow (panel) != nullptr)
+            continue;
+
+        auto& buttons = getButtons (panel);
+        const auto bounds = getPanel (panel).getBounds();
+        const auto width = buttons.getPreferredWidth();
+        buttons.setBounds (bounds.getRight() - width - Space::xs / 2, bounds.getY() + Space::xs / 2, width, Shell::panelButtonSize);
+    }
 }
 
 //==============================================================================
@@ -512,9 +641,9 @@ void AppShell::addCommands (CommandRegistry& registry)
              {
                  browserWindow->toFront (true);
              }
-             else if (! browserShown)
+             else if (! panels.takesRoom (Panel::browser))
              {
-                 browserShown = true;
+                 panels.show (Panel::browser);
                  updateLayout();
              }
 
@@ -532,33 +661,54 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     browser.addCommands (registry); // saving presets, which the browser shows
 
-    // Showing and hiding apply to the main window; a panel in its own window is closed there.
-    add (
-        "view.toggleBrowser", "Show or Hide the Browser", "Shows or hides the browser on the left.", { "files", "samples", "plugins" },
-        [this]
-        {
-            browserShown = ! browserShown;
-            updateLayout();
-        },
-        [this] { return browserWindow == nullptr; });
+    // Each panel shows and hides, and fills the window until the others are restored (PanelLayout.h). Showing and hiding
+    // apply to the main window; a panel in its own window is closed there.
+    struct PanelCommands
+    {
+        Panel panel;
+        const char* description; // of showing or hiding it
+        juce::StringArray synonyms;
+    };
 
-    add (
-        "view.toggleInspector", "Show or Hide the Inspector", "Shows or hides the inspector on the right.", { "properties" },
-        [this]
-        {
-            inspectorShown = ! inspectorShown;
-            updateLayout();
-        },
-        [this] { return inspectorWindow == nullptr; });
+    for (const auto& command :
+         { PanelCommands { Panel::browser, "Shows or hides the browser on the left.", { "files", "samples", "plugins", "sounds" } },
+           PanelCommands { Panel::song,
+                           "Shows or hides the playlist or the mixer in the centre; the editor takes their place.",
+                           { "song", "arrangement", "centre", "tracks" } },
+           PanelCommands { Panel::editor,
+                           "Shows or hides the editor dock under the playlist.",
+                           { "dock", "piano roll", "devices", "bottom" } },
+           PanelCommands { Panel::inspector, "Shows or hides the inspector on the right.", { "properties", "info" } } })
+    {
+        const auto which = command.panel;
+        registry.add ({ .id = getPanelCommandID ("toggle", which),
+                        .name = "Show or Hide the " + getPanelName (which),
+                        .category = "View",
+                        .description = command.description,
+                        .synonyms = command.synonyms,
+                        .perform = [this, which] { togglePanel (which); },
+                        .isEnabled = [this, which] { return panels.canToggle (which); },
+                        .currentName = [this, which] { return panels.getToggleName (which); } });
 
-    add (
-        "view.toggleEditor", "Show or Hide the Editor", "Shows or hides the editor dock under the playlist.", { "dock" },
-        [this]
-        {
-            editorShown = ! editorShown;
-            updateLayout();
-        },
-        [this] { return editorWindow == nullptr; });
+        registry.add ({ .id = getPanelCommandID ("maximize", which),
+                        .name = "Maximize the " + getPanelName (which),
+                        .category = "View",
+                        .description = "Fills the window with " + describePanel (which)
+                                       + ", the other panels hidden until you restore them, or brings them back.",
+                        .synonyms = { "full", "zoom panel", "only", "restore", "focus" },
+                        .perform = [this, which] { toggleMaximized (which); },
+                        .isEnabled = [this, which] { return panels.canMaximize (which); },
+                        .currentName = [this, which] { return panels.getMaximizeName (which); } });
+    }
+
+    registry.add ({ .id = "view.maximizePanel",
+                    .name = "Maximize the Panel in Use",
+                    .category = "View",
+                    .description = "Fills the window with the panel you are using (the one with the keyboard focus), the others hidden "
+                                   "until you restore them, or brings them back.",
+                    .synonyms = { "full", "zoom panel", "only", "restore", "focus" },
+                    .perform = [this] { maximizePanelInUse(); },
+                    .currentName = [this] { return panels.getMaximizeInUseName(); } });
 
     // The editor dock's first tab, which edits the selected clip: named for the editor it shows.
     registry.add ({ .id = "view.pianoRoll",
@@ -589,8 +739,7 @@ void AppShell::addCommands (CommandRegistry& registry)
          { "arrange", "tracks", "clips", "timeline" }, [this] { showSongView (SongViews::playlist); });
 
     add ("view.mixer", "Mixer", "Shows the mixer in the centre, in place of the playlist, or the playlist again if it is showing.",
-         { "channels", "faders" },
-         [this] { showSongView (songViews.getTab() == SongViews::mixer ? SongViews::playlist : SongViews::mixer); });
+         { "channels", "faders" }, [this] { toggleMixer(); });
 
     add ("view.layoutBeat", "Beat Layout", "Arranges the panels for making beats: playlist, piano roll and browser.", { "layout" },
          [this] { setLayout (Layout::beat); });
@@ -602,14 +751,14 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     struct DetachCommand
     {
-        DetachablePanel panel;
+        Panel panel;
         const char* id;
         const char* name;
     };
 
-    for (const auto& command : { DetachCommand { DetachablePanel::browser, "view.detachBrowser", "Browser in Its Own Window" },
-                                 DetachCommand { DetachablePanel::inspector, "view.detachInspector", "Inspector in Its Own Window" },
-                                 DetachCommand { DetachablePanel::editor, "view.detachEditor", "Editor in Its Own Window" } })
+    for (const auto& command : { DetachCommand { Panel::browser, "view.detachBrowser", "Browser in Its Own Window" },
+                                 DetachCommand { Panel::inspector, "view.detachInspector", "Inspector in Its Own Window" },
+                                 DetachCommand { Panel::editor, "view.detachEditor", "Editor in Its Own Window" } })
     {
         const auto which = command.panel;
         registry.add ({ .id = command.id,
@@ -621,9 +770,7 @@ void AppShell::addCommands (CommandRegistry& registry)
                         .isTicked = [this, which] { return isDetached (which); } });
     }
 
-    // The editor used last, or the playlist while that one is hidden.
-    addTimelineCommands (registry, [this]() -> TimelineEditor*
-                         { return activeEditor != nullptr && activeEditor->isActive() ? activeEditor : &playlist; });
+    addTimelineCommands (registry, [this] { return getTimelineEditorInUse(); });
     playlist.addCommands (registry);
 
     // The note commands use the piano roll's grid.
@@ -636,6 +783,10 @@ void AppShell::addCommands (CommandRegistry& registry)
 void AppShell::refreshShortcutTexts()
 {
     topBar.refreshTooltips();
+
+    for (const auto panel : allPanels)
+        getButtons (panel).refreshTooltips();
+
     playlist.refreshShortcutTexts();
     pianoRoll.refreshShortcutTexts();
     audioClipEditor.refreshShortcutTexts();

@@ -4,6 +4,7 @@
 
 #include "Guide.h"
 #include "HintBar.h"
+#include "PanelLayout.h"
 #include "Panels.h"
 #include "TopBar.h"
 #include "ui/audioclip/AudioClipEditor.h"
@@ -31,18 +32,14 @@ public:
               Previewer&);
     ~AppShell() override;
 
-    // The panels that can move to a window of their own, for example on a second monitor. Closing
-    // that window puts the panel back.
-    enum class DetachablePanel
-    {
-        browser,
-        inspector,
-        editor
-    };
+    // A panel (not the song's views) can move to a window of its own, for example on a second monitor. Closing that
+    // window puts the panel back.
+    void setDetached (Panel, bool);
+    bool isDetached (Panel) const;
+    juce::Component& getPanel (Panel); // docked here, or in its own window
 
-    void setDetached (DetachablePanel, bool);
-    bool isDetached (DetachablePanel) const;
-    juce::Component& getPanel (DetachablePanel); // docked here, or in its own window
+    // Which panels show, which fills the window, and their sizes (PanelLayout.h); the settings keep them.
+    const PanelLayout& getPanelLayout() const noexcept { return panels; }
 
     // Layouts arrange the panels; they don't hide features.
     enum class Layout
@@ -76,6 +73,7 @@ private:
     CommandBridge& commands;
     KeyDispatcher& shortcutKeys; // for the windows of detached panels
     ProjectContext& projectContext;
+    Settings& settings;   // keeps the panels' layout
     Library& library;     // what the browser and the plug-in picker show
     Previewer& previewer; // the browser's
     ComputerKeyboard& computerKeyboard;
@@ -97,11 +95,11 @@ private:
     // The editor used last, which the time line's commands (zoom, grid, tools, nudge) act on.
     TimelineEditor* activeEditor = nullptr;
 
-    bool browserShown = true, inspectorShown = true, editorShown = true;
-    double editorShare = 0.45; // of the space below the top bar
+    PanelLayout panels;
+    Panel panelInUse = Panel::song; // the one the keyboard focus was in last, which "Maximize the Panel in Use" maximizes
 
     // Holds the song's views (the playlist or the mixer), the divider and the editor dock, and lays them out when
-    // resized (which is also what the divider triggers when dragged).
+    // resized.
     struct Centre : public juce::Component
     {
         std::function<void()> onResize;
@@ -112,21 +110,29 @@ private:
         }
     };
 
-    juce::StretchableLayoutManager columns, rows;
-    juce::StretchableLayoutResizerBar browserDivider { &columns, 1, true };
-    juce::StretchableLayoutResizerBar inspectorDivider { &columns, 3, true };
-    juce::StretchableLayoutResizerBar editorDivider { &rows, 1, false };
+    // Dragged, they size the panels beside them, which keep those sizes (PanelLayout).
+    PanelDivider browserDivider { "Browser's edge", true }, inspectorDivider { "Inspector's edge", true },
+        editorDivider { "Editor's edge", false };
     Centre centre;
+    int sizeAtDragStart = 0; // of the panel beside the divider dragged
 
-    // Each docked panel has a button in its top right corner that moves it to its own window.
-    IconButton browserDetachButton { "Move the browser to its own window", Icon::detach },
-        inspectorDetachButton { "Move the inspector to its own window", Icon::detach },
-        editorDetachButton { "Move the editor to its own window", Icon::detach };
+    // In each docked panel's top right corner: Maximize, a window of its own, and Hide.
+    PanelButtons browserButtons { commands, Panel::browser }, songButtons { commands, Panel::song },
+        editorButtons { commands, Panel::editor }, inspectorButtons { commands, Panel::inspector };
 
     struct PanelWindow;
     std::unique_ptr<PanelWindow> browserWindow, inspectorWindow, editorWindow; // null while docked
 
-    void updateLayout();
+    void updateLayout(); // after the panels changed: lays them out, and keeps the layout in the settings
+    void layOutCentre(); // the song's views over the editor dock
+    void dragDivider (Panel, int distance);
+    void togglePanel (Panel);
+    void toggleMaximized (Panel);
+    void maximizePanelInUse(); // or restores the panels
+    void toggleMixer();        // the mixer in the centre, or the playlist again if it shows ("view.mixer")
+
+    // The editor the time line's commands act on: the one used last, while it shows; or one that shows, the playlist first.
+    TimelineEditor* getTimelineEditorInUse();
 
     // "No audio output" in the hint bar while none plays, which a click on it takes to the audio settings (docs/performance-
     // audit.md, R3): the device failed to open, or went (unplugged, or Bluetooth that disconnected).
@@ -137,15 +143,14 @@ private:
     void showSongView (SongViews::Tab);  // in the centre
     void revealEditor (EditorDock::Tab); // shows it, even if it is showing already
     void showSelectedDevice();           // in the Devices view (the "device.show" command)
-    void placeDetachButtons();
+    void placePanelButtons();
     void setActiveEditor (TimelineEditor*);
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track
     juce::String getDefaultHint() const;                 // the guide's next step, or how to search for commands
     void globalFocusChanged (juce::Component*) override; // makes the editor that has the focus the active one
     void projectChanged() override;                      // stops a preview, which may be in time with the project
 
-    IconButton& getDetachButton (DetachablePanel);
-    std::unique_ptr<PanelWindow>& getWindow (DetachablePanel);
-    const std::unique_ptr<PanelWindow>& getWindow (DetachablePanel) const;
+    PanelButtons& getButtons (Panel);
+    std::unique_ptr<PanelWindow>& getWindow (Panel); // a detachable panel's (not the song's views)
 };
 } // namespace phazite::ui

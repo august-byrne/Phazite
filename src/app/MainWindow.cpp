@@ -289,6 +289,14 @@ void MainWindow::addCommands()
                     .synonyms = { "zoom", "reset", "100%", "scale" },
                     .perform = [this] { setInterfaceScale (1.0f); } });
 
+    registry.add ({ .id = "view.fullScreen",
+                    .name = "Full Screen",
+                    .category = "View",
+                    .description = "Fills the whole screen with Phazite's window, over the taskbar, or puts it back.",
+                    .synonyms = { "fullscreen", "kiosk", "whole screen", "maximize window" },
+                    .perform = [this] { setFullScreenMode (! isFullScreenMode()); },
+                    .isTicked = [this] { return isFullScreenMode(); } });
+
     registry.add ({ .id = "view.hoverHelp",
                     .name = "Hover Help",
                     .category = "View",
@@ -597,6 +605,17 @@ void MainWindow::setKeymap (const juce::String& name)
     menuItemsChanged();
 }
 
+bool MainWindow::isFullScreenMode() const
+{
+    return juce::Desktop::getInstance().getKioskModeComponent() == this;
+}
+
+void MainWindow::setFullScreenMode (bool on)
+{
+    // Over the whole screen, the taskbar too, or back where it was.
+    juce::Desktop::getInstance().setKioskModeComponent (on ? this : nullptr, false);
+}
+
 void MainWindow::updateTitle()
 {
     juce::String title ("Phazite");
@@ -709,7 +728,17 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
         case 3: // View
         {
-            add (menu, { "view.toggleBrowser", "view.toggleInspector", "view.toggleEditor", "view.pianoRoll", "view.mixer" });
+            // The panels: each shows or hides, and one fills the window until the others are restored.
+            add (menu, { "view.toggleBrowser", "view.toggleSong", "view.toggleEditor", "view.toggleInspector" });
+
+            juce::PopupMenu maximizeMenu;
+            add (maximizeMenu, { "view.maximizePanel" });
+            maximizeMenu.addSeparator();
+            add (maximizeMenu, { "view.maximizeBrowser", "view.maximizeSong", "view.maximizeEditor", "view.maximizeInspector" });
+            menu.addSubMenu ("Maximize", maximizeMenu);
+            add (menu, { "view.fullScreen" });
+            menu.addSeparator();
+            add (menu, { "view.pianoRoll", "view.mixer" });
             menu.addSeparator();
             add (menu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback" });
             add (menu, { "transport.goToStart", "transport.goToEnd" });

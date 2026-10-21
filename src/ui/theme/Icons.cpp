@@ -86,6 +86,18 @@ namespace
                 return "snowflake.svg";
             case Icon::lowLatency:
                 return "zap.svg";
+            case Icon::maximizePanel:
+                return "maximize-2.svg";
+            case Icon::restorePanels:
+                return "minimize-2.svg";
+            case Icon::hidePanelLeft:
+                return "panel-left-close.svg";
+            case Icon::hidePanelTop:
+                return "panel-top-close.svg";
+            case Icon::hidePanelBottom:
+                return "panel-bottom-close.svg";
+            case Icon::hidePanelRight:
+                return "panel-right-close.svg";
         }
 
         return "";

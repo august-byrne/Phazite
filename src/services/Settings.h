@@ -77,6 +77,7 @@ public:
     static constexpr ListSetting pluginsGettingAllKeys { "phazitePluginsGettingAllKeys", SaveTiming::now }; // plug-ins, by identity
     static constexpr BoolSetting guide { "phaziteGuide", true, SaveTiming::now };
     static constexpr ListSetting guideStepsDone { "phaziteGuideStepsDone", SaveTiming::now }; // the guide's steps, by name
+    static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon };  // ui/shell/PanelLayout.h
 
     // Kept in that file (the Engine's, which must outlive this), or, without one, in memory (tests). The parameter
     // isn't named 'file': it would hide the member (C4458, -Wshadow).

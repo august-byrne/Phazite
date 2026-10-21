@@ -33,6 +33,8 @@ public:
 
     void showTab (Tab tab) { setCurrentTabIndex (tab); }
     Tab getTab() const { return getCurrentTabIndex() == mixer ? mixer : playlist; }
+
+    void resized() override; // its tabs leave the panel's buttons their corner
 };
 
 //==============================================================================
@@ -63,6 +65,8 @@ public:
     // The editor the first tab shows, and whether that is the audio clip editor.
     TimelineEditor& getClipEditor() const noexcept;
     bool showsAudioClip() const noexcept { return showingAudio; }
+
+    void resized() override; // its tabs leave the panel's buttons their corner
 
 private:
     struct ClipTab; // the first tab: holds both editors, and shows one

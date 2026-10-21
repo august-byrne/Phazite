@@ -12,15 +12,15 @@ namespace
 {
 using Screen = phazite::test::AppScreen;
 
-// The window's parts, as checkChildrenApart() checks them, except the panels' detach buttons ("Move the browser to its
-// own window"), which sit in their panel's top right corner on purpose: each lies inside a panel.
+// The window's parts, as checkChildrenApart() checks them, except the panels' buttons (maximize, a window of its own,
+// hide), which sit in their panel's top right corner on purpose: each lies inside a panel.
 void checkPartsApart (juce::Component& shell)
 {
-    juce::Array<juce::Component*> parts, detachButtons;
+    juce::Array<juce::Component*> parts, cornerButtons;
 
     for (auto* child : shell.getChildren())
         if (child->isVisible() && ! child->getBounds().isEmpty())
-            (child->getTitle().endsWith (" to its own window") ? detachButtons : parts).add (child);
+            (child->getTitle() == "Panel buttons" ? cornerButtons : parts).add (child);
 
     for (int i = 0; i < parts.size(); ++i)
     {
@@ -34,7 +34,7 @@ void checkPartsApart (juce::Component& shell)
         }
     }
 
-    for (auto* button : detachButtons)
+    for (auto* button : cornerButtons)
     {
         CAPTURE (button->getTitle().toStdString());
         CHECK (std::any_of (parts.begin(), parts.end(),
@@ -44,8 +44,8 @@ void checkPartsApart (juce::Component& shell)
 
 constexpr const char* aboutTheAppCatalogue =
     "# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps "
-    "and themes, view.interface*, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), in order, with "
-    "their keys as Windows and Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
+    "and themes, view.interface*, view.fullScreen, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), "
+    "in order, with their keys as Windows and Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
 } // namespace
 
 TEST_CASE ("The window's content works without a screen: a project opens, the panels and layouts change, and commands are found")
@@ -59,9 +59,12 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     phazite::test::settle();
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 
-    for (const auto* id : { "view.toggleBrowser", "view.toggleBrowser", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll",
-                            "view.instrument", "view.effects", "view.mixer", "view.playlist", "view.toggleEditor", "view.toggleEditor",
-                            "view.layoutBeat", "view.layoutMix", "view.layoutFull" })
+    for (const auto* id :
+         { "view.toggleBrowser",   "view.toggleBrowser", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll",
+           "view.instrument",      "view.effects",       "view.mixer",           "view.playlist",        "view.toggleEditor",
+           "view.toggleEditor",    "view.toggleSong",    "view.toggleSong",      "view.maximizeEditor",  "view.maximizeBrowser",
+           "view.maximizeBrowser", "view.maximizePanel", "view.maximizePanel",   "view.layoutBeat",      "view.layoutMix",
+           "view.layoutFull" })
     {
         INFO ("after " << id);
         CHECK (screen.registry.invoke (id));
@@ -76,7 +79,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     auto* song = dynamic_cast<juce::TabbedComponent*> (phazite::test::findComponentWithTitle (screen.shell, "Song"));
     REQUIRE (song != nullptr);
     CHECK (song->getTabNames() == juce::StringArray { "Playlist", "Mixer" });
-    auto* dock = dynamic_cast<juce::TabbedComponent*> (&screen.shell.getPanel (phazite::ui::AppShell::DetachablePanel::editor));
+    auto* dock = dynamic_cast<juce::TabbedComponent*> (&screen.shell.getPanel (phazite::ui::Panel::editor));
     REQUIRE (dock != nullptr);
     CHECK (dock->getTabNames() == juce::StringArray { "Piano roll", "Instrument", "Effects" });
 
@@ -106,11 +109,120 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 }
 
+TEST_CASE ("Each panel hides, and fills the window until the others are restored, from its corner or its commands")
+{
+    using phazite::ui::Panel;
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    phazite::test::settle();
+
+    auto& browser = screen.shell.getPanel (Panel::browser);
+    auto& song = screen.shell.getPanel (Panel::song);
+    auto& editor = screen.shell.getPanel (Panel::editor);
+    auto& inspector = screen.shell.getPanel (Panel::inspector);
+
+    // The buttons in a panel's top right corner.
+    const auto cornerOf = [&screen] (juce::Component& panel) -> juce::Component&
+    {
+        for (auto* buttons : phazite::test::findAll<phazite::ui::PanelButtons> (screen.shell))
+            if (buttons->isVisible() && panel.getScreenBounds().contains (buttons->getScreenBounds()))
+                return *buttons;
+
+        FAIL ("no buttons in the panel's corner");
+        return panel;
+    };
+
+    const auto click = [] (juce::Component& corner, const juce::String& title)
+    {
+        auto* button = phazite::test::findComponentWithTitle (corner, title);
+        REQUIRE (button != nullptr);
+        phazite::test::Mouse mouse (*button);
+        mouse.click (button->getLocalBounds().getCentre());
+        phazite::test::dispatchPendingMessages();
+    };
+
+    for (auto* panel : { &browser, &song, &editor, &inspector })
+        CHECK (panel->isShowing());
+
+    const auto browserWidth = browser.getWidth(), editorHeight = editor.getHeight();
+
+    // The playlist's Maximize: it fills the window between the bars, the other panels out of sight, and its first button
+    // restores them, as they were.
+    click (cornerOf (song), "Maximize");
+    CHECK (song.getWidth() == screen.shell.getWidth());
+    CHECK_FALSE (browser.isShowing());
+    CHECK_FALSE (editor.isShowing());
+    CHECK_FALSE (inspector.isShowing());
+    CHECK (phazite::getCurrentName (*screen.registry.find ("view.maximizeSong")) == juce::String ("Restore the Panels"));
+    checkPartsApart (screen.shell);
+    click (cornerOf (song), "Restore the panels");
+    CHECK (browser.isShowing());
+    CHECK (editor.isShowing());
+    CHECK (inspector.isShowing());
+    CHECK (browser.getWidth() == browserWidth);
+    CHECK (editor.getHeight() == editorHeight);
+
+    // The inspector's Hide, and its command, which shows it again and names what it does.
+    click (cornerOf (inspector), "Hide");
+    CHECK_FALSE (inspector.isShowing());
+    CHECK (phazite::getCurrentName (*screen.registry.find ("view.toggleInspector")) == juce::String ("Show the Inspector"));
+    REQUIRE (screen.registry.invoke ("view.toggleInspector"));
+    CHECK (inspector.isShowing());
+    CHECK (phazite::getCurrentName (*screen.registry.find ("view.toggleInspector")) == juce::String ("Hide the Inspector"));
+
+    // Hiding the playlist gives the editor the centre; Show the Playlist brings it back.
+    click (cornerOf (song), "Hide");
+    CHECK_FALSE (song.isShowing());
+    CHECK (editor.isShowing());
+    CHECK (editor.getHeight() > editorHeight);
+    REQUIRE (screen.registry.invoke ("view.playlist"));
+    CHECK (song.isShowing());
+
+    // A divider dragged sizes the browser, which keeps that width while it hides and shows, in the settings too.
+    auto* divider = phazite::test::findComponentWithTitle (screen.shell, "Browser's edge");
+    REQUIRE (divider != nullptr);
+    CHECK (divider->getX() == browser.getRight());
+    CHECK (browserWidth == phazite::ui::Shell::browserWidth);
+    phazite::test::Mouse dividerMouse (screen.shell); // the divider moves with the drag
+    const auto middle = divider->getBounds().getCentre();
+    dividerMouse.press (middle);
+    dividerMouse.dragTo (middle + juce::Point<int> (1, 0));
+    dividerMouse.dragTo (middle + juce::Point<int> (40, 0));
+    dividerMouse.release();
+    const auto dragged = browser.getWidth();
+    CHECK (dragged == browserWidth + 40);
+    REQUIRE (screen.registry.invoke ("view.toggleBrowser"));
+    CHECK_FALSE (browser.isShowing());
+    REQUIRE (screen.registry.invoke ("view.toggleBrowser"));
+    CHECK (browser.getWidth() == dragged);
+    CHECK (screen.services.settings.get (phazite::Settings::panelLayout).contains ("browser=" + juce::String (dragged)));
+
+    // The panel in use is the one with the keyboard focus (which the shell hears about after the focus moved).
+    browser.grabKeyboardFocus();
+    phazite::test::dispatchPendingMessages();
+    auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    REQUIRE (focused != nullptr);
+    REQUIRE (browser.isParentOf (focused));
+    REQUIRE (screen.registry.invoke ("view.maximizePanel"));
+    CHECK (screen.shell.getPanelLayout().isMaximized (Panel::browser));
+    CHECK_FALSE (song.isShowing());
+    REQUIRE (screen.registry.invoke ("view.maximizePanel"));
+    CHECK_FALSE (screen.shell.getPanelLayout().getMaximized().has_value());
+    CHECK (song.isShowing());
+
+    // Once that panel hides, the song's views are the ones in use.
+    REQUIRE (screen.registry.invoke ("view.toggleBrowser"));
+    REQUIRE (screen.registry.invoke ("view.maximizePanel"));
+    CHECK (screen.shell.getPanelLayout().isMaximized (Panel::song));
+    CHECK_FALSE (browser.isShowing());
+}
+
 #if JUCE_WINDOWS
 // A panel's own window is a real one, which Linux CI can't open without a display.
 TEST_CASE ("A panel moved to a window of its own fills it at once, and keeps filling it")
 {
-    using Panel = phazite::ui::AppShell::DetachablePanel;
+    using phazite::ui::Panel;
     Screen screen;
 
     for (const auto which : { Panel::browser, Panel::inspector, Panel::editor })

@@ -75,6 +75,8 @@ private:
     void setHoverHelp (bool);
     void setInterfaceScale (float);
     void stepInterfaceScale (int direction); // to the next larger (1) or smaller (-1) size
+    bool isFullScreenMode() const;           // the window fills the screen ("view.fullScreen")
+    void setFullScreenMode (bool);
     void setKeymap (const juce::String& name);
     void updateTitle();
 

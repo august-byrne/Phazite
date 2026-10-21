@@ -5,12 +5,21 @@
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/mixer/DevicesView.h"
 #include "ui/pianoroll/PianoRoll.h"
+#include "ui/theme/DesignTokens.h"
 
 namespace phazite::ui
 {
 namespace
 {
     constexpr int tabBarDepth = 32;
+
+    // A panel's tabs end before its buttons (PanelLayout.h), in the bar's top right corner; where they don't all fit, the
+    // tab bar shows the rest in its menu.
+    void leaveCorner (juce::TabbedComponent& tabs, int buttons)
+    {
+        auto& bar = tabs.getTabbedButtonBar();
+        bar.setBounds (bar.getBounds().withTrimmedRight (Shell::getPanelCornerWidth (buttons) + Space::xs));
+    }
 } // namespace
 
 SongViews::SongViews (juce::Component& playlistPanel, juce::Component& mixerPanel)
@@ -23,6 +32,12 @@ SongViews::SongViews (juce::Component& playlistPanel, juce::Component& mixerPane
     const auto background = juce::Colours::transparentBlack; // each view paints its own
     addTab ("Playlist", background, &playlistPanel, false);
     addTab ("Mixer", background, &mixerPanel, false);
+}
+
+void SongViews::resized()
+{
+    juce::TabbedComponent::resized();
+    leaveCorner (*this, 2); // maximize and hide
 }
 
 //==============================================================================
@@ -101,6 +116,12 @@ void EditorDock::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     if (const auto type = getClipTypeToEdit (context))
         showClipEditor (*type);
+}
+
+void EditorDock::resized()
+{
+    juce::TabbedComponent::resized();
+    leaveCorner (*this, 3); // maximize, its own window and hide
 }
 
 void EditorDock::currentTabChanged (int index, const juce::String&)

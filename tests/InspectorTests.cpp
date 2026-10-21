@@ -134,7 +134,20 @@ TEST_CASE ("The inspector fills its panel, and scrolls up and down when the pane
     auto* page = viewport->getViewedComponent();
     REQUIRE (page != nullptr);
     CHECK (page->getWidth() >= 300 - viewport->getScrollBarThickness());
-    CHECK (page->getHeight() >= 900);
+
+    // Under its title, which stays at the top as the rows scroll under it, beside the panel's buttons.
+    CHECK (viewport->getY() > 0);
+    CHECK (viewport->getBottom() == screen.inspector.getHeight());
+    CHECK (page->getHeight() >= viewport->getHeight());
+    juce::Label* title = nullptr;
+
+    for (auto* child : screen.inspector.getChildren())
+        if (auto* label = dynamic_cast<juce::Label*> (child))
+            title = label;
+
+    REQUIRE (title != nullptr);
+    CHECK (title->getText().isNotEmpty()); // the track's name
+    CHECK (title->getBottom() <= viewport->getY());
 
     screen.window.setSize (300, 200);
     CHECK (page->getHeight() > 200); // it scrolls

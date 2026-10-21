@@ -1,4 +1,4 @@
-# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps and themes, view.interface*, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), in order, with their keys as Windows and Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
+# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps and themes, view.interface*, view.fullScreen, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), in order, with their keys as Windows and Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
 edit.undo | ctrl + Z
 edit.redo | ctrl + shift + Z, ctrl + Y
 edit.undoOrRedo
@@ -87,8 +87,14 @@ device.add | F8
 device.savePreset
 track.savePreset
 view.toggleBrowser | ctrl + alt + B
-view.toggleInspector
-view.toggleEditor
+view.maximizeBrowser
+view.toggleSong
+view.maximizeSong
+view.toggleEditor | ctrl + alt + L
+view.maximizeEditor
+view.toggleInspector | ctrl + alt + I
+view.maximizeInspector
+view.maximizePanel | shift + F11
 view.pianoRoll | F7
 view.instrument | F6
 view.effects | shift + F6

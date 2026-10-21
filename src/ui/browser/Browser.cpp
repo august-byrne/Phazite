@@ -11,7 +11,6 @@ namespace
 {
     constexpr int iconSize = 16;
     constexpr int starWidth = 24;
-    constexpr int detachButtonRoom = 30; // the panel's detach button, in its top right corner
     constexpr int statusHeight = 20;
 
     Icon getIconFor (const LibraryItem& item)
@@ -1020,7 +1019,7 @@ void Browser::resized()
     auto area = getLocalBounds().reduced (Space::s);
 
     auto top = area.removeFromTop (controlHeight);
-    top.removeFromRight (detachButtonRoom);
+    top.removeFromRight (Shell::getPanelCornerWidth (3) + Space::xs - Space::s); // the panel's buttons, in its top right corner
     searchField.setBounds (top);
     area.removeFromTop (Space::s);
 
