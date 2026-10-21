@@ -212,9 +212,18 @@ void freezeFromFile (te::AudioTrack& track, const juce::File& rendered)
     {
         list[i]->state.setProperty (te::IDs::frozen, i < point, nullptr);
 
-        // A frozen plug-in's window shuts: what it changed would no longer be heard.
-        if (i < point && list[i]->windowState != nullptr)
-            list[i]->windowState->closeWindowExplicitly();
+        // A frozen device's window shuts, and those of the devices in a frozen container: what they changed would no longer
+        // be heard.
+        if (i < point)
+        {
+            if (list[i]->windowState != nullptr)
+                list[i]->windowState->closeWindowExplicitly();
+
+            if (auto* container = dynamic_cast<te::RackInstance*> (list[i]); container != nullptr && container->type != nullptr)
+                for (auto* inside : container->type->getPlugins())
+                    if (inside->windowState != nullptr)
+                        inside->windowState->closeWindowExplicitly();
+        }
     }
 
     setFrozenSwitch (track, true); // last: the FreezeKeeper takes what the file holds then

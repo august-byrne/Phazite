@@ -115,6 +115,11 @@ int DeviceEditorBase::getHeightForWidth (int width) const
     return 2 * margin + (layout != nullptr ? layout->getHeightForWidth (width - 2 * margin) : 0);
 }
 
+int DeviceEditorBase::getMinimumWidth() const
+{
+    return 2 * margin + (layout != nullptr ? layout->getMinimumWidth() : 0);
+}
+
 void DeviceEditorBase::paint (juce::Graphics& g)
 {
     g.fillAll (getPalette (*this).surface);

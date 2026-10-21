@@ -74,8 +74,18 @@ namespace
 
 DeviceSlot makeDeviceSlot (te::Plugin& device)
 {
-    return { getDeviceID (device), device.getName(),     device.isEnabled(),      hasMix (device),       device.getLatencySeconds(),
-             isContainer (device), opensWindow (device), isFrozenDevice (device), hasSidechain (device), describeSidechainSource (device) };
+    return { .id = getDeviceID (device),
+             .name = device.getName(),
+             .isOn = device.isEnabled(),
+             .hasMix = hasMix (device),
+             .latencySeconds = device.getLatencySeconds(),
+             .isContainer = isContainer (device),
+             .opensWindow = opensWindow (device),
+             .popsOut = popsOut (device),
+             .windowOpen = popsOut (device) && isWindowOpen (device),
+             .frozen = isFrozenDevice (device),
+             .hasSidechain = hasSidechain (device),
+             .sidechain = describeSidechainSource (device) };
 }
 
 //==============================================================================
@@ -348,8 +358,15 @@ void removeDevice (ProjectContext& context, DeviceID id)
 
 void showDeviceWindow (ProjectContext& context, DeviceID id)
 {
-    if (auto* device = findDevice (context, id); device != nullptr && opensWindow (*device) && ! isFrozenDevice (*device))
+    if (auto* device = findDevice (context, id);
+        device != nullptr && (opensWindow (*device) || popsOut (*device)) && ! isFrozenDevice (*device))
         device->showWindowExplicitly();
+}
+
+bool isDeviceWindowOpen (const ProjectContext& context, DeviceID id)
+{
+    auto* device = findDevice (context, id);
+    return device != nullptr && isWindowOpen (*device);
 }
 
 DeviceHandle getDeviceHandle (ProjectContext& context, DeviceID id)

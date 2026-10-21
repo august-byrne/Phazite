@@ -114,7 +114,8 @@ void showDevice (ProjectContext& context, CommandBridge& commands, const DeviceS
 {
     context.getSongSelection().selectOnly (device.id);
 
-    if (device.opensWindow)
+    // A plug-in's window, or the window one of Phazite's own devices is in, comes to the front.
+    if (device.opensWindow || isDeviceWindowOpen (context, device.id))
         showDeviceWindow (context, device.id);
 
     commands.invoke ("device.show");

@@ -157,6 +157,16 @@ int DeviceLayout::getMinimumHeight() const
     return height;
 }
 
+int DeviceLayout::getMinimumWidth() const
+{
+    auto width = 0;
+
+    for (size_t i = 0; i < columns.size(); ++i)
+        width = std::max (width, getWidthOf (i));
+
+    return width;
+}
+
 int DeviceLayout::getHeightForWidth (int width) const
 {
     if (width >= getWidth())

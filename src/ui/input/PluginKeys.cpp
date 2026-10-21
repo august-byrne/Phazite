@@ -2,6 +2,7 @@
 #include "PluginKeys.h"
 #include "ComputerKeyboard.h"
 #include "KeyDispatcher.h"
+#include "WindowKeys.h"
 
 // Last, so that its macros can't change the headers above.
 #if JUCE_WINDOWS
@@ -147,6 +148,7 @@ PluginKeys::~PluginKeys()
         if (auto* window = watched.window.getComponent())
             removeFrom (*window);
 
+    ownWindows.clear(); // their keys leave them, before the keys themselves go
     nativeHook = nullptr;
 }
 
@@ -175,6 +177,8 @@ void PluginKeys::unwatch (juce::Component& window)
     windows.erase (std::remove_if (windows.begin(), windows.end(),
                                    [&window] (const Watched& w) { return w.window == nullptr || w.window == &window; }),
                    windows.end());
+    ownWindows.erase (std::remove_if (ownWindows.begin(), ownWindows.end(), [&window] (const OwnWindow& w) { return w.window == &window; }),
+                      ownWindows.end());
 }
 
 void PluginKeys::setSendsAllKeys (juce::Component& window, bool allKeys)
@@ -188,6 +192,33 @@ bool PluginKeys::sendsAllKeys (const juce::Component& window) const
 {
     const auto* watched = findWatched (&window);
     return watched != nullptr && watched->allKeys;
+}
+
+void PluginKeys::watchAsOwnWindow (juce::Component& window)
+{
+    if (findOwnWindow (window) == nullptr)
+        ownWindows.push_back ({ &window, std::make_unique<WindowKeys> (window, shortcuts, computerKeyboard) });
+}
+
+WindowKeys* PluginKeys::findOwnWindow (const juce::Component& window) const
+{
+    for (const auto& own : ownWindows)
+        if (own.window == &window)
+            return own.keys.get();
+
+    return nullptr;
+}
+
+bool PluginKeys::keyPressedAfterListeners (juce::Component& window, const juce::KeyPress& key)
+{
+    auto* keys = findOwnWindow (window);
+    return keys != nullptr && keys->keyPressedAfterListeners (key);
+}
+
+void PluginKeys::releaseKeys (juce::Component& window)
+{
+    if (auto* keys = findOwnWindow (window))
+        keys->releaseKeys();
 }
 
 const PluginKeys::Watched* PluginKeys::findWatched (const juce::Component* component) const

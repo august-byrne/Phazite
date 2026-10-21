@@ -31,6 +31,7 @@ void showNewReturnMenu (ProjectContext&, TrackID sender, juce::Component& target
 void showContainerEffectMenu (ProjectContext&, DeviceID container, juce::Component& target);
 
 // What a click on a device's name does, in the mixer, the piano roll and the Devices view: selects the device alone and
-// shows it in the Devices view (the "device.show" command, where the window has one), and opens a plug-in's own window.
+// shows it in the Devices view (the "device.show" command, where the window has one), and opens a plug-in's own window,
+// or brings forward the window one of Phazite's own devices is in.
 void showDevice (ProjectContext&, CommandBridge&, const DeviceSlot&);
 } // namespace phazite::ui

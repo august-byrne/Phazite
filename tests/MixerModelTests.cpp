@@ -195,8 +195,11 @@ TEST_CASE ("A device's channel, its handle for an editor, and whether its contro
     const auto compressor = phazite::getEffects (context, a)[1];
     const auto limiter = phazite::getEffects (context, {}).back();
 
-    // Phazite's own devices show whole in the Devices view, through their handles; they open no windows.
+    // Phazite's own devices show whole in the Devices view, through their handles, and in a window of their own only when
+    // the user pops one out.
     CHECK_FALSE (eq.opensWindow);
+    CHECK (eq.popsOut);
+    CHECK_FALSE (eq.windowOpen);
     CHECK (phazite::getDeviceHandle (context, eq.id).isValid());
     CHECK (phazite::getDeviceChannel (context, eq.id) == std::optional (a));
     CHECK (phazite::getDeviceChannel (context, limiter.id) == std::optional (phazite::TrackID()));

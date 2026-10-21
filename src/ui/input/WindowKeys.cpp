@@ -4,20 +4,23 @@
 namespace phazite::ui
 {
 WindowKeys::WindowKeys (juce::Component& w, KeyDispatcher& s, ComputerKeyboard& keyboard)
-    : window (w),
+    : window (&w),
       shortcuts (s),
       computerKeyboard (keyboard)
 {
     // Shortcuts work anywhere in the window. Key listeners added later are asked first, so the computer keyboard gets
     // its letters before shortcuts do; it leaves alone keys pressed with Ctrl, Alt or Cmd.
-    window.addKeyListener (&shortcuts);
-    window.addKeyListener (&computerKeyboard);
+    w.addKeyListener (&shortcuts);
+    w.addKeyListener (&computerKeyboard);
 }
 
 WindowKeys::~WindowKeys()
 {
-    window.removeKeyListener (&computerKeyboard);
-    window.removeKeyListener (&shortcuts);
+    if (window == nullptr)
+        return;
+
+    window->removeKeyListener (&computerKeyboard);
+    window->removeKeyListener (&shortcuts);
 }
 
 bool WindowKeys::keyPressedAfterListeners (const juce::KeyPress& key)

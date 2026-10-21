@@ -100,9 +100,11 @@ struct DeviceSlot
     double latencySeconds = 0.0; // how late its sound comes out
     bool isContainer = false;    // a container of effects (ContainerModel.h)
 
-    // A plug-in: its own controls are in a window of its own (showDeviceWindow()). Phazite's own devices and containers have
-    // none: the Devices view shows them whole (docs/design.md, section 9).
+    // A plug-in: its own controls are in a window of its own (showDeviceWindow()). Phazite's own devices show whole in the
+    // Devices view, and in a window of their own too when the user wants (popsOut); containers only there.
     bool opensWindow = false;
+    bool popsOut = false;
+    bool windowOpen = false; // one of Phazite's own devices, in its window now (isDeviceWindowOpen() also tells a plug-in's)
 
     // Its sound is in its track's frozen file (FreezeModel.h): its controls are off, and its window shut, until the track
     // is unfrozen.
@@ -125,7 +127,10 @@ MixHandle getMix (ProjectContext&, DeviceID);
 void setDeviceOn (ProjectContext&, DeviceID, bool);
 void moveEffect (ProjectContext&, DeviceID, int places); // earlier (negative) or later among its channel's effects
 void removeDevice (ProjectContext&, DeviceID);
-void showDeviceWindow (ProjectContext&, DeviceID); // a device that opens one (DeviceSlot::opensWindow); nothing for others
+// A device's window (DeviceSlot::opensWindow, popsOut), shown, or brought to the front if it shows; and whether it shows
+// (its close button puts it back into the Devices view). Nothing for a device without one.
+void showDeviceWindow (ProjectContext&, DeviceID);
+bool isDeviceWindowOpen (const ProjectContext&, DeviceID);
 
 // One of Phazite's own devices, for its editor (model/devices/DeviceHandle.h); a handle of nothing for another device.
 DeviceHandle getDeviceHandle (ProjectContext&, DeviceID);

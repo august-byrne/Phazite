@@ -42,6 +42,9 @@ public:
     // Every part showing: the tallest column's stack, or with the columns wrapped to a narrower width, their rows'.
     int getHeightForWidth (int width) const;
 
+    // The least width that shows every part: the widest column, with the columns one under another.
+    int getMinimumWidth() const;
+
     // Places the parts in an area of the editor, and remembers their titles' places for paint().
     void layOut (juce::Rectangle<int>);
     void paint (juce::Graphics&) const; // the parts' titles, and a line between columns

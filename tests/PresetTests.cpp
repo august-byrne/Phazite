@@ -431,8 +431,8 @@ TEST_CASE ("A plug-in's preset loads into the same plug-in, in place of its sett
     CHECK (phazite::getMix (*loud) == doctest::Approx (0.1f));
     CHECK_FALSE (edit.getUndoManager().canUndo());
 
-    // Not into a device of another kind, nor one of Phazite's own (which has no window), nor a container's or a track's
-    // preset: none is an undo step.
+    // Not into a device of another kind, nor one of Phazite's own (whose window has no Plug-in menu), nor a container's or a
+    // track's preset: none is an undo step.
     const auto eq = song.addEffect (song.track (0), "phaziteEq");
     const auto eqFile = temp.folder.getChildFile ("Bright" + juce::String (phazite::presetExtension));
     REQUIRE (phazite::saveDevicePreset (song.context, eq, eqFile));

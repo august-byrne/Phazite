@@ -2,7 +2,8 @@
 // What the editors of Phazite's own devices share (docs/design.md, section 9): their parts in a DeviceLayout (columns of
 // titled parts that stack, or show one at a time under tabs, so that the editor is as wide at any height), the controls of
 // their parameters (ParameterControls), found by ID, and the device's colour (DeviceTint), which their knobs and graphs
-// take. A device's mix and its switch are its header's (the Devices view's, or its window's), not its editor's.
+// take. A device's mix, its switch and its sidechain are its card's header's in the Devices view, not its editor's: a window of
+// its own shows the editor, and the card stays, folded, with its header.
 #pragma once
 
 #include "DeviceEditors.h"
@@ -36,6 +37,7 @@ public:
     int getMinimumHeight() const override;
     int getWidthForHeight (int) const override;
     int getHeightForWidth (int) const override;
+    int getMinimumWidth() const override;
 
     void paint (juce::Graphics&) override;
     void resized() override;

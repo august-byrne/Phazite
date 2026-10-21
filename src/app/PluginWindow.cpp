@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginWindow.h"
+#include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DeviceStates.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/ProjectContext.h"
 #include "services/Library.h"
 #include "services/Settings.h"
 #include "ui/browser/Browser.h"
+#include "ui/devices/DeviceWindowContent.h"
 #include "ui/input/PluginKeys.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -169,50 +173,27 @@ namespace
     };
 
     //==============================================================================
-    class PluginWindow : public juce::DocumentWindow,
-                         private juce::Timer
+    // What a device's window does, a plug-in's or one of Phazite's own devices': it opens where it was last (kept as view
+    // state in the project: model/mixer/internal/Mixer.h), on a screen that is there; it stays above the main window while
+    // Phazite is in front; and it closes through Tracktion, which then forgets it.
+    class DeviceWindowFrame : public juce::DocumentWindow,
+                              private juce::Timer
     {
     public:
-        explicit PluginWindow (te::ExternalPlugin& p)
-            : juce::DocumentWindow (p.getName(), {}, juce::DocumentWindow::closeButton),
-              plugin (p),
-              menu (p, *this)
+        DeviceWindowFrame (te::Plugin& p, const juce::String& title)
+            : juce::DocumentWindow (title, {}, juce::DocumentWindow::closeButton),
+              plugin (p)
         {
             setBackgroundColour (ui::getPalette (*this).surface);
             setUsingNativeTitleBar (true);
             getConstrainer()->setMinimumOnscreenAmounts (0x10000, 50, 30, 50);
-            setMenuBar (&menu);
-            recreateEditor();
-
-            // Where it was last time, or where Tracktion suggests.
-            setBounds (onScreen (getBounds().withPosition (plugin.windowState->choosePositionForPluginWindow())));
-            storeBounds = true;
-
-            // Above the main window, as the design asks, but not above other apps while Phazite is in the background.
-            timerCallback();
-            startTimerHz (2);
         }
 
-        ~PluginWindow() override
+        ~DeviceWindowFrame() override
         {
             if (auto* keys = ui::getPluginKeys())
                 keys->unwatch (*this);
-
-            storeBounds = false;
-            storeDeviceState (plugin); // the settings changed in the window, into the project, outside the undo history
-            setEditor (nullptr);
-            setMenuBar (nullptr); // before the menu goes
         }
-
-        bool hasEditor() const noexcept { return editor != nullptr; }
-
-        void recreateEditor()
-        {
-            setEditor (nullptr);
-            setEditor (plugin.createEditor());
-        }
-
-        void updateKeys() { menu.updateKeys(); }
 
         void closeButtonPressed() override { plugin.windowState->closeWindowExplicitly(); }
 
@@ -232,10 +213,22 @@ namespace
             rememberWindowPosition (plugin, getPosition());
         }
 
+    protected:
+        te::Plugin& plugin;
+
+        // Where it was last time, or where Tracktion suggests; then its moves are kept, and it stays above the main window.
+        void place()
+        {
+            setBounds (onScreen (getBounds().withPosition (plugin.windowState->choosePositionForPluginWindow())));
+            storeBounds = true;
+            timerCallback();
+            startTimerHz (2);
+        }
+
+        // As it closes: what it does then is no move to keep.
+        void stopKeepingMoves() noexcept { storeBounds = false; }
+
     private:
-        te::ExternalPlugin& plugin;
-        PluginMenu menu;
-        std::unique_ptr<te::Plugin::EditorComponent> editor;
         bool storeBounds = false;
 
         // A window kept where it was on a screen that isn't there any more (a project saved with a second screen beside
@@ -255,9 +248,64 @@ namespace
 
         void timerCallback() override
         {
+            // A device in a container whose track went (deleted, or the step that made it undone) plays nowhere, and its
+            // container's rack stays for the session: its window goes, as Tracktion closes a device's on a deleted track.
+            // (This deletes the window, which a timer's callback may do.)
+            if (plugin.isInRack() && findContainerOf (plugin) == nullptr)
+            {
+                plugin.windowState->closeWindowExplicitly();
+                return;
+            }
+
             if (const auto inFront = juce::Process::isForegroundProcess(); inFront != isAlwaysOnTop())
                 setAlwaysOnTop (inFront);
+
+            refresh();
         }
+
+        // Twice a second, what the window shows of the device that changes (its name).
+        virtual void refresh() {}
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeviceWindowFrame)
+    };
+
+    //==============================================================================
+    // A plug-in's window: its own editor, under the Plug-in menu.
+    class PluginWindow : public DeviceWindowFrame
+    {
+    public:
+        explicit PluginWindow (te::ExternalPlugin& p)
+            : DeviceWindowFrame (p, p.getName()),
+              externalPlugin (p),
+              menu (p, *this)
+        {
+            setMenuBar (&menu);
+            recreateEditor();
+            place();
+        }
+
+        ~PluginWindow() override
+        {
+            stopKeepingMoves();
+            storeDeviceState (plugin); // the settings changed in the window, into the project, outside the undo history
+            setEditor (nullptr);
+            setMenuBar (nullptr); // before the menu goes
+        }
+
+        bool hasEditor() const noexcept { return editor != nullptr; }
+
+        void recreateEditor()
+        {
+            setEditor (nullptr);
+            setEditor (externalPlugin.createEditor());
+        }
+
+        void updateKeys() { menu.updateKeys(); }
+
+    private:
+        te::ExternalPlugin& externalPlugin;
+        PluginMenu menu;
+        std::unique_ptr<te::Plugin::EditorComponent> editor;
 
         void setEditor (std::unique_ptr<te::Plugin::EditorComponent> newEditor)
         {
@@ -286,6 +334,74 @@ namespace
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginWindow)
     };
 
+    // One of Phazite's own devices out of the Devices view, when the user wants it: its editor, in a window named after it
+    // and its channel ("EQ - Bass"), as large as its editor at first and then as the user makes it. Its card in the Devices
+    // view stays folded meanwhile.
+    class DeviceWindow final : public DeviceWindowFrame
+    {
+    public:
+        explicit DeviceWindow (DevicePlugin& device)
+            : DeviceWindowFrame (device, getTitleOf (device)),
+              content (makeDeviceHandle (device))
+        {
+            setContentNonOwned (&content, true);
+            setResizable (true, false);
+            setResizeLimits (content.getMinimumWidth(), std::min (content.getHeight(), content.getMinimumHeight()), 8192, 8192);
+
+            // It is Phazite's own: every shortcut works in it, and the computer keyboard, as in the main window, while the
+            // app's keys are there (until the main window goes).
+            if (auto* keys = ui::getPluginKeys())
+                keys->watchAsOwnWindow (*this);
+
+            place();
+        }
+
+        ~DeviceWindow() override
+        {
+            stopKeepingMoves();
+            clearContentComponent();
+        }
+
+        bool hasEditor() const noexcept { return content.hasEditor(); }
+
+        bool keyPressed (const juce::KeyPress& key) override
+        {
+            auto* keys = ui::getPluginKeys();
+            return (keys != nullptr && keys->keyPressedAfterListeners (*this, key)) || DeviceWindowFrame::keyPressed (key);
+        }
+
+        void activeWindowStatusChanged() override
+        {
+            DeviceWindowFrame::activeWindowStatusChanged();
+
+            // Keys released in another window would never reach this one.
+            if (auto* keys = ui::getPluginKeys(); keys != nullptr && ! isActiveWindow())
+                keys->releaseKeys (*this);
+        }
+
+    private:
+        ui::DeviceWindowContent content;
+
+        // "EQ - Bass": the device and its channel, the track of the container it is in, or the master.
+        static juce::String getTitleOf (const te::Plugin& device)
+        {
+            auto* track = device.getOwnerTrack();
+
+            if (track == nullptr)
+                track = getTrackOfContainerDevice (device);
+
+            return device.getName() + " - " + (track != nullptr ? track->getName() : juce::String ("Master"));
+        }
+
+        void refresh() override // the device or its track renamed
+        {
+            if (const auto title = getTitleOf (plugin); title != getName())
+                setName (title);
+        }
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeviceWindow)
+    };
+
     void updateWindowsKeys()
     {
         auto& desktop = juce::Desktop::getInstance();
@@ -303,7 +419,19 @@ std::unique_ptr<juce::Component> createPluginWindow (te::PluginWindowState& stat
     if (windowState == nullptr)
         return {};
 
-    // Phazite's own devices and containers show in the Devices view instead.
+    // One of Phazite's own devices, out of the Devices view when the user wants: its editor. Containers show there only.
+    if (auto* device = dynamic_cast<DevicePlugin*> (&windowState->plugin))
+    {
+        auto window = std::make_unique<DeviceWindow> (*device);
+
+        if (! window->hasEditor())
+            return {};
+
+        window->setVisible (true);
+        window->toFront (false);
+        return window;
+    }
+
     auto* plugin = dynamic_cast<te::ExternalPlugin*> (&windowState->plugin);
 
     if (plugin == nullptr || plugin->getAudioPluginInstance() == nullptr)

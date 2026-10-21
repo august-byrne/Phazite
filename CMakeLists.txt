@@ -482,6 +482,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DeviceTicker.h
     src/ui/devices/DeviceTint.cpp
     src/ui/devices/DeviceTint.h
+    src/ui/devices/DeviceWindowContent.cpp
+    src/ui/devices/DeviceWindowContent.h
     src/ui/devices/DrumSamplerEditor.cpp
     src/ui/devices/DrumSamplerEditor.h
     src/ui/devices/EqEditor.cpp

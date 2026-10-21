@@ -6,17 +6,20 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
+#include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
+#include "ui/devices/DeviceWindowContent.h"
 #include "ui/devices/FilterEditor.h"
 #include "ui/devices/FlangerEditor.h"
 #include "ui/devices/PhaserEditor.h"
@@ -297,4 +300,40 @@ TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its
     mouse.release();
     CHECK (std::abs (song.valueOf ("formant") - 12.0f * std::log2 (std::pow (100.0f, 2.0f / 15.0f))) < 0.8f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Formant"));
+}
+
+TEST_CASE ("A built-in device's editor in a window of its own wraps its parts to the window's width, and scrolls")
+{
+    Song song (phazite::devices::Synth::typeID);
+    phazite::ui::DeviceWindowContent content (phazite::makeDeviceHandle (*song.plugin));
+    REQUIRE (content.hasEditor());
+    const auto wide = content.getWidth(), high = content.getHeight();
+    phazite::test::TestWindow window (content, wide, high);
+    auto* editor = content.getEditor();
+    REQUIRE (editor != nullptr);
+    const auto tallest = editor->getHeight();
+
+    // Half as wide: the synth's columns wrap into rows, taller than the window, which scrolls to them.
+    content.setSize (wide / 2, high);
+    CHECK (editor->getWidth() <= wide / 2);
+    CHECK (editor->getHeight() > tallest);
+    CHECK (content.getMinimumHeight() > 0);
+    phazite::test::checkChildrenApart (*editor);
+
+    // As narrow as the window can be: its columns one under another, each whole.
+    CHECK (content.getMinimumWidth() < wide / 2);
+    content.setSize (content.getMinimumWidth(), high);
+    phazite::test::checkChildrenApart (*editor);
+
+    for (auto* child : editor->getChildren())
+        if (child->isVisible())
+            CHECK (editor->getLocalBounds().contains (child->getBounds()));
+}
+
+TEST_CASE ("A built-in device's editor that doesn't wrap keeps its window as wide as it is")
+{
+    Song song (phazite::devices::Equalizer::typeID);
+    phazite::ui::DeviceWindowContent content (phazite::makeDeviceHandle (*song.plugin));
+    REQUIRE (content.hasEditor());
+    CHECK (content.getMinimumWidth() == content.getWidth());
 }

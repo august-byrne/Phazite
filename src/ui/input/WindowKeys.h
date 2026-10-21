@@ -16,7 +16,7 @@ public:
     // first (ComponentPeer::handleKeyPress), so the computer keyboard gets its letters before the shortcuts do; it leaves
     // alone keys pressed with Shift, Ctrl, Alt or Cmd.
     WindowKeys (juce::Component& window, KeyDispatcher& shortcuts, ComputerKeyboard&);
-    ~WindowKeys(); // removes them, the computer keyboard first
+    ~WindowKeys(); // removes them, the computer keyboard first, from the window if it is still there
 
     // For the window's keyPressed(), which JUCE calls when no key listener took the key: while the computer keyboard
     // plays notes, Shift and a letter run that letter's single-key shortcut, as in Ableton Live. True if it ran one.
@@ -27,7 +27,7 @@ public:
     void releaseKeys();
 
 private:
-    juce::Component& window;
+    juce::Component::SafePointer<juce::Component> window;
     KeyDispatcher& shortcuts;
     ComputerKeyboard& computerKeyboard;
 

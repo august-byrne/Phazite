@@ -5,6 +5,7 @@
 // the mixer, the master's devices, and the track's modulators with an editor beside them.
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
+#include "model/base/internal/Tracktion.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/ContainerModel.h"
@@ -121,8 +122,7 @@ TEST_CASE ("The Effects page shows the selected track's effects in a row, as car
     CHECK (eq->getHeight() > 300);
 
     // Folded at first to their key knobs, narrow; the EQ's chevron opens it, its whole editor with its graph shrunk to fit,
-    // and opening the compressor folds it again. The plug-in has key knobs and a button for its own window, which Phazite's
-    // devices don't have.
+    // and opening the compressor folds it again. The plug-in has key knobs and a button that opens its own window.
     CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).isEmpty());
     CHECK (eq->getWidth() < 250);
     auto* open = phazite::test::findComponentWithTitle (*eq, "Open");
@@ -138,6 +138,14 @@ TEST_CASE ("The Effects page shows the selected track's effects in a row, as car
     CHECK (phazite::test::findAll<phazite::ui::CompressorEditor> (*compressor).size() == 1);
     CHECK (phazite::test::findComponentWithTitle (*eq, "Open its window") == nullptr);
     CHECK (phazite::test::findComponentWithTitle (*plugin, "Open its window") != nullptr);
+
+    // Phazite's devices can show in a window of their own too, when the user wants (app/PluginWindow.h).
+    CHECK (phazite::test::findComponentWithTitle (*eq, "Open in a window") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*plugin, "Open in a window") == nullptr);
+    const auto slots = phazite::getEffects (screen.context, screen.track (0));
+    CHECK (slots[0].popsOut);
+    CHECK_FALSE (slots[0].windowOpen);
+    CHECK_FALSE (slots[2].popsOut);
     CHECK (phazite::test::findAll<phazite::ui::Knob> (*plugin).size() >= 2);
     CHECK (phazite::test::findComponentWithTitle (view, "Choose instrument") == nullptr); // no notes to play
 
@@ -179,6 +187,52 @@ TEST_CASE ("The Effects page shows the selected track's effects in a row, as car
     const auto delay = phazite::getEffects (screen.context, screen.track (0)).back().id;
     CHECK (view.isOpen (delay));
     CHECK_FALSE (view.isOpen (effects[1]));
+}
+
+TEST_CASE ("While devices' windows show, a plug-in's card keeps its knobs, and one of Phazite's own folds with its button lit")
+{
+    Screen screen;
+    auto& view = screen.view;
+    const auto effects = screen.effects (0);
+    REQUIRE (effects.size() == 3);
+    REQUIRE (view.findPanel (effects[2]) != nullptr);
+    const auto pluginWidth = view.findPanel (effects[2])->getWidth();
+    view.setOpen (effects[0], true);
+    REQUIRE (phazite::test::findAll<phazite::ui::EqEditor> (*view.findPanel (effects[0])).size() == 1);
+
+    // Windows as Tracktion holds them, showing (the app's would be real ones on the screen).
+    std::vector<te::Plugin::Ptr> shown;
+
+    for (const auto id : { effects[0], effects[2] })
+    {
+        auto device = te::findPluginForID (*screen.edit, phazite::toTracktion (id));
+        REQUIRE (device != nullptr);
+        device->windowState->pluginWindow = std::make_unique<juce::Component>();
+        device->windowState->pluginWindow->setVisible (true);
+        shown.push_back (device);
+    }
+
+    CHECK (phazite::isDeviceWindowOpen (screen.context, effects[2]));
+    CHECK_FALSE (phazite::getEffects (screen.context, screen.track (0))[2].windowOpen); // a plug-in's says nothing of its card
+
+    // The cards made again as the track is selected again.
+    screen.context.getSongSelection().selectOnly (screen.track (1));
+    phazite::test::dispatchPendingMessages();
+    screen.context.getSongSelection().selectOnly (screen.track (0));
+    phazite::test::dispatchPendingMessages();
+
+    auto* plugin = view.findPanel (effects[2]);
+    auto* eq = view.findPanel (effects[0]);
+    REQUIRE (plugin != nullptr);
+    REQUIRE (eq != nullptr);
+    CHECK (plugin->getWidth() == pluginWidth);
+    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).isEmpty());
+    auto* windowButton = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*eq, "Open in a window"));
+    REQUIRE (windowButton != nullptr);
+    CHECK (windowButton->getToggleState());
+
+    for (auto& device : shown)
+        device->windowState->pluginWindow = nullptr;
 }
 
 TEST_CASE ("The Instrument page shows the track's instrument alone, as wide as the page, or why it has none")

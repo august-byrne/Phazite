@@ -243,20 +243,30 @@ struct DevicesView::Panel : public juce::Component
             addAndMakeVisible (*windowButton);
         }
 
+        // One of Phazite's own devices, in a window of its own when the user wants: its card folds meanwhile, one editor at a
+        // time (app/PluginWindow.h).
+        if (device.popsOut)
+        {
+            windowButton = std::make_unique<IconButton> ("Open in a window", Icon::detach);
+            windowButton->setClickingTogglesState (false);
+            windowButton->onClick = [this] { popOut(); };
+            addAndMakeVisible (*windowButton);
+        }
+
         bodyView.setScrollBarsShown (true, false);
         addAndMakeVisible (bodyView);
         addAndMakeVisible (power);
         addAndMakeVisible (nameButton);
-        setFolded (foldButton != nullptr && ! view.isOpen (device.id), true);
+        setFolded (device.windowOpen || (foldButton != nullptr && ! view.isOpen (device.id)), true); // in its window: folded from the start
         show (device);
     }
 
     bool isFoldable() const noexcept { return foldButton != nullptr; }
 
-    // Folds the card to its key knobs, or opens it to the whole of it.
+    // Folds the card to its key knobs, or opens it to the whole of it; an instrument folds only while its window shows it.
     void setFolded (bool shouldFold, bool force = false)
     {
-        if (! isFoldable())
+        if (! isFoldable() && ! shown.windowOpen)
             shouldFold = false;
 
         if (shouldFold == folded && ! force)
@@ -305,6 +315,24 @@ struct DevicesView::Panel : public juce::Component
         if (sidechainButton != nullptr)
             sidechainButton->show (device.sidechain);
 
+        // In its window: folded here, until the window closes.
+        if (device.popsOut && windowButton != nullptr)
+        {
+            windowButton->setToggleState (device.windowOpen, juce::dontSendNotification);
+            windowButton->setTooltip (device.windowOpen ? "It is in its own window: click to bring the window to the front"
+                                                        : "Shows it in a window of its own, out of the dock: here it shows its key knobs "
+                                                          "meanwhile");
+
+            // One editor at a time: its key knobs here while its window shows it; an instrument whole again after.
+            if (device.windowOpen)
+                setFolded (true);
+            else if (! isFoldable())
+                setFolded (false);
+
+            if (foldButton != nullptr)
+                foldButton->setVisible (! device.windowOpen);
+        }
+
         // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
         for (auto* control : std::initializer_list<juce::Component*> { &power, &bodyView, windowButton.get(), sidechainButton.get() })
             if (control != nullptr)
@@ -316,6 +344,31 @@ struct DevicesView::Panel : public juce::Component
             containerBody->refresh();
 
         repaint();
+    }
+
+    // Out into its window, or the window to the front; its card, if it was the open one, folds once the window shows it.
+    void popOut()
+    {
+        showDeviceWindow (view.context, shown.id);
+
+        if (isDeviceWindowOpen (view.context, shown.id) && view.isOpen (shown.id))
+            view.setOpen (shown.id, false);
+
+        view.songChanged ({ .devices = true }); // its card shows that it is in its window
+    }
+
+    // Whether its window, or a window of a device in it, has closed since it showed (they open only from popOut()).
+    bool windowsChanged() const
+    {
+        if (shown.windowOpen && ! isDeviceWindowOpen (view.context, shown.id))
+            return true;
+
+        if (auto* containerBody = dynamic_cast<ContainerBody*> (body.get()))
+            for (auto* panel : containerBody->devices->panels)
+                if (panel->windowsChanged())
+                    return true;
+
+        return false;
     }
 
     void select (const juce::ModifierKeys& mods)
@@ -334,7 +387,8 @@ struct DevicesView::Panel : public juce::Component
 
         selection.selectOnly (shown.id);
 
-        if (shown.opensWindow)
+        // A plug-in's window, or one of Phazite's own devices' that shows it now, comes to the front.
+        if (shown.opensWindow || shown.windowOpen)
             showDeviceWindow (view.context, shown.id);
     }
 
@@ -479,7 +533,7 @@ struct DevicesView::Panel : public juce::Component
     juce::OwnedArray<Knob> mixKnob; // an effect's
     std::unique_ptr<MixAttachment> mixAttachment;
     std::unique_ptr<IconButton> foldButton;           // an effect's that opens: one of Phazite's own, or a container
-    std::unique_ptr<IconButton> windowButton;         // a plug-in's
+    std::unique_ptr<IconButton> windowButton;         // a plug-in's, or one of Phazite's own that pops out
     std::unique_ptr<SidechainButton> sidechainButton; // a device's that has a sidechain
     std::unique_ptr<juce::Component> body;
     juce::Viewport bodyView;
@@ -809,6 +863,13 @@ bool DevicesView::isOpen (DeviceID id) const
 
 void DevicesView::setOpen (DeviceID id, bool open)
 {
+    // In its window, it opens there: one editor at a time.
+    if (open && isDeviceWindowOpen (context, id))
+    {
+        showDeviceWindow (context, id);
+        return;
+    }
+
     // The row that holds it, a channel's or a container's: its other cards fold.
     const std::function<Row*(Row&)> search = [&search, id] (Row& in) -> Row*
     {
@@ -1100,7 +1161,16 @@ void DevicesView::timerCallback()
         return;
 
     if (auto* row = getShownRow())
+    {
         row->updateValues();
+
+        // A device's window opened or closed (its close button, Tracktion): its card shows it.
+        if (std::any_of (row->panels.begin(), row->panels.end(), [] (const Panel* panel) { return panel->windowsChanged(); }))
+        {
+            row->refresh();
+            layOutRow();
+        }
+    }
 
     modulators.updateValues();
 }

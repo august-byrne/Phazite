@@ -17,12 +17,14 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <memory>
 #include <vector>
 
 namespace phazite::ui
 {
 class ComputerKeyboard;
 class KeyDispatcher;
+class WindowKeys;
 
 class PluginKeys : public juce::KeyListener
 {
@@ -42,6 +44,14 @@ public:
     void setSendsAllKeys (juce::Component& window, bool);
     bool sendsAllKeys (const juce::Component& window) const;
 
+    // The main window's keys (WindowKeys: every shortcut, and the computer keyboard) for another of Phazite's own windows
+    // that Tracktion asks for, which is no plug-in's: a built-in device's (app/PluginWindow.h), until unwatch(), or until
+    // these keys go with the main window. Its keyPressed() asks keyPressedAfterListeners(), and it lets go of the keys held
+    // as another window becomes the active one.
+    void watchAsOwnWindow (juce::Component& window);
+    bool keyPressedAfterListeners (juce::Component& window, const juce::KeyPress&);
+    void releaseKeys (juce::Component& window);
+
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
     bool keyStateChanged (bool isKeyDown, juce::Component*) override;
 
@@ -54,13 +64,21 @@ private:
         bool allKeys = false; // its plug-in gets every key
     };
 
+    struct OwnWindow
+    {
+        juce::Component::SafePointer<juce::Component> window {};
+        std::unique_ptr<WindowKeys> keys;
+    };
+
     KeyDispatcher& shortcuts;
     ComputerKeyboard& computerKeyboard;
     std::vector<Watched> windows;
+    std::vector<OwnWindow> ownWindows;
     std::unique_ptr<NativeHook> nativeHook; // Windows only
 
     const Watched* findWindow (void* nativeHandle) const;      // the watched one a native window is in
     const Watched* findWatched (const juce::Component*) const; // the watched one a component is in
+    WindowKeys* findOwnWindow (const juce::Component&) const;
     void removeFrom (juce::Component&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginKeys)

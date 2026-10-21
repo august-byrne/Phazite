@@ -137,6 +137,16 @@ bool opensWindow (const te::Plugin& device)
     return dynamic_cast<const te::ExternalPlugin*> (&device) != nullptr;
 }
 
+bool popsOut (const te::Plugin& device)
+{
+    return dynamic_cast<const DevicePlugin*> (&device) != nullptr;
+}
+
+bool isWindowOpen (const te::Plugin& device)
+{
+    return device.windowState != nullptr && device.windowState->isWindowShowing();
+}
+
 juce::Array<te::Plugin*> getDevices (const te::Track& track)
 {
     return getDevicesIn (track.pluginList);

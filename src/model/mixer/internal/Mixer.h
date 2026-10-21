@@ -29,6 +29,11 @@ juce::Array<te::Plugin*> getMasterDevices (const te::Edit&);
 // container, which the Devices view shows.
 bool opensWindow (const te::Plugin&);
 
+// Whether one of Phazite's own devices (not a container) can show in a window of its own when the user wants it, out of
+// the Devices view; and whether a device's window shows now.
+bool popsOut (const te::Plugin&);
+bool isWindowOpen (const te::Plugin&);
+
 // A track's instrument, which turns its notes into sound: its first device, if that is an instrument. Its effects
 // are the devices after it, which change the sound. Folders, returns and the master have effects only.
 te::Plugin* getInstrument (const te::Track&);
