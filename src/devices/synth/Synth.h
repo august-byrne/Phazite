@@ -10,6 +10,7 @@
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
+#include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
@@ -80,6 +81,19 @@ public:
     // How many voices are sounding, for tests and meters. Any thread.
     int getActiveVoices() const noexcept { return activeVoices.load (std::memory_order_relaxed); }
 
+    // What its editor shows playing, once a block (devices/core/LiveValue.h): the newest voice's amp and filter envelopes
+    // (from 0 to 1) and the cutoff it plays (in hertz; 0 while no voice plays), and where the LFO is in its cycle (0 to 1).
+    struct Shown
+    {
+        LiveValue amp, filterEnvelope, cutoff, lfoPhase;
+    };
+
+    const Shown& getShown() const noexcept { return shown; }
+
+    // The filter's response at a frequency, as a gain, for the parameters' values with its cutoff at a frequency: for its
+    // editor.
+    static double getFilterMagnitude (std::span<const float> parameters, double cutoffHertz, double frequency, double sampleRate);
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
@@ -128,6 +142,7 @@ private:
     dsp::Lfo lfo;
     std::atomic<float> tailSeconds { 0.2f };
     std::atomic<int> activeVoices { 0 };
+    Shown shown;
 
     void handle (const NoteEvent&, std::span<const float> parameters);
     void startNote (int note, float velocity, std::span<const float> parameters);

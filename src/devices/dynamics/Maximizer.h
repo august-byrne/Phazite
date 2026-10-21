@@ -46,6 +46,14 @@ public:
     // The limiter's meters (Limiter.h): what comes in, how far it turns the sound down, and what goes out.
     Limiter& getLimiter() noexcept { return limiter; }
 
+    // Where each band's squeeze begins, in decibels (for its editor).
+    static constexpr float squeezeThreshold = -12.0f;
+
+    // Each band as its editor shows it, since it last looked (devices/core/MeterValue.h): its level coming in, in decibels
+    // (after the gain), and the most it was squeezed, in decibels.
+    MeterValue& getBandLevel (int band) noexcept { return bandLevels[(size_t) band]; }
+    MeterValue& getBandReduction (int band) noexcept { return bandReductions[(size_t) band]; }
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
@@ -62,5 +70,7 @@ private:
     std::array<dsp::LevelFollower, numBands> reductions; // in decibels
     Limiter limiter;
     std::array<float, Limiter::mix + 1> limiterValues {}; // its parameters, as the maximizer sets them
+    std::array<MeterValue, numBands> bandLevels { MeterValue { -120.0f }, MeterValue { -120.0f }, MeterValue { -120.0f } };
+    std::array<MeterValue, numBands> bandReductions; // from 0
 };
 } // namespace phazite::devices

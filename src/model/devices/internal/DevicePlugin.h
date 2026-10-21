@@ -6,6 +6,7 @@
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
+#include "devices/core/DeviceScope.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/DelayLine.h"
 #include "model/base/internal/Tracktion.h"
@@ -28,6 +29,9 @@ public:
 
     // The device's DSP, for the model code of a device that has more than parameters (its meters, its samples).
     devices::Processor& getProcessor() noexcept { return *processor; }
+
+    // What goes into it and comes out, after its mix, for its editor's displays (devices/core/DeviceScope.h).
+    devices::DeviceScope& getScope() noexcept { return scope; }
 
     // The parameter with that ID, or nullptr.
     te::AutomatableParameter* findParameter (std::string_view id) const;
@@ -59,6 +63,7 @@ private:
 
     const devices::DeviceInfo& deviceInfo;
     std::unique_ptr<devices::Processor> processor;
+    devices::DeviceScope scope;
 
     juce::OwnedArray<juce::CachedValue<float>> storedValues; // in the plug-in's state, under the parameters' IDs
 

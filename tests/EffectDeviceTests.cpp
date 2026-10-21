@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The devices of roadmap step 2.10, as DSP (src/devices/): the delay's timing and ping-pong, the saturator's curves and
-// level, the filter's response, the utility's gain, balance, width, bass mono and polarity, the multiband dynamics'
-// flat split and both-way squeeze, the maximizer's ceiling, and the synth's unison.
+// level, the filter's response, the multiband dynamics' flat split and both-way squeeze, the maximizer's ceiling, and the
+// synth's unison. The stereo expander's have a file of their own (StereoExpanderTests.cpp), as the phaser's and the
+// flanger's do (MotionEffectTests.cpp).
 #include "TestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/saturation/Saturator.h"
+#include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
-#include "devices/utility/Utility.h"
 
 #include <cmath>
 #include <set>
@@ -136,8 +137,8 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
 {
     std::set<std::string_view> types;
 
-    for (const auto* info : { &devices::Delay::info, &devices::Saturator::info, &devices::FilterEffect::info, &devices::Utility::info,
-                              &devices::Multiband::info, &devices::Maximizer::info, &devices::Synth::info })
+    for (const auto* info : { &devices::Delay::info, &devices::Saturator::info, &devices::FilterEffect::info,
+                              &devices::StereoExpander::info, &devices::Multiband::info, &devices::Maximizer::info, &devices::Synth::info })
     {
         INFO (std::string (info->typeID));
         CHECK (devices::isValid (*info));
@@ -147,8 +148,8 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
     // The synth's unison plays one voice at first.
     CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].defaultValue == doctest::Approx (0.0f));
 
-    // The utility changes nothing until turned, and has no mix.
-    CHECK (devices::findParameter (devices::Utility::info, devices::mixParameterID) < 0);
+    // The stereo expander changes nothing until turned, and has no mix.
+    CHECK (devices::findParameter (devices::StereoExpander::info, devices::mixParameterID) < 0);
 }
 
 TEST_CASE ("The delay: echoes on the beat at the song's tempo, fewer each time, and bouncing in ping-pong")
@@ -346,68 +347,6 @@ TEST_CASE ("The filter's vowel, phaser and sample and hold: after the combs, eac
     const auto folded = play (filter, values, 24000, sine (2700.0, 0.25f));
     CHECK (getAmplitudeAt (folded.left, 12000, 24000, 700.0) > 0.1f);
     CHECK (filter.getTailSeconds() == doctest::Approx (0.0));
-}
-
-TEST_CASE ("The utility: gain, balance, width, bass in mono and polarity")
-{
-    auto values = getDefaults (devices::Utility::info);
-    devices::Utility utility;
-    utility.prepare (testRate, testBlockSize);
-    const auto apart = [] (int t)
-    {
-        const auto value = 0.5f * (float) std::sin (twoPi * 1000.0 * t / testRate);
-        return std::pair { value, 0.5f * value };
-    };
-
-    // As it was, at first.
-    const auto unchanged = play (utility, values, 4800, apart);
-    CHECK (getRms (unchanged.left, 2400, 4800) == doctest::Approx (0.5f / std::sqrt (2.0f)).epsilon (0.01));
-    CHECK (getRms (unchanged.right, 2400, 4800) == doctest::Approx (0.25f / std::sqrt (2.0f)).epsilon (0.01));
-
-    set (values, devices::Utility::info, "gain", 6.0f);
-    utility.reset();
-    const auto louder = play (utility, values, 4800, apart);
-    CHECK (getRms (louder.left, 2400, 4800) == doctest::Approx (0.5f / std::sqrt (2.0f) * 1.9953f).epsilon (0.01));
-
-    set (values, devices::Utility::info, "gain", 0.0f);
-    set (values, devices::Utility::info, "balance", -1.0f); // all the way left: the right silent
-    utility.reset();
-    const auto left = play (utility, values, 4800, apart);
-    CHECK (getRms (left.right, 2400, 4800) < 1.0e-4f);
-    CHECK (getRms (left.left, 2400, 4800) == doctest::Approx (0.5f / std::sqrt (2.0f)).epsilon (0.01));
-
-    set (values, devices::Utility::info, "balance", 0.0f);
-    set (values, devices::Utility::info, "width", 0.0f); // mono: both sides alike
-    utility.reset();
-    const auto mono = play (utility, values, 4800, apart);
-
-    for (size_t i = 2400; i < 4800; i += 97)
-        CHECK (mono.left[i] == doctest::Approx (mono.right[i]).epsilon (1.0e-4));
-
-    set (values, devices::Utility::info, "width", 1.0f);
-    set (values, devices::Utility::info, "invertLeft", 1.0f);
-    utility.reset();
-    const auto flipped = play (utility, values, 4800, apart);
-    CHECK (flipped.left[3000] == doctest::Approx (-unchanged.left[3000]).epsilon (1.0e-3));
-
-    // Bass in mono: a low tone out of phase cancels; a high one stays as it was.
-    set (values, devices::Utility::info, "invertLeft", 0.0f);
-    set (values, devices::Utility::info, "bassMono", 1.0f);
-    const auto opposite = [] (double frequency)
-    {
-        return [frequency] (int t)
-        {
-            const auto value = 0.5f * (float) std::sin (twoPi * frequency * t / testRate);
-            return std::pair { value, -value };
-        };
-    };
-
-    utility.reset();
-    const auto bass = play (utility, values, 48000, opposite (40.0));
-    utility.reset();
-    const auto treble = play (utility, values, 48000, opposite (4000.0));
-    CHECK (getRms (bass.left, 24000, 48000) < 0.03f);
-    CHECK (getRms (treble.left, 24000, 48000) > 0.3f);
 }
 
 TEST_CASE ("The multiband dynamics: a flat split, quiet sound brought up and loud sound turned down")

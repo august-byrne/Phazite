@@ -25,15 +25,35 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
 
     phazite::ui::ReverbEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    const auto knobs = phazite::test::findAll<phazite::ui::Knob> (editor);
-    REQUIRE (knobs.size() == Reverb::info.parameters.size());
+    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Reverb::info.parameters.size() - 1); // its mix is its header's
     phazite::test::checkChildrenApart (editor);
 
-    // A longer decay, as an undo step the model names, and the graph shows more time.
+    // A longer decay, as an undo step the model names, and the map shows more time.
     const auto before = editor.getShownSeconds();
-    knobs[Reverb::decay]->setValue (8.0, juce::sendNotificationSync);
+    auto* decay = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("decay"));
+    REQUIRE (decay != nullptr);
+    decay->setValue (8.0, juce::sendNotificationSync);
     editor.refresh();
     CHECK (plugin->getAutomatableParameterByID ("decay")->getCurrentValue() == doctest::Approx (8.0f));
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Decay"));
     CHECK (editor.getShownSeconds() > 3.0 * before);
+
+    // Dragging the gap at the tail's start to the right lengthens the pre-delay, as one undo step.
+    auto& map = editor.getGraph();
+    const auto gap = editor.getPredelayHandle().roundToInt();
+    phazite::test::Mouse mouse (map);
+    mouse.press (gap);
+    mouse.dragTo (gap + juce::Point<int> (10, 0));
+    mouse.dragTo (gap + juce::Point<int> (20, 0));
+    mouse.release();
+    CHECK (plugin->getAutomatableParameterByID ("predelay")->getCurrentValue() > 100.0f);
+    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Pre-Delay"));
+
+    // And its end to the left, a shorter decay.
+    mouse.pause();
+    const auto end = editor.getDecayHandle().roundToInt();
+    mouse.press (end);
+    mouse.dragTo (end - juce::Point<int> (40, 0));
+    mouse.release();
+    CHECK (plugin->getAutomatableParameterByID ("decay")->getCurrentValue() < 8.0f);
 }

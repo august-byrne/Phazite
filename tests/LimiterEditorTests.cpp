@@ -60,7 +60,7 @@ TEST_CASE ("A value meter jumps up and falls back smoothly, and screen readers r
     CHECK (level.getValueText() == juce::String ("0.0 dB"));
 }
 
-TEST_CASE ("The limiter's editor shows its knobs and meters, with the ceiling marked")
+TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the ceiling a line to drag")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     const auto plugin = edit->getPluginCache().createNewPlugin (Limiter::typeID, {});
@@ -76,19 +76,45 @@ TEST_CASE ("The limiter's editor shows its knobs and meters, with the ceiling ma
 
     phazite::ui::LimiterEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Limiter::info.parameters.size());
-    phazite::test::checkChildrenApart (editor);
 
-    // A full-scale sine pushed 12 dB comes in at +12 dB, over the meter's top, goes down 13 dB, and out at the ceiling.
+    // A knob for each parameter but its mix, which is in its header.
+    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Limiter::info.parameters.size() - 1);
+    CHECK (editor.findControl ("mix") == nullptr);
+    phazite::test::checkChildrenApart (editor);
+    phazite::test::checkChildrenApart (editor.getDisplay());
+
+    // A full-scale sine pushed 12 dB comes in at +12 dB, over the meter's top, goes down 13 dB, and out at the ceiling; the
+    // history shows how far it went down.
     playLoud (*limiter, 48000);
     editor.refresh();
-    CHECK (editor.getInputMeter().getValue() == doctest::Approx (0.0f));
-    CHECK (editor.getReductionMeter().getValue() == doctest::Approx (13.0f).epsilon (0.03));
-    CHECK (editor.getOutputMeter().getValue() == doctest::Approx (-1.0f).epsilon (0.01));
+    const auto& display = editor.getDisplay();
+    CHECK (display.getInputMeter().getValue() == doctest::Approx (0.0f));
+    CHECK (display.getReductionMeter().getValue() == doctest::Approx (13.0f).epsilon (0.03));
+    CHECK (display.getOutputMeter().getValue() == doctest::Approx (-1.0f).epsilon (0.01));
+    CHECK (editor.getDisplay().getHistory().getNewestReduction() == doctest::Approx (13.0f).epsilon (0.03));
 
     // Turning a knob is an undo step the model names.
-    auto* ceilingKnob = phazite::test::findAll<phazite::ui::Knob> (editor)[Limiter::ceiling];
+    auto* ceilingKnob = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("ceiling"));
+    REQUIRE (ceilingKnob != nullptr);
     ceilingKnob->setValue (-3.0, juce::sendNotificationSync);
     CHECK (plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue() == doctest::Approx (-3.0f));
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Ceiling"));
+
+    // Dragging the ceiling's line down in the history lowers it, as one undo step; a double-click puts it back.
+    auto& history = editor.getDisplay().getHistory();
+    const auto y = juce::roundToInt (history.getYForLevel (-3.0f));
+    phazite::test::Mouse mouse (history);
+    mouse.press ({ 40, y });
+    mouse.dragTo ({ 40, y + 10 });
+    mouse.dragTo ({ 40, y + 20 });
+    mouse.release();
+    const auto lowered = plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue();
+    CHECK (lowered < -4.0f);
+    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Ceiling"));
+    phazite::undo (*edit);
+    CHECK (plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue() == doctest::Approx (-3.0f));
+
+    mouse.pause();
+    mouse.doubleClick ({ 40, y });
+    CHECK (plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue() == doctest::Approx (-1.0f));
 }

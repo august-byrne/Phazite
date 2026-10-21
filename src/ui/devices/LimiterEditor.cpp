@@ -9,48 +9,74 @@ namespace
 {
     using devices::Limiter;
 
-    constexpr int refreshRateHz = 30;
-    constexpr int meterHeight = 3 * knobSize; // tall enough to read, beside the knobs
+    constexpr float historyLowest = -48.0f, historyReduction = 24.0f;
+    constexpr int historyTicks = 4 * DeviceTicker::ticksPerSecond; // four seconds
 
     const auto labelHeight = juce::roundToInt (TextSize::small) + Space::xs;
-
-    juce::String toString (std::string_view text)
-    {
-        return juce::String (text.data(), text.size());
-    }
-
-    juce::Label& setUp (juce::Label& label)
-    {
-        label.setJustificationType (juce::Justification::centred);
-        label.setFont (juce::FontOptions (TextSize::small));
-        return label;
-    }
 } // namespace
 
-LimiterEditor::LimiterEditor (const DeviceHandle& handle)
-    : device (handle),
-      ceiling (device.getParameter (Limiter::info.parameters[Limiter::ceiling].id))
+LimiterDisplay::LimiterDisplay (ParameterHandle c)
+    : ceiling (std::move (c)),
+      history ("Limiter history", historyLowest, historyReduction, historyTicks)
 {
+    setTitle ("Limiter");
+    history.setLine (&ceiling, "Ceiling");
+    addAndMakeVisible (history);
+
     // Short names under the meters, whose titles say them in full.
     const std::pair<ValueMeter*, const char*> meters[] = { { &inputMeter, "In" }, { &reductionMeter, "GR" }, { &outputMeter, "Out" } };
 
     for (const auto& [meter, name] : meters)
     {
         addAndMakeVisible (meter);
-        addAndMakeVisible (setUp (*meterNames.add (new juce::Label ({}, name))));
+        auto* label = meterNames.add (new juce::Label ({}, name));
+        label->setJustificationType (juce::Justification::centred);
+        label->setFont (juce::FontOptions (TextSize::small));
+        addAndMakeVisible (label);
     }
+}
 
-    for (const auto& parameter : Limiter::info.parameters)
+void LimiterDisplay::show (float input, float reduction, float output)
+{
+    inputMeter.update (input);
+    reductionMeter.update (reduction);
+    outputMeter.update (output);
+
+    const auto mark = ceiling.isValid() ? std::optional<float> (ceiling.getValue()) : std::nullopt;
+    inputMeter.setMark (mark);
+    outputMeter.setMark (mark);
+    history.push (input, output, reduction);
+}
+
+int LimiterDisplay::getMetersWidth()
+{
+    return 3 * (GraphTint::meterWidth + Space::s);
+}
+
+void LimiterDisplay::resized()
+{
+    auto area = getLocalBounds();
+    auto meters = area.removeFromRight (getMetersWidth());
+    area.removeFromRight (Space::xs);
+    history.setBounds (area);
+
+    ValueMeter* const shown[] = { &inputMeter, &reductionMeter, &outputMeter };
+
+    for (int i = 0; i < 3; ++i)
     {
-        const auto name = toString (parameter.name);
-        auto* knob = knobs.add (new Knob (name, parameter.defaultValue));
-        showAsParameter (*knob, parameter);
-        attachments.add (new ParameterAttachment (*knob))->setParameter (device.getParameter (parameter.id));
-        addAndMakeVisible (knob);
-        addAndMakeVisible (setUp (*names.add (new juce::Label ({}, name))));
-        addAndMakeVisible (setUp (*texts.add (new juce::Label())));
-        texts.getLast()->setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+        auto column = meters.removeFromLeft (GraphTint::meterWidth + Space::s);
+        meterNames[i]->setBounds (column.removeFromBottom (labelHeight));
+        shown[i]->setBounds (column.withSizeKeepingCentre (GraphTint::meterWidth, column.getHeight()));
     }
+}
+
+//==============================================================================
+LimiterEditor::LimiterEditor (const DeviceHandle& handle)
+    : DeviceEditorBase (handle),
+      DeviceTicker::Display (static_cast<juce::Component&> (*this))
+{
+    auto& shown = keep (std::make_unique<LimiterDisplay> (device.getParameter (Limiter::info.parameters[Limiter::ceiling].id)));
+    display = &shown;
 
     // The meters' first readings would show what played before the editor opened.
     if (auto* limiter = device.getProcessor<Limiter>())
@@ -60,66 +86,16 @@ LimiterEditor::LimiterEditor (const DeviceHandle& handle)
         limiter->getOutputMeter().take();
     }
 
-    const auto meterWidth = 3 * (GraphTint::meterWidth + Space::l);
-    setSize (2 * Space::l + meterWidth + Space::xl + knobs.size() * (knobSize + Space::l), 2 * Space::l + meterHeight + labelHeight);
-    refresh();
-    startTimerHz (refreshRateHz);
+    const auto gain = makeControlsPart ("Gain", { "gain" }, 1, ParameterControls::Size::large);
+    const auto limit = makeControlsPart ("Limit", { "ceiling", "release" }, 2);
+    setParts ({ { { "History", &shown, 280 + LimiterDisplay::getMetersWidth(), 200, 96, true } }, { gain, limit } });
 }
 
-LimiterEditor::~LimiterEditor()
-{
-    stopTimer();
-}
+LimiterEditor::~LimiterEditor() = default;
 
 void LimiterEditor::refresh()
 {
-    for (int i = 0; i < knobs.size(); ++i)
-    {
-        attachments[i]->update();
-        texts[i]->setText (knobs[i]->getTextFromValue (knobs[i]->getValue()), juce::dontSendNotification);
-    }
-
     if (auto* limiter = device.getProcessor<Limiter>())
-    {
-        inputMeter.update (limiter->getInputMeter().take());
-        reductionMeter.update (limiter->getReductionMeter().take());
-        outputMeter.update (limiter->getOutputMeter().take());
-    }
-
-    const auto mark = ceiling.isValid() ? std::optional<float> (ceiling.getValue()) : std::nullopt;
-    inputMeter.setMark (mark);
-    outputMeter.setMark (mark);
-}
-
-void LimiterEditor::paint (juce::Graphics& g)
-{
-    g.fillAll (getPalette (*this).surface);
-}
-
-void LimiterEditor::resized()
-{
-    auto area = getLocalBounds().reduced (Space::l);
-
-    // The meters side by side, each with its name under it, then the knobs in a row, centred beside them.
-    auto meters = area.removeFromLeft (3 * (GraphTint::meterWidth + Space::l));
-    ValueMeter* const shown[] = { &inputMeter, &reductionMeter, &outputMeter };
-
-    for (int i = 0; i < 3; ++i)
-    {
-        auto column = meters.removeFromLeft (GraphTint::meterWidth + Space::l);
-        meterNames[i]->setBounds (column.removeFromBottom (labelHeight));
-        shown[i]->setBounds (column.withSizeKeepingCentre (GraphTint::meterWidth, column.getHeight()));
-    }
-
-    area.removeFromLeft (Space::xl);
-    auto row = area.withSizeKeepingCentre (area.getWidth(), knobSize + 2 * labelHeight);
-
-    for (int i = 0; i < knobs.size(); ++i)
-    {
-        auto cell = row.removeFromLeft (knobSize + Space::l);
-        knobs[i]->setBounds (cell.removeFromTop (knobSize).withSizeKeepingCentre (knobSize, knobSize));
-        names[i]->setBounds (cell.removeFromTop (labelHeight));
-        texts[i]->setBounds (cell.removeFromTop (labelHeight));
-    }
+        display->show (limiter->getInputMeter().take(), limiter->getReductionMeter().take(), limiter->getOutputMeter().take());
 }
 } // namespace phazite::ui

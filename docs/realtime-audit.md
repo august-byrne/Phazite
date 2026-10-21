@@ -50,7 +50,8 @@ The first column covers the warm-up after playback starts (about 0.5 s); the sec
 | MIDI into Phazite's synth, notes overlapping, with noise and its LFO | 24 allocations (Tracktion's MIDI message arrays, used for the first time as Tracktion passes them between its nodes) | 0 |
 | Phazite's synth with seven unison voices, spread wide, playing chords a sixteenth apart (step 2.10) | about 22 allocations (the same) | 0 |
 | Phazite's wavetable synth with eight unison voices and two oscillators warped (sync and FM), an envelope sweeping each note's table and an LFO the other's, playing chords a sixteenth apart (step 2.13) | about 25 allocations (the same) | 0 |
-| Phazite's filter, saturator, multiband, delay, utility and maximizer in a row on a tone, the filter swept by a lane (step 2.10) | 2 allocations | 0 |
+| Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and maximizer in a row on a tone, the filter swept by a lane (step 2.10; the phaser, the flanger and the stereo expander since step 2.17) | 3 allocations | 0 |
+| Phazite's EQ, filter, saturator, compressor, multiband, delay, reverb, phaser and maximizer in a row on a tone, every one's editor's displays listening to what goes in and out of it (step 2.17) | 3 allocations | 0 |
 | Phazite's synth's Comb +, swept by its filter envelope, playing chords a sixteenth apart, and its filter's Comb - on a tone, swept by a lane (step 2.14) | about 27 allocations (Tracktion's MIDI message arrays, as above) | 0 |
 | Phazite's wavetable synth's Comb +, swept by an envelope at each note, playing chords a sixteenth apart (step 2.14) | about 24 allocations (the same) | 0 |
 | Phazite's synth's Vowel, swept by its filter envelope, playing chords a sixteenth apart, and its filter's Phaser on a tone, swept by a lane (step 2.15) | about 27 allocations (the same) | 0 |

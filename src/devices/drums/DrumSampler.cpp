@@ -208,7 +208,10 @@ std::string_view DrumSampler::getKitName (int pad)
 DrumSampler::DrumSampler()
 {
     for (int pad = 0; pad < numPads; ++pad)
+    {
         sounds[(size_t) pad].store (&getKitSound (pad), std::memory_order_release);
+        playheads[(size_t) pad].set (-1.0f);
+    }
 }
 
 DrumSampler::~DrumSampler() = default;
@@ -413,6 +416,20 @@ void DrumSampler::process (const ProcessContext& block)
     if (! juce::exactlyEqual (output, 1.0f))
         for (int channel = 0; channel < std::min (block.numChannels, 2); ++channel)
             juce::FloatVectorOperations::multiply (block.channels[channel], output, block.numSamples);
+
+    // Where each pad's newest hit is, for the editor.
+    std::array<const Voice*, numPads> newest {};
+
+    for (const auto& voice : voices)
+        if (voice.pad >= 0 && (newest[(size_t) voice.pad] == nullptr || voice.started > newest[(size_t) voice.pad]->started))
+            newest[(size_t) voice.pad] = &voice;
+
+    for (size_t pad = 0; pad < numPads; ++pad)
+    {
+        const auto* voice = newest[pad];
+        const auto frames = voice != nullptr ? voice->sound->audio.getNumSamples() : 0;
+        playheads[pad].set (frames > 0 ? (float) (voice->position / frames) : -1.0f);
+    }
 
     blocksDone.fetch_add (1, std::memory_order_release);
 }

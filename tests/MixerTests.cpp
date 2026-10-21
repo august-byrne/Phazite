@@ -265,7 +265,7 @@ TEST_CASE ("The device list offers Phazite's own devices, instruments first, and
     CHECK (builtIn
            == juce::StringArray { "phaziteSynth", "phaziteWavetable", "phaziteDrums", "phaziteEq", "phaziteFilter", "phaziteCompressor",
                                   "phaziteMultiband", "phaziteLimiter", "phaziteMaximizer", "phaziteSaturator", "phaziteDelay",
-                                  "phaziteReverb", "phaziteUtility" });
+                                  "phaziteReverb", "phazitePhaser", "phaziteFlanger", "phaziteStereoExpander" });
 }
 
 TEST_CASE ("Phazite's effects have a mix of their own, and name their key controls")

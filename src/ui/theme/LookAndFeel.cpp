@@ -52,7 +52,8 @@ void LookAndFeel::setTheme (ThemeName newTheme)
     setColour (juce::TextEditor::highlightColourId, p.accent.withAlpha (0.4f));
     setColour (juce::TextEditor::outlineColourId, p.border);
     setColour (juce::TextEditor::focusedOutlineColourId, p.accent);
-    setColour (juce::Slider::textBoxTextColourId, p.text); // number fields' text (ui::NumberField)
+    setColour (juce::Slider::rotarySliderFillColourId, p.accent); // a knob's arc, unless its device's editor gives its colour
+    setColour (juce::Slider::textBoxTextColourId, p.text);        // number fields' text (ui::NumberField)
     setColour (juce::Slider::textBoxBackgroundColourId, p.surfaceRaised);
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxHighlightColourId, p.accent.withAlpha (0.4f));
@@ -140,7 +141,10 @@ void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, 
     {
         const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
         const auto origin = bipolar ? startAngle + (float) slider.valueToProportionOfLength (0.0) * (endAngle - startAngle) : startAngle;
-        strokeArc (juce::jmin (origin, angle), juce::jmax (origin, angle), p.accent);
+
+        // In the colour of the device whose editor holds it (ui/devices/DeviceTint.h), else the accent.
+        strokeArc (juce::jmin (origin, angle), juce::jmax (origin, angle),
+                   slider.findColour (juce::Slider::rotarySliderFillColourId, true));
     }
 
     g.setColour (slider.isEnabled() ? p.text : p.textMuted);

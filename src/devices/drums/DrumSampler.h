@@ -8,6 +8,7 @@
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
+#include "devices/core/LiveValue.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
 
@@ -69,6 +70,12 @@ public:
     // How hard each pad was hit since the editor last looked, from 0 to 1 (devices/core/MeterValue.h).
     MeterValue& getPadMeter (int pad) noexcept { return padMeters[(size_t) pad]; }
 
+    // Message thread: the sound a pad plays now, its own or the kit's, for drawing it.
+    const Sound& getPadSound (int pad) const noexcept { return *sounds[(size_t) pad].load (std::memory_order_acquire); }
+
+    // Where each pad's newest hit is in its sound, from 0 to 1, or below 0 while it plays none (devices/core/LiveValue.h).
+    const LiveValue& getPlayhead (int pad) const noexcept { return playheads[(size_t) pad]; }
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
@@ -107,6 +114,7 @@ private:
     std::array<std::pair<int, float>, auditionSlots> auditions {};
 
     std::array<MeterValue, numPads> padMeters;
+    std::array<LiveValue, numPads> playheads;
 
     void hit (int pad, float velocity, std::span<const float> parameters);
     void render (float* left, float* right, int numSamples);

@@ -14,6 +14,7 @@
 
 #include "Wavetable.h"
 #include "devices/core/DeviceInfo.h"
+#include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
@@ -218,6 +219,22 @@ public:
     // How many voices are sounding, for tests and meters. Any thread.
     int getActiveVoices() const noexcept { return activeVoices.load (std::memory_order_relaxed); }
 
+    // What its editor shows playing, once a block (devices/core/LiveValue.h): the newest note's three envelopes (from 0 to 1)
+    // and the cutoff it plays (in hertz; 0 while no note plays or the filter is off), and where each LFO is in its cycle (0 to
+    // 1; below 0 for one that starts with each note while none plays).
+    struct Shown
+    {
+        std::array<LiveValue, 3> envelopes;
+        LiveValue cutoff;
+        std::array<LiveValue, 2> lfoPhases;
+    };
+
+    const Shown& getShown() const noexcept { return shown; }
+
+    // The filter's response at a frequency, as a gain, for the parameters' values with its cutoff at a frequency: for its
+    // editor.
+    static double getFilterMagnitude (std::span<const float> parameters, double cutoffHertz, double frequency, double sampleRate);
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
@@ -264,6 +281,7 @@ private:
         float fade = 1.0f, fadeStep = 0.0f;          // fading out: taken for another note, or cut as playback stopped
         int age = 0;                                 // the samples since its note began (up to a limit)
         float subGain = 0.0f, noiseGain = 0.0f, gainLeft = 1.0f, gainRight = 1.0f, driveGain = 1.0f;
+        float cutoffNow = 0.0f; // its filter's frequency, as it was last set
     };
 
     struct Retired
@@ -301,6 +319,7 @@ private:
     std::array<std::atomic<float>, numOscillators> playedPositions;
     std::atomic<float> tailSeconds { 0.2f };
     std::atomic<int> activeVoices { 0 };
+    Shown shown;
 
     void handle (const NoteEvent&, std::span<const float> parameters);
     void startNote (int note, float velocity, std::span<const float> parameters);

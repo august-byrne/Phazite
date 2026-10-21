@@ -73,7 +73,8 @@ TEST_CASE ("The compressor's editor shows its knobs, and dragging across its cur
 
     phazite::ui::CompressorEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Compressor::info.parameters.size());
+    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Compressor::info.parameters.size() - 1); // its mix is its header's
+    CHECK (editor.findControl ("mix") == nullptr);
     phazite::test::checkChildrenApart (editor);
 
     // Twelve decibels to the right, from the default -18 dB.

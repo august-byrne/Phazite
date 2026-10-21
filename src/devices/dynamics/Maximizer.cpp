@@ -49,7 +49,7 @@ namespace
     constexpr std::string_view keyControls[] = { "gain", "ceiling" };
 
     // Each band's compressor: above the threshold, across a soft knee, at a ratio from 1:1 (no squeeze) to 10:1.
-    constexpr float threshold = -12.0f, knee = 6.0f, mostRatio = 10.0f;
+    constexpr float threshold = Maximizer::squeezeThreshold, knee = 6.0f, mostRatio = 10.0f;
     constexpr float attacks[] = { 0.01f, 0.005f, 0.002f }; // seconds: the low band slower, as its waves are longer
 
     constexpr double smoothingSeconds = 0.02;
@@ -136,6 +136,9 @@ void Maximizer::process (const ProcessContext& block)
         isFirstBlock = false;
     }
 
+    // For the editor: each band's loudest, and the most it was squeezed, this block.
+    std::array<float, numBands> loudest {}, mostReduced {};
+
     for (int i = 0; i < block.numSamples; ++i)
     {
         inGain += (targetIn - inGain) * smoothing;
@@ -160,6 +163,8 @@ void Maximizer::process (const ProcessContext& block)
             levels[band] += (targetLevels[band] - levels[band]) * smoothing;
             const auto reduced = reductions[band].process (getReduction (squeezes[band], dsp::gainToDecibels (peaks[band])));
             gains[band] = dsp::decibelsToGain (-reduced) * levels[band];
+            loudest[band] = std::max (loudest[band], peaks[band]);
+            mostReduced[band] = std::max (mostReduced[band], reduced);
         }
 
         for (int channel = 0; channel < numChannels; ++channel)
@@ -167,6 +172,12 @@ void Maximizer::process (const ProcessContext& block)
             const auto& split = bands[(size_t) channel];
             block.channels[channel][i] = split[0] * gains[0] + split[1] * gains[1] + split[2] * gains[2];
         }
+    }
+
+    for (size_t band = 0; band < numBands; ++band)
+    {
+        bandLevels[band].raise (dsp::gainToDecibels (loudest[band]));
+        bandReductions[band].raise (mostReduced[band]);
     }
 
     // Then the limiter keeps it all under the ceiling.

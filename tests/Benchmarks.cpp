@@ -16,10 +16,12 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/motion/Flanger.h"
+#include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
+#include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
-#include "devices/utility/Utility.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LiveInput.h"
@@ -225,7 +227,11 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Saturator", maker<dev::Saturator>(), &dev::Saturator::info },
         { "Delay", maker<dev::Delay>(), &dev::Delay::info },
         { "Reverb", maker<dev::Reverb>(), &dev::Reverb::info },
-        { "Utility", maker<dev::Utility>(), &dev::Utility::info },
+        { "Stereo Expander, spreading", maker<dev::StereoExpander>(), &dev::StereoExpander::info, 0,
+          [] (std::vector<float>& v) { v[dev::StereoExpander::spread] = 1.0f; } },
+        { "Phaser, six notches", maker<dev::Phaser>(), &dev::Phaser::info, 0,
+          [] (std::vector<float>& v) { v[dev::Phaser::notches] = 5.0f; } },
+        { "Flanger", maker<dev::Flanger>(), &dev::Flanger::info },
         { "Reverb, silence in", maker<dev::Reverb>(), &dev::Reverb::info, 0, {}, true },
         { "Multiband, silence in", maker<dev::Multiband>(), &dev::Multiband::info, 0, {}, true },
     };

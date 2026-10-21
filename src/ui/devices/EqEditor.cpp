@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EqEditor.h"
+#include "DeviceTint.h"
 #include "devices/eq/Equalizer.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -17,17 +18,23 @@ namespace
     constexpr double analyzerFloor = -90.0; // the analyzer's bottom, in dB; its top is 0 dB
     constexpr float analyzerFall = 3.0f;    // dB per refresh: 90 dB a second
     constexpr double defaultSampleRate = 48000.0;
-    constexpr int refreshRateHz = 30;
-    constexpr int bandsGroup = 1; // the band buttons' radio group
+    constexpr int bandsGroup = 1;   // the band buttons' radio group
+    constexpr int graphWidth = 400; // as wide at any height
+    constexpr int bandRows = 2;     // of band buttons
 
     const auto labelHeight = juce::roundToInt (TextSize::small) + Space::xs;
+    const auto knobCell = compactKnobSize + Space::l;
 
-    // Under the graph: the band buttons, then the band's choices and switch, or a knob with its name and value, whichever
-    // is taller.
-    int getHeightBelowGraph()
+    // Beside the graph: the band buttons in two rows, the band's switch and shape, its slope, then its knobs and the output's.
+    int getControlsWidth()
     {
-        const auto controls = std::max (3 * controlHeight + 2 * Space::xs, knobSize + 2 * labelHeight);
-        return 2 * Space::s + controlHeight + controls;
+        return EqEditor::numKnobs * knobCell;
+    }
+
+    int getControlsHeight()
+    {
+        return bandRows * controlHeight + Space::xs + Space::s + 2 * controlHeight + Space::xs + Space::s + compactKnobSize
+               + 2 * labelHeight;
     }
 
     juce::String toString (std::string_view text)
@@ -137,7 +144,13 @@ public:
 
         played.lineTo (width, height);
         played.closeSubPath();
-        g.setColour (palette.accent.withAlpha (GraphTint::spectrumFill));
+
+        // What comes in, faint, then what it plays, in the EQ's colour.
+        const graph::FrequencyAxis frequencies { getLocalBounds().toFloat(), lowestFrequency, highestFrequency };
+        editor.input.paint (g, frequencies, { getLocalBounds().toFloat(), (float) analyzerFloor, 0.0f },
+                            palette.textMuted.withAlpha (GraphTint::spectrumFill),
+                            palette.textMuted.withAlpha (GraphTint::spectrumLine * 0.5f));
+        g.setColour (getDeviceTint (*this).withAlpha (GraphTint::spectrumFill * 1.5f));
         g.fillPath (played);
 
         // The selected band's own curve, filled to 0 dB, and the curve of every band together.
@@ -348,7 +361,8 @@ private:
 
 //==============================================================================
 EqEditor::EqEditor (const DeviceHandle& handle)
-    : device (handle),
+    : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+      device (handle),
       pulled (8192)
 {
     for (const auto& parameter : Eq::info.parameters)
@@ -376,39 +390,38 @@ EqEditor::EqEditor (const DeviceHandle& handle)
     typeBox.setTitle ("Band Shape");
     slopeBox.setTitle ("Slope");
 
-    for (auto* control : std::initializer_list<juce::Component*> { &onButton, &typeBox, &slopeBox, &frequencyKnob, &gainKnob, &qKnob,
-                                                                   &mixKnob, &outputKnob })
+    for (auto* control :
+         std::initializer_list<juce::Component*> { &onButton, &typeBox, &slopeBox, &frequencyKnob, &gainKnob, &qKnob, &outputKnob })
         addAndMakeVisible (control);
 
     // Each knob's name, then what it is set to.
-    for (const auto* name : { "Frequency", "Gain", "Q", "Mix", "Output" })
+    for (const auto* name : { "Frequency", "Gain", "Q", "Output" })
         addLabel (name);
 
     for (int i = 0; i < numKnobs; ++i)
         addLabel ({}).setColour (juce::Label::textColourId, getPalette (*this).textMuted);
 
-    showAsParameter (mixKnob, getInfo (Eq::mixParameter));
-    mixAttachment.setParameter (device.getParameter (getInfo (Eq::mixParameter).id));
     showAsParameter (outputKnob, getInfo (Eq::outputParameter));
     outputAttachment.setParameter (device.getParameter (getInfo (Eq::outputParameter).id));
+    applyDeviceTint (*this, device);
 
     selectBand (selectedBand);
-    setSize (10 * (knobSize + Space::l), 2 * Space::l + GraphTint::height + getHeightBelowGraph());
+    setSize (2 * Space::s + graphWidth + Space::m + getControlsWidth(), 2 * Space::s + std::max (GraphTint::height, getControlsHeight()));
     refresh();
-    startTimerHz (refreshRateHz);
 }
 
 int EqEditor::getMinimumHeight() const
 {
-    return 2 * Space::l + GraphTint::minimumHeight + getHeightBelowGraph();
+    return 2 * Space::s + std::max (GraphTint::minimumHeight, getControlsHeight());
 }
 
 EqEditor::~EqEditor()
 {
-    stopTimer();
-
     if (auto* eq = device.getProcessor<Eq>())
         eq->getOutputTap().setListening (false);
+
+    if (auto* scope = device.getScope())
+        scope->setListening (false);
 }
 
 juce::Component& EqEditor::getGraph()
@@ -469,7 +482,6 @@ void EqEditor::refresh()
     frequencyAttachment.update();
     gainAttachment.update();
     qAttachment.update();
-    mixAttachment.update();
     outputAttachment.update();
 
     // A cut's slope matters, and a shelf's or bell's gain.
@@ -481,7 +493,7 @@ void EqEditor::refresh()
         bandButtons[band]->setAlpha (values[(size_t) indexOf (band, Eq::on)] > 0.5f ? 1.0f : GraphTint::partOff);
 
     // What each knob is set to, under its name (none for a knob that doesn't apply).
-    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &mixKnob, &outputKnob };
+    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &outputKnob };
 
     for (int i = 0; i < numKnobs; ++i)
         labels[i + numKnobs]->setText (knobs[i]->isEnabled() ? knobs[i]->getTextFromValue (knobs[i]->getValue()) : juce::String(),
@@ -499,6 +511,18 @@ void EqEditor::refresh()
         spectrum.update (analyzerFall);
     }
 
+    // And, fainter behind it, what comes in.
+    if (auto* scope = device.getScope())
+    {
+        scope->setListening (true);
+        input.setSampleRate (getSampleRate());
+
+        if (auto* tap = scope->getInput())
+            input.pull (*tap);
+
+        input.update();
+    }
+
     graph->repaint();
 }
 
@@ -509,43 +533,48 @@ void EqEditor::paint (juce::Graphics& g)
 
 void EqEditor::resized()
 {
-    // The graph shrinks when the editor is shorter than it makes itself, as a Devices view may be.
-    auto area = getLocalBounds().reduced (Space::l);
-    graph->setBounds (
-        area.removeFromTop (juce::jlimit (GraphTint::minimumHeight, GraphTint::height, area.getHeight() - getHeightBelowGraph())));
-    area.removeFromTop (Space::s);
+    // The graph on the left, as tall as the editor; the band's controls beside it.
+    auto area = getLocalBounds().reduced (Space::s);
+    graph->setBounds (area.removeFromLeft (area.getWidth() - getControlsWidth() - Space::m));
+    area.removeFromLeft (Space::m);
 
-    auto buttons = area.removeFromTop (controlHeight);
-    const auto buttonWidth = (buttons.getWidth() - (Eq::numBands - 1) * Space::xs) / Eq::numBands;
+    // The band buttons, in two rows.
+    const auto perRow = Eq::numBands / bandRows;
 
-    for (auto* button : bandButtons)
+    for (int row = 0; row < bandRows; ++row)
     {
-        button->setBounds (buttons.removeFromLeft (buttonWidth));
-        buttons.removeFromLeft (Space::xs);
+        auto buttons = area.removeFromTop (controlHeight);
+        const auto buttonWidth = (buttons.getWidth() - (perRow - 1) * Space::xs) / perRow;
+
+        for (int i = 0; i < perRow; ++i)
+        {
+            bandButtons[row * perRow + i]->setBounds (buttons.removeFromLeft (buttonWidth));
+            buttons.removeFromLeft (Space::xs);
+        }
+
+        if (row + 1 < bandRows)
+            area.removeFromTop (Space::xs);
     }
 
     area.removeFromTop (Space::s);
 
-    // The band's switch and shapes on the left, its knobs, and the output's knob on the right.
-    auto choices = area.removeFromLeft (2 * knobSize + Space::s);
-    onButton.setBounds (choices.removeFromTop (controlHeight));
-    choices.removeFromTop (Space::xs);
-    typeBox.setBounds (choices.removeFromTop (controlHeight));
-    choices.removeFromTop (Space::xs);
-    slopeBox.setBounds (choices.removeFromTop (controlHeight));
-    area.removeFromLeft (Space::l);
+    // The band's switch and shape, then its slope.
+    auto shapes = area.removeFromTop (controlHeight);
+    onButton.setBounds (shapes.removeFromLeft (knobCell));
+    typeBox.setBounds (shapes);
+    area.removeFromTop (Space::xs);
+    slopeBox.setBounds (area.removeFromTop (controlHeight).withTrimmedLeft (knobCell));
+    area.removeFromTop (Space::s);
 
-    const auto place = [this] (juce::Rectangle<int> cell, Knob& knob, int index)
+    // Its knobs, then the output's, each with its name and value.
+    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &outputKnob };
+
+    for (int i = 0; i < numKnobs; ++i)
     {
-        knob.setBounds (cell.removeFromTop (knobSize).withSizeKeepingCentre (knobSize, knobSize));
-        labels[index]->setBounds (cell.removeFromTop (labelHeight));
-        labels[index + numKnobs]->setBounds (cell.removeFromTop (labelHeight));
-    };
-
-    place (area.removeFromRight (knobSize + Space::l), outputKnob, 4);
-    place (area.removeFromRight (knobSize + Space::l), mixKnob, 3);
-    place (area.removeFromLeft (knobSize + Space::l), frequencyKnob, 0);
-    place (area.removeFromLeft (knobSize + Space::l), gainKnob, 1);
-    place (area.removeFromLeft (knobSize + Space::l), qKnob, 2);
+        auto cell = area.removeFromLeft (knobCell).withHeight (compactKnobSize + 2 * labelHeight);
+        knobs[i]->setBounds (cell.removeFromTop (compactKnobSize).withSizeKeepingCentre (compactKnobSize, compactKnobSize));
+        labels[i]->setBounds (cell.removeFromTop (labelHeight));
+        labels[i + numKnobs]->setBounds (cell.removeFromTop (labelHeight));
+    }
 }
 } // namespace phazite::ui

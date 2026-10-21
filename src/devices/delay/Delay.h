@@ -7,6 +7,7 @@
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
+#include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Filters.h"
@@ -40,6 +41,9 @@ public:
     // the note value's length, or the milliseconds; at most maximumSeconds.
     static double getDelaySeconds (std::span<const float> parameters, double tempo);
 
+    // The tempo it last played at, in beats per minute (devices/core/LiveValue.h), for its editor's note values.
+    const LiveValue& getShownTempo() const noexcept { return shownTempo; }
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
@@ -53,5 +57,6 @@ private:
     std::array<dsp::DelayLine, 2> lines;
     std::array<dsp::Filter, 2> lowCuts {}, highCuts {};
     std::atomic<double> tailSeconds { 2.0 };
+    LiveValue shownTempo { 120.0f };
 };
 } // namespace phazite::devices

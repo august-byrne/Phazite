@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceEditors.h"
 #include "CompressorEditor.h"
-#include "DevicePanel.h"
+#include "DelayEditor.h"
 #include "DrumSamplerEditor.h"
 #include "EqEditor.h"
+#include "FilterEditor.h"
+#include "FlangerEditor.h"
 #include "LimiterEditor.h"
+#include "MaximizerEditor.h"
+#include "MultibandEditor.h"
+#include "PhaserEditor.h"
 #include "ReverbEditor.h"
+#include "SaturatorEditor.h"
+#include "StereoExpanderEditor.h"
+#include "SynthEditor.h"
 #include "WavetableEditor.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
@@ -15,10 +23,12 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/motion/Flanger.h"
+#include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
+#include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
-#include "devices/utility/Utility.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -33,58 +43,6 @@ namespace
         return juce::String (text.data(), text.size());
     }
 
-    // The synth's controls, in the order the sound goes through them.
-    std::vector<std::vector<DevicePanel::Group>> getSynthLayout()
-    {
-        return { { { "Oscillators",
-                     { "osc1Wave", "osc2Wave", "osc2Pitch", "osc2Detune", "oscMix", "pulseWidth", "subLevel", "noiseLevel" } },
-                   { "Unison", { "unisonVoices", "unisonDetune", "unisonSpread" } } },
-                 { { "Filter", { "filterType", "cutoff", "resonance", "filterSlope", "filterEnvelope", "keyTracking" } },
-                   { "Filter Envelope", { "filterAttack", "filterDecay", "filterSustain", "filterRelease" } } },
-                 { { "Amp Envelope", { "attack", "decay", "sustain", "release" } },
-                   { "LFO", { "lfoShape", "lfoTarget", "lfoRate", "lfoDepth" } } },
-                 { { "Play", { "voiceMode", "glide", "bendRange", "velocity", "level" } } } };
-    }
-
-    // The effects of step 2.10, each a panel of its controls in the order the sound goes through them (their mix is in
-    // the Devices view's header).
-    std::vector<std::vector<DevicePanel::Group>> getDelayLayout()
-    {
-        return { { { "Time", { "sync", "time", "milliseconds" } },
-                   { "Echoes", { "feedback", "pingPong" } },
-                   { "Tone", { "lowCut", "highCut" } } } };
-    }
-
-    std::vector<std::vector<DevicePanel::Group>> getSaturatorLayout()
-    {
-        return { { { "Drive", { "drive", "shape" } }, { "Tone", { "tone" } }, { "Output", { "output", "autoGain" } } } };
-    }
-
-    std::vector<std::vector<DevicePanel::Group>> getFilterLayout()
-    {
-        return { { { "Filter", { "filterType", "cutoff", "resonance", "filterSlope" } }, { "Drive", { "drive" } } } };
-    }
-
-    std::vector<std::vector<DevicePanel::Group>> getUtilityLayout()
-    {
-        return { { { "Level", { "gain", "balance" } },
-                   { "Stereo", { "width", "bassMono", "bassMonoFrequency" } },
-                   { "Polarity", { "invertLeft", "invertRight" } } } };
-    }
-
-    std::vector<std::vector<DevicePanel::Group>> getMultibandLayout()
-    {
-        return { { { "Amount", { "depth", "time", "upward", "downward" } }, { "Gain", { "inputGain", "outputGain" } } },
-                 { { "Bands", { "lowFrequency", "highFrequency", "lowGain", "midGain", "highGain" } } } };
-    }
-
-    std::vector<std::vector<DevicePanel::Group>> getMaximizerLayout()
-    {
-        return { { { "Gain", { "gain" } },
-                   { "Squeeze", { "lowSqueeze", "midSqueeze", "highSqueeze" } },
-                   { "Limiter", { "ceiling", "release" } } },
-                 { { "Bands", { "lowFrequency", "highFrequency", "lowLevel", "midLevel", "highLevel" } } } };
-    }
 } // namespace
 
 std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
@@ -107,7 +65,7 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
         return std::make_unique<ReverbEditor> (device);
 
     if (info->typeID == devices::Synth::typeID)
-        return std::make_unique<DevicePanel> (device, getSynthLayout());
+        return std::make_unique<SynthEditor> (device);
 
     if (info->typeID == devices::DrumSampler::typeID)
         return std::make_unique<DrumSamplerEditor> (device);
@@ -116,22 +74,28 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
         return std::make_unique<WavetableEditor> (device);
 
     if (info->typeID == devices::Delay::typeID)
-        return std::make_unique<DevicePanel> (device, getDelayLayout());
+        return std::make_unique<DelayEditor> (device);
 
     if (info->typeID == devices::Saturator::typeID)
-        return std::make_unique<DevicePanel> (device, getSaturatorLayout());
+        return std::make_unique<SaturatorEditor> (device);
 
     if (info->typeID == devices::FilterEffect::typeID)
-        return std::make_unique<DevicePanel> (device, getFilterLayout());
+        return std::make_unique<FilterEditor> (device);
 
-    if (info->typeID == devices::Utility::typeID)
-        return std::make_unique<DevicePanel> (device, getUtilityLayout());
+    if (info->typeID == devices::StereoExpander::typeID)
+        return std::make_unique<StereoExpanderEditor> (device);
 
     if (info->typeID == devices::Multiband::typeID)
-        return std::make_unique<DevicePanel> (device, getMultibandLayout());
+        return std::make_unique<MultibandEditor> (device);
 
     if (info->typeID == devices::Maximizer::typeID)
-        return std::make_unique<DevicePanel> (device, getMaximizerLayout());
+        return std::make_unique<MaximizerEditor> (device);
+
+    if (info->typeID == devices::Phaser::typeID)
+        return std::make_unique<PhaserEditor> (device);
+
+    if (info->typeID == devices::Flanger::typeID)
+        return std::make_unique<FlangerEditor> (device);
 
     return std::make_unique<DeviceKnobs> (device);
 }

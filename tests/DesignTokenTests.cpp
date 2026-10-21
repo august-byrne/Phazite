@@ -42,6 +42,32 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
 
         // Text on a button that needs attention.
         CHECK (getContrastRatio (p.text, p.surfaceRaised.interpolatedWith (p.warning, attentionTint)) >= 4.5);
+
+        // A level brought up, in devices' graphs (on the background behind them).
+        CHECK (getContrastRatio (p.boost, p.background) >= 3.0);
+
+        // Each kind of device's colour, its knobs' arcs and graphs on panels and on graphs' backgrounds, and apart from the
+        // modulation colour that rings its knobs and from the others.
+        const DeviceFamily families[] = { DeviceFamily::dynamics, DeviceFamily::tone,   DeviceFamily::drive,
+                                          DeviceFamily::space,    DeviceFamily::motion, DeviceFamily::stereo };
+        const auto distance = [] (juce::Colour a, juce::Colour b)
+        { return std::abs (a.getRed() - b.getRed()) + std::abs (a.getGreen() - b.getGreen()) + std::abs (a.getBlue() - b.getBlue()); };
+
+        CHECK_FALSE (getFamilyColour (DeviceFamily::instrument, theme).has_value()); // the accent
+
+        for (const auto family : families)
+        {
+            CAPTURE ((int) family);
+            const auto colour = getFamilyColour (family, theme);
+            REQUIRE (colour.has_value());
+            CHECK (getContrastRatio (*colour, p.surface) >= 3.0);
+            CHECK (getContrastRatio (*colour, p.background) >= 3.0);
+            CHECK (distance (*colour, p.modulation) >= 60);
+
+            for (const auto other : families)
+                if (other != family)
+                    CHECK (distance (*colour, *getFamilyColour (other, theme)) >= 60);
+        }
     }
 }
 

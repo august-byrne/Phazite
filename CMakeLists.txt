@@ -77,6 +77,8 @@ add_library(phazite_core STATIC)
 target_sources(phazite_core PRIVATE
     src/devices/core/DeviceInfo.cpp
     src/devices/core/DeviceInfo.h
+    src/devices/core/DeviceScope.h
+    src/devices/core/LiveValue.h
     src/devices/core/MeterValue.h
     src/devices/core/Processor.h
     src/devices/core/SampleTap.h
@@ -98,8 +100,10 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/Math.h
     src/devices/dsp/MultimodeFilter.cpp
     src/devices/dsp/MultimodeFilter.h
+    src/devices/dsp/NoteValues.h
     src/devices/dsp/Oscillators.h
     src/devices/dsp/Random.h
+    src/devices/dsp/SyncedLfo.h
     src/devices/dynamics/Compressor.cpp
     src/devices/dynamics/Compressor.h
     src/devices/dynamics/Limiter.cpp
@@ -112,14 +116,18 @@ target_sources(phazite_core PRIVATE
     src/devices/eq/Equalizer.h
     src/devices/filter/FilterEffect.cpp
     src/devices/filter/FilterEffect.h
+    src/devices/motion/Flanger.cpp
+    src/devices/motion/Flanger.h
+    src/devices/motion/Phaser.cpp
+    src/devices/motion/Phaser.h
     src/devices/reverb/Reverb.cpp
     src/devices/reverb/Reverb.h
     src/devices/saturation/Saturator.cpp
     src/devices/saturation/Saturator.h
+    src/devices/stereo/StereoExpander.cpp
+    src/devices/stereo/StereoExpander.h
     src/devices/synth/Synth.cpp
     src/devices/synth/Synth.h
-    src/devices/utility/Utility.cpp
-    src/devices/utility/Utility.h
     src/devices/wavetable/FactoryWavetables.cpp
     src/devices/wavetable/FactoryWavetables.h
     src/devices/wavetable/Wavetable.cpp
@@ -455,22 +463,56 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/ValueText.h
     src/ui/devices/CompressorEditor.cpp
     src/ui/devices/CompressorEditor.h
+    src/ui/devices/DelayEditor.cpp
+    src/ui/devices/DelayEditor.h
+    src/ui/devices/DeviceEditorBase.cpp
+    src/ui/devices/DeviceEditorBase.h
     src/ui/devices/DeviceEditors.cpp
     src/ui/devices/DeviceEditors.h
+    src/ui/devices/DeviceGraph.cpp
+    src/ui/devices/DeviceGraph.h
+    src/ui/devices/DeviceLayout.cpp
+    src/ui/devices/DeviceLayout.h
     src/ui/devices/DeviceMenus.cpp
     src/ui/devices/DeviceMenus.h
-    src/ui/devices/DevicePanel.cpp
-    src/ui/devices/DevicePanel.h
+    src/ui/devices/DeviceTicker.cpp
+    src/ui/devices/DeviceTicker.h
+    src/ui/devices/DeviceTint.cpp
+    src/ui/devices/DeviceTint.h
     src/ui/devices/DrumSamplerEditor.cpp
     src/ui/devices/DrumSamplerEditor.h
     src/ui/devices/EqEditor.cpp
     src/ui/devices/EqEditor.h
+    src/ui/devices/FilterEditor.cpp
+    src/ui/devices/FilterEditor.h
+    src/ui/devices/FlangerEditor.cpp
+    src/ui/devices/FlangerEditor.h
+    src/ui/devices/LevelHistoryView.cpp
+    src/ui/devices/LevelHistoryView.h
     src/ui/devices/LimiterEditor.cpp
     src/ui/devices/LimiterEditor.h
+    src/ui/devices/MaximizerEditor.cpp
+    src/ui/devices/MaximizerEditor.h
     src/ui/devices/ModulatorEditor.cpp
     src/ui/devices/ModulatorEditor.h
+    src/ui/devices/MultibandEditor.cpp
+    src/ui/devices/MultibandEditor.h
+    src/ui/devices/ParameterControls.cpp
+    src/ui/devices/ParameterControls.h
+    src/ui/devices/PhaserEditor.cpp
+    src/ui/devices/PhaserEditor.h
     src/ui/devices/ReverbEditor.cpp
     src/ui/devices/ReverbEditor.h
+    src/ui/devices/SaturatorEditor.cpp
+    src/ui/devices/SaturatorEditor.h
+    src/ui/devices/StereoExpanderEditor.cpp
+    src/ui/devices/StereoExpanderEditor.h
+    src/ui/devices/SweepPicture.cpp
+    src/ui/devices/SweepPicture.h
+    src/ui/devices/SynthEditor.cpp
+    src/ui/devices/SynthEditor.h
+    src/ui/devices/SynthParts.cpp
+    src/ui/devices/SynthParts.h
     src/ui/devices/WavetableEditor.cpp
     src/ui/devices/WavetableEditor.h
     src/ui/input/CommandBridge.cpp
@@ -686,7 +728,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/DesignTokenTests.cpp
         tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp
-        tests/DevicePanelTests.cpp
         tests/DevicePluginTests.cpp
         tests/DeviceStatesTests.cpp
         tests/DevicesViewTests.cpp
@@ -694,8 +735,10 @@ if(PHAZITE_BUILD_TESTS)
         tests/DrumSamplerEditorTests.cpp
         tests/DrumSamplerTests.cpp
         tests/DspTests.cpp
+        tests/DynamicsEditorTests.cpp
         tests/EngineSetupTests.cpp
         tests/EffectDeviceTests.cpp
+        tests/EffectEditorTests.cpp
         tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
         tests/ExportTests.cpp
@@ -720,6 +763,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MixerModelTests.cpp
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
+        tests/MotionEffectTests.cpp
         tests/NewProjectTests.cpp
         tests/NoteIDTests.cpp
         tests/NoteTests.cpp
@@ -748,6 +792,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/SidechainTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
+        tests/StereoExpanderTests.cpp
+        tests/SynthEditorTests.cpp
         tests/SynthTests.cpp
         tests/TestDevices.h
         tests/TestPlugin.cpp

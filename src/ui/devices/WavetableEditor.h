@@ -1,27 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The wavetable synth's editor (devices/wavetable/WavetableSynth.h; roadmap step 2.13). Each oscillator shows its table as
-// its frames one behind another, as Serum and Ableton Live's Wavetable draw theirs, with the frame it plays in the accent
-// color as the newest note moves through the table; above, a button with the table's name opens a menu of the factory
-// tables and Load Wavetable File..., and a sound dropped on the drawing, from the browser or Explorer, becomes the table.
-// Dragging across the drawing moves the oscillator's position. Under each drawing are its oscillator's controls; below them
-// the rest of the synth's, in groups in the order the sound goes through them (DevicePanel.h), the modulation slots last.
+// The wavetable synth's editor (devices/wavetable/WavetableSynth.h; roadmap step 2.13), in three columns as the sound goes
+// through them. First its oscillators, each showing its table as its frames one behind another, as Serum and Ableton Live's
+// Wavetable draw theirs, the frame it plays lit as the newest note moves through the table; above, a button with the table's
+// name opens a menu of the factory tables and Load Wavetable File..., a sound dropped on the drawing (from the browser or
+// Explorer) becomes the table, and a drag across it moves the oscillator's position; then the sub and noise, and the
+// unison. Then its filter's response, which follows the newest note, with the cutoff a dot to drag. Last, a list down the
+// side of its envelopes and LFOs, each drawn with how far the newest note has got, the modulation matrix and how it plays.
+// In a short dock, the first two columns show one part at a time under tabs.
 #pragma once
 
-#include "DeviceEditors.h"
-#include "DevicePanel.h"
+#include "DeviceEditorBase.h"
+#include "SynthParts.h"
 #include "devices/wavetable/Wavetable.h"
-#include "model/devices/DeviceHandle.h"
-
-#include <juce_gui_basics/juce_gui_basics.h>
 
 #include <array>
 #include <memory>
 
 namespace phazite::ui
 {
-class WavetableEditor : public juce::Component,
-                        public FlexibleHeight,
-                        private juce::Timer
+class WavetableEditor : public DeviceEditorBase,
+                        private DeviceTicker::Display
 {
 public:
     static constexpr int numOscillators = 2;
@@ -40,31 +38,19 @@ public:
     // Puts a sound file on an oscillator as its table; returns whether it did.
     bool dropFile (int osc, const juce::File&);
 
-    // Shows what changed elsewhere (undo, the table, where it plays); a timer does it 15 times a second.
+    // Shows what changed elsewhere (undo, the table, where it plays); the ticker does it.
     void refresh();
-
-    DevicePanel& getOscillatorControls (int osc) const;
-    DevicePanel& getControls() const noexcept { return *controls; }
-
-    void paint (juce::Graphics&) override;
-    void resized() override;
-
-    int getMinimumHeight() const override;
-    int getWidthForHeight (int height) const override;
 
 private:
     class TableView;
+    class Oscillator;
+    class Matrix;
 
-    DeviceHandle device;
-    std::array<std::unique_ptr<TableView>, numOscillators> views;
-    std::array<std::unique_ptr<juce::TextButton>, numOscillators> tableButtons;
-    std::array<std::unique_ptr<DevicePanel>, numOscillators> oscillatorControls;
-    std::unique_ptr<DevicePanel> controls; // the sub, noise, unison, filter, envelopes, LFOs, voices and modulation
+    std::array<TableView*, numOscillators> views {};
+    std::array<juce::TextButton*, numOscillators> tableButtons {};
     std::unique_ptr<juce::FileChooser> chooser;
 
-    int getColumnWidth (int osc) const;
-    int getTopHeight (int drawingHeight) const; // the oscillators' columns
     void chooseFile (int osc);
-    void timerCallback() override;
+    void tick() override { refresh(); }
 };
 } // namespace phazite::ui

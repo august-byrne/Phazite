@@ -44,8 +44,8 @@ namespace
 
     // Each band is turned down hard above the downward threshold (10:1, across a soft knee) and brought up 3:1 below the
     // upward one, by at most maxBoost, the boost fading out toward silence so that noise isn't raised.
-    constexpr float downThreshold = -30.0f, downSlope = 0.9f, knee = 6.0f;
-    constexpr float upThreshold = -40.0f, upSlope = 2.0f / 3.0f, maxBoost = 18.0f;
+    constexpr float downThreshold = Multiband::downwardThreshold, downSlope = 0.9f, knee = 6.0f;
+    constexpr float upThreshold = Multiband::upwardThreshold, upSlope = 2.0f / 3.0f, maxBoost = 18.0f;
     constexpr float boostFadeTop = -70.0f, boostFadeBottom = -90.0f;
 
     // How fast each band reacts at the middle time, in seconds: the low band slower, as its waves are longer.
@@ -151,6 +151,9 @@ void Multiband::process (const ProcessContext& block)
         isFirstBlock = false;
     }
 
+    // For the editor: each band's loudest, and the most it was turned down and up, this block.
+    std::array<float, numBands> loudest {}, mostCut {}, mostLifted {};
+
     for (int i = 0; i < block.numSamples; ++i)
     {
         inGain += (targetIn - inGain) * smoothing;
@@ -177,6 +180,9 @@ void Multiband::process (const ProcessContext& block)
             bandGains[band] += (targetBands[band] - bandGains[band]) * smoothing;
             const auto reduction = changes[band].process (-getGainChange (values, dsp::gainToDecibels (peaks[band])));
             gains[band] = dsp::decibelsToGain (-reduction) * bandGains[band];
+            loudest[band] = std::max (loudest[band], peaks[band]);
+            mostCut[band] = std::max (mostCut[band], reduction);
+            mostLifted[band] = std::max (mostLifted[band], -reduction);
         }
 
         for (int channel = 0; channel < numChannels; ++channel)
@@ -184,6 +190,13 @@ void Multiband::process (const ProcessContext& block)
             const auto& split = bands[(size_t) channel];
             block.channels[channel][i] = (split[0] * gains[0] + split[1] * gains[1] + split[2] * gains[2]) * outGain;
         }
+    }
+
+    for (size_t band = 0; band < numBands; ++band)
+    {
+        bandLevels[band].raise (dsp::gainToDecibels (loudest[band]));
+        bandCuts[band].raise (mostCut[band]);
+        bandLifts[band].raise (mostLifted[band]);
     }
 }
 } // namespace phazite::devices

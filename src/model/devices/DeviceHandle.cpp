@@ -141,6 +141,14 @@ bool DeviceHandle::setWavetableFile (int osc, const juce::File& file) const
     return device != nullptr && phazite::setWavetableFile (*device, osc, file);
 }
 
+devices::DeviceScope* DeviceHandle::getScope() const
+{
+    if (auto* device = dynamic_cast<DevicePlugin*> (pluginOf (impl)))
+        return &device->getScope();
+
+    return nullptr;
+}
+
 devices::Processor* DeviceHandle::getProcessorBase() const
 {
     if (auto* device = dynamic_cast<DevicePlugin*> (pluginOf (impl)))

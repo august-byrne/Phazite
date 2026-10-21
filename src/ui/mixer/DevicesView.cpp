@@ -27,15 +27,11 @@ namespace
     constexpr int macroHeight = macroKnobSize + labelHeight;
 
     //==============================================================================
-    // A plug-in's key knobs: its mix first, as a strip's slot has it, then the knobs the model offers, each named; its own
-    // controls are in its window.
+    // A plug-in's key knobs, which the model offers, each named (its mix is in the header); its own controls are in its window.
     struct KeyKnobs : public juce::Component
     {
         KeyKnobs (ProjectContext& context, const DeviceSlot& device)
         {
-            if (device.hasMix)
-                addMixKnob (*this, knobs, mixAttachment, context, device);
-
             for (auto& control : getKeyControls (context, device.id, maxKeyKnobs))
                 addParameterKnob (*this, knobs, attachments, std::move (control));
 
@@ -56,9 +52,6 @@ namespace
         {
             for (auto* attachment : attachments)
                 attachment->update();
-
-            if (mixAttachment != nullptr)
-                mixAttachment->update();
         }
 
         void resized() override
@@ -75,7 +68,6 @@ namespace
         juce::OwnedArray<Knob> knobs;
         juce::OwnedArray<ParameterAttachment> attachments;
         juce::OwnedArray<juce::Label> names;
-        std::unique_ptr<MixAttachment> mixAttachment;
     };
 
     //==============================================================================
@@ -203,6 +195,10 @@ struct DevicesView::Panel : public juce::Component
                 select (mods);
         };
 
+        // Every effect's mix, in one place: its header, as FL Studio's mixer slots have it (a container's is beside its macros).
+        if (device.hasMix && ! device.isContainer)
+            addMixKnob (*this, mixKnob, mixAttachment, view.context, device);
+
         if (device.opensWindow)
         {
             windowButton = std::make_unique<IconButton> ("Open its window", Icon::detach);
@@ -292,6 +288,9 @@ struct DevicesView::Panel : public juce::Component
 
     void updateValues()
     {
+        if (mixAttachment != nullptr)
+            mixAttachment->update();
+
         if (auto* knobs = dynamic_cast<KeyKnobs*> (body.get()))
             knobs->updateValues();
         else if (auto* containerBody = dynamic_cast<ContainerBody*> (body.get()))
@@ -357,6 +356,9 @@ struct DevicesView::Panel : public juce::Component
         if (windowButton != nullptr)
             windowButton->setBounds (header.removeFromRight (windowButtonWidth));
 
+        if (! mixKnob.isEmpty())
+            mixKnob.getFirst()->setBounds (header.removeFromRight (header.getHeight()));
+
         nameButton.setBounds (header);
         bodyView.setBounds (area);
 
@@ -370,6 +372,8 @@ struct DevicesView::Panel : public juce::Component
     DeviceSlot shown;
     juce::TextButton power;
     MenuButton nameButton;
+    juce::OwnedArray<Knob> mixKnob; // an effect's
+    std::unique_ptr<MixAttachment> mixAttachment;
     std::unique_ptr<IconButton> windowButton; // a plug-in's
     std::unique_ptr<juce::Component> body;
     juce::Viewport bodyView;

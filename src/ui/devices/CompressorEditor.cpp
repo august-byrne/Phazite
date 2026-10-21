@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "CompressorEditor.h"
+#include "DeviceTint.h"
 #include "devices/dynamics/Compressor.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -12,25 +13,12 @@ namespace
     constexpr float lowestLevel = -60.0f; // the graph's levels, in and out, go from here to 0 dB
     constexpr float meterRange = 24.0f;   // the meter shows the sound turned down by up to this many dB
     constexpr float meterFall = 0.5f;     // dB per refresh: 15 dB a second
-    constexpr int refreshRateHz = 30;
-    constexpr int columns = 4; // of knobs
 
     const auto labelHeight = juce::roundToInt (TextSize::small) + Space::xs;
-
-    juce::String toString (std::string_view text)
-    {
-        return juce::String (text.data(), text.size());
-    }
 
     const devices::ParameterInfo& getInfo (int index)
     {
         return Compressor::info.parameters[(size_t) index];
-    }
-
-    // The name under a knob: the low cut's is short, as the sidechain's row below names it.
-    juce::String getShortName (const devices::ParameterInfo& parameter)
-    {
-        return &parameter == &getInfo (Compressor::sidechainLowCut) ? juce::String ("Low Cut") : toString (parameter.name);
     }
 } // namespace
 
@@ -97,7 +85,7 @@ public:
         {
             const auto in = std::min (editor.shownLevel, 0.0f);
             const auto dot = getPosition (in, juce::jlimit (lowestLevel, 0.0f, outputFor (in)));
-            g.setColour (palette.accent);
+            g.setColour (getDeviceTint (*this));
             g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (dot));
         }
 
@@ -146,7 +134,7 @@ private:
         // Level in equals level out, and the threshold.
         g.setColour (palette.text.withAlpha (GraphTint::zeroLine));
         g.drawLine ({ getPosition (lowestLevel, lowestLevel), getPosition (0.0f, 0.0f) });
-        g.setColour (palette.accent.withAlpha (GraphTint::marker));
+        g.setColour (getDeviceTint (*this).withAlpha (GraphTint::marker));
         g.drawVerticalLine (juce::roundToInt (getPosition (editor.values[Compressor::threshold], 0.0f).x), area.getY(), area.getBottom());
     }
 
@@ -236,39 +224,50 @@ private:
 };
 
 //==============================================================================
+// The curve, then the history beside it.
+class CompressorEditor::Activity : public juce::Component
+{
+public:
+    explicit Activity (CompressorEditor& editor)
+        : graph (editor),
+          history ("Compressor history", lowestLevel, meterRange, 4 * DeviceTicker::ticksPerSecond),
+          threshold (editor.device.getParameter (getInfo (Compressor::threshold).id))
+    {
+        setTitle ("Activity");
+        history.setLine (&threshold, "Threshold");
+        addAndMakeVisible (graph);
+        addAndMakeVisible (history);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        graph.setBounds (area.removeFromLeft (std::min (area.getWidth() / 2, area.getHeight() + Space::s + GraphTint::meterWidth)));
+        area.removeFromLeft (Space::s);
+        history.setBounds (area);
+    }
+
+    Graph graph;
+    LevelHistoryView history;
+    ParameterHandle threshold; // the history's line
+};
+
+//==============================================================================
 CompressorEditor::CompressorEditor (const DeviceHandle& handle)
-    : device (handle),
+    : DeviceEditorBase (handle),
+      DeviceTicker::Display (static_cast<juce::Component&> (*this)),
       shownLevel (lowestLevel)
 {
-    graph = std::make_unique<Graph> (*this);
-    addAndMakeVisible (*graph);
-
     for (const auto& parameter : Compressor::info.parameters)
     {
         parameters.push_back (device.getParameter (parameter.id));
         values.push_back (parameter.defaultValue);
-
-        const auto name = toString (parameter.name);
-        auto* knob = knobs.add (new Knob (name, parameter.defaultValue));
-        showAsParameter (*knob, parameter);
-        attachments.add (new ParameterAttachment (*knob))->setParameter (device.getParameter (parameter.id));
-        addAndMakeVisible (knob);
-
-        for (auto* label : { names.add (new juce::Label ({}, getShortName (parameter))), texts.add (new juce::Label()) })
-        {
-            label->setJustificationType (juce::Justification::centred);
-            label->setFont (juce::FontOptions (TextSize::small));
-            addAndMakeVisible (label);
-        }
-
-        texts.getLast()->setColour (juce::Label::textColourId, getPalette (*this).textMuted);
     }
 
-    sourceBox = std::make_unique<SourceBox> (*this);
-    sourceLabel.setText ("Sidechain", juce::dontSendNotification);
-    sourceLabel.setFont (juce::FontOptions (TextSize::small));
-    sourceLabel.attachToComponent (sourceBox.get(), true);
-    addAndMakeVisible (*sourceBox);
+    auto& shownActivity = keep (std::make_unique<Activity> (*this));
+    activity = &shownActivity;
+    auto& box = keep (std::make_unique<SourceBox> (*this));
+    sourceBox = &box;
 
     // The meters' first readings would show what played before the editor opened.
     if (auto* compressor = device.getProcessor<Compressor>())
@@ -277,22 +276,31 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle)
         compressor->getReductionMeter().take();
     }
 
-    const auto knobCell = knobSize + 2 * labelHeight;
-    const auto controls = 2 * knobCell + Space::m + controlHeight;
-    setSize (2 * Space::l + controls + Space::s + GraphTint::meterWidth + Space::xl + columns * (knobSize + Space::l),
-             2 * Space::l + controls);
-    refresh();
-    startTimerHz (refreshRateHz);
+    const auto main = makeControlsPart ("Squeeze", { "threshold", "ratio" }, 2, ParameterControls::Size::large);
+    const auto timing = makeControlsPart ("Timing", { "attack", "release" }, 2);
+    const auto shape = makeControlsPart ("Shape", { "knee", "makeup" }, 2);
+    const auto cellWidth = ParameterControls::getCellWidth (ParameterControls::Size::compact);
+    const auto key = makeControlsPart ("Key", { "sidechainLowCut" }, 1, ParameterControls::Size::compact, { "Low Cut" });
+
+    setParts ({ { { "Activity", &shownActivity, 340, 196, 110, true } },
+                { main, timing },
+                { shape, { "Sidechain", &box, 2 * cellWidth, controlHeight, controlHeight }, key } });
 }
 
 CompressorEditor::~CompressorEditor()
 {
-    stopTimer();
+    if (auto* scope = device.getScope())
+        scope->setListening (false);
 }
 
 juce::Component& CompressorEditor::getGraph()
 {
-    return *graph;
+    return activity->graph;
+}
+
+LevelHistoryView& CompressorEditor::getHistory()
+{
+    return activity->history;
 }
 
 juce::ComboBox& CompressorEditor::getSidechainBox()
@@ -302,7 +310,7 @@ juce::ComboBox& CompressorEditor::getSidechainBox()
 
 juce::Point<float> CompressorEditor::getGraphPosition (float inputDecibels, float outputDecibels) const
 {
-    return graph->getPosition (inputDecibels, outputDecibels);
+    return activity->graph.getPosition (inputDecibels, outputDecibels);
 }
 
 void CompressorEditor::refresh()
@@ -311,47 +319,25 @@ void CompressorEditor::refresh()
         if (parameters[i].isValid())
             values[i] = parameters[i].getValue();
 
-    for (int i = 0; i < knobs.size(); ++i)
-    {
-        attachments[i]->update();
-        texts[i]->setText (knobs[i]->getTextFromValue (knobs[i]->getValue()), juce::dontSendNotification);
-    }
-
-    // The meters jump up and fall back smoothly.
+    // The meters jump up and fall back smoothly; the history takes each reading as it comes, with what goes out.
     if (auto* compressor = device.getProcessor<Compressor>())
     {
-        shownLevel = std::max (compressor->getLevelMeter().take(), shownLevel - meterFall);
-        shownReduction = std::max (compressor->getReductionMeter().take(), shownReduction - meterFall);
+        const auto level = compressor->getLevelMeter().take(), reduction = compressor->getReductionMeter().take();
+        shownLevel = std::max (level, shownLevel - meterFall);
+        shownReduction = std::max (reduction, shownReduction - meterFall);
+
+        auto output = devices::DeviceScope::silentDecibels;
+
+        if (auto* scope = device.getScope())
+        {
+            scope->setListening (true);
+            output = scope->getOutputPeak().take();
+        }
+
+        activity->history.push (level, output, reduction);
     }
 
     sourceBox->update();
-    graph->repaint();
-}
-
-void CompressorEditor::paint (juce::Graphics& g)
-{
-    g.fillAll (getPalette (*this).surface);
-}
-
-void CompressorEditor::resized()
-{
-    auto area = getLocalBounds().reduced (Space::l);
-    graph->setBounds (area.removeFromLeft (area.getHeight() + Space::s + GraphTint::meterWidth));
-    area.removeFromLeft (Space::xl);
-
-    // The knobs in two rows, each with its name and value, then the sidechain's source beside its name.
-    const auto knobCell = knobSize + 2 * labelHeight;
-
-    for (int i = 0; i < knobs.size(); ++i)
-    {
-        auto cell = juce::Rectangle<int> (area.getX() + (i % columns) * (knobSize + Space::l), area.getY() + (i / columns) * knobCell,
-                                          knobSize + Space::l, knobCell);
-        knobs[i]->setBounds (cell.removeFromTop (knobSize).withSizeKeepingCentre (knobSize, knobSize));
-        names[i]->setBounds (cell.removeFromTop (labelHeight));
-        texts[i]->setBounds (cell.removeFromTop (labelHeight));
-    }
-
-    auto row = area.withTrimmedTop (2 * knobCell + Space::m).removeFromTop (controlHeight);
-    sourceBox->setBounds (row.withTrimmedLeft (2 * knobSize));
+    activity->graph.repaint();
 }
 } // namespace phazite::ui

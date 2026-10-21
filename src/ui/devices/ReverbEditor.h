@@ -1,52 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The reverb's editor (roadmap step 1.6, devices/reverb/Reverb.h): a graph of how its tail fades, after the pre-delay,
-// with the treble's faster fade past the damping frequency, and a knob for each control.
+// The reverb's editor (devices/reverb/Reverb.h), as FabFilter's Pro-R shows its decay: a map of the tail, time across and
+// pitch up, each pitch lit until it has faded by 60 dB: long in the bass, shorter in the treble past the damping, after the
+// pre-delay's gap, and nothing below the low cut, so its slanted wedge says how the space sounds. Hits drift into it and fade
+// as they play. Its edges drag, each one undo step: the wedge's end for the decay, the gap for the pre-delay, the slant's
+// corner for the damping and the floor for the low cut. Then its Decay and Size, large, and the rest.
 #pragma once
 
-#include "model/devices/DeviceHandle.h"
-#include "ui/components/Controls.h"
-
-#include <juce_gui_basics/juce_gui_basics.h>
-
-#include <memory>
-#include <vector>
+#include "DeviceEditorBase.h"
 
 namespace phazite::ui
 {
-class ReverbEditor : public juce::Component,
-                     private juce::Timer
+class ReverbEditor : public DeviceEditorBase
 {
 public:
     explicit ReverbEditor (const DeviceHandle&);
     ~ReverbEditor() override;
 
-    void paint (juce::Graphics&) override;
-    void resized() override;
+    juce::Component& getGraph() const noexcept;
 
-    juce::Component& getGraph();
-
-    // The times the graph shows, in seconds: up to where the slowest fade ends, and a little after.
+    // The times the map shows, in seconds: up to where the slowest fade ends, and a little after.
     double getShownSeconds() const;
 
-    // Brings the graph and the knobs' values up to date; a timer does it 10 times a second.
+    // Where the map draws the tail's end for the bass (the decay), and the pre-delay's edge, in its own coordinates.
+    juce::Point<float> getDecayHandle() const;
+    juce::Point<float> getPredelayHandle() const;
+
+    // Brings the map up to date; the ticker does it.
     void refresh();
 
 private:
     class Graph;
-
-    DeviceHandle device;
-    std::vector<ParameterHandle> parameters; // every parameter, in the reverb's order, for the graph
-    std::vector<float> values;
-
-    std::unique_ptr<Graph> graph;
-    juce::OwnedArray<Knob> knobs; // one for each parameter, in the reverb's order
-    juce::OwnedArray<ParameterAttachment> attachments;
-    juce::OwnedArray<juce::Label> names, texts; // each knob's name, and what it is set to
-
-    void timerCallback() override
-    {
-        if (isShowing()) // nothing to show behind another tab of the Devices view
-            refresh();
-    }
+    Graph* graph = nullptr;
 };
 } // namespace phazite::ui

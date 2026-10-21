@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The EQ's editor (roadmap step 1.6, devices/eq/Equalizer.h): its curve over an analyzer of what it plays, with a dot
-// for each band to drag (frequency and gain, as one undo step; the wheel changes Q; a double-click turns the band on
-// or off; a right-click picks its shape), and the selected band's controls below, which work from the keyboard too.
+// The EQ's editor (roadmap step 1.6, devices/eq/Equalizer.h): its curve over an analyzer of what it plays (and, fainter, what
+// comes in), with a dot for each band to drag (frequency and gain, as one undo step; the wheel changes Q; a double-click turns
+// the band on or off; a right-click picks its shape), and beside it the selected band's controls and the output's, which work
+// from the keyboard too. Its mix is its header's.
 #pragma once
 
 #include "DeviceEditors.h"
+#include "DeviceGraph.h"
+#include "DeviceTicker.h"
 #include "devices/core/Spectrum.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
@@ -18,11 +21,13 @@ namespace phazite::ui
 {
 class EqEditor : public juce::Component,
                  public FlexibleHeight,
-                 private juce::Timer
+                 private DeviceTicker::Display
 {
 public:
     explicit EqEditor (const DeviceHandle&);
     ~EqEditor() override;
+
+    static constexpr int numKnobs = 4; // the band's frequency, gain and Q, and the EQ's output
 
     int getMinimumHeight() const override; // its graph shrinks, down to GraphTint::minimumHeight
     int getWidthForHeight (int) const override { return getWidth(); }
@@ -39,7 +44,7 @@ public:
     // Where a band's dot is, in the graph's coordinates.
     juce::Point<float> getDotPosition (int band) const;
 
-    // Brings the curve, the controls and the analyzer up to date; a timer does it 30 times a second.
+    // Brings the curve, the controls and the analyzer up to date; the ticker does it 30 times a second.
     void refresh();
 
 private:
@@ -54,24 +59,19 @@ private:
     juce::OwnedArray<juce::TextButton> bandButtons;
     juce::ToggleButton onButton { "On" };
     juce::ComboBox typeBox, slopeBox;
-    static constexpr int numKnobs = 5; // the band's frequency, gain and Q, and the EQ's mix and output
-    Knob frequencyKnob { "Frequency", 1000.0 }, gainKnob { "Gain", 0.0 }, qKnob { "Q", 1.0 }, mixKnob { "Mix", 1.0 },
-        outputKnob { "Output", 0.0 };
+    Knob frequencyKnob { "Frequency", 1000.0 }, gainKnob { "Gain", 0.0 }, qKnob { "Q", 1.0 }, outputKnob { "Output", 0.0 };
     juce::OwnedArray<juce::Label> labels;
 
     ToggleAttachment onAttachment { onButton };
     ChoiceAttachment typeAttachment { typeBox }, slopeAttachment { slopeBox };
     ParameterAttachment frequencyAttachment { frequencyKnob }, gainAttachment { gainKnob }, qAttachment { qKnob },
-        mixAttachment { mixKnob }, outputAttachment { outputKnob };
+        outputAttachment { outputKnob };
 
     devices::Spectrum spectrum;
+    graph::SpectrumTrace input; // what comes in
     std::vector<float> pulled;
 
-    void timerCallback() override
-    {
-        if (isShowing()) // nothing to show behind another tab of the Devices view
-            refresh();
-    }
+    void tick() override { refresh(); }
     juce::Label& addLabel (const juce::String&);
     double getSampleRate() const; // the EQ's, for its curve near the top of the range
 };

@@ -126,6 +126,7 @@ void Delay::process (const ProcessContext& block)
     // How long the echoes ring: until the feedback has taken them 60 dB down.
     const auto repeats = amount > 0.001f ? std::log (0.001) / std::log ((double) amount) : 1.0;
     tailSeconds.store (std::min (60.0, seconds * (repeats + 1.0)), std::memory_order_relaxed);
+    shownTempo.set ((float) block.tempo);
 
     auto* left = block.channels[0];
     auto* right = numChannels > 1 ? block.channels[1] : nullptr;

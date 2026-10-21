@@ -161,6 +161,7 @@ void DevicePlugin::initialise (const te::PluginInitialisationInfo& info)
     tempoPosition.emplace (te::createPosition (edit.tempoSequence));
     latencySamples = processor->getLatencySamples();
     latencySeconds = latencySamples / info.sampleRate;
+    scope.setSampleRate (info.sampleRate);
     sleepAfterSamples = std::max ((int) (sleepAfterSeconds * info.sampleRate), 2 * latencySamples);
     silentSamples = 0;
     asleep = false;
@@ -265,6 +266,7 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
     {
         tempoPosition->set (context.editTime.getStart());
         block.tempo = tempoPosition->getTempo();
+        block.beat = tempoPosition->getBeats().inBeats();
     }
 
     auto& buffer = *context.destBuffer;
@@ -303,6 +305,13 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
     }
 
     asleep = false;
+
+    // What comes in, for the editor's displays: an effect's sound (an instrument's channels were cleared for it to play into).
+    const auto* inLeft = buffer.getReadPointer (0, start);
+    const auto* inRight = isMono ? inLeft : buffer.getReadPointer (1, start);
+
+    if (! isSynth())
+        scope.pushInput (inLeft, inRight, numSamples);
 
     const float* sidechain[2] = {};
 
@@ -375,6 +384,8 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
         done += length;
     }
 
+    scope.pushOutput (buffer.getReadPointer (0, start), isMono ? buffer.getReadPointer (0, start) : buffer.getReadPointer (1, start),
+                      numSamples);
     keepValues();
 
     // Silent in and out long enough: asleep from the next block.

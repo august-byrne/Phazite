@@ -72,4 +72,73 @@ private:
     std::vector<float> buffer;
     std::atomic<bool> listening { false };
 };
+
+//==============================================================================
+// The same for two channels kept apart, each left sample with its right one, for a display that compares them, such as a
+// vectorscope.
+class StereoTap
+{
+public:
+    explicit StereoTap (int capacity = 8192)
+        : fifo (capacity),
+          lefts ((size_t) capacity),
+          rights ((size_t) capacity)
+    {
+    }
+
+    // Message thread, as SampleTap's.
+    void setListening (bool shouldListen) noexcept
+    {
+        if (shouldListen && ! isListening())
+            fifo.finishedRead (fifo.getNumReady());
+
+        listening.store (shouldListen, std::memory_order_release);
+    }
+
+    bool isListening() const noexcept { return listening.load (std::memory_order_acquire); }
+
+    // Audio thread (pass the same channel twice for mono).
+    void push (const float* left, const float* right, int numSamples) noexcept
+    {
+        if (! isListening())
+            return;
+
+        const auto scope = fifo.write (std::min (numSamples, fifo.getFreeSpace()));
+        int done = 0;
+
+        for (const auto& [start, size] :
+             { std::pair { scope.startIndex1, scope.blockSize1 }, std::pair { scope.startIndex2, scope.blockSize2 } })
+        {
+            for (int i = 0; i < size; ++i, ++done)
+            {
+                lefts[(size_t) (start + i)] = left[done];
+                rights[(size_t) (start + i)] = right[done];
+            }
+        }
+    }
+
+    // Message thread: up to maximum pairs, oldest first. Returns how many it gave.
+    int pull (float* left, float* right, int maximum) noexcept
+    {
+        const auto scope = fifo.read (std::min (maximum, fifo.getNumReady()));
+        int done = 0;
+
+        for (const auto& [start, size] :
+             { std::pair { scope.startIndex1, scope.blockSize1 }, std::pair { scope.startIndex2, scope.blockSize2 } })
+        {
+            for (int i = 0; i < size; ++i, ++done)
+            {
+                left[done] = lefts[(size_t) (start + i)];
+                right[done] = rights[(size_t) (start + i)];
+            }
+        }
+
+        return done;
+    }
+
+private:
+    juce::AbstractFifo fifo;
+    std::vector<float> lefts, rights;
+    std::atomic<bool> listening { false };
+};
 } // namespace phazite::devices

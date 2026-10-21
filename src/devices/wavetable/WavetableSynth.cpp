@@ -2,6 +2,7 @@
 #include "WavetableSynth.h"
 #include "FactoryWavetables.h"
 #include "devices/dsp/Math.h"
+#include "devices/dsp/NoteValues.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -28,13 +29,9 @@ namespace
                                                 "Unison Detune" };
     constexpr std::string_view voiceModes[] = { "Poly", "Mono" };
 
-    // The note values an LFO in time with the song takes, and their lengths in beats (quarter notes): T for a triplet, D
-    // for dotted; a bar is four beats.
-    constexpr std::string_view divisions[] = { "1/32", "1/16T", "1/16", "1/16D", "1/8T",  "1/8",    "1/8D",   "1/4T",  "1/4",
-                                               "1/4D", "1/2T",  "1/2",  "1/2D",  "1 bar", "2 bars", "4 bars", "8 bars" };
-    constexpr double divisionBeats[] = { 0.125, 1.0 / 6.0, 0.25, 0.375, 1.0 / 3.0, 0.5, 0.75, 2.0 / 3.0, 1.0,
-                                         1.5,   4.0 / 3.0, 2.0,  3.0,   4.0,       8.0, 16.0, 32.0 };
-    static_assert (std::size (divisions) == std::size (divisionBeats));
+    // The note values an LFO in time with the song takes (devices/dsp/NoteValues.h).
+    constexpr auto& divisions = dsp::noteValueNames;
+    constexpr auto& divisionBeats = dsp::noteValueBeats;
 
     // An envelope's time, from minimum to 10 s, with 300 ms halfway along its knob.
     constexpr ParameterInfo makeTime (std::string_view id, std::string_view name, float minimum, float defaultValue)
@@ -92,7 +89,7 @@ namespace
     }
 
     constexpr float sawPosition = 2.0f / 3.0f; // the saw in the first factory table, Basic Shapes
-    constexpr float quarterNote = 8.0f;        // among the divisions
+    constexpr float quarterNote = dsp::quarterNoteValue;
 
     // In the order of WavetableSynth::Parameter. The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
@@ -458,6 +455,18 @@ void WavetableSynth::freeRetired()
     const auto done = blocksDone.load (std::memory_order_acquire);
     retired.erase (std::remove_if (retired.begin(), retired.end(), [done] (const Retired& old) { return done >= old.safeAfter; }),
                    retired.end());
+}
+
+double WavetableSynth::getFilterMagnitude (std::span<const float> values, double cutoffHertz, double frequency, double rate)
+{
+    // As render() sets its voices' filters up, before modulation.
+    return dsp::getMagnitude (dsp::makeMultimode ({ .mode = dsp::toFilterMode (values[filterType]),
+                                                    .frequency = cutoffHertz,
+                                                    .resonance = values[resonance],
+                                                    .steep = dsp::isSteep (values[filterSlope]),
+                                                    .q = dsp::getResonanceQ (values[resonance]) },
+                                                  rate),
+                              frequency, rate);
 }
 
 float WavetableSynth::getPlayedPosition (int osc) const noexcept
@@ -963,6 +972,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                         side.set (coefficients, untilNextStep);
 
                     voice.driveGain = settings.driveGain;
+                    voice.cutoffNow = (float) frequency;
                 }
 
                 const auto volume = std::clamp (1.0f + moveOf (moves, ModTarget::volume), 0.0f, 2.0f);
@@ -1258,6 +1268,18 @@ void WavetableSynth::process (const ProcessContext& block)
         playedPositions[(size_t) osc].store (newest != nullptr ? newest->oscillators[(size_t) osc].position
                                                                : values[(size_t) getParameter (osc, oscPosition)],
                                              std::memory_order_relaxed);
+
+    // The newest note's envelopes and cutoff, and where each LFO is: the newest note's, for one that starts again with each.
+    shown.envelopes[0].set (newest != nullptr ? newest->amp.getLevel() : 0.0f);
+    shown.envelopes[1].set (newest != nullptr ? newest->envelope2.getLevel() : 0.0f);
+    shown.envelopes[2].set (newest != nullptr ? newest->envelope3.getLevel() : 0.0f);
+    shown.cutoff.set (newest != nullptr && newest->filtering ? newest->cutoffNow : 0.0f);
+
+    for (size_t i = 0; i < freeLfos.size(); ++i)
+    {
+        const auto retriggered = values[(size_t) getLfoParameter ((int) i, lfoRetrigger)] > 0.5f;
+        shown.lfoPhases[i].set (retriggered ? (newest != nullptr ? newest->lfos[i].getPhase() : -1.0f) : freeLfos[i].getPhase());
+    }
 
     activeVoices.store (active, std::memory_order_relaxed);
     blocksDone.fetch_add (1, std::memory_order_release);

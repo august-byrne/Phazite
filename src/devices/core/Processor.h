@@ -42,6 +42,7 @@ struct ProcessContext
     std::span<const float> parameters {}; // each parameter's value now, in the order and ranges of the device's DeviceInfo
 
     double tempo = 120.0;   // beats per minute at the block's start, for rates in time with the song
+    double beat = 0.0;      // where the song is at the block's start, in beats (quarter notes), for sweeps in time with it
     bool isPlaying = false; // whether the song is playing (rather than only the computer keyboard)
 };
 

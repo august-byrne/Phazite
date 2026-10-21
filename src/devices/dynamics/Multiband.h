@@ -7,6 +7,7 @@
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
+#include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/Crossover.h"
 #include "devices/dsp/Envelopes.h"
@@ -43,6 +44,16 @@ public:
     // once settled, for the parameters' values: its curve, for tests and its editor.
     static float getGainChange (std::span<const float> parameters, float levelDecibels);
 
+    // Where its downward and upward squeezes begin, in decibels: above the first a band is turned down, below the second
+    // brought up (for its editor).
+    static constexpr float downwardThreshold = -30.0f, upwardThreshold = -40.0f;
+
+    // Each band as its editor shows it, since it last looked (devices/core/MeterValue.h): its level coming in, in decibels
+    // (after the input gain), and the most it was turned down and brought up, in decibels.
+    MeterValue& getBandLevel (int band) noexcept { return bandLevels[(size_t) band]; }
+    MeterValue& getBandCut (int band) noexcept { return bandCuts[(size_t) band]; }
+    MeterValue& getBandLift (int band) noexcept { return bandLifts[(size_t) band]; }
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
@@ -56,5 +67,7 @@ private:
     float shownLow = 0.0f, shownHigh = 0.0f; // the crossovers' frequencies
     std::array<dsp::ThreeBandSplit, 2> splits;
     std::array<dsp::LevelFollower, numBands> changes; // each band's gain change, in decibels below 0 dB of reduction
+    std::array<MeterValue, numBands> bandLevels { MeterValue { -120.0f }, MeterValue { -120.0f }, MeterValue { -120.0f } };
+    std::array<MeterValue, numBands> bandCuts, bandLifts; // from 0
 };
 } // namespace phazite::devices

@@ -130,32 +130,32 @@ public:
         held = random.nextBipolar();
     }
 
-    float next (LfoShape shape) noexcept
+    // A shape's value at a point in its cycle (0 to 1), from -1 to 1: for the LFO, and its editor's picture of it. The random
+    // shape's values are its own (held a cycle each): 0 here.
+    static float getValue (LfoShape shape, float phase) noexcept
     {
-        auto value = 0.0f;
-
         switch (shape)
         {
             case LfoShape::sine:
-                value = sineOfPhase (phase);
-                break;
+                return sineOfPhase (phase);
             case LfoShape::triangle:
-                value = 1.0f - 4.0f * std::abs (phase - 0.5f);
-                break;
+                return 1.0f - 4.0f * std::abs (phase - 0.5f);
             case LfoShape::sawUp:
-                value = 2.0f * phase - 1.0f;
-                break;
+                return 2.0f * phase - 1.0f;
             case LfoShape::sawDown:
-                value = 1.0f - 2.0f * phase;
-                break;
+                return 1.0f - 2.0f * phase;
             case LfoShape::square:
-                value = phase < 0.5f ? 1.0f : -1.0f;
-                break;
+                return phase < 0.5f ? 1.0f : -1.0f;
             case LfoShape::random:
-                value = held;
                 break;
         }
 
+        return 0.0f;
+    }
+
+    float next (LfoShape shape) noexcept
+    {
+        const auto value = shape == LfoShape::random ? held : getValue (shape, phase);
         phase += increment;
 
         if (phase >= 1.0f)
@@ -166,6 +166,8 @@ public:
 
         return value;
     }
+
+    float getPhase() const noexcept { return phase; } // from 0 to 1, where it is in its cycle
 
 private:
     double sampleRate = 44100.0;

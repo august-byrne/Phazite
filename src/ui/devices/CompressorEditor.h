@@ -1,30 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The compressor's editor (roadmap step 1.6, devices/dynamics/Compressor.h): its curve, with a dot riding it at the
-// level the detector hears and a meter of how far it turns the sound down, its knobs, and the track its sidechain
-// listens to. Dragging across the curve moves the threshold, as one undo step.
+// The compressor's editor (roadmap step 1.6, devices/dynamics/Compressor.h): its curve, with a dot riding it at the level the
+// detector hears and a meter of how far it turns the sound down; beside it the last seconds, as FabFilter's compressor shows
+// them, what it hears (pale), what goes out and how far it turned the sound down (red, from the top), with the threshold a
+// line across; its Threshold and Ratio, large, then the rest, and the track its sidechain listens to. Dragging across the
+// curve, or the threshold's line up or down, moves the threshold, as one undo step.
 #pragma once
 
-#include "model/devices/DeviceHandle.h"
-#include "ui/components/Controls.h"
-
-#include <juce_gui_basics/juce_gui_basics.h>
+#include "DeviceEditorBase.h"
+#include "LevelHistoryView.h"
 
 #include <memory>
 #include <vector>
 
 namespace phazite::ui
 {
-class CompressorEditor : public juce::Component,
-                         private juce::Timer
+class CompressorEditor : public DeviceEditorBase,
+                         private DeviceTicker::Display
 {
 public:
     explicit CompressorEditor (const DeviceHandle&);
     ~CompressorEditor() override;
 
-    void paint (juce::Graphics&) override;
-    void resized() override;
-
     juce::Component& getGraph();
+    LevelHistoryView& getHistory();
     juce::ComboBox& getSidechainBox();
 
     // Where the graph draws a level in (x) and out (y), in decibels, in its own coordinates.
@@ -34,30 +32,21 @@ public:
     float getShownLevel() const noexcept { return shownLevel; }
     float getShownReduction() const noexcept { return shownReduction; }
 
-    // Brings the curve, the knobs' values, the meters and the sidechain's source up to date; a timer does it 30 times a
-    // second.
+    // Brings the curve, the meters, the history and the sidechain's source up to date; the ticker does it.
     void refresh();
 
 private:
     class Graph;
     class SourceBox;
+    class Activity;
 
-    DeviceHandle device;
     std::vector<ParameterHandle> parameters; // every parameter, in the compressor's order, for the curve
     std::vector<float> values;
     float shownLevel, shownReduction = 0.0f;
 
-    std::unique_ptr<Graph> graph;
-    std::unique_ptr<SourceBox> sourceBox;
-    juce::Label sourceLabel;
-    juce::OwnedArray<Knob> knobs; // one for each parameter, in the compressor's order
-    juce::OwnedArray<ParameterAttachment> attachments;
-    juce::OwnedArray<juce::Label> names, texts; // each knob's name, and what it is set to
+    Activity* activity = nullptr;
+    SourceBox* sourceBox = nullptr;
 
-    void timerCallback() override
-    {
-        if (isShowing()) // nothing to show behind another tab of the Devices view
-            refresh();
-    }
+    void tick() override { refresh(); }
 };
 } // namespace phazite::ui

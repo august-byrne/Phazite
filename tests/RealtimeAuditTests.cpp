@@ -20,10 +20,12 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/motion/Flanger.h"
+#include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
+#include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
-#include "devices/utility/Utility.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -769,7 +771,8 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, utility and maximizer in a row, the filter swept")
+    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and maximizer in a "
+               "row, the filter swept")
     {
         auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
@@ -779,7 +782,8 @@ TEST_SUITE ("realtime-audit")
 
         for (const auto* type :
              { phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID, phazite::devices::Multiband::typeID,
-               phazite::devices::Delay::typeID, phazite::devices::Utility::typeID, phazite::devices::Maximizer::typeID })
+               phazite::devices::Delay::typeID, phazite::devices::Phaser::typeID, phazite::devices::Flanger::typeID,
+               phazite::devices::StereoExpander::typeID, phazite::devices::Maximizer::typeID })
         {
             const auto plugin = edit->getPluginCache().createNewPlugin (type, {});
             auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -801,9 +805,35 @@ TEST_SUITE ("realtime-audit")
         }
 
         const auto m = playAndMeasure (*edit);
-        report ("Phazite's filter, saturator, multiband, delay, utility and maximizer in a row, the filter swept", m);
+        report ("Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and maximizer in a row, the filter swept",
+                m);
         CHECK (m.peakLevel > 0.001f);
         CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // the maximizer's ceiling
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's effects with their editors' displays listening, what goes in and out of each tapped")
+    {
+        // Each device's scope (devices/core/DeviceScope.h) taking its sound in and out, and its peaks, as open editors have it.
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& track = getTrack (*edit, 0);
+        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+
+        for (const auto* type :
+             { phazite::devices::Equalizer::typeID, phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID,
+               phazite::devices::Compressor::typeID, phazite::devices::Multiband::typeID, phazite::devices::Delay::typeID,
+               phazite::devices::Reverb::typeID, phazite::devices::Phaser::typeID, phazite::devices::Maximizer::typeID })
+        {
+            const auto plugin = edit->getPluginCache().createNewPlugin (type, {});
+            auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+            REQUIRE (device != nullptr);
+            REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
+            device->getScope().setListening (true);
+        }
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's effects with their editors' displays listening", m);
+        CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

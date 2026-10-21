@@ -5,6 +5,8 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include <optional>
+
 namespace phazite::ui
 {
 enum class ThemeName
@@ -29,6 +31,7 @@ struct Palette
     juce::Colour loop;       // where playback loops, in the rulers
     juce::Colour modulation; // what modulation does to a control: the ring around a knob, a modulator's output
     juce::Colour frozen;     // a frozen track's frost, over its clips and its snowflake (FrozenTint)
+    juce::Colour boost;      // a level brought up, as upward compression does (danger: one turned down), in devices' graphs
 };
 
 inline Palette getPalette (ThemeName theme)
@@ -40,18 +43,18 @@ inline Palette getPalette (ThemeName theme)
         case ThemeName::light:
             return { Colour (0xfff4f5f7), Colour (0xffffffff), Colour (0xffeceef1), Colour (0xffd3d7dd), Colour (0xff1b1f24),
                      Colour (0xff545d69), Colour (0xff1f6feb), Colour (0xffffffff), Colour (0xff9a5b00), Colour (0xffc62828),
-                     Colour (0xff1a7f5a), Colour (0xff7b3fd4), Colour (0xff2b8fd6) };
+                     Colour (0xff1a7f5a), Colour (0xff7b3fd4), Colour (0xff2b8fd6), Colour (0xff1e7d3c) };
 
         case ThemeName::highContrast:
             return { Colour (0xff000000), Colour (0xff000000), Colour (0xff1a1a1a), Colour (0xffffffff), Colour (0xffffffff),
                      Colour (0xffe6e6e6), Colour (0xffffd400), Colour (0xff000000), Colour (0xffffb000), Colour (0xffff6b6b),
-                     Colour (0xff00ff9c), Colour (0xffff5cff), Colour (0xff00e5ff) };
+                     Colour (0xff00ff9c), Colour (0xffff5cff), Colour (0xff00e5ff), Colour (0xff3dff7a) };
 
         case ThemeName::dark:
         default:
             return { Colour (0xff15171a), Colour (0xff1c1f23), Colour (0xff272b31), Colour (0xff343a42), Colour (0xffe8eaed),
                      Colour (0xffa5adb8), Colour (0xff5b9dff), Colour (0xff0b1220), Colour (0xfff2b84b), Colour (0xffff7a6b),
-                     Colour (0xff3fbf8f), Colour (0xffb48cff), Colour (0xffa8dcff) };
+                     Colour (0xff3fbf8f), Colour (0xffb48cff), Colour (0xffa8dcff), Colour (0xff6fdc8c) };
     }
 }
 
@@ -77,8 +80,46 @@ namespace Space
 inline constexpr int controlHeight = 28;
 inline constexpr float cornerRadius = 4.0f;
 
-// The knobs of devices' editors, square.
+// Each kind of built-in device's colour (ui/devices/DeviceTint.h), so that each has a character of its own and its kind shows at
+// a glance: the dynamics warm, the EQ and the filter cyan, the saturator red, the delay and the reverb blue, the phaser and
+// the flanger green and the stereo expander teal; instruments keep the accent. Each is at least 3:1 against the surface in
+// every theme, and apart from the modulation colour, which rings their knobs.
+enum class DeviceFamily
+{
+    instrument,
+    dynamics, // compressor, limiter, maximizer, multiband
+    tone,     // EQ, filter
+    drive,    // saturator
+    space,    // delay, reverb
+    motion,   // phaser, flanger
+    stereo    // stereo expander
+};
+
+inline std::optional<juce::Colour> getFamilyColour (DeviceFamily family, ThemeName theme)
+{
+    const auto pick = [theme] (juce::uint32 dark, juce::uint32 light, juce::uint32 highContrast)
+    {
+        return juce::Colour (theme == ThemeName::light ? light : theme == ThemeName::highContrast ? highContrast : dark);
+    };
+
+    // clang-format off
+    switch (family)
+    {   //                                    dark        light       high contrast
+        case DeviceFamily::dynamics: return pick (0xffff9a5c, 0xffb4501c, 0xffffa05a);
+        case DeviceFamily::tone:     return pick (0xff3ecbe0, 0xff00708a, 0xff2fe6ff);
+        case DeviceFamily::drive:    return pick (0xffff5f73, 0xffc42540, 0xffff6b80);
+        case DeviceFamily::space:    return pick (0xff6fa8ff, 0xff2f5fd0, 0xff7fb2ff);
+        case DeviceFamily::motion:   return pick (0xff5fd38d, 0xff3b7d12, 0xff4dff9a);
+        case DeviceFamily::stereo:   return pick (0xff26d4a8, 0xff0b7d64, 0xff2bffc8);
+        case DeviceFamily::instrument:
+        default:                     return std::nullopt;
+    }
+    // clang-format on
+}
+
+// The knobs of devices' editors, square: a device's main controls large, the rest compact.
 inline constexpr int knobSize = 64;
+inline constexpr int compactKnobSize = 40;
 
 // Colours that tell apart the parts of a device's editor, such as the EQ's bands. Each part also shows its number,
 // with an outline in the theme's text colour, so that colour is never the only sign.

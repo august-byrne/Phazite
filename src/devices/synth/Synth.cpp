@@ -429,6 +429,17 @@ void Synth::handle (const NoteEvent& event, std::span<const float> values)
     }
 }
 
+double Synth::getFilterMagnitude (std::span<const float> values, double cutoffHertz, double frequency, double rate)
+{
+    // As render() sets its voices' filters up.
+    const dsp::FilterSettings settings { .mode = dsp::toFilterMode (values[filterType]),
+                                         .frequency = cutoffHertz,
+                                         .resonance = values[resonance],
+                                         .steep = dsp::isSteep (values[filterSlope]),
+                                         .q = 0.5 * std::pow (50.0, (double) values[resonance]) };
+    return dsp::getMagnitude (dsp::makeMultimode (settings, rate), frequency, rate);
+}
+
 void Synth::render (float* left, float* right, int numSamples, std::span<const float> values)
 {
     const auto wave1 = choiceOf<dsp::Waveform> (values[osc1Wave]), wave2 = choiceOf<dsp::Waveform> (values[osc2Wave]);
@@ -654,5 +665,17 @@ void Synth::process (const ProcessContext& block)
 
     activeVoices.store ((int) std::count_if (voices.begin(), voices.end(), [] (const Voice& each) { return each.amp.isActive(); }),
                         std::memory_order_relaxed);
+
+    // For the editor: the newest voice, and the LFO.
+    const Voice* newest = nullptr;
+
+    for (const auto& voice : voices)
+        if (voice.amp.isActive() && (newest == nullptr || voice.started > newest->started))
+            newest = &voice;
+
+    shown.amp.set (newest != nullptr ? newest->amp.getLevel() : 0.0f);
+    shown.filterEnvelope.set (newest != nullptr ? newest->filterEnvelopeLevel : 0.0f);
+    shown.cutoff.set (newest != nullptr && newest->filterIsSet ? (float) newest->filterSettings.frequency : 0.0f);
+    shown.lfoPhase.set (lfo.getPhase());
 }
 } // namespace phazite::devices

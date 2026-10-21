@@ -7,6 +7,7 @@
 
 #include "ParameterHandle.h"
 #include "devices/core/DeviceInfo.h"
+#include "devices/core/DeviceScope.h"
 #include "devices/core/Processor.h"
 #include "devices/wavetable/Wavetable.h"
 #include "model/base/IDs.h"
@@ -55,6 +56,10 @@ public:
     std::shared_ptr<const devices::Wavetable> getWavetable (int osc) const;
     void setFactoryWavetable (int osc, int index) const;
     bool setWavetableFile (int osc, const juce::File&) const;
+
+    // What goes into the device and comes out, for its editor's displays (devices/core/DeviceScope.h); nullptr once the
+    // device is gone. Ask each time: never keep the pointer.
+    devices::DeviceScope* getScope() const;
 
     // The device's DSP as its own type, for an editor's lock-free reads; nullptr once the device is gone, or for another
     // type. Ask each time: never keep the pointer.

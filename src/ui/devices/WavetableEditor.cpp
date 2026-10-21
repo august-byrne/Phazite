@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "WavetableEditor.h"
+#include "DeviceTint.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace phazite::ui
 {
@@ -13,61 +15,21 @@ namespace
 {
     using devices::WavetableSynth;
 
-    constexpr int refreshRateHz = 15;
     constexpr int pointsPerWave = 72; // where each frame's wave is drawn through
+
+    std::string_view getParameterID (int index)
+    {
+        return WavetableSynth::info.parameters[(size_t) index].id;
+    }
 
     std::string_view getParameterID (int osc, WavetableSynth::OscillatorField field)
     {
-        return WavetableSynth::info.parameters[(size_t) WavetableSynth::getParameter (osc, field)].id;
+        return getParameterID (WavetableSynth::getParameter (osc, field));
     }
 
     juce::String getOscillatorName (int osc)
     {
         return "Osc " + juce::String (osc + 1);
-    }
-
-    std::vector<std::vector<DevicePanel::Group>> getOscillatorLayout (int osc)
-    {
-        std::vector<std::string_view> ids;
-
-        for (const auto field : { WavetableSynth::oscOn, WavetableSynth::oscPosition, WavetableSynth::oscPitch, WavetableSynth::oscFine,
-                                  WavetableSynth::oscLevel, WavetableSynth::oscWarp, WavetableSynth::oscWarpAmount })
-            ids.push_back (getParameterID (osc, field));
-
-        return { { { getOscillatorName (osc), ids } } };
-    }
-
-    // The rest of the synth's controls, in the order the sound goes through them; the modulation slots last.
-    std::vector<std::vector<DevicePanel::Group>> getLayout()
-    {
-        std::vector<std::vector<DevicePanel::Group>> rows {
-            { { "Sub", { "subLevel", "subOctave", "subShape" } },
-              { "Noise", { "noiseLevel" } },
-              { "Unison", { "unisonVoices", "unisonDetune", "unisonSpread", "unisonPosition" } },
-              { "Filter", { "filterOn", "filterType", "cutoff", "resonance", "filterSlope", "drive", "keyTracking" } } },
-            { { "Envelope 1", { "env1Attack", "env1Decay", "env1Sustain", "env1Release" } },
-              { "Envelope 2", { "env2Attack", "env2Decay", "env2Sustain", "env2Release" } },
-              { "Envelope 3", { "env3Attack", "env3Decay", "env3Sustain", "env3Release" } } },
-            { { "LFO 1", { "lfo1Shape", "lfo1Rate", "lfo1Sync", "lfo1Division", "lfo1Retrigger" } },
-              { "LFO 2", { "lfo2Shape", "lfo2Rate", "lfo2Sync", "lfo2Division", "lfo2Retrigger" } },
-              { "Play", { "voiceMode", "glide", "bendRange", "velocity", "level" } } },
-        };
-
-        // The modulation slots, four to a row.
-        for (int slot = 0; slot < WavetableSynth::numModSlots; ++slot)
-        {
-            if (slot % 4 == 0)
-                rows.emplace_back();
-
-            std::vector<std::string_view> ids;
-
-            for (const auto field : { WavetableSynth::modSource, WavetableSynth::modTarget, WavetableSynth::modAmount })
-                ids.push_back (WavetableSynth::info.parameters[(size_t) WavetableSynth::getModParameter (slot, field)].id);
-
-            rows.back().push_back ({ "Mod " + juce::String (slot + 1), ids });
-        }
-
-        return rows;
     }
 } // namespace
 
@@ -140,7 +102,7 @@ public:
             const auto place = std::clamp (played, 0.0f, 1.0f) * (float) (table->getNumFrames() - 1);
             const auto first = std::min ((int) place, table->getNumFrames() - 1);
             const auto second = std::min (first + 1, table->getNumFrames() - 1);
-            g.setColour (palette.accent.withAlpha (alpha));
+            g.setColour (getDeviceTint (*this).withAlpha (alpha));
             g.strokePath (makeWave (table->getFrameForDrawing (first), table->getFrameForDrawing (second), place - (float) first,
                                     getFrameBox (std::clamp (played, 0.0f, 1.0f))),
                           juce::PathStrokeType (WavetableTint::playedWidth));
@@ -256,40 +218,250 @@ private:
 };
 
 //==============================================================================
-WavetableEditor::WavetableEditor (const DeviceHandle& handle)
-    : device (handle)
+// An oscillator's picture: the button that names its table, over the drawing of it.
+class WavetableEditor::Oscillator : public juce::Component
 {
-    for (int osc = 0; osc < numOscillators; ++osc)
+public:
+    Oscillator (WavetableEditor& editor, int osc)
+        : view (editor, osc, editor.getDevice().getParameter (getParameterID (osc, WavetableSynth::oscPosition)))
     {
-        auto& view = views[(size_t) osc];
-        view = std::make_unique<TableView> (*this, osc, device.getParameter (getParameterID (osc, WavetableSynth::oscPosition)));
-        addAndMakeVisible (*view);
-
-        auto& button = tableButtons[(size_t) osc];
-        button = std::make_unique<juce::TextButton>();
-        button->setTitle (getOscillatorName (osc) + " Wavetable Choice");
-        button->setTooltip ("Chooses the table this oscillator plays: one that comes with Phazite, or a sound file of yours");
-        button->onClick = [this, osc]
-        { getTableMenu (osc).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (tableButtons[(size_t) osc].get())); };
-        addAndMakeVisible (*button);
-
-        oscillatorControls[(size_t) osc] = std::make_unique<DevicePanel> (device, getOscillatorLayout (osc));
-        addAndMakeVisible (*oscillatorControls[(size_t) osc]);
+        setTitle (getOscillatorName (osc) + " table");
+        button.setTitle (getOscillatorName (osc) + " Wavetable Choice");
+        button.setTooltip ("Chooses the table this oscillator plays: one that comes with Phazite, or a sound file of yours");
+        button.onClick = [&editor, osc, this]
+        { editor.getTableMenu (osc).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&button)); };
+        addAndMakeVisible (button);
+        addAndMakeVisible (view);
     }
 
-    controls = std::make_unique<DevicePanel> (device, getLayout());
-    addAndMakeVisible (*controls);
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        button.setBounds (area.removeFromTop (controlHeight));
+        area.removeFromTop (Space::xs);
+        view.setBounds (area);
+    }
 
-    refresh();
-    setSize (std::max (getColumnWidth (0) + getColumnWidth (1), controls->getWidth()),
-             getTopHeight (WavetableTint::height) + controls->getHeight());
-    startTimerHz (refreshRateHz);
-}
+    juce::TextButton button;
+    TableView view;
+};
 
-WavetableEditor::~WavetableEditor()
+//==============================================================================
+// The modulation matrix: each slot a row, its source and target picked from lists, and its amount a knob.
+class WavetableEditor::Matrix : public juce::Component,
+                                private DeviceTicker::Display
 {
-    stopTimer();
+public:
+    explicit Matrix (const DeviceHandle& device)
+        : DeviceTicker::Display (static_cast<juce::Component&> (*this))
+    {
+        setTitle ("Modulation matrix");
+
+        for (int slot = 0; slot < WavetableSynth::numModSlots; ++slot)
+        {
+            auto& row = rows.emplace_back (std::make_unique<Row>());
+            const auto id = [slot] (WavetableSynth::ModField field)
+            { return getParameterID (WavetableSynth::getModParameter (slot, field)); };
+            const auto& amount =
+                WavetableSynth::info.parameters[(size_t) WavetableSynth::getModParameter (slot, WavetableSynth::modAmount)];
+
+            row->source.setTitle ("Mod " + juce::String (slot + 1) + " Source");
+            row->target.setTitle ("Mod " + juce::String (slot + 1) + " Target");
+            row->sourceAttachment.setParameter (device.getParameter (id (WavetableSynth::modSource)));
+            row->targetAttachment.setParameter (device.getParameter (id (WavetableSynth::modTarget)));
+            row->amount = std::make_unique<Knob> (juce::String (amount.name.data(), amount.name.size()), amount.defaultValue);
+            showAsParameter (*row->amount, amount);
+            row->amountAttachment = std::make_unique<ParameterAttachment> (*row->amount);
+            row->amountAttachment->setParameter (device.getParameter (amount.id));
+            row->number.setText (juce::String (slot + 1), juce::dontSendNotification);
+            row->number.setFont (juce::FontOptions (TextSize::small));
+            row->number.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+
+            for (auto* control : std::initializer_list<juce::Component*> { &row->number, &row->source, &row->target, row->amount.get() })
+                addAndMakeVisible (control);
+        }
+
+        tick();
+    }
+
+    juce::Component* findControl (std::string_view parameterID)
+    {
+        for (int slot = 0; slot < WavetableSynth::numModSlots; ++slot)
+        {
+            auto& row = *rows[(size_t) slot];
+
+            if (parameterID == getParameterID (WavetableSynth::getModParameter (slot, WavetableSynth::modSource)))
+                return &row.source;
+
+            if (parameterID == getParameterID (WavetableSynth::getModParameter (slot, WavetableSynth::modTarget)))
+                return &row.target;
+
+            if (parameterID == getParameterID (WavetableSynth::getModParameter (slot, WavetableSynth::modAmount)))
+                return row.amount.get();
+        }
+
+        return nullptr;
+    }
+
+    static constexpr int rowHeight = 26;
+    static int getPreferredHeight() { return WavetableSynth::numModSlots * rowHeight; }
+    static int getPreferredWidth() { return 16 + 2 * 96 + rowHeight + 2 * Space::xs; }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+
+        for (auto& row : rows)
+        {
+            auto line = area.removeFromTop (rowHeight).reduced (0, 1);
+            row->number.setBounds (line.removeFromLeft (16));
+            row->amount->setBounds (line.removeFromRight (line.getHeight()));
+            line.removeFromRight (Space::xs);
+            const auto half = (line.getWidth() - Space::xs) / 2;
+            row->source.setBounds (line.removeFromLeft (half));
+            line.removeFromLeft (Space::xs);
+            row->target.setBounds (line);
+        }
+    }
+
+private:
+    struct Row
+    {
+        juce::Label number;
+        juce::ComboBox source, target;
+        ChoiceAttachment sourceAttachment { source }, targetAttachment { target };
+        std::unique_ptr<Knob> amount;
+        std::unique_ptr<ParameterAttachment> amountAttachment;
+    };
+
+    std::vector<std::unique_ptr<Row>> rows;
+
+    void tick() override
+    {
+        for (auto& row : rows)
+        {
+            row->sourceAttachment.update();
+            row->targetAttachment.update();
+            row->amountAttachment->update();
+        }
+    }
+};
+
+//==============================================================================
+WavetableEditor::WavetableEditor (const DeviceHandle& handle)
+    : DeviceEditorBase (handle),
+      DeviceTicker::Display (static_cast<juce::Component&> (*this))
+{
+    const auto parameter = [this] (int index) { return device.getParameter (getParameterID (index)); };
+    const auto shown = [this]() -> const WavetableSynth::Shown*
+    {
+        auto* synth = device.getProcessor<WavetableSynth>();
+        return synth != nullptr ? &synth->getShown() : nullptr;
+    };
+
+    // The oscillators: each its table, then its controls.
+    std::vector<DeviceLayout::Part> oscillatorParts;
+
+    for (int osc = 0; osc < numOscillators; ++osc)
+    {
+        auto& picture = keep (std::make_unique<Oscillator> (*this, osc));
+        views[(size_t) osc] = &picture.view;
+        tableButtons[(size_t) osc] = &picture.button;
+
+        std::vector<std::string_view> ids;
+
+        for (const auto field : { WavetableSynth::oscOn, WavetableSynth::oscPosition, WavetableSynth::oscPitch, WavetableSynth::oscFine,
+                                  WavetableSynth::oscLevel, WavetableSynth::oscWarp, WavetableSynth::oscWarpAmount })
+            ids.push_back (getParameterID (osc, field));
+
+        oscillatorParts.push_back (makePicturePart (getOscillatorName (osc), picture, 120, 44, ids, 4, ParameterControls::Size::compact,
+                                                    { "On", "Position", "Pitch", "Fine", "Level", "Warp", "Amount" }));
+    }
+
+    const auto subAndNoise = makeControlsPart ("Sub and Noise", { "subLevel", "subOctave", "subShape", "noiseLevel" }, 4,
+                                               ParameterControls::Size::compact, { "Sub", "Octave", "Shape", "Noise" });
+    const auto unison = makeControlsPart ("Unison", { "unisonVoices", "unisonDetune", "unisonSpread", "unisonPosition" }, 4,
+                                          ParameterControls::Size::compact, { "Voices", "Detune", "Spread", "Position" });
+
+    // The filter: its response, then its controls.
+    auto all = std::make_shared<std::vector<ParameterHandle>>();
+
+    for (const auto& each : WavetableSynth::info.parameters)
+        all->push_back (device.getParameter (each.id));
+
+    auto& filterView = keep (std::make_unique<FilterView> (
+        "Filter response", parameter (WavetableSynth::cutoff), parameter (WavetableSynth::resonance),
+        [all]
+        {
+            std::vector<float> values;
+
+            for (const auto& each : *all)
+                values.push_back (each.getValue());
+
+            return values;
+        },
+        [this] (const std::vector<float>& values, double cutoffHertz, double frequency)
+        {
+            auto* scope = device.getScope();
+            return WavetableSynth::getFilterMagnitude (values, cutoffHertz, frequency, scope != nullptr ? scope->getSampleRate() : 48000.0);
+        },
+        [shown] { return shown() != nullptr ? shown()->cutoff.get() : 0.0f; }));
+    const auto filter = makePicturePart (
+        "Filter", filterView, 80, 40, { "filterOn", "filterType", "cutoff", "resonance", "filterSlope", "drive", "keyTracking" }, 4,
+        ParameterControls::Size::compact, { "On", "Type", "Cutoff", "Resonance", "Slope", "Drive", "Key" });
+
+    // The modulation: the envelopes, the LFOs, the matrix and how it plays.
+    std::vector<DeviceLayout::Part> modulation;
+
+    for (int envelope = 0; envelope < 3; ++envelope)
+    {
+        const auto first = WavetableSynth::env1Attack + 4 * envelope;
+        auto& view = keep (std::make_unique<EnvelopeView> (
+            "Envelope " + juce::String (envelope + 1), parameter (first), parameter (first + 1), parameter (first + 2),
+            parameter (first + 3), [shown, envelope] { return shown() != nullptr ? shown()->envelopes[(size_t) envelope].get() : 0.0f; }));
+        const auto name = envelope == 0 ? juce::String ("Amp") : "Envelope " + juce::String (envelope + 1);
+        modulation.push_back (
+            makePicturePart (name, view, 64, 36,
+                             { getParameterID (first), getParameterID (first + 1), getParameterID (first + 2), getParameterID (first + 3) },
+                             4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release" }));
+    }
+
+    for (int lfo = 0; lfo < 2; ++lfo)
+    {
+        auto lfoShape = std::make_shared<ParameterHandle> (parameter (WavetableSynth::getLfoParameter (lfo, WavetableSynth::lfoShape)));
+        auto& view = keep (std::make_unique<LfoView> (
+            "LFO " + juce::String (lfo + 1),
+            [lfoShape] (float phase) { return getDrawnLfoValue (juce::roundToInt (lfoShape->getValue()), phase); },
+            [shown, lfo] { return shown() != nullptr ? shown()->lfoPhases[(size_t) lfo].get() : -1.0f; }));
+
+        std::vector<std::string_view> ids;
+
+        for (const auto field : { WavetableSynth::lfoShape, WavetableSynth::lfoRate, WavetableSynth::lfoSync, WavetableSynth::lfoDivision,
+                                  WavetableSynth::lfoRetrigger })
+            ids.push_back (getParameterID (WavetableSynth::getLfoParameter (lfo, field)));
+
+        modulation.push_back (makePicturePart ("LFO " + juce::String (lfo + 1), view, 64, 36, ids, 3, ParameterControls::Size::compact,
+                                               { "Shape", "Rate", "Sync", "Division", "Retrigger" }));
+    }
+
+    auto& matrix = keep (std::make_unique<Matrix> (device));
+
+    for (int slot = 0; slot < WavetableSynth::numModSlots; ++slot)
+        for (const auto field : { WavetableSynth::modSource, WavetableSynth::modTarget, WavetableSynth::modAmount })
+            if (auto* control = matrix.findControl (getParameterID (WavetableSynth::getModParameter (slot, field))))
+                addControl (getParameterID (WavetableSynth::getModParameter (slot, field)), *control);
+
+    modulation.push_back ({ "Matrix", &matrix, Matrix::getPreferredWidth(), Matrix::getPreferredHeight(), Matrix::getPreferredHeight() });
+    modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "bendRange", "velocity", "level" }, 3,
+                                            ParameterControls::Size::compact, { "Mode", "Glide", "Bend", "Velocity", "Level" }));
+
+    oscillatorParts.push_back (subAndNoise);
+    oscillatorParts.push_back (unison);
+    setParts ({ oscillatorParts, { filter }, modulation }, { 2 });
+    refresh();
 }
+
+WavetableEditor::~WavetableEditor() = default;
 
 juce::Component& WavetableEditor::getTableView (int osc) const
 {
@@ -299,11 +471,6 @@ juce::Component& WavetableEditor::getTableView (int osc) const
 juce::Button& WavetableEditor::getTableButton (int osc) const
 {
     return *tableButtons[(size_t) std::clamp (osc, 0, numOscillators - 1)];
-}
-
-DevicePanel& WavetableEditor::getOscillatorControls (int osc) const
-{
-    return *oscillatorControls[(size_t) std::clamp (osc, 0, numOscillators - 1)];
 }
 
 juce::PopupMenu WavetableEditor::getTableMenu (int osc)
@@ -380,61 +547,5 @@ void WavetableEditor::refresh()
                                                : device.getParameter (getParameterID (osc, WavetableSynth::oscPosition)).getValue();
         views[(size_t) osc]->setPlayed (position, on);
     }
-}
-
-void WavetableEditor::timerCallback()
-{
-    if (isShowing()) // nothing to show behind another tab of the Devices view
-        refresh();
-}
-
-int WavetableEditor::getColumnWidth (int osc) const
-{
-    return oscillatorControls[(size_t) osc]->getWidth();
-}
-
-int WavetableEditor::getTopHeight (int drawingHeight) const
-{
-    return Space::l + controlHeight + Space::s + drawingHeight + oscillatorControls[0]->getHeight();
-}
-
-void WavetableEditor::paint (juce::Graphics& g)
-{
-    g.fillAll (getPalette (*this).surface);
-}
-
-void WavetableEditor::resized()
-{
-    // The drawings at their full height while the editor has room, and else as short as they go.
-    const auto full = getTopHeight (WavetableTint::height) + controls->getMinimumHeight() <= getHeight();
-    const auto drawingHeight = full ? WavetableTint::height : WavetableTint::minimumHeight;
-    auto x = 0;
-
-    for (int osc = 0; osc < numOscillators; ++osc)
-    {
-        const auto width = getColumnWidth (osc);
-        auto column = juce::Rectangle<int> (x, 0, width, getTopHeight (drawingHeight)).reduced (Space::l, 0);
-        column.removeFromTop (Space::l);
-        tableButtons[(size_t) osc]->setBounds (column.removeFromTop (controlHeight));
-        column.removeFromTop (Space::s);
-        views[(size_t) osc]->setBounds (column.removeFromTop (drawingHeight));
-        oscillatorControls[(size_t) osc]->setBounds (x, column.getY(), width, oscillatorControls[(size_t) osc]->getHeight());
-        x += width;
-    }
-
-    const auto top = getTopHeight (drawingHeight);
-    controls->setBounds (0, top, getWidth(), std::max (0, getHeight() - top));
-}
-
-int WavetableEditor::getMinimumHeight() const
-{
-    return getTopHeight (WavetableTint::minimumHeight) + controls->getMinimumHeight();
-}
-
-int WavetableEditor::getWidthForHeight (int height) const
-{
-    const auto full = getTopHeight (WavetableTint::height) + controls->getMinimumHeight() <= height;
-    const auto top = getTopHeight (full ? WavetableTint::height : WavetableTint::minimumHeight);
-    return std::max (getColumnWidth (0) + getColumnWidth (1), controls->getWidthForHeight (height - top));
 }
 } // namespace phazite::ui

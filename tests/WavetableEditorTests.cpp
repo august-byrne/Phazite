@@ -69,14 +69,12 @@ TEST_CASE ("The wavetable synth's editor draws each oscillator's table and names
         CHECK (phazite::test::findComponentWithTitle (editor, "Osc " + juce::String (osc + 1) + " Wavetable") != nullptr);
     }
 
-    // Every parameter has its control, titled with its whole name and named within its group: under "Envelope 2", its
+    // Every parameter has its control, titled with its whole name and named within its part: under "Envelope 2", its
     // attack is "Attack".
     for (const auto& parameter : WavetableSynth::info.parameters)
     {
         CAPTURE (std::string (parameter.id));
-        const auto osc = parameter.id.starts_with ("osc2") ? 1 : 0;
-        const auto* control = parameter.id.starts_with ("osc") ? editor.getOscillatorControls (osc).findControl (parameter.id)
-                                                               : editor.getControls().findControl (parameter.id);
+        const auto* control = editor.findControl (parameter.id);
         REQUIRE (control != nullptr);
         CHECK (control->getTitle() == juce::String (parameter.name.data(), parameter.name.size()));
     }
@@ -86,8 +84,13 @@ TEST_CASE ("The wavetable synth's editor draws each oscillator's table and names
     for (auto* label : phazite::test::findAll<juce::Label> (editor))
         names.add (label->getText());
 
-    CHECK (names.contains ("Envelope 2"));
-    CHECK (names.contains ("Mod 8"));
+    CHECK (phazite::test::findComponentWithTitle (editor, "Envelope 2") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (editor, "Mod 8 Source") != nullptr);
+
+    // As wide in a short dock as in a tall one: a shorter dock shows a part at a time under tabs.
+    CHECK (editor.getWidthForHeight (editor.getMinimumHeight()) == editor.getWidth());
+    CHECK (editor.getMinimumHeight() <= 235); // the default dock's height in a 1280 x 800 window
+    CHECK (editor.getWidth() < 1100);
     CHECK_FALSE (names.contains ("2 Attack"));
     CHECK_FALSE (names.contains ("Envelope 2 Attack"));
 }
@@ -159,17 +162,22 @@ TEST_CASE ("Dragging across a wavetable oscillator's drawing moves its position,
     CHECK (screen.getValue ("osc1Position") == doctest::Approx (before));
 }
 
-TEST_CASE ("The wavetable synth's editor fits a shorter Devices view, its groups side by side")
+TEST_CASE ("The wavetable synth's editor fits a shorter Devices view, as wide, a part at a time under tabs")
 {
     Screen screen;
     auto& editor = *screen.editor;
     const auto fullHeight = editor.getHeight();
     const auto shortest = editor.getMinimumHeight();
     REQUIRE (shortest < fullHeight);
+    CHECK (editor.getWidthForHeight (shortest) == editor.getWidth());
 
-    const auto width = editor.getWidthForHeight (shortest);
-    CHECK (width >= editor.getWidth());
-    editor.setSize (width, shortest);
+    editor.setSize (editor.getWidth(), shortest);
     phazite::test::checkChildrenApart (editor);
+    CHECK (editor.getLayout().usesTabs (0));
+    CHECK (editor.getTableView (0).isShowing());
     CHECK (editor.getTableView (0).getHeight() > 0);
+    CHECK_FALSE (editor.getTableView (1).isShowing());
+
+    // The modulation is a list down the side, one part at a time at any height.
+    CHECK (editor.getLayout().usesTabs (2));
 }
