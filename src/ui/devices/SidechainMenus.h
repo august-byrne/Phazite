@@ -35,6 +35,8 @@ public:
     void show (const SidechainChoice& source);
 
     void paintButton (juce::Graphics&, bool isHighlighted, bool isDown) override;
+
+    using juce::Button::clicked; // the overload with the keys held, which this leaves as it is
     void clicked() override;
 
     // Called after the menu changed the sidechain.

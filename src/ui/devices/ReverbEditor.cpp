@@ -17,11 +17,6 @@ namespace
     constexpr int rows = 40;                                     // bands of pitch drawn
     constexpr float grabDistance = 10.0f;                        // pixels from a handle that a press takes it
     constexpr int historyTicks = 6 * DeviceTicker::ticksPerSecond;
-
-    const devices::ParameterInfo& getInfo (int index)
-    {
-        return Reverb::info.parameters[(size_t) index];
-    }
 } // namespace
 
 class ReverbEditor::Graph : public juce::Component,
