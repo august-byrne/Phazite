@@ -14,6 +14,7 @@
 #include "SaturatorEditor.h"
 #include "StereoExpanderEditor.h"
 #include "SynthEditor.h"
+#include "VocoderEditor.h"
 #include "WavetableEditor.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
@@ -29,6 +30,7 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -96,6 +98,9 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Flanger::typeID)
         return std::make_unique<FlangerEditor> (device);
+
+    if (info->typeID == devices::Vocoder::typeID)
+        return std::make_unique<VocoderEditor> (device);
 
     return std::make_unique<DeviceKnobs> (device);
 }

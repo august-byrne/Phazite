@@ -22,6 +22,7 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LiveInput.h"
@@ -232,6 +233,8 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Phaser, six notches", maker<dev::Phaser>(), &dev::Phaser::info, 0,
           [] (std::vector<float>& v) { v[dev::Phaser::notches] = 5.0f; } },
         { "Flanger", maker<dev::Flanger>(), &dev::Flanger::info },
+        { "Vocoder, 40 bands", maker<dev::Vocoder>(), &dev::Vocoder::info, 0,
+          [] (std::vector<float>& v) { v[dev::Vocoder::bands] = 5.0f; } },
         { "Reverb, silence in", maker<dev::Reverb>(), &dev::Reverb::info, 0, {}, true },
         { "Multiband, silence in", maker<dev::Multiband>(), &dev::Multiband::info, 0, {}, true },
     };

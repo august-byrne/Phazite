@@ -12,6 +12,7 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
+#include "devices/vocoder/Vocoder.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -31,6 +32,7 @@ DeviceFamily getDeviceFamily (std::string_view typeID)
         { devices::Saturator::typeID, DeviceFamily::drive },     { devices::Delay::typeID, DeviceFamily::space },
         { devices::Reverb::typeID, DeviceFamily::space },        { devices::Phaser::typeID, DeviceFamily::motion },
         { devices::Flanger::typeID, DeviceFamily::motion },      { devices::StereoExpander::typeID, DeviceFamily::stereo },
+        { devices::Vocoder::typeID, DeviceFamily::voice },
     };
 
     for (const auto& entry : entries)

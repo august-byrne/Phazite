@@ -128,6 +128,8 @@ target_sources(phazite_core PRIVATE
     src/devices/stereo/StereoExpander.h
     src/devices/synth/Synth.cpp
     src/devices/synth/Synth.h
+    src/devices/vocoder/Vocoder.cpp
+    src/devices/vocoder/Vocoder.h
     src/devices/wavetable/FactoryWavetables.cpp
     src/devices/wavetable/FactoryWavetables.h
     src/devices/wavetable/Wavetable.cpp
@@ -513,6 +515,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/SynthEditor.h
     src/ui/devices/SynthParts.cpp
     src/ui/devices/SynthParts.h
+    src/ui/devices/VocoderEditor.cpp
+    src/ui/devices/VocoderEditor.h
     src/ui/devices/WavetableEditor.cpp
     src/ui/devices/WavetableEditor.h
     src/ui/input/CommandBridge.cpp
@@ -811,6 +815,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/UiTestHelpers.h
         tests/UndoTests.cpp
         tests/ValueTextTests.cpp
+        tests/VocoderTests.cpp
         tests/WavetableEditorTests.cpp
         tests/WavetableModelTests.cpp
         tests/WavetableTests.cpp

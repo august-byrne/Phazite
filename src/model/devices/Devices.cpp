@@ -13,6 +13,7 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vocoder/Vocoder.h"
 #include "internal/DevicePlugin.h"
 #include "internal/DrumSamplerPlugin.h"
 #include "internal/WavetablePlugin.h"
@@ -35,6 +36,7 @@ void registerDevices (te::Engine& engine)
     plugins.createBuiltInType<DevicePluginOf<devices::StereoExpander>>();
     plugins.createBuiltInType<DevicePluginOf<devices::Phaser>>();
     plugins.createBuiltInType<DevicePluginOf<devices::Flanger>>();
+    plugins.createBuiltInType<DevicePluginOf<devices::Vocoder>>();
     plugins.createBuiltInType<DrumSamplerPlugin>();
     plugins.createBuiltInType<WavetablePlugin>();
 }
@@ -42,12 +44,12 @@ void registerDevices (te::Engine& engine)
 std::span<const devices::DeviceInfo* const> getOwnDevices()
 {
     // In the order menus list them: the instruments, then the effects by what they do (tone, dynamics, colour, space,
-    // motion, and the stereo expander last).
+    // motion, the voice, and the stereo expander last).
     static const devices::DeviceInfo* const own[] = {
-        &devices::Synth::info,        &devices::WavetableSynth::info, &devices::DrumSampler::info,    &devices::Equalizer::info,
-        &devices::FilterEffect::info, &devices::Compressor::info,     &devices::Multiband::info,      &devices::Limiter::info,
-        &devices::Maximizer::info,    &devices::Saturator::info,      &devices::Delay::info,          &devices::Reverb::info,
-        &devices::Phaser::info,       &devices::Flanger::info,        &devices::StereoExpander::info,
+        &devices::Synth::info,        &devices::WavetableSynth::info, &devices::DrumSampler::info, &devices::Equalizer::info,
+        &devices::FilterEffect::info, &devices::Compressor::info,     &devices::Multiband::info,   &devices::Limiter::info,
+        &devices::Maximizer::info,    &devices::Saturator::info,      &devices::Delay::info,       &devices::Reverb::info,
+        &devices::Phaser::info,       &devices::Flanger::info,        &devices::Vocoder::info,     &devices::StereoExpander::info,
     };
     return own;
 }

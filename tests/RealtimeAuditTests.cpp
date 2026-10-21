@@ -26,6 +26,7 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -646,6 +647,31 @@ TEST_SUITE ("realtime-audit")
         CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
         CHECK (compressor.getReductionMeter().take() > 1.0f);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's vocoder at 40 bands, its carrier another track through the sidechain")
+    {
+        using phazite::devices::Vocoder;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto& voice = getTrack (*edit, 0);
+        auto& carrier = getTrack (*edit, 1);
+        REQUIRE (phazite::insertDevice (voice, createToneGenerator (*edit)) != nullptr);
+        REQUIRE (phazite::insertDevice (carrier, createToneGenerator (*edit)) != nullptr);
+        carrier.setMute (true); // still heard by the sidechain
+
+        const auto plugin = edit->getPluginCache().createNewPlugin (Vocoder::typeID, {});
+        auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
+        REQUIRE (device != nullptr);
+        REQUIRE (phazite::insertDevice (voice, plugin) != nullptr);
+        device->findParameter ("carrier")->setParameter ((float) Vocoder::Carrier::track, juce::sendNotification);
+        device->findParameter ("bands")->setParameter (5.0f, juce::sendNotification);
+        phazite::setSidechainSource (*device, &carrier);
+        REQUIRE (phazite::getSidechainSource (*device) == &carrier);
+
+        const auto m = playAndMeasure (*edit);
+        report ("Phazite's vocoder at 40 bands, its carrier another track through the sidechain", m);
+        CHECK (m.peakLevel > 0.001f);
+        checkSteadyPlaybackDoesNotAllocate (m);
     }
 
     TEST_CASE ("Real-time audit: Phazite's limiter on the master, pushed 12 dB, with its meters read")

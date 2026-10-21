@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Filter's, the saturator's, the delay's, the stereo expander's, the phaser's and the flanger's editors
+// The Filter's, the saturator's, the delay's, the stereo expander's, the phaser's, the flanger's and the vocoder's editors
 // (src/ui/devices/): a control for each parameter but the mix (the header's), what their pictures show, and the drags on
 // them, each one undo step.
 #include "GoldenFiles.h"
@@ -11,6 +11,7 @@
 #include "devices/motion/Phaser.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
+#include "devices/vocoder/Vocoder.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -21,6 +22,7 @@
 #include "ui/devices/PhaserEditor.h"
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/StereoExpanderEditor.h"
+#include "ui/devices/VocoderEditor.h"
 
 namespace
 {
@@ -264,4 +266,35 @@ TEST_CASE ("The flanger's editor shows how far each side's copy lags, and its do
     mouse.dragTo ({ editor.getDotPosition().roundToInt().x, picture.getHeight() });
     mouse.release();
     CHECK (song.valueOf ("feedback") == doctest::Approx (-1.0f));
+}
+
+TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its bands moves the formant as one undo step")
+{
+    Song song (phazite::devices::Vocoder::typeID);
+    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    CHECK (dynamic_cast<phazite::ui::VocoderEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
+
+    phazite::ui::VocoderEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    checkEveryParameterButMixHasAControl (editor, phazite::devices::Vocoder::info);
+    phazite::test::checkChildrenApart (editor);
+
+    // The buzz at first, at C3; a track as the carrier, while none feeds its sidechain, says so.
+    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    CHECK (editor.getCarrierText() == juce::String ("Buzz C3"));
+    song.plugin->getAutomatableParameterByID ("carrier")->setParameter (3.0f, juce::sendNotification);
+    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    CHECK (editor.getCarrierText() == juce::String ("Track: none feeds its sidechain"));
+
+    // From the fifth band's column to the seventh's: the carrier's bands up by as far (10.6 semitones), one step.
+    auto& bands = editor.getBands();
+    phazite::test::Mouse mouse (bands);
+    const auto from = editor.getColumnPosition (4).roundToInt() - juce::Point<int> (0, 20);
+    const auto to = editor.getColumnPosition (6).roundToInt() - juce::Point<int> (0, 20);
+    mouse.press (from);
+    mouse.dragTo (from + juce::Point<int> (10, 0));
+    mouse.dragTo (to);
+    mouse.release();
+    CHECK (std::abs (song.valueOf ("formant") - 12.0f * std::log2 (std::pow (100.0f, 2.0f / 15.0f))) < 0.8f);
+    CHECK (song.describeUndo() == juce::String ("Undo Change Formant"));
 }

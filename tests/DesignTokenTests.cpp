@@ -48,8 +48,8 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
 
         // Each kind of device's colour, its knobs' arcs and graphs on panels and on graphs' backgrounds, and apart from the
         // modulation colour that rings its knobs and from the others.
-        const DeviceFamily families[] = { DeviceFamily::dynamics, DeviceFamily::tone,   DeviceFamily::drive,
-                                          DeviceFamily::space,    DeviceFamily::motion, DeviceFamily::stereo };
+        const DeviceFamily families[] = { DeviceFamily::dynamics, DeviceFamily::tone,   DeviceFamily::drive, DeviceFamily::space,
+                                          DeviceFamily::motion,   DeviceFamily::stereo, DeviceFamily::voice };
         const auto distance = [] (juce::Colour a, juce::Colour b)
         { return std::abs (a.getRed() - b.getRed()) + std::abs (a.getGreen() - b.getGreen()) + std::abs (a.getBlue() - b.getBlue()); };
 

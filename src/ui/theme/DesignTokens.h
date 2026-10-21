@@ -82,8 +82,8 @@ inline constexpr float cornerRadius = 4.0f;
 
 // Each kind of built-in device's colour (ui/devices/DeviceTint.h), so that each has a character of its own and its kind shows at
 // a glance: the dynamics warm, the EQ and the filter cyan, the saturator red, the delay and the reverb blue, the phaser and
-// the flanger green and the stereo expander teal; instruments keep the accent. Each is at least 3:1 against the surface in
-// every theme, and apart from the modulation colour, which rings their knobs.
+// the flanger green, the stereo expander teal and the vocoder pink; instruments keep the accent. Each is at least 3:1
+// against the surface in every theme, and apart from the modulation colour, which rings their knobs.
 enum class DeviceFamily
 {
     instrument,
@@ -92,7 +92,8 @@ enum class DeviceFamily
     drive,    // saturator
     space,    // delay, reverb
     motion,   // phaser, flanger
-    stereo    // stereo expander
+    stereo,   // stereo expander
+    voice     // vocoder
 };
 
 inline std::optional<juce::Colour> getFamilyColour (DeviceFamily family, ThemeName theme)
@@ -111,6 +112,7 @@ inline std::optional<juce::Colour> getFamilyColour (DeviceFamily family, ThemeNa
         case DeviceFamily::space:    return pick (0xff6fa8ff, 0xff2f5fd0, 0xff7fb2ff);
         case DeviceFamily::motion:   return pick (0xff5fd38d, 0xff3b7d12, 0xff4dff9a);
         case DeviceFamily::stereo:   return pick (0xff26d4a8, 0xff0b7d64, 0xff2bffc8);
+        case DeviceFamily::voice:    return pick (0xffff7fd0, 0xffb3317d, 0xffff7fb8);
         case DeviceFamily::instrument:
         default:                     return std::nullopt;
     }
