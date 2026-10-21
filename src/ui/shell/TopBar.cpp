@@ -9,9 +9,8 @@
 
 namespace phazite::ui
 {
-TopBar::TopBar (EngineContext& e, CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContext& context)
-    : engine (e),
-      commands (bridge),
+TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContext& context)
+    : commands (bridge),
       computerKeyboard (keyboard),
       projectContext (context),
       tempoField ("Tempo", minTempo, maxTempo, 1.0, 120.0)
@@ -46,9 +45,6 @@ TopBar::TopBar (EngineContext& e, CommandBridge& bridge, ComputerKeyboard& keybo
     lowLatencyButton.onClick = [this] { commands.invoke ("transport.lowLatency"); };
     keyboardButton.onClick = [this] { commands.invoke ("input.computerKeyboard"); };
 
-    searchButton.setButtonText ("Search commands");
-    searchButton.onClick = [this] { commands.invoke ("view.commandPalette"); };
-
     // The tempo: each drag is one undo step, as are a typed tempo and each step of the wheel or the arrow keys.
     tempoField.textFromValueFunction = [] (double bpm) { return formatTempo (bpm); };
     tempoField.valueFromTextFunction = [this] (const juce::String& text) { return parseTempo (text).value_or (tempoField.getValue()); };
@@ -63,22 +59,18 @@ TopBar::TopBar (EngineContext& e, CommandBridge& bridge, ComputerKeyboard& keybo
     timeSignatureButton.onClick = [this] { showTimeSignatureMenu(); };
     refreshTooltips();
 
-    cpuLabel.setFont (LookAndFeel::getNumberFont (TextSize::body));
-    cpuLabel.setJustificationType (juce::Justification::centred);
-    cpuLabel.setTooltip ("How much of the time available for each audio block the engine uses");
-
     showAsDecibels (masterVolume);
     masterVolume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
     for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &captureButton, &loopButton, &metronomeButton,
-                                                               &lowLatencyButton, &timeSignatureButton, &keyboardButton, &searchButton })
+                                                               &lowLatencyButton, &timeSignatureButton, &keyboardButton })
     {
         button->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (button);
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &tempoField, &cpuLabel, &masterMeter, &masterVolume })
+    for (auto* c : std::initializer_list<juce::Component*> { &tempoField, &masterMeter, &masterVolume })
         addAndMakeVisible (c);
 
     lookAndFeelChanged();
@@ -121,7 +113,6 @@ void TopBar::refreshTooltips()
                                                "Low latency: while on, what you play has no delay to wait for. Devices that look ahead "
                                                "are bypassed, delay compensation is off and the buffer shrinks. Turn it off to mix",
                                                "transport.lowLatency"));
-    searchButton.setTooltip (withShortcut (commands, "Find and run any command by typing part of its name", "view.commandPalette"));
 
     shownKeyboardState = -1; // its tooltip names a shortcut too
     updateKeyboardButton();
@@ -259,19 +250,11 @@ void TopBar::resized()
     timeSignatureButton.setBounds (area.removeFromLeft (52));
     area.removeFromLeft (Space::m);
 
-    searchButton.setBounds (area.removeFromRight (180));
-    area.removeFromRight (Space::s);
     keyboardButton.setBounds (area.removeFromRight (76));
     area.removeFromRight (Space::m);
     masterVolume.setBounds (area.removeFromRight (120));
     area.removeFromRight (Space::xs);
     masterMeter.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 12));
-    area.removeFromRight (Space::m);
-
-    // The CPU readout gets what is left, and gives way in a narrow window.
-    constexpr int cpuWidth = 80;
-    cpuLabel.setVisible (area.getWidth() >= cpuWidth);
-    cpuLabel.setBounds (area.removeFromLeft (juce::jmin (cpuWidth, area.getWidth())));
 }
 
 void TopBar::timerCallback()
@@ -298,7 +281,6 @@ void TopBar::timerCallback()
     lowLatencyButton.setToggleState (isCommandTicked ("transport.lowLatency"), juce::dontSendNotification);
     updateTempo();
 
-    cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.getCpuUsage() * 100.0)) + "%", juce::dontSendNotification);
     updateKeyboardButton();
 
     masterVolumeAttachment.update();

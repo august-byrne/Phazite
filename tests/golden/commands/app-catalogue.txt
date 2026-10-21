@@ -82,6 +82,7 @@ project.saveAs | ctrl + shift + S
 project.save | ctrl + S
 project.export | ctrl + shift + R
 view.commandPalette | ctrl + K
+view.menus | F10
 view.searchBrowser | ctrl + F
 device.add | F8
 device.savePreset

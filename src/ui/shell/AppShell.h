@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The main window's content: top bar, browser, playlist, inspector, editor dock and hint bar.
+// The main window's content: the title bar, the transport bar, the browser, the song's views over the editor dock, the
+// inspector and the status bar.
 #pragma once
 
 #include "Guide.h"
-#include "HintBar.h"
 #include "PanelLayout.h"
 #include "Panels.h"
+#include "StatusBar.h"
+#include "TitleBar.h"
 #include "TopBar.h"
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/browser/Browser.h"
@@ -41,6 +43,19 @@ public:
     // Which panels show, which fills the window, and their sizes (PanelLayout.h); the settings keep them.
     const PanelLayout& getPanelLayout() const noexcept { return panels; }
 
+    // The bars along the top and the bottom. The window gives the title bar its menus and its own buttons (Windows), and
+    // asks it what its frame does where.
+    TitleBar& getTitleBar() noexcept { return titleBar; }
+    StatusBar& getStatusBar() noexcept { return statusBar; }
+    juce::Component::WindowControlKind getWindowControlAt (juce::Point<int>) const;
+
+    // The open project's name and whether it is saved, which the window knows: the title bar and the status bar show them.
+    void showProject (const juce::String& name, bool unsavedChanges, bool neverSaved);
+
+    // How far the panels keep from the window's sides: the band there that resizes a restored window on Windows, whose
+    // scroll bars it would take (app/MainWindow.h). The bars across the top and the bottom reach the sides.
+    void setEdgeInset (int);
+
     // Layouts arrange the panels; they don't hide features.
     enum class Layout
     {
@@ -61,7 +76,7 @@ public:
     void refreshShortcutTexts();
 
     // For tests.
-    HintBar& getHintBar() noexcept { return hintBar; }
+    HintBar& getHintBar() noexcept { return statusBar.getHintBar(); }
     bool showsOpening() const noexcept { return openingLabel.isVisible(); } // for tests
     Guide& getGuide() noexcept { return guide; }
 
@@ -78,6 +93,7 @@ private:
     Previewer& previewer; // the browser's
     ComputerKeyboard& computerKeyboard;
 
+    TitleBar titleBar;
     TopBar topBar;
     Browser browser;
     Playlist playlist;
@@ -88,7 +104,7 @@ private:
     DevicesView devices;                     // the selected track's
     SongViews songViews { playlist, mixer }; // the centre
     EditorDock editorDock { projectContext, pianoRoll, audioClipEditor, devices };
-    HintBar hintBar;
+    StatusBar statusBar;
     Guide guide;              // the hint bar's next step for newcomers
     juce::Label openingLabel; // over the centre until a project is open: what the window shows as Phazite starts
 
@@ -97,6 +113,7 @@ private:
 
     PanelLayout panels;
     Panel panelInUse = Panel::song; // the one the keyboard focus was in last, which "Maximize the Panel in Use" maximizes
+    int edgeInset = 0;              // setEdgeInset()
 
     // Holds the song's views (the playlist or the mixer), the divider and the editor dock, and lays them out when
     // resized.
@@ -134,8 +151,9 @@ private:
     // The editor the time line's commands act on: the one used last, while it shows; or one that shows, the playlist first.
     TimelineEditor* getTimelineEditorInUse();
 
-    // "No audio output" in the hint bar while none plays, which a click on it takes to the audio settings (docs/performance-
-    // audit.md, R3): the device failed to open, or went (unplugged, or Bluetooth that disconnected).
+    // The audio output in the status bar, and "No audio output" in its hint bar while none plays, which a click on it takes
+    // to the audio settings (docs/performance-audit.md, R3): the device failed to open, or went (unplugged, or Bluetooth
+    // that disconnected).
     void updateAudioAlert();
     void changeListenerCallback (juce::ChangeBroadcaster*) override { updateAudioAlert(); } // the audio devices changed
 

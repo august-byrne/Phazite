@@ -343,6 +343,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/circle.svg
         resources/icons/lucide/clock-arrow-down.svg
         resources/icons/lucide/clock.svg
+        resources/icons/lucide/copy.svg
         resources/icons/lucide/download.svg
         resources/icons/lucide/eraser.svg
         resources/icons/lucide/folder-plus.svg
@@ -350,10 +351,13 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/grip-vertical.svg
         resources/icons/lucide/headphones.svg
         resources/icons/lucide/keyboard-music.svg
+        resources/icons/lucide/layout-dashboard.svg
         resources/icons/lucide/magnet.svg
         resources/icons/lucide/maximize-2.svg
+        resources/icons/lucide/menu.svg
         resources/icons/lucide/metronome.svg
         resources/icons/lucide/minimize-2.svg
+        resources/icons/lucide/minus.svg
         resources/icons/lucide/mouse-pointer-2.svg
         resources/icons/lucide/move-horizontal.svg
         resources/icons/lucide/music.svg
@@ -366,6 +370,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/piano.svg
         resources/icons/lucide/play.svg
         resources/icons/lucide/plus.svg
+        resources/icons/lucide/redo-2.svg
         resources/icons/lucide/repeat.svg
         resources/icons/lucide/scissors.svg
         resources/icons/lucide/search.svg
@@ -374,6 +379,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/square-dashed-mouse-pointer.svg
         resources/icons/lucide/square.svg
         resources/icons/lucide/star.svg
+        resources/icons/lucide/undo-2.svg
         resources/icons/lucide/volume-x.svg
         resources/icons/lucide/x.svg
         resources/icons/lucide/zap.svg
@@ -618,6 +624,10 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/RenderPanel.h
     src/ui/shell/SettingsPanel.cpp
     src/ui/shell/SettingsPanel.h
+    src/ui/shell/StatusBar.cpp
+    src/ui/shell/StatusBar.h
+    src/ui/shell/TitleBar.cpp
+    src/ui/shell/TitleBar.h
     src/ui/shell/TopBar.cpp
     src/ui/shell/TopBar.h
     src/ui/shell/Welcome.cpp
@@ -810,6 +820,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SidechainTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
+        tests/StatusBarTests.cpp
         tests/StereoExpanderTests.cpp
         tests/SynthEditorTests.cpp
         tests/SynthTests.cpp
@@ -821,6 +832,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TimelineModelTests.cpp
         tests/TimelineTests.cpp
         tests/TimelineViewTests.cpp
+        tests/TitleBarTests.cpp
         tests/ToggleTests.cpp
         tests/TopBarTests.cpp
         tests/TrackTests.cpp

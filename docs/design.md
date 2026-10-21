@@ -86,7 +86,9 @@ Why this audience:
 
 ```
 +-----------------------------------------------------------------------+
-| Play  Rec   140 BPM   4/4   CPU 12%        Ctrl+K: search any command |
+| File Edit Add View  My Song *  [<-][->][ Search commands ] [|][_][|][#] [-][o][x] |
++-----------------------------------------------------------------------+
+| Play  Rec   140 BPM   4/4                   master level   keyboard   |
 +----------+--------------------------------------------+---------------+
 | Browser  | [Playlist] [Mixer]      (the whole song)   | Inspector     |
 | (Ctrl+F) | + Track  Intro    Build    Drop    (bars)  | (properties   |
@@ -96,14 +98,15 @@ Why this audience:
 | samples  |     Lead    [riff ] [riff*] [riff*] *alias |               |
 | presets  |       `- Cutoff lane   /\/\/\_/\           |               |
 |          +--------------------------------------------+               |
-|          | [Piano roll] [Devices]    (the selection)  |               |
+|          | [Piano roll] [Instrument] [Effects]        |               |
 +----------+--------------------------------------------+---------------+
-| Hint bar: what the mouse and modifier keys do under the pointer       |
+| Saved | hint: what the mouse and keys do here | 48 kHz . 10 ms | CPU 12% |
 +-----------------------------------------------------------------------+
 ```
 
 **The whole song in the centre, the selection below (the owner's decision, 2026-10-17).** The owner found that the editor dock mixed one clip's editor with every track's mixer, that the inspector showed only a copy of a mixer channel, and that effects needed a place to be edited in line, as notes are in the piano roll. Seven DAWs' layouts (Appendix A) showed that the bottom of the window is for the selection in all of them; four also let the mixer take that place (Bitwig, Studio Pro, Logic Pro, Cubase), while Ableton Live keeps it for the selection and gives the mixer a main view of its own, as Bitwig's Mix view does with its Device panel below; an in-line view of the selected track's devices is the clearest trend (Ableton's Device View and Bitwig's Device panel for years, Studio Pro 8's Channel Overview and Reason 14's Track Panel since 2025-26); and side inspectors show properties of the selection.
-- **Top bar:** play, loop and record, tempo, time signature, CPU and disk meters, the master level, the computer keyboard and the command search (Ctrl+K). A key is a track's, so the piano roll shows it, not the top bar (2026-10-13).
+- **Title bar (2026-10-21, as the owner asked: "integrating with the top action bar smoothly like most apps", with VS Code's command search in the middle and Undo and Redo to its left; decided by Claude for the owner to review, `src/ui/shell/TitleBar.h`):** the menus and the project's name (a dot after it while it has unsaved changes) on the left; Undo and Redo, which name the step they take, beside the command search (Ctrl+K) in the middle of the window; on the right, a switch for the browser, the editor dock and the inspector, lit while each shows, as VS Code's layout controls, and a Layout menu (the layouts, each panel, Maximize the Panel in Use, Full Screen); then the window's own minimize, maximize and close buttons. Its empty parts and the project's name drag the window, a double-click on them maximizes it, and Windows 11's snap layouts open from the maximize button; a restored window resizes from a band along its sides, which the panels keep out of so that their scroll bars there can be dragged. In a narrow window the menus fold into one button, then the name goes, then the search narrows. F10 opens the menus. In full screen the bar stays, without the window's buttons. **Platforms:** on Windows it is the window's title bar (JUCE tells Windows which parts are the caption and which the buttons); on Linux the system's title bar stays above it, as nothing in it needs the window's frame, and a switch to use Phazite's own there, as on Windows, can come later (JUCE removes the decorations and moves the window through the window manager); on macOS the system's title bar and its traffic lights stay, with the menus in the menu bar at the top of the screen, and a small piece of native code (a full-size content view under a transparent title bar) can put the bar beside the traffic lights later.
+- **Transport bar:** play, loop and record, tempo, time signature, the master level and volume, and the computer keyboard. A key is a track's, so the piano roll shows it, not the transport bar (2026-10-13).
 - **Browser (left):** instruments, effects, plug-ins, presets, samples, generated sounds and projects ([section 11](#11-the-browser)).
 - **Centre: the whole song,** in one of two views, chosen by the tabs at its top, so that no key needs remembering (the owner asked for as few "magic key presses" as possible; F5 and F9 do the same, as in FL Studio):
   - **Playlist:** the time bar (the song's sections over the bar numbers, with the button that adds a track beside it), then global lanes (chords, tempo, markers), then the tracks, with the sections drawn faintly behind them ([section 6](#6-the-playlist));
@@ -113,12 +116,12 @@ Why this audience:
   - **Instrument** (F6) and **Effects** (Shift+F6): the selected track's instrument apart, as wide as the dock, and its effects in a row of cards, folded, one at a time open ([section 9](#9-devices-containers-and-presets); since 2026-10-21, as the owner asked: the instrument looked like another effect, and a long chain ran off sideways).
   Automation has no tab: it is edited in its lanes, under its tracks in the playlist (2026-10-17, [section 10](#10-automation-and-modulation)).
 - **Inspector (right): the properties of what is selected,** as Bitwig's, Studio Pro's, Logic Pro's and Cubase's inspectors show them, laid out to use its width: a track's name, color, volume, pan, where its sound goes and its sends; a clip's name, place, length, mute, fades and whether it is an alias; a section's name, color, place, length, energy and tip; and, with nothing selected, the song's tempo, time signature and length. A track's also shows its instrument, its effects and its automation mode, each a click from the Devices view or its lanes. It isn't a copy of a mixer channel, which the mixer already shows.
-- **Hint bar (bottom edge):** what clicking, dragging and the modifier keys do under the pointer.
+- **Status bar (bottom edge, 2026-10-21, as VS Code's: the owner asked for "small infos" there, beside the hints; `src/ui/shell/StatusBar.h`):** on the left, whether the project is saved ("Saved", "Unsaved changes", "Not saved yet"; a click saves); in the middle, the hint bar: what clicking, dragging and the modifier keys do under the pointer, the guide's next step, and alerts such as no audio output; on the right, the audio output's sample rate and delay ("48 kHz · 10 ms", Bluetooth's in the warning colour; a click opens the audio settings) and how busy the engine is (CPU, moved from the top bar, in the warning colour near its limit). Each says more under the pointer. Later: what is selected, where MIDI goes, and the delay compensation.
 
 **Panels and layouts:**
 - Panels can be resized, hidden, maximized and detached to another monitor (2026-10-21, as the owner asked: "options to hide and also an option to fullscreen only that panel", for the browser, the playlist, the inspector and the editor dock; decided by Claude for the owner to review, from VS Code's panels and Ableton Live's View menu, `src/ui/shell/PanelLayout.h`):
   - **each panel's top right corner** has Maximize, its own window (not the playlist and mixer, which stay in the main window) and Hide, which are commands with names that say what they do now ("Hide the Inspector", "Show the Inspector"), in the View menu too;
-  - **maximized,** a panel fills the window between the top bar and the hint bar, and one at a time; its first button, its command again or **Maximize the Panel in Use** (Shift+F11; the panel with the keyboard focus) brings back the others as they were. Asking to see another panel (its key, F5, F6, F7 or F9, a double-click on a clip, Ctrl+F) restores them first. A panel in a window of its own isn't maximized;
+  - **maximized,** a panel fills the window between the transport bar and the status bar, and one at a time; its first button, its command again or **Maximize the Panel in Use** (Shift+F11; the panel with the keyboard focus) brings back the others as they were. Asking to see another panel (its key, F5, F6, F7 or F9, a double-click on a clip, Ctrl+F) restores them first. A panel in a window of its own isn't maximized;
   - **the centre always shows the playlist and mixer, the editor dock or both:** hiding the one that shows shows the other, and the playlist stays while the editor dock is in a window of its own;
   - **sizes are kept:** a panel hidden and shown again, or the others brought back from a maximized one, come back at the width or height their dividers were dragged to, and the window opens with its panels as they were left (the settings keep them; a detached panel comes back docked);
   - **nothing plays out of sight:** a sound the browser previews stops as the browser hides or another panel fills the window;
@@ -526,7 +529,7 @@ So Phazite keeps lanes, which are also Tracktion's own path for automation and t
 - **Edit** also holds the selected tracks' edits (color, mute, solo, folders, order) and inserting and removing time;
 - **View** also holds going to the start or end, focus mode, pinning, collapsing and track heights;
 - **Help:** the command search, the keyboard shortcuts and hover help;
-- play and stop are on the top bar and the keys. Every command stays in a menu as well as in right-click menus, as Apple's and Microsoft's guidelines ask.
+- play and stop are on the transport bar and the keys. Every command stays in a menu as well as in right-click menus, as Apple's and Microsoft's guidelines ask.
 
 **Keymaps (decided: whatever users find most intuitive; FL Studio style is fine):**
 - **First launch asks** "Coming from FL Studio, Ableton Live, Logic, Pro Tools, or new to music software?" and loads a matching keymap. Digital Performer 12 has switchable keysets that copy other DAWs' shortcuts ([B13](#appendix-b-sources)). v1 ships the Phazite default and FL Studio keymaps, with Ableton Live next.
@@ -858,7 +861,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 
 **Latency** (the owner's decisions, 2026-10-21, from the [performance audit](performance-audit.md)):
 - **First run:** Phazite picks "Windows Audio (Low Latency Mode)" with a buffer of 128 to 256 samples where the output offers one, and Windows' shared mode with the device's own buffer otherwise. It doesn't pick ASIO by itself: an ASIO driver takes its device from every other app, and which driver belongs to the output in use is only a guess from names. The audio settings say that an audio interface's own ASIO driver gives the lowest delay.
-- **Low latency switch:** a "Low latency" switch in the top bar, as Cubase's Constrain Delay Compensation and Studio One's Low Latency Monitoring do, off at first: while it is on, devices that look ahead (the Limiter and the Maximizer, and plug-ins that report latency) are bypassed and the buffer shrinks, so that what is played live has no delay compensation.
+- **Low latency switch:** a "Low latency" switch in the transport bar, as Cubase's Constrain Delay Compensation and Studio One's Low Latency Monitoring do, off at first: while it is on, devices that look ahead (the Limiter and the Maximizer, and plug-ins that report latency) are bypassed and the buffer shrinks, so that what is played live has no delay compensation.
 - **Bluetooth outputs:** the audio settings and the welcome window say when the output is Bluetooth, and what it costs (about 150 to 250 ms between a key and its sound), and suggest a wired output for playing and recording.
 - **Shown:** the audio settings show the buffer and the output's latency in milliseconds, and the song's delay compensation.
 
@@ -1000,7 +1003,7 @@ The roadmap's [architecture track](roadmap.md#architecture-track) gets there in 
 7. ~~Plug-in sandboxing~~ **Decided (2026-10-16, the owner):** before v1, on by default, unless it costs a lot of performance: other people's plug-ins mustn't be able to crash Phazite ([section 19](#19-plug-in-hosting-and-stability)).
 8. ~~Ableton Live keymap~~ **Decided (2026-10-16, the owner):** in v1.
 9. ~~Single-key tools and the computer keyboard~~ **Decided:** Ableton Live's way. While the computer keyboard plays notes, Shift and a letter run that letter's single-key shortcut ([section 12](#12-commands-keys-and-help)).
-10. ~~The computer keyboard at startup~~ **Decided (2026-10-16):** it starts off, so that the tools' letters (P, S, T, D, E, C, Z) work; M or the top bar's button turns it on, and Phazite remembers the choice. The digits 1 to 9 pick the tools either way.
+10. ~~The computer keyboard at startup~~ **Decided (2026-10-16):** it starts off, so that the tools' letters (P, S, T, D, E, C, Z) work; M or the transport bar's button turns it on, and Phazite remembers the choice. The digits 1 to 9 pick the tools either way.
 
 Raised by the mixer research (2026-10-13), each with what the research recommends:
 
@@ -1120,6 +1123,7 @@ Raised by the comb filters (2026-10-18), the audit the owner asked for:
 | 2026-10-21 | The instrument apart from the effects, and a device row that doesn't run off sideways, as the owner asked (step 2.17), decided by Claude for the owner to review ([section 9](#9-devices-containers-and-presets)): the editor dock's Devices tab became Instrument (F6) and Effects (Shift+F6), two pages of one view; the instrument as wide as the dock under a header in its track's colour; the effects as cards folded to two key knobs, one at a time open, an effect just added opening; the inspector's Devices row became Effects |
 | 2026-10-21 | Built-in devices in windows of their own, as the owner asked (step 2.17), decided by Claude for the owner to review ([section 9](#9-devices-containers-and-presets)): a window button on each of Phazite's own devices' cards opens its editor in a window named "EQ - Bass", above the main window, where it was last, resizable with its parts wrapping; its card folds meanwhile (one editor at a time, as its analyzer has one reader); the mixer's slot brings the window forward; containers stay in the Devices view. This reverses part of 2026-10-17's "one place" |
 | 2026-10-21 | Every panel hides and can fill the window, as the owner asked (step 2.17), decided by Claude for the owner to review ([section 4](#4-the-window)): Maximize, its own window and Hide in each panel's corner; one maximized at a time, the others back as they were, and back as soon as another panel is asked for; the centre always shows the playlist or the editor dock; sizes kept, and the layout kept in the settings; Full Screen (F11), Maximize the Panel in Use (Shift+F11), Ctrl+Alt+L and Ctrl+Alt+I in Phazite's keymap, F12 in FL Studio's |
+| 2026-10-21 | The window's own title bar and a status bar, as the owner asked (step 2.17), decided by Claude for the owner to review ([section 4](#4-the-window)): the menus, the project's name, Undo and Redo beside the command search in the middle, the panels' switches and a Layout menu, and the window's buttons, in Windows' title bar; on Linux and macOS the system's title bar stays above it (macOS's menus in its menu bar), with a path to Phazite's own there later; the transport bar keeps the rest; the status bar shows the save state, the hints, the audio output's rate and delay, and the CPU, moved from the top bar |
 
 ## Appendix A. Research summary
 

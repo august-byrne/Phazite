@@ -18,9 +18,9 @@
 
 namespace phazite
 {
-// Phazite's one window: the menu bar and the AppShell. It also owns the dialogs, and the computer
-// keyboard, which plays notes while this window has the keyboard focus. Freezes and bounces render in a progress window
-// over it (TrackRenderHost).
+// Phazite's one window: the AppShell, whose title bar shows this window's menus. It also owns the dialogs, and the
+// computer keyboard, which plays notes while this window has the keyboard focus. Freezes and bounces render in a progress
+// window over it (TrackRenderHost).
 class MainWindow : public juce::DocumentWindow,
                    public TrackRenderHost,
                    private juce::MenuBarModel,
@@ -46,6 +46,13 @@ public:
     void closeButtonPressed() override;
     void activeWindowStatusChanged() override;
     bool keyPressed (const juce::KeyPress&) override;
+
+    // Phazite's own title bar, on Windows (ui/shell/TitleBar.h): the content fills the window, edges and all, the bar's empty
+    // parts move it, and Windows hears that it has the buttons the bar draws.
+    WindowControlKind findControlAtPoint (juce::Point<float>) const override;
+    int getDesktopWindowStyleFlags() const override;
+    void resized() override; // the panels keep out of the band along a restored window's sides
+    juce::BorderSize<int> getBorderThickness() const override { return {}; }
 
 private:
     te::Engine& engine;
@@ -79,6 +86,7 @@ private:
     void setFullScreenMode (bool);
     void setKeymap (const juce::String& name);
     void updateTitle();
+    ui::TitleBar::WindowActions getWindowActions(); // what the title bar's own window buttons do
 
     void timerCallback() override { updateTitle(); }
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the keys changed

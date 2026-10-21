@@ -98,6 +98,20 @@ namespace
                 return "panel-bottom-close.svg";
             case Icon::hidePanelRight:
                 return "panel-right-close.svg";
+            case Icon::menu:
+                return "menu.svg";
+            case Icon::undo:
+                return "undo-2.svg";
+            case Icon::redo:
+                return "redo-2.svg";
+            case Icon::layout:
+                return "layout-dashboard.svg";
+            case Icon::minimiseWindow:
+                return "minus.svg";
+            case Icon::maximiseWindow:
+                return "square.svg";
+            case Icon::restoreWindow:
+                return "copy.svg";
         }
 
         return "";

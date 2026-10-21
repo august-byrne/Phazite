@@ -244,6 +244,40 @@ void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button,
     g.drawRoundedRectangle (focused ? bounds.reduced (1.0f) : bounds, cornerRadius, focused ? 2.0f : 1.0f);
 }
 
+void LookAndFeel::drawMenuBarBackground (juce::Graphics& g, int width, int height, bool, juce::MenuBarComponent& menuBar)
+{
+    if (menuBar.getProperties()[onBarProperty])
+        return; // the bar behind it paints its background
+
+    g.setColour (palette.surfaceRaised);
+    g.fillRect (0, 0, width, height);
+}
+
+void LookAndFeel::drawMenuBarItem (juce::Graphics& g, int width, int height, int itemIndex, const juce::String& itemText,
+                                   bool isMouseOverItem, bool isMenuOpen, bool, juce::MenuBarComponent& menuBar)
+{
+    if (menuBar.isEnabled() && (isMouseOverItem || isMenuOpen))
+    {
+        g.setColour (palette.surfaceRaised);
+        g.fillRoundedRectangle (juce::Rectangle<int> (width, height).toFloat(), cornerRadius);
+    }
+
+    g.setColour (menuBar.isEnabled() ? palette.text : palette.textMuted);
+    g.setFont (getMenuBarFont (menuBar, itemIndex, itemText));
+    g.drawFittedText (itemText, 0, 0, width, height, juce::Justification::centred, 1);
+}
+
+juce::Font LookAndFeel::getMenuBarFont (juce::MenuBarComponent&, int, const juce::String&)
+{
+    return juce::Font (juce::FontOptions (TextSize::body));
+}
+
+int LookAndFeel::getMenuBarItemWidth (juce::MenuBarComponent& menuBar, int itemIndex, const juce::String& itemText)
+{
+    return juce::roundToInt (juce::GlyphArrangement::getStringWidth (getMenuBarFont (menuBar, itemIndex, itemText), itemText))
+           + 2 * Space::m;
+}
+
 const Palette& getPalette (const juce::Component& component)
 {
     if (auto* lookAndFeel = dynamic_cast<const LookAndFeel*> (&component.getLookAndFeel()))

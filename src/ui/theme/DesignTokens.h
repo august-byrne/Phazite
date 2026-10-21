@@ -80,14 +80,34 @@ namespace Space
 inline constexpr int controlHeight = 28;
 inline constexpr float cornerRadius = 4.0f;
 
-// The main window's bars and panels (ui/shell/AppShell.h, PanelLayout.h).
+// The main window's bars and panels (ui/shell/AppShell.h, PanelLayout.h, TitleBar.h, StatusBar.h).
 namespace Shell
 {
+    inline constexpr int titleBarHeight = 36;     // the menus, Undo and Redo, the command search and the panels' switches
     inline constexpr int transportBarHeight = 44; // play, record, the tempo and the master level
-    inline constexpr int hintBarHeight = 24;      // what the control under the pointer does
-    inline constexpr int dividerSize = 5;         // between panels, dragged to size them
-    inline constexpr float dividerLit = 0.5f;     // the accent's alpha on a divider under the pointer
-    inline constexpr int panelButtonSize = 26;    // in a panel's top right corner: maximize, detach and hide
+    inline constexpr int statusBarHeight = 24;    // whether the project is saved, the hints, the audio output and the CPU
+
+    // The title bar's parts: the window's buttons, as wide as Windows 11's, with their glyphs, Close red under the pointer as
+    // there (in every theme); the command search, as wide as it can be in the middle; the project's name at its widest; the
+    // panels' switches, a little window with the panel's part filled while it shows; and how faint the bar's text goes while
+    // another window is in front. The window's edges resize it within this band.
+    inline constexpr int windowButtonWidth = 46;
+    inline constexpr float windowGlyphSize = 10.0f;
+    inline constexpr juce::uint32 closeButtonColour = 0xffc42b1c, closeButtonText = 0xffffffff;
+    inline constexpr int searchMinimumWidth = 240, searchMaximumWidth = 520, searchIconSize = 14;
+    inline constexpr int projectNameWidth = 200;
+    inline constexpr float panelSwitchWidth = 16.0f, panelSwitchHeight = 12.0f, panelSwitchCorner = 2.0f;
+    inline constexpr float panelSwitchSideShare = 0.35f, panelSwitchBottomShare = 0.4f; // of the little window, the panel's part
+    inline constexpr float inactiveAlpha = 0.6f;
+    inline constexpr int resizeBand = 5; // along the top and the title bar's sides
+    inline constexpr int edgeInset = 8;  // the panels keep out of the band along a restored window's sides, which resizes it
+
+    // The status bar's CPU in the warning colour from here, in percent: the sound is close to breaking up.
+    inline constexpr int busyCpuPercent = 80;
+
+    inline constexpr int dividerSize = 5;      // between panels, dragged to size them
+    inline constexpr float dividerLit = 0.5f;  // the accent's alpha on a divider under the pointer
+    inline constexpr int panelButtonSize = 26; // in a panel's top right corner: maximize, detach and hide
 
     // What a panel's buttons take of its top right corner, with their margins, so that what is there leaves them room.
     constexpr int getPanelCornerWidth (int buttons)

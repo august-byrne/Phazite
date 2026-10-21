@@ -73,7 +73,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       library (l),
       previewer (p),
       computerKeyboard (keyboard),
-      topBar (engine, bridge, keyboard, context),
+      titleBar (bridge),
+      topBar (bridge, keyboard, context),
       browser (library, previewer, pack, s, context),
       playlist (bridge, context),
       inspector (bridge, context),
@@ -81,6 +82,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       audioClipEditor (bridge, context),
       mixer (bridge, context),
       devices (bridge, context),
+      statusBar (engine, bridge),
       guide (bridge, s)
 {
     setTitle ("Phazite");
@@ -98,7 +100,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
                 });
     };
     browser.onUsed = [this] (const LibraryItem&) { guide.markDone (Guide::Step::addSound); };
-    hintBar.setDefaultHint ([this] { return getDefaultHint(); });
+    getHintBar().setDefaultHint ([this] { return getDefaultHint(); });
 
     // Double-clicking a clip opens it in the editor dock, a MIDI clip in the piano roll and an audio clip in the audio clip
     // editor, which then has the keys.
@@ -115,8 +117,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     browser.onPlace = [this] (const LibraryItem& item) { return placeItem (item); };
     browser.onShowSoundPack = [this] { commands.invoke ("help.phaziteSounds"); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &topBar, &browser, &browserDivider, &centre, &inspectorDivider, &inspector,
-                                                             &hintBar, &browserButtons, &inspectorButtons })
+    for (auto* c : std::initializer_list<juce::Component*> { &titleBar, &topBar, &browser, &browserDivider, &centre, &inspectorDivider,
+                                                             &inspector, &statusBar, &browserButtons, &inspectorButtons })
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &songViews, &editorDivider, &editorDock, &songButtons, &editorButtons })
@@ -279,12 +281,12 @@ void AppShell::showSelectedDevice()
 
 void AppShell::showCommandPalette()
 {
-    CommandPalette::show (commands, topBar.getSearchButton());
+    CommandPalette::show (commands, titleBar.getSearchBox());
 }
 
 void AppShell::showPluginPicker()
 {
-    PluginPicker::show (library, topBar.getSearchButton(),
+    PluginPicker::show (library, titleBar.getSearchBox(),
                         [safeThis = juce::Component::SafePointer<AppShell> (this)] (const LibraryItem& item)
                         {
                             if (safeThis != nullptr)
@@ -490,6 +492,8 @@ void AppShell::updateLayout()
         buttons.update (panels);
     }
 
+    titleBar.showPanels (panels);
+
     // (A sound the browser previews stops as the browser goes out of sight: Browser::visibilityChanged().)
     resized();
     layOutCentre();
@@ -531,23 +535,58 @@ void AppShell::dragDivider (Panel panel, int distance)
 
 void AppShell::paint (juce::Graphics& g)
 {
-    g.fillAll (getPalette (*this).border); // shows through the dividers
+    const auto& p = getPalette (*this);
+    g.fillAll (p.border); // shows through the dividers
+
+    // The window's sides beside the panels (setEdgeInset()), as the title bar's background.
+    g.setColour (p.background);
+    g.fillRect (getLocalBounds().removeFromLeft (edgeInset));
+    g.fillRect (getLocalBounds().removeFromRight (edgeInset));
 }
 
 void AppShell::updateAudioAlert()
 {
-    if (engineContext.getAudioOutput().isOpen)
-        hintBar.setAlert ({}, nullptr);
+    const auto output = engineContext.getAudioOutput();
+    statusBar.showAudioOutput (output);
+
+    if (output.isOpen)
+        getHintBar().setAlert ({}, nullptr);
     else
-        hintBar.setAlert ("No audio output: nothing can be heard. Click here to choose one in the audio settings.",
-                          [this] { commands.invoke ("options.audioSettings"); });
+        getHintBar().setAlert ("No audio output: nothing can be heard. Click here to choose one in the audio settings.",
+                               [this] { commands.invoke ("options.audioSettings"); });
+}
+
+void AppShell::showProject (const juce::String& name, bool unsavedChanges, bool neverSaved)
+{
+    titleBar.setProjectName (name, unsavedChanges);
+    statusBar.showSaveState (name.isEmpty()   ? StatusBar::SaveState::none
+                             : neverSaved     ? StatusBar::SaveState::neverSaved
+                             : unsavedChanges ? StatusBar::SaveState::unsaved
+                                              : StatusBar::SaveState::saved);
+}
+
+void AppShell::setEdgeInset (int inset)
+{
+    if (inset == edgeInset)
+        return;
+
+    edgeInset = inset;
+    resized();
+    layOutCentre();
+}
+
+juce::Component::WindowControlKind AppShell::getWindowControlAt (juce::Point<int> point) const
+{
+    return titleBar.getControlAt (point - titleBar.getPosition());
 }
 
 void AppShell::resized()
 {
     auto area = getLocalBounds();
+    titleBar.setBounds (area.removeFromTop (Shell::titleBarHeight));
     topBar.setBounds (area.removeFromTop (Shell::transportBarHeight));
-    hintBar.setBounds (area.removeFromBottom (Shell::hintBarHeight));
+    statusBar.setBounds (area.removeFromBottom (Shell::statusBarHeight));
+    area = area.reduced (edgeInset, 0);
     openingLabel.setBounds (area);
 
     // The side panels at the widths they keep, as far as the window has room, and the centre between them. A panel in its
@@ -632,6 +671,10 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     add ("view.commandPalette", "Search Commands", "Finds and runs any command by name.", { "palette", "find", "run" },
          [this] { showCommandPalette(); });
+
+    add (
+        "view.menus", "Open the Menus", "Opens the File menu in the title bar, for the arrow keys to move through the menus.",
+        { "menu bar", "file menu", "alt" }, [this] { titleBar.showMenus(); }, [this] { return titleBar.hasMenus(); });
 
     add ("view.searchBrowser", "Search the Browser", "Shows the browser and puts the cursor in its search field.",
          { "find", "sounds", "samples", "plugins" },
@@ -782,6 +825,7 @@ void AppShell::addCommands (CommandRegistry& registry)
 
 void AppShell::refreshShortcutTexts()
 {
+    titleBar.refreshTooltips();
     topBar.refreshTooltips();
 
     for (const auto panel : allPanels)
@@ -798,7 +842,7 @@ juce::String AppShell::getDefaultHint() const
         return next;
 
     const auto paletteKey = getKeyText (commands, "view.commandPalette");
-    return paletteKey.isEmpty() ? juce::String ("Search for any command with \"Search commands\" at the top right.")
+    return paletteKey.isEmpty() ? juce::String ("Search for any command with \"Search commands\" at the top.")
                                 : "Press " + paletteKey + " to search for any command.";
 }
 } // namespace phazite::ui

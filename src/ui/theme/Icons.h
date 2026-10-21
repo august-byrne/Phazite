@@ -53,7 +53,15 @@ enum class Icon
     hidePanelLeft, // the browser
     hidePanelTop,  // the song's views
     hidePanelBottom,
-    hidePanelRight
+    hidePanelRight,
+    // The title bar (ui/shell/TitleBar.h)
+    menu, // the menus, folded
+    undo,
+    redo,
+    layout, // the Layout menu
+    minimiseWindow,
+    maximiseWindow,
+    restoreWindow
 };
 
 // The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read. A filled icon has its shape

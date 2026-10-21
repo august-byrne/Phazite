@@ -350,8 +350,12 @@ void PanelButtons::refreshTooltips()
                                                + " to a window of its own, for example on a second monitor. Close that "
                                                  "window to put it back",
                                            getPanelCommandID ("detach", panel)));
-    hideButton.setTooltip (
-        withShortcut (commands, "Hides " + name + ". The View menu shows it again", getPanelCommandID ("toggle", panel)));
+    hideButton.setTooltip (withShortcut (commands,
+                                         panel == Panel::song
+                                             ? juce::String ("Hides the playlist and mixer: the editor takes their place. The "
+                                                             "Layout menu at the top of the window shows them again")
+                                             : "Hides " + name + ". Its switch at the top of the window shows it again",
+                                         getPanelCommandID ("toggle", panel)));
 }
 
 int PanelButtons::getPreferredWidth() const noexcept

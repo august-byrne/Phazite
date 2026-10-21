@@ -67,6 +67,7 @@
     "project.saveAs": [ "command + shift + S" ],
     "project.export": [ "command + shift + R" ],
     "view.commandPalette": [ "command + K" ],
+    "view.menus": [ "F10" ],
     "view.pianoRoll": [ "F7" ],
     "view.instrument": [ "F6" ],
     "view.effects": [ "shift + F6" ],

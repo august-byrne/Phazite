@@ -4,7 +4,6 @@
 #include "UiTestHelpers.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/engine/internal/EngineContext.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Metronome.h"
@@ -42,8 +41,7 @@ struct TopBarScreen
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge bridge { registry };
     phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
-    std::unique_ptr<phazite::EngineContext> engine = phazite::createEngineContext (phazite::test::getEngine());
-    phazite::ui::TopBar topBar { *engine, bridge, keyboard, context };
+    phazite::ui::TopBar topBar { bridge, keyboard, context };
     phazite::test::TestWindow window { topBar, 1200, 40 };
 };
 } // namespace

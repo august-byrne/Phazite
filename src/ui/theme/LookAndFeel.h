@@ -37,6 +37,15 @@ public:
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour, bool isHighlighted,
                                bool isDown) override;
 
+    // Menu bars: each name lit under the pointer and while its menu is open; the title bar's (ui/shell/TitleBar.h), with
+    // onBarProperty set, on the bar's own background, and others, such as a plug-in window's, on the raised surface.
+    static constexpr const char* onBarProperty = "phaziteMenuBarOnBar";
+    void drawMenuBarBackground (juce::Graphics&, int width, int height, bool isMouseOverBar, juce::MenuBarComponent&) override;
+    void drawMenuBarItem (juce::Graphics&, int width, int height, int itemIndex, const juce::String& itemText, bool isMouseOverItem,
+                          bool isMenuOpen, bool isMouseOverBar, juce::MenuBarComponent&) override;
+    juce::Font getMenuBarFont (juce::MenuBarComponent&, int itemIndex, const juce::String& itemText) override;
+    int getMenuBarItemWidth (juce::MenuBarComponent&, int itemIndex, const juce::String& itemText) override;
+
 private:
     ThemeName theme = ThemeName::dark;
     Palette palette;

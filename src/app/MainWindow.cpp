@@ -57,7 +57,16 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
       shortcutKeys (bridge),
       pluginWindowServices { s.getContext(), appServices.library, appServices.settings }
 {
+    // Phazite's own title bar on Windows (ui/shell/TitleBar.h), in the bar Windows would draw: the content fills the window,
+    // and findControlAtPoint() tells Windows which of its parts are the caption and the buttons. Linux and macOS keep the
+    // system's (docs/design.md, section 4). setResizable(), below, makes the window again with getDesktopWindowStyleFlags().
+#if JUCE_WINDOWS
+    setTitleBarButtonsRequired (0, false);
+    setTitleBarHeight (0);
+    setUsingNativeTitleBar (false);
+#else
     setUsingNativeTitleBar (true);
+#endif
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
     auto content = std::make_unique<ui::AppShell> (*services.engineContext, commands, shortcutKeys, computerKeyboard, s.getContext(),
@@ -79,8 +88,17 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
         menuItemsChanged();
     };
 
-    setMenuBar (this);
+    // The menus, in the title bar, or on macOS in the menu bar at the top of the screen.
+#if JUCE_MAC
+    juce::MenuBarModel::setMacMainMenu (this);
+#else
+    shell->getTitleBar().setMenus (this);
+#endif
     setApplicationCommandManagerToWatch (&commands.getCommandManager());
+
+#if JUCE_WINDOWS
+    shell->getTitleBar().setWindowActions (getWindowActions());
+#endif
 
     // Shortcuts work anywhere in the window, and the computer keyboard gets its letters before they do.
     windowKeys = std::make_unique<ui::WindowKeys> (*this, shortcutKeys, computerKeyboard);
@@ -140,7 +158,11 @@ MainWindow::~MainWindow()
     commands.getCommandManager().getKeyMappings()->removeChangeListener (this);
     windowKeys = nullptr;
     computerKeyboard.onChange = nullptr;
-    setMenuBar (nullptr);
+#if JUCE_MAC
+    juce::MenuBarModel::setMacMainMenu (nullptr);
+#endif
+    shell->getTitleBar().setMenus (nullptr);
+    shell->getTitleBar().setWindowActions (std::nullopt);
     clearContentComponent();
 }
 
@@ -156,6 +178,66 @@ void MainWindow::activeWindowStatusChanged()
     // Keys released in another window would never reach this one.
     if (! isActiveWindow() && windowKeys != nullptr)
         windowKeys->releaseKeys();
+
+    if (shell != nullptr)
+        shell->getTitleBar().setWindowActive (isActiveWindow());
+}
+
+auto MainWindow::findControlAtPoint (juce::Point<float> point) const -> WindowControlKind
+{
+    using Kind = WindowControlKind;
+
+    // Filling the screen, it neither moves nor resizes.
+    if (isKioskMode())
+        return Kind::client;
+
+    // A band along the top resizes the window, as Windows 11 expects it inside the window, and along the title bar's
+    // sides; below the title bar, JUCE gives the content's edges and corners a band of their own. Not while it is maximized.
+    if (! isFullScreen())
+    {
+        const auto band = (float) ui::Shell::resizeBand;
+        const auto left = point.x < band, right = point.x >= (float) getWidth() - band;
+
+        if (point.y < band)
+            return left ? Kind::sizeTopLeft : right ? Kind::sizeTopRight : Kind::sizeTop;
+
+        if (point.y < (float) ui::Shell::titleBarHeight && (left || right))
+            return left ? Kind::sizeLeft : Kind::sizeRight;
+    }
+
+    // The title bar's empty parts are the caption, which moves the window, and its window buttons are Windows' own.
+    return shell != nullptr ? shell->getWindowControlAt (shell->getLocalPoint (this, point.roundToInt())) : Kind::client;
+}
+
+void MainWindow::resized()
+{
+    juce::DocumentWindow::resized();
+
+    // On Windows the band along a restored window's sides that resizes it is inside the window: the panels keep out of it,
+    // so that their scroll bars there can be dragged.
+#if JUCE_WINDOWS
+    if (shell != nullptr)
+        shell->setEdgeInset (isFullScreen() || isKioskMode() ? 0 : ui::Shell::edgeInset);
+#endif
+}
+
+int MainWindow::getDesktopWindowStyleFlags() const
+{
+    // Phazite draws the window's buttons, but Windows needs to know it has them, for their clicks and its snap layouts.
+    auto styleFlags = juce::DocumentWindow::getDesktopWindowStyleFlags();
+#if JUCE_WINDOWS
+    styleFlags |= juce::ComponentPeer::windowHasMinimiseButton | juce::ComponentPeer::windowHasMaximiseButton
+                  | juce::ComponentPeer::windowHasCloseButton;
+#endif
+    return styleFlags;
+}
+
+ui::TitleBar::WindowActions MainWindow::getWindowActions()
+{
+    return { .minimise = [this] { minimiseButtonPressed(); },
+             .toggleMaximised = [this] { maximiseButtonPressed(); },
+             .close = [this] { closeButtonPressed(); },
+             .isMaximised = [this] { return isFullScreen(); } };
 }
 
 bool MainWindow::keyPressed (const juce::KeyPress& key)
@@ -612,19 +694,33 @@ bool MainWindow::isFullScreenMode() const
 
 void MainWindow::setFullScreenMode (bool on)
 {
-    // Over the whole screen, the taskbar too, or back where it was.
+    // Over the whole screen, the taskbar too, or back where it was. The title bar stays, its menus and search with it, but
+    // not the window's buttons.
     juce::Desktop::getInstance().setKioskModeComponent (on ? this : nullptr, false);
+
+#if JUCE_WINDOWS
+    shell->getTitleBar().setWindowActions (on ? std::nullopt : std::optional (getWindowActions()));
+#endif
 }
 
 void MainWindow::updateTitle()
 {
-    juce::String title ("Phazite");
+    // The taskbar's name for the window; and in the title bar and the status bar, the project's name and whether it is saved.
+    juce::String title ("Phazite"), name;
+    auto unsaved = false;
 
     if (auto* project = session.getProject())
-        title = project->getFile().getFileNameWithoutExtension() + (project->hasUnsavedChanges() ? "*" : "") + " - Phazite";
+    {
+        name = project->getFile().getFileNameWithoutExtension();
+        unsaved = project->hasUnsavedChanges();
+        title = name + (unsaved ? "*" : "") + " - Phazite";
+    }
 
     if (getName() != title)
         setName (title);
+
+    if (shell != nullptr)
+        shell->showProject (name, unsaved, session.getProject() != nullptr && session.isUntitled());
 }
 
 //==============================================================================
