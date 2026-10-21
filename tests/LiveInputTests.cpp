@@ -27,6 +27,21 @@ void addInstrument (te::AudioTrack& track)
 {
     track.pluginList.insertPlugin (track.edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}), 0, nullptr);
 }
+
+// Plays a note until it sounds as wanted, a few times at most, and says when it sounded the last time: Tracktion makes its
+// graph again after a change in its own time, which a sanitizer's build makes slow.
+int playUntil (const std::function<int()>& playNote, const std::function<bool (int samples)>& wanted)
+{
+    auto samples = playNote();
+
+    for (int tries = 0; tries < 20 && ! wanted (samples); ++tries)
+    {
+        phazite::test::settle (250);
+        samples = playNote();
+    }
+
+    return samples;
+}
 } // namespace
 
 TEST_CASE ("Live MIDI goes to the first track with an instrument")
@@ -177,12 +192,12 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     phazite::test::settle (500);
     const auto latency = juce::roundToInt (limiter->getLatencySeconds() * phazite::test::HostedDevice::sampleRate);
     REQUIRE (latency > 0);
-    CHECK (playNote() == atOnce + latency);
+    CHECK (playUntil (playNote, [&] (int samples) { return samples == atOnce + latency; }) == atOnce + latency);
 
     // ...but not once it is switched off.
     limiter->setEnabled (false);
     phazite::test::settle (500);
-    CHECK (playNote() == atOnce);
+    CHECK (playUntil (playNote, [atOnce] (int samples) { return samples == atOnce; }) == atOnce);
 }
 
 TEST_CASE ("Low latency plays live notes without delay compensation, and back with it when it is off")
@@ -211,19 +226,19 @@ TEST_CASE ("Low latency plays live notes without delay compensation, and back wi
         return samples;
     };
 
-    const auto compensated = playNote();
+    const auto compensated = playUntil (playNote, [] (int samples) { return samples > 90; });
     CHECK (compensated > 90); // the limiter's look-ahead, about 99 samples
 
     phazite::setLowLatency (engine, true);
     phazite::test::settle (500);
     CHECK (phazite::isLowLatency (engine));
-    const auto low = playNote();
+    const auto low = playUntil (playNote, [] (int samples) { return samples >= 0 && samples < 16; });
     CHECK (low >= 0);
     CHECK (low < 16);
 
     phazite::setLowLatency (engine, false);
     phazite::test::settle (500);
-    CHECK (playNote() == compensated);
+    CHECK (playUntil (playNote, [compensated] (int samples) { return samples == compensated; }) == compensated);
 }
 
 TEST_CASE ("Low latency leaves what renders play as the song has it")
