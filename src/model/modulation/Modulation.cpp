@@ -329,6 +329,29 @@ bool isBipolar (const ModulatorAccess& modulator)
     return dynamic_cast<te::StepModifier*> (modifier) != nullptr; // steps go from -1 to 1
 }
 
+bool isModulatorOn (const ModulatorAccess& modulator)
+{
+    return modulator.modifier == nullptr || isOn (modulator.modifier->enabledParam);
+}
+
+void setModulatorOn (const ModulatorAccess& modulator, bool on)
+{
+    auto* modifier = modulator.modifier.get();
+
+    if (modifier == nullptr || isModulatorOn (modulator) == on)
+        return;
+
+    // Stored first without an undo step, as a control's first change is (model/devices/ParameterHandle.cpp): undoing the
+    // first switch would otherwise take the property away, and phazite::undo() would write it back as a step of its own.
+    if (! modifier->state.hasProperty (te::IDs::enabled))
+        modifier->state.setProperty (te::IDs::enabled, 1.0f, nullptr);
+
+    modifier->enabledParam->setParameter (on ? 1.0f : 0.0f, juce::sendNotification);
+
+    for (const auto& modulation : getModulations (modulator))
+        followModulation (*modulation.parameter);
+}
+
 //==============================================================================
 std::vector<ModulationAccess> getModulations (const te::AutomatableParameter& parameter)
 {

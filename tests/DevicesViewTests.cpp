@@ -265,6 +265,15 @@ TEST_CASE ("The Devices view shows its track's modulators, a macro with its knob
     mouse.click (lfo->getLocalBounds().getCentre());
     CHECK (phazite::test::findAll<phazite::ui::ModulatorEditor> (view).isEmpty());
 
+    // The LFO's On switch turns it off, to hear the sound without it; the macro has none.
+    auto* on = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*group, "On"));
+    REQUIRE (on != nullptr);
+    CHECK (on->getToggleState());
+    phazite::test::Mouse onMouse (*on);
+    onMouse.click (on->getLocalBounds().getCentre());
+    CHECK_FALSE (phazite::isModulatorOn (screen.context, phazite::getModulators (screen.context, screen.track (0))[0].id));
+    CHECK_FALSE (on->getToggleState());
+
     // Removing one takes its slot away.
     phazite::removeModulator (screen.context, phazite::getModulators (screen.context, screen.track (0))[0].id);
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "LFO 1") == nullptr; }));

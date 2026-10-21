@@ -344,3 +344,90 @@ TEST_CASE ("Modulators and what they modulate are saved with the project, and pl
     CHECK (modulations[1].modulator == macro);
     setEdit (context, nullptr);
 }
+
+TEST_CASE ("A modulator switched off moves nothing and keeps what it modulates, one undo step either way")
+{
+    Song song;
+    auto& context = song.context;
+    const auto cutoff = song.cutoff();
+    auto handle = phazite::getParameter (context, cutoff);
+    const auto lfo = phazite::modulateWithNew (handle, ModulatorType::lfo, 0.3f);
+    REQUIRE (lfo.isValid());
+    phazite::getModulatorParameter (context, lfo, "rate").setValue (8.0f); // fast enough to see within a second
+    CHECK (phazite::isModulatorOn (context, lfo));
+    CHECK (phazite::getModulator (context, lfo)->isOn);
+    REQUIRE (phazite::getModulationRange (handle).has_value());
+    CHECK (phazite::getModulationRange (handle)->isOn);
+
+    phazite::setModulatorOn (context, lfo, false);
+    CHECK (song.describeUndo() == juce::String ("Undo Turn Modulator Off"));
+    CHECK_FALSE (phazite::isModulatorOn (context, lfo));
+    CHECK_FALSE (phazite::getModulator (context, lfo)->isOn);
+    CHECK (phazite::getModulations (context, lfo).size() == 1);
+
+    // Its knob's ring shows where it would move the cutoff, as switched off.
+    const auto range = phazite::getModulationRange (handle);
+    REQUIRE (range.has_value());
+    CHECK_FALSE (range->isOn);
+    CHECK (range->high > range->low);
+
+    // Played, the cutoff stays where it is set.
+    const auto parameter = song.find (cutoff);
+    const auto base = parameter->getCurrentBaseValue();
+
+    const auto play = [&song, &parameter]
+    {
+        const phazite::test::RealTimePlayback playback (phazite::test::getEngine());
+        auto& transport = song.edit->getTransport();
+        transport.setPosition (te::TimePosition());
+        transport.play (false);
+        std::vector<float> seen;
+
+        for (int i = 0; i < 16; ++i)
+        {
+            phazite::test::RealTimePlayback::wait (25);
+            seen.push_back (parameter->getCurrentValue());
+        }
+
+        transport.stop (false, false);
+        phazite::test::RealTimePlayback::wait (200);
+        return seen;
+    };
+
+    for (const auto value : play())
+        CHECK (value == doctest::Approx (base));
+
+    // Undone, it is on, and moves the cutoff again; redone, off.
+    phazite::undo (*song.edit);
+    CHECK (phazite::isModulatorOn (context, lfo));
+    const auto seen = play();
+    const auto [lowest, highest] = std::minmax_element (seen.begin(), seen.end());
+    CHECK (*highest > *lowest);
+
+    phazite::redo (*song.edit);
+    CHECK_FALSE (phazite::isModulatorOn (context, lfo));
+    phazite::setModulatorOn (context, lfo, true);
+    CHECK (song.describeUndo() == juce::String ("Undo Turn Modulator On"));
+
+    // A macro has no switch.
+    const auto macro = phazite::addModulator (context, idOf (*song.a), ModulatorType::macro);
+    phazite::setModulatorOn (context, macro, false);
+    CHECK (phazite::isModulatorOn (context, macro));
+    CHECK (song.describeUndo() == juce::String ("Undo Add Macro"));
+}
+
+TEST_CASE ("Undoing the switch of a modulator on the master plays it as it was")
+{
+    // The master's modulators are left out of Tracktion's list of an Edit's parameters, which undo puts back.
+    Song song;
+    auto& context = song.context;
+    const auto lfo = phazite::addModulator (context, phazite::getMasterTrack (context), ModulatorType::lfo);
+    REQUIRE (lfo.isValid());
+
+    phazite::setModulatorOn (context, lfo, false);
+    CHECK_FALSE (phazite::isModulatorOn (context, lfo));
+    phazite::undo (*song.edit);
+    CHECK (phazite::isModulatorOn (context, lfo)); // what Tracktion's modulation reads, not only what is stored
+    phazite::redo (*song.edit);
+    CHECK_FALSE (phazite::isModulatorOn (context, lfo));
+}

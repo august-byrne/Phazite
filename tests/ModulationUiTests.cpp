@@ -104,6 +104,12 @@ TEST_CASE ("A modulated knob shows a ring, which a drag on it changes as one und
     mouse.dragTo ({ 32, 12 });
     mouse.release();
     CHECK (handle.getBaseValue() > -30.0f);
+
+    // Its LFO switched off: the ring stays, faint, where it would move it.
+    phazite::setModulatorOn (song.context, lfo, false);
+    screen.attachment.update();
+    REQUIRE (screen.knob.getModulation().has_value());
+    CHECK_FALSE (screen.knob.getModulation()->isOn);
 }
 
 TEST_CASE ("A modulator dropped on a knob of its track modulates it; one of another track's isn't taken")

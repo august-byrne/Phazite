@@ -55,6 +55,11 @@ void removeModulator (const ModulatorAccess&); // and what it modulates; joins t
 // Whether its values go from -1 to 1, rather than from 0 to 1 (a macro's, an envelope follower's).
 bool isBipolar (const ModulatorAccess&);
 
+// Whether a modulator is on (its modifier's enabled parameter, which Tracktion's modulation reads); a macro always is.
+// Switching one joins the caller's step, and what it modulates plays as it now is, modulated or not.
+bool isModulatorOn (const ModulatorAccess&);
+void setModulatorOn (const ModulatorAccess&, bool on);
+
 //==============================================================================
 // What a modulator or a macro modulates: a parameter, by an amount (Tracktion's assignment's value) from -1 to 1, as a
 // part of the parameter's range.

@@ -30,6 +30,12 @@ ModulatorID addModulator (ProjectContext&, TrackID, ModulatorType);
 // Removes one and what it modulates ("Remove LFO 1"), one undo step.
 void removeModulator (ProjectContext&, ModulatorID);
 
+// Switches a modulator on or off ("Turn Modulator Off"), one undo step, so that a sound can be heard with and without it:
+// off, it moves nothing, and what it modulates plays its value. It keeps what it modulates, and by how much. A macro has
+// no switch, and is always on.
+bool isModulatorOn (const ProjectContext&, ModulatorID);
+void setModulatorOn (ProjectContext&, ModulatorID, bool on);
+
 // A modulator's parameters, as its editor's controls change them (a macro's is its value): their IDs and names, in the
 // modulator's order, and a handle of each, whose changes are undo steps named after them ("Change Rate").
 std::vector<ModulatorParameter> getModulatorParameters (const ProjectContext&, ModulatorID);

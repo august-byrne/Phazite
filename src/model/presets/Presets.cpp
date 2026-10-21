@@ -44,9 +44,13 @@ namespace
     }
 
     // Takes out of a device's state, and those of the devices in it, what ties it to its project: its automation, what
-    // modulates it from outside the preset, its sidechain's source, where its window was, and whether it is on.
+    // modulates it from outside the preset, its sidechain's source, where its window was, and whether it is on. A
+    // modulator's state loses whether it is on too: presets load devices and modulators on.
     void cleanForPreset (juce::ValueTree state, const juce::Array<te::EditItemID>& modulatorsInside)
     {
+        if (state.getParent().hasType (te::IDs::MODIFIERS))
+            state.removeProperty (te::IDs::enabled, nullptr);
+
         for (int i = state.getNumChildren(); --i >= 0;)
         {
             auto child = state.getChild (i);

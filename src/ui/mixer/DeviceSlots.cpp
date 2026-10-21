@@ -100,7 +100,7 @@ struct DeviceSlots::Slot : public juce::Component
     {
         auto area = getLocalBounds();
         auto top = area.removeFromTop (slotNameHeight);
-        power.setBounds (top.removeFromRight (32));
+        power.setBounds (top.removeFromRight (slotPowerWidth));
         nameButton.setBounds (top.withTrimmedRight (2));
 
         if (knobs.isEmpty())

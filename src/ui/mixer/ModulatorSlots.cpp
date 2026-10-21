@@ -13,7 +13,7 @@ namespace
 {
     constexpr int outputMeterWidth = 28;
 
-    // A modulator's output now: a bar from the middle (bipolar) or from the left.
+    // A modulator's output now: a bar from the middle (bipolar) or from the left, faint while it is switched off.
     struct Meter : public juce::Component
     {
         Meter()
@@ -22,12 +22,13 @@ namespace
             setInterceptsMouseClicks (false, false);
         }
 
-        void show (float newValue, bool isBipolar)
+        void show (float newValue, bool isBipolar, bool isOn)
         {
-            if (! juce::approximatelyEqual (value, newValue) || bipolar != isBipolar)
+            if (! juce::approximatelyEqual (value, newValue) || bipolar != isBipolar || on != isOn)
             {
                 value = newValue;
                 bipolar = isBipolar;
+                on = isOn;
                 repaint();
             }
         }
@@ -41,13 +42,13 @@ namespace
 
             const auto origin = bipolar ? area.getCentreX() : area.getX();
             const auto end = bipolar ? area.getCentreX() + value * area.getWidth() / 2.0f : area.getX() + value * area.getWidth();
-            g.setColour (p.modulation);
+            g.setColour (p.modulation.withMultipliedAlpha (on ? 1.0f : ModulationRing::offAlpha));
             g.fillRect (
                 juce::Rectangle<float>::leftTopRightBottom (std::min (origin, end), area.getY(), std::max (origin, end), area.getBottom()));
         }
 
         float value = 0.0f;
-        bool bipolar = false;
+        bool bipolar = false, on = true;
     };
 } // namespace
 
@@ -69,7 +70,8 @@ struct ModulatorSlots::Slot : public juce::Component
 
         nameButton.setButtonText (info.name);
         nameButton.setTitle (info.name);
-        nameButton.setTooltip ("Opens " + info.name + "'s editor. Right-click to remove it");
+        nameButton.setTooltip ("Opens " + info.name + "'s editor. Right-click to "
+                               + (info.type == ModulatorType::macro ? "remove it" : "switch it off or remove it"));
         addAndMakeVisible (grip);
         addAndMakeVisible (nameButton);
 
@@ -87,6 +89,14 @@ struct ModulatorSlots::Slot : public juce::Component
         }
         else
         {
+            // Its switch: off, it moves nothing, to hear the sound without it.
+            power.setButtonText ("On");
+            power.setTitle ("On");
+            power.setTooltip ("Turns " + info.name + " on or off, to hear the sound with and without it");
+            power.setClickingTogglesState (true);
+            power.setToggleState (info.isOn, juce::dontSendNotification);
+            power.onClick = [this] { setModulatorOn (owner.context, shown.id, power.getToggleState()); };
+            addAndMakeVisible (power);
             addAndMakeVisible (meter);
         }
     }
@@ -94,9 +104,14 @@ struct ModulatorSlots::Slot : public juce::Component
     void updateValues()
     {
         if (macroAttachment != nullptr)
+        {
             macroAttachment->update();
-        else
-            meter.show (getModulatorValue (owner.context, shown.id), isBipolar (owner.context, shown.id));
+            return;
+        }
+
+        const auto on = isModulatorOn (owner.context, shown.id);
+        power.setToggleState (on, juce::dontSendNotification);
+        meter.show (getModulatorValue (owner.context, shown.id), isBipolar (owner.context, shown.id), on);
     }
 
     void resized() override
@@ -106,9 +121,14 @@ struct ModulatorSlots::Slot : public juce::Component
         auto right = area.removeFromRight (outputMeterWidth);
 
         if (macroKnob != nullptr)
+        {
             macroKnob->setBounds (right.reduced (2, 0));
+        }
         else
+        {
             meter.setBounds (right);
+            power.setBounds (area.removeFromRight (slotPowerWidth));
+        }
 
         nameButton.setBounds (area.withTrimmedRight (2));
     }
@@ -117,6 +137,7 @@ struct ModulatorSlots::Slot : public juce::Component
     ModulatorInfo shown;
     ModulatorGrip grip;
     MenuButton nameButton;
+    juce::TextButton power; // a modulator's, not a macro's
     Meter meter;
     std::unique_ptr<Knob> macroKnob;
     std::unique_ptr<ParameterAttachment> macroAttachment;
@@ -269,6 +290,13 @@ void ModulatorSlots::showSlotMenu (const ModulatorInfo& modulator)
     }
 
     menu.addSubMenu ("Modulates", modulates, modulates.getNumItems() > 0);
+
+    if (modulator.type != ModulatorType::macro)
+    {
+        const auto on = isModulatorOn (context, id);
+        menu.addItem ("On", true, on, [&projectContext, id, on] { setModulatorOn (projectContext, id, ! on); });
+    }
+
     menu.addSeparator();
     menu.addItem ("Remove", [&projectContext, id] { removeModulator (projectContext, id); });
     menu.showMenuAsync (juce::PopupMenu::Options());

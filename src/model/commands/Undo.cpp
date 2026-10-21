@@ -8,6 +8,19 @@ namespace phazite
 {
 namespace
 {
+    // Every parameter of an Edit: Tracktion's list leaves out the master track's modulators, which it doesn't visit.
+    juce::Array<te::AutomatableParameter*> getAllParameters (te::Edit& edit)
+    {
+        auto parameters = edit.getAllAutomatableParams (true);
+
+        if (auto master = edit.getMasterTrack())
+            if (auto* modulators = master->getModifierList())
+                for (auto* modulator : modulators->getModifiers())
+                    parameters.addArray (modulator->getAutomatableParameters());
+
+        return parameters;
+    }
+
     // AutomatableParameter::valueTreePropertyChanged() updates a parameter's CachedValue when undo changes it, but not
     // its currentValue, which the audio thread reads: this tells which stored values an undo or redo changes, so that
     // their parameters play them. Parameters with a curve of their own follow it instead.
@@ -16,7 +29,7 @@ namespace
     public:
         explicit StoredValueChanges (te::Edit& edit)
         {
-            for (auto* parameter : edit.getAllAutomatableParams (true))
+            for (auto* parameter : getAllParameters (edit))
             {
                 before.add (parameter);
                 parameter->addListener (this);
@@ -37,7 +50,7 @@ namespace
 
             // Those of devices and modulators the undo or redo brought back too: it puts back what they stored after
             // making them.
-            for (auto* parameter : edit.getAllAutomatableParams (true))
+            for (auto* parameter : getAllParameters (edit))
                 if (! before.contains (parameter) && parameter->getCurve().getNumPoints() == 0)
                     parameter->updateFromAttachedValue();
         }

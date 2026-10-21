@@ -261,6 +261,7 @@ TEST_CASE ("A track's preset makes a new track with its devices, mix and modulat
         const auto synth = phazite::getInstrument (context, track)->id;
         const auto lfo = phazite::addModulator (context, track, ModulatorType::lfo);
         phazite::modulate (context, lfo, { synth, "cutoff" }, 0.25f);
+        phazite::setModulatorOn (context, lfo, false); // as a device switched off, a preset loads it on
         const auto macro = phazite::addModulator (context, track, ModulatorType::macro);
         phazite::modulate (context, macro, { eq, "band4Gain" }, 0.5f);
         phazite::modulate (context, phazite::getContainerMacros (context, container)[0].id,
@@ -306,6 +307,7 @@ TEST_CASE ("A track's preset makes a new track with its devices, mix and modulat
     const auto modulators = phazite::getModulators (context, track);
     REQUIRE (modulators.size() == 2);
     CHECK (modulators[0].type == ModulatorType::lfo);
+    CHECK (modulators[0].isOn);
     CHECK (modulators[1].type == ModulatorType::macro);
 
     const auto cutoff = phazite::getModulations (context, ParameterRef { instrument->id, "cutoff" });

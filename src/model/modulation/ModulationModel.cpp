@@ -39,6 +39,7 @@ namespace
         info.track = modulator.getTrack() != nullptr ? getTrackID (*modulator.getTrack()) : TrackID();
         info.type = getModulatorType (modulator).value_or (ModulatorType::lfo);
         info.name = getModulatorName (modulator);
+        info.isOn = isModulatorOn (modulator);
 
         if (auto* rack = modulator.getContainerRack())
             if (auto* container = findContainerOf (*rack))
@@ -138,6 +139,22 @@ void removeModulator (ProjectContext& context, ModulatorID id)
     {
         const UndoStep step (modulator->getTrack()->edit, "Remove " + getModulatorName (*modulator));
         removeModulator (*modulator);
+    }
+}
+
+bool isModulatorOn (const ProjectContext& context, ModulatorID id)
+{
+    const auto modulator = find (context, id);
+    return modulator.has_value() && isModulatorOn (*modulator);
+}
+
+void setModulatorOn (ProjectContext& context, ModulatorID id, bool on)
+{
+    if (const auto modulator = find (context, id);
+        modulator.has_value() && modulator->modifier != nullptr && isModulatorOn (*modulator) != on)
+    {
+        const UndoStep step (modulator->modifier->edit, on ? "Turn Modulator On" : "Turn Modulator Off");
+        setModulatorOn (*modulator, on);
     }
 }
 
@@ -412,19 +429,25 @@ std::optional<ModulationRange> getModulationRange (const ParameterHandle& handle
     if (modulations.empty())
         return {};
 
-    // From where its value is without modulation, each modulation's reach: a bipolar modulator's both ways.
+    // From where its value is without modulation, each modulation's reach: a bipolar modulator's both ways. Only those
+    // whose modulators are on, unless all are off.
+    const auto anyOn = std::any_of (modulations.begin(), modulations.end(), [] (const auto& m) { return isModulatorOn (m.modulator); });
     const auto& range = parameter->valueRange;
     const auto base = range.convertTo0to1 (range.snapToLegalValue (parameter->getCurrentBaseValue()));
     auto low = base, high = base;
 
     for (const auto& modulation : modulations)
     {
+        if (anyOn && ! isModulatorOn (modulation.modulator))
+            continue;
+
         const auto amount = modulation.assignment->value.get();
         const auto reach = isBipolar (modulation.modulator) ? std::abs (amount) : 0.0f;
         low += std::min ({ amount, -reach, 0.0f });
         high += std::max ({ amount, reach, 0.0f });
     }
 
-    return ModulationRange { juce::jlimit (0.0f, 1.0f, low), juce::jlimit (0.0f, 1.0f, high), parameter->getCurrentNormalisedValue() };
+    return ModulationRange { juce::jlimit (0.0f, 1.0f, low), juce::jlimit (0.0f, 1.0f, high), parameter->getCurrentNormalisedValue(),
+                             anyOn };
 }
 } // namespace phazite

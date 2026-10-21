@@ -100,7 +100,7 @@ void Knob::setModulation (std::optional<ModulationRange> newModulation)
 
         return ! a.has_value()
                || (juce::approximatelyEqual (a->low, b->low) && juce::approximatelyEqual (a->high, b->high)
-                   && juce::approximatelyEqual (a->now, b->now));
+                   && juce::approximatelyEqual (a->now, b->now) && a->isOn == b->isOn);
     };
 
     if (! same (modulation, newModulation))
@@ -139,14 +139,21 @@ void Knob::paint (juce::Graphics& g)
     if (dropping)
         g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre), ModulationRing::width);
 
+    // Its modulators switched off: faint, where they would move it, with no dot.
     if (modulation.has_value())
     {
+        if (! modulation->isOn)
+            g.setColour (p.modulation.withMultipliedAlpha (ModulationRing::offAlpha));
+
         juce::Path arc;
         arc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, angleOf (modulation->low), angleOf (modulation->high), true);
         g.strokePath (arc, juce::PathStrokeType (ModulationRing::width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-        const auto now = centre.getPointOnCircumference (radius, angleOf (modulation->now));
-        g.fillEllipse (juce::Rectangle<float> (ModulationRing::dotSize, ModulationRing::dotSize).withCentre (now));
+        if (modulation->isOn)
+        {
+            const auto now = centre.getPointOnCircumference (radius, angleOf (modulation->now));
+            g.fillEllipse (juce::Rectangle<float> (ModulationRing::dotSize, ModulationRing::dotSize).withCentre (now));
+        }
     }
 }
 

@@ -162,13 +162,14 @@ namespace LaneTint
 
 // The ring around a modulated knob (ui::Knob), in the modulation color: how thick its arc is, how far outside the knob's
 // edge, the size of the dot where the value is now, and how far inside the edge a drag takes the ring rather than the
-// knob (pixels).
+// knob (pixels); and how faint it is while its modulators are switched off, as is a modulator's meter (an alpha).
 namespace ModulationRing
 {
     inline constexpr float width = 1.5f;
     inline constexpr float offset = 1.0f;
     inline constexpr float dotSize = 3.5f;
     inline constexpr float grabWidth = 3.0f;
+    inline constexpr float offAlpha = 0.35f;
 } // namespace ModulationRing
 
 // How the song's sections show behind the playlist's tracks, as ghosts: a faint wash of each section's color

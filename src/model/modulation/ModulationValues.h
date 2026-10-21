@@ -37,6 +37,7 @@ struct ModulatorInfo
     DeviceID container {}; // a container's macro's: the container (model/mixer/ContainerModel.h), on that track
     ModulatorType type = ModulatorType::lfo;
     juce::String name {}; // "LFO 2", "Macro 1"
+    bool isOn = true;     // a modulator switched off moves nothing (ModulationModel.h: setModulatorOn()); a macro is on
 };
 
 // One of a modulator's parameters, as its editor shows it: "rate", "Rate".
@@ -55,9 +56,11 @@ struct Modulation
 };
 
 // What modulation does to a parameter, as parts of its range (0 to 1), for the ring around its control: the range its
-// modulations can move it over from its value (or its automation's), and where it is now.
+// modulations can move it over from its value (or its automation's), and where it is now. With every modulator of its
+// modulations switched off, isOn is false, and the range is where they would move it.
 struct ModulationRange
 {
     float low = 0.0f, high = 0.0f, now = 0.0f;
+    bool isOn = true;
 };
 } // namespace phazite
