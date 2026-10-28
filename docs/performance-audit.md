@@ -269,7 +269,9 @@ What each part became (roadmap step 2.16 has the files):
   step, so they stay as they are. The EQ's and compressor's repaints and the piano roll's note cache go with the devices'
   new editors and the piano roll's next work; the 4-second MIDI rescan and keys over plug-in windows are left as they are.
 - **F** as planned. A plug-in that crashes as it loads can't be tested without one: check by hand with a crashing VST3.
-- It found [known bug 3](known-bugs.md): two Limiter-type devices can silence live notes.
+- It found known bug 3, taken then for two Limiter-type devices silencing live notes: in fact any live note could be
+  lost after the UI thread was busy, whatever the devices (fixed 2026-10-28, [realtime-audit.md](realtime-audit.md),
+  finding 23).
 
 ## 8. An outside review (2026-10-27)
 

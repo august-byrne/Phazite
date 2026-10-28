@@ -44,6 +44,7 @@ public:
     bool shouldBypassedPluginsBeRemovedFromPlaybackGraph() override;
     bool areClipSlotsEnabled() override;
     bool shouldLoadPlugin (te::ExternalPlugin&) override;
+    void doAdditionalInitialisation (te::ExternalPlugin&) override;
     void newClipCreated (te::Clip&, bool fromRecording) override;
 
     // Low latency's state (isLowLatency()), which devices read on the audio thread; and the buffer the output had before it.

@@ -255,6 +255,13 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
     return names[juce::jlimit (0, 1, osc)];
 }
 
+// On a plug-in's PLUGIN (Tracktion's "vst" type, whatever the plug-in's format): each parameter the project refers to (its
+// automation, what modulates it, its value set by hand under automation, its automation lane), as the ID Tracktion knows
+// it by, its place in the plug-in's list, then "=" and the plug-in's own ID for it (a VST3's), which stays the same
+// through the plug-in's updates; separated by spaces ("3=1084 7=2001"). Or none. A plug-in that opens moves what refers to
+// a parameter that its update moved (model/devices/internal/PluginParameters.h). state
+inline const juce::Identifier phaziteParameterIDs { "phaziteParameterIDs" };
+
 //==============================================================================
 // Presets (model/presets/PresetModel.h): files of their own (".phazitepreset"), outside any project, that hold a device,
 // a container or a track as a project holds them (Tracktion's elements with Phazite's names above).

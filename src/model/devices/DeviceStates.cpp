@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DeviceStates.h"
+#include "internal/PluginParameters.h"
 
 namespace phazite
 {
@@ -130,7 +131,10 @@ void storeDeviceState (te::Plugin& device)
     storeWindowPosition (device);
 
     if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (&device))
+    {
         storePluginState (*plugin);
+        storeParameterIDs (*plugin); // after the values set by hand, which name parameters too
+    }
 }
 
 void storeDeviceStates (te::Track& track)

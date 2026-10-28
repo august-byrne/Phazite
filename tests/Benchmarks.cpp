@@ -28,6 +28,7 @@
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/engine/internal/PreviewLoop.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -481,6 +482,52 @@ TEST_CASE ("Benchmark: rendering audio clips stretched and pitched" * doctest::t
             report << juce::String (seconds, 0) << " s in stereo, " << name << ": " << milliseconds (ms, 0) << " ("
                    << juce::String (seconds * 1000.0 / ms, 1) << " times as fast as it plays)\n";
         }
+    }
+
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: a loop previewed in time, until it can start" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // What the browser waits for before a loop it previews sounds (src/model/engine/internal/PreviewLoop.h): its start
+    // stretched by Rubber Band, with the render running at least twice as fast as the loop plays. Four bars at 120 BPM of
+    // stereo noise at 44.1 kHz, previewed at 100 BPM, played at 48 kHz.
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Loop 120 BPM.wav");
+    {
+        juce::AudioBuffer<float> audio (2, (int) (8.0 * 44100.0));
+        juce::Random random (5);
+
+        for (int i = 0; i < audio.getNumSamples(); ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                audio.setSample (channel, i, 0.3f * std::exp (-(float) (i % 11025) / 2000.0f) * (random.nextFloat() * 2.0f - 1.0f));
+
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+        auto writer = juce::WavAudioFormat().createWriterFor (
+            stream, juce::AudioFormatWriterOptions {}.withSampleRate (44100.0).withNumChannels (2).withBitsPerSample (24));
+        REQUIRE (writer != nullptr);
+        writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
+    }
+
+    juce::String report ("\n");
+
+    for (int run = 0; run < 3; ++run)
+    {
+        const auto started = juce::Time::getMillisecondCounterHiRes();
+        phazite::StretchedLoop loop (phazite::test::getEngine(), file, 1.2, 48000.0);
+        REQUIRE (loop.isValid());
+
+        while (! loop.isReadyToPlay())
+            juce::Thread::sleep (1);
+
+        const auto ready = juce::Time::getMillisecondCounterHiRes() - started;
+
+        while (! loop.isComplete())
+            juce::Thread::sleep (1);
+
+        const auto complete = juce::Time::getMillisecondCounterHiRes() - started;
+        report << "Four bars, stretched from 120 to 100 BPM: ready to start in " << milliseconds (ready, 0) << ", all of it in "
+               << milliseconds (complete, 0) << "\n";
     }
 
     MESSAGE (report);

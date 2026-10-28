@@ -2,6 +2,7 @@
 #include "HostedDevice.h"
 #include "TestHelpers.h"
 #include "devices/dynamics/Limiter.h"
+#include "devices/dynamics/Maximizer.h"
 #include "devices/synth/Synth.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
@@ -206,7 +207,7 @@ TEST_CASE ("Low latency plays live notes without delay compensation, and back wi
     REQUIRE (findAllMidiInputs() != nullptr);
     phazite::test::HostedDevice device;
 
-    // A limiter, which looks ahead, on another track. (Two limiters lose live notes: docs/known-bugs.md.)
+    // A limiter, which looks ahead, on another track.
     auto edit = te::Edit::createSingleTrackEdit (engine);
     edit->ensureNumberOfAudioTracks (2);
     const auto tracks = te::getAudioTracks (*edit);
@@ -239,6 +240,53 @@ TEST_CASE ("Low latency plays live notes without delay compensation, and back wi
     phazite::setLowLatency (engine, false);
     phazite::test::settle (500);
     CHECK (playUntil (playNote, [compensated] (int samples) { return samples == compensated; }) == compensated);
+}
+
+TEST_CASE ("Every live note sounds, however long the message thread was busy")
+{
+    // The blocks are processed while the test's message thread waits, as the app's does through a long repaint: JUCE's
+    // approximate clock falls behind meanwhile, and Tracktion dropped the notes waiting when it caught up between two
+    // blocks, about every other one here (createEngine()'s ClockKeeper, in model/engine/EngineSetup.cpp).
+    auto& engine = phazite::test::getEngine();
+    REQUIRE (findAllMidiInputs() != nullptr);
+    phazite::test::HostedDevice device;
+
+    auto edit = te::Edit::createSingleTrackEdit (engine);
+    edit->ensureNumberOfAudioTracks (2);
+    addInstrument (*te::getAudioTracks (*edit)[0]);
+
+    SUBCASE ("Alone in the song")
+    {
+    }
+
+    // As the notes were lost when they were first seen to be.
+    SUBCASE ("With a limiter and a maximizer on the master")
+    {
+        for (const auto* type : { phazite::devices::Limiter::typeID, phazite::devices::Maximizer::typeID })
+            edit->getMasterPluginList().insertPlugin (edit->getPluginCache().createNewPlugin (type, {}), -1, nullptr);
+    }
+
+    phazite::routeLiveMidiInput (*edit);
+    edit->getTransport().ensureContextAllocated();
+    phazite::test::settle (500);
+
+    const auto playNote = [&]
+    {
+        device.process (50);
+        phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
+        const auto samples = device.samplesToFirstSound();
+        phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOff (1, 60));
+        device.process (200);
+        return samples;
+    };
+
+    // Once the graph plays the note, every note after it sounds as soon.
+    const auto first = playUntil (playNote, [] (int samples) { return samples >= 0; });
+    REQUIRE (first >= 0);
+    CHECK (first < phazite::test::HostedDevice::blockSize);
+
+    for (int i = 0; i < 12; ++i)
+        CHECK (playNote() == first);
 }
 
 TEST_CASE ("Low latency leaves what renders play as the song has it")

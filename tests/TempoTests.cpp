@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's tempo and time signature (src/model/transport/internal/Tempo.h), and what a change of tempo stretches:
 // samples that follow it, which Phazite renders (roadmap step 2.18), and patterns unless they keep their speed.
+#include "HostedDevice.h"
 #include "TestHelpers.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
@@ -8,6 +9,8 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/Preview.h"
+#include "model/engine/internal/PreviewLoop.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
@@ -207,6 +210,68 @@ TEST_CASE ("A loop stretched to the song's tempo plays every hit once and on its
 
     std::sort (offsets.begin(), offsets.end());
     CHECK (std::abs (offsets[offsets.size() / 2]) < 1.0);
+}
+
+TEST_CASE ("A loop previewed in time plays stretched as its clip would be, every hit once and on its beat, round and round")
+{
+    // The browser's preview (model/engine/internal/PreviewLoop.h), which Tracktion stretched with SoundTouch as it played.
+    // A bar at 44.1 kHz, played at 48: stretched and brought to the output's rate in one go. The tests before this one wrote
+    // two bars at the same path, which Tracktion's knowledge of the file still had: the preview reads it again.
+    phazite::test::HostedDevice device;
+    phazite::test::TemporaryFolder temp;
+    const auto file = writeClicks (temp.folder, 4, 120.0);
+    auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    project->tempoSequence.getTempos()[0]->setBpm (100.0);
+
+    auto inTime = false;
+    auto preview = phazite::createPreviewEdit (phazite::test::getEngine(), file, project.get(), inTime);
+    REQUIRE (preview != nullptr);
+    REQUIRE (inTime);
+    const auto loop = phazite::stretchPreviewLoop (*preview, file);
+    REQUIRE (loop != nullptr);
+    const auto rate = phazite::test::HostedDevice::sampleRate;
+    CHECK (loop->getLength() == (juce::int64) std::lround (2.4 * rate));
+
+    // Rendered whole first: these blocks are processed faster than they would play.
+    phazite::test::runTimersUntil ([&loop] { return loop->isComplete(); }, 60000);
+    REQUIRE (loop->isComplete());
+
+    auto& transport = preview->getTransport();
+    transport.looping = true;
+    transport.ensureContextAllocated();
+    phazite::test::settle (300);
+    transport.play (false);
+
+    std::vector<float> out;
+    device.process (600,
+                    [&out] (const juce::AudioBuffer<float>& block, int)
+                    {
+                        out.insert (out.end(), block.getReadPointer (0), block.getReadPointer (0) + block.getNumSamples());
+                        return false;
+                    });
+
+    transport.stop (false, false);
+    transport.freePlaybackContext();
+    phazite::clearPreviewLoop (*preview);
+
+    // From the first click, one on each beat at 100 BPM, twice round the bar, and nothing between.
+    const auto start = std::find_if (out.begin(), out.end(), [] (float sample) { return std::abs (sample) > 0.01f; });
+    REQUIRE (start != out.end());
+    const auto beat = (int) std::lround (0.6 * rate), near = (int) (0.01 * rate);
+    const auto first = findLoudestMillisecond (out.data(), (int) (start - out.begin()), (int) (start - out.begin()) + near).second;
+    REQUIRE (first + 8 * beat < (int) out.size());
+
+    for (int k = 1; k < 8; ++k)
+    {
+        CAPTURE (k);
+        const auto expected = first + k * beat;
+        const auto [level, at] = findLoudestMillisecond (out.data(), expected - near, expected + near);
+        CHECK (std::abs ((at - expected) / rate * 1000.0) < 2.5);
+
+        const auto between =
+            findLoudestMillisecond (out.data(), expected - beat + (int) (0.02 * rate), expected - (int) (0.02 * rate)).first;
+        CHECK (juce::Decibels::gainToDecibels (between / level) < -20.0);
+    }
 }
 
 TEST_CASE ("Patterns follow the tempo, their notes on their beats, unless the song says they keep their speed")

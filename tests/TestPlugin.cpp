@@ -5,23 +5,65 @@ namespace phazite::test
 {
 namespace
 {
-    // The plug-in itself, as a plug-in format would make it.
+    // A parameter as a plug-in format hosts one (a VST3's): with the plug-in's own ID for it, and no ID in JUCE, so that
+    // Tracktion knows it by its place in the list.
+    class StandInParameter final : public juce::HostedAudioProcessorParameter
+    {
+    public:
+        StandInParameter (juce::String ownID, juce::String parameterName, float defaultValue)
+            : id (std::move (ownID)),
+              name (std::move (parameterName)),
+              initial (defaultValue),
+              value (defaultValue)
+        {
+        }
+
+        juce::String getParameterID() const override { return id; }
+        float getValue() const override { return value.load(); }
+        void setValue (float newValue) override { value = newValue; }
+        float getDefaultValue() const override { return initial; }
+        juce::String getName (int maximumLength) const override { return name.substring (0, maximumLength); }
+        juce::String getLabel() const override { return {}; }
+        float getValueForText (const juce::String& text) const override { return text.getFloatValue(); }
+
+    private:
+        const juce::String id, name;
+        const float initial;
+        std::atomic<float> value;
+    };
+
+    // The plug-in itself, as a plug-in format would make it, in one of its versions (TestPlugin::setVersion()).
     class TestEffect final : public juce::AudioPluginInstance
     {
     public:
-        TestEffect()
+        explicit TestEffect (int version)
             : juce::AudioPluginInstance (BusesProperties()
                                              .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                                              .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
         {
-            auto gainParameter = std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { TestPlugin::gainID, 1 }, "Gain",
-                                                                              juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f);
-            auto toneParameter = std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { TestPlugin::toneID, 1 }, "Tone",
-                                                                              juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f);
-            gain = gainParameter.get();
-            tone = toneParameter.get();
-            addHostedParameter (std::move (gainParameter));
-            addHostedParameter (std::move (toneParameter));
+            const auto add = [this] (const char* ownID, const char* parameterName, float defaultValue)
+            {
+                auto parameter = std::make_unique<StandInParameter> (ownID, parameterName, defaultValue);
+                auto* added = parameter.get();
+                addHostedParameter (std::move (parameter));
+                return added;
+            };
+
+            if (version == 1)
+            {
+                gain = add (TestPlugin::gainOwnID, "Gain", 1.0f);
+                tone = add (TestPlugin::toneOwnID, "Tone", 0.5f);
+            }
+            else
+            {
+                tone = add (TestPlugin::toneOwnID, "Tone", 0.5f);
+
+                if (version == 2)
+                {
+                    gain = add (TestPlugin::gainOwnID, "Gain", 1.0f);
+                    add ("2", "Drive", 0.0f);
+                }
+            }
         }
 
         void fillInPluginDescription (juce::PluginDescription& description) const override { description = TestPlugin::getDescription(); }
@@ -31,7 +73,12 @@ namespace
         void releaseResources() override {}
 
         using juce::AudioProcessor::processBlock;
-        void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (gain->get()); }
+
+        void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+        {
+            if (gain != nullptr)
+                buffer.applyGain (gain->getValue());
+        }
 
         double getTailLengthSeconds() const override { return 0.0; }
         bool acceptsMidi() const override { return false; }
@@ -45,12 +92,12 @@ namespace
         const juce::String getProgramName (int) override { return {}; }
         void changeProgramName (int, const juce::String&) override {}
 
-        // Its parameters' values, as a plug-in keeps its settings: in a block of its own.
+        // Its parameters' values, as a plug-in keeps its settings: in a block of its own, the gain's then the tone's.
         void getStateInformation (juce::MemoryBlock& data) override
         {
             juce::MemoryOutputStream out (data, false);
-            out.writeFloat (gain->get());
-            out.writeFloat (tone->get());
+            out.writeFloat (gain != nullptr ? gain->getValue() : 1.0f);
+            out.writeFloat (tone->getValue());
         }
 
         void setStateInformation (const void* data, int size) override
@@ -59,25 +106,46 @@ namespace
                 return;
 
             juce::MemoryInputStream in (data, (size_t) size, false);
-            *gain = in.readFloat();
-            *tone = in.readFloat();
+            const auto gainValue = in.readFloat();
+
+            if (gain != nullptr)
+                gain->setValue (gainValue);
+
+            tone->setValue (in.readFloat());
         }
 
     private:
-        juce::AudioParameterFloat* gain = nullptr;
-        juce::AudioParameterFloat* tone = nullptr;
+        StandInParameter* gain = nullptr; // none in version 3
+        StandInParameter* tone = nullptr;
     };
+
+    // The plug-in's Gain, wherever its version has it.
+    juce::AudioProcessorParameter& getGainParameter (const te::ExternalPlugin& plugin)
+    {
+        auto* instance = plugin.getAudioPluginInstance();
+        REQUIRE (instance != nullptr);
+        juce::AudioProcessorParameter* found = nullptr;
+
+        for (auto* parameter : instance->getParameters())
+            if (const auto* hosted = dynamic_cast<juce::HostedAudioProcessorParameter*> (parameter))
+                if (hosted->getParameterID() == TestPlugin::gainOwnID)
+                    found = parameter;
+
+        REQUIRE (found != nullptr);
+        return *found;
+    }
 } // namespace
 
 TestPlugin::TestPlugin()
 {
     auto& plugins = getEngine().getPluginManager();
     previous = plugins.createPluginInstance;
-    plugins.createPluginInstance = [fallback = previous] (const juce::PluginDescription& description, double sampleRate, int blockSize,
-                                                          juce::String& error) -> std::unique_ptr<juce::AudioPluginInstance>
+    plugins.createPluginInstance = [this, fallback = previous] (const juce::PluginDescription& description, double sampleRate,
+                                                                int blockSize,
+                                                                juce::String& error) -> std::unique_ptr<juce::AudioPluginInstance>
     {
         if (description.pluginFormatName == getDescription().pluginFormatName && description.name == getDescription().name)
-            return std::make_unique<TestEffect>();
+            return std::make_unique<TestEffect> (version);
 
         return fallback != nullptr ? fallback (description, sampleRate, blockSize, error) : nullptr;
     };
@@ -90,6 +158,11 @@ TestPlugin::~TestPlugin()
     auto& plugins = getEngine().getPluginManager();
     plugins.knownPluginList.removeType (getDescription());
     plugins.createPluginInstance = previous;
+}
+
+void TestPlugin::setVersion (int newVersion)
+{
+    version = newVersion;
 }
 
 juce::PluginDescription TestPlugin::getDescription()
@@ -111,16 +184,12 @@ juce::PluginDescription TestPlugin::getDescription()
 
 float TestPlugin::getGain (const te::ExternalPlugin& plugin)
 {
-    auto* instance = plugin.getAudioPluginInstance();
-    REQUIRE (instance != nullptr);
-    return instance->getHostedParameter (0)->getValue();
+    return getGainParameter (plugin).getValue();
 }
 
 void TestPlugin::setGain (te::ExternalPlugin& plugin, float gain)
 {
-    auto* instance = plugin.getAudioPluginInstance();
-    REQUIRE (instance != nullptr);
-    instance->getHostedParameter (0)->setValueNotifyingHost (gain);
+    getGainParameter (plugin).setValueNotifyingHost (gain);
 }
 
 te::ExternalPlugin::Ptr TestPlugin::create (te::Edit& edit)

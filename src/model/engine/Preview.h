@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Hearing a sound before it goes into the song, from the browser (docs/design.md, section 11). A loop plays in time
-// with the project, at its tempo, stretched by SoundTouch, and at its own pitch (in key later). A one-shot plays as it
-// is. Tracktion knows a loop by its loop data, or by a tempo in its name ("Break 120 BPM") when it lasts whole bars at
-// that tempo. Each sound plays in a small Edit of its own (Tracktion's preview Edit), which the engine mixes with the
-// project's; while the project plays, a loop keeps in step with its bars. A MIDI file plays on Phazite's synth, in time,
-// as a loop. Without Tracktion here (architecture phase A3): the app makes it (internal/Preview.h).
+// with the project, at its tempo, stretched as a clip of it would be, by Rubber Band (internal/PreviewLoop.h), and at its
+// own pitch (in key later). A one-shot plays as it is. Tracktion knows a loop by its loop data, or by a tempo in its name
+// ("Break 120 BPM") when it lasts whole bars at that tempo. Each sound plays in a small Edit of its own (Tracktion's
+// preview Edit), which the engine mixes with the project's; while the project plays, a loop keeps in step with its bars.
+// A MIDI file plays on Phazite's synth, in time, as a loop. Without Tracktion here (architecture phase A3): the app makes
+// it (internal/Preview.h).
 #pragma once
 
 #include <juce_core/juce_core.h>

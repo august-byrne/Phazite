@@ -377,7 +377,8 @@ TEST_CASE ("A plug-in's mix crossfades between the sound that comes in and the e
     CHECK (phazite::getMixParameters (*plugin).size() == 2);
 
     // The mix sets the dry and wet levels, so the slot's key controls are the plug-in's own.
-    CHECK (phazite::getKeyControls (*plugin, 2) == juce::StringArray { "gain", "tone" });
+    CHECK (phazite::getKeyControls (*plugin, 2)
+           == juce::StringArray { phazite::test::TestPlugin::gainID, phazite::test::TestPlugin::toneID });
 
     // An instrument has no mix.
     auto* synth = phazite::setInstrument (*mix.a, mix.create (Synth::typeID));

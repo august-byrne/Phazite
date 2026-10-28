@@ -11,12 +11,15 @@
 
 namespace phazite::stretch
 {
-// How a sound plays: so many times as long (above 1 is slower), shifted in pitch by semitones, and backwards or not.
+// How a sound plays: so many times as long (above 1 is slower), shifted in pitch by semitones, and backwards or not; and,
+// for a sound played at another sample rate than its own, the rate it is played at over its own (so many more frames, at
+// the same speed and pitch).
 struct Settings
 {
     double timeRatio = 1.0;
     double semitones = 0.0;
     bool reversed = false;
+    double rateRatio = 1.0;
 
     bool operator== (const Settings&) const = default;
 };
@@ -40,8 +43,9 @@ struct Source
 // Takes the next frames rendered (the buffer's first numFrames), and says whether to go on.
 using Sink = std::function<bool (const juce::AudioBuffer<float>&, int numFrames)>;
 
-// Renders all of a sound with the settings into the sink, which gets getStretchedLength() frames in all, in blocks.
-// Returns false if the sink, or shouldStop (asked between blocks), stopped it. It takes a while: about 20 times faster
-// than real time for each channel when it stretches or shifts the pitch, and a copy otherwise.
+// Renders all of a sound with the settings into the sink, which gets getStretchedLength() frames in all, in blocks from
+// the start: the first comes as soon as the first block of the sound is stretched. Returns false if the sink, or
+// shouldStop (asked between blocks), stopped it. It takes a while: about 9 times faster than real time for a stereo
+// sound when it stretches, shifts the pitch or changes the rate, and a copy otherwise.
 bool render (const Source&, const Settings&, const Sink&, const std::function<bool()>& shouldStop = {});
 } // namespace phazite::stretch

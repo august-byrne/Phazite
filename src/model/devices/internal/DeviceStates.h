@@ -3,7 +3,8 @@
 //
 // Part of a device's state stays in the device until something stores it in the project: a plug-in's own settings (its
 // settings block and program, which its window changes) and channel layout, where its window was, and, for parameters
-// that automation or modulation moves, the values set by hand. Tracktion stores it (flushPluginStateToValueTree() and
+// that automation or modulation moves, the values set by hand; and, which Phazite adds, a plug-in's own IDs of the
+// parameters the project names (PluginParameters.h). Tracktion stores it (flushPluginStateToValueTree() and
 // what calls it) when it saves and before it copies a track or a rack, through the Edit's undo manager: every save was an
 // undo step that changed nothing the user did, and undoing one that stored a plug-in's channel layout for the first time
 // reset the playing plug-in. These store the same without the undo manager, and only what differs from what is there, as

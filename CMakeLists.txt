@@ -214,6 +214,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/ParameterHandle.cpp
     src/model/devices/ParameterHandle.h
     src/model/devices/ParameterRef.h
+    src/model/devices/PluginParameters.cpp
     src/model/devices/WavetablePlugin.cpp
     src/model/devices/Wavetables.cpp
     src/model/devices/internal/DeviceFiles.h
@@ -224,6 +225,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/internal/DrumKit.h
     src/model/devices/internal/DrumSamplerPlugin.h
     src/model/devices/internal/ParameterHandle.h
+    src/model/devices/internal/PluginParameters.h
     src/model/devices/internal/WavetablePlugin.h
     src/model/devices/internal/Wavetables.h
     src/model/engine/AppInfo.cpp
@@ -238,12 +240,14 @@ target_sources(phazite_core PRIVATE
     src/model/engine/PluginScanner.cpp
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
+    src/model/engine/PreviewLoop.cpp
     src/model/engine/internal/EngineContext.h
     src/model/engine/internal/EngineSetup.h
     src/model/engine/internal/LiveInput.h
     src/model/engine/internal/LoudnessMeterPlugin.h
     src/model/engine/internal/PluginScanner.h
     src/model/engine/internal/Preview.h
+    src/model/engine/internal/PreviewLoop.h
     src/model/mixer/Buses.cpp
     src/model/mixer/ContainerModel.cpp
     src/model/mixer/ContainerModel.h
@@ -404,14 +408,14 @@ if(NOT MSVC)
     set_source_files_properties(src/devices/stretch/RubberBandLibrary.cpp PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
+# No time-stretcher of Tracktion's: Phazite stretches clips and previews itself, with Rubber Band (src/devices/stretch/).
 target_compile_definitions(phazite_core PRIVATE
     PHAZITE_VERSION_STRING="${PROJECT_VERSION}"
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_AU=1
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
-    JUCE_STRICT_REFCOUNTEDPOINTER=1
-    TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1)
+    JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
 if(WIN32)
     # JUCE's headers define these anyway; defining them here as well keeps any code that includes
@@ -823,6 +827,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/PlaybackTests.cpp
         tests/PlaylistModelTests.cpp
         tests/PluginKeysTests.cpp
+        tests/PluginParametersTests.cpp
         tests/PluginWindowTests.cpp
         tests/PlaylistTests.cpp
         tests/PresetTests.cpp

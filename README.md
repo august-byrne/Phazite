@@ -436,8 +436,7 @@ Phazite is licensed under the GNU Affero General Public License, version 3 or (a
 | [Tracktion Engine](https://github.com/Tracktion/tracktion_engine) | GPL-3.0-or-later, or commercial | Audio engine, compiled in |
 | [JUCE](https://github.com/juce-framework/JUCE) 8 (inside Tracktion Engine) | AGPL-3.0, or commercial | App, audio-device and plug-in-hosting framework, compiled in |
 | VST 3 SDK (bundled with JUCE) | MIT | VST3 plug-in scanning (hosting later), compiled in |
-| [Rubber Band Library](https://breakfastquay.com/rubberband/) 4.0 | GPL-2.0-or-later, or commercial | Stretches and pitches audio clips (its R3 engine), compiled in; the licence ships next to the app (`licenses/RubberBand.txt`) |
-| SoundTouch (bundled with Tracktion Engine) | LGPL-2.1-or-later | Time-stretching for the browser's previews, compiled in |
+| [Rubber Band Library](https://breakfastquay.com/rubberband/) 4.0 | GPL-2.0-or-later, or commercial | Stretches and pitches audio clips and the browser's previews (its R3 engine), compiled in; the licence ships next to the app (`licenses/RubberBand.txt`) |
 | libsamplerate (bundled with Tracktion Engine) | BSD-2-Clause | Sample-rate conversion, compiled in |
 | ASIO SDK 2.3.4 headers (bundled with JUCE) | GPL-3.0-only (Steinberg's GPLv3 option) | ASIO driver support on Windows, compiled in |
 | [WindowsToolchain](https://github.com/MarkSchofield/WindowsToolchain) | MIT | Finds MSVC at build time on Windows; nothing compiled in |

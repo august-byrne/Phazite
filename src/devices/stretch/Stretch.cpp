@@ -68,7 +68,8 @@ namespace
         return true;
     }
 
-    // Rubber Band's R3 engine, offline: it reads the whole sound once to study it, then again to stretch it.
+    // Rubber Band's R3 engine, offline. Told the sound's length, it needs no pass to study it first: R3's study only counts
+    // the frames.
     bool stretch (const Source& source, const Settings& settings, const Sink& sink, const std::function<bool()>& shouldStop)
     {
         using Stretcher = RubberBand::RubberBandStretcher;
@@ -77,8 +78,9 @@ namespace
         if (source.numChannels == 2)
             options |= Stretcher::OptionChannelsTogether; // keeps a stereo sound's image
 
-        Stretcher stretcher ((size_t) std::lround (source.sampleRate), (size_t) source.numChannels, options, settings.timeRatio,
-                             std::pow (2.0, settings.semitones / 12.0));
+        // Played at another rate, more frames each a little lower, which that rate brings back up.
+        Stretcher stretcher ((size_t) std::lround (source.sampleRate), (size_t) source.numChannels, options,
+                             settings.timeRatio * settings.rateRatio, std::pow (2.0, settings.semitones / 12.0) / settings.rateRatio);
         stretcher.setExpectedInputDuration ((size_t) source.length);
         stretcher.setMaxProcessSize ((size_t) blockFrames);
 
@@ -104,29 +106,17 @@ namespace
             return true;
         };
 
-        for (const auto studying : { true, false })
+        for (juce::int64 start = 0; start < source.length; start += blockFrames)
         {
-            for (juce::int64 start = 0; start < source.length; start += blockFrames)
-            {
-                if (shouldStop != nullptr && shouldStop())
-                    return false;
+            if (shouldStop != nullptr && shouldStop())
+                return false;
 
-                const auto frames = (int) std::min ((juce::int64) blockFrames, source.length - start);
-                const auto last = start + frames >= source.length;
-                source.read (in, start, frames);
+            const auto frames = (int) std::min ((juce::int64) blockFrames, source.length - start);
+            source.read (in, start, frames);
+            stretcher.process (in.getArrayOfReadPointers(), (size_t) frames, start + frames >= source.length);
 
-                if (studying)
-                {
-                    stretcher.study (in.getArrayOfReadPointers(), (size_t) frames, last);
-                }
-                else
-                {
-                    stretcher.process (in.getArrayOfReadPointers(), (size_t) frames, last);
-
-                    if (! takeOutput())
-                        return false;
-                }
-            }
+            if (! takeOutput())
+                return false;
         }
 
         if (! takeOutput())
@@ -151,22 +141,24 @@ namespace
 
 bool isUnchanged (const Settings& settings)
 {
-    return juce::exactlyEqual (settings.timeRatio, 1.0) && juce::exactlyEqual (settings.semitones, 0.0) && ! settings.reversed;
+    return juce::exactlyEqual (settings.timeRatio, 1.0) && juce::exactlyEqual (settings.semitones, 0.0) && ! settings.reversed
+           && juce::exactlyEqual (settings.rateRatio, 1.0);
 }
 
 juce::int64 getStretchedLength (juce::int64 frames, const Settings& settings)
 {
-    return (juce::int64) std::llround ((double) frames * settings.timeRatio);
+    return (juce::int64) std::llround ((double) frames * settings.timeRatio * settings.rateRatio);
 }
 
 bool render (const Source& source, const Settings& settings, const Sink& sink, const std::function<bool()>& shouldStop)
 {
-    if (source.numChannels <= 0 || source.length <= 0 || source.sampleRate <= 0.0 || settings.timeRatio <= 0.0)
+    if (source.numChannels <= 0 || source.length <= 0 || source.sampleRate <= 0.0 || settings.timeRatio <= 0.0 || settings.rateRatio <= 0.0)
         return true;
 
     const auto played = settings.reversed ? reversedSource (source) : source;
 
-    if (juce::exactlyEqual (settings.timeRatio, 1.0) && juce::exactlyEqual (settings.semitones, 0.0))
+    if (juce::exactlyEqual (settings.timeRatio, 1.0) && juce::exactlyEqual (settings.semitones, 0.0)
+        && juce::exactlyEqual (settings.rateRatio, 1.0))
         return copy (played, sink, shouldStop);
 
     return stretch (played, settings, sink, shouldStop);

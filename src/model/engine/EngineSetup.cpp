@@ -3,8 +3,10 @@
 #include "AudioDevices.h"
 #include "internal/LoudnessMeterPlugin.h"
 #include "internal/PluginScanner.h"
+#include "internal/PreviewLoop.h"
 #include "model/automation/internal/Automation.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/PluginParameters.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Freeze.h"
 
@@ -109,6 +111,35 @@ namespace
         for (auto* edit : playing)
             edit->getTransport().play (true);
     }
+
+    // Brings JUCE's approximate millisecond clock up to date after every audio block. Tracktion's audio code reads that
+    // clock (Time::getApproximateMillisecondCounter()), which only a read of the exact one brings up to date: JUCE's timer
+    // thread reads it every 100 ms at most, and not at all for up to 300 ms while it waits for a busy message thread.
+    // Tracktion's live MIDI input takes a clock that moved more than two blocks and 100 ms between two blocks for a glitch,
+    // and drops the notes waiting; a note played on the computer keyboard reads the exact clock itself
+    // (juce::MidiKeyboardState::noteOn()). So the first note played after the clock fell behind was lost, about every
+    // other note in tests, whose message thread waits while blocks are processed.
+    class ClockKeeper final : public juce::AudioProcessor
+    {
+    public:
+        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override { juce::Time::getMillisecondCounter(); }
+
+        const juce::String getName() const override { return "Clock keeper"; }
+        void prepareToPlay (double, int) override {}
+        void releaseResources() override {}
+        double getTailLengthSeconds() const override { return 0.0; }
+        bool acceptsMidi() const override { return false; }
+        bool producesMidi() const override { return false; }
+        juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+        bool hasEditor() const override { return false; }
+        int getNumPrograms() override { return 1; }
+        int getCurrentProgram() override { return 0; }
+        void setCurrentProgram (int) override {}
+        const juce::String getProgramName (int) override { return {}; }
+        void changeProgramName (int, const juce::String&) override {}
+        void getStateInformation (juce::MemoryBlock&) override {}
+        void setStateInformation (const void*, int) override {}
+    };
 } // namespace
 
 bool isLowLatency (te::Engine& engine)
@@ -167,10 +198,17 @@ void setPluginsLoad (te::Engine& engine, bool load)
     getBehaviour (engine).loadsPlugins = load;
 }
 
-// Phazite stretches and pitches audio clips itself (model/arrangement/internal/AudioClips.h; roadmap step 2.18), so a new
-// clip of a file with loop data plays the file as it is: Tracktion's own defaults for one (its auto-tempo, with the clip
-// stretched to the loop's beats, and auto-pitch toward the song's key, both through SoundTouch) are undone here, and the
-// clip lasts as long as its file. The model makes it follow the tempo, as importFile() does a loop.
+// Called as soon as a plug-in's instance is made, before Tracktion makes its parameters: what the project names them by
+// follows them through an update of the plug-in that moved them (model/devices/internal/PluginParameters.h).
+void EngineBehaviour::doAdditionalInitialisation (te::ExternalPlugin& plugin)
+{
+    findMovedParameters (plugin);
+}
+
+// Phazite stretches and pitches audio clips itself (model/arrangement/internal/AudioClips.h; roadmap step 2.18), and
+// Tracktion has no stretcher compiled in, so a new clip of a file with loop data plays the file as it is: Tracktion's own
+// defaults for one (its auto-tempo, with the clip stretched to the loop's beats, and auto-pitch toward the song's key) are
+// undone here, and the clip lasts as long as its file. The model makes it follow the tempo, as importFile() does a loop.
 void EngineBehaviour::newClipCreated (te::Clip& clip, bool)
 {
     auto* audio = dynamic_cast<te::AudioClipBase*> (&clip);
@@ -279,9 +317,13 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
     if (engine->getPluginManager().usesSeparateProcessForScanning())
         usePluginScannerWithTimeLimit (*engine);
 
-    // Phazite's own plug-in types, which projects can hold.
+    // Phazite's own plug-in types, which projects can hold, and the browser's player of stretched loops.
     engine->getPluginManager().createBuiltInType<LoudnessMeterPlugin>();
+    engine->getPluginManager().createBuiltInType<PreviewLoopPlugin>();
     registerDevices (*engine);
+
+    // So that every note played live sounds (ClockKeeper).
+    engine->getDeviceManager().setGlobalOutputAudioProcessor (std::make_unique<ClockKeeper>());
 
     // Tracktion's DeviceManager::initialise() asks for a MIDI device scan in 5 ms, but then restarts the
     // same timer with the 4-second hot-plug check, so MIDI inputs (and the computer keyboard, which
