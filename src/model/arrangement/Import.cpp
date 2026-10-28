@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Import.h"
+#include "internal/AudioClips.h"
 #include "internal/Clips.h"
 #include "internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
@@ -110,12 +111,7 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
             // A loop that knows its tempo (from its loop data, or from its name when it lasts whole bars) follows the
             // song's tempo, as the browser's preview played it: stretched to its beats from where it starts.
             if (const auto loop = audio.getInfo().loopInfo; loop.getNumBeats() > 0.0 && ! loop.isOneShot())
-            {
-                clip->setLoopInfo (loop);
-                clip->setTimeStretchMode (te::TimeStretcher::defaultMode);
-                clip->setAutoTempo (true);
-                clip->setEnd (edit.tempoSequence.toTime (start + te::BeatDuration::fromBeats (loop.getNumBeats())), true);
-            }
+                setClipFollowsTempo (*clip, true);
 
             return clip.get();
         }

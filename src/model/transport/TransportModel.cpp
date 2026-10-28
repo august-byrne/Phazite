@@ -61,6 +61,12 @@ TempoHandle getTempoHandle (ProjectContext& context)
     return TempoHandle (std::move (impl));
 }
 
+TempoStretch getTempoStretch (const ProjectContext& context)
+{
+    auto* edit = getEdit (context);
+    return edit != nullptr ? getTempoStretch (*edit) : TempoStretch {};
+}
+
 TempoHandle::TempoHandle() = default;
 
 TempoHandle::TempoHandle (std::unique_ptr<Impl> i)

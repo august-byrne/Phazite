@@ -53,4 +53,8 @@ private:
 
 // The open project's tempo, or a handle of nothing while none is open.
 TempoHandle getTempoHandle (ProjectContext&);
+
+// What a change of the open project's tempo stretches (nothing while none is open). The commands
+// "transport.samplesFollowTempo" and "transport.patternsFollowTempo" change it.
+TempoStretch getTempoStretch (const ProjectContext&);
 } // namespace phazite

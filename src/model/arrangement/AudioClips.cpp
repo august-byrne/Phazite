@@ -2,6 +2,7 @@
 #include "internal/AudioClips.h"
 #include "AudioClipModel.h"
 #include "model/base/Toggles.h"
+#include "model/base/internal/Schema.h"
 
 #include <algorithm>
 
@@ -9,88 +10,270 @@ namespace phazite
 {
 namespace
 {
-    // How long the part of the clip's file that its loop data counts beats over lasts: between the data's in and out
-    // markers, which hold all of the file unless they are set. From the file itself: a reversed copy, which is as long,
-    // may still be on its way.
-    double getMarkedSeconds (te::AudioClipBase& clip)
+    // Bumped whenever renders would come out differently, so that a project's old ones aren't played.
+    constexpr const char* renderVersion = "rubberband-4.0-r3-1";
+
+    // What a clip's sound is made from, and how: its file and its Phazite properties (Schema.h).
+    struct Sound
     {
-        const auto file = te::AudioFile (clip.edit.engine, clip.getOriginalFile()).getInfo();
-        const auto& loop = clip.getLoopInfo();
-        auto out = loop.getOutMarker();
-
-        if (out < 0 || out > file.lengthInSamples)
-            out = file.lengthInSamples;
-
-        return file.sampleRate > 0.0 ? (double) (out - loop.getInMarker()) / file.sampleRate : 0.0;
-    }
-
-    // The file's beats in a second, as its loop data counts them; 0 without a tempo.
-    double getFileBeatsPerSecond (te::AudioClipBase& clip)
-    {
-        const auto seconds = getMarkedSeconds (clip);
-        const auto beats = clip.getLoopInfo().getNumBeats();
-        return seconds > 0.0 && beats > 0.0 ? beats / seconds : 0.0;
-    }
-
-    // Whether the clip stretches to the song's tempo now: it follows it, from a tempo of its own.
-    bool isStretchedToTempo (te::AudioClipBase& clip)
-    {
-        return clip.getAutoTempo() && getFileBeatsPerSecond (clip) > 0.0;
-    }
-
-    // The song's beats in a second where the clip starts, as Tracktion counts a clip's offset in beats.
-    double getSongBeatsPerSecond (const te::AudioClipBase& clip)
-    {
-        return clip.edit.tempoSequence.getBeatsPerSecondAt (clip.getPosition().getStart());
-    }
-
-    // The part of its file that the clip plays: from how many seconds into the file, for how many seconds of it.
-    struct FilePart
-    {
-        double start = 0.0, length = 0.0;
+        juce::File file;
+        double tempo = 0.0; // the file's, while the clip follows the song's; 0 while it doesn't
+        float pitch = 0.0f;
+        bool reversed = false;
     };
 
-    FilePart getFilePart (te::AudioClipBase& clip)
+    Sound getSound (const te::AudioClipBase& clip)
     {
-        // Stretched, the clip's offset and length count beats of its file.
-        if (isStretchedToTempo (clip))
-        {
-            const auto fileBps = getFileBeatsPerSecond (clip);
-            return { clip.getOffsetInBeats().inBeats() / fileBps, clip.getLengthInBeats().inBeats() / fileBps };
-        }
-
-        const auto position = clip.getPosition();
-        const auto speed = clip.getSpeedRatio();
-        return { position.getOffset().inSeconds() * speed, position.getLength().inSeconds() * speed };
+        return { getClipFile (clip), getClipTempo (clip), getClipPitch (clip), isClipReversed (clip) };
     }
 
-    // Places the clip, from where it starts, so that it plays that part of its file as it plays its audio now.
-    void playFilePart (te::AudioClipBase& clip, FilePart part)
+    double getSongTempoAt (const te::AudioClipBase& clip)
+    {
+        return clip.edit.tempoSequence.getBeatsPerSecondAt (clip.getPosition().getStart()) * 60.0;
+    }
+
+    stretch::Settings getSettings (const Sound& sound, double songTempo)
+    {
+        return { sound.tempo > 0.0 && songTempo > 0.0 ? sound.tempo / songTempo : 1.0, (double) sound.pitch, sound.reversed };
+    }
+
+    double getFileSeconds (const te::Edit& edit, const juce::File& file)
+    {
+        return te::AudioFile (edit.engine, file).getLength();
+    }
+
+    // The part of its file that the clip plays, in seconds of the file as it was recorded.
+    struct FilePart
+    {
+        double start = 0.0, end = 0.0;
+    };
+
+    FilePart getFilePart (const te::AudioClipBase& clip, const Sound& sound, const stretch::Settings& settings)
+    {
+        const auto position = clip.getPosition();
+        const auto from = position.getOffset().inSeconds() / settings.timeRatio;
+        const auto to = (position.getOffset() + position.getLength()).inSeconds() / settings.timeRatio;
+
+        if (! sound.reversed)
+            return { from, to };
+
+        const auto length = getFileSeconds (clip.edit, sound.file);
+        return { length - to, length - from };
+    }
+
+    // Lays the clip out, from where it starts, so that it plays that part of its file as it plays its sound now.
+    void playFilePart (te::AudioClipBase& clip, const Sound& sound, const stretch::Settings& settings, FilePart part)
     {
         const auto start = clip.getPosition().getStart();
-
-        if (isStretchedToTempo (clip))
-        {
-            const auto fileBps = getFileBeatsPerSecond (clip);
-            const auto end = clip.edit.tempoSequence.toTime (clip.getStartBeat() + te::BeatDuration::fromBeats (part.length * fileBps));
-            clip.setPosition ({ { start, end }, te::TimeDuration::fromSeconds (part.start * fileBps / getSongBeatsPerSecond (clip)) });
-            return;
-        }
-
-        const auto speed = clip.getSpeedRatio();
-        clip.setPosition (
-            { { start, start + te::TimeDuration::fromSeconds (part.length / speed) }, te::TimeDuration::fromSeconds (part.start / speed) });
+        const auto from = sound.reversed ? getFileSeconds (clip.edit, sound.file) - part.end : part.start;
+        clip.setPosition ({ { start, start + te::TimeDuration::fromSeconds ((part.end - part.start) * settings.timeRatio) },
+                            te::TimeDuration::fromSeconds (from * settings.timeRatio) });
     }
 
-    // Gives the file's loop data a tempo: as many beats between its markers as that tempo plays in their time.
-    void setFileTempo (te::AudioClipBase& clip, double bpm)
+    void setOrRemove (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value, juce::UndoManager* um)
     {
-        if (const auto seconds = getMarkedSeconds (clip); seconds > 0.0)
-            clip.getLoopInfo().setNumBeats (bpm / 60.0 * seconds);
+        if (value.isVoid())
+            state.removeProperty (property, um);
+        else
+            state.setProperty (property, value, um);
     }
 
+    // Writes the sound into the clip's properties, and points Tracktion at what plays it: its file, or a render of it.
+    void setSound (te::AudioClipBase& clip, const Sound& sound)
+    {
+        auto* um = &clip.edit.getUndoManager();
+        auto& state = clip.state;
+        setOrRemove (state, schema::phaziteTempo, sound.tempo > 0.0 ? juce::var (sound.tempo) : juce::var(), um);
+        setOrRemove (state, schema::phazitePitch, juce::exactlyEqual (sound.pitch, 0.0f) ? juce::var() : juce::var (sound.pitch), um);
+        setOrRemove (state, schema::phaziteReversed, sound.reversed ? juce::var (true) : juce::var(), um);
+
+        const auto settings = getSettings (sound, getSongTempoAt (clip));
+        const auto played = stretch::isUnchanged (settings) ? sound.file : getRenderFile (clip.edit, sound.file, settings);
+        setOrRemove (
+            state, schema::phaziteSource,
+            played == sound.file ? juce::var() : juce::var (te::SourceFileReference::findPathFromFile (clip.edit, sound.file, true)), um);
+
+        if (auto& source = clip.getSourceFileReference(); source.getFile() != played)
+            source.source = te::SourceFileReference::findPathFromFile (clip.edit, played, true);
+    }
+
+    // Changes how a clip sounds, keeping its start and the part of its file it plays: on each clip it is linked with too,
+    // which Tracktion would otherwise only partly mirror.
+    template <typename Change>
+    void changeSound (te::AudioClipBase& clip, Change&& change)
+    {
+        auto linked = clip.isLinked() ? clip.edit.findClipsInLinkGroup (clip.getLinkGroupID())
+                                      : juce::Array<te::Clip*> { static_cast<te::Clip*> (&clip) };
+
+        for (auto* other : linked)
+        {
+            if (auto* audio = dynamic_cast<te::AudioClipBase*> (other))
+            {
+                auto sound = getSound (*audio);
+                const auto part = getFilePart (*audio, sound, getSettings (sound, getSongTempoAt (*audio)));
+                change (sound);
+                setSound (*audio, sound);
+                playFilePart (*audio, sound, getSettings (sound, getSongTempoAt (*audio)), part);
+            }
+        }
+    }
+
+    // The tempo a file was played at: from its loop data, or else the song's where the clip starts, so that it sounds as it
+    // does until either tempo changes.
+    double getFileTempo (const te::AudioClipBase& clip, const juce::File& file)
+    {
+        const auto info = te::AudioFile (clip.edit.engine, file).getInfo();
+        const auto& loop = info.loopInfo;
+        auto out = loop.getOutMarker();
+
+        if (out < 0 || out > info.lengthInSamples)
+            out = info.lengthInSamples;
+
+        const auto seconds = info.sampleRate > 0.0 ? (double) (out - loop.getInMarker()) / info.sampleRate : 0.0;
+        const auto tempo = seconds > 0.0 && loop.getNumBeats() > 0.0 ? loop.getNumBeats() / seconds * 60.0 : getSongTempoAt (clip);
+        return juce::jlimit (minClipTempo, maxClipTempo, tempo);
+    }
+} // namespace
+
+juce::File getClipFile (const te::AudioClipBase& clip)
+{
+    if (const auto source = clip.state.getProperty (schema::phaziteSource).toString(); source.isNotEmpty())
+        return te::SourceFileReference::findFileFromString (clip.edit, source);
+
+    return clip.getOriginalFile();
+}
+
+stretch::Settings getClipStretch (const te::AudioClipBase& clip)
+{
+    return getSettings (getSound (clip), getSongTempoAt (clip));
+}
+
+bool isRendered (const te::AudioClipBase& clip)
+{
+    return clip.state.hasProperty (schema::phaziteSource);
+}
+
+juce::File getRenderFile (te::Edit& edit, const juce::File& source, const stretch::Settings& settings)
+{
+    const auto key = source.getFullPathName() + "|" + juce::String (settings.timeRatio, 9) + "|" + juce::String (settings.semitones, 4)
+                     + "|" + (settings.reversed ? "backwards" : "forwards") + "|" + renderVersion;
+    return edit.getTempDirectory (false).getChildFile (renderFilePrefix + juce::String::toHexString (key.hashCode64()) + ".wav");
+}
+
+te::TimeRange getAudioTimeRange (te::AudioClipBase& clip)
+{
+    const auto position = clip.getPosition();
+    const auto start = position.getStart() - position.getOffset();
+    return { start,
+             start + te::TimeDuration::fromSeconds (getFileSeconds (clip.edit, getClipFile (clip)) * getClipStretch (clip).timeRatio) };
+}
+
+double getFileTimeAt (te::AudioClipBase& clip, te::BeatPosition beat)
+{
+    const auto position = clip.getPosition();
+    const auto settings = getClipStretch (clip);
+    const auto intoFile =
+        (clip.edit.tempoSequence.toTime (beat) - (position.getStart() - position.getOffset())).inSeconds() / settings.timeRatio;
+    return settings.reversed ? getFileSeconds (clip.edit, getClipFile (clip)) - intoFile : intoFile;
+}
+
+double getClipTempo (const te::AudioClipBase& clip)
+{
+    return (double) clip.state.getProperty (schema::phaziteTempo, 0.0);
+}
+
+float getClipPitch (const te::AudioClipBase& clip)
+{
+    return (float) clip.state.getProperty (schema::phazitePitch, 0.0f);
+}
+
+bool isClipReversed (const te::AudioClipBase& clip)
+{
+    return (bool) clip.state.getProperty (schema::phaziteReversed, false);
+}
+
+void setClipGain (te::AudioClipBase& clip, float decibels)
+{
+    clip.setGainDB (juce::jlimit (minClipGain, maxClipGain, decibels));
+}
+
+void setClipPitch (te::AudioClipBase& clip, float semitones)
+{
+    const auto pitch = juce::jlimit (-maxClipPitch, maxClipPitch, semitones);
+
+    if (! juce::exactlyEqual (getClipPitch (clip), pitch))
+        changeSound (clip, [pitch] (Sound& sound) { sound.pitch = pitch; });
+}
+
+void setClipReversed (te::AudioClipBase& clip, bool reversed)
+{
+    // The same part of the audio plays, backwards.
+    if (isClipReversed (clip) != reversed)
+        changeSound (clip, [reversed] (Sound& sound) { sound.reversed = reversed; });
+}
+
+void setClipFollowsTempo (te::AudioClipBase& clip, bool follows)
+{
+    // Without its file, how long it lasts is unknown, and so is its tempo.
+    if ((getClipTempo (clip) > 0.0) == follows || (follows && getFileSeconds (clip.edit, getClipFile (clip)) <= 0.0))
+        return;
+
+    const auto tempo = follows ? getFileTempo (clip, getClipFile (clip)) : 0.0;
+    changeSound (clip, [tempo] (Sound& sound) { sound.tempo = tempo; });
+}
+
+void setClipTempo (te::AudioClipBase& clip, double bpm)
+{
+    if (getClipTempo (clip) <= 0.0)
+        return;
+
+    const auto tempo = juce::jlimit (minClipTempo, maxClipTempo, bpm);
+    changeSound (clip, [tempo] (Sound& sound) { sound.tempo = tempo; });
+}
+
+juce::Array<te::AudioClipBase*> getAudioClips (te::Edit& edit)
+{
+    juce::Array<te::AudioClipBase*> clips;
+
+    for (auto* track : te::getAudioTracks (edit))
+        for (auto* clip : track->getClips())
+            if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
+                clips.add (audio);
+
+    return clips;
+}
+
+//==============================================================================
+FollowingClipsOnBeats::FollowingClipsOnBeats (te::Edit& edit)
+{
+    for (auto* clip : getAudioClips (edit))
+    {
+        if (const auto sound = getSound (*clip); sound.tempo > 0.0)
+        {
+            const auto part = getFilePart (*clip, sound, getSettings (sound, getSongTempoAt (*clip)));
+            kept.push_back ({ clip, part.start, part.end });
+        }
+    }
+}
+
+FollowingClipsOnBeats::~FollowingClipsOnBeats()
+{
+    for (auto& [clip, fileStart, fileEnd] : kept)
+    {
+        if (auto* audio = clip.get())
+        {
+            const auto sound = getSound (*audio);
+            setSound (*audio, sound);
+            playFilePart (*audio, sound, getSettings (sound, getSongTempoAt (*audio)), { fileStart, fileEnd });
+        }
+    }
+}
+
+//==============================================================================
+namespace
+{
     // The audio clips among some clips.
-    juce::Array<te::AudioClipBase*> getAudioClips (const juce::Array<te::Clip*>& clips)
+    juce::Array<te::AudioClipBase*> getAudioClipsAmong (const juce::Array<te::Clip*>& clips)
     {
         juce::Array<te::AudioClipBase*> audio;
 
@@ -102,117 +285,27 @@ namespace
     }
 } // namespace
 
-te::TimeRange getAudioTimeRange (te::AudioClipBase& clip)
-{
-    if (isStretchedToTempo (clip))
-    {
-        const auto& tempo = clip.edit.tempoSequence;
-        const auto start = clip.getStartBeat() - clip.getOffsetInBeats();
-        const auto beats = te::BeatDuration::fromBeats (getMarkedSeconds (clip) * getFileBeatsPerSecond (clip));
-        return { tempo.toTime (start), tempo.toTime (start + beats) };
-    }
-
-    const auto start = clip.getPosition().getStartOfSource();
-    return { start, start + clip.getSourceLength() / clip.getSpeedRatio() };
-}
-
-double getFileTimeAt (te::AudioClipBase& clip, te::BeatPosition beat)
-{
-    // Stretched, from the loop data's in marker, the beats of the file at its own tempo (as Tracktion's AudioSegmentList
-    // lays them out); otherwise from its start, at the clip's speed.
-    if (isStretchedToTempo (clip))
-    {
-        const auto file = te::AudioFile (clip.edit.engine, clip.getOriginalFile()).getInfo();
-        const auto inMarker = file.sampleRate > 0.0 ? (double) clip.getLoopInfo().getInMarker() / file.sampleRate : 0.0;
-        return inMarker + (beat - (clip.getStartBeat() - clip.getOffsetInBeats())).inBeats() / getFileBeatsPerSecond (clip);
-    }
-
-    return (clip.edit.tempoSequence.toTime (beat) - clip.getPosition().getStartOfSource()).inSeconds() * clip.getSpeedRatio();
-}
-
-double getClipTempo (te::AudioClipBase& clip)
-{
-    return isStretchedToTempo (clip) ? getFileBeatsPerSecond (clip) * 60.0 : 0.0;
-}
-
-void setClipGain (te::AudioClipBase& clip, float decibels)
-{
-    clip.setGainDB (juce::jlimit (minClipGain, maxClipGain, decibels));
-}
-
-void setClipPitch (te::AudioClipBase& clip, float semitones)
-{
-    clip.setPitchChange (juce::jlimit (-maxClipPitch, maxClipPitch, semitones));
-}
-
-void setClipReversed (te::AudioClipBase& clip, bool reversed)
-{
-    // Tracktion plays a reversed copy of the file, which it renders in the background, and moves the clip's offset so that
-    // the same part of the audio plays.
-    if (clip.getIsReversed() != reversed)
-        clip.setIsReversed (reversed);
-}
-
-void setClipFollowsTempo (te::AudioClipBase& clip, bool follows)
-{
-    // Without its file, how long it lasts is unknown, and so is its tempo.
-    if (clip.getAutoTempo() == follows || (follows && getMarkedSeconds (clip) <= 0.0))
-        return;
-
-    const auto part = getFilePart (clip);
-
-    if (follows)
-    {
-        // Without a tempo from its file, the clip plays at the song's tempo where it starts, as it sounds now.
-        if (getFileBeatsPerSecond (clip) <= 0.0)
-            setFileTempo (clip, getSongBeatsPerSecond (clip) * 60.0);
-
-        auto& loop = clip.getLoopInfo();
-
-        if (loop.getNumerator() <= 0 || loop.getDenominator() <= 0)
-        {
-            const auto& signature = clip.edit.tempoSequence.getTimeSigAt (clip.getPosition().getStart());
-            loop.setNumerator (signature.numerator);
-            loop.setDenominator (signature.denominator);
-        }
-    }
-
-    clip.setAutoTempo (follows);
-    playFilePart (clip, part);
-}
-
-void setClipTempo (te::AudioClipBase& clip, double bpm)
-{
-    if (! isStretchedToTempo (clip))
-        return;
-
-    const auto part = getFilePart (clip);
-    setFileTempo (clip, juce::jlimit (minClipTempo, maxClipTempo, bpm));
-    playFilePart (clip, part);
-}
-
-//==============================================================================
 bool areAllClipsReversed (const juce::Array<te::Clip*>& clips)
 {
-    return areAllOn (getAudioClips (clips), [] (te::AudioClipBase* clip) { return clip->getIsReversed(); });
+    return areAllOn (getAudioClipsAmong (clips), [] (te::AudioClipBase* clip) { return isClipReversed (*clip); });
 }
 
 void toggleClipsReversed (const juce::Array<te::Clip*>& clips)
 {
     toggleAll (
-        getAudioClips (clips), [] (te::AudioClipBase* clip) { return clip->getIsReversed(); },
+        getAudioClipsAmong (clips), [] (te::AudioClipBase* clip) { return isClipReversed (*clip); },
         [] (te::AudioClipBase* clip, bool on) { setClipReversed (*clip, on); });
 }
 
 bool doAllClipsFollowTempo (const juce::Array<te::Clip*>& clips)
 {
-    return areAllOn (getAudioClips (clips), [] (te::AudioClipBase* clip) { return clip->getAutoTempo(); });
+    return areAllOn (getAudioClipsAmong (clips), [] (te::AudioClipBase* clip) { return getClipTempo (*clip) > 0.0; });
 }
 
 void toggleClipsFollowTempo (const juce::Array<te::Clip*>& clips)
 {
     toggleAll (
-        getAudioClips (clips), [] (te::AudioClipBase* clip) { return clip->getAutoTempo(); },
+        getAudioClipsAmong (clips), [] (te::AudioClipBase* clip) { return getClipTempo (*clip) > 0.0; },
         [] (te::AudioClipBase* clip, bool on) { setClipFollowsTempo (*clip, on); });
 }
 } // namespace phazite

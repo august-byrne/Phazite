@@ -3,6 +3,7 @@
 // putting items into the song with Enter, a drop or the picker (roadmap step 1.5).
 #include "SoundPackTestHelpers.h"
 #include "UiTestHelpers.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
 #include "model/mixer/internal/Mixer.h"
@@ -292,7 +293,8 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     REQUIRE (track->getClips().size() == 2);
     auto* loopClip = dynamic_cast<te::WaveAudioClip*> (track->getClips().getLast());
     REQUIRE (loopClip != nullptr);
-    CHECK (loopClip->getAutoTempo());
+    CHECK (phazite::getClipTempo (*loopClip) == doctest::Approx (120.0)); // it follows the song's tempo, from its own
+    CHECK_FALSE (loopClip->getAutoTempo());                               // as Phazite stretches it, not Tracktion
     CHECK (loopClip->getStartBeat().inBeats() == doctest::Approx (16.0));
     CHECK (loopClip->getLengthInBeats().inBeats() == doctest::Approx (8.0));
 

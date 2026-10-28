@@ -28,6 +28,10 @@ inline const juce::Identifier loopFollowsSong { "loopFollowsSong" };
 // On PHAZITE. The id of the song outline applied last (Outline::id), or none. song
 inline const juce::Identifier outline { "outline" };
 
+// On PHAZITE. bool, default false: a change of the song's tempo leaves its patterns (MIDI clips) at their speed, their
+// notes keeping their times, rather than on their beats (model/transport/internal/Tempo.h). song
+inline const juce::Identifier patternsKeepTheirSpeed { "patternsKeepTheirSpeed" };
+
 // Child of PHAZITE: the key set last on any track (phaziteKeyRoot and phaziteKeyScale), which new tracks get. state
 inline const juce::Identifier LASTKEY { "LASTKEY" };
 
@@ -184,6 +188,26 @@ inline const juce::Identifier CHORDKEY { "CHORDKEY" };
 // "arpeggioDown" or "arpeggioUpDown" (getSavedPartStyleName()). While its notes are the ones the lane makes for it, they
 // change with the chords. song
 inline const juce::Identifier phaziteChordPart { "phaziteChordPart" };
+
+//==============================================================================
+// On audio clips (Tracktion's AUDIOCLIP) whose sound Phazite renders itself (model/arrangement/internal/AudioClips.h;
+// roadmap step 2.18): one that follows the song's tempo, or is pitched or reversed. Tracktion plays such a clip as a
+// plain clip of the render (its source, a file in the Edit's temporary folder, the project's Cache folder), and these
+// say what the render is made from. A clip without phaziteSource plays its source as it is. song
+
+// The audio file the clip's sound comes from, as Tracktion names a clip's source: a path relative to the project's
+// file, or a full path.
+inline const juce::Identifier phaziteSource { "phaziteSource" };
+
+// double 20..300 (AudioClipModel.h: minClipTempo..maxClipTempo), or none: the tempo the file was played at, in beats
+// per minute, while the clip stretches to follow the song's; none while it plays at the file's own speed.
+inline const juce::Identifier phaziteTempo { "phaziteTempo" };
+
+// float -48..48, default 0: how many semitones the clip is pitched up or down, with cents as hundredths.
+inline const juce::Identifier phazitePitch { "phazitePitch" };
+
+// bool, default false: the clip plays its file backwards.
+inline const juce::Identifier phaziteReversed { "phaziteReversed" };
 
 //==============================================================================
 // On notes: Tracktion's NOTEs, in a MIDI clip's SEQUENCE. song

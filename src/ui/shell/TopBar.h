@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include "TempoStretchPanel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/transport/TransportModel.h"
@@ -55,6 +56,8 @@ private:
     OptionsButton recordButton { "Record", Icon::record }, metronomeButton { "Metronome", Icon::metronome };
     NumberField tempoField;               // dragged, scrolled or typed, a drag being one undo step
     TempoHandle tempo;                    // the open project's, which owns those steps
+    TempoStretchPanel tempoStretch;       // what a tempo change stretches, under the field while the tempo changes
+    juce::uint32 tempoStretchShownAt = 0; // when it was shown, or last still in use
     juce::TextButton timeSignatureButton; // a menu of time signatures
     LevelMeter masterMeter { "Master level" };
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", decibelsToFaderPosition (0.0f) };
@@ -65,6 +68,7 @@ private:
     void timerCallback() override;  // updates the readouts a few times a second; only changes repaint
     void updateKeyboardButton();
     void updateTempo();
+    void showTempoStretch(); // what the tempo stretches, as it starts to change
     void showRecordMenu();
     void showMetronomeMenu();
     void showTimeSignatureMenu();

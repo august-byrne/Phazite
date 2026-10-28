@@ -40,9 +40,9 @@ juce::Array<te::AudioTrack*> getFrozenTracks (const te::Edit&);
 juce::Array<te::EditItemID> takeFrozenTracks (juce::ValueTree& state, const juce::File& cacheFolder);
 void restoreFrozenTracks (te::Edit&, const juce::Array<te::EditItemID>&);
 
-// Deletes from an Edit's temporary folder what nothing in the Edit uses: renders of clips that have changed since, and
-// the frozen files of tracks that aren't frozen, or are gone. When a project closes (when it opens, its clips haven't yet
-// asked for the renders they use).
+// Deletes from an Edit's temporary folder what nothing in the Edit uses: renders of clips that have changed since
+// (Tracktion's, and Phazite's: model/arrangement/internal/ClipRenders.h), and the frozen files of tracks that aren't
+// frozen, or are gone. When a project closes (when it opens, its clips haven't yet asked for the renders they use).
 void purgeCache (te::Edit&);
 
 //==============================================================================

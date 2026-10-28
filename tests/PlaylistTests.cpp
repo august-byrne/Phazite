@@ -4,6 +4,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -12,6 +13,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
@@ -718,4 +720,37 @@ TEST_CASE ("The sections strip adds, selects, resizes, moves and copies sections
     CHECK (sections[2].name == juce::String ("Section 2"));
     CHECK (sections[2].range.getStart().inBeats() == doctest::Approx (48.0));
     CHECK (context.getSongSelection().getSections() == std::vector { sections[2].id });
+}
+
+TEST_CASE ("A sample that follows the song's tempo is marked in the playlist, so a change of tempo stretches no surprise")
+{
+    PlaylistScreen screen;
+    phazite::test::TemporaryFolder temp;
+    REQUIRE (
+        phazite::importFile (*screen.tracks[0], phazite::test::writeSound (temp.folder.getChildFile ("Beat 120 BPM.wav"), 2.0), beats (0.0))
+        != nullptr);
+    REQUIRE (
+        phazite::importFile (*screen.tracks[1], phazite::test::writeSound (temp.folder.getChildFile ("Hit sound.wav"), 0.5), beats (0.0))
+        != nullptr);
+    phazite::test::dispatchPendingMessages();
+
+    // The loop, which knows its tempo, follows the song's; the hit plays at its own speed.
+    const auto findClip = [&screen] (const juce::String& name)
+    {
+        auto* clip = dynamic_cast<phazite::ui::ClipComponent*> (phazite::test::findComponentWithTitle (screen.playlist, name));
+        REQUIRE (clip != nullptr);
+        return clip;
+    };
+
+    CHECK (findClip ("Beat 120 BPM")->getDescription() == juce::String ("Stretches with the song's tempo"));
+    CHECK (findClip ("Hit sound")->getDescription().isEmpty());
+
+    // Samples Follow Tempo: every one of them does.
+    {
+        const phazite::UndoStep step (*screen.edit, "Samples Follow Tempo");
+        phazite::toggleSamplesFollowTempo (*screen.edit);
+    }
+
+    phazite::test::dispatchPendingMessages();
+    CHECK (findClip ("Hit sound")->getDescription() == juce::String ("Stretches with the song's tempo"));
 }

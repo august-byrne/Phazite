@@ -21,7 +21,7 @@ inline constexpr double minClipTempo = 20.0, maxClipTempo = 300.0; // beats per 
 enum class AudioState
 {
     ready,     // it plays
-    preparing, // Tracktion is making a stretched or reversed copy of its file in the background: the clip is silent until then
+    preparing, // Phazite is rendering it stretched, pitched or reversed in the background: the clip is silent until then
     missing    // its audio file can't be found
 };
 

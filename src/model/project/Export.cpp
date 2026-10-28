@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Export.h"
 #include "internal/Export.h"
+#include "model/arrangement/internal/ClipRenders.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
@@ -281,6 +282,7 @@ namespace
 
         restorePlayback = edit.getTransport().isPlayContextActive(); // the render frees it
         file.getParentDirectory().createDirectory();
+        renderMissingClipAudio (edit); // Tracktion would render a clip whose render isn't ready silent
 
         // The renderer calls back on its own thread, which measures the file before the message thread hears of it.
         handle = te::EditRenderer::render (makeParameters (edit, temporary.getFile(), settings),
@@ -378,6 +380,7 @@ namespace
             return;
         }
 
+        renderMissingClipAudio (edit); // Tracktion would render a clip whose render isn't ready silent
         queue = std::make_unique<te::RenderQueue>();
         const auto tracks = getStemTracks (edit);
 

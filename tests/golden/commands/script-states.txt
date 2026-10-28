@@ -72,6 +72,8 @@ after start:
   transport.loopSong: on "Loop the Song"
   transport.metronome: on "Metronome"
   transport.countIn: on "Count-In"
+  transport.samplesFollowTempo: on "Samples Follow Tempo"
+  transport.patternsFollowTempo: on, ticked "Patterns Follow Tempo"
   transport.record: off "Record"
   transport.overdub: on, ticked "Overdub"
   transport.quantizeRecordings: on "Quantize Recordings"

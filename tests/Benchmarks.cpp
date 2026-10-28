@@ -22,6 +22,7 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
+#include "devices/stretch/Stretch.h"
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
@@ -442,6 +443,46 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
            << milliseconds (millisecondsOf ([&] { reopened = phazite::Project::open (phazite::test::getEngine(), file, false, error); }), 1)
            << "\n";
     REQUIRE (reopened != nullptr);
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: rendering audio clips stretched and pitched" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // What a clip that follows the tempo, or is pitched, waits for before it sounds (roadmap step 2.18): Rubber Band's R3
+    // engine over its whole file (src/devices/stretch/Stretch.h), here stereo noise at 44.1 kHz with a hit on every eighth
+    // note at 120 BPM.
+    juce::String report ("\n");
+    juce::Random random (5);
+
+    for (const auto seconds : { 8.0, 60.0 })
+    {
+        juce::AudioBuffer<float> audio (2, (int) (seconds * 44100.0));
+
+        for (int i = 0; i < audio.getNumSamples(); ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                audio.setSample (channel, i, 0.3f * std::exp (-(float) (i % 11025) / 2000.0f) * (random.nextFloat() * 2.0f - 1.0f));
+
+        const phazite::stretch::Source source { 2, 44100.0, audio.getNumSamples(),
+                                                [&audio] (juce::AudioBuffer<float>& buffer, juce::int64 start, int frames)
+                                                {
+                                                    buffer.clear (0, frames);
+                                                    const auto count = (int) std::min ((juce::int64) frames, audio.getNumSamples() - start);
+
+                                                    for (int channel = 0; channel < 2 && count > 0; ++channel)
+                                                        buffer.copyFrom (channel, 0, audio, channel, (int) start, count);
+                                                } };
+        const std::pair<const char*, phazite::stretch::Settings> cases[] = { { "stretched from 120 to 100 BPM", { 1.2, 0.0, false } },
+                                                                             { "pitched up 3 semitones", { 1.0, 3.0, false } } };
+
+        for (const auto& [name, settings] : cases)
+        {
+            const auto ms = millisecondsOf (
+                [&] { REQUIRE (phazite::stretch::render (source, settings, [] (const juce::AudioBuffer<float>&, int) { return true; })); });
+            report << juce::String (seconds, 0) << " s in stereo, " << name << ": " << milliseconds (ms, 0) << " ("
+                   << juce::String (seconds * 1000.0 / ms, 1) << " times as fast as it plays)\n";
+        }
+    }
+
     MESSAGE (report);
 }
 

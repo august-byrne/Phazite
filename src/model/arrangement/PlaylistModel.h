@@ -90,7 +90,8 @@ struct ClipInfo
     juce::String name {};
     BeatRange range {}; // where it is in the song
     bool muted = false;
-    bool linked = false; // an alias: what it plays is another clip's too
+    bool linked = false;       // an alias: what it plays is another clip's too
+    bool followsTempo = false; // an audio clip that stretches with the song's tempo (AudioClipModel.h)
 
     // An audio clip's fades, each as a part of the clip's length (0 to 1), and their shapes.
     double fadeIn = 0.0, fadeOut = 0.0;

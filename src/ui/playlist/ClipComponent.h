@@ -46,7 +46,9 @@ private:
     std::vector<NoteShape> notes; // a MIDI clip's
     juce::Colour colour;
     bool selected = false, frozen = false;
-    ClipWaveform* waveform = nullptr; // an audio clip's, the playlist's
+    ClipWaveform* waveform = nullptr;                      // an audio clip's, the playlist's
+    std::unique_ptr<juce::Drawable> tempoMark;             // the metronome a sample that follows the tempo shows, once drawn
+    juce::Colour tempoMarkColour { juce::Colours::black }; // the color the drawing is in now
 
     juce::Colour getFill() const;
     void paintFades (juce::Graphics&, juce::Rectangle<int>);

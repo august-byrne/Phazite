@@ -126,6 +126,9 @@ target_sources(phazite_core PRIVATE
     src/devices/saturation/Saturator.h
     src/devices/stereo/StereoExpander.cpp
     src/devices/stereo/StereoExpander.h
+    src/devices/stretch/RubberBandLibrary.cpp
+    src/devices/stretch/Stretch.cpp
+    src/devices/stretch/Stretch.h
     src/devices/synth/Synth.cpp
     src/devices/synth/Synth.h
     src/devices/vocoder/Vocoder.cpp
@@ -140,6 +143,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/AudioClipModel.cpp
     src/model/arrangement/AudioClipModel.h
     src/model/arrangement/AudioClips.cpp
+    src/model/arrangement/ClipRenders.cpp
     src/model/arrangement/Clips.cpp
     src/model/arrangement/Grid.cpp
     src/model/arrangement/GridSettings.h
@@ -161,6 +165,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Tracks.cpp
     src/model/arrangement/internal/Arrangement.h
     src/model/arrangement/internal/AudioClips.h
+    src/model/arrangement/internal/ClipRenders.h
     src/model/arrangement/internal/Clips.h
     src/model/arrangement/internal/Grid.h
     src/model/arrangement/internal/Import.h
@@ -389,6 +394,15 @@ target_link_libraries(phazite_core PRIVATE phazite_data)
 
 target_include_directories(phazite_core PUBLIC src)
 target_compile_features(phazite_core PUBLIC cxx_std_20)
+
+# Rubber Band Library 4.0 (GPL-2.0-or-later), which stretches audio clips (src/devices/stretch/), compiled from its
+# single-file build in RubberBandLibrary.cpp. Its code is third-party: MSVC's warnings are off for it there, GCC's and
+# Clang's here.
+target_include_directories(phazite_core SYSTEM PRIVATE external/rubberband)
+
+if(NOT MSVC)
+    set_source_files_properties(src/devices/stretch/RubberBandLibrary.cpp PROPERTIES COMPILE_OPTIONS "-w")
+endif()
 
 target_compile_definitions(phazite_core PRIVATE
     PHAZITE_VERSION_STRING="${PROJECT_VERSION}"
@@ -626,6 +640,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/SettingsPanel.h
     src/ui/shell/StatusBar.cpp
     src/ui/shell/StatusBar.h
+    src/ui/shell/TempoStretchPanel.cpp
+    src/ui/shell/TempoStretchPanel.h
     src/ui/shell/TitleBar.cpp
     src/ui/shell/TitleBar.h
     src/ui/shell/TopBar.cpp
@@ -703,6 +719,12 @@ add_custom_command(TARGET Phazite POST_BUILD
 add_custom_command(TARGET Phazite POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/lucide/LICENSE" "$<TARGET_FILE_DIR:Phazite>/licenses/Lucide.txt"
+    VERBATIM)
+
+# Rubber Band Library is compiled in, under the GPL (version 2 or later), whose text goes with every copy.
+add_custom_command(TARGET Phazite POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/external/rubberband/COPYING" "$<TARGET_FILE_DIR:Phazite>/licenses/RubberBand.txt"
     VERBATIM)
 
 # --- phazite_soundkit: renders Phazite Sounds, the pack Phazite offers to download, from the recipes in the
@@ -822,6 +844,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SoundPackTests.cpp
         tests/StatusBarTests.cpp
         tests/StereoExpanderTests.cpp
+        tests/StretchTests.cpp
         tests/SynthEditorTests.cpp
         tests/SynthTests.cpp
         tests/TestDevices.h

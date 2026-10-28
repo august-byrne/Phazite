@@ -16,6 +16,7 @@
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
+#include "model/transport/internal/Tempo.h"
 #include "ui/playlist/TrackHeights.h"
 
 namespace phazite
@@ -39,6 +40,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context, TrackR
     addAutomationCommands (registry, context);
     addLoopCommands (registry, selection, range);
     addMetronomeCommands (registry, selection);
+    addTempoCommands (registry, selection);
     addRecordingCommands (registry, selection);
     addCaptureCommands (registry, selection);
 }

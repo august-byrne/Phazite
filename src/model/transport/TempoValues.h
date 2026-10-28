@@ -24,4 +24,17 @@ bool isValid (TimeSignature);
 inline constexpr std::array<TimeSignature, 8> commonTimeSignatures {
     { { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } }
 };
+
+// What a change of the song's tempo stretches (docs/design.md, section 4): each sample (audio clip) that follows the
+// tempo, and the song's patterns (MIDI clips) unless they keep their speed. A stretched clip plays faster or slower with
+// the tempo; one that isn't keeps its speed. Either way each clip starts on the same beat.
+struct TempoStretch
+{
+    int samples = 0;            // in the song
+    int samplesFollowing = 0;   // of them, those that follow the tempo
+    int patterns = 0;           // in the song
+    bool patternsFollow = true; // or keep their speed
+
+    bool operator== (const TempoStretch&) const = default;
+};
 } // namespace phazite

@@ -30,6 +30,7 @@
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
@@ -1086,29 +1087,22 @@ TEST_SUITE ("realtime-audit")
         edit->tempoSequence.getTempos()[0]->setBpm (100.0);
         auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (getTrack (*edit, 0), loop, te::BeatPosition()));
         REQUIRE (clip != nullptr);
-        REQUIRE (clip->getAutoTempo());
+        REQUIRE (phazite::getClipTempo (*clip) == doctest::Approx (120.0));
 
-        // Tracktion renders the stretched loop to a file in the background (a "proxy"), and plays that, so the audio
-        // thread only reads a file; until it is ready, the clip is silent.
-        const auto giveUpAt = juce::Time::getMillisecondCounter() + 20000;
-
-        while (clip->getPlaybackFile().getSampleRate() <= 0.0 && juce::Time::getMillisecondCounter() < giveUpAt)
-        {
-            phazite::test::dispatchPendingMessages(); // the render finishing comes as a message
-            juce::Thread::sleep (5);
-        }
-
-        REQUIRE (clip->getPlaybackFile().getSampleRate() > 0.0);
+        // Phazite renders the stretched loop to a file (in the background, for an open project), and Tracktion plays that,
+        // so the audio thread only reads a file; until it is ready, the clip is silent.
+        REQUIRE (phazite::renderMissingClipAudio (*edit));
+        REQUIRE (clip->getAudioFile().isValid());
 
         const auto m = playAndMeasure (*edit);
-        report ("A loop at 120 BPM stretched to 100 BPM, from its rendered proxy", m);
+        report ("A loop at 120 BPM stretched to 100 BPM, from its render", m);
         CHECK (m.peakLevel > 0.01f);
     }
 
     TEST_CASE ("Real-time audit: an audio clip turned up, pitched and reversed")
     {
-        // As the audio clip editor sets them (roadmap step 2.6). Tracktion renders a reversed copy of the file, and a pitched
-        // proxy of that, in the background, and plays the proxy, so the audio thread only reads a file.
+        // As the audio clip editor sets them (roadmap step 2.6). Phazite renders the file pitched and backwards, and
+        // Tracktion plays the render, so the audio thread only reads a file.
         SineFile sine;
         auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
         auto clip = getTrack (*edit, 0).insertWaveClip ("Sine", sine.getFile(), { te::TimeRange (0_tp, 2_tp) }, false);
@@ -1116,19 +1110,11 @@ TEST_SUITE ("realtime-audit")
         phazite::setClipGain (*clip, 6.0f);
         phazite::setClipPitch (*clip, 3.0f);
         phazite::setClipReversed (*clip, true);
-
-        const auto giveUpAt = juce::Time::getMillisecondCounter() + 20000;
-
-        while (clip->getPlaybackFile().getSampleRate() <= 0.0 && juce::Time::getMillisecondCounter() < giveUpAt)
-        {
-            phazite::test::dispatchPendingMessages(); // the renders finishing come as messages
-            juce::Thread::sleep (5);
-        }
-
-        REQUIRE (clip->getPlaybackFile().getSampleRate() > 0.0);
+        REQUIRE (phazite::renderMissingClipAudio (*edit));
+        REQUIRE (clip->getAudioFile().isValid());
 
         const auto m = playAndMeasure (*edit);
-        report ("An audio clip turned up 6 dB, pitched up 3 semitones and reversed, from its rendered proxy", m);
+        report ("An audio clip turned up 6 dB, pitched up 3 semitones and reversed, from its render", m);
         CHECK (m.peakLevel > 0.01f);
     }
 

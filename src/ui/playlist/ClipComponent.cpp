@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ClipComponent.h"
+#include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -24,6 +25,7 @@ void ClipComponent::showClip (const ClipInfo& shown)
 {
     info = shown;
     setTitle (info.name); // what screen readers call it
+    setDescription (info.followsTempo ? "Stretches with the song's tempo" : juce::String());
 
     if (info.kind == ClipType::midi)
         notes = getNoteShapes (context, id);
@@ -72,15 +74,35 @@ void ClipComponent::paint (juce::Graphics& g)
     g.setColour (fill);
     g.fillRoundedRectangle (body, corner);
 
-    // The name, in a strip along the top. An alias (a linked copy) has a star after its name.
+    // The name, in a strip along the top. An alias (a linked copy) has a star after its name. A sample that follows the
+    // song's tempo, and so stretches when it changes, shows the metronome at the strip's end (docs/design.md, section 4).
     auto content = getLocalBounds().reduced (2);
 
     if (getHeight() >= nameHeight * 2)
     {
+        auto strip = content.removeFromTop (nameHeight);
+
+        if (info.followsTempo && strip.getWidth() > 3 * nameHeight)
+        {
+            if (tempoMark == nullptr)
+                tempoMark = createIcon (Icon::metronome);
+
+            if (tempoMark != nullptr)
+            {
+                if (ink != tempoMarkColour)
+                {
+                    tempoMark->replaceColour (tempoMarkColour, ink);
+                    tempoMarkColour = ink;
+                }
+
+                tempoMark->drawWithin (g, strip.removeFromRight (nameHeight).reduced (2).toFloat(), juce::RectanglePlacement::centred,
+                                       1.0f);
+            }
+        }
+
         g.setColour (ink);
         g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText (info.name + (info.linked ? "*" : ""), content.removeFromTop (nameHeight).reduced (2, 0),
-                    juce::Justification::centredLeft, true);
+        g.drawText (info.name + (info.linked ? "*" : ""), strip.reduced (2, 0), juce::Justification::centredLeft, true);
     }
 
     if (info.kind == ClipType::audio)

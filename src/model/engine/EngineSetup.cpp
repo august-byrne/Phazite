@@ -167,6 +167,24 @@ void setPluginsLoad (te::Engine& engine, bool load)
     getBehaviour (engine).loadsPlugins = load;
 }
 
+// Phazite stretches and pitches audio clips itself (model/arrangement/internal/AudioClips.h; roadmap step 2.18), so a new
+// clip of a file with loop data plays the file as it is: Tracktion's own defaults for one (its auto-tempo, with the clip
+// stretched to the loop's beats, and auto-pitch toward the song's key, both through SoundTouch) are undone here, and the
+// clip lasts as long as its file. The model makes it follow the tempo, as importFile() does a loop.
+void EngineBehaviour::newClipCreated (te::Clip& clip, bool)
+{
+    auto* audio = dynamic_cast<te::AudioClipBase*> (&clip);
+
+    if (audio == nullptr || ! (audio->getAutoTempo() || audio->getAutoPitch()))
+        return;
+
+    audio->setAutoTempo (false);
+    audio->setAutoPitch (false);
+
+    if (const auto length = te::AudioFile (clip.edit.engine, audio->getOriginalFile()).getLength(); length > 0.0)
+        audio->setLength (te::TimeDuration::fromSeconds (length), true);
+}
+
 // Phazite has no clip launcher (until after v1: docs/design.md, section 26), so no track needs the nodes Tracktion adds
 // to every one for its clip slots (docs/performance-audit.md, A3).
 bool EngineBehaviour::areClipSlotsEnabled()

@@ -2,6 +2,7 @@
 #include "internal/Freeze.h"
 #include "FreezeModel.h"
 #include "internal/Mixer.h"
+#include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -325,6 +326,7 @@ void restoreFrozenTracks (te::Edit& edit, const juce::Array<te::EditItemID>& tak
 void purgeCache (te::Edit& edit)
 {
     te::TemporaryFileManager::purgeOrphanFreezeAndProxyFiles (edit);
+    purgeClipRenders (edit);
 
     // Tracktion leaves the frozen files of tracks that are gone.
     const auto prefix = juce::String ("trackFreeze_0_");
@@ -507,6 +509,7 @@ namespace
             setup = std::move (heldWhileRendering);
             temporary = params.destFile;
             temporary.getParentDirectory().createDirectory();
+            renderMissingClipAudio (edit); // Tracktion would render a clip whose render isn't ready silent
 
             handle = te::EditRenderer::render (
                 std::move (params),

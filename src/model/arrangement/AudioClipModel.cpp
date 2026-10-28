@@ -57,8 +57,8 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
     AudioClipInfo info;
     info.clip = *shown;
 
-    // The file as it was recorded, not the copy that plays it stretched or reversed.
-    const auto original = clip->getOriginalFile();
+    // The file as it was recorded, not the render that plays it stretched, pitched or reversed.
+    const auto original = getClipFile (*clip);
     const auto file = te::AudioFile (clip->edit.engine, original).getInfo();
     info.fileName = original.getFileName();
     info.sampleRate = file.sampleRate;
@@ -70,14 +70,14 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
     info.content = { fromTracktion (tempo.toBeats (audio.getStart())), fromTracktion (tempo.toBeats (audio.getEnd())) };
 
     info.gain = clip->getGainDB();
-    info.pitch = clip->getPitchChange();
-    info.reversed = clip->getIsReversed();
-    info.followsTempo = clip->getAutoTempo();
+    info.pitch = getClipPitch (*clip);
+    info.reversed = isClipReversed (*clip);
     info.tempo = getClipTempo (*clip);
+    info.followsTempo = info.tempo > 0.0;
 
     if (file.sampleRate <= 0.0)
         info.state = AudioState::missing;
-    else if (! clip->getPlaybackFile().isValid())
+    else if (isRendered (*clip) && ! clip->getAudioFile().isValid())
         info.state = AudioState::preparing;
 
     return info;

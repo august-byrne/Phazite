@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PlaylistModel.h"
+#include "internal/AudioClips.h"
 #include "internal/Clips.h"
 #include "internal/Import.h"
 #include "internal/Sections.h"
@@ -157,6 +158,7 @@ namespace
 
             info.fadeInShape = toFadeShape (audio->getFadeInType());
             info.fadeOutShape = toFadeShape (audio->getFadeOutType());
+            info.followsTempo = getClipTempo (*audio) > 0.0;
         }
 
         return info;

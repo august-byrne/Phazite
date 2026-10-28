@@ -2,6 +2,9 @@
 // The top bar (src/ui/shell/TopBar.h), driven with the mouse: its tempo field and time signature show the open
 // project's, and change them.
 #include "UiTestHelpers.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Import.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
@@ -14,10 +17,11 @@
 
 namespace
 {
-// A top bar in a window, over a project with one track.
+// A top bar in a window, over a project with one track. A window taller than the bar has room for what shows under it.
 struct TopBarScreen
 {
-    TopBarScreen()
+    explicit TopBarScreen (int height = 40)
+        : windowHeight (height)
     {
         setEdit (context, edit.get());
         phazite::addMetronomeCommands (registry, getSelection (context));
@@ -42,9 +46,69 @@ struct TopBarScreen
     phazite::ui::CommandBridge bridge { registry };
     phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
     phazite::ui::TopBar topBar { bridge, keyboard, context };
-    phazite::test::TestWindow window { topBar, 1200, 40 };
+    const int windowHeight;
+    phazite::test::TestWindow window { topBar, 1200, windowHeight };
 };
 } // namespace
+
+TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a switch for samples and one for patterns")
+{
+    TopBarScreen screen (300);
+    phazite::addTempoCommands (screen.registry, getSelection (screen.context));
+
+    // A loop that follows the tempo, a sound that doesn't, and a pattern on a track of its own.
+    phazite::test::TemporaryFolder temp;
+    auto& track = *te::getAudioTracks (*screen.edit)[0];
+    REQUIRE (phazite::importFile (track, phazite::test::writeSound (temp.folder.getChildFile ("Loop 120 BPM.wav"), 4.0), te::BeatPosition())
+             != nullptr);
+    REQUIRE (phazite::importFile (track, phazite::test::writeSound (temp.folder.getChildFile ("One-second hit.wav"), 1.0),
+                                  te::BeatPosition::fromBeats (10.0))
+             != nullptr);
+    auto* other = phazite::insertTrack (*screen.edit, &track, nullptr);
+    REQUIRE (other != nullptr);
+    REQUIRE (phazite::insertMidiClip (*other, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, nullptr) != nullptr);
+    screen.edit->getUndoManager().clearUndoHistory();
+
+    // Nothing shows until the tempo is dragged.
+    auto* window = screen.topBar.getTopLevelComponent();
+    REQUIRE (window != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*window, "Changing the tempo stretches") == nullptr);
+
+    auto& field = screen.getTempoField();
+    phazite::test::Mouse mouse (field);
+    const auto centre = field.getLocalBounds().getCentre();
+    mouse.press (centre);
+    mouse.dragTo (centre.translated (0, -4));
+    mouse.release();
+
+    auto* panel = phazite::test::findComponentWithTitle (*window, "Changing the tempo stretches");
+    REQUIRE (panel != nullptr);
+    CHECK (panel->isShowing());
+    CHECK (panel->getY() >= screen.topBar.getLocalArea (&field, field.getLocalBounds()).getBottom()); // under the field
+
+    auto* samples = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "Samples follow the tempo"));
+    auto* patterns = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "Patterns follow the tempo"));
+    REQUIRE (samples != nullptr);
+    REQUIRE (patterns != nullptr);
+    CHECK_FALSE (samples->getToggleState());
+    CHECK (samples->getDescription() == juce::String ("1 of 2 follow the tempo"));
+    CHECK (patterns->getToggleState());
+    CHECK (patterns->getDescription() == juce::String ("It follows the tempo"));
+
+    // Samples: now all of them follow it, as one undo step.
+    phazite::test::Mouse samplesMouse (*samples);
+    samplesMouse.click (samples->getLocalBounds().getCentre());
+    CHECK (samples->getToggleState());
+    CHECK (samples->getDescription() == juce::String ("All 2 follow the tempo"));
+    CHECK (screen.edit->getUndoManager().getUndoDescription() == juce::String ("Samples Follow Tempo"));
+
+    // Patterns: now they keep their speed.
+    phazite::test::Mouse patternsMouse (*patterns);
+    patternsMouse.click (patterns->getLocalBounds().getCentre());
+    CHECK_FALSE (patterns->getToggleState());
+    CHECK (patterns->getDescription() == juce::String ("It keeps its speed"));
+    CHECK_FALSE (phazite::doPatternsFollowTempo (*screen.edit));
+}
 
 TEST_CASE ("The top bar's tempo field shows the song's tempo, and a drag on it is one undo step")
 {

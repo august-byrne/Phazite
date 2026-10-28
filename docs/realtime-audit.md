@@ -63,8 +63,8 @@ The first column covers the warm-up after playback starts (about 0.5 s); the sec
 | An audio clip | 6 allocations, 3 frees (fewer if the file cache hits) | 0 |
 | Two tracks in a folder bus with Phazite's compressor | 13 allocations, 6 frees (a file cache miss logs in Debug builds) | 0 |
 | One empty track with two audio inputs enabled | 8 allocations, 4 frees | 0 |
-| A loop at 120 BPM stretched to 100 BPM, played from its rendered proxy (a loop dropped from the browser) | 12 allocations, 9 frees (from a file cache miss) | 0 |
-| An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from its rendered proxy (as the audio clip editor sets them, step 2.6) | 10 allocations, 6 frees (from a file cache miss) | 0 |
+| A loop at 120 BPM stretched to 100 BPM, played from Phazite's render (a loop dropped from the browser; step 2.18) | 13 allocations, 9 frees (from a file cache miss) | 0 |
+| An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from Phazite's render (as the audio clip editor sets them, steps 2.6 and 2.18) | 3 allocations | 0 |
 | A loop at 120 BPM previewed at 100 BPM, stretched as it plays (the browser's preview) | 21 allocations, 14 frees | 0 |
 
 Steady playback is clean everywhere. Every scenario allocates something in its first blocks, though.
@@ -127,6 +127,7 @@ Steady playback is clean everywhere. Every scenario allocates something in its f
 
 **11. Scratch buffers** (source): `AudioScratchBuffer` takes a shared mutex. It allocates when its 8 pooled buffers are busy or a buffer has more than 2 channels. It is used by time-stretching, multi-output plug-ins and sidechains; the guarded scenarios with a sidechain (the compressor ducked by a muted track, the vocoder with a track as its carrier) allocate nothing in steady playback.
   - **Time-stretching, revisited in step 1.5 (2026-10-13):** a loop dropped from the browser follows the song's tempo, and Tracktion plays it from a stretched copy that it renders in the background (a "proxy"), so the audio thread only reads a file: its steady playback allocates nothing (measured). The render starts 600 ms after the clip changes, and the clip is silent until it is ready, usually well under a second for a loop. Since step 2.6 (2026-10-17), the audio clip editor's pitch, Reverse and Follow Tempo play the same way: from a reversed copy of the file, and a pitched or stretched proxy rendered from it (measured: steady playback allocates nothing). The browser's preview stretches as it plays instead (finding 17).
+  - **Since step 2.18 (2026-10-28)** Phazite renders those clips itself, with Rubber Band's R3 engine, on two background threads of its own (`model/arrangement/internal/ClipRenders.h`), and Tracktion plays each render as a plain clip: still only a file read on the audio thread, and no Tracktion proxy, stretcher or scratch buffer for them. The audit's two scenarios play from those renders.
 
 **12. Tempo changes** (source): the tempo map swaps its rebuilt sequence under the audio callback's lock. Report upstream; test with tempo automation later.
 
@@ -153,7 +154,7 @@ Steady playback is clean everywhere. Every scenario allocates something in its f
 - **Action:** Phazite ships its own devices (steps 1.6 and 2.10) and uses none of Tracktion's: its device list (`phazite::getDeviceTypes()`) offers Phazite's own and the plug-ins found by scanning. Tracktion's reverb, which reads its parameters atomically and allocates nothing (measured), was offered until Phazite's own reverb replaced it (2026-10-15), and projects that held it played it until 2026-10-18. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stayed out from the start.
 
 **17. Previews** (measured, step 1.5): the browser's preview plays a loop in an Edit of its own, mixed on the same audio thread as the song, and stretches it as it plays (Tracktion's preview Edit uses no proxy). In its first blocks, SoundTouch grows its buffers (`FIFOSampleBuffer::ensureCapacity`, 10 allocations), and a file cache miss logs in Debug builds; then it allocates nothing. A preview started while the song plays could therefore make it glitch.
-- **Action:** accept it for now: previews are short, and are mostly started while the song is stopped. Later, prime the stretcher on the message thread before the preview starts, or render the preview ahead as the clips do. Report SoundTouch's growing buffers upstream with finding 11.
+- **Action:** accept it for now: previews are short, and are mostly started while the song is stopped. Later, prime the stretcher on the message thread before the preview starts, or render the preview ahead as the clips do. Report SoundTouch's growing buffers upstream with finding 11. Since step 2.18 (2026-10-28) the previews are the one place Tracktion still stretches: rendering a loop with R3 first would hold each one back by about 0.4 s, so the plan is a preview player of Phazite's own with R3 running as it plays.
 - **Signalsmith Stretch instead** (measured 2026-10-17, Release build, a voice-like stereo recording sped up from 120 to 140 BPM): it would take 1.5% of each 512-sample block on average, against SoundTouch's 0.13%, and, with its 150 ms delay, 45% of one block to catch up each time the preview loops or jumps, where SoundTouch takes 1%. Previews stay on SoundTouch even if clips move to Signalsmith ([design section 23](design.md#23-tracktion-engine-what-it-gives-and-what-we-build)).
 
 ### Data races

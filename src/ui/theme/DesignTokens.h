@@ -85,6 +85,8 @@ namespace Shell
 {
     inline constexpr int titleBarHeight = 36;     // the menus, Undo and Redo, the command search and the panels' switches
     inline constexpr int transportBarHeight = 44; // play, record, the tempo and the master level
+    inline constexpr int tempoStretchWidth = 320; // what a tempo change stretches, under the tempo field as it changes
+    inline constexpr int tempoStretchSeconds = 4; // how long that stays once the tempo stops changing
     inline constexpr int statusBarHeight = 24;    // whether the project is saved, the hints, the audio output and the CPU
 
     // The title bar's parts: the window's buttons, as wide as Windows 11's, with their glyphs, Close red under the pointer as

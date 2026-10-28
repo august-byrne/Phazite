@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/UnsavedProjects.h"
 #include "internal/Project.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/engine/AppInfo.h"
 
@@ -147,7 +148,7 @@ int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
     for (auto* track : te::getAudioTracks (edit))
         for (auto* clip : track->getClips())
             if (auto* audio = dynamic_cast<te::WaveAudioClip*> (clip))
-                played.add (audio->getOriginalFile());
+                played.add (getClipFile (*audio)); // the file, not a render of it
 
     // In the order they were made, as they were recorded.
     auto unused = edit.editFileRetriever().getSiblingFile ("Audio").findChildFiles (juce::File::findFiles, true);

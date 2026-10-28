@@ -69,8 +69,10 @@ namespace
 
             showFileOf (audio);
 
-            // The time in the file at an x, as the clip plays it: stretched to the song's tempo, say.
+            // The time in the file at an x, as the clip plays it: stretched to the song's tempo, say, or going back from
+            // its end while the clip plays backwards.
             const auto fileTime = [&] (int x) { return getFileTimeAt (audio, beatAt (x)); };
+            const auto backwards = isClipReversed (audio);
             auto drawn = area;
 
             // Only where the file has audio, once the thumbnail knows how long it is.
@@ -78,32 +80,38 @@ namespace
             {
                 const auto left = fileTime (drawn.getX()), right = fileTime (drawn.getRight());
 
-                if (right <= 0.0 || left >= length || right <= left)
+                if (juce::exactlyEqual (left, right) || std::max (left, right) <= 0.0 || std::min (left, right) >= length)
                     return;
 
                 const auto xAt = [&] (double time)
                 { return drawn.getX() + (int) std::round ((time - left) / (right - left) * drawn.getWidth()); };
 
-                if (left < 0.0)
-                    drawn.setLeft (xAt (0.0));
-
-                if (right > length)
-                    drawn.setRight (xAt (length));
+                if (const auto start = xAt (0.0), end = xAt (length); backwards)
+                    drawn = drawn.withLeft (std::max (drawn.getX(), end)).withRight (std::min (drawn.getRight(), start));
+                else
+                    drawn = drawn.withLeft (std::max (drawn.getX(), start)).withRight (std::min (drawn.getRight(), end));
             }
 
-            if (drawn.getWidth() > 0)
-                thumbnail->drawChannels (g, drawn,
-                                         { te::TimePosition::fromSeconds (fileTime (drawn.getX())),
-                                           te::TimePosition::fromSeconds (fileTime (drawn.getRight())) },
-                                         audio.getGain());
+            if (drawn.getWidth() <= 0)
+                return;
+
+            // Backwards, the file is drawn from its later time to its earlier, mirrored into place.
+            const auto from = fileTime (backwards ? drawn.getRight() : drawn.getX());
+            const auto to = fileTime (backwards ? drawn.getX() : drawn.getRight());
+            const juce::Graphics::ScopedSaveState saved (g);
+
+            if (backwards)
+                g.addTransform (juce::AffineTransform::scale (-1.0f, 1.0f, drawn.toFloat().getCentreX(), 0.0f));
+
+            thumbnail->drawChannels (g, drawn, { te::TimePosition::fromSeconds (from), te::TimePosition::fromSeconds (to) },
+                                     audio.getGain());
         }
 
-        // The file the clip's audio comes from, which changes when it is reversed. Not the proxy it plays while stretched or
-        // pitched, which holds only what the clip plays, and only once it is ready: the waveform shows it unstretched, as
-        // Ableton Live shows a sample, and all of it.
+        // The file the clip's audio comes from. Not the render it plays while stretched, pitched or reversed, which may not
+        // be ready yet: the waveform shows the file unstretched, as Ableton Live shows a sample, and all of it.
         void showFileOf (te::AudioClipBase& audio)
         {
-            const auto file = audio.getAudioFile();
+            const auto file = te::AudioFile (audio.edit.engine, getClipFile (audio));
 
             if (thumbnail != nullptr && file.getFile() == shownFile)
                 return;

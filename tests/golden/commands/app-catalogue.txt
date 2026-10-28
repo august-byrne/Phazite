@@ -71,6 +71,8 @@ section.loop
 transport.loopSong
 transport.metronome | O
 transport.countIn
+transport.samplesFollowTempo
+transport.patternsFollowTempo
 transport.record | R
 transport.overdub
 transport.quantizeRecordings

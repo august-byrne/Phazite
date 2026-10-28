@@ -13,7 +13,8 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     : commands (bridge),
       computerKeyboard (keyboard),
       projectContext (context),
-      tempoField ("Tempo", minTempo, maxTempo, 1.0, 120.0)
+      tempoField ("Tempo", minTempo, maxTempo, 1.0, 120.0),
+      tempoStretch (bridge, context)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Transport");
@@ -50,10 +51,19 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     tempoField.textFromValueFunction = [] (double bpm) { return formatTempo (bpm); };
     tempoField.valueFromTextFunction = [this] (const juce::String& text) { return parseTempo (text).value_or (tempoField.getValue()); };
     tempoField.updateText();
-    tempoField.onDragStart = [this] { tempo.beginGesture(); };
+    tempoField.onDragStart = [this]
+    {
+        tempo.beginGesture();
+        showTempoStretch();
+    };
     tempoField.onDragEnd = [this] { tempo.endGesture(); };
-    tempoField.onValueChange = [this] { tempo.setValue (tempoField.getValue()); };
-    tempoField.setTooltip ("Tempo, in beats per minute: drag it up or down, scroll, or click it and type");
+    tempoField.onValueChange = [this]
+    {
+        tempo.setValue (tempoField.getValue());
+        showTempoStretch();
+    };
+    tempoField.setTooltip ("Tempo, in beats per minute: drag it up or down, scroll, or click it and type. As it changes, it shows "
+                           "what it stretches");
 
     timeSignatureButton.setTitle ("Time signature");
     timeSignatureButton.setTooltip ("Time signature: the beats in a bar, and the note that counts as a beat. Click for others");
@@ -160,6 +170,39 @@ void TopBar::updateTempo()
         tempoField.setValue (tempo.getValue(), juce::dontSendNotification);
 
     timeSignatureButton.setButtonText (formatTimeSignature (timeSignature->numerator, timeSignature->denominator));
+
+    // What the tempo stretches goes once the tempo has stayed as it is a while, and isn't being typed or pointed at.
+    if (tempoStretch.isVisible())
+    {
+        if (tempo.isInGesture() || typing || tempoStretch.isMouseOverOrDragging (true) || tempoField.isMouseOverOrDragging (true))
+            tempoStretchShownAt = juce::Time::getMillisecondCounter();
+        else if (juce::Time::getMillisecondCounter() - tempoStretchShownAt > (juce::uint32) Shell::tempoStretchSeconds * 1000)
+            tempoStretch.setVisible (false);
+        else
+            tempoStretch.update();
+    }
+}
+
+void TopBar::showTempoStretch()
+{
+    // Over whatever is under the top bar, as wide as it needs, in the window.
+    auto* window = getTopLevelComponent();
+    const auto stretch = getTempoStretch (projectContext);
+
+    if (window == nullptr || window == this || stretch.samples + stretch.patterns == 0)
+        return;
+
+    if (tempoStretch.getParentComponent() != window)
+        window->addChildComponent (tempoStretch);
+
+    const auto field = window->getLocalArea (&tempoField, tempoField.getLocalBounds());
+    const auto width = std::min (Shell::tempoStretchWidth, window->getWidth());
+    tempoStretch.setBounds (juce::jlimit (0, window->getWidth() - width, field.getX()), field.getBottom() + Space::xs, width,
+                            tempoStretch.getIdealHeight());
+    tempoStretch.update();
+    tempoStretch.setVisible (true);
+    tempoStretch.toFront (false);
+    tempoStretchShownAt = juce::Time::getMillisecondCounter();
 }
 
 void TopBar::showRecordMenu()
