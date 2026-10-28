@@ -13,6 +13,7 @@
 #include "model/project/ProjectContext.h"
 #include "ui/timeline/TimelineEditor.h"
 
+#include <map>
 #include <optional>
 #include <unordered_set>
 
@@ -110,6 +111,20 @@ private:
     std::unique_ptr<TransformBar> transformBar;
     TrackID auditionTrack; // the track a note is being auditioned on
 
+    // What the note grid and the velocity lane draw: the clips' notes, their colours and which are selected, read again
+    // once the song (ProjectContext::getSongVersion()), the clips shown or the selection changed, rather than at each
+    // paint, as the playhead repaints a strip of the grid at each frame while playing (docs/performance-audit.md, U5 and
+    // section 8). Only for painting: the tools read the song as it is (getAllNotes()).
+    struct DrawnNotes
+    {
+        std::vector<NoteData> notes;
+        std::map<ClipID, juce::Colour> colours;
+        std::unordered_set<NoteRef> selected;
+    };
+
+    mutable std::optional<DrawnNotes> drawnNotes;
+    mutable int drawnSongVersion = 0;
+
     //==============================================================================
     void projectChanged() override; // another project, or none
     void songChanged (const SongChanges&) override;
@@ -119,6 +134,7 @@ private:
     void clipsChanged(); // the notes or the clips moved: repaint, and update the drum rows
     std::vector<NoteClip> getShownClips() const;
     std::vector<NoteData> getAllNotes() const;
+    const DrawnNotes& getDrawnNotes() const;                 // as they are now, for painting
     std::unordered_set<NoteRef> getSelectedNoteRefs() const; // the selected notes, if they are these clips'
     std::vector<NoteData> getSelectedNotesHere() const;
     std::vector<NoteRef> getSelectedRefsHere() const;

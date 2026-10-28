@@ -785,6 +785,7 @@ DevicesView::DevicesView (CommandBridge& bridge, ProjectContext& projectContext)
       context (projectContext),
       modulators (projectContext)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Devices");
     nameLabel.setFont (juce::FontOptions (TextSize::title, juce::Font::bold));
     kindLabel.setFont (juce::FontOptions (TextSize::small));

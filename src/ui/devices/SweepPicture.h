@@ -7,9 +7,9 @@
 #pragma once
 
 #include "DeviceGraph.h"
-#include "DeviceTicker.h"
 #include "devices/core/DeviceInfo.h"
 #include "model/devices/DeviceHandle.h"
+#include "ui/components/DisplayTicker.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -18,7 +18,7 @@
 namespace phazite::ui
 {
 class SweepPicture : public juce::Component,
-                     private DeviceTicker::Display
+                     private DisplayTicker::Display
 {
 public:
     SweepPicture (const DeviceHandle&, const devices::DeviceInfo&, int stripHeight = 0);
@@ -59,6 +59,7 @@ private:
     const int shapeIndex, stereoIndex, syncIndex, divisionIndex, rateIndex;
     float phase = 0.0f;
     graph::SpectrumTrace input, output;
+    DrawnNumbers drawn;
 
     void paintLfo (juce::Graphics&, const Palette&, juce::Colour tint) const;
     juce::String getRateText() const;

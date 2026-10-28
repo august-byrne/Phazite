@@ -61,6 +61,10 @@ public:
     // Paints the window into an image, as the screen would.
     juce::Image paintEverything();
 
+    // What the window was asked to repaint since the last call (or since it opened), in its own coordinates: where
+    // components called repaint(), or moved.
+    juce::RectangleList<int> takeRepaintedArea();
+
     void resized() override; // the content fills the window
     juce::ComponentPeer* createNewPeer (int styleFlags, void* nativeWindowToAttachTo) override;
 };

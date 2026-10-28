@@ -38,7 +38,7 @@ private:
 };
 
 class LimiterEditor : public DeviceEditorBase,
-                      private DeviceTicker::Display
+                      private DisplayTicker::Display
 {
 public:
     explicit LimiterEditor (const DeviceHandle&);

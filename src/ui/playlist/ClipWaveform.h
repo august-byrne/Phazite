@@ -19,6 +19,9 @@ class ProjectContext;
 
 namespace phazite::ui
 {
+// It keeps the levels it drew last, for one area and stretch of the file, and draws of them only what the Graphics
+// context's clip region asks for: give it the same area while the view stays the same (the part of the clip in view, not
+// the part being painted), and a strip that repaints, such as under the playhead, reads nothing again.
 class ClipWaveform
 {
 public:

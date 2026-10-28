@@ -4,6 +4,7 @@
 // keys change the value) and tell screen readers their name and value.
 #pragma once
 
+#include "DisplayTicker.h"
 #include "model/base/IDs.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/mixer/LevelSource.h"
@@ -202,10 +203,11 @@ private:
 
 //==============================================================================
 // A level meter: each channel's peak level from -60 to +6 dB, the highest peak of the last second as
-// a line, and red above 0 dB, where the sound clips. It reads its source (model/mixer/LevelSource.h) 30 times a
-// second on the message thread, never on the audio thread, and repaints only when the levels change.
+// a line, and red above 0 dB, where the sound clips. It reads its source (model/mixer/LevelSource.h) at each tick of the
+// displays' ticker (DisplayTicker.h), on the message thread, never on the audio thread, and repaints only when what it
+// draws moves: a silent meter repaints nothing.
 class LevelMeter : public juce::Component,
-                   private juce::Timer
+                   private DisplayTicker::Display
 {
 public:
     explicit LevelMeter (const juce::String& title);
@@ -222,11 +224,12 @@ private:
     static constexpr float minDb = -60.0f, maxDb = 6.0f;
 
     LevelSource source;
-    std::array<float, numChannels> levels, peaks;
+    std::array<float, numChannels> levels, peaks;           // as they fall
+    std::array<float, numChannels> shownLevels, shownPeaks; // as drawn
     std::array<juce::uint32, numChannels> peakTimes {};
 
     juce::String getLevelText() const; // what screen readers read
-    void timerCallback() override;
+    void tick() override;
 };
 
 //==============================================================================

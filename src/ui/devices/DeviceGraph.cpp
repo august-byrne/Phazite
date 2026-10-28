@@ -160,9 +160,9 @@ void SpectrumTrace::pull (devices::SampleTap& tap)
         spectrum.add (lefts.data(), n);
 }
 
-void SpectrumTrace::update()
+bool SpectrumTrace::update()
 {
-    spectrum.update (1.5f);
+    return spectrum.update (1.5f);
 }
 
 float SpectrumTrace::getLevelAt (double frequency) const
@@ -202,6 +202,12 @@ void LevelHistory::push (float value)
 float LevelHistory::get (int index) const noexcept
 {
     return values[(size_t) ((next + index) % (int) values.size())];
+}
+
+void LevelHistory::appendTo (std::vector<float>& numbers) const
+{
+    numbers.insert (numbers.end(), values.begin() + next, values.end());
+    numbers.insert (numbers.end(), values.begin(), values.begin() + next);
 }
 
 juce::Path LevelHistory::makeLine (juce::Rectangle<float> area, const std::function<float (float)>& yFor) const

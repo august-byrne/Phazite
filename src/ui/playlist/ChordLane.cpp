@@ -58,6 +58,7 @@ ChordLane::ChordLane (TimelineEditor& e)
     : editor (e),
       context (e.getContext())
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Chords");
     setDescription (emptyHint);
 }
@@ -372,6 +373,7 @@ ChordLaneHeader::ChordLaneHeader (TimelineEditor& e)
     : editor (e),
       context (e.getContext())
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Chord lane");
     nameLabel.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
     addAndMakeVisible (nameLabel);

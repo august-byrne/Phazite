@@ -24,6 +24,7 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
       velocityLane (std::make_unique<VelocityLane> (*this)),
       transformBar (std::make_unique<TransformBar> (*this))
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Piano roll");
 
     // The notes being edited stay in view while the song plays (the owner's choice, 2026-10-16); View > Follow
@@ -221,6 +222,8 @@ ClipID PianoRoll::makeClipForNewNotes()
 
 void PianoRoll::clipsChanged()
 {
+    drawnNotes.reset();
+
     if (const auto track = getTrack(); drumMode && track.isValid())
         drumRows = getDrumRows (getSamplerSounds (context, track), getNoteNumbersPlayed (context, clips), getDrumRowOrder (context, track),
                                 getHiddenDrumRows (context, track));
@@ -236,6 +239,19 @@ void PianoRoll::clipsChanged()
 std::vector<NoteData> PianoRoll::getAllNotes() const
 {
     return getNotes (context, clips);
+}
+
+const PianoRoll::DrawnNotes& PianoRoll::getDrawnNotes() const
+{
+    if (! drawnNotes.has_value() || drawnSongVersion != context.getSongVersion())
+    {
+        auto notes = getAllNotes();
+        auto colours = getNoteColours (context, notes);
+        drawnNotes = DrawnNotes { std::move (notes), std::move (colours), getSelectedNoteRefs() };
+        drawnSongVersion = context.getSongVersion();
+    }
+
+    return *drawnNotes;
 }
 
 std::unordered_set<NoteRef> PianoRoll::getSelectedNoteRefs() const
@@ -270,6 +286,7 @@ std::vector<NoteRef> PianoRoll::getSelectedRefsHere() const
 void PianoRoll::selectNotes (const std::vector<NoteRef>& notes, bool addToSelection)
 {
     selection.selectNotes (notes, addToSelection);
+    drawnNotes.reset();
     grid->repaint();
     velocityLane->repaint();
 }
@@ -529,6 +546,7 @@ void PianoRoll::changeListenerCallback (juce::ChangeBroadcaster*)
             showTrack (track);
     }
 
+    drawnNotes.reset();
     grid->repaint();
     velocityLane->repaint();
 }

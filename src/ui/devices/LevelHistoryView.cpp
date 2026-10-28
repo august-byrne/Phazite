@@ -28,7 +28,15 @@ void LevelHistoryView::push (float input, float output, float reduction)
     inputs.push (input);
     outputs.push (output);
     reductions.push (reduction);
-    repaint();
+
+    // Only what moves the picture repaints: a history of silence doesn't, scrolled on (docs/performance-audit.md, section 8).
+    std::vector<float> numbers { line != nullptr ? line->getValue() : 0.0f };
+    inputs.appendTo (numbers);
+    outputs.appendTo (numbers);
+    reductions.appendTo (numbers);
+
+    if (drawn.changed (std::move (numbers)))
+        repaint();
 }
 
 void LevelHistoryView::setLine (ParameterHandle* handle, const juce::String& name)

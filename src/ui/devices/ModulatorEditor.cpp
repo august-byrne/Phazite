@@ -30,11 +30,18 @@ struct ModulatorEditor::Scope : public juce::Component
         setInterceptsMouseClicks (false, false);
     }
 
+    // Repainted when what it shows moved: a modulator at rest moves nothing (docs/performance-audit.md, section 8).
     void refresh()
     {
-        values = getModulatorOutput (context, modulator, scopeSeconds);
-        bipolar = isBipolar (context, modulator);
-        repaint();
+        auto now = getModulatorOutput (context, modulator, scopeSeconds);
+        const auto nowBipolar = isBipolar (context, modulator);
+
+        if (now != values || nowBipolar != bipolar)
+        {
+            values = std::move (now);
+            bipolar = nowBipolar;
+            repaint();
+        }
     }
 
     void paint (juce::Graphics& g) override
@@ -161,6 +168,7 @@ ModulatorEditor::ModulatorEditor (ProjectContext& projectContext, ModulatorID id
     : context (projectContext),
       modulator (id)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     const auto info = phazite::getModulator (context, modulator);
     const auto name = info.has_value() ? info->name : juce::String ("Modulator");
     setTitle (name);

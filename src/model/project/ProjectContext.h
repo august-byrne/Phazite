@@ -62,6 +62,11 @@ public:
     // project changed can tell the same one again from another.
     int getProjectNumber() const noexcept;
 
+    // A number that changes at once with each change to the song that songChanged() will tell of (that comes once a turn
+    // of the message loop), and with each project opened: for a view that keeps what it read from the song between
+    // paints, and reads it again when this differs.
+    int getSongVersion() const noexcept;
+
     // The open project's undo manager, for the commands that change it (Command::undoTarget): none while no project is
     // open.
     juce::UndoManager* getUndoManager() const noexcept;

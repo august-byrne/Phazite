@@ -23,11 +23,11 @@ namespace
 
 //==============================================================================
 class MultibandEditor::Display : public juce::Component,
-                                 private DeviceTicker::Display
+                                 private DisplayTicker::Display
 {
 public:
     explicit Display (const DeviceHandle& d)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           device (d)
     {
         setTitle ("Bands");
@@ -185,8 +185,11 @@ private:
     std::array<std::unique_ptr<Knob>, Multiband::numBands> gainKnobs;
     std::array<std::unique_ptr<ParameterAttachment>, Multiband::numBands> gainAttachments;
     std::array<ParameterHandle, 2> crossovers;
+    static constexpr float silentLevel = -120.0f;
+
     graph::SpectrumTrace spectrum;
-    std::array<float, Multiband::numBands> shownLevels { -120.0f, -120.0f, -120.0f }, shownChanges {};
+    std::array<float, Multiband::numBands> shownLevels { silentLevel, silentLevel, silentLevel }, shownChanges {};
+    DrawnNumbers drawn;
     ParameterHandle* dragged = nullptr;
     float startValue = 0.0f;
     graph::WheelGesture wheelGesture; // after the handles it turns
@@ -220,6 +223,8 @@ private:
         for (auto& attachment : gainAttachments)
             attachment->update();
 
+        auto spectrumMoved = false;
+
         if (auto* scope = device.getScope())
         {
             scope->setListening (true);
@@ -227,17 +232,17 @@ private:
             if (auto* output = scope->getOutput())
                 spectrum.pull (*output);
 
-            spectrum.update();
+            spectrumMoved = spectrum.update();
         }
 
-        // Each band's level and how far it is pushed: up at once, falling back smoothly.
+        // Each band's level and how far it is pushed: up at once, falling back smoothly, down to silence.
         if (auto* multiband = device.getProcessor<Multiband>())
         {
             for (size_t band = 0; band < Multiband::numBands; ++band)
             {
                 const auto level = multiband->getBandLevel ((int) band).take();
                 const auto cut = multiband->getBandCut ((int) band).take(), lift = multiband->getBandLift ((int) band).take();
-                shownLevels[band] = std::max (level, shownLevels[band] - levelFall);
+                shownLevels[band] = std::max ({ level, shownLevels[band] - levelFall, silentLevel });
 
                 const auto change = lift > cut ? lift : -cut;
                 shownChanges[band] = std::abs (change) >= std::abs (shownChanges[band]) - levelFall
@@ -246,7 +251,17 @@ private:
             }
         }
 
-        repaint();
+        std::vector<float> numbers (shownLevels.begin(), shownLevels.end());
+        numbers.insert (numbers.end(), shownChanges.begin(), shownChanges.end());
+
+        for (const auto& gain : gains)
+            numbers.push_back (gain.getValue());
+
+        for (const auto& crossover : crossovers)
+            numbers.push_back (crossover.getValue());
+
+        if (drawn.changed (std::move (numbers)) || spectrumMoved)
+            repaint();
     }
 
     void paintSpectrum (juce::Graphics& g, const Palette& p, juce::Colour tint)

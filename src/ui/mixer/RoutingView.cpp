@@ -42,6 +42,7 @@ namespace
 RoutingView::RoutingView (ProjectContext& c)
     : context (c)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Routing");
     setDescription (hint);
     context.getSongSelection().addChangeListener (this);

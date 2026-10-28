@@ -109,6 +109,8 @@ public:
             for (auto& attachment : *attachments)
                 attachment->update();
 
+        auto spectrumMoved = false;
+
         if (auto* scope = device.getScope())
         {
             scope->setListening (true);
@@ -116,19 +118,31 @@ public:
             if (auto* output = scope->getOutput())
                 spectrum.pull (*output);
 
-            spectrum.update();
+            spectrumMoved = spectrum.update();
         }
 
+        // Each band's level falls back down to silence, and how far it is turned down to none.
         if (auto* maximizer = device.getProcessor<Maximizer>())
         {
             for (size_t band = 0; band < Maximizer::numBands; ++band)
             {
-                shownLevels[band] = std::max (maximizer->getBandLevel ((int) band).take(), shownLevels[band] - levelFall);
+                shownLevels[band] = std::max ({ maximizer->getBandLevel ((int) band).take(), shownLevels[band] - levelFall, silentLevel });
                 shownReductions[band] = std::max (maximizer->getBandReduction ((int) band).take(), shownReductions[band] - levelFall);
             }
         }
 
-        repaint();
+        std::vector<float> numbers (shownLevels.begin(), shownLevels.end());
+        numbers.insert (numbers.end(), shownReductions.begin(), shownReductions.end());
+
+        for (const auto* handles : { &squeezes, &levels })
+            for (const auto& handle : *handles)
+                numbers.push_back (handle.getValue());
+
+        for (const auto& crossover : crossovers)
+            numbers.push_back (crossover.getValue());
+
+        if (drawn.changed (std::move (numbers)) || spectrumMoved)
+            repaint();
     }
 
     void paint (juce::Graphics& g) override
@@ -207,8 +221,11 @@ private:
     std::array<ParameterHandle, 2> crossovers;
     std::array<std::unique_ptr<Knob>, Maximizer::numBands> squeezeKnobs, levelKnobs;
     std::array<std::unique_ptr<ParameterAttachment>, Maximizer::numBands> squeezeAttachments, levelAttachments;
+    static constexpr float silentLevel = -120.0f;
+
     graph::SpectrumTrace spectrum;
-    std::array<float, Maximizer::numBands> shownLevels { -120.0f, -120.0f, -120.0f }, shownReductions {};
+    std::array<float, Maximizer::numBands> shownLevels { silentLevel, silentLevel, silentLevel }, shownReductions {};
+    DrawnNumbers drawn;
     ParameterHandle* dragged = nullptr;
     float startValue = 0.0f;
     graph::WheelGesture wheelGesture; // after the handles it turns
@@ -309,7 +326,7 @@ private:
 //==============================================================================
 MaximizerEditor::MaximizerEditor (const DeviceHandle& handle)
     : DeviceEditorBase (handle),
-      DeviceTicker::Display (static_cast<juce::Component&> (*this))
+      DisplayTicker::Display (static_cast<juce::Component&> (*this))
 {
     auto& shownBands = keep (std::make_unique<Bands> (device));
     bands = &shownBands;

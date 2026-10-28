@@ -6,6 +6,7 @@ namespace phazite::ui
 {
 HintBar::HintBar()
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Hint bar");
     startTimerHz (10);
 }

@@ -30,6 +30,7 @@ SectionsStrip::SectionsStrip (TimelineEditor& e)
       selection (context.getSongSelection()),
       range (context.getSongRange())
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Sections");
     setDescription (emptyHint);
     selection.addChangeListener (this);

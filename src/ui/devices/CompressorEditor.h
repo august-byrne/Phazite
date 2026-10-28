@@ -16,7 +16,7 @@
 namespace phazite::ui
 {
 class CompressorEditor : public DeviceEditorBase,
-                         private DeviceTicker::Display
+                         private DisplayTicker::Display
 {
 public:
     explicit CompressorEditor (const DeviceHandle&);
@@ -45,6 +45,7 @@ private:
     std::vector<ParameterHandle> parameters; // every parameter, in the compressor's order, for the curve
     std::vector<float> values;
     float shownLevel, shownReduction = 0.0f;
+    DrawnNumbers drawnGraph; // what its curve and meter show
 
     Activity* activity = nullptr;
     KeyPart* keyPart = nullptr;

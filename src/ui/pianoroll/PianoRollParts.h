@@ -62,10 +62,26 @@ struct PianoRoll::NoteGrid : public juce::Component
     std::unique_ptr<Gesture> gesture; // from mouse down to mouse up
     juce::Rectangle<int> rubberBand;  // the Select and Zoom tools' rectangle
 
+    // The other tracks' notes in view, with their colours, as they were painted last: read again once the song, the view,
+    // the clips shown or the ghosts' switch changed (PianoRoll::DrawnNotes says why).
+    struct DrawnGhosts
+    {
+        std::vector<NoteData> notes;
+        std::map<ClipID, juce::Colour> colours;
+        int songVersion = 0;
+        BeatRange range;
+        std::vector<ClipID> clips;
+        TrackID track; // shown without clips
+        bool shown = true;
+    };
+
+    std::optional<DrawnGhosts> drawnGhosts;
+
     std::optional<NoteData> getNoteAt (juce::Point<float>) const;
     Zone getZone (const NoteData&, juce::Point<float>) const;
     ClipID getGhostClipAt (juce::Point<float>) const;
-    std::vector<NoteData> getGhostNotes() const; // other tracks' notes in view
+    std::vector<NoteData> getGhostNotes() const; // other tracks' notes in view, as they are now
+    const DrawnGhosts& getDrawnGhosts();         // as they are now, for painting
 
     void paintRows (juce::Graphics&, juce::Rectangle<int> area);
     void paintChordTones (juce::Graphics&, juce::Rectangle<int> area); // the chord lane's chords' notes, in their rows

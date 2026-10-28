@@ -361,10 +361,11 @@ private:
 
 //==============================================================================
 EqEditor::EqEditor (const DeviceHandle& handle)
-    : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       device (handle),
       pulled (8192)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     for (const auto& parameter : Eq::info.parameters)
     {
         parameters.push_back (device.getParameter (parameter.id));
@@ -478,16 +479,23 @@ void EqEditor::refresh()
 
     onAttachment.update();
     typeAttachment.update();
-    slopeAttachment.update();
     frequencyAttachment.update();
-    gainAttachment.update();
     qAttachment.update();
     outputAttachment.update();
 
-    // A cut's slope matters, and a shelf's or bell's gain.
+    // A cut's slope matters, and a shelf's or bell's gain; the other's control is off, switched off once rather than on by its
+    // attachment and off again at each tick, which repainted it each time.
     const auto type = juce::roundToInt (values[(size_t) indexOf (selectedBand, Eq::type)]);
-    slopeBox.setEnabled (slopeBox.isEnabled() && isCut (type));
-    gainKnob.setEnabled (gainKnob.isEnabled() && hasGain (type));
+
+    if (isCut (type))
+        slopeAttachment.update();
+    else
+        slopeBox.setEnabled (false);
+
+    if (hasGain (type))
+        gainAttachment.update();
+    else
+        gainKnob.setEnabled (false);
 
     for (int band = 0; band < Eq::numBands; ++band)
         bandButtons[band]->setAlpha (values[(size_t) indexOf (band, Eq::on)] > 0.5f ? 1.0f : GraphTint::partOff);
@@ -499,6 +507,8 @@ void EqEditor::refresh()
         labels[i + numKnobs]->setText (knobs[i]->isEnabled() ? knobs[i]->getTextFromValue (knobs[i]->getValue()) : juce::String(),
                                        juce::dontSendNotification);
 
+    auto spectraMoved = false;
+
     if (auto* eq = device.getProcessor<Eq>())
     {
         auto& tap = eq->getOutputTap();
@@ -508,7 +518,7 @@ void EqEditor::refresh()
         for (int n; (n = tap.pull (pulled.data(), (int) pulled.size())) > 0;)
             spectrum.add (pulled.data(), n);
 
-        spectrum.update (analyzerFall);
+        spectraMoved = spectrum.update (analyzerFall);
     }
 
     // And, fainter behind it, what comes in.
@@ -520,10 +530,15 @@ void EqEditor::refresh()
         if (auto* tap = scope->getInput())
             input.pull (*tap);
 
-        input.update();
+        spectraMoved = input.update() || spectraMoved;
     }
 
-    graph->repaint();
+    // The curve and its dots over the spectra, repainted when any of them moves.
+    auto numbers = values;
+    numbers.insert (numbers.end(), { (float) selectedBand, (float) getSampleRate() });
+
+    if (drawnGraph.changed (std::move (numbers)) || spectraMoved)
+        graph->repaint();
 }
 
 void EqEditor::paint (juce::Graphics& g)

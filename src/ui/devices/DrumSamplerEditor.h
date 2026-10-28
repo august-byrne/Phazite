@@ -8,9 +8,9 @@
 #pragma once
 
 #include "DeviceEditors.h"
-#include "DeviceTicker.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
+#include "ui/components/DisplayTicker.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -21,7 +21,7 @@ namespace phazite::ui
 {
 class DrumSamplerEditor : public juce::Component,
                           public FlexibleHeight,
-                          private DeviceTicker::Display
+                          private DisplayTicker::Display
 {
 public:
     explicit DrumSamplerEditor (const DeviceHandle&);

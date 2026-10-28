@@ -13,9 +13,9 @@ namespace
 {
     using devices::Delay;
 
-    constexpr int numEchoes = 8;                                   // the echoes shown after the sound coming in
-    constexpr float litFall = 0.85f;                               // of a hit's light, kept per refresh
-    constexpr int historyTicks = 4 * DeviceTicker::ticksPerSecond; // what came in, for the echoes' light
+    constexpr int numEchoes = 8;                                    // the echoes shown after the sound coming in
+    constexpr float litFall = 0.85f;                                // of a hit's light, kept per refresh
+    constexpr int historyTicks = 4 * DisplayTicker::ticksPerSecond; // what came in, for the echoes' light
 
     const devices::ParameterInfo& getInfo (int index)
     {
@@ -33,11 +33,11 @@ namespace
 
 //==============================================================================
 class DelayEditor::Echoes : public juce::Component,
-                            private DeviceTicker::Display
+                            private DisplayTicker::Display
 {
 public:
     explicit Echoes (const DeviceHandle& d)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           device (d),
           history (historyTicks, 0.0f)
     {
@@ -165,6 +165,7 @@ private:
     std::unique_ptr<ParameterAttachment> lowCutAttachment, highCutAttachment;
     graph::LevelHistory history; // what came in, a peak a tick, as a gain
     float lit = 0.0f;            // the light of what is coming in now
+    DrawnNumbers drawn;
     bool draggingBand = false;
     int draggedCut = Delay::lowCut;
 
@@ -241,9 +242,16 @@ private:
             const auto peak = juce::Decibels::decibelsToGain (scope->getInputPeak().take(), devices::DeviceScope::silentDecibels);
             history.push (peak);
             lit = std::max (std::min (1.0f, peak * 2.0f), lit * litFall);
+            lit = lit < 1.0e-3f ? 0.0f : lit; // out, rather than ever fainter
         }
 
-        repaint();
+        // The echoes, lit by what came in, at the delay's settings and the song's tempo.
+        auto numbers = getValues();
+        numbers.insert (numbers.end(), { (float) getTempo(), lit });
+        history.appendTo (numbers);
+
+        if (drawn.changed (std::move (numbers)))
+            repaint();
     }
 
     // How bright echo n is now: what came in its time ago, taken down by the feedback.
@@ -252,7 +260,7 @@ private:
         if (n == 0)
             return lit;
 
-        const auto ticksAgo = juce::roundToInt (getSeconds() * n * DeviceTicker::ticksPerSecond);
+        const auto ticksAgo = juce::roundToInt (getSeconds() * n * DisplayTicker::ticksPerSecond);
 
         if (ticksAgo >= history.size())
             return 0.0f;

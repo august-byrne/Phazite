@@ -206,6 +206,7 @@ TitleBar::TitleBar (CommandBridge& bridge)
       editorSwitch (std::make_unique<PanelSwitch> (bridge, Panel::editor)),
       inspectorSwitch (std::make_unique<PanelSwitch> (bridge, Panel::inspector))
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Title bar");
 
     projectName.setFont (juce::FontOptions (TextSize::body));

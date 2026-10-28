@@ -8,6 +8,7 @@ namespace phazite::ui
 DeviceEditorBase::DeviceEditorBase (const DeviceHandle& d)
     : device (d)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     if (const auto* info = device.getInfo())
         setTitle (juce::String (info->name.data(), info->name.size()));
 

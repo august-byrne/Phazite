@@ -84,6 +84,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge)
       audioItem (std::make_unique<Item> ("Audio output")),
       cpuItem (std::make_unique<Item> ("CPU"))
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Status bar");
     saveItem->onClick = [this] { commands.invoke ("project.save"); };
     audioItem->onClick = [this] { commands.invoke ("options.audioSettings"); };

@@ -2,12 +2,12 @@
 // Displays that Phazite's synths share (docs/design.md, section 9): an envelope's shape, with how far the newest note has
 // got; an LFO's wave, with where it is in its cycle; and a filter's response, which moves with the note as its envelope and
 // LFO open and close it, with a dot at the cutoff (as high as the resonance) to drag. Their editors give them their
-// parameters' handles and what the synth plays (functions read once a refresh); each refreshes from the DeviceTicker.
+// parameters' handles and what the synth plays (functions read once a refresh); each refreshes from the DisplayTicker.
 #pragma once
 
 #include "DeviceGraph.h"
-#include "DeviceTicker.h"
 #include "model/devices/ParameterHandle.h"
+#include "ui/components/DisplayTicker.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -18,7 +18,7 @@ namespace phazite::ui
 {
 // An envelope's attack, decay, sustain and release, and a line at the level of the newest note's.
 class EnvelopeView : public juce::Component,
-                     private DeviceTicker::Display
+                     private DisplayTicker::Display
 {
 public:
     // Times in milliseconds, the sustain from 0 to 1; level: the newest note's envelope now, from 0 to 1.
@@ -32,13 +32,14 @@ private:
     ParameterHandle attack, decay, sustain, release;
     std::function<float()> level;
     float shownLevel = 0.0f;
+    DrawnNumbers drawn;
 
     void tick() override;
 };
 
 // An LFO's wave, one cycle, and a dot where it is now.
 class LfoView : public juce::Component,
-                private DeviceTicker::Display
+                private DisplayTicker::Display
 {
 public:
     // shapeAt: the wave at a phase from 0 to 1, from -1 to 1; phase: where it is now, from 0 to 1 (below 0 for nowhere).
@@ -47,9 +48,12 @@ public:
     void paint (juce::Graphics&) override;
 
 private:
+    static constexpr int drawnWavePoints = 64; // where a tick reads the wave, to see whether it changed
+
     std::function<float (float)> shapeAt;
     std::function<float()> phase;
     float shownPhase = -1.0f;
+    DrawnNumbers drawn;
 
     void tick() override;
 };
@@ -61,7 +65,7 @@ float getDrawnLfoValue (int shape, float phase);
 // A filter's response: at its cutoff as set, and, fainter, where the newest note plays it now; a dot at the cutoff, as high
 // as the resonance, which a drag moves (both, as one undo step).
 class FilterView : public juce::Component,
-                   private DeviceTicker::Display
+                   private DisplayTicker::Display
 {
 public:
     // readValues: the synth's parameters' values, read once for each drawing; magnitude: the response for them, as a gain, with
@@ -83,6 +87,7 @@ private:
     Response magnitude;
     std::function<float()> playing;
     float shownPlaying = 0.0f;
+    DrawnNumbers drawn;
 
     graph::FrequencyAxis getFrequencies() const;
     void dragTo (juce::Point<float>);

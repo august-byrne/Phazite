@@ -424,6 +424,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
       tree (std::make_unique<Tree> (*this)),
       searchRoot (std::make_unique<RootNode> (*this))
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Browser");
 
     searchField.setTitle ("Search sounds, instruments and effects");

@@ -25,11 +25,11 @@ namespace
 } // namespace
 
 class VocoderEditor::Bands : public juce::Component,
-                             private DeviceTicker::Display
+                             private DisplayTicker::Display
 {
 public:
     explicit Bands (const DeviceHandle& d)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           device (d),
           formant (device.getParameter ("formant"))
     {
@@ -184,6 +184,7 @@ private:
     std::vector<float> values;
     std::array<float, Vocoder::maxBands> shown {};
     float consonant = 0.0f, carrierLevel = 0.0f;
+    DrawnNumbers drawn;
     float startFormant = 0.0f;
     double startHertz = 1000.0;
 
@@ -214,15 +215,27 @@ private:
 
         if (auto* vocoder = device.getProcessor<Vocoder>())
         {
-            // Each column rises at once and falls smoothly.
-            for (int band = 0; band < Vocoder::maxBands; ++band)
-                shown[(size_t) band] = std::max (vocoder->getBandLevel (band).get(), shown[(size_t) band] * lightFall);
+            // Each column rises at once and falls smoothly, until it is out.
+            const auto fall = [] (float now, float before)
+            {
+                const auto level = std::max (now, before * lightFall);
+                return level < 1.0e-4f ? 0.0f : level;
+            };
 
-            consonant = std::max (vocoder->getConsonant().get(), consonant * lightFall);
-            carrierLevel = std::max (vocoder->getCarrierLevel().get(), carrierLevel * lightFall);
+            for (int band = 0; band < Vocoder::maxBands; ++band)
+                shown[(size_t) band] = fall (vocoder->getBandLevel (band).get(), shown[(size_t) band]);
+
+            consonant = fall (vocoder->getConsonant().get(), consonant);
+            carrierLevel = fall (vocoder->getCarrierLevel().get(), carrierLevel);
         }
 
-        repaint();
+        auto numbers = values;
+        numbers.insert (numbers.end(), shown.begin(), shown.end());
+        numbers.insert (numbers.end(), { consonant, carrierLevel, (float) getSampleRate(), (float) getCarrierText().hashCode(),
+                                         needsTrack() ? 1.0f : 0.0f });
+
+        if (drawn.changed (std::move (numbers)))
+            repaint();
     }
 };
 

@@ -57,43 +57,44 @@ namespace
             return edit != nullptr ? te::findClipForID (*edit, toTracktion (clipID)) : nullptr;
         }
 
-        // Draws the file over the part of an area that is being painted and that the file has audio for, given the song beat
-        // at each x.
+        // Draws the file over the part of an area that it has audio for, given the song beat at each x: over all of the area,
+        // not only the part being painted. The thumbnail keeps the levels it drew last, for one width and time range, and
+        // draws only what is being painted of them, so a strip that repaints under the playhead reads nothing again, while
+        // an area as wide as the part being painted would read them all at each paint (docs/performance-audit.md, section 8).
         void draw (te::AudioClipBase& audio, juce::Graphics& g, juce::Rectangle<int> area,
                    const std::function<te::BeatPosition (int)>& beatAt)
         {
-            auto visible = area.getIntersection (g.getClipBounds());
-
-            if (visible.isEmpty())
+            if (! area.intersects (g.getClipBounds()))
                 return;
 
             showFileOf (audio);
 
             // The time in the file at an x, as the clip plays it: stretched to the song's tempo, say.
             const auto fileTime = [&] (int x) { return getFileTimeAt (audio, beatAt (x)); };
+            auto drawn = area;
 
             // Only where the file has audio, once the thumbnail knows how long it is.
             if (const auto length = thumbnail->getTotalLength(); length > 0.0)
             {
-                const auto left = fileTime (visible.getX()), right = fileTime (visible.getRight());
+                const auto left = fileTime (drawn.getX()), right = fileTime (drawn.getRight());
 
                 if (right <= 0.0 || left >= length || right <= left)
                     return;
 
                 const auto xAt = [&] (double time)
-                { return visible.getX() + (int) std::round ((time - left) / (right - left) * visible.getWidth()); };
+                { return drawn.getX() + (int) std::round ((time - left) / (right - left) * drawn.getWidth()); };
 
                 if (left < 0.0)
-                    visible.setLeft (xAt (0.0));
+                    drawn.setLeft (xAt (0.0));
 
                 if (right > length)
-                    visible.setRight (xAt (length));
+                    drawn.setRight (xAt (length));
             }
 
-            if (visible.getWidth() > 0)
-                thumbnail->drawChannels (g, visible,
-                                         { te::TimePosition::fromSeconds (fileTime (visible.getX())),
-                                           te::TimePosition::fromSeconds (fileTime (visible.getRight())) },
+            if (drawn.getWidth() > 0)
+                thumbnail->drawChannels (g, drawn,
+                                         { te::TimePosition::fromSeconds (fileTime (drawn.getX())),
+                                           te::TimePosition::fromSeconds (fileTime (drawn.getRight())) },
                                          audio.getGain());
         }
 

@@ -16,15 +16,15 @@ namespace
     constexpr double lowestPitch = 50.0, highestPitch = 16000.0; // the map's frequencies, bottom to top
     constexpr int rows = 40;                                     // bands of pitch drawn
     constexpr float grabDistance = 10.0f;                        // pixels from a handle that a press takes it
-    constexpr int historyTicks = 6 * DeviceTicker::ticksPerSecond;
+    constexpr int historyTicks = 6 * DisplayTicker::ticksPerSecond;
 } // namespace
 
 class ReverbEditor::Graph : public juce::Component,
-                            private DeviceTicker::Display
+                            private DisplayTicker::Display
 {
 public:
     explicit Graph (const DeviceHandle& d)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           device (d),
           hits (historyTicks, 0.0f)
     {
@@ -149,7 +149,7 @@ public:
         // What played, drifting in after the pre-delay and fading.
         for (int i = 0; i < hits.size(); ++i)
         {
-            const auto age = (double) (hits.size() - 1 - i) / DeviceTicker::ticksPerSecond;
+            const auto age = (double) (hits.size() - 1 - i) / DisplayTicker::ticksPerSecond;
             const auto level = hits.get (i);
             const auto decay = Reverb::getDecayAt (values, 500.0, getSampleRate());
 
@@ -253,6 +253,7 @@ private:
     graph::LevelHistory hits; // what came in, a peak a tick, as a gain
     int dragged = -1;
     double dragStartSeconds = 1.0;
+    DrawnNumbers drawn;
 
     void tick() override
     {
@@ -264,7 +265,12 @@ private:
             hits.push (juce::Decibels::decibelsToGain (scope->getInputPeak().take(), devices::DeviceScope::silentDecibels));
         }
 
-        repaint();
+        auto numbers = values;
+        numbers.push_back ((float) getSampleRate());
+        hits.appendTo (numbers);
+
+        if (drawn.changed (std::move (numbers)))
+            repaint();
     }
 };
 

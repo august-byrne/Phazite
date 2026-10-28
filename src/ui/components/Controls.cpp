@@ -12,9 +12,11 @@ namespace
 {
     constexpr float fineDragFactor = 0.2f; // Shift-drag moves a fifth as far
     constexpr int knobDragDistance = 200;  // pixels from one end of a knob's range to the other
-    constexpr int meterRefreshRateHz = 30;
-    constexpr float meterFallDbPerTick = 1.0f; // 30 dB a second
     constexpr juce::uint32 peakHoldMs = 1000;
+    constexpr float meterMoveDb = 0.1f; // the least change of a level that a meter shows
+
+    // A meter falls 30 dB a second.
+    constexpr float meterFallDbPerTick = 30.0f / DisplayTicker::ticksPerSecond;
 
     juce::String getMuteTooltip (bool silencedBySolo)
     {
@@ -584,12 +586,14 @@ void ToggleAttachment::update()
 
 //==============================================================================
 LevelMeter::LevelMeter (const juce::String& title)
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)) // the component, not a Display to copy
 {
     setTitle (title);
     setDescription ("The peak level, from -60 to +6 dB. Red means above 0 dB, where the sound clips.");
     levels.fill ((float) silenceDb);
     peaks.fill ((float) silenceDb);
-    startTimerHz (meterRefreshRateHz);
+    shownLevels = levels;
+    shownPeaks = peaks;
 }
 
 LevelMeter::~LevelMeter() = default;
@@ -599,39 +603,45 @@ void LevelMeter::setSource (LevelSource newSource)
     source = std::move (newSource);
 }
 
-void LevelMeter::timerCallback()
+void LevelMeter::tick()
 {
-    if (! isShowing()) // behind another tab, or in a hidden panel (docs/performance-audit.md, U5)
-        return;
-
     source.refresh();
     const bool hasSource = source.isMeasuring();
     const bool mono = hasSource && source.getNumChannels() == 1;
     const auto now = juce::Time::getMillisecondCounter();
-    bool changed = false;
 
     for (size_t ch = 0; ch < (size_t) numChannels; ++ch)
     {
-        // Rises at once, falls steadily; a mono source shows on both bars.
+        // Rises at once, falls steadily; a mono source shows on both bars. The peak holds for a second, unless a higher
+        // one comes.
         const auto measured = hasSource ? source.getAndClearLevel (mono ? 0 : (int) ch) : (float) silenceDb;
-        const auto level = juce::jmax (measured, levels[ch] - meterFallDbPerTick, (float) silenceDb);
+        levels[ch] = juce::jmax (measured, levels[ch] - meterFallDbPerTick, (float) silenceDb);
 
-        if (level >= peaks[ch] || now - peakTimes[ch] > peakHoldMs)
+        if (levels[ch] > peaks[ch] || now - peakTimes[ch] > peakHoldMs)
         {
-            peaks[ch] = level;
+            peaks[ch] = levels[ch];
             peakTimes[ch] = now;
-            changed = true;
         }
-
-        // Only changes that move what is drawn count (levels below the meter's range all look the same).
-        if (std::abs (juce::jmax (level, minDb) - juce::jmax (levels[ch], minDb)) > 0.1f)
-            changed = true;
-
-        levels[ch] = level;
     }
 
-    if (changed)
-        repaint();
+    // Only what moves what is drawn repaints: levels below the meter's range all look the same, so a silent meter, or
+    // one that holds still, repaints nothing (docs/performance-audit.md, section 8).
+    const auto moves = [] (float value, float drawn)
+    {
+        return std::abs (juce::jmax (value, minDb) - juce::jmax (drawn, minDb)) > meterMoveDb || (value > minDb) != (drawn > minDb)
+               || (value > 0.0f) != (drawn > 0.0f);
+    };
+
+    for (size_t ch = 0; ch < (size_t) numChannels; ++ch)
+    {
+        if (moves (levels[ch], shownLevels[ch]) || moves (peaks[ch], shownPeaks[ch]))
+        {
+            shownLevels = levels;
+            shownPeaks = peaks;
+            repaint();
+            return;
+        }
+    }
 }
 
 void LevelMeter::paint (juce::Graphics& g)
@@ -656,7 +666,7 @@ void LevelMeter::paint (juce::Graphics& g)
                             : area.withHeight (barThickness).withY (area.getY() + (float) ch * (barThickness + gap));
 
         const auto length = vertical ? bar.getHeight() : bar.getWidth();
-        const auto level = toProportion (levels[ch]);
+        const auto level = toProportion (shownLevels[ch]);
 
         // The bar up to the level: the accent, then the danger color above 0 dB.
         const auto drawSegment = [&] (float from, float to, juce::Colour colour)
@@ -673,10 +683,10 @@ void LevelMeter::paint (juce::Graphics& g)
         drawSegment (zeroDb, level, p.danger);
 
         // The recent peak, as a line.
-        if (peaks[ch] > minDb)
+        if (shownPeaks[ch] > minDb)
         {
-            const auto peak = toProportion (peaks[ch]);
-            g.setColour (peaks[ch] > 0.0f ? p.danger : p.text);
+            const auto peak = toProportion (shownPeaks[ch]);
+            g.setColour (shownPeaks[ch] > 0.0f ? p.danger : p.text);
 
             if (vertical)
                 g.fillRect (bar.getX(), bar.getBottom() - peak * length - 1.0f, bar.getWidth(), 2.0f);
@@ -688,7 +698,7 @@ void LevelMeter::paint (juce::Graphics& g)
 
 juce::String LevelMeter::getLevelText() const
 {
-    return formatDecibels (juce::jmax (peaks[0], peaks[1]));
+    return formatDecibels (juce::jmax (shownPeaks[0], shownPeaks[1]));
 }
 
 std::unique_ptr<juce::AccessibilityHandler> LevelMeter::createAccessibilityHandler()

@@ -32,14 +32,18 @@ namespace
             state.removeListener (this);
             cancelPendingUpdate();
             pending = {};
+            ++version;
             state = std::move (newState);
             state.addListener (this);
         }
+
+        int getVersion() const noexcept { return version; }
 
     private:
         juce::ListenerList<ProjectContext::Listener>& listeners;
         juce::ValueTree state;
         SongChanges pending;
+        int version = 0; // ProjectContext::getSongVersion()
 
         // The group a change to this element, or to something in it, belongs to.
         void mark (const juce::ValueTree& changed)
@@ -84,6 +88,7 @@ namespace
         void add (bool& group)
         {
             group = true;
+            ++version;
             triggerAsyncUpdate();
         }
 
@@ -218,6 +223,11 @@ bool ProjectContext::hasProject() const noexcept
 int ProjectContext::getProjectNumber() const noexcept
 {
     return impl->projectNumber;
+}
+
+int ProjectContext::getSongVersion() const noexcept
+{
+    return impl->songWatcher->getVersion();
 }
 
 juce::UndoManager* ProjectContext::getUndoManager() const noexcept

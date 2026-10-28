@@ -27,10 +27,17 @@ void ClipComponent::showClip (const ClipInfo& shown)
 
     if (info.kind == ClipType::midi)
         notes = getNoteShapes (context, id);
-    else if (info.kind == ClipType::audio && waveform == nullptr)
-        waveform = makeClipWaveform (context, id, *this);
 
     repaint();
+}
+
+void ClipComponent::showWaveform (ClipWaveform* newWaveform)
+{
+    if (waveform != newWaveform)
+    {
+        waveform = newWaveform;
+        repaint();
+    }
 }
 
 void ClipComponent::showLook (juce::Colour newColour, bool isSelected, bool isFrozen)
@@ -78,10 +85,11 @@ void ClipComponent::paint (juce::Graphics& g)
 
     if (info.kind == ClipType::audio)
     {
-        if (waveform != nullptr)
+        // The part of it in view, which stays the same while the playlist does (ClipWaveform.h).
+        if (const auto* parent = getParentComponent(); waveform != nullptr && parent != nullptr)
         {
             g.setColour (ink.withAlpha (0.7f));
-            waveform->paint (g, content, getWidth());
+            waveform->paint (g, content.getIntersection (getLocalArea (parent, parent->getLocalBounds())), getWidth());
         }
 
         paintFades (g, getLocalBounds());

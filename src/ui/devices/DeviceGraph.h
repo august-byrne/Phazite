@@ -62,10 +62,11 @@ public:
 
     void setSampleRate (double);
 
-    // Takes the newest samples (both channels, averaged), then analyzes them; call at each refresh.
+    // Takes the newest samples (both channels, averaged), then analyzes them; call at each refresh. update() returns whether
+    // the trace moved.
     void pull (devices::StereoTap&);
     void pull (devices::SampleTap&);
-    void update();
+    bool update();
 
     void paint (juce::Graphics&, const FrequencyAxis&, const LevelAxis&, juce::Colour fill, juce::Colour line) const;
     float getLevelAt (double frequency) const; // tilted, in decibels
@@ -87,6 +88,9 @@ public:
     void push (float);
     int size() const noexcept { return (int) values.size(); }
     float get (int index) const noexcept; // from the oldest (0) to the newest (size() - 1)
+
+    // Its values, oldest first, after the numbers there: what a display draws from (DrawnNumbers, DisplayTicker.h).
+    void appendTo (std::vector<float>& numbers) const;
 
     // Across an area, the oldest at the left: a line through the values, or the area under it down to the bottom.
     juce::Path makeLine (juce::Rectangle<float> area, const std::function<float (float value)>& yFor) const;

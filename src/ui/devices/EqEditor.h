@@ -7,10 +7,10 @@
 
 #include "DeviceEditors.h"
 #include "DeviceGraph.h"
-#include "DeviceTicker.h"
 #include "devices/core/Spectrum.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
+#include "ui/components/DisplayTicker.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -21,7 +21,7 @@ namespace phazite::ui
 {
 class EqEditor : public juce::Component,
                  public FlexibleHeight,
-                 private DeviceTicker::Display
+                 private DisplayTicker::Display
 {
 public:
     explicit EqEditor (const DeviceHandle&);
@@ -70,6 +70,7 @@ private:
     devices::Spectrum spectrum;
     graph::SpectrumTrace input; // what comes in
     std::vector<float> pulled;
+    DrawnNumbers drawnGraph; // what its graph shows
 
     void tick() override { refresh(); }
     juce::Label& addLabel (const juce::String&);

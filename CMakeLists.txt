@@ -473,6 +473,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/browser/PluginPicker.h
     src/ui/components/Controls.cpp
     src/ui/components/Controls.h
+    src/ui/components/DisplayTicker.cpp
+    src/ui/components/DisplayTicker.h
     src/ui/components/ModulatorDrag.h
     src/ui/components/ValueText.cpp
     src/ui/components/ValueText.h
@@ -490,8 +492,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DeviceLayout.h
     src/ui/devices/DeviceMenus.cpp
     src/ui/devices/DeviceMenus.h
-    src/ui/devices/DeviceTicker.cpp
-    src/ui/devices/DeviceTicker.h
     src/ui/devices/DeviceTint.cpp
     src/ui/devices/DeviceTint.h
     src/ui/devices/DeviceWindowContent.cpp

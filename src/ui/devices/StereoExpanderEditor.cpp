@@ -21,11 +21,11 @@ namespace
 } // namespace
 
 class StereoExpanderEditor::Image : public juce::Component,
-                                    private DeviceTicker::Display
+                                    private DisplayTicker::Display
 {
 public:
     explicit Image (const DeviceHandle& d)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           device (d),
           width (device.getParameter ("width")),
           lefts ((size_t) maxDots),
@@ -69,6 +69,7 @@ private:
     std::vector<float> lefts, rights;
     std::vector<Dot> outputs, inputs;
     float correlation = StereoExpander::noReading, inputCorrelation = StereoExpander::noReading;
+    DrawnNumbers drawn;
 
     // A pair as a dot: turned an eighth of a turn, so that mono stands up; the lower half folded up, as a half disc.
     static Dot toDot (float l, float r)
@@ -117,7 +118,14 @@ private:
             inputCorrelation = expander->getInputCorrelation().get();
         }
 
-        repaint();
+        std::vector<float> numbers { width.getValue(), correlation, inputCorrelation, (float) outputs.size() };
+
+        for (const auto& dots : { &outputs, &inputs })
+            for (const auto& dot : *dots)
+                numbers.insert (numbers.end(), { dot.x, dot.y });
+
+        if (drawn.changed (std::move (numbers)))
+            repaint();
     }
 
     void paintDisc (juce::Graphics& g, const Palette& p, juce::Colour tint, juce::Rectangle<float> area)

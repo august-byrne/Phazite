@@ -223,8 +223,8 @@ first forward instead of opening the project again (R6); a log file, and a messa
 (R7); the live-MIDI locks go into realtime-audit.md and upstream (R8).
 - *Done when:* each has a test, or a check by hand where it needs a real device or a crashing plug-in.
 
-**Not now:** link-time optimisation and an AVX2 baseline (measure in the profile build first), `/fp:fast` (changes
-the golden renders and makes MSVC and GCC differ).
+**Not now:** link-time optimisation and an AVX2 baseline (measure in the profile build first: done 2026-10-27, section 8,
+and neither helps), `/fp:fast` (changes the golden renders and makes MSVC and GCC differ).
 
 ## 6. Decisions for the owner
 
@@ -270,3 +270,67 @@ What each part became (roadmap step 2.16 has the files):
   new editors and the piano roll's next work; the 4-second MIDI rescan and keys over plug-in windows are left as they are.
 - **F** as planned. A plug-in that crashes as it loads can't be tested without one: check by hand with a crashing VST3.
 - It found [known bug 3](known-bugs.md): two Limiter-type devices can silence live notes.
+
+## 8. An outside review (2026-10-27)
+
+*The owner asked Claude on the web for "the most impactful changes I could make to Phazite in order to improve its audio
+and video performance", then asked for its findings to be checked and fixed, together with what this audit had left. The
+review read `main`, which didn't have parts A to F yet, so three of its points were done already.*
+
+| The review said | Checked against `phase-2-polish` | What changed |
+|---|---|---|
+| Every clip is a component, and every scroll and zoom moves them all; rows are found by searching; rebuilding the clips is quadratic, and runs at every change of a clip | True, and worse than it says: rebuilding read every MIDI clip's notes and repainted every clip, at each step of a drag | Components only for the clips in view, made as they come into view (`Playlist::layOutClips()`); rows found by their tracks; the clips listed again in linear time, their notes read only for clips in view; hit-testing and selection by the list, not the components |
+| Meters repaint 30 times a second in silence | True: a level equal to the peak counted as a new peak | A meter repaints only when what it draws moves (`LevelMeter::tick()`) |
+| Nothing is opaque | True | 29 components that fill themselves in opaque colours say so |
+| The playhead moves on a 60 Hz timer; each meter has a timer | True | While playing, the playhead moves at each frame of the display (`juce::VBlankAttachment` in `TimelineEditor`), a 5 Hz timer otherwise; meters tick with the device editors' displays, from one timer (`ui::DisplayTicker`, moved down to `ui/components/`) |
+| Cache waveform images | Partly: JUCE's thumbnail keeps its levels per pixel for one area and draws only what is painted of it, but the playlist gave it the part being painted, so each scroll step and each strip under the playhead read the levels again | Waveforms are drawn over the part of the clip in view, which stays the same between paints (`src/app/ClipWaveforms.cpp`); the audio clip editor draws its trimmed and kept audio from one span, through clip regions, rather than three that took turns in the thumbnail's one cache. No images: one per clip would take a few hundred kilobytes to megabytes each, made again at each zoom |
+| Plug-in sandboxing needs shared memory, one wake-up per block and MMCSS | Not built yet (roadmap step 3.3) | Written into step 3.3, for when it is |
+| Audio threads default to every logical CPU | Not on this branch: physical cores minus one since part D (A2) | Nothing |
+| Bypassed plug-ins stay in the graph | Not on this branch: they leave it since part B (A8) | Nothing |
+| Link-time optimisation and AVX2 would speed up Phazite's devices; processing unison voices with SIMD is the usual large win | Measured (below): neither speeds them up | Neither turned on. SIMD across the wavetable's unison voices is left for later: each voice reads its own table at its own place, eight reads a sample that SSE2 can't gather, so only the arithmetic around them would go four at a time, for at most about a percent of a core in the worst case measured |
+| No benchmarks of audio CPU or the UI's frame times | Not on this branch (part A), but none of scrolling or zooming | A benchmark of scrolling and zooming a 2,400-clip song, and tests that fail if the playlist, the meters or the device editors go back to their old ways (`tests/PlaylistTests.cpp`, `tests/ControlsTests.cpp`, `tests/DeviceEditorTests.cpp`); timings stay out of CI, which runs on machines of every speed |
+
+Found while checking:
+- **Switching the mouse pointer.** JUCE keeps a standard pointer only while something holds it, so the playlist moving
+  between a clip's halves (one selects a range, the other moves the clip) made the hand again from its image at each
+  switch: 150 to 200 ms in the tests' window, which an ordinary scroll set off whenever the pointer came to rest on a
+  clip's lower half. Phazite's look and feel now keeps every standard pointer for the session.
+- **The rest of U5.** Every device editor's picture repainted at each of the ticker's 30 ticks a second; the EQ switched
+  its slope and gain controls on and off again at each tick; spectra analysed the same samples again at each tick in
+  silence; and the multiband's, maximizer's, delay's, saturator's and vocoder's levels fell forever without reaching
+  rest. Each picture now gathers the numbers it draws and repaints when they change (`ui::DrawnNumbers`), and a spectrum
+  at rest skips its analysis (`devices::Spectrum::update()`).
+- **The piano roll's note cache (U5).** It read every note, its colour and whether it was selected at each repaint,
+  the playhead's strip included; it now keeps them until the song (`ProjectContext::getSongVersion()`, which changes at
+  once with each change), the clips shown or the selection change, and keeps the other tracks' ghost notes the same way.
+
+Measured as section 7 was, with `phazite_tests.exe --test-suite=benchmark --no-skip` from the `windows-profile` build,
+before and after; the big song is the new benchmark's: 100 tracks, 2,400 clips and 38,400 notes, in the whole window.
+
+| What | Before | After |
+|---|---|---|
+| A wheel notch scrolling the big song's tracks: the UI thread's work | 43 ms | 0.23 ms |
+| ... scrolling it in time, or zooming | 0.7 to 1.1 ms | 0.13 ms |
+| The mouse moving from one half of a clip to the other (another pointer) | 150 to 200 ms at each switch | 0.11 ms |
+| A clip moved a beat, as each step of a drag moves it | 385 ms | 1.5 ms |
+| Clip components in the playlist | 2,402 | 8, those in view |
+| The big song's playlist painted | 2.4 ms | 2.0 ms |
+| An 11-px column of the window, as the playhead repaints it (section 7's song) | 0.85 ms | 0.66 ms |
+| ... of the piano roll | 0.50 ms | 0.13 ms |
+| The whole window painted | 11.3 ms | 11.0 ms |
+| A silent level meter, a device editor with nothing playing and nothing turned | 30 repaints a second | none |
+
+The audio benchmarks didn't change, as nothing on the audio thread did. The playhead's smoothness at each frame of the
+display, and the CPU of a window at rest, are for the owner to see in the app (Task Manager, with the mixer showing and
+the song stopped).
+
+**Link-time optimisation and AVX2**, each in a build of its own made from the `windows-profile` preset (with
+`CMAKE_INTERPROCEDURAL_OPTIMIZATION`, and with `/arch:AVX2`), each benchmark run twice beside the plain build:
+- *Link-time optimisation* sped up no device and slowed several: the vocoder from 3.2 to 4.5 % of a core, the maximizer
+  from 0.71 to 0.79 %, the compressor from 0.20 to 0.25 %; the synths and the projects were within the runs' noise (about
+  5 %). Its link of the tests took about 15 GB of memory and many minutes, at every change. Not worth it.
+- *AVX2*: every device within the noise of plain SSE2 (the synth's worst case 4.77 against 4.96 % of a core, the
+  wavetable's 3.71 against 3.73 %, the vocoder's 3.30 against 3.22 %): MSVC finds little to vectorise in loops that work
+  a sample at a time, and the devices that do work on blocks are cheap already. It would cost the computers without AVX2
+  (Intel's Pentium and Celeron chips of up to about 2020) a start that crashes, and on GCC fused multiply-adds would
+  change the golden renders. Not worth it either; section 5's "measure first" is answered.

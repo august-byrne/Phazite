@@ -22,8 +22,9 @@ public:
     // Adds samples, the newest last; only the newest getSize() count.
     void add (const float* samples, int numSamples);
 
-    // Analyzes the newest samples. Each level falls by fallDecibels at most since the last update, so peaks linger.
-    void update (float fallDecibels);
+    // Analyzes the newest samples. Each level falls by fallDecibels at most since the last update, so peaks linger. Returns
+    // whether any level moved; once they rest, with no samples added, it returns false without analyzing them again.
+    bool update (float fallDecibels);
 
     // The level in decibels at a frequency, between the bins around it; a full-scale sine is 0 dB, silence floorDecibels.
     float getLevelAt (double frequency) const;
@@ -36,5 +37,6 @@ private:
     std::vector<float> window, history, work, levels;
     int writeIndex = 0;
     double sampleRate = 48000.0;
+    bool added = false, moving = true; // samples added since the last update, and levels it moved
 };
 } // namespace phazite::devices

@@ -6,6 +6,7 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
+#include "ui/components/DisplayTicker.h"
 #include "ui/components/ValueText.h"
 
 TEST_CASE ("A slider linked to a track's volume sets it, one undo step per change")
@@ -95,6 +96,48 @@ TEST_CASE ("A level source follows what it measures, and outlives it")
     phazite::ui::LevelMeter meter ("Level");
     meter.setSource (std::move (source));
     meter.setSource ({});
+}
+
+TEST_CASE ("A level meter repaints only while what it shows moves: a silent one never does")
+{
+    te::LevelMeasurer measurer;
+    phazite::ui::LevelMeter meter ("Level");
+    meter.setSource (phazite::makeLevelSource ([&measurer] { return &measurer; }));
+    phazite::test::TestWindow window (meter, 12, 120);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+    const auto tick = [&ticker] (int times)
+    {
+        for (int i = 0; i < times; ++i)
+            ticker->tickNow();
+    };
+
+    // Silence, however long it shows (it once repainted 30 times a second).
+    window.takeRepaintedArea();
+    tick (90);
+    CHECK (window.takeRepaintedArea().isEmpty());
+
+    // A sound: the bars jump up, then fall back 30 dB a second, repainting as they go.
+    juce::AudioBuffer<float> sound (2, 480);
+
+    for (int channel = 0; channel < 2; ++channel)
+        juce::FloatVectorOperations::fill (sound.getWritePointer (channel), 0.5f, 480);
+
+    measurer.processBuffer (sound, 0, 480);
+    tick (1);
+    CHECK (window.takeRepaintedArea().containsRectangle (meter.getBounds()));
+    tick (5);
+    CHECK_FALSE (window.takeRepaintedArea().isEmpty());
+
+    // Below the meter's range, the bars rest, and only the peak's line waits to be let go, a second after it came.
+    tick (60);
+    window.takeRepaintedArea();
+    tick (10);
+    CHECK (window.takeRepaintedArea().isEmpty());
+    juce::Thread::sleep (1100);
+    tick (1);
+    CHECK_FALSE (window.takeRepaintedArea().isEmpty());
+    tick (30);
+    CHECK (window.takeRepaintedArea().isEmpty());
 }
 
 TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")

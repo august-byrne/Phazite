@@ -225,17 +225,19 @@ private:
     bool usedWhileKeyDown = false;     // and whether the mouse was pressed meanwhile
     std::optional<Tool> toolAfterDrag; // the key was let go during a drag: the tool to go back to when it ends
     bool mouseIsDown = false;
-    bool followPlayback = true, wasPlaying = false, active = false;
+    bool followPlayback = true, active = false;
     bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;
     double contentEnd = 0.0;            // in beats, as the scroll bar knows it
     std::optional<BeatRange> shownLoop; // the loop the ruler shows (none while playback doesn't loop), to repaint it on changes
     double lastAutoScrollTime = 0.0;    // milliseconds (juce::Time::getMillisecondCounterHiRes())
     std::unique_ptr<Playhead> playhead;
+    juce::VBlankAttachment playheadFrames; // while playing where it shows: followPlayhead() at each frame of the display
     std::unique_ptr<UseListener> useListener;
 
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
     void componentVisibilityChanged (juce::Component&) override; // the vertical scroll bar showed or hid itself
-    void timerCallback() override;                               // moves the playhead, and follows it while playing
+    void timerCallback() override;                               // notices what changed elsewhere, and starts and stops playheadFrames
+    void followPlayhead();                                       // moves the playhead, and turns the page while playing
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TimelineEditor)
 };

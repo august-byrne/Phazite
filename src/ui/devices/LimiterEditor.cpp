@@ -10,7 +10,7 @@ namespace
     using devices::Limiter;
 
     constexpr float historyLowest = -48.0f, historyReduction = 24.0f;
-    constexpr int historyTicks = 4 * DeviceTicker::ticksPerSecond; // four seconds
+    constexpr int historyTicks = 4 * DisplayTicker::ticksPerSecond; // four seconds
 
     const auto labelHeight = juce::roundToInt (TextSize::small) + Space::xs;
 } // namespace
@@ -73,7 +73,7 @@ void LimiterDisplay::resized()
 //==============================================================================
 LimiterEditor::LimiterEditor (const DeviceHandle& handle)
     : DeviceEditorBase (handle),
-      DeviceTicker::Display (static_cast<juce::Component&> (*this))
+      DisplayTicker::Display (static_cast<juce::Component&> (*this))
 {
     auto& shown = keep (std::make_unique<LimiterDisplay> (device.getParameter (Limiter::info.parameters[Limiter::ceiling].id)));
     display = &shown;

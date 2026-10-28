@@ -13,6 +13,7 @@ MasterStrip::MasterStrip (CommandBridge& bridge, ProjectContext& projectContext)
     : context (projectContext),
       effects (DeviceSlots::Kind::effects, projectContext, bridge)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Master");
     showAsDecibels (volume);
     volume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");

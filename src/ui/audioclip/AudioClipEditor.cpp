@@ -42,6 +42,7 @@ struct AudioClipEditor::Waveform : public juce::Component
     explicit Waveform (AudioClipEditor& e)
         : editor (e)
     {
+        setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
         setTitle ("Audio clip");
     }
 
@@ -194,21 +195,32 @@ struct AudioClipEditor::Waveform : public juce::Component
         g.setColour (colour.withAlpha (AudioClipTint::clipWash));
         g.fillRect (clipArea);
 
-        if (drawing != nullptr && shown.state != AudioState::missing)
-        {
-            const auto paintPart = [&] (BeatRange span)
-            {
-                const auto x0 = juce::roundToInt (beatToX (span.getStart())), x1 = juce::roundToInt (beatToX (span.getEnd()));
+        // The file's audio in view, as one span that the waveform keeps between paints (ClipWaveform.h), and its parts in their
+        // colours through clip regions.
+        const auto left = std::max (0, juce::roundToInt (beatToX (shown.content.getStart())));
+        const auto right = std::min (getWidth(), juce::roundToInt (beatToX (shown.content.getEnd())));
 
-                if (x1 > x0)
-                    drawing->paintSpan (g, audioArea.withX (x0).withWidth (x1 - x0), { xToBeat ((float) x0), xToBeat ((float) x1) });
+        if (drawing != nullptr && shown.state != AudioState::missing && right > left)
+        {
+            const auto shownAudio = audioArea.withX (left).withWidth (right - left);
+            const BeatRange span { xToBeat ((float) left), xToBeat ((float) right) };
+
+            const auto paintPart = [&] (BeatRange part, juce::Colour partColour)
+            {
+                const auto x0 = juce::roundToInt (beatToX (part.getStart())), x1 = juce::roundToInt (beatToX (part.getEnd()));
+                juce::Graphics::ScopedSaveState state (g);
+
+                if (g.reduceClipRegion (shownAudio.withX (x0).withWidth (std::max (0, x1 - x0))))
+                {
+                    g.setColour (partColour);
+                    drawing->paintSpan (g, shownAudio, span);
+                }
             };
 
-            g.setColour (p.textMuted.withAlpha (AudioClipTint::trimmedAudio));
-            paintPart ({ shown.content.getStart(), shown.clip.range.getStart() });
-            paintPart ({ shown.clip.range.getEnd(), shown.content.getEnd() });
-            g.setColour (colour);
-            paintPart (shown.clip.range);
+            const auto trimmed = p.textMuted.withAlpha (AudioClipTint::trimmedAudio);
+            paintPart ({ shown.content.getStart(), shown.clip.range.getStart() }, trimmed);
+            paintPart ({ shown.clip.range.getEnd(), shown.content.getEnd() }, trimmed);
+            paintPart (shown.clip.range, colour);
         }
 
         // The fades, over the clip's height.
@@ -387,6 +399,7 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
       waveform (std::make_unique<Waveform> (*this)),
       preparingCheck ([this] { refresh(); })
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Audio clip editor");
     setDescription ("The selected audio clip. Drag its edges to trim it, the squares at its top to fade it, and its audio to move it "
                     "inside the clip");

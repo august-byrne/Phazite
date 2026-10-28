@@ -94,7 +94,7 @@ TEST_CASE ("The multiband's editor shows each band squeezed, and its drags set t
     auto* multiband = device.getProcessor<Multiband>();
     REQUIRE (multiband != nullptr);
     playLowSine (*multiband, Multiband::info, -6.0f);
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getShownLevel (0) > -12.0f);
     CHECK (editor.getShownChange (0) < -3.0f);
     CHECK (editor.getShownLevel (2) < editor.getShownLevel (0) - 40.0f); // its start's click, at most

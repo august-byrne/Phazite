@@ -30,6 +30,9 @@ LookAndFeel::LookAndFeel()
       semiBold (loadInter ("Inter-SemiBold.ttf"))
 {
     setTheme (ThemeName::dark);
+
+    for (int type = 0; type < juce::MouseCursor::NumStandardCursorTypes; ++type)
+        standardPointers.emplace_back ((juce::MouseCursor::StandardCursorType) type);
 }
 
 void LookAndFeel::setTheme (ThemeName newTheme)

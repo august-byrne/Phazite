@@ -10,6 +10,7 @@ namespace phazite::ui
 Playlist::Lanes::Lanes (Playlist& p)
     : playlist (p)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Tracks");
     setWantsKeyboardFocus (true); // a click here takes the keyboard back from text fields and sliders
 }
@@ -207,6 +208,7 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
       addTrackRow (std::make_unique<AddTrackRow> (*this)),
       lanes (std::make_unique<Lanes> (*this))
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Playlist");
 
     addTrackButton.setButtonText ("Track");
@@ -250,8 +252,8 @@ Playlist::~Playlist()
     headers.clear(); // before headerContent, which holds them
     laneHeaders.clear();
     laneViews.clear();
-    clipComponentFor.clear();
     clipComponents.clear(); // and the lanes
+    waveforms.clear();      // after the components that draw them, and before the lanes they repaint
 }
 
 void Playlist::showProject()
@@ -275,9 +277,12 @@ void Playlist::showProject()
     laneHeaders.clear();
     laneViews.clear();
     knownLanes.reset(); // the new project's lanes show where they are
-    clipComponentFor.clear();
     clipComponents.clear();
+    waveforms.clear();
+    shownClips.clear();
+    clipIndex.clear();
     rows.clear();
+    rowOf.clear();
     cancelPendingUpdate();
 
     TimelineEditor::showProject();

@@ -15,6 +15,7 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
       projectContext (context),
       tempoField ("Tempo", minTempo, maxTempo, 1.0, 120.0)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Transport");
 
     playButton.onClick = [this] { commands.invoke ("transport.playStop"); };

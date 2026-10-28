@@ -19,6 +19,7 @@ MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
       master (bridge, projectContext),
       routing (projectContext)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Mixer");
     setDescription ("A channel for every track, in the playlist's order, and the return tracks next to the master. Click a channel to "
                     "select its track: the channels it feeds, and those that feed it, get an outline.");

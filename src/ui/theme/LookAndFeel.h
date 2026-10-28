@@ -7,7 +7,10 @@
 
 namespace phazite::ui
 {
-// Phazite's look: the design tokens applied to JUCE's components, and the Inter typeface.
+// Phazite's look: the design tokens applied to JUCE's components, and the Inter typeface. While it lives (the app's, for
+// the whole session), it keeps every one of JUCE's standard mouse pointers: JUCE keeps a pointer only while something
+// holds it, so a view that switches between two (a clip's halves, select and move) would make one again at each switch,
+// the hand's from an image (docs/performance-audit.md, section 8).
 class LookAndFeel : public juce::LookAndFeel_V4
 {
 public:
@@ -50,6 +53,7 @@ private:
     ThemeName theme = ThemeName::dark;
     Palette palette;
     juce::Typeface::Ptr regular, medium, semiBold;
+    std::vector<juce::MouseCursor> standardPointers;
 };
 
 // The palette of the LookAndFeel a component uses (the dark theme if that isn't Phazite's).

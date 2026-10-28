@@ -120,6 +120,7 @@ namespace
 TimelineRuler::TimelineRuler (TimelineEditor& e)
     : editor (e)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Timeline");
     setDescription ("Drag along the top to loop part of the song, or the loop's edges or middle to change it; click there to "
                     "turn looping on or off, double-click for the whole song. Lower down, click or drag to move the playhead. "
@@ -522,6 +523,7 @@ void TimelineEditor::showProject()
 
     updateGridControls();
     setViewStart ({});
+    playheadFrames = {};
 
     if (open)
         startTimerHz (5);
@@ -884,28 +886,20 @@ void TimelineEditor::timerCallback()
     if (! timelineContext.hasProject())
         return;
 
-    // Smooth while playing where it shows; otherwise only often enough to notice moves made elsewhere. An editor that
-    // doesn't show draws nothing (docs/performance-audit.md, U5).
-    const auto playing = isPlaying (timelineContext) && isShowing();
-
-    if (playing != wasPlaying)
-    {
-        wasPlaying = playing;
-        startTimerHz (playing ? 60 : 5);
-    }
+    // While playing where it shows, the playhead moves at each frame of the display, as smooth as it can be at any refresh
+    // rate; otherwise this notices moves made elsewhere a few times a second. An editor that doesn't show draws nothing
+    // (docs/performance-audit.md, U5 and section 8).
+    if (const auto playing = isPlaying (timelineContext) && isShowing(); playing == playheadFrames.isEmpty())
+        playheadFrames = playing ? juce::VBlankAttachment (this,
+                                                           [this] (double)
+                                                           {
+                                                               if (isShowing())
+                                                                   followPlayhead();
+                                                           })
+                                 : juce::VBlankAttachment();
 
     if (! isShowing())
         return;
-
-    // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end).
-    if (playing && followPlayback && ! horizontalScrollBar.isMouseButtonDown())
-    {
-        const auto beat = getPlayheadBeat();
-        const auto width = getTimelineArea().getWidth();
-
-        if (const auto x = view.beatToX (beat); x < 0.0 || x > width - 4.0)
-            setViewStart (beat - BeatDuration::fromBeats (width * 0.05 / view.pixelsPerBeat));
-    }
 
     if (std::abs (getContentRange().getEnd().inBeats() - contentEnd) > 1.0e-6)
         updateScrollBar();
@@ -914,6 +908,21 @@ void TimelineEditor::timerCallback()
     {
         shownLoop = loop;
         ruler.repaint();
+    }
+
+    followPlayhead();
+}
+
+void TimelineEditor::followPlayhead()
+{
+    // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end).
+    if (followPlayback && isPlaying (timelineContext) && ! horizontalScrollBar.isMouseButtonDown())
+    {
+        const auto beat = getPlayheadBeat();
+        const auto width = getTimelineArea().getWidth();
+
+        if (const auto x = view.beatToX (beat); x < 0.0 || x > width - 4.0)
+            setViewStart (beat - BeatDuration::fromBeats (width * 0.05 / view.pixelsPerBeat));
     }
 
     updatePlayhead();

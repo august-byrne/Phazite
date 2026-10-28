@@ -132,13 +132,13 @@ ClipID Playlist::placeClip (int row, BeatPosition beat, bool snapStart)
 
 void Playlist::muteOrDeleteClipAt (juce::Point<int> position, bool deleteIt)
 {
-    auto* component = getClipComponentAt (position);
+    const auto* hit = getClipAt (position);
 
-    if (component == nullptr || gesture == nullptr)
+    if (hit == nullptr || gesture == nullptr)
         return;
 
     // Each clip once per drag, however long the mouse stays on it.
-    const auto clip = component->getClip();
+    const auto clip = hit->id;
 
     if (! gesture->doOnce (clip))
         return;
@@ -166,9 +166,10 @@ void Playlist::selectClipsIn (juce::Rectangle<int> area, bool addToSelection)
             selection.add (section);
     }
 
-    for (auto* component : clipComponents)
-        if (getClipBounds (component->getInfo()).intersects (area))
-            selection.add (component->getClip());
+    // Every clip there, those scrolled out of view too.
+    for (const auto& clip : shownClips)
+        if (getClipBounds (clip).intersects (area))
+            selection.add (clip.id);
 }
 
 //==============================================================================
@@ -239,12 +240,11 @@ void Playlist::lanesMouseMove (const juce::MouseEvent& e)
         return;
     }
 
-    auto* component = getClipComponentAt (e.getPosition());
+    const auto* clip = getClipAt (e.getPosition());
 
-    if (component != nullptr && (currentTool == Tool::smart || currentTool == Tool::draw))
+    if (clip != nullptr && (currentTool == Tool::smart || currentTool == Tool::draw))
     {
-        const auto& clip = component->getInfo();
-        const auto zone = getClipZone (getClipBounds (clip).toFloat(), e.position, clip.kind == ClipType::audio);
+        const auto zone = getClipZone (getClipBounds (*clip).toFloat(), e.position, clip->kind == ClipType::audio);
         lanes->setMouseCursor (getCursorFor (zone));
         lanes->setDescription (describeClipZone (zone));
         return;
@@ -272,8 +272,8 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     gesture->startScrollY = scrollY;
     beginDragAutoRepeat (autoRepeatInterval); // so the lanes go on scrolling while the mouse rests past an edge
 
-    auto* component = getClipComponentAt (e.getPosition());
-    const auto clip = component != nullptr ? component->getClip() : ClipID();
+    const auto* hit = getClipAt (e.getPosition());
+    const auto clip = hit != nullptr ? hit->id : ClipID();
     auto currentTool = getTool();
 
     if (e.mods.isPopupMenu())
@@ -422,12 +422,11 @@ void Playlist::smartToolDown (const juce::MouseEvent& e)
     }
 
     // On a clip: where it is clicked decides what a drag does.
-    if (auto* component = getClipComponentAt (e.getPosition()))
+    if (const auto* hit = getClipAt (e.getPosition()))
     {
-        const auto& info = component->getInfo();
-        const auto clip = info.id;
+        const auto clip = hit->id;
         gesture->clip = clip;
-        gesture->zone = getClipZone (getClipBounds (info).toFloat(), e.position, info.kind == ClipType::audio);
+        gesture->zone = getClipZone (getClipBounds (*hit).toFloat(), e.position, hit->kind == ClipType::audio);
 
         if (e.mods.isPopupMenu())
         {
@@ -782,10 +781,10 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
     }
 
     // On a clip: open it in its editor, the piano roll or the audio clip editor.
-    if (auto* component = getClipComponentAt (e.getPosition()))
+    if (const auto* hit = getClipAt (e.getPosition()))
     {
         if (onOpenClip != nullptr)
-            onOpenClip (component->getClip());
+            onOpenClip (hit->id);
 
         return;
     }

@@ -513,6 +513,91 @@ TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren'
     CHECK (image.getPixelAt (point.x, point.y) == phazite::ui::getPalette (screen.playlist).background);
 }
 
+TEST_CASE ("Only the clips in view have components, which come and go as the playlist scrolls and zooms")
+{
+    // A song much bigger than the playlist (docs/performance-audit.md, section 8): its clips once all had components, each
+    // moved at every step of a scroll, and all built again at each change of a clip.
+    PlaylistScreen screen;
+    screen.edit->ensureNumberOfAudioTracks (40);
+    screen.tracks = te::getAudioTracks (*screen.edit);
+
+    for (int track = 0; track < 40; ++track)
+        for (int c = 0; c < 30; ++c)
+            screen.addClip (track, c * 8.0 + 4.0, 4.0);
+
+    // Two that overlap on the first track: the second is the one clicked where they meet, so it shows over the first.
+    auto& first = screen.addClip (0, 0.0, 2.0);
+    auto& second = screen.addClip (0, 1.0, 2.0);
+    phazite::test::dispatchPendingMessages();
+
+    const auto componentOf = [&screen] (const te::Clip& clip) -> phazite::ui::ClipComponent*
+    {
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (component->getClip() == phazite::getClipID (clip))
+                return component;
+
+        return nullptr;
+    };
+
+    // Of 1202 clips, those that show: a few bars of the tracks in view, all bars of them once zoomed out.
+    const auto checkOnlyInView = [&screen] (int most)
+    {
+        const auto components = phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist);
+        CHECK_FALSE (components.isEmpty());
+        CHECK (components.size() <= most);
+
+        for (auto* component : components)
+            CHECK (component->getParentComponent()->getLocalBounds().intersects (component->getBounds()));
+    };
+
+    checkOnlyInView (100);
+    const auto& lastTrackClips = screen.tracks[39]->getClips();
+    CHECK (componentOf (*lastTrackClips.getFirst()) == nullptr);
+    REQUIRE (componentOf (first) != nullptr);
+    REQUIRE (componentOf (second) != nullptr);
+    CHECK (screen.lanes->getIndexOfChildComponent (componentOf (first)->getParentComponent()) >= 0);
+
+    // Scrolled down to the last track: its clips have components, the first track's none, and a click finds what is there.
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto middle = screen.lanes->getLocalBounds().getCentre();
+
+    for (int notch = 0; notch < 60; ++notch)
+        mouse.wheel (middle, -60.0f / 256.0f);
+
+    checkOnlyInView (100);
+    CHECK (componentOf (first) == nullptr);
+    auto* last = componentOf (*lastTrackClips.getFirst());
+    REQUIRE (last != nullptr);
+    mouse.click (screen.lanes->getLocalPoint (last, last->getLocalBounds().getCentre()));
+    CHECK (screen.selection.isSelected (lastTrackClips.getFirst()));
+
+    // Back at the top, scrolled along so that only the second of the two that overlap shows, and back: the first comes
+    // into view under the second, and stays there.
+    for (int notch = 0; notch < 60; ++notch)
+        mouse.wheel (middle, 60.0f / 256.0f);
+
+    screen.playlist.setViewStart (phazite::BeatPosition::fromBeats (2.5));
+    CHECK (componentOf (first) == nullptr);
+    CHECK (componentOf (second) != nullptr);
+    screen.playlist.setViewStart ({});
+    auto* firstShown = componentOf (first);
+    auto* secondShown = componentOf (second);
+    REQUIRE (firstShown != nullptr);
+    REQUIRE (secondShown != nullptr);
+    REQUIRE (firstShown->getParentComponent() == secondShown->getParentComponent());
+    const auto* layer = firstShown->getParentComponent();
+    CHECK (layer->getIndexOfChildComponent (firstShown) < layer->getIndexOfChildComponent (secondShown));
+    mouse.click (screen.at (1.5, 0));
+    CHECK (screen.selection.isSelected (&second));
+
+    // Zoomed out, every clip of the tracks in view shows, the song's last ones too.
+    screen.playlist.zoomToFit();
+    checkOnlyInView (400);
+
+    for (auto* clip : screen.tracks[0]->getClips())
+        CHECK (componentOf (*clip) != nullptr);
+}
+
 TEST_CASE ("Dragging along the top of the ruler loops part of the song, and the loop's edges and middle change it")
 {
     PlaylistScreen screen;

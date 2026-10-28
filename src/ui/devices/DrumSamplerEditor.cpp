@@ -354,9 +354,10 @@ namespace
 } // namespace
 
 DrumSamplerEditor::DrumSamplerEditor (const DeviceHandle& handle)
-    : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       device (handle)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     for (int pad = 0; pad < numPads; ++pad)
     {
         pads[(size_t) pad] = std::make_unique<Pad> (*this, pad);

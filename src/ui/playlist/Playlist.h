@@ -111,15 +111,23 @@ private:
     juce::Component pinnedClips, scrollingClips;
 
     std::vector<Row> rows;
+    std::unordered_map<TrackID, int> rowOf;              // rows[i] by its track
     juce::OwnedArray<TrackHeader> headers;               // headers[i] shows rows[i]
     juce::OwnedArray<AutomationLaneHeader> laneHeaders;  // the rows' lanes, in their order
     juce::OwnedArray<AutomationLaneView> laneViews;      // laneViews[i] goes with laneHeaders[i]
     AutomationShape paintShape = AutomationShape::sine;  // what the Paint tool draws in a lane
     std::optional<std::vector<ParameterRef>> knownLanes; // the lanes shown when they were built last: none for a new project
-    juce::OwnedArray<ClipComponent> clipComponents;
-    std::unordered_map<ClipID, ClipComponent*> clipComponentFor; // the same, found by their clips
-    int contentHeight = 0;                                       // of the scrolling rows
-    int pinnedHeight = 0;                                        // of the pinned band
+
+    // The clips on the rows, row by row as the model lists them (a later one shows over an earlier one it overlaps), which
+    // the tools find and select, and where each is in that list. Only the clips in view have components, made as they come
+    // into view: a song can hold thousands of clips (docs/performance-audit.md, section 8). An audio clip's waveform stays
+    // until the clip leaves the rows, so that it doesn't load again each time the clip scrolls back into view.
+    std::vector<ClipInfo> shownClips;
+    std::unordered_map<ClipID, size_t> clipIndex;
+    std::unordered_map<ClipID, std::unique_ptr<ClipComponent>> clipComponents;
+    std::unordered_map<ClipID, std::unique_ptr<ClipWaveform>> waveforms;
+    int contentHeight = 0; // of the scrolling rows
+    int pinnedHeight = 0;  // of the pinned band
     bool focusMode = false;
     std::optional<BeatPosition> fileDropBeat; // where files dragged over the playlist would go
     int fileDropRow = -1;
@@ -158,11 +166,13 @@ private:
 
     // The clips.
     void rebuildClips(); // the clips on the rows, as they are now
-    void layOutClips();
-    void positionClip (ClipComponent&);                         // in its layer, by its row's place
-    void updateClips();                                         // their colors and whether they are selected
+    void layOutClips();  // a component for each clip in view, where it is
+    std::unique_ptr<ClipComponent> makeClipComponent (const ClipInfo&);
+    int getZOrderFor (const juce::Component& layer, size_t index) const; // after the clips before it in the list
+    void updateClips();                                                  // their colors and whether they are selected
+    void showLookOf (ClipComponent&) const;
     juce::Rectangle<int> getClipBounds (const ClipInfo&) const; // in the lanes
-    ClipComponent* getClipComponentAt (juce::Point<int>) const;
+    const ClipInfo* getClipAt (juce::Point<int>) const;         // the one shown on top there, or nullptr
     void clipClicked (ClipID, const juce::ModifierKeys&);
     void showClipMenu();
 

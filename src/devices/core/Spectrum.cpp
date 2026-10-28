@@ -26,10 +26,19 @@ void Spectrum::add (const float* samples, int numSamples)
         history[(size_t) writeIndex] = samples[i];
         writeIndex = (writeIndex + 1) % size;
     }
+
+    added = added || numSamples > 0;
 }
 
-void Spectrum::update (float fallDecibels)
+bool Spectrum::update (float fallDecibels)
 {
+    // Without samples since an update that moved no level, the same samples would give the same levels again: the levels
+    // are at rest, at the samples' own or the floor.
+    if (! added && ! moving)
+        return false;
+
+    added = false;
+
     // The newest samples, oldest first, windowed.
     for (int i = 0; i < size; ++i)
         work[(size_t) i] = history[(size_t) ((writeIndex + i) % size)] * window[(size_t) i];
@@ -39,13 +48,18 @@ void Spectrum::update (float fallDecibels)
 
     // Magnitudes to decibels: a sine of amplitude a gives a / 2 * size before the scaling.
     const auto scale = 2.0f / (float) size;
+    moving = false;
 
     for (size_t bin = 0; bin < levels.size(); ++bin)
     {
         const auto magnitude = work[bin] * scale;
         const auto level = magnitude > 1.0e-6f ? 20.0f * std::log10 (magnitude) : floorDecibels;
-        levels[bin] = std::max (level, std::max (floorDecibels, levels[bin] - fallDecibels));
+        const auto next = std::max (level, std::max (floorDecibels, levels[bin] - fallDecibels));
+        moving = moving || ! juce::exactlyEqual (next, levels[bin]);
+        levels[bin] = next;
     }
+
+    return moving;
 }
 
 float Spectrum::getLevelAt (double frequency) const

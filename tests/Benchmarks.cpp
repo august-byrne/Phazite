@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Benchmarks (docs/performance-audit.md): what each device costs and how soon it sounds, how soon a live note sounds
-// through Tracktion, what a project costs stopped and playing, and how long saving, opening and the UI's work take.
+// through Tracktion, what a project costs stopped and playing, how long saving, opening and the UI's work take, and what
+// scrolling and zooming a big song cost.
 // ctest and CI skip them; run them from an optimised build (windows-profile or windows-release) with
 //   phazite_tests.exe --test-suite=benchmark --no-skip
 // and record the numbers in docs/performance-audit.md. Times depend on the machine: compare runs on the same one.
@@ -30,7 +31,9 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/pianoroll/PianoRoll.h"
+#include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
+#include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
 #include <chrono>
@@ -198,6 +201,19 @@ std::shared_ptr<te::MidiInputDevice> findAllMidiInputs()
 juce::String milliseconds (double ms, int decimals = 2)
 {
     return juce::String (ms, decimals) + " ms";
+}
+
+// Paints part of a component into a software image, as the screen would: the app draws with Direct2D, which fills pixels
+// differently but walks the same notes and clips. (createComponentSnapshot() makes a Direct2D image on Windows, which costs
+// ~170 ms by itself.) Returns the time it took.
+double paintTime (juce::Component& c, juce::Rectangle<int> area)
+{
+    juce::Image image (juce::Image::ARGB, juce::jmax (1, area.getWidth()), juce::jmax (1, area.getHeight()), true,
+                       juce::SoftwareImageType());
+    juce::Graphics g (image);
+    g.setOrigin (-area.getPosition());
+    g.reduceClipRegion (area);
+    return millisecondsOf ([&] { c.paintEntireComponent (g, false); });
 }
 } // namespace
 
@@ -487,20 +503,8 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
 
     report << "| A parameter's change, as the views handle it | " << milliseconds (total / changes) << " |\n";
 
-    // Painting, into a software image: the app draws with Direct2D, which fills pixels differently but walks the same
-    // notes and clips. (createComponentSnapshot() makes a Direct2D image on Windows, which costs ~170 ms by itself.)
-    const auto paint = [] (juce::Component& c, juce::Rectangle<int> area)
-    {
-        juce::Image image (juce::Image::ARGB, juce::jmax (1, area.getWidth()), juce::jmax (1, area.getHeight()), true,
-                           juce::SoftwareImageType());
-        juce::Graphics g (image);
-        g.setOrigin (-area.getPosition());
-        g.reduceClipRegion (area);
-        return millisecondsOf ([&] { c.paintEntireComponent (g, false); });
-    };
-
     const auto bounds = screen.shell.getLocalBounds();
-    report << "| The whole window painted | " << milliseconds (paint (screen.shell, bounds), 1) << " |\n";
+    report << "| The whole window painted | " << milliseconds (paintTime (screen.shell, bounds), 1) << " |\n";
 
     const std::function<juce::Component*(juce::Component&, const std::function<bool (juce::Component&)>&)> find =
         [&find] (juce::Component& parent, const std::function<bool (juce::Component&)>& is) -> juce::Component*
@@ -517,12 +521,12 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
         return nullptr;
     };
 
-    const auto columnOf = [&paint] (juce::Component& c)
+    const auto columnOf = [] (juce::Component& c)
     {
         double sum = 0.0;
 
         for (int i = 0; i < 10; ++i)
-            sum += paint (c, { 200 + i * 20, 0, 11, c.getHeight() });
+            sum += paintTime (c, { 200 + i * 20, 0, 11, c.getHeight() });
 
         return sum / 10;
     };
@@ -568,5 +572,96 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
 
     report << "| A note moved a step, with what follows (the views, the graph's rebuild) | " << milliseconds (moving / 10 - 30.0) << " |\n";
 
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // The app's look and feel lives as long as the app, and keeps the mouse pointers (ui/theme/LookAndFeel.h); not set as
+    // the default here, so that the paint times compare with those of earlier runs.
+    phazite::ui::LookAndFeel lookAndFeel;
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    auto* edit = getEdit (screen.session.getContext());
+    REQUIRE (edit != nullptr);
+
+    // 100 tracks, each with 24 clips of 4 bars and 16 notes: 2,400 clips and 38,400 notes.
+    edit->ensureNumberOfAudioTracks (100);
+    te::MidiClip* lastClip = nullptr;
+    int numClips = 0;
+
+    for (auto* track : te::getAudioTracks (*edit))
+    {
+        for (int c = 0; c < 24; ++c)
+        {
+            const auto start = te::BeatPosition::fromBeats (c * 16.0);
+            auto clip =
+                track->insertMIDIClip ("Part", edit->tempoSequence.toTime ({ start, start + te::BeatDuration::fromBeats (16.0) }), nullptr);
+
+            for (int n = 0; n < 16; ++n)
+                clip->getSequence().addNote (48 + (n * 5) % 24, te::BeatPosition::fromBeats (n), te::BeatDuration::fromBeats (0.5), 100, 0,
+                                             nullptr);
+
+            lastClip = clip.get();
+            ++numClips;
+        }
+    }
+
+    REQUIRE (lastClip != nullptr);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 1500);
+    auto* playlist = phazite::test::findAll<phazite::ui::Playlist> (screen.shell).getFirst();
+    REQUIRE (playlist != nullptr);
+
+    juce::String report;
+    report << "\n| The playlist: " << te::getAudioTracks (*edit).size() << " tracks, " << numClips << " clips, " << numClips * 16
+           << " notes | The UI thread's work | The playlist painted |\n|---|---|---|\n";
+
+    // Each step: the event, what it posts, and the playlist painted afterwards as the screen would.
+    const auto measure = [&] (const juce::String& what, int steps, const std::function<void()>& step)
+    {
+        double work = 0.0, painting = 0.0;
+
+        for (int i = 0; i < steps; ++i)
+        {
+            work += millisecondsOf (
+                [&]
+                {
+                    step();
+                    phazite::test::dispatchPendingMessages();
+                });
+            painting += paintTime (*playlist, playlist->getLocalBounds());
+        }
+
+        report << "| " << what << " | " << milliseconds (work / steps) << " | " << milliseconds (painting / steps) << " |\n";
+    };
+
+    phazite::test::Mouse mouse (*playlist);
+    const auto centre = playlist->getLocalBounds().getCentre(); // over the tracks' lanes
+    constexpr float notch = 60.0f / 256.0f;                     // a mouse wheel's notch, as JUCE reports it on Windows
+    const auto ctrl = juce::ModifierKeys::ctrlModifier, shift = juce::ModifierKeys::shiftModifier;
+
+    auto x = 0;
+    measure ("The mouse moved a pixel over the tracks", 40, [&] { mouse.moveTo (centre.translated (++x % 2, 0)); });
+
+    // Half a row apart: from a clip's upper half, which selects a range, to its lower half, which moves it, each with its
+    // own pointer.
+    auto y = 0;
+    measure ("The mouse moved from one half of a clip to the other", 20, [&] { mouse.moveTo (centre.translated (0, ++y % 2 * 32)); });
+    measure ("A wheel notch, scrolling down", 40, [&] { mouse.wheel (centre, -notch); });
+    measure ("A wheel notch, scrolling up", 40, [&] { mouse.wheel (centre, notch); });
+    measure ("Shift and a wheel notch, scrolling in time", 20, [&] { mouse.wheel (centre, -notch, shift); });
+    measure ("Ctrl and a wheel notch, zooming in", 10, [&] { mouse.wheel (centre, notch, ctrl); });
+    measure ("Ctrl and a wheel notch, zooming out", 10, [&] { mouse.wheel (centre, -notch, ctrl); });
+
+    // A clip moved a beat at a time, as a drag moves it: what the views do with each change.
+    auto beat = lastClip->getStartBeat();
+    measure ("A clip moved a beat", 20,
+             [&]
+             {
+                 beat = beat + te::BeatDuration::fromBeats (1.0);
+                 lastClip->setStart (edit->tempoSequence.toTime (beat), false, true);
+             });
+
+    report << "\nClip components in the playlist: " << phazite::test::findAll<phazite::ui::ClipComponent> (*playlist).size() << "\n";
     MESSAGE (report);
 }

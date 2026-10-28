@@ -139,7 +139,8 @@ bool runMenuItem (const juce::PopupMenu& menu, const std::vector<juce::String>& 
 //==============================================================================
 namespace
 {
-    // A window without a native one behind it: it is always showing and focused, and paints nothing itself.
+    // A window without a native one behind it: it is always showing and focused, and paints nothing itself. It keeps
+    // what it was asked to repaint, for TestWindow::takeRepaintedArea().
     class HeadlessPeer final : public juce::ComponentPeer
     {
     public:
@@ -178,11 +179,13 @@ namespace
         void toBehind (juce::ComponentPeer*) override {}
         bool isFocused() const override { return true; }
         void grabFocus() override {}
-        void repaint (const juce::Rectangle<int>&) override {}
+        void repaint (const juce::Rectangle<int>& area) override { repainted.add (area); }
         void performAnyPendingRepaintsNow() override {}
         void setAlpha (float) override {}
         juce::StringArray getAvailableRenderingEngines() override { return { "Software Renderer" }; }
         void textInputRequired (juce::Point<int>, juce::TextInputTarget&) override {}
+
+        juce::RectangleList<int> repainted;
 
     private:
         juce::Rectangle<int> bounds;
@@ -225,6 +228,14 @@ void TestWindow::releaseKeys()
 juce::Image TestWindow::paintEverything()
 {
     return createComponentSnapshot (getLocalBounds());
+}
+
+juce::RectangleList<int> TestWindow::takeRepaintedArea()
+{
+    if (auto* peer = dynamic_cast<HeadlessPeer*> (getPeer()))
+        return std::exchange (peer->repainted, {});
+
+    return {};
 }
 
 void TestWindow::resized()

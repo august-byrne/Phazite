@@ -84,6 +84,7 @@ juce::String PianoRoll::describeToolHere (Tool toolToDescribe) const
 PianoRoll::NoteGrid::NoteGrid (PianoRoll& r)
     : roll (r)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Notes");
     setDescription (emptyHint);
     setWantsKeyboardFocus (true); // a click here gives the piano roll the keys (and makes it the editor the tools act on)
@@ -140,6 +141,24 @@ std::vector<NoteData> PianoRoll::NoteGrid::getGhostNotes() const
 
     const auto& timeline = roll.getView();
     return getNotesOfOtherTracks (roll.context, shownTracks, { timeline.xToBeat (0), timeline.xToBeat (getWidth()) });
+}
+
+const PianoRoll::NoteGrid::DrawnGhosts& PianoRoll::NoteGrid::getDrawnGhosts()
+{
+    const auto& timeline = roll.getView();
+    const BeatRange range { timeline.xToBeat (0), timeline.xToBeat (getWidth()) };
+    const auto songVersion = roll.context.getSongVersion();
+
+    if (! drawnGhosts.has_value() || drawnGhosts->songVersion != songVersion || drawnGhosts->range != range
+        || drawnGhosts->clips != roll.clips || drawnGhosts->track != roll.emptyTrack || drawnGhosts->shown != roll.showGhostNotes)
+    {
+        auto notes = getGhostNotes();
+        auto colours = getNoteColours (roll.context, notes);
+        drawnGhosts =
+            DrawnGhosts { std::move (notes), std::move (colours), songVersion, range, roll.clips, roll.emptyTrack, roll.showGhostNotes };
+    }
+
+    return *drawnGhosts;
 }
 
 ClipID PianoRoll::NoteGrid::getGhostClipAt (juce::Point<float> position) const
@@ -201,8 +220,9 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
     }
 
     // Other tracks' notes, faintly.
-    const auto ghosts = getGhostNotes();
-    const auto ghostColours = getNoteColours (roll.context, ghosts);
+    const auto& drawn = getDrawnGhosts();
+    const auto& ghosts = drawn.notes;
+    const auto& ghostColours = drawn.colours;
     const auto colourOf = [&ghostColours, &p] (ClipID clip)
     {
         const auto found = ghostColours.find (clip);
@@ -296,9 +316,7 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
     const auto area = g.getClipBounds().toFloat();
     const auto preview = roll.getPreview();
     const auto previewing = roll.transformOpen;
-    const auto notes = roll.getAllNotes();
-    const auto colours = getNoteColours (roll.context, notes);
-    const auto selected = roll.getSelectedNoteRefs();
+    const auto& [notes, colours, selected] = roll.getDrawnNotes();
 
     for (const auto& note : notes)
     {

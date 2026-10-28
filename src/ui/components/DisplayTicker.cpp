@@ -1,28 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "DeviceTicker.h"
+#include "DisplayTicker.h"
 
 #include <algorithm>
 
 namespace phazite::ui
 {
-DeviceTicker::Display::Display (juce::Component& shownBy)
+DisplayTicker::Display::Display (juce::Component& shownBy)
     : component (shownBy)
 {
     ticker->add (*this);
 }
 
-DeviceTicker::Display::~Display()
+DisplayTicker::Display::~Display()
 {
     ticker->remove (*this);
 }
 
 //==============================================================================
-DeviceTicker::~DeviceTicker()
+DisplayTicker::~DisplayTicker()
 {
     stopTimer();
 }
 
-void DeviceTicker::add (Display& display)
+void DisplayTicker::add (Display& display)
 {
     displays.push_back (&display);
 
@@ -30,7 +30,7 @@ void DeviceTicker::add (Display& display)
         startTimerHz (ticksPerSecond);
 }
 
-void DeviceTicker::remove (Display& display)
+void DisplayTicker::remove (Display& display)
 {
     displays.erase (std::remove (displays.begin(), displays.end(), &display), displays.end());
 
@@ -38,7 +38,7 @@ void DeviceTicker::remove (Display& display)
         stopTimer();
 }
 
-void DeviceTicker::tickNow()
+void DisplayTicker::tickNow()
 {
     // A tick may add or remove displays (an editor that rebuilds a part of itself): each is looked for again before it ticks.
     const auto ticking = displays;
@@ -46,5 +46,15 @@ void DeviceTicker::tickNow()
     for (auto* display : ticking)
         if (std::find (displays.begin(), displays.end(), display) != displays.end() && display->component.isShowing())
             display->tick();
+}
+
+//==============================================================================
+bool DrawnNumbers::changed (std::vector<float> numbers)
+{
+    const auto same =
+        numbers.size() == last.size()
+        && std::equal (numbers.begin(), numbers.end(), last.begin(), [] (float a, float b) { return juce::exactlyEqual (a, b); });
+    last = std::move (numbers);
+    return ! same;
 }
 } // namespace phazite::ui

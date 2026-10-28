@@ -7,6 +7,7 @@
 
 #include "DeviceGraph.h"
 #include "model/devices/ParameterHandle.h"
+#include "ui/components/DisplayTicker.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -38,6 +39,7 @@ public:
 private:
     const float lowest, reductionRange;
     graph::LevelHistory inputs, outputs, reductions;
+    DrawnNumbers drawn;
     ParameterHandle* line = nullptr;
     juce::String lineName;
     bool dragging = false;

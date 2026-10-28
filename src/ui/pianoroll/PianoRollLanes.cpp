@@ -17,6 +17,7 @@ namespace
 PianoRoll::Keys::Keys (PianoRoll& r)
     : roll (r)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Keys");
     setDescription ("Click a key to hear its note. In drum mode, drag a drum up or down to reorder the rows, and right-click to hide it.");
 }
@@ -183,6 +184,7 @@ void PianoRoll::Keys::mouseUp (const juce::MouseEvent&)
 PianoRoll::VelocityLane::VelocityLane (PianoRoll& r)
     : roll (r)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Velocity");
     setDescription ("How hard each note is played. Drag across the notes to set their velocity: the selected ones, if the mouse is "
                     "on any of them. New notes get the velocity set last.");
@@ -207,9 +209,7 @@ void PianoRoll::VelocityLane::paint (juce::Graphics& g)
 
     const auto& timeline = roll.getView();
     const auto usable = (float) getHeight() - 4.0f;
-    const auto notes = roll.getAllNotes();
-    const auto colours = getNoteColours (roll.context, notes);
-    const auto selected = roll.getSelectedNoteRefs();
+    const auto& [notes, colours, selected] = roll.getDrawnNotes();
 
     for (const auto& note : notes)
     {
@@ -281,6 +281,7 @@ void PianoRoll::VelocityLane::mouseUp (const juce::MouseEvent&)
 PianoRoll::TransformBar::TransformBar (PianoRoll& r)
     : roll (r)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Transform");
     title.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
     info.setFont (juce::FontOptions (TextSize::small));

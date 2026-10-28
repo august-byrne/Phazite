@@ -21,11 +21,11 @@ namespace
 } // namespace
 
 class FilterEditor::Graph : public juce::Component,
-                            private DeviceTicker::Display
+                            private DisplayTicker::Display
 {
 public:
     explicit Graph (const DeviceHandle& d)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           device (d),
           cutoff (device.getParameter (getInfo (FilterEffect::cutoff).id)),
           resonance (device.getParameter (getInfo (FilterEffect::resonance).id)),
@@ -139,6 +139,7 @@ private:
     ParameterHandle cutoff, resonance, drive;
     graph::SpectrumTrace input, output;
     graph::WheelGesture wheelGesture; // after the handles it turns
+    DrawnNumbers drawn;
 
     double getSampleRate() const
     {
@@ -166,6 +167,7 @@ private:
     void tick() override
     {
         readValues();
+        auto spectraMoved = false;
 
         if (auto* scope = device.getScope())
         {
@@ -179,11 +181,15 @@ private:
             if (auto* tap = scope->getOutput())
                 output.pull (*tap);
 
-            input.update();
-            output.update();
+            spectraMoved = input.update();
+            spectraMoved = output.update() || spectraMoved;
         }
 
-        repaint();
+        auto numbers = values;
+        numbers.push_back ((float) getSampleRate());
+
+        if (drawn.changed (std::move (numbers)) || spectraMoved)
+            repaint();
     }
 };
 

@@ -26,6 +26,7 @@ void Playlist::rebuild()
     // aren't shown. The master shows under them while it has automation lanes.
     juce::OwnedArray<TrackHeader> newHeaders;
     rows.clear();
+    rowOf.clear();
 
     for (const auto& track : getShownRows())
     {
@@ -42,6 +43,7 @@ void Playlist::rebuild()
         }
 
         newHeaders.add (header);
+        rowOf[track.id] = (int) rows.size();
         rows.push_back ({ track });
 
         for (const auto& lane : getAutomationLanes (context, track.id))
@@ -183,11 +185,8 @@ int Playlist::getRowAt (int y) const
 
 int Playlist::getRowOf (TrackID track) const
 {
-    for (size_t i = 0; i < rows.size(); ++i)
-        if (track.isValid() && rows[i].track.id == track)
-            return (int) i;
-
-    return -1;
+    const auto found = rowOf.find (track);
+    return found != rowOf.end() ? found->second : -1;
 }
 
 TrackHeader* Playlist::getHeaderFor (TrackID track) const
@@ -236,73 +235,103 @@ void Playlist::updateVerticalScrollBar()
 //==============================================================================
 void Playlist::rebuildClips()
 {
-    // The components of clips that are still there are kept, showing the clips as they are now; the others go.
-    juce::OwnedArray<ClipComponent> kept;
-    std::unordered_map<ClipID, ClipComponent*> keptFor;
+    // The clips on the rows as they are now. The components of those still there show them as they are now; those of clips
+    // that went go, and so do their waveforms. layOutClips() makes the components of clips that come into view.
+    shownClips.clear();
+    clipIndex.clear();
 
     for (const auto& row : rows)
     {
-        for (const auto& clip : getClips (context, row.track.id))
+        for (auto& clip : getClips (context, row.track.id))
         {
-            auto* component = [this, &clip]() -> ClipComponent*
-            {
-                const auto found = clipComponentFor.find (clip.id);
-                return found != clipComponentFor.end() ? found->second : nullptr;
-            }();
-
-            if (component != nullptr)
-            {
-                clipComponents.removeObject (component, false);
-            }
-            else
-            {
-                component = new ClipComponent (context, clip.id);
-                scrollingClips.addAndMakeVisible (component); // positionClip() moves it to the right layer
-            }
-
-            component->showClip (clip);
-            kept.add (component);
-            keptFor[clip.id] = component;
+            clipIndex.emplace (clip.id, shownClips.size());
+            shownClips.push_back (std::move (clip));
         }
     }
 
-    clipComponents.swapWith (kept); // kept now holds the components of clips that are gone, and deletes them
-    clipComponentFor = std::move (keptFor);
+    std::erase_if (clipComponents, [this] (const auto& entry) { return ! clipIndex.contains (entry.first); });
+    std::erase_if (waveforms, [this] (const auto& entry) { return ! clipIndex.contains (entry.first); });
+
+    for (const auto& [id, component] : clipComponents)
+        component->showClip (shownClips[clipIndex.at (id)]);
 }
 
 void Playlist::layOutClips()
 {
-    for (auto* component : clipComponents)
-        positionClip (*component);
+    // A pinned track's clips are in the pinned layer, the others in the scrolling one, which keeps them out of the pinned
+    // band; each layer's bounds are what of it shows. Components of clips that left the view go.
+    std::unordered_map<ClipID, std::unique_ptr<ClipComponent>> inView;
+
+    for (size_t i = 0; i < shownClips.size(); ++i)
+    {
+        const auto& clip = shownClips[i];
+        const auto row = getRowOf (clip.track);
+
+        if (row < 0)
+            continue;
+
+        auto& layer = rows[(size_t) row].track.pinned ? pinnedClips : scrollingClips;
+        const auto bounds = getClipBounds (clip);
+
+        if (! bounds.intersects (layer.getBounds()))
+            continue;
+
+        auto kept = clipComponents.extract (clip.id);
+        auto& component = kept.empty() ? *inView.emplace (clip.id, makeClipComponent (clip)).first->second
+                                       : *inView.insert (std::move (kept)).position->second;
+
+        if (component.getParentComponent() != &layer)
+            layer.addAndMakeVisible (component, getZOrderFor (layer, i));
+
+        component.setBounds (bounds - layer.getPosition());
+    }
+
+    clipComponents = std::move (inView);
 }
 
-void Playlist::positionClip (ClipComponent& component)
+std::unique_ptr<ClipComponent> Playlist::makeClipComponent (const ClipInfo& clip)
 {
-    const auto row = getRowOf (component.getInfo().track);
-    component.setVisible (row >= 0);
+    auto component = std::make_unique<ClipComponent> (context, clip.id);
+    component->showClip (clip);
 
-    if (row < 0)
-        return;
+    if (clip.kind == ClipType::audio)
+    {
+        auto& waveform = waveforms[clip.id];
 
-    // A pinned track's clips are in the pinned layer, the others in the scrolling one, which keeps them
-    // out of the pinned band.
-    auto& layer = rows[(size_t) row].track.pinned ? pinnedClips : scrollingClips;
+        if (waveform == nullptr)
+            waveform = makeClipWaveform (context, clip.id, *lanes); // which it repaints as it loads
 
-    if (component.getParentComponent() != &layer)
-        layer.addAndMakeVisible (component);
+        component->showWaveform (waveform.get());
+    }
 
-    component.setBounds (getClipBounds (component.getInfo()) - layer.getPosition());
+    showLookOf (*component);
+    return component;
+}
+
+int Playlist::getZOrderFor (const juce::Component& layer, size_t index) const
+{
+    // Before the first of the layer's clips that comes after it in the list, so that clips that overlap show as the tools
+    // find them.
+    for (int i = 0; i < layer.getNumChildComponents(); ++i)
+        if (const auto* other = dynamic_cast<const ClipComponent*> (layer.getChildComponent (i)))
+            if (const auto found = clipIndex.find (other->getClip()); found != clipIndex.end() && found->second > index)
+                return i;
+
+    return -1;
 }
 
 void Playlist::updateClips()
 {
+    for (const auto& [id, component] : clipComponents)
+        showLookOf (*component);
+}
+
+void Playlist::showLookOf (ClipComponent& component) const
+{
     // A clip shows in its track's colour, as the track's header does, frosted if the track is frozen.
-    for (auto* component : clipComponents)
-    {
-        const auto row = getRowOf (component->getInfo().track);
-        component->showLook (row >= 0 ? rows[(size_t) row].track.colour : juce::Colours::grey, selection.isSelected (component->getClip()),
-                             row >= 0 && rows[(size_t) row].track.frozen);
-    }
+    const auto row = getRowOf (component.getInfo().track);
+    component.showLook (row >= 0 ? rows[(size_t) row].track.colour : juce::Colours::grey, selection.isSelected (component.getClip()),
+                        row >= 0 && rows[(size_t) row].track.frozen);
 }
 
 juce::Rectangle<int> Playlist::getClipBounds (const ClipInfo& clip) const
@@ -319,19 +348,19 @@ juce::Rectangle<int> Playlist::getClipBounds (const ClipInfo& clip) const
     return { left, getRowTop (r) + 1, std::max (2, right - left), std::max (1, r.height - 3) };
 }
 
-ClipComponent* Playlist::getClipComponentAt (juce::Point<int> position) const
+const ClipInfo* Playlist::getClipAt (juce::Point<int> position) const
 {
-    // In the pinned band, only the pinned tracks' clips. The last one added is drawn on top, so it is
-    // the one that is clicked.
+    // In the pinned band, only the pinned tracks' clips. A clip shows over those before it in the list, so the last one
+    // there is the one that is clicked.
     const auto inBand = position.y < pinnedHeight;
 
-    for (auto i = clipComponents.size(); --i >= 0;)
+    for (auto i = shownClips.size(); i-- > 0;)
     {
-        auto* component = clipComponents.getUnchecked (i);
-        const auto row = getRowOf (component->getInfo().track);
+        const auto& clip = shownClips[i];
+        const auto row = getRowOf (clip.track);
 
-        if (row >= 0 && rows[(size_t) row].track.pinned == inBand && getClipBounds (component->getInfo()).contains (position))
-            return component;
+        if (row >= 0 && rows[(size_t) row].track.pinned == inBand && getClipBounds (clip).contains (position))
+            return &clip;
     }
 
     return nullptr;

@@ -249,11 +249,11 @@ public:
 //==============================================================================
 // The modulation matrix: each slot a row, its source and target picked from lists, and its amount a knob.
 class WavetableEditor::Matrix : public juce::Component,
-                                private DeviceTicker::Display
+                                private DisplayTicker::Display
 {
 public:
     explicit Matrix (const DeviceHandle& device)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this))
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this))
     {
         setTitle ("Modulation matrix");
 
@@ -350,7 +350,7 @@ private:
 //==============================================================================
 WavetableEditor::WavetableEditor (const DeviceHandle& handle)
     : DeviceEditorBase (handle),
-      DeviceTicker::Display (static_cast<juce::Component&> (*this))
+      DisplayTicker::Display (static_cast<juce::Component&> (*this))
 {
     const auto parameter = [this] (int index) { return device.getParameter (getParameterID (index)); };
     const auto shown = [this]() -> const WavetableSynth::Shown*

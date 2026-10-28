@@ -796,6 +796,7 @@ Inspector::Inspector (CommandBridge& bridge, ProjectContext& projectContext)
     : commands (bridge),
       context (projectContext)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Inspector");
     view.setScrollBarsShown (true, false);
     view.setScrollBarThickness (6);

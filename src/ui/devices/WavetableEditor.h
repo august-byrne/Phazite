@@ -19,7 +19,7 @@
 namespace phazite::ui
 {
 class WavetableEditor : public DeviceEditorBase,
-                        private DeviceTicker::Display
+                        private DisplayTicker::Display
 {
 public:
     static constexpr int numOscillators = 2;

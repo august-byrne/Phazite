@@ -85,6 +85,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       statusBar (engine, bridge),
       guide (bridge, s)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Phazite");
 
     // The guide's steps that no command does. The first note's step is saved after the notes played with it have gone out:

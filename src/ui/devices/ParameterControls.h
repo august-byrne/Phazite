@@ -3,12 +3,12 @@
 // that turns, a list for one that picks a choice, a switch for one that is on or off, in a grid of a given number of
 // columns, in the order given. Knobs are compact (compactKnobSize), or large for a device's main controls. A name that
 // starts with the part's title drops it ("Filter Cutoff" is "Cutoff" under "Filter"); the control's title, which screen
-// readers read, keeps the whole name. The DeviceTicker shows changes made elsewhere (automation, undo).
+// readers read, keeps the whole name. The DisplayTicker shows changes made elsewhere (automation, undo).
 #pragma once
 
-#include "DeviceTicker.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
+#include "ui/components/DisplayTicker.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -19,7 +19,7 @@
 namespace phazite::ui
 {
 class ParameterControls : public juce::Component,
-                          private DeviceTicker::Display
+                          private DisplayTicker::Display
 {
 public:
     enum class Size

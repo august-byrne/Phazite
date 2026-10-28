@@ -62,7 +62,7 @@ TEST_CASE ("The synth's editor has a control for each parameter, in groups, and 
 
     // Undo shows on the panel.
     phazite::undo (*edit);
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (wave->getText() == juce::String ("Saw"));
 }
 
@@ -160,7 +160,7 @@ TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonan
     block.events = { &note, 1 };
     synth->process (block);
 
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getAmpEnvelope().getShownLevel() > 0.1f);
     CHECK (editor.getOscillators().isShowing());
 }

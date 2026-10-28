@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// How editors reach Phazite's own devices (src/model/devices/DeviceHandle.h), and the knobs a device gets until it has
-// an editor of its own (src/ui/devices/DeviceEditors.h).
+// How editors reach Phazite's own devices (src/model/devices/DeviceHandle.h), the knobs a device gets until it has an
+// editor of its own (src/ui/devices/DeviceEditors.h), and what every device's editor repaints.
+#include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "UiTestHelpers.h"
 #include "devices/eq/Equalizer.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Devices.h"
+#include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
 
 namespace
@@ -75,4 +79,51 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
 
     CHECK (phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*eq)) != nullptr);
     CHECK (phazite::ui::createDeviceEditor (phazite::DeviceHandle()) == nullptr);
+}
+
+TEST_CASE ("Every device's editor rests while nothing it shows moves, and shows a value as it changes")
+{
+    // Their pictures once repainted at each tick of the displays' ticker, 30 times a second, with nothing playing and nothing
+    // turned (docs/performance-audit.md, section 8).
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+    const auto tick = [&ticker] (int times)
+    {
+        for (int i = 0; i < times; ++i)
+            ticker->tickNow();
+    };
+
+    for (const auto* info : phazite::getOwnDevices())
+    {
+        CAPTURE (std::string (info->name));
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto plugin = addDevice (*edit, std::string (info->typeID).c_str());
+        phazite::test::settle();
+        auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*plugin));
+        REQUIRE (editor != nullptr);
+
+        {
+            phazite::test::TestWindow window (*editor, std::max (1200, editor->getWidth()), std::max (700, editor->getHeight()));
+
+            // Long enough for what falls back to rest: a compressor's dot falls from its lowest level shown to silence.
+            tick (200);
+            window.takeRepaintedArea();
+            tick (30);
+            CHECK (window.takeRepaintedArea().isEmpty());
+
+            // A value turned elsewhere (automation, say), other than the mix, which the header shows: its control at least
+            // shows it.
+            const auto shown = std::find_if (info->parameters.begin(), info->parameters.end(),
+                                             [] (const auto& parameter) { return parameter.id != phazite::devices::mixParameterID; });
+            REQUIRE (shown != info->parameters.end());
+            const auto parameter = plugin->getAutomatableParameterByID (juce::String (shown->id.data(), shown->id.size()));
+            REQUIRE (parameter != nullptr);
+            parameter->setParameter (juce::approximatelyEqual (shown->defaultValue, shown->maximum) ? shown->minimum : shown->maximum,
+                                     juce::sendNotificationSync);
+            tick (1);
+            CHECK_FALSE (window.takeRepaintedArea().isEmpty());
+        }
+
+        editor = nullptr;
+        plugin = nullptr; // before its Edit
+    }
 }

@@ -108,6 +108,7 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 //==============================================================================
 DeviceKnobs::DeviceKnobs (const DeviceHandle& device)
 {
+    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     if (const auto* info = device.getInfo())
     {
         for (const auto& parameter : info->parameters)

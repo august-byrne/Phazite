@@ -15,7 +15,7 @@ namespace
 } // namespace
 
 SweepPicture::SweepPicture (const DeviceHandle& d, const devices::DeviceInfo& deviceInfo, int strip)
-    : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       device (d),
       info (deviceInfo),
       stripHeight (strip),
@@ -162,6 +162,7 @@ void SweepPicture::tick()
 {
     readValues();
     phase = readPhase();
+    auto spectraMoved = false;
 
     if (auto* scope = device.getScope())
     {
@@ -175,10 +176,15 @@ void SweepPicture::tick()
         if (auto* tap = scope->getOutput())
             output.pull (*tap);
 
-        input.update();
-        output.update();
+        spectraMoved = input.update();
+        spectraMoved = output.update() || spectraMoved;
     }
 
-    repaint();
+    // The response and the LFO, at the values and where the LFO is (it rests while the device sleeps on silence).
+    auto numbers = values;
+    numbers.insert (numbers.end(), { phase, (float) getSampleRate() });
+
+    if (drawn.changed (std::move (numbers)) || spectraMoved)
+        repaint();
 }
 } // namespace phazite::ui

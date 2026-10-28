@@ -37,11 +37,11 @@ namespace
 
 //==============================================================================
 class SaturatorEditor::Display : public juce::Component,
-                                 private DeviceTicker::Display
+                                 private DisplayTicker::Display
 {
 public:
     explicit Display (const DeviceHandle& d)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           device (d),
           drive (device.getParameter (getInfo (Saturator::drive).id)),
           shape (device.getParameter (getInfo (Saturator::shape).id)),
@@ -102,6 +102,7 @@ private:
     float startDrive = 0.0f, reach = 0.0f;
     std::vector<float> inputs, outputs; // the newest samples, oldest first
     std::vector<float> lefts, rights;   // pulled from the taps
+    DrawnNumbers drawn;
 
     Saturator::Shape getShape() const { return (Saturator::Shape) juce::roundToInt (shape.getValue()); }
     float getDriveGain() const { return juce::Decibels::decibelsToGain (drive.getValue()); }
@@ -131,12 +132,22 @@ private:
             if (auto* out = scope->getOutput())
                 pull (*out, outputs);
 
-            // How far the loudest coming in reaches into the curve once driven: up at once, falling back slowly.
+            // How far the loudest coming in reaches into the curve once driven: up at once, falling back slowly, and gone once
+            // it is too low to light any.
             const auto peak = juce::Decibels::decibelsToGain (scope->getInputPeak().take(), devices::DeviceScope::silentDecibels);
             reach = std::max (peak * getDriveGain(), reach * (1.0f - reachFall));
+            reach = reach < 1.0e-3f ? 0.0f : reach;
         }
 
-        repaint();
+        auto* saturator = device.getProcessor<Saturator>();
+        std::vector<float> numbers { drive.getValue(), shape.getValue(), reach,
+                                     (float) (saturator != nullptr ? saturator->getLatencySamples() : 0),
+                                     (float) (device.getScope() != nullptr ? device.getScope()->getSampleRate() : 48000.0) };
+        numbers.insert (numbers.end(), inputs.begin(), inputs.end());
+        numbers.insert (numbers.end(), outputs.begin(), outputs.end());
+
+        if (drawn.changed (std::move (numbers)))
+            repaint();
     }
 
     void paintCurve (juce::Graphics& g, const Palette& p, juce::Colour tint)
@@ -225,11 +236,11 @@ private:
 //==============================================================================
 // One button for each shape, drawn with its curve: the shape chosen lit.
 class SaturatorEditor::ShapeButtons : public juce::Component,
-                                      private DeviceTicker::Display
+                                      private DisplayTicker::Display
 {
 public:
     explicit ShapeButtons (const DeviceHandle& device)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           shape (device.getParameter (getInfo (Saturator::shape).id))
     {
         setTitle ("Shape");

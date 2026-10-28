@@ -21,7 +21,7 @@ namespace
 //==============================================================================
 EnvelopeView::EnvelopeView (const juce::String& title, ParameterHandle a, ParameterHandle d, ParameterHandle s, ParameterHandle r,
                             std::function<float()> newestLevel)
-    : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       attack (std::move (a)),
       decay (std::move (d)),
       sustain (std::move (s)),
@@ -34,10 +34,10 @@ EnvelopeView::EnvelopeView (const juce::String& title, ParameterHandle a, Parame
 
 void EnvelopeView::tick()
 {
-    if (const auto now = level != nullptr ? level() : 0.0f; ! juce::approximatelyEqual (now, shownLevel))
-        shownLevel = now;
+    shownLevel = level != nullptr ? level() : 0.0f;
 
-    repaint();
+    if (drawn.changed ({ attack.getValue(), decay.getValue(), sustain.getValue(), release.getValue(), shownLevel }))
+        repaint();
 }
 
 void EnvelopeView::paint (juce::Graphics& g)
@@ -93,7 +93,7 @@ float getDrawnLfoValue (int shape, float phase)
 
 //==============================================================================
 LfoView::LfoView (const juce::String& title, std::function<float (float)> shape, std::function<float()> now)
-    : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       shapeAt (std::move (shape)),
       phase (std::move (now))
 {
@@ -103,8 +103,15 @@ LfoView::LfoView (const juce::String& title, std::function<float (float)> shape,
 
 void LfoView::tick()
 {
+    // Where it is, and its wave across a cycle, which its settings change.
     shownPhase = phase != nullptr ? phase() : -1.0f;
-    repaint();
+    std::vector<float> numbers { shownPhase };
+
+    for (int i = 0; i < drawnWavePoints; ++i)
+        numbers.push_back (shapeAt ((float) i / (float) drawnWavePoints));
+
+    if (drawn.changed (std::move (numbers)))
+        repaint();
 }
 
 void LfoView::paint (juce::Graphics& g)
@@ -133,7 +140,7 @@ void LfoView::paint (juce::Graphics& g)
 //==============================================================================
 FilterView::FilterView (const juce::String& title, ParameterHandle c, ParameterHandle r, std::function<std::vector<float>()> read,
                         Response response, std::function<float()> nowPlaying)
-    : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       cutoff (std::move (c)),
       resonance (std::move (r)),
       readValues (std::move (read)),
@@ -160,7 +167,11 @@ juce::Point<float> FilterView::getDotPosition() const
 void FilterView::tick()
 {
     shownPlaying = playing != nullptr ? playing() : 0.0f;
-    repaint();
+    auto numbers = readValues();
+    numbers.insert (numbers.end(), { cutoff.getValue(), resonance.getValue(), shownPlaying });
+
+    if (drawn.changed (std::move (numbers)))
+        repaint();
 }
 
 void FilterView::paint (juce::Graphics& g)

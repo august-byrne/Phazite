@@ -181,7 +181,7 @@ TEST_CASE ("The stereo expander's editor shows its image and how alike its sides
     // Mono noise through its scope, as the audio thread hands it over: the image fills with dots, and the sides are alike.
     auto* scope = device.getScope();
     REQUIRE (scope != nullptr);
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow(); // the editor listens
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow(); // the editor listens
     REQUIRE (scope->isListening());
 
     std::vector<float> noise (512);
@@ -192,7 +192,7 @@ TEST_CASE ("The stereo expander's editor shows its image and how alike its sides
 
     scope->pushInput (noise.data(), noise.data(), (int) noise.size());
     scope->pushOutput (noise.data(), noise.data(), (int) noise.size());
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getNumDots() == 512);
 }
 
@@ -209,7 +209,7 @@ TEST_CASE ("The phaser's editor shows where the LFO has each side's notches, and
 
     // Before it plays, its LFO at the start of its cycle: the left at the bottom of its sweep (800 Hz, two octaves down at
     // full depth, so 1.2 at 60 %), the right a quarter of a cycle ahead (Stereo at 50 %), in the middle.
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getShownCentre (0) == doctest::Approx (800.0 * std::exp2 (-1.2)).epsilon (0.001));
     CHECK (editor.getShownCentre (1) == doctest::Approx (800.0).epsilon (0.001));
 
@@ -247,7 +247,7 @@ TEST_CASE ("The flanger's editor shows how far each side's copy lags, and its do
 
     // Its triangle at the start of its cycle: the left at the bottom of its sweep (3 ms, 3.5 octaves shorter at 70 %), the
     // right a quarter of a cycle ahead, halfway.
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getShownDelay (0) == doctest::Approx (3.0 * std::exp2 (-3.5)).epsilon (0.001));
     CHECK (editor.getShownDelay (1) == doctest::Approx (3.0 * std::exp2 (-1.75)).epsilon (0.001));
 
@@ -283,10 +283,10 @@ TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its
     phazite::test::checkChildrenApart (editor);
 
     // The buzz at first, at C3; a track as the carrier, while none feeds its sidechain, says so.
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getCarrierText() == juce::String ("Buzz C3"));
     song.plugin->getAutomatableParameterByID ("carrier")->setParameter (3.0f, juce::sendNotification);
-    juce::SharedResourcePointer<phazite::ui::DeviceTicker>()->tickNow();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getCarrierText() == juce::String ("Track: pick one with Sidechain, above"));
 
     // From the fifth band's column to the seventh's: the carrier's bands up by as far (10.6 semitones), one step.

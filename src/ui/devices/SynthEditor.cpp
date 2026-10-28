@@ -39,11 +39,11 @@ namespace
 //==============================================================================
 // What the oscillators play together, one cycle (two of the sub).
 class SynthEditor::OscillatorView : public juce::Component,
-                                    private DeviceTicker::Display
+                                    private DisplayTicker::Display
 {
 public:
     explicit OscillatorView (const DeviceHandle& device)
-        : DeviceTicker::Display (static_cast<juce::Component&> (*this))
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this))
     {
         setTitle ("Oscillators' wave");
         setDescription ("One cycle of what the oscillators play together: their waves and mix, the pulse width, the sub and the noise.");
@@ -90,8 +90,18 @@ public:
 
 private:
     std::vector<ParameterHandle> handles;
+    DrawnNumbers drawn;
 
-    void tick() override { repaint(); }
+    void tick() override
+    {
+        std::vector<float> values;
+
+        for (const auto& handle : handles)
+            values.push_back (handle.getValue());
+
+        if (drawn.changed (std::move (values)))
+            repaint();
+    }
 };
 
 //==============================================================================

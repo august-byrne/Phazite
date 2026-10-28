@@ -13,7 +13,7 @@
 namespace phazite::ui
 {
 class MaximizerEditor : public DeviceEditorBase,
-                        private DeviceTicker::Display
+                        private DisplayTicker::Display
 {
 public:
     explicit MaximizerEditor (const DeviceHandle&);

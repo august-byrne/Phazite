@@ -62,7 +62,7 @@ int ParameterControls::getCellHeight (Size size)
 
 ParameterControls::ParameterControls (const DeviceHandle& device, std::vector<std::string_view> parameterIDs, int numColumns, Size s,
                                       const juce::String& dropFromNames, const std::vector<juce::String>& shownNames)
-    : DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       columns (numColumns > 0 ? numColumns : std::max (1, (int) parameterIDs.size())),
       size (s)
 {

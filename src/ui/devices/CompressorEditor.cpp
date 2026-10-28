@@ -196,7 +196,7 @@ class CompressorEditor::Activity : public juce::Component
 public:
     explicit Activity (CompressorEditor& editor)
         : graph (editor),
-          history ("Compressor history", lowestLevel, meterRange, 4 * DeviceTicker::ticksPerSecond),
+          history ("Compressor history", lowestLevel, meterRange, 4 * DisplayTicker::ticksPerSecond),
           threshold (editor.device.getParameter (getInfo (Compressor::threshold).id))
     {
         setTitle ("Activity");
@@ -221,7 +221,7 @@ public:
 //==============================================================================
 CompressorEditor::CompressorEditor (const DeviceHandle& handle)
     : DeviceEditorBase (handle),
-      DeviceTicker::Display (static_cast<juce::Component&> (*this)),
+      DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       shownLevel (lowestLevel)
 {
     for (const auto& parameter : Compressor::info.parameters)
@@ -306,6 +306,11 @@ void CompressorEditor::refresh()
             compressor->listenToKey();
     }
 
-    activity->graph.repaint();
+    // The curve, its dot and the meter beside it, repainted when they move.
+    auto numbers = values;
+    numbers.insert (numbers.end(), { shownLevel, shownReduction });
+
+    if (drawnGraph.changed (std::move (numbers)))
+        activity->graph.repaint();
 }
 } // namespace phazite::ui
