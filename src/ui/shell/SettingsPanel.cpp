@@ -11,6 +11,7 @@ namespace phazite::ui
 namespace
 {
     constexpr int rowHeight = 28;
+    constexpr int correctionLabelWidth = 100, correctionWidth = 160; // the recordings' correction's row
 
     void makeHeading (juce::Label& label, const juce::String& text)
     {
@@ -101,17 +102,30 @@ AudioSettings::AudioSettings (EngineContext& e, const ProjectContext& context)
     viewport.setViewedComponent (&selector, false);
     viewport.setScrollBarsShown (true, false);
     makeHeading (delayHeading, "Delay");
+    makeHeading (recordingHeading, "Recording");
+    correctionLabel.setText ("Correction", juce::dontSendNotification);
+    correctionNote.setText ("Moves what the audio inputs record earlier by this much, after the delays the driver reports. Leave it at "
+                            "0 ms unless recordings come out late with this audio interface.",
+                            juce::dontSendNotification);
+    correction.setTitle ("Recording correction");
+    correction.setSliderStyle (juce::Slider::IncDecButtons);
+    correction.setRange (-100.0, 100.0, 0.1);
+    correction.setTextValueSuffix (" ms");
+    correction.setValue (engine.getRecordingCorrection(), juce::dontSendNotification);
+    correction.onValueChange = [this] { engine.setRecordingCorrection (correction.getValue()); };
 
-    for (auto* label : { &delayText, &warning })
+    for (auto* label : { &delayText, &warning, &correctionNote })
     {
         label->setJustificationType (juce::Justification::topLeft);
         label->setMinimumHorizontalScale (1.0f);
     }
 
     delayText.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+    correctionNote.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
     warning.setColour (juce::Label::textColourId, getPalette (*this).warning);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &viewport, &delayHeading, &delayText, &warning })
+    for (auto* c : std::initializer_list<juce::Component*> { &viewport, &delayHeading, &delayText, &warning, &recordingHeading,
+                                                             &correctionLabel, &correction, &correctionNote })
         addAndMakeVisible (c);
 
     engine.addChangeListener (this);
@@ -126,6 +140,10 @@ AudioSettings::~AudioSettings()
 
 void AudioSettings::update()
 {
+    // Kept for each input of each device: another device may have another.
+    if (! correction.isMouseButtonDown (true))
+        correction.setValue (engine.getRecordingCorrection(), juce::dontSendNotification);
+
     const auto description =
         describeDelay (engine.getAudioOutput(), getDelayCompensation (projectContext), engine.isLowLatency(), engine.hasAsioDrivers());
     const auto text = description.lines.joinIntoString ("\n");
@@ -146,10 +164,13 @@ void AudioSettings::paint (juce::Graphics& g)
 
 void AudioSettings::resized()
 {
-    // The delay's text under the device settings, as tall as it needs.
+    // The delay's text under the device settings, as tall as it needs, then the recordings' correction.
     auto area = getLocalBounds().reduced (Space::l);
     const auto textHeight = getTextHeight (delayText, area.getWidth());
     const auto warningHeight = warning.isVisible() ? getTextHeight (warning, area.getWidth()) + Space::s : 0;
+    const auto noteHeight = getTextHeight (correctionNote, area.getWidth());
+    auto recording = area.removeFromBottom (2 * rowHeight + noteHeight);
+    area.removeFromBottom (Space::m);
     auto bottom = area.removeFromBottom (rowHeight + textHeight + warningHeight);
     area.removeFromBottom (Space::m);
 
@@ -161,6 +182,12 @@ void AudioSettings::resized()
 
     if (warning.isVisible())
         warning.setBounds (bottom.withTrimmedTop (Space::s));
+
+    recordingHeading.setBounds (recording.removeFromTop (rowHeight));
+    auto row = recording.removeFromTop (rowHeight);
+    correctionLabel.setBounds (row.removeFromLeft (correctionLabelWidth));
+    correction.setBounds (row.removeFromLeft (correctionWidth));
+    correctionNote.setBounds (recording);
 }
 
 //==============================================================================

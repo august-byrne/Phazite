@@ -34,6 +34,7 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/devices/internal/Wavetables.h"
@@ -45,6 +46,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Recording.h"
 
@@ -341,6 +343,100 @@ Measurement recordAndMeasure (te::Edit& edit)
         });
 
     midiThread.join(); // once the measuring is done
+    phazite::stopRecording (edit);
+    running = false;
+    audioThread.join();
+    m.callSites = AudioThreadMonitor::describeCallSites();
+    m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
+
+    deviceManager.closeDevices();
+    deviceManager.removeHostedAudioDeviceInterface();
+    deviceManager.deviceManager.closeAudioDevice();
+
+    return m;
+}
+
+// Records an armed track's input, heard as it comes in, measured once the take has begun as playAndMeasure() measures
+// playback: a tone played into the hosted device's inputs, as an audio interface brings a voice in (roadmap step 3.4).
+// Phazite's recorder copies it into its own buffer on the audio thread, which its thread writes into the file. Stopping
+// keeps the take.
+Measurement recordAudioAndMeasure (te::Edit& edit, te::AudioTrack& track)
+{
+    auto& deviceManager = edit.engine.getDeviceManager();
+    auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
+
+    te::HostedAudioDeviceInterface::Parameters params;
+    params.sampleRate = auditSampleRate;
+    params.blockSize = auditBlockSize;
+    params.inputChannels = 2;
+    audioIO.initialise (params);
+    audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
+    deviceManager.dispatchPendingUpdates();
+
+    phazite::setCountInOn (edit, false);
+    edit.getTransport().looping = false;
+    phazite::AudioRecorder recorder (edit);
+    recorder.setArmed (track, true);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 300); // Tracktion makes its inputs as the track needs them
+
+    Measurement m;
+    juce::AudioBuffer<float> buffer (std::max (params.inputChannels, params.outputChannels), auditBlockSize);
+    juce::MidiBuffer midi;
+    midi.ensureSize (4096);
+    const auto blockDuration =
+        std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
+    std::atomic<bool> running { true }, recording { false }, measured { false };
+
+    AudioThreadMonitor::reset();
+
+    std::thread audioThread (
+        [&]
+        {
+            const AudioThreadMonitor::ScopedAudioThread marker;
+            double phase = 0.0;
+
+            const auto processFor = [&] (double seconds)
+            {
+                const auto numBlocks = juce::roundToInt (seconds * auditSampleRate / auditBlockSize);
+
+                for (int i = 0; i < numBlocks; ++i)
+                {
+                    const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
+
+                    for (int frame = 0; frame < auditBlockSize;
+                         ++frame, phase += juce::MathConstants<double>::twoPi * 220.0 / auditSampleRate)
+                        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                            buffer.setSample (channel, frame, 0.25f * (float) std::sin (phase));
+
+                    midi.clear();
+                    audioIO.processBlock (buffer, midi);
+                    m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
+                    std::this_thread::sleep_until (blockEnd);
+                }
+            };
+
+            // The warm-up starts once the take has begun.
+            while (! recording.load())
+                processFor (0.01);
+
+            m.warmUpTaken = warmUp (processFor);
+            m.warmUp = AudioThreadMonitor::getCounts();
+            m.firstSteadyEvent = AudioThreadMonitor::getNumEvents();
+
+            processFor (steadySeconds);
+            const auto total = AudioThreadMonitor::getCounts();
+            m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
+            measured = true;
+
+            // On, unmeasured, while recording stops.
+            while (running.load())
+                processFor (0.01);
+        });
+
+    // Tracktion waits for a block to go by before recording begins, so this starts once the audio thread runs.
+    phazite::startRecording (edit);
+    recording = true;
+    phazite::test::dispatchMessagesUntil ([&measured] { return measured.load(); }, 60000);
     phazite::stopRecording (edit);
     running = false;
     audioThread.join();
@@ -1179,12 +1275,29 @@ TEST_SUITE ("realtime-audit")
         CHECK (m.peakLevel > 0.01f);
     }
 
-    // Phazite opens no audio inputs by default; this shows what happens once a user turns one on
-    // (audio recording comes in roadmap step 3.4).
+    // Phazite opens an audio input only while a track is armed or always hears it; this shows what an input costs with
+    // nothing recording (the scenario after it records one).
     TEST_CASE ("Real-time audit: two enabled audio inputs")
     {
         auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
         const auto m = playAndMeasure (*edit, 2);
         report ("One empty track, with two audio inputs enabled", m);
+    }
+
+    TEST_CASE ("Real-time audit: an audio input recorded onto an armed track, heard as it comes in")
+    {
+        phazite::test::TemporaryFolder temp;
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        const auto file = temp.folder.getChildFile ("Audit.phazite"); // there, as a project's file always is
+        REQUIRE (file.create());
+        edit->editFileRetriever = [file] { return file; };
+        auto& track = getTrack (*edit, 0);
+        track.state.setProperty (phazite::schema::phaziteInput, "1", nullptr);
+
+        const auto m = recordAudioAndMeasure (*edit, track);
+        report ("An audio input recorded onto an armed track, heard as it comes in", m);
+        CHECK (m.peakLevel > 0.01f);          // heard as it comes in
+        CHECK (track.getClips().size() == 1); // the take
+        checkSteadyPlaybackDoesNotAllocate (m);
     }
 }

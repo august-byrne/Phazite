@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Playing in real time for tests that need the song to play as the app plays it: recording MIDI (RecordingTests.cpp) and
-// writing automation (AutomationModelTests.cpp).
+// audio (AudioRecordingTests.cpp), and writing automation (AutomationModelTests.cpp).
 #pragma once
 
 #include "UiTestHelpers.h"
@@ -18,7 +18,15 @@ namespace phazite::test
 class RealTimePlayback
 {
 public:
-    explicit RealTimePlayback (te::Engine& e)
+    // What comes into the device's two inputs: silence, or what it played a block before, as a cable from an audio
+    // interface's outputs to its inputs would bring it back (for recording audio: AudioRecordingTests.cpp).
+    enum class Input
+    {
+        silence,
+        loopback
+    };
+
+    explicit RealTimePlayback (te::Engine& e, Input input = Input::silence)
         : engine (e)
     {
         auto& deviceManager = engine.getDeviceManager();
@@ -36,18 +44,21 @@ public:
         wait (settleMilliseconds);
 
         audioThread = std::thread (
-            [this, &audioIO]
+            [this, &audioIO, input]
             {
                 juce::AudioBuffer<float> buffer (2, blockSize);
                 juce::MidiBuffer midi;
                 const auto blockDuration = std::chrono::duration_cast<std::chrono::steady_clock::duration> (
                     std::chrono::duration<double> (blockSize / sampleRate));
                 auto nextBlock = std::chrono::steady_clock::now();
+                buffer.clear(); // what comes in first
 
                 while (! stopping.load())
                 {
                     nextBlock += blockDuration;
-                    buffer.clear();
+
+                    if (input == Input::silence)
+                        buffer.clear(); // otherwise what it played last comes back in
                     midi.clear();
                     audioIO.processBlock (buffer, midi);
                     std::this_thread::sleep_until (nextBlock);

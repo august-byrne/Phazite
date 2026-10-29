@@ -54,6 +54,10 @@ private:
     juce::Viewport viewport; // the device settings, which grow with what they show
     juce::Label delayHeading, delayText, warning;
 
+    // Recording: the correction for a driver that reports its delays wrongly (EngineContext::getRecordingCorrection()).
+    juce::Label recordingHeading, correctionLabel, correctionNote;
+    juce::Slider correction;
+
     void update();
     void changeListenerCallback (juce::ChangeBroadcaster*) override { update(); } // the devices changed
     void timerCallback() override { update(); }                                   // so might the song's devices

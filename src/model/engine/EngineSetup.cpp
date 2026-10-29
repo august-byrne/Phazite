@@ -40,6 +40,14 @@ juce::String PropertyStorage::getApplicationVersion()
     return getVersionString();
 }
 
+juce::var PropertyStorage::getProperty (te::SettingID setting, const juce::var& defaultValue)
+{
+    if (setting == te::SettingID::retrospectiveRecord)
+        return 0.0;
+
+    return te::PropertyStorage::getProperty (setting, defaultValue);
+}
+
 //==============================================================================
 EngineBehaviour::EngineBehaviour (Options o)
     : options (o)

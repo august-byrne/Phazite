@@ -3,6 +3,7 @@
 // that the time line's commands make.
 #include "PlaylistParts.h"
 #include "model/arrangement/TimelineModel.h"
+#include "model/transport/RecordingModel.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -81,6 +82,24 @@ void Playlist::showClipMenu()
     addCommandItems (fadeShapes, bridge, { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" });
     menu.addSubMenu ("Fade Shape", fadeShapes);
     addCommandItems (menu, bridge, { "clip.reverse", "clip.followTempo" });
+
+    // A clip recorded round a looped range: its takes, the one it plays ticked, each one undo step (RecordingModel.h).
+    for (const auto id : selection.getClips())
+    {
+        if (const auto takes = getClipTakes (context, id); takes.count > 1)
+        {
+            juce::PopupMenu takeMenu;
+
+            for (int take = 1; take <= takes.count; ++take)
+                takeMenu.addItem ("Take " + juce::String (take), true, take == takes.playing,
+                                  [&projectContext = context, id, take] { setClipTake (projectContext, id, take); });
+
+            takeMenu.addSeparator();
+            addCommandItems (takeMenu, bridge, { "clip.previousTake", "clip.nextTake" });
+            menu.addSubMenu ("Take", takeMenu);
+            break;
+        }
+    }
 
     menu.addSeparator();
     addCommandItems (menu, bridge, { "edit.delete", "edit.deleteAndCloseGap" });

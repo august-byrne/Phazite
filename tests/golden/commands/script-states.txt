@@ -77,6 +77,10 @@ after start:
   transport.record: off "Record"
   transport.overdub: on, ticked "Overdub"
   transport.quantizeRecordings: on "Quantize Recordings"
+  transport.punch: off "Punch In"
+  track.arm: off "Arm Track"
+  clip.previousTake: off "Previous Take"
+  clip.nextTake: off "Next Take"
   transport.capture: off "Capture"
   note.transposeUp: off "Transpose Up"
   note.transposeDown: off "Transpose Down"
@@ -373,6 +377,7 @@ after edit.duplicateAsAlias:
   edit.undoOrRedo: on "Undo Duplicate Section as Aliases"
 after section.loop:
   transport.loop: on, ticked "Loop"
+  transport.punch: on "Punch In"
   loop 64.000-96.000 beats
 after edit.delete:
   edit.undo: on "Undo Delete Section"
@@ -621,10 +626,13 @@ after clear the range:
   selected: nothing
 after transport.loop:
   transport.loop: on "Loop"
+  transport.punch: off "Punch In"
 after transport.loop:
   transport.loop: on, ticked "Loop"
+  transport.punch: on "Punch In"
 after transport.loopSong:
   transport.loopSong: on, ticked "Loop the Song"
+  transport.punch: off "Punch In"
   loop 0.000-8.000 beats
 after transport.loop:
   transport.loop: on "Loop"

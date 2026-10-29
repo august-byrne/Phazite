@@ -12,6 +12,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/RecordingModel.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/components/DisplayTicker.h"
@@ -790,4 +791,44 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
     CHECK (progress >= 0.0);
     CHECK (progress < 1.0);
     CHECK (phazite::test::dispatchMessagesUntil ([&shownRendering] { return ! shownRendering().value_or (0.0).has_value(); }, 120000));
+}
+
+TEST_CASE ("A track without an instrument has an arm switch: with an input, a click arms it, and its header says what it records")
+{
+    PlaylistScreen screen;
+    const auto findArm = [&screen] (int track) -> juce::Button*
+    {
+        for (auto* header : phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist))
+            if (header->getTrack() == phazite::getTrackID (*screen.tracks[track]))
+                return dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*header, "Arm"));
+
+        return nullptr;
+    };
+
+    // A track with an instrument plays what is played on MIDI: no arm switch.
+    auto* arm = findArm (0);
+    REQUIRE (arm != nullptr);
+    CHECK (arm->isVisible());
+    screen.tracks[1]->pluginList.insertPlugin (screen.edit->getPluginCache().createNewPlugin ("phaziteSynth", {}), 0, nullptr);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (findArm (1) != nullptr);
+    CHECK_FALSE (findArm (1)->isVisible());
+
+    // With an input, a click arms the track; its header says what it records, and the click is no undo step.
+    phazite::setTrackInput (screen.context, phazite::getTrackID (*screen.tracks[0]), "1");
+    phazite::test::dispatchPendingMessages();
+    screen.edit->getUndoManager().clearUndoHistory();
+    phazite::test::Mouse mouse (*arm);
+    mouse.click (arm->getLocalBounds().getCentre());
+    CHECK (phazite::isArmed (screen.context, phazite::getTrackID (*screen.tracks[0])));
+    CHECK (arm->getToggleState());
+    CHECK_FALSE (screen.edit->getUndoManager().canUndo());
+    const auto labels = phazite::test::findAll<juce::Label> (screen.playlist);
+    CHECK (
+        std::any_of (labels.begin(), labels.end(), [] (juce::Label* label) { return label->isVisible() && label->getText() == "In 1"; }));
+
+    // Armed elsewhere (the Arm Track command, the mixer), it shows at the displays' next tick.
+    phazite::setArmed (screen.context, phazite::getTrackID (*screen.tracks[0]), false);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK_FALSE (arm->getToggleState());
 }

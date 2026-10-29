@@ -301,14 +301,18 @@ target_sources(phazite_core PRIVATE
     src/model/project/internal/ProjectContext.h
     src/model/project/internal/StarterProject.h
     src/model/project/internal/UnsavedProjects.h
+    src/model/transport/AudioRecorder.cpp
     src/model/transport/Capture.cpp
     src/model/transport/Metronome.cpp
     src/model/transport/Playback.cpp
     src/model/transport/Recording.cpp
+    src/model/transport/RecordingModel.cpp
+    src/model/transport/RecordingModel.h
     src/model/transport/Tempo.cpp
     src/model/transport/TempoValues.h
     src/model/transport/TransportModel.cpp
     src/model/transport/TransportModel.h
+    src/model/transport/internal/AudioRecorder.h
     src/model/transport/internal/Capture.h
     src/model/transport/internal/Metronome.h
     src/model/transport/internal/Playback.h
@@ -490,6 +494,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/browser/Browser.h
     src/ui/browser/PluginPicker.cpp
     src/ui/browser/PluginPicker.h
+    src/ui/components/ArmButton.cpp
+    src/ui/components/ArmButton.h
     src/ui/components/Controls.cpp
     src/ui/components/Controls.h
     src/ui/components/DisplayTicker.cpp
@@ -758,6 +764,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AudioDevicesTests.cpp
         tests/AudioSettingsTests.cpp
         tests/AudioClipModelTests.cpp
+        tests/AudioRecordingTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
         tests/AutomationFollowsClipsTests.cpp

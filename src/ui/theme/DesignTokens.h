@@ -323,6 +323,14 @@ namespace AudioClipTint
     inline constexpr int grabDistance = 6;
 } // namespace AudioClipTint
 
+// A track's arm switch (ui/components/ArmButton.h): its dot, as a part of the button's height, and the dot's outline while
+// it is off (pixels); lit, the dot is the danger colour, as record buttons are.
+namespace ArmTint
+{
+    inline constexpr float dot = 0.55f;
+    inline constexpr float outline = 1.5f;
+} // namespace ArmTint
+
 // An audio clip in the playlist while its render is being made (roadmap step 2.18), silent until then: its waveform faint
 // (alpha), and a bar along its bottom edge of how far the render has come, over a track of the same ink (alpha, height).
 namespace RenderingTint

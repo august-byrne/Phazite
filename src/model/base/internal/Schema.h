@@ -210,6 +210,36 @@ inline const juce::Identifier phazitePitch { "phazitePitch" };
 inline const juce::Identifier phaziteReversed { "phaziteReversed" };
 
 //==============================================================================
+// Recording audio (model/transport/RecordingModel.h; roadmap step 3.4).
+
+// On TRACK. The audio device's input the track records (AudioInput::id): a channel, counted from 1 ("1"), or a pair of
+// neighbours from an odd-numbered one ("1+2"); none for no input. song
+inline const juce::Identifier phaziteInput { "phaziteInput" };
+
+// On TRACK. When the track's input is heard through it: monitorAlways, monitorNever, or none, while it is armed. song
+inline const juce::Identifier phaziteMonitoring { "phaziteMonitoring" };
+inline constexpr const char* monitorAlways = "always";
+inline constexpr const char* monitorNever = "never";
+
+// On PHAZITE. The input chosen last on any track (an id as phaziteInput's), which the next track's list shows first. state
+inline const juce::Identifier lastInput { "lastInput" };
+
+// On PHAZITE. bool, default false: Record punches in and out at the looped range. Like the loop's switch, not an unsaved
+// change. state
+inline const juce::Identifier punch { "punch" };
+
+// On AUDIOCLIP: a clip recorded round a looped range, whose file holds a take for each time round, one after another
+// (ClipTakes). song
+// int, 2 or more: how many takes the file holds.
+inline const juce::Identifier phaziteTakes { "phaziteTakes" };
+
+// int, 1..phaziteTakes: the take the clip plays.
+inline const juce::Identifier phaziteTake { "phaziteTake" };
+
+// double, more than 0: how long each take is, in seconds: the looped range's length when it was recorded.
+inline const juce::Identifier phaziteTakeLength { "phaziteTakeLength" };
+
+//==============================================================================
 // On notes: Tracktion's NOTEs, in a MIDI clip's SEQUENCE. song
 
 // int, 1 or more: the note's ID (NoteID, model/base/IDs.h), which no other note of its clip has, so that selections, undo

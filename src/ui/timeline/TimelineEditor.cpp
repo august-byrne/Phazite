@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TimelineEditor.h"
 #include "TimelineGesture.h"
+#include "model/transport/RecordingModel.h"
 #include "model/transport/TransportModel.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -156,9 +157,11 @@ void TimelineRuler::paint (juce::Graphics& g)
     {
         const auto loopStart = (float) view.beatToX (loop->getStart()), loopEnd = (float) view.beatToX (loop->getEnd());
         const juce::Rectangle<float> area (loopStart, 0.0f, loopEnd - loopStart, (float) getHeight() - 1.0f);
-        g.setColour (p.loop.withAlpha (LoopTint::wash));
+        // Red while Record punches into it, as Logic Pro's autopunch range is.
+        const auto colour = isPunchOn (context) && canPunch (context) ? p.danger : p.loop;
+        g.setColour (colour.withAlpha (LoopTint::wash));
         g.fillRect (area);
-        g.setColour (p.loop.withAlpha (LoopTint::bar));
+        g.setColour (colour.withAlpha (LoopTint::bar));
         g.fillRect (area.withHeight ((float) LoopTint::laneHeight));
     }
 
@@ -907,6 +910,12 @@ void TimelineEditor::timerCallback()
     if (const auto loop = getLoop (timelineContext); ! isNear (loop, shownLoop))
     {
         shownLoop = loop;
+        ruler.repaint();
+    }
+
+    if (const auto punch = isPunchOn (timelineContext) && canPunch (timelineContext); punch != shownPunch)
+    {
+        shownPunch = punch;
         ruler.repaint();
     }
 

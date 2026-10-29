@@ -24,6 +24,7 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
       context (projectContext),
       row (shown),
       muteSolo (projectContext),
+      arm (projectContext),
       gripIcon (createIcon (Icon::grip))
 {
     setDescription ("Click to select the track, Ctrl+click to add it to the selection, Shift+click to select up to it. "
@@ -38,6 +39,13 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
     nameLabel.onTextChange = [this] { renameTrack (context, row.id, nameLabel.getText()); }; // an empty name gives its number back
 
     muteSolo.setTrack (row.id);
+
+    // A track without an instrument records audio: its arm switch, and while it is armed, what it records under its name.
+    arm.setTrack (row.id);
+    arm.onChange = [this] { showArmedInput(); };
+    inputLabel.setFont (juce::FontOptions (TextSize::small));
+    inputLabel.setInterceptsMouseClicks (false, false);
+    showArmedInput();
 
     // The chevron collapses a track to a thin row, and hides a folder's tracks.
     collapseButton.setQuiet (true);
@@ -63,6 +71,8 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
         addAndMakeVisible (c);
 
     addChildComponent (frozenButton);
+    addChildComponent (arm);
+    addChildComponent (inputLabel);
     updateFrozenButton();
 
     setTitle (isFolder() ? row.name + " (folder)" : row.name); // what screen readers call the header
@@ -84,6 +94,7 @@ void TrackHeader::update (const TrackRow& shown, bool isSelected)
         nameLabel.setText (row.name, juce::dontSendNotification);
 
     muteSolo.update(); // and whether other tracks' solos silence it
+    arm.update();      // and whether it can record audio, an instrument added or removed
 
     if (row.collapsed != before.collapsed)
         updateCollapseButton();
@@ -213,6 +224,7 @@ void TrackHeader::resized()
     const auto size = juce::jmin (buttonSize, top.getHeight() - 2);
     const auto roomForButtons = size >= minButtonSize;
     muteSolo.setVisible (roomForButtons && ! isMaster());
+    arm.setVisible (roomForButtons && ! isMaster() && arm.isShown());
     collapseButton.setVisible (roomForButtons);
     frozenButton.setVisible (roomForButtons && row.frozen);
 
@@ -223,6 +235,12 @@ void TrackHeader::resized()
             const auto buttonsWidth = 2 * size + Space::xs / 2;
             muteSolo.setBounds (top.removeFromRight (buttonsWidth).withSizeKeepingCentre (buttonsWidth, size));
             top.removeFromRight (Space::xs);
+
+            if (arm.isVisible())
+            {
+                arm.setBounds (top.removeFromRight (size).withSizeKeepingCentre (size, size));
+                top.removeFromRight (Space::xs);
+            }
         }
 
         if (row.frozen)
@@ -235,6 +253,17 @@ void TrackHeader::resized()
     }
 
     nameLabel.setBounds (top);
+
+    // Under the name, while the track is armed and has room for it: what it records.
+    const auto inputHeight = juce::roundToInt (TextSize::small) + Space::xs;
+    inputLabel.setVisible (inputLabel.getText().isNotEmpty() && area.getHeight() >= inputHeight);
+    inputLabel.setBounds (area.removeFromTop (inputHeight).withTrimmedLeft (collapseButtonSize));
+}
+
+void TrackHeader::showArmedInput()
+{
+    inputLabel.setText (describeArmedInput (context, row.id), juce::dontSendNotification);
+    resized();
 }
 
 void TrackHeader::mouseMove (const juce::MouseEvent& e)

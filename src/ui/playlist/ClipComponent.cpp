@@ -123,6 +123,17 @@ void ClipComponent::paint (juce::Graphics& g)
 
         g.setColour (ink);
         g.setFont (juce::FontOptions (TextSize::small));
+
+        // A clip recorded round a looped range: the take it plays, of how many, at the strip's end (its menu chooses).
+        if (info.takes > 1)
+        {
+            const auto takeText = "Take " + juce::String (info.take) + "/" + juce::String (info.takes);
+            const auto takeWidth = (int) std::ceil (juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), takeText)) + 4;
+
+            if (strip.getWidth() > takeWidth + 3 * nameHeight)
+                g.drawText (takeText, strip.removeFromRight (takeWidth), juce::Justification::centredRight, false);
+        }
+
         g.drawText (info.name + (info.linked ? "*" : ""), strip.reduced (2, 0), juce::Justification::centredLeft, true);
     }
 

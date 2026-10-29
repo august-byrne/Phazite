@@ -34,6 +34,13 @@ namespace
                 transport.stop (false, false);
             }
 
+            // A punched take turned the loop off (Recording.h): it is on again, around its range.
+            if (edit.recordingPunchInOut)
+            {
+                edit.recordingPunchInOut = false;
+                transport.looping = true;
+            }
+
             updateSongLoop (edit); // which the recording set aside
             return;
         }

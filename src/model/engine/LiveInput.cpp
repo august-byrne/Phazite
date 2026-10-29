@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/LiveInput.h"
+#include "internal/EngineSetup.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
 
@@ -127,6 +128,10 @@ bool setLiveMidiTrack (te::AudioTrack& track)
 void routeLiveMidiInput (te::Edit& edit)
 {
     edit.getTransport().ensureContextAllocated();
+
+    // Capture's seconds: Tracktion gives every input the same length, which Phazite leaves at none for audio inputs.
+    if (const auto input = getAllMidiInputs (edit.engine))
+        input->updateRetrospectiveBufferLength (captureSeconds);
 
     // The track it plays already, armed as setLiveMidiTrack() arms it.
     if (auto* track = getLiveMidiTrack (edit))

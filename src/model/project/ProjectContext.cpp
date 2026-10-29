@@ -10,6 +10,7 @@
 #include "model/engine/internal/EngineSetup.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/notes/internal/Notes.h"
+#include "model/transport/internal/AudioRecorder.h"
 
 namespace phazite
 {
@@ -191,6 +192,7 @@ struct ProjectContext::Impl
     std::unique_ptr<NoteIDKeeper> noteIDs;         // gives the notes added to the open Edit their IDs
     std::unique_ptr<FreezeKeeper> freezes;         // unfreezes a frozen track whose clips or frozen devices change
     std::unique_ptr<ClipRenders> clipRenders;      // renders what the clips play stretched, pitched or reversed
+    std::unique_ptr<AudioRecorder> recorder;       // records the armed tracks' audio inputs
     std::unique_ptr<AutomationWatcher> automation; // the parameter touched last, and recorded automation's undo steps
     std::unique_ptr<SongWatcher> songWatcher;
     int projectNumber = 0;
@@ -207,6 +209,7 @@ ProjectContext::~ProjectContext()
 {
     impl->songWatcher = nullptr;
     impl->automation = nullptr;
+    impl->recorder = nullptr;
     impl->clipRenders = nullptr;
     impl->freezes = nullptr;
     impl->noteIDs = nullptr;
@@ -317,10 +320,12 @@ void setEdit (ProjectContext& context, te::Edit* edit)
     impl.selection.edit = edit;
     impl.automation = nullptr;                                                         // before the Edit it watches goes
     impl.freezes = nullptr;                                                            // likewise
+    impl.recorder = nullptr;                                                           // likewise, any recording dropped
     impl.clipRenders = nullptr;                                                        // likewise, its renders stopped
     impl.noteIDs = edit != nullptr ? std::make_unique<NoteIDKeeper> (*edit) : nullptr; // before the watcher hears what it writes
     impl.freezes = edit != nullptr ? std::make_unique<FreezeKeeper> (*edit) : nullptr;
     impl.clipRenders = edit != nullptr ? std::make_unique<ClipRenders> (*edit) : nullptr;
+    impl.recorder = edit != nullptr ? std::make_unique<AudioRecorder> (*edit) : nullptr;
     impl.automation = edit != nullptr ? std::make_unique<AutomationWatcher> (*edit) : nullptr;
     impl.songWatcher->setState (edit != nullptr ? edit->state : juce::ValueTree());
 

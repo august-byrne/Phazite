@@ -28,7 +28,7 @@ Replacing a part of the engine outright is a separate decision, made one capabil
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** 25 scenarios must allocate and free nothing on the audio thread once playback is running, or the tests fail. They read no files, but for the frozen track's, which Phazite made: the browser's preview of a loop, which plays from memory (step 2.18), one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2, automation clips until 2026-10-17), every kind of modulator and a macro moving the EQ (step 2.3), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), a frozen track playing its file (step 2.11), and Phazite's own devices (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler; then the devices of step 2.10 in a row, the synth's unison, the wavetable synth, and the filter types of steps 2.14 and 2.15; then, in step 2.17, every effect with its editor's displays listening, and the vocoder at 40 bands with another track as its carrier through the sidechain). The other scenarios only report.
+- **Guards:** 26 scenarios must allocate and free nothing on the audio thread once playback is running, or the tests fail. They read no files, but for the frozen track's, which Phazite made: the browser's preview of a loop, which plays from memory (step 2.18), one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), an audio input recorded onto an armed track that hears it (step 3.4), automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2, automation clips until 2026-10-17), every kind of modulator and a macro moving the EQ (step 2.3), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), a frozen track playing its file (step 2.11), and Phazite's own devices (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler; then the devices of step 2.10 in a row, the synth's unison, the wavetable synth, and the filter types of steps 2.14 and 2.15; then, in step 2.17, every effect with its editor's displays listening, and the vocoder at 40 bands with another track as its carrier through the sidechain). The other scenarios only report.
 
 ## Results (Windows Debug)
 
@@ -63,6 +63,7 @@ The first column covers the warm-up after playback starts (about 0.5 s); the sec
 | An audio clip | 6 allocations, 3 frees (fewer if the file cache hits) | 0 |
 | Two tracks in a folder bus with Phazite's compressor | 13 allocations, 6 frees (a file cache miss logs in Debug builds) | 0 |
 | One empty track with two audio inputs enabled | 8 allocations, 4 frees | 0 |
+| An audio input recorded onto an armed track, heard as it comes in (step 3.4, measured 2026-10-29) | 6 allocations, 3 frees (the input's first buffers, finding 1, and the meters', finding 2) | 0 |
 | A loop at 120 BPM stretched to 100 BPM, played from Phazite's render (a loop dropped from the browser; step 2.18) | 13 allocations, 9 frees (from a file cache miss) | 0 |
 | An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from Phazite's render (as the audio clip editor sets them, steps 2.6 and 2.18) | 3 allocations | 0 |
 | A loop at 120 BPM previewed at 100 BPM, stretched by Phazite into memory as it starts (the browser's preview, since 2026-10-28) | 9 allocations (the meters' and the device's, findings 2 and 3; SoundTouch's 21 allocations and 14 frees before) | 0 |
@@ -79,10 +80,9 @@ Steady playback is clean everywhere. Every scenario allocates something in its f
 - **What:** when an audio input is enabled, its first blocks allocate on the audio thread:
   - the retrospective-record buffer: about 11 MB per stereo input at 48 kHz, for the default 30 seconds;
   - its per-project bookkeeping, a map insert under a spin lock;
-  - the input copy buffers.
-- **Action:** Phazite opens no inputs by default (step 0.2), so this can't happen yet. Fix it before audio recording (step 3.4):
-  - turning the buffer off isn't an option, because MIDI Capture shares its length setting;
-  - so the fix is a small engine change (fork) that sizes the buffer when the input is enabled.
+  - the input copy buffers;
+  - and, until the Edit's playback has the input, a buffer at every block for the input's meter.
+- **Action (step 3.4, 2026-10-29):** Phazite opens an input only while a track is armed or always hears its input. The audio inputs keep no retrospective buffer, with no fork: Phazite's engine settings give Tracktion's retrospective length as 0 (Capture is for MIDI; audio Capture comes after v1), and live MIDI's inputs keep Capture's 30 seconds, set on them directly (`model/engine/internal/EngineSetup.h`). What is left happens as an input opens (its copy buffers, the bookkeeping, the meter's buffer before playback has the input): the recording scenario allocates 6 times as it warms up, and nothing after.
 - Report upstream.
 
 **2. Level meters** (measured): every meter allocates a small buffer in its first block (`LevelMeasurer::Client::ensureNumChannels`). This happens once per meter, so accept it for now. Report upstream; fix it in the fork if one exists by then.
@@ -131,7 +131,9 @@ Steady playback is clean everywhere. Every scenario allocates something in its f
 
 **12. Tempo changes** (source): the tempo map swaps its rebuilt sequence under the audio callback's lock. Report upstream; test with tempo automation later.
 
-**13. Recording** (source): the MIDI and audio recording paths lock, allocate and start timers on the audio thread. Revisit with MIDI recording (step 1.7) and audio recording (step 3.4).
+**13. Recording** (source; Phazite's audio recording measured, step 3.4).
+- **What:** Tracktion's MIDI and audio recording paths lock, allocate and start timers on the audio thread. Its audio recording also writes each block under a lock, adds silence in buffers it allocates, and needs a Tracktion project for its takes.
+- **Action:** MIDI recording is Tracktion's (step 1.7), and its guarded scenario allocates nothing in steady playback. Audio recording is Phazite's own since step 3.4 (2026-10-29, `model/transport/internal/AudioRecorder.h`): Tracktion hands each armed track's input to a consumer of Phazite's, which copies it into a buffer of its own (a `juce::AbstractFifo`) with no lock or allocation, and a thread of Phazite's writes it into the file. The one lock left is the input's list of consumers, which the audio thread takes at each block and the message thread only as recording starts and stops. The guarded scenario records a tone onto an armed track that hears it, and allocates nothing once recording runs.
 
 **14. The click track** (source): reads message-thread values on the audio thread without synchronisation. That's a data race rather than a lock. ThreadSanitizer in CI should show it. Report upstream.
 

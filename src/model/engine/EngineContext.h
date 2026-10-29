@@ -45,6 +45,12 @@ public:
     // Whether the Low Latency switch is on (the command transport.lowLatency; model/engine/internal/EngineSetup.h).
     bool isLowLatency() const;
 
+    // The correction for recordings, in milliseconds (model/transport/internal/AudioRecorder.h): how much earlier what the
+    // audio inputs record goes than the delays their driver reports put it, for a driver that reports them wrongly; 0 at
+    // first, and best left so.
+    double getRecordingCorrection() const;
+    void setRecordingCorrection (double milliseconds);
+
     // The MIDI devices connected, each on or off. The Engine opens them (not JUCE's device manager), and what they
     // play goes to the track live MIDI plays.
     struct MidiInput

@@ -106,10 +106,11 @@ void TopBar::projectChanged()
 void TopBar::refreshTooltips()
 {
     playButton.setTooltip (withShortcut (commands, "Play or stop", "transport.playStop"));
-    recordButton.setTooltip (withShortcut (commands,
-                                           "Record what you play onto the selected track, from where playback starts. Right-click "
-                                           "for the count-in, overdub and quantizing",
-                                           "transport.record"));
+    recordButton.setTooltip (
+        withShortcut (commands,
+                      "Record what you play onto the selected track, and the armed tracks' audio inputs, from where playback "
+                      "starts. Right-click for the count-in, punch-in, overdub and quantizing",
+                      "transport.record"));
     captureButton.setTooltip (withShortcut (commands,
                                             "Capture: turns what you played in the last 30 seconds into a clip on the selected "
                                             "track, recording or not",
@@ -208,7 +209,8 @@ void TopBar::showTempoStretch()
 void TopBar::showRecordMenu()
 {
     juce::PopupMenu menu;
-    addCommandItems (menu, commands, { "transport.record", "transport.countIn", "transport.overdub", "transport.quantizeRecordings" });
+    addCommandItems (menu, commands,
+                     { "transport.record", "transport.countIn", "transport.punch", "transport.overdub", "transport.quantizeRecordings" });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (recordButton));
 }
 

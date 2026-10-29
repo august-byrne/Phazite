@@ -6,6 +6,7 @@
 #include "internal/Sections.h"
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/chords/internal/Chords.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
@@ -159,6 +160,12 @@ namespace
             info.fadeInShape = toFadeShape (audio->getFadeInType());
             info.fadeOutShape = toFadeShape (audio->getFadeOutType());
             info.followsTempo = getClipTempo (*audio) > 0.0;
+
+            if (const auto takes = (int) audio->state.getProperty (schema::phaziteTakes, 0); takes > 1)
+            {
+                info.takes = takes;
+                info.take = (int) audio->state.getProperty (schema::phaziteTake, 1);
+            }
         }
 
         return info;

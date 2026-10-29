@@ -9,6 +9,7 @@
 #include "StripParts.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
+#include "ui/components/ArmButton.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 
@@ -76,6 +77,7 @@ private:
     Fader volume { Fader::Direction::vertical, "Volume", decibelsToFaderPosition (0.0f) };
     Knob pan { "Pan", 0.0 };
     MuteSoloButtons muteSolo;
+    ArmButton arm; // a track's that records audio
     strip::CpuBar cpuBar;
     ParameterAttachment volumeAttachment { volume }, panAttachment { pan };
 

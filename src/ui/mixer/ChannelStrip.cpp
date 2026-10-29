@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ChannelStrip.h"
 #include "model/presets/PresetModel.h"
+#include "model/transport/RecordingModel.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/input/LibraryDrag.h"
@@ -87,9 +88,15 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
       context (projectContext),
       instrument (DeviceSlots::Kind::instrument, projectContext, bridge),
       effects (DeviceSlots::Kind::effects, projectContext, bridge),
-      muteSolo (projectContext)
+      muteSolo (projectContext),
+      arm (projectContext)
 {
     setTitle ("Channel");
+    arm.onChange = [this]
+    {
+        inputLabel.setText (describeInput(), juce::dontSendNotification);
+        resized(); // the arm switch, shown or not
+    };
 
     nameLabel.setJustificationType (juce::Justification::centred);
     nameLabel.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
@@ -136,6 +143,8 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
                                                              &pan, &muteSolo, &cpuBar })
         addAndMakeVisible (c);
 
+    addChildComponent (arm);
+
     context.addListener (this);
     setTrack ({});
     startTimerHz (8);
@@ -153,6 +162,7 @@ void ChannelStrip::setTrack (TrackID newTrack)
     instrument.setTrack (newTrack);
     effects.setTrack (newTrack);
     muteSolo.setTrack (newTrack);
+    arm.setTrack (newTrack);
     meter.setSource (getLevel (context, newTrack));
     shownReturns.clear();
     sendSlots.clear();
@@ -197,6 +207,7 @@ void ChannelStrip::refresh()
     effects.refresh();
     refreshSends();
     muteSolo.update();
+    arm.update();
     layOutSlots();
 
     // The color bar, when the track's color changes (it follows the track's place in the palette unless it has its own).
@@ -311,6 +322,10 @@ juce::String ChannelStrip::describeInput() const
         case ChannelKind::track:
             break;
     }
+
+    // A track that records audio says from what, and whether it is armed.
+    if (const auto input = getTrackInput (context, track); input.isNotEmpty() && canRecordAudio (context, track))
+        return (isArmed (context, track) ? "Armed: " : "Input: ") + phazite::describeInput (input);
 
     return {};
 }
@@ -431,7 +446,17 @@ void ChannelStrip::resized()
     volume.setBounds (faderArea);
     area.removeFromBottom (Space::xs);
 
-    muteSolo.setBounds (area.removeFromBottom (buttonHeight));
+    // A track that records audio has its arm switch before its mute and solo.
+    auto switches = area.removeFromBottom (buttonHeight);
+    arm.setVisible (arm.isShown());
+
+    if (arm.isVisible())
+    {
+        arm.setBounds (switches.removeFromLeft (buttonHeight));
+        switches.removeFromLeft (Space::xs / 2);
+    }
+
+    muteSolo.setBounds (switches);
     area.removeFromBottom (Space::xs);
     pan.setBounds (area.removeFromBottom (panKnobSize).withSizeKeepingCentre (panKnobSize, panKnobSize));
     area.removeFromBottom (Space::xs);

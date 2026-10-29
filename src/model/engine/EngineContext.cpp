@@ -4,6 +4,7 @@
 #include "internal/EngineContext.h"
 #include "internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/transport/internal/AudioRecorder.h"
 
 namespace phazite
 {
@@ -77,6 +78,16 @@ EngineContext::AudioOutput EngineContext::getAudioOutput() const
 bool EngineContext::isLowLatency() const
 {
     return phazite::isLowLatency (impl->engine);
+}
+
+double EngineContext::getRecordingCorrection() const
+{
+    return phazite::getRecordingCorrection (impl->engine);
+}
+
+void EngineContext::setRecordingCorrection (double milliseconds)
+{
+    phazite::setRecordingCorrection (impl->engine, milliseconds);
 }
 
 bool EngineContext::hasAsioDrivers() const

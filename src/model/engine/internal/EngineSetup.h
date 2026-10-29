@@ -20,7 +20,16 @@ public:
 
     juce::String getUserName() override;           // always empty
     juce::String getApplicationVersion() override; // getVersionString()
+
+    // How much of what came in each input keeps for Tracktion's retrospective record: none, so that an audio input,
+    // which Phazite records itself (model/transport/internal/AudioRecorder.h), makes no buffer of 30 seconds on the
+    // audio thread as it is enabled (docs/realtime-audit.md, finding 1). Live MIDI's input gets Capture's 30 seconds back
+    // (LiveInput.h: routeLiveMidiInput()).
+    juce::var getProperty (te::SettingID, const juce::var& defaultValue) override;
 };
+
+// How many seconds of what is played on MIDI Capture keeps.
+inline constexpr double captureSeconds = 30.0;
 
 //==============================================================================
 class EngineBehaviour : public te::EngineBehaviour

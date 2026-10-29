@@ -229,6 +229,7 @@ private:
     bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;
     double contentEnd = 0.0;            // in beats, as the scroll bar knows it
     std::optional<BeatRange> shownLoop; // the loop the ruler shows (none while playback doesn't loop), to repaint it on changes
+    bool shownPunch = false;            // whether it shows the loop red, Record punching into it (RecordingModel.h)
     double lastAutoScrollTime = 0.0;    // milliseconds (juce::Time::getMillisecondCounterHiRes())
     std::unique_ptr<Playhead> playhead;
     juce::VBlankAttachment playheadFrames; // while playing where it shows: followPlayhead() at each frame of the display

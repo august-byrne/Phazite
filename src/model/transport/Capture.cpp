@@ -149,11 +149,18 @@ te::MidiClip* capture (te::Edit& edit, te::SelectionManager* selection)
     const bool songWasEmpty = getSongEnd (edit) == te::TimePosition();
 
     // Tracktion's capture makes clips of what was played, which Phazite takes the notes out of, unquantized, to place
-    // them itself.
+    // them itself. Live MIDI's input only: an audio input carried to a track would give a clip of its own (or, with no
+    // Tracktion project, none), and keeps no buffer to capture from (model/engine/internal/EngineSetup.h).
+    auto* midiInput = findLiveMidiInput (edit);
+
+    if (midiInput == nullptr)
+        return nullptr;
+
     const auto quantizing = device->quantisation.getType (false);
     device->quantisation.setType ("(none)");
-    juce::Array<te::Clip*> made;
-    context->applyRetrospectiveRecord (&made, false);
+    te::InputDevice::setRetrospectiveLock (edit.engine, { midiInput }, true);
+    const auto made = midiInput->applyRetrospectiveRecord (false);
+    te::InputDevice::setRetrospectiveLock (edit.engine, { midiInput }, false);
     device->quantisation.setType (quantizing);
 
     auto notes = takeNotes (made);
