@@ -125,18 +125,19 @@ void purgeClipRenders (te::Edit& edit)
 class ClipRenders::Job : public juce::ThreadPoolJob
 {
 public:
-    Job (ClipRenders& o, te::Engine& e, Recipe r, juce::File file)
+    Job (ClipRenders& o, te::Engine& e, Recipe r, juce::File file, std::shared_ptr<const std::atomic<bool>> stopped)
         : juce::ThreadPoolJob ("Clip render"),
           owner (o),
           engine (e),
           recipe (std::move (r)),
-          render (std::move (file))
+          render (std::move (file)),
+          stop (std::move (stopped))
     {
     }
 
     JobStatus runJob() override
     {
-        renderClipAudio (engine, recipe.source, recipe.settings, render, [this] { return shouldExit(); });
+        renderClipAudio (engine, recipe.source, recipe.settings, render, [this] { return shouldExit() || stop->load(); });
         owner.jobFinished (render);
         return jobHasFinished;
     }
@@ -146,6 +147,7 @@ private:
     te::Engine& engine;
     const Recipe recipe;
     const juce::File render;
+    const std::shared_ptr<const std::atomic<bool>> stop;
 };
 
 ClipRenders::ClipRenders (te::Edit& e)
@@ -182,18 +184,18 @@ void ClipRenders::update()
     const auto needed = getNeededRenders (edit);
 
     // Those no clip plays any more stop.
-    for (auto& [render, job] : running)
-        if (needed.find (render) == needed.end() && pool.contains (job))
-            job->signalJobShouldExit();
+    for (const auto& [render, stop] : running)
+        if (needed.find (render) == needed.end())
+            stop->store (true);
 
     for (const auto& [render, recipe] : needed)
     {
         if (render.existsAsFile() || running.find (render) != running.end())
             continue;
 
-        auto* job = new Job (*this, edit.engine, recipe, render);
-        running[render] = job;
-        pool.addJob (job, true);
+        auto stop = std::make_shared<std::atomic<bool>> (false);
+        running[render] = stop;
+        pool.addJob (new Job (*this, edit.engine, recipe, render, std::move (stop)), true);
     }
 }
 

@@ -3,6 +3,7 @@
 // samples that follow it, which Phazite renders (roadmap step 2.18), and patterns unless they keep their speed.
 #include "HostedDevice.h"
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
@@ -167,6 +168,46 @@ TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite r
     phazite::undo (*edit);
     phazite::purgeClipRenders (*edit);
     CHECK_FALSE (render.existsAsFile());
+}
+
+TEST_CASE ("A project's renders are made in the background, and one that no clip needs any more stops and leaves nothing")
+{
+    phazite::test::TemporaryFolder temp;
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto& track = *te::getAudioTracks (*edit)[0];
+
+    // A loop rendered in no time, and one so long that its render is still going when the tempo changes back (Tracktion
+    // takes a tempo from a name for files of up to a minute).
+    auto* shortLoop = dynamic_cast<te::AudioClipBase*> (
+        phazite::importFile (track, writeClicks (temp.folder.getChildFile ("Short"), 4, 120.0), te::BeatPosition()));
+    auto* longLoop = dynamic_cast<te::AudioClipBase*> (
+        phazite::importFile (track, writeClicks (temp.folder.getChildFile ("Long"), 112, 120.0), te::BeatPosition::fromBeats (8.0)));
+    REQUIRE (shortLoop != nullptr);
+    REQUIRE (longLoop != nullptr);
+    phazite::ClipRenders renders (*edit);
+    CHECK_FALSE (renders.isRendering());
+
+    // A short while after the tempo last changed, both renders begin, each written beside where it goes until it is
+    // whole; once the short one is made, its clip plays it.
+    phazite::setTempo (*edit, 100.0);
+    const auto longRender = longLoop->getSourceFileReference().getFile();
+    REQUIRE (phazite::isRendered (*longLoop));
+    const auto isWritingLongRender = [&longRender]
+    {
+        return ! longRender.getParentDirectory()
+                     .findChildFiles (juce::File::findFiles, false, longRender.getFileNameWithoutExtension() + "_*.part")
+                     .isEmpty();
+    };
+    CHECK (renders.isRendering());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([shortLoop] { return shortLoop->getAudioFile().isValid(); }, 60000));
+    REQUIRE (isWritingLongRender());
+
+    // Back at their own tempo the loops play their files, and the long render stops, leaving nothing.
+    phazite::setTempo (*edit, 120.0);
+    CHECK_FALSE (renders.isRendering());
+    CHECK (phazite::test::dispatchMessagesUntil ([&isWritingLongRender] { return ! isWritingLongRender(); }, 10000));
+    CHECK_FALSE (longRender.existsAsFile());
+    phazite::purgeClipRenders (*edit); // the short one's, which no clip plays now
 }
 
 TEST_CASE ("A loop stretched to the song's tempo plays every hit once and on its beat, as export renders it")

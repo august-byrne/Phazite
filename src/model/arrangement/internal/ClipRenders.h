@@ -8,7 +8,9 @@
 #include "devices/stretch/Stretch.h"
 #include "model/base/internal/Tracktion.h"
 
+#include <atomic>
 #include <map>
+#include <memory>
 
 namespace phazite
 {
@@ -49,7 +51,10 @@ private:
     te::Edit& edit;
     juce::ValueTree state; // the Edit's
     juce::ThreadPool pool;
-    std::map<juce::File, Job*> running;
+
+    // The renders being made, each with the switch that stops it: never the job itself, which the pool deletes as it ends,
+    // between any two calls here.
+    std::map<juce::File, std::shared_ptr<std::atomic<bool>>> running;
 
     juce::CriticalSection finishedLock;
     juce::Array<juce::File> finished; // by the jobs, for the message thread to tell Tracktion about
