@@ -121,11 +121,32 @@ int DeviceEditorBase::getMinimumWidth() const
     return 2 * margin + (layout != nullptr ? layout->getMinimumWidth() : 0);
 }
 
+juce::Component* DeviceEditorBase::getFoldedPicture() const
+{
+    return layout != nullptr ? layout->getContent (0, 0) : nullptr;
+}
+
+void DeviceEditorBase::showPictureOnly()
+{
+    auto* shown = getFoldedPicture();
+
+    if (shown == nullptr || pictureShown != nullptr)
+        return;
+
+    for (auto* child : getChildren())
+        child->setVisible (false);
+
+    addAndMakeVisible (*shown); // a part that showed it over its controls gives it up
+    pictureShown = shown;
+    resized();
+    repaint();
+}
+
 void DeviceEditorBase::paint (juce::Graphics& g)
 {
     g.fillAll (getPalette (*this).surface);
 
-    if (layout != nullptr)
+    if (layout != nullptr && pictureShown == nullptr)
         layout->paint (g);
 }
 
@@ -136,7 +157,9 @@ void DeviceEditorBase::lookAndFeelChanged()
 
 void DeviceEditorBase::resized()
 {
-    if (layout != nullptr)
+    if (pictureShown != nullptr)
+        pictureShown->setBounds (getLocalBounds());
+    else if (layout != nullptr)
         layout->layOut (getLocalBounds().reduced (margin));
 }
 } // namespace phazite::ui

@@ -82,7 +82,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       audioClipEditor (bridge, context),
       mixer (bridge, context),
       devices (bridge, context),
-      statusBar (engine, bridge),
+      statusBar (engine, bridge, context),
       guide (bridge, s)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it

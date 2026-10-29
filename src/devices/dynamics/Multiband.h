@@ -57,6 +57,7 @@ public:
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
+    const FallingValue* getGainReduction() const noexcept override { return &gainReduction; } // its bands' cuts
 
 private:
     double sampleRate = 44100.0;
@@ -69,5 +70,6 @@ private:
     std::array<dsp::LevelFollower, numBands> changes; // each band's gain change, in decibels below 0 dB of reduction
     std::array<MeterValue, numBands> bandLevels { MeterValue { -120.0f }, MeterValue { -120.0f }, MeterValue { -120.0f } };
     std::array<MeterValue, numBands> bandCuts, bandLifts; // from 0
+    FallingValue gainReduction { reductionFallPerSecond };
 };
 } // namespace phazite::devices

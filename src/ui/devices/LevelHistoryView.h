@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The last seconds of a dynamics device's sound, scrolling from right to left, as FabFilter's limiter and compressor show
-// theirs: how loud it comes in (pale) and goes out (in the device's colour), how far it is turned down (red, hanging from
-// the top, its deepest dips numbered), and a line across at a level the device sets (a limiter's ceiling, a compressor's
-// threshold), which a drag up or down moves, as one undo step. Its editor pushes a reading each tick.
+// theirs: how loud it comes in (pale; or, when the device listens to another track through its sidechain, that track, in its
+// colour and named) and goes out (in the device's colour), how far it is turned down (red, hanging from the top, its
+// deepest dips numbered), and a line across at a level the device sets (a limiter's ceiling, a compressor's threshold),
+// which a drag up or down moves, as one undo step. Its editor pushes a reading each tick.
 #pragma once
 
 #include "DeviceGraph.h"
@@ -25,6 +26,12 @@ public:
     // The line across: its parameter (the caller's handle, which must outlive this), named ("Ceiling"), or none.
     void setLine (ParameterHandle*, const juce::String& name);
 
+    // What comes in, when the device listens to another track through its sidechain (its key): that track's colour and name,
+    // drawn and written in its colour, so that a sound ducked under another shows what ducks it (roadmap step 2.17). An
+    // empty name: the device's own sound, pale.
+    void setKey (const juce::String& name, juce::Colour);
+    juce::String getKeyName() const { return keyName; }
+
     // The newest reading, as shown.
     float getNewestReduction() const { return reductions.get (reductions.size() - 1); }
 
@@ -41,7 +48,8 @@ private:
     graph::LevelHistory inputs, outputs, reductions;
     DrawnNumbers drawn;
     ParameterHandle* line = nullptr;
-    juce::String lineName;
+    juce::String lineName, keyName;
+    juce::Colour keyColour;
     bool dragging = false;
     float startValue = 0.0f;
 

@@ -295,6 +295,11 @@ AutomationWatcher* getAutomationWatcher (const ProjectContext& context)
     return context.getImpl().automation.get();
 }
 
+ClipRenders* getClipRenders (const ProjectContext& context)
+{
+    return context.getImpl().clipRenders.get();
+}
+
 void setEdit (ProjectContext& context, te::Edit* edit)
 {
     auto& impl = context.getImpl();

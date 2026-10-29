@@ -43,6 +43,7 @@ public:
     void reset() override;
     void process (const ProcessContext&) override;
     int getLatencySamples() const override { return latency; }
+    const FallingValue* getGainReduction() const noexcept override { return &gainReduction; }
 
 private:
     // Peaks between samples are found at a quarter, a half and three quarters of the way from one to the next, each
@@ -72,6 +73,7 @@ private:
 
     std::array<dsp::DelayLine, 2> delays;
     MeterValue inputMeter { -120.0f }, reductionMeter { 0.0f }, outputMeter { -120.0f };
+    FallingValue gainReduction { reductionFallPerSecond };
 
     float hold (float required) noexcept;
     float average (float value) noexcept;

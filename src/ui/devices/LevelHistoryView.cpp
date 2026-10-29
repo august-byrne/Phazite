@@ -19,8 +19,8 @@ LevelHistoryView::LevelHistoryView (const juce::String& title, float lowestLevel
       reductions (ticks, 0.0f)
 {
     setTitle (title);
-    setDescription ("How loud the sound came in (pale) and went out over the last seconds, and how far it was turned down (red, "
-                    "from the top).");
+    setDescription ("How loud the sound came in (pale, or in the colour of the track the device listens to through its sidechain) and "
+                    "went out over the last seconds, and how far it was turned down (red, from the top).");
 }
 
 void LevelHistoryView::push (float input, float output, float reduction)
@@ -50,6 +50,16 @@ void LevelHistoryView::setLine (ParameterHandle* handle, const juce::String& nam
     repaint();
 }
 
+void LevelHistoryView::setKey (const juce::String& name, juce::Colour colour)
+{
+    if (name == keyName && colour == keyColour)
+        return;
+
+    keyName = name;
+    keyColour = colour;
+    repaint();
+}
+
 graph::LevelAxis LevelHistoryView::getLevels() const
 {
     return { getLocalBounds().toFloat().reduced (1.0f), lowest, 0.0f };
@@ -72,9 +82,22 @@ void LevelHistoryView::paint (juce::Graphics& g)
     const auto yFor = [&levels, this] (float decibels) { return levels.yFor (juce::jlimit (lowest, 0.0f, decibels)); };
     const auto inner = levels.area;
 
-    // In, pale; out, in the device's colour, over it.
-    g.setColour (p.textMuted.withAlpha (GraphTint::spectrumFill * 2.0f));
-    g.fillPath (inputs.makeArea (inner, yFor, inner.getBottom()));
+    // In, pale, or the key in its track's colour, outlined and named; out, in the device's colour, over it.
+    if (keyName.isEmpty())
+    {
+        g.setColour (p.textMuted.withAlpha (GraphTint::spectrumFill * 2.0f));
+        g.fillPath (inputs.makeArea (inner, yFor, inner.getBottom()));
+    }
+    else
+    {
+        g.setColour (keyColour.withAlpha (GraphTint::partCurve * 2.0f));
+        g.fillPath (inputs.makeArea (inner, yFor, inner.getBottom()));
+        g.setColour (keyColour);
+        g.strokePath (inputs.makeLine (inner, yFor), juce::PathStrokeType (1.0f));
+        g.setFont (juce::FontOptions (TextSize::small));
+        g.drawText (keyName, inner.reduced ((float) Space::xs), juce::Justification::bottomLeft, true);
+    }
+
     g.setColour (tint.withAlpha (GraphTint::partCurve * 2.0f));
     g.fillPath (outputs.makeArea (inner, yFor, inner.getBottom()));
     g.setColour (tint);

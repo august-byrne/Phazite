@@ -11,14 +11,16 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <optional>
 
 namespace phazite
 {
 // Renders a file with some settings into another, on the calling thread: into a file beside it first, which becomes the
 // render once it is whole. Returns false if the source can't be read or the render written, or shouldStop stopped it;
-// true if the render is there, even if someone else made it meanwhile.
+// true if the render is there, even if someone else made it meanwhile. framesWritten, if given, counts the frames written
+// so far, for another thread to show how far it has come.
 bool renderClipAudio (te::Engine&, const juce::File& source, const stretch::Settings&, const juce::File& render,
-                      const std::function<bool()>& shouldStop = {});
+                      const std::function<bool()>& shouldStop = {}, std::atomic<juce::int64>* framesWritten = nullptr);
 
 // Renders, on the calling thread, every clip's render that isn't there yet, and tells Tracktion about each new one. What
 // the project's ClipRenders does in the background; exports and freezes call it first, as Tracktion would render such
@@ -45,16 +47,41 @@ public:
     // Whether any clip still waits for its render.
     bool isRendering() const;
 
+    // How far the renders being made have come, since none was (for the status bar's bar): how many are being made or wait
+    // their turn (clips that play the same render count once), and how much of all their frames is done, from 0 to 1.
+    struct Progress
+    {
+        int renders = 0;
+        double done = 0.0;
+    };
+
+    Progress getProgress() const;
+
+    // How far one render has come, from 0 to 1, while it is being made or waits its turn; nothing otherwise.
+    std::optional<double> getProgressOf (const juce::File& render) const;
+
 private:
     class Job;
+
+    // A render being made, as its job and the keeper share it: the switch that stops it, and its frames, written and all.
+    struct Render
+    {
+        std::atomic<bool> stopped { false };
+        std::atomic<juce::int64> written { 0 };
+        juce::int64 length = 0;
+    };
+
+    static_assert (std::atomic<juce::int64>::is_always_lock_free);
 
     te::Edit& edit;
     juce::ValueTree state; // the Edit's
     juce::ThreadPool pool;
 
-    // The renders being made, each with the switch that stops it: never the job itself, which the pool deletes as it ends,
-    // between any two calls here.
-    std::map<juce::File, std::shared_ptr<std::atomic<bool>>> running;
+    // The renders being made: never the jobs themselves, which the pool deletes as they end, between any two calls here.
+    std::map<juce::File, std::shared_ptr<Render>> running;
+
+    // The frames of the renders made and being made since none was, those stopped left out, for getProgress().
+    juce::int64 framesMade = 0, framesAll = 0;
 
     juce::CriticalSection finishedLock;
     juce::Array<juce::File> finished; // by the jobs, for the message thread to tell Tracktion about

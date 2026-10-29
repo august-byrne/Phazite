@@ -190,5 +190,7 @@ void Maximizer::process (const ProcessContext& block)
     limited.numChannels = numChannels;
     limited.parameters = limiterValues;
     limiter.process (limited);
+
+    gainReduction.push (std::max (*std::max_element (mostReduced.begin(), mostReduced.end()), limiter.getGainReduction()->get()));
 }
 } // namespace phazite::devices

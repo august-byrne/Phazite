@@ -5,6 +5,7 @@
 // the mixer, the master's devices, and the track's modulators with an editor beside them.
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
+#include "devices/dynamics/Compressor.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -28,6 +29,14 @@ namespace
 {
 using phazite::DeviceID;
 using phazite::TrackID;
+
+// The editors in a panel that show all of a device: a folded card's shows its picture alone.
+template <typename Editor>
+int countWholeEditors (juce::Component& panel)
+{
+    const auto editors = phazite::test::findAll<Editor> (panel);
+    return (int) std::count_if (editors.begin(), editors.end(), [] (const Editor* editor) { return ! editor->isPictureOnly(); });
+}
 
 // A device's name in its panel's header (the panel has the same title, for screen readers).
 juce::Component* findNameButton (juce::Component& panel, const juce::String& name)
@@ -123,19 +132,19 @@ TEST_CASE ("The Effects page shows the selected track's effects in a row, as car
 
     // Folded at first to their key knobs, narrow; the EQ's chevron opens it, its whole editor with its graph shrunk to fit,
     // and opening the compressor folds it again. The plug-in has key knobs and a button that opens its own window.
-    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).isEmpty());
+    CHECK (countWholeEditors<phazite::ui::EqEditor> (*eq) == 0);
     CHECK (eq->getWidth() < 250);
     auto* open = phazite::test::findComponentWithTitle (*eq, "Open");
     REQUIRE (open != nullptr);
     phazite::test::Mouse openMouse (*open);
     openMouse.click (open->getLocalBounds().getCentre());
     CHECK (view.isOpen (effects[0]));
-    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).size() == 1);
+    CHECK (countWholeEditors<phazite::ui::EqEditor> (*eq) == 1);
     CHECK (eq->getWidth() > 300);
     view.setOpen (effects[1], true);
     CHECK_FALSE (view.isOpen (effects[0]));
-    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).isEmpty());
-    CHECK (phazite::test::findAll<phazite::ui::CompressorEditor> (*compressor).size() == 1);
+    CHECK (countWholeEditors<phazite::ui::EqEditor> (*eq) == 0);
+    CHECK (countWholeEditors<phazite::ui::CompressorEditor> (*compressor) == 1);
     CHECK (phazite::test::findComponentWithTitle (*eq, "Open its window") == nullptr);
     CHECK (phazite::test::findComponentWithTitle (*plugin, "Open its window") != nullptr);
 
@@ -189,6 +198,61 @@ TEST_CASE ("The Effects page shows the selected track's effects in a row, as car
     CHECK_FALSE (view.isOpen (effects[1]));
 }
 
+TEST_CASE ("A folded card shows what its device does as it plays, over its key knobs, and a click on that opens the card")
+{
+    Screen screen;
+    auto& view = screen.view;
+    const auto effects = screen.effects (0);
+    REQUIRE (effects.size() == 3);
+    auto* eq = view.findPanel (effects[0]);
+    auto* compressor = view.findPanel (effects[1]);
+    auto* plugin = view.findPanel (effects[2]);
+    REQUIRE (eq != nullptr);
+    REQUIRE (compressor != nullptr);
+    REQUIRE (plugin != nullptr);
+    view.setOpen (effects[1], false); // the compressor, added last, opened
+    REQUIRE_FALSE (view.isOpen (effects[0]));
+    REQUIRE_FALSE (view.isOpen (effects[1]));
+
+    // The EQ's curve alone, filling the card above its knobs; the compressor's history, which shows the ducking, without
+    // its curve; the plug-in's card, its knobs only.
+    const auto eqPictures = phazite::test::findAll<phazite::ui::EqEditor> (*eq);
+    REQUIRE (eqPictures.size() == 1);
+    CHECK (eqPictures[0]->isPictureOnly());
+    CHECK (eqPictures[0]->isShowing());
+    CHECK (eqPictures[0]->getHeight() > 120);
+    CHECK (eqPictures[0]->getGraph().getBounds() == eqPictures[0]->getLocalBounds());
+    auto* history = phazite::test::findComponentWithTitle (*compressor, "Compressor history");
+    REQUIRE (history != nullptr);
+    CHECK (history->isShowing());
+    auto* curve = phazite::test::findComponentWithTitle (*compressor, "Compressor curve");
+    CHECK ((curve == nullptr || ! curve->isShowing()));
+    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*plugin).isEmpty());
+
+    const auto showingKnobs = [] (juce::Component& card)
+    {
+        auto knobs = phazite::test::findAll<phazite::ui::Knob> (card);
+        return std::count_if (knobs.begin(), knobs.end(), [] (const phazite::ui::Knob* knob) { return knob->isShowing(); });
+    };
+
+    CHECK (showingKnobs (*compressor) >= 3); // its mix in the header, and its two key knobs
+    CHECK (showingKnobs (*eq) >= 3);
+    phazite::test::checkChildrenApart (*eq);
+
+    // A click on the picture opens the card, to the whole editor.
+    phazite::test::Mouse mouse (*eqPictures[0]);
+    mouse.click (eqPictures[0]->getLocalBounds().getCentre());
+    CHECK (view.isOpen (effects[0]));
+    CHECK (countWholeEditors<phazite::ui::EqEditor> (*eq) == 1);
+    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).size() == 1);
+
+    // A short dock leaves the knobs, and no picture squeezed into what is left.
+    view.setOpen (effects[0], false);
+    screen.window.setSize (1600, 150);
+    auto* shortPicture = phazite::test::findAll<phazite::ui::EqEditor> (*view.findPanel (effects[0]))[0];
+    CHECK_FALSE (shortPicture->isShowing());
+}
+
 TEST_CASE ("While devices' windows show, a plug-in's card keeps its knobs, and one of Phazite's own folds with its button lit")
 {
     Screen screen;
@@ -198,7 +262,7 @@ TEST_CASE ("While devices' windows show, a plug-in's card keeps its knobs, and o
     REQUIRE (view.findPanel (effects[2]) != nullptr);
     const auto pluginWidth = view.findPanel (effects[2])->getWidth();
     view.setOpen (effects[0], true);
-    REQUIRE (phazite::test::findAll<phazite::ui::EqEditor> (*view.findPanel (effects[0])).size() == 1);
+    REQUIRE (countWholeEditors<phazite::ui::EqEditor> (*view.findPanel (effects[0])) == 1);
 
     // Windows as Tracktion holds them, showing (the app's would be real ones on the screen).
     std::vector<te::Plugin::Ptr> shown;
@@ -450,4 +514,56 @@ TEST_CASE ("A device with a sidechain shows in its header what it listens to: th
     REQUIRE (other.has_value());
     CHECK (button->getButtonText() == other->name);
     phazite::test::checkChildrenApart (view);
+}
+
+TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, along its edge, as the sound plays")
+{
+    Screen screen;
+    const auto effects = screen.effects (0);
+    REQUIRE (effects.size() == 3);
+    phazite::ui::ChannelStrip strip { screen.commands, screen.context };
+    phazite::test::TestWindow stripWindow { strip, phazite::ui::ChannelStrip::width, 900 };
+    strip.setTrack (screen.track (0));
+
+    // The compressor's slot has one, the EQ's and the plug-in's none.
+    const auto meters = phazite::test::findAll<phazite::ui::ValueMeter> (strip);
+    const auto reductions = std::count_if (meters.begin(), meters.end(),
+                                           [] (const phazite::ui::ValueMeter* meter) { return meter->getTitle() == "Gain reduction"; });
+    REQUIRE (reductions == 1);
+    auto* meter = *std::find_if (meters.begin(), meters.end(),
+                                 [] (const phazite::ui::ValueMeter* meter) { return meter->getTitle() == "Gain reduction"; });
+    auto* compressorName = phazite::test::findComponentWithTitle (strip, "Compressor");
+    REQUIRE (compressorName != nullptr);
+    CHECK (meter->getParentComponent() == compressorName->getParentComponent());
+    CHECK (meter->getRight() == compressorName->getParentComponent()->getWidth());
+    phazite::test::checkChildrenApart (*meter->getParentComponent());
+
+    // Nothing at first; then 12 dB over the compressor's threshold, at 4:1, settles 9 dB down, as the audio thread plays it.
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+    ticker->tickNow();
+    CHECK (meter->getValue() == doctest::Approx (0.0f));
+
+    auto* compressor = phazite::getDeviceHandle (screen.context, effects[1]).getProcessor<phazite::devices::Compressor>();
+    REQUIRE (compressor != nullptr);
+    compressor->prepare (48000.0, 24000);
+    std::vector<float> values;
+
+    for (const auto& parameter : phazite::devices::Compressor::info.parameters)
+        values.push_back (parameter.defaultValue);
+
+    juce::AudioBuffer<float> buffer (2, 24000);
+
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+        for (int channel = 0; channel < 2; ++channel)
+            buffer.setSample (channel, i, (i % 2 == 0 ? 1.0f : -1.0f) * juce::Decibels::decibelsToGain (-6.0f));
+
+    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+    phazite::devices::ProcessContext block;
+    block.channels = channels;
+    block.numChannels = 2;
+    block.numSamples = buffer.getNumSamples();
+    block.parameters = values;
+    compressor->process (block);
+    ticker->tickNow();
+    CHECK (meter->getValue() == doctest::Approx (9.0f).epsilon (0.05));
 }

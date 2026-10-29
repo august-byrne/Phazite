@@ -3,6 +3,8 @@
 // prepares it before playback and hands it each block's audio, notes and parameter values.
 #pragma once
 
+#include "FallingValue.h"
+
 #include <cstdint>
 #include <span>
 
@@ -70,5 +72,12 @@ public:
     // Whether it plays something other than its effect now, such as a compressor letting its key be heard: its thin
     // plug-in then passes what it plays on whole, whatever its mix. Real-time safe.
     virtual bool overridesMix() const noexcept { return false; }
+
+    // How far it turns the sound down now, in decibels (0 or more), for what shows it besides its editor, such as its slot
+    // in the mixer (FallingValue.h: any number of readers); nullptr for a device that doesn't turn the sound down.
+    virtual const FallingValue* getGainReduction() const noexcept { return nullptr; }
 };
+
+// How fast a gain reduction shown outside a device's editor falls back, as the editors' meters do: 15 dB a second.
+inline constexpr float reductionFallPerSecond = 15.0f;
 } // namespace phazite::devices

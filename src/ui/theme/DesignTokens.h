@@ -87,7 +87,7 @@ namespace Shell
     inline constexpr int transportBarHeight = 44; // play, record, the tempo and the master level
     inline constexpr int tempoStretchWidth = 320; // what a tempo change stretches, under the tempo field as it changes
     inline constexpr int tempoStretchSeconds = 4; // how long that stays once the tempo stops changing
-    inline constexpr int statusBarHeight = 24;    // whether the project is saved, the hints, the audio output and the CPU
+    inline constexpr int statusBarHeight = 24;    // whether the project is saved, the selection, the hints, the audio output...
 
     // The title bar's parts: the window's buttons, as wide as Windows 11's, with their glyphs, Close red under the pointer as
     // there (in every theme); the command search, as wide as it can be in the middle; the project's name at its widest; the
@@ -106,6 +106,11 @@ namespace Shell
 
     // The status bar's CPU in the warning colour from here, in percent: the sound is close to breaking up.
     inline constexpr int busyCpuPercent = 80;
+
+    // The status bar's bar of how far clips being stretched in the background have come; and the least room its items leave
+    // the hints, which drop the least needed items rather than shrink below it.
+    inline constexpr int statusProgressWidth = 80, statusProgressHeight = 6;
+    inline constexpr int statusHintsMinimumWidth = 240;
 
     inline constexpr int dividerSize = 5;      // between panels, dragged to size them
     inline constexpr float dividerLit = 0.5f;  // the accent's alpha on a divider under the pointer
@@ -317,6 +322,15 @@ namespace AudioClipTint
     inline constexpr int handleSize = 10;
     inline constexpr int grabDistance = 6;
 } // namespace AudioClipTint
+
+// An audio clip in the playlist while its render is being made (roadmap step 2.18), silent until then: its waveform faint
+// (alpha), and a bar along its bottom edge of how far the render has come, over a track of the same ink (alpha, height).
+namespace RenderingTint
+{
+    inline constexpr float waveform = 0.3f;
+    inline constexpr float barTrack = 0.25f;
+    inline constexpr float barHeight = 3.0f;
+} // namespace RenderingTint
 
 // How the loop shows in a ruler: its lane along the top, which a drag loops (a shade of the text color), a bar of
 // the loop color in that lane over the part that loops, and a wash of it below (alphas); the lane's height, and how

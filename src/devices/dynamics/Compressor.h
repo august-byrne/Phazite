@@ -61,6 +61,7 @@ public:
 
     bool isPlayingKey() const noexcept { return juce::Time::getMillisecondCounterHiRes() < listenUntil.load (std::memory_order_relaxed); }
     bool overridesMix() const noexcept override { return keyShare > 0.0f; } // the block it last played: the key, or fading
+    const FallingValue* getGainReduction() const noexcept override { return &gainReduction; }
 
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
@@ -79,6 +80,7 @@ private:
     std::array<dsp::Filter, 2> lowCuts {};                 // the key's, per channel
     std::array<std::array<dsp::Filter, 2>, 2> highCuts {}; // the key's, two sections per channel
     MeterValue levelMeter { -120.0f }, reductionMeter { 0.0f };
+    FallingValue gainReduction { reductionFallPerSecond };
     std::atomic<double> listenUntil { 0.0 }; // in the clock's milliseconds
 
     static_assert (std::atomic<double>::is_always_lock_free);

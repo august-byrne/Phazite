@@ -10,6 +10,7 @@
 namespace phazite
 {
 class AutomationWatcher;
+class ClipRenders;
 class ProjectContext;
 
 te::Edit* getEdit (const ProjectContext&); // nullptr while no project is open
@@ -19,6 +20,10 @@ RangeSelection& getRangeSelection (ProjectContext&);
 
 // What watches the open Edit's automation (model/automation/internal/Automation.h): nullptr while no project is open.
 AutomationWatcher* getAutomationWatcher (const ProjectContext&);
+
+// What renders the open Edit's audio clips stretched, pitched or reversed (model/arrangement/internal/ClipRenders.h):
+// nullptr while no project is open.
+ClipRenders* getClipRenders (const ProjectContext&);
 
 // The Edit open now, or none: ProjectSession's (and tests'). Nothing of the previous Edit stays selected. Then tells the
 // listeners.

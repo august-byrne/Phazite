@@ -9,6 +9,7 @@
 
 #include "PlaylistModel.h"
 
+#include <map>
 #include <optional>
 
 namespace phazite
@@ -81,4 +82,21 @@ void setClipFollowsTempo (ProjectContext&, ClipID, bool);
 // "Change Clip Tempo": the tempo its audio was played at, while it follows the song's, kept within the editor's range. The
 // clip keeps its start and the part of its audio it plays, so it gets shorter or longer.
 void setClipTempo (ProjectContext&, ClipID, double bpm);
+
+//==============================================================================
+// The renders Phazite makes in the background for the clips that follow the tempo, or are pitched or reversed (each clip
+// silent until its own is ready; roadmap step 2.18), as the status bar shows them: how many are being made or wait their
+// turn (clips that play the same render count once), and how much of all of them is done, from 0 to 1, since none was.
+// None while nothing is being made, or no project is open.
+struct ClipRenderProgress
+{
+    int renders = 0;
+    double done = 0.0;
+};
+
+ClipRenderProgress getClipRenderProgress (const ProjectContext&);
+
+// The clips whose renders are being made or wait their turn, each with how far its render has come (0 to 1), as the
+// playlist shows them: silent until it is ready. None while nothing is being made.
+std::map<ClipID, double> getClipsBeingRendered (const ProjectContext&);
 } // namespace phazite

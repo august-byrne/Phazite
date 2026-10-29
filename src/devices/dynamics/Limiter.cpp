@@ -204,6 +204,7 @@ void Limiter::process (const ProcessContext& block)
 
     inputMeter.raise (dsp::gainToDecibels (loudestIn));
     reductionMeter.raise (-dsp::gainToDecibels (least));
+    gainReduction.push (-dsp::gainToDecibels (least));
     outputMeter.raise (dsp::gainToDecibels (loudestOut));
 }
 } // namespace phazite::devices

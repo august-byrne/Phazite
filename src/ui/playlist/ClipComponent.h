@@ -10,6 +10,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace phazite::ui
@@ -33,6 +34,11 @@ public:
 
     // Shows it in its track's color, whether it is selected, and frosted if its track is frozen.
     void showLook (juce::Colour, bool isSelected, bool isFrozen = false);
+
+    // While its render is being made (model/arrangement/AudioClipModel.h), how far it has come, from 0 to 1: its waveform
+    // faint, as it is silent until then, and a bar along its bottom edge; nothing once it plays.
+    void showRendering (std::optional<double> progress);
+    std::optional<double> getRendering() const noexcept { return rendering; }
     juce::Colour getColour() const noexcept { return colour; }
     bool isFrozen() const noexcept { return frozen; }
     juce::Colour getInk() const; // what is drawn on it: its name and its notes
@@ -46,6 +52,7 @@ private:
     std::vector<NoteShape> notes; // a MIDI clip's
     juce::Colour colour;
     bool selected = false, frozen = false;
+    std::optional<double> rendering;                       // to a hundredth
     ClipWaveform* waveform = nullptr;                      // an audio clip's, the playlist's
     std::unique_ptr<juce::Drawable> tempoMark;             // the metronome a sample that follows the tempo shows, once drawn
     juce::Colour tempoMarkColour { juce::Colours::black }; // the color the drawing is in now

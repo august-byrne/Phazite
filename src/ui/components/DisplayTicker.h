@@ -20,14 +20,14 @@ public:
     class Display
     {
     public:
-        explicit Display (juce::Component& shownBy);
+        explicit Display (juce::Component& shown);
         virtual ~Display();
 
         // Brings what it shows up to date, repainting what changed; called while its component shows.
         virtual void tick() = 0;
 
     private:
-        juce::Component& component;
+        juce::Component& shownBy;
         juce::SharedResourcePointer<DisplayTicker> ticker;
 
         friend class DisplayTicker;

@@ -21,11 +21,16 @@
 namespace phazite::ui
 {
 class DeviceEditorBase : public juce::Component,
-                         public FlexibleHeight
+                         public FlexibleHeight,
+                         public ShowsPictureOnly
 {
 public:
     explicit DeviceEditorBase (const DeviceHandle&);
     ~DeviceEditorBase() override;
+
+    // Its picture alone, filling it: its first part's (a graph, a history), unless it says otherwise (getFoldedPicture()).
+    void showPictureOnly() override;
+    bool isPictureOnly() const noexcept override { return pictureShown != nullptr; }
 
     const DeviceHandle& getDevice() const noexcept { return device; }
 
@@ -82,8 +87,12 @@ protected:
     // tabs (DeviceLayout::setSideTabs()). The editor's size is then its width at the height it wants.
     void setParts (std::vector<DeviceLayout::Column>, std::vector<int> sideTabColumns = {});
 
+    // What showPictureOnly() shows: the first part's content, or another of the editor's (one part of a part).
+    virtual juce::Component* getFoldedPicture() const;
+
 private:
     std::unique_ptr<DeviceLayout> layout;
+    juce::Component* pictureShown = nullptr; // alone, filling the editor
     std::vector<std::unique_ptr<juce::Component>> keptComponents;
     std::vector<ParameterControls*> controls;
     std::vector<std::pair<std::string_view, juce::Component*>> ownControls;

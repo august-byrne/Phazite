@@ -18,30 +18,7 @@
 
 namespace
 {
-constexpr double clickRate = 44100.0;
-
-// A loop of clicks, one on each beat at a tempo, each a burst of noise of its own, named for its tempo so that it follows
-// the song's ("Clicks 120 BPM.wav").
-juce::File writeClicks (const juce::File& folder, int beats, double bpm)
-{
-    const auto file = folder.getChildFile ("Clicks " + juce::String (bpm, 0) + " BPM.wav");
-    const auto beatSamples = (int) std::lround (60.0 / bpm * clickRate);
-    juce::AudioBuffer<float> audio (1, beats * beatSamples);
-    audio.clear();
-    juce::Random random (3);
-
-    for (int beat = 0; beat < beats; ++beat)
-        for (int i = 0; i < 88; ++i)
-            audio.setSample (0, beat * beatSamples + i, 0.5f * std::exp ((float) -i / 30.0f) * (random.nextFloat() * 2.0f - 1.0f));
-
-    folder.createDirectory();
-    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
-    auto writer = juce::WavAudioFormat().createWriterFor (
-        stream, juce::AudioFormatWriterOptions {}.withSampleRate (clickRate).withNumChannels (1).withBitsPerSample (24));
-    REQUIRE (writer != nullptr);
-    writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
-    return file;
-}
+using phazite::test::writeClicks;
 
 // The loudest millisecond (RMS) of a channel between two samples, and where it starts.
 std::pair<double, int> findLoudestMillisecond (const float* samples, int from, int to)
@@ -199,12 +176,22 @@ TEST_CASE ("A project's renders are made in the background, and one that no clip
                      .isEmpty();
     };
     CHECK (renders.isRendering());
+    CHECK (renders.getProgress().renders == 0); // not before the tempo has stayed put a moment
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return renders.getProgress().renders > 0; }, 10000));
+    CHECK (renders.getProgress().done < 1.0);
     REQUIRE (phazite::test::dispatchMessagesUntil ([shortLoop] { return shortLoop->getAudioFile().isValid(); }, 60000));
     REQUIRE (isWritingLongRender());
 
-    // Back at their own tempo the loops play their files, and the long render stops, leaving nothing.
+    // The short one counts as made, the long one as far as it has come.
+    const auto halfway = renders.getProgress();
+    CHECK (halfway.renders == 1);
+    CHECK (halfway.done > 0.0);
+    CHECK (halfway.done < 1.0);
+
+    // Back at their own tempo the loops play their files, and the long render stops, leaving nothing, and no progress.
     phazite::setTempo (*edit, 120.0);
     CHECK_FALSE (renders.isRendering());
+    CHECK (phazite::test::dispatchMessagesUntil ([&renders] { return renders.getProgress().renders == 0; }, 10000));
     CHECK (phazite::test::dispatchMessagesUntil ([&isWritingLongRender] { return ! isWritingLongRender(); }, 10000));
     CHECK_FALSE (longRender.existsAsFile());
     phazite::purgeClipRenders (*edit); // the short one's, which no clip plays now

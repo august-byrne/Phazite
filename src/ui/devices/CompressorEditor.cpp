@@ -273,6 +273,11 @@ juce::Button& CompressorEditor::getListenButton()
     return keyPart->listen;
 }
 
+juce::Component* CompressorEditor::getFoldedPicture() const
+{
+    return &activity->history;
+}
+
 juce::Point<float> CompressorEditor::getGraphPosition (float inputDecibels, float outputDecibels) const
 {
     return activity->graph.getPosition (inputDecibels, outputDecibels);
@@ -300,6 +305,10 @@ void CompressorEditor::refresh()
         }
 
         activity->history.push (level, output, reduction);
+
+        // What it hears, when that is another track: in that track's colour, named, so that what ducks the sound shows.
+        const auto key = device.getSidechainSource();
+        activity->history.setKey (key.name, key.colour);
 
         // Listen: the key, for as long as the editor shows and asks.
         if (keyPart->listen.getToggleState())

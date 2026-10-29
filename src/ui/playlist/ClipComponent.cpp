@@ -3,6 +3,8 @@
 #include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <cmath>
+
 namespace phazite::ui
 {
 namespace
@@ -25,7 +27,9 @@ void ClipComponent::showClip (const ClipInfo& shown)
 {
     info = shown;
     setTitle (info.name); // what screen readers call it
-    setDescription (info.followsTempo ? "Stretches with the song's tempo" : juce::String());
+    setDescription (rendering.has_value() ? "Being stretched again: silent until it is ready"
+                    : info.followsTempo   ? "Stretches with the song's tempo"
+                                          : juce::String());
 
     if (info.kind == ClipType::midi)
         notes = getNoteShapes (context, id);
@@ -51,6 +55,23 @@ void ClipComponent::showLook (juce::Colour newColour, bool isSelected, bool isFr
         frozen = isFrozen;
         repaint();
     }
+}
+
+void ClipComponent::showRendering (std::optional<double> progress)
+{
+    if (progress.has_value())
+        progress = std::round (*progress * 100.0) / 100.0;
+
+    if (progress == rendering)
+        return;
+
+    const auto changedState = progress.has_value() != rendering.has_value();
+    rendering = progress;
+
+    if (changedState)
+        showClip (info); // its description
+    else
+        repaint (getLocalBounds().removeFromBottom (juce::roundToInt (RenderingTint::barHeight) + 2));
 }
 
 juce::Colour ClipComponent::getFill() const
@@ -110,11 +131,21 @@ void ClipComponent::paint (juce::Graphics& g)
         // The part of it in view, which stays the same while the playlist does (ClipWaveform.h).
         if (const auto* parent = getParentComponent(); waveform != nullptr && parent != nullptr)
         {
-            g.setColour (ink.withAlpha (0.7f));
+            g.setColour (ink.withAlpha (rendering.has_value() ? RenderingTint::waveform : 0.7f));
             waveform->paint (g, content.getIntersection (getLocalArea (parent, parent->getLocalBounds())), getWidth());
         }
 
         paintFades (g, getLocalBounds());
+
+        // Silent while its render is being made: how far that has come, along its bottom edge.
+        if (rendering.has_value())
+        {
+            const auto bar = body.reduced (2.0f, 0.0f).removeFromBottom (RenderingTint::barHeight + 1.0f).withTrimmedBottom (1.0f);
+            g.setColour (ink.withAlpha (RenderingTint::barTrack));
+            g.fillRect (bar);
+            g.setColour (ink);
+            g.fillRect (bar.withWidth (bar.getWidth() * (float) *rendering));
+        }
     }
     else
     {

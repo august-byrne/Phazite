@@ -58,6 +58,7 @@ public:
     void reset() override;
     void process (const ProcessContext&) override;
     int getLatencySamples() const override { return limiter.getLatencySamples(); }
+    const FallingValue* getGainReduction() const noexcept override { return &gainReduction; } // its bands' and its limiter's
 
 private:
     double sampleRate = 44100.0;
@@ -72,5 +73,6 @@ private:
     std::array<float, Limiter::mix + 1> limiterValues {}; // its parameters, as the maximizer sets them
     std::array<MeterValue, numBands> bandLevels { MeterValue { -120.0f }, MeterValue { -120.0f }, MeterValue { -120.0f } };
     std::array<MeterValue, numBands> bandReductions; // from 0
+    FallingValue gainReduction { reductionFallPerSecond };
 };
 } // namespace phazite::devices

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AudioClipModel.h"
 #include "internal/AudioClips.h"
+#include "internal/ClipRenders.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -191,5 +192,33 @@ void setClipFollowsTempo (ProjectContext& context, ClipID id, bool follows)
 void setClipTempo (ProjectContext& context, ClipID id, double bpm)
 {
     changeClip (context, id, "Change Clip Tempo", [bpm] (te::AudioClipBase& clip) { setClipTempo (clip, bpm); });
+}
+
+ClipRenderProgress getClipRenderProgress (const ProjectContext& context)
+{
+    if (const auto* renders = getClipRenders (context))
+    {
+        const auto progress = renders->getProgress();
+        return { progress.renders, progress.done };
+    }
+
+    return {};
+}
+
+std::map<ClipID, double> getClipsBeingRendered (const ProjectContext& context)
+{
+    std::map<ClipID, double> clips;
+    const auto* renders = getClipRenders (context);
+    auto* edit = getEdit (context);
+
+    if (renders == nullptr || edit == nullptr || renders->getProgress().renders == 0)
+        return clips;
+
+    for (auto* clip : getAudioClips (*edit))
+        if (isRendered (*clip))
+            if (const auto progress = renders->getProgressOf (clip->getSourceFileReference().getFile()))
+                clips[getClipID (*clip)] = *progress;
+
+    return clips;
 }
 } // namespace phazite

@@ -16,6 +16,19 @@ namespace phazite::ui
 // The editor for one of Phazite's devices, or nullptr if the handle has none.
 std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle&);
 
+// An editor that can show its picture alone (its graph, curve or history), as an effect's card shows it folded in the Devices
+// view: what the device does as it plays, without its controls or titles (roadmap step 2.17). Once shown so, it stays so.
+class ShowsPictureOnly
+{
+public:
+    virtual ~ShowsPictureOnly() = default;
+    virtual void showPictureOnly() = 0;
+    virtual bool isPictureOnly() const noexcept = 0;
+};
+
+// The editor of one of Phazite's devices showing its picture alone, or nullptr if the handle has none that does.
+std::unique_ptr<juce::Component> createDevicePicture (const DeviceHandle&);
+
 // An editor that also fits a shorter space than the size it gives itself, as the Devices view's panels are (a graph
 // shrinks, or parts show one at a time under tabs): the least height it needs, and how wide it is at a height; and how tall
 // it is at a width, everything showing (narrower, its parts wrap), and the least width it wraps to (its widest part), or

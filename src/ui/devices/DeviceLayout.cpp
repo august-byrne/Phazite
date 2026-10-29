@@ -76,6 +76,15 @@ void DeviceLayout::setSideTabs (int column)
     states[(size_t) column]->sideTabs = true;
 }
 
+juce::Component* DeviceLayout::getContent (int column, int part) const
+{
+    if (! juce::isPositiveAndBelow (column, (int) columns.size())
+        || ! juce::isPositiveAndBelow (part, (int) columns[(size_t) column].size()))
+        return nullptr;
+
+    return columns[(size_t) column][(size_t) part].content;
+}
+
 int DeviceLayout::getWidthOf (size_t column) const
 {
     auto width = 0;

@@ -546,8 +546,23 @@ void EqEditor::paint (juce::Graphics& g)
     g.fillAll (getPalette (*this).surface);
 }
 
+void EqEditor::showPictureOnly()
+{
+    for (auto* child : getChildren())
+        child->setVisible (child == graph.get());
+
+    pictureOnly = true;
+    resized();
+}
+
 void EqEditor::resized()
 {
+    if (pictureOnly)
+    {
+        graph->setBounds (getLocalBounds());
+        return;
+    }
+
     // The graph on the left, as tall as the editor; the band's controls beside it.
     auto area = getLocalBounds().reduced (Space::s);
     graph->setBounds (area.removeFromLeft (area.getWidth() - getControlsWidth() - Space::m));

@@ -14,6 +14,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
+#include "ui/components/DisplayTicker.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
@@ -753,4 +754,40 @@ TEST_CASE ("A sample that follows the song's tempo is marked in the playlist, so
 
     phazite::test::dispatchPendingMessages();
     CHECK (findClip ("Hit sound")->getDescription() == juce::String ("Stretches with the song's tempo"));
+}
+
+TEST_CASE ("While an audio clip's render is being made it shows faint, with how far the render has come along its bottom edge")
+{
+    PlaylistScreen screen;
+    phazite::test::TemporaryFolder temp;
+    auto* loop = dynamic_cast<te::AudioClipBase*> (phazite::importFile (
+        *screen.tracks[0], phazite::test::writeClicks (temp.folder.getChildFile ("Long loop"), 64, 120.0), beats (0.0)));
+    REQUIRE (loop != nullptr);
+    phazite::test::dispatchPendingMessages();
+    const auto id = phazite::getClipID (*loop);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+
+    // What its component shows: how far its render has come, or nothing; and nothing at all without a component.
+    const auto shownRendering = [&screen, &ticker, id]() -> std::optional<std::optional<double>>
+    {
+        ticker->tickNow();
+
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (component->getClip() == id)
+                return component->getRendering();
+
+        return std::nullopt;
+    };
+
+    REQUIRE (shownRendering().has_value());
+    CHECK_FALSE (shownRendering()->has_value()); // at its own tempo it plays its file
+
+    // Slower, it waits for its render, which a while later it plays.
+    phazite::setTempo (*screen.edit, 100.0);
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&shownRendering] { return shownRendering().value_or (std::nullopt).has_value(); }, 10000));
+    const auto progress = *shownRendering().value_or (std::nullopt);
+    CHECK (progress >= 0.0);
+    CHECK (progress < 1.0);
+    CHECK (phazite::test::dispatchMessagesUntil ([&shownRendering] { return ! shownRendering().value_or (0.0).has_value(); }, 120000));
 }

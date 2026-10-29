@@ -5,8 +5,8 @@
 
 namespace phazite::ui
 {
-DisplayTicker::Display::Display (juce::Component& shownBy)
-    : component (shownBy)
+DisplayTicker::Display::Display (juce::Component& shown)
+    : shownBy (shown)
 {
     ticker->add (*this);
 }
@@ -44,7 +44,7 @@ void DisplayTicker::tickNow()
     const auto ticking = displays;
 
     for (auto* display : ticking)
-        if (std::find (displays.begin(), displays.end(), display) != displays.end() && display->component.isShowing())
+        if (std::find (displays.begin(), displays.end(), display) != displays.end() && display->shownBy.isShowing())
             display->tick();
 }
 

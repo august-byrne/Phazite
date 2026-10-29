@@ -9,18 +9,60 @@
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <cmath>
+
 namespace phazite::ui
 {
 using namespace strip;
 
+namespace
+{
+    // How far a device turns the sound down now, hanging from the top along its slot's right edge, as mixers show it beside
+    // a compressor (roadmap step 2.17): the device's own reading (devices/core/FallingValue.h), at each tick of the displays'
+    // ticker, repainted only when it moves.
+    struct ReductionMeter : public ValueMeter,
+                            private DisplayTicker::Display
+    {
+        explicit ReductionMeter (DeviceHandle handle)
+            : ValueMeter ("Gain reduction", 0.0f, reductionMeterRange, Fill::fromTop),
+              DisplayTicker::Display (static_cast<juce::Component&> (*this)),
+              device (std::move (handle))
+        {
+        }
+
+        // Whether the device turns the sound down, and so shows one.
+        static bool isShownFor (const DeviceHandle& handle)
+        {
+            const auto* processor = handle.getProcessor<devices::Processor>();
+            return processor != nullptr && processor->getGainReduction() != nullptr;
+        }
+
+        void tick() override
+        {
+            const auto* processor = device.getProcessor<devices::Processor>();
+            const auto* reduction = processor != nullptr ? processor->getGainReduction() : nullptr;
+            update (reduction != nullptr ? std::round (reduction->get() * 4.0f) / 4.0f : 0.0f); // a quarter of a decibel
+        }
+
+        const DeviceHandle device;
+    };
+} // namespace
+
 //==============================================================================
-// A device: its name, which shows it in the Devices view (right-click for more), an on/off switch, and its key controls.
+// A device: its name, which shows it in the Devices view (right-click for more), an on/off switch, its key controls, and
+// how far it turns the sound down if it does.
 struct DeviceSlots::Slot : public juce::Component
 {
     Slot (DeviceSlots& o, const DeviceSlot& device)
         : owner (o),
           shown (device)
     {
+        if (auto handle = getDeviceHandle (owner.context, device.id); ReductionMeter::isShownFor (handle))
+        {
+            reductionMeter = std::make_unique<ReductionMeter> (std::move (handle));
+            addAndMakeVisible (*reductionMeter);
+        }
+
         nameButton.onClickedWith = [this] (const juce::ModifierKeys& mods)
         {
             if (mods.isPopupMenu())
@@ -107,6 +149,10 @@ struct DeviceSlots::Slot : public juce::Component
     void resized() override
     {
         auto area = getLocalBounds();
+
+        if (reductionMeter != nullptr)
+            reductionMeter->setBounds (area.removeFromRight (reductionMeterWidth).reduced (0, 2));
+
         auto top = area.removeFromTop (slotNameHeight);
         power.setBounds (top.removeFromRight (slotPowerWidth));
         nameButton.setBounds (top.withTrimmedRight (2));
@@ -126,7 +172,8 @@ struct DeviceSlots::Slot : public juce::Component
     juce::TextButton power;
     juce::OwnedArray<Knob> knobs;
     juce::OwnedArray<ParameterAttachment> attachments;
-    std::unique_ptr<MixAttachment> mixAttachment; // an effect's, for its first knob
+    std::unique_ptr<MixAttachment> mixAttachment;   // an effect's, for its first knob
+    std::unique_ptr<ReductionMeter> reductionMeter; // a device's that turns the sound down
 };
 
 //==============================================================================

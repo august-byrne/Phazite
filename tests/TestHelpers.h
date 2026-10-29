@@ -75,6 +75,33 @@ inline juce::File writeSound (const juce::File& file, double seconds, double fre
 
     return file;
 }
+
+// Writes a loop of clicks into a folder, one on each beat at a tempo, each a burst of noise of its own, named for its tempo
+// so that it follows the song's ("Clicks 120 BPM.wav"), and returns it. Tracktion is told it changed: a temporary folder's
+// name comes round again, and Tracktion keeps what it read of a file by its path.
+inline juce::File writeClicks (const juce::File& folder, int beats, double bpm)
+{
+    constexpr double sampleRate = 44100.0;
+    const auto file = folder.getChildFile ("Clicks " + juce::String (bpm, 0) + " BPM.wav");
+    const auto beatSamples = (int) std::lround (60.0 / bpm * sampleRate);
+    juce::AudioBuffer<float> audio (1, beats * beatSamples);
+    audio.clear();
+    juce::Random random (3);
+
+    for (int beat = 0; beat < beats; ++beat)
+        for (int i = 0; i < 88; ++i)
+            audio.setSample (0, beat * beatSamples + i, 0.5f * std::exp ((float) -i / 30.0f) * (random.nextFloat() * 2.0f - 1.0f));
+
+    folder.createDirectory();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+    auto writer = juce::WavAudioFormat().createWriterFor (
+        stream, juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels (1).withBitsPerSample (24));
+    REQUIRE (writer != nullptr);
+    writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
+    writer.reset();
+    getEngine().getAudioFileManager().checkFileForChanges (te::AudioFile (getEngine(), file));
+    return file;
+}
 } // namespace phazite::test
 
 // doctest prints juce::Strings in failure messages.

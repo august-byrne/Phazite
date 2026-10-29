@@ -196,5 +196,6 @@ void Compressor::process (const ProcessContext& block)
 
     levelMeter.raise (dsp::gainToDecibels (loudestPeak));
     reductionMeter.raise (most);
+    gainReduction.push (most);
 }
 } // namespace phazite::devices

@@ -58,6 +58,9 @@ public:
     // parts, such as a synth's envelopes, LFOs and modulation.
     void setSideTabs (int column);
 
+    // What a part shows, or nullptr if there is no such part.
+    juce::Component* getContent (int column, int part) const;
+
     static constexpr int titleHeight = 18, sideTabWidth = 76;
 
 private:

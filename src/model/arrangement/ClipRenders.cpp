@@ -37,7 +37,7 @@ namespace
 } // namespace
 
 bool renderClipAudio (te::Engine& engine, const juce::File& source, const stretch::Settings& settings, const juce::File& render,
-                      const std::function<bool()>& shouldStop)
+                      const std::function<bool()>& shouldStop, std::atomic<juce::int64>* framesWritten)
 {
     if (render.existsAsFile())
         return true;
@@ -67,8 +67,15 @@ bool renderClipAudio (te::Engine& engine, const juce::File& source, const stretc
 
         if (auto writer = juce::WavAudioFormat().createWriterFor (stream, options))
             rendered = stretch::render (
-                in, settings, [&writer] (const juce::AudioBuffer<float>& block, int frames)
-                { return writer->writeFromAudioSampleBuffer (block, 0, frames); }, shouldStop);
+                in, settings,
+                [&writer, framesWritten] (const juce::AudioBuffer<float>& block, int frames)
+                {
+                    if (framesWritten != nullptr)
+                        framesWritten->fetch_add (frames, std::memory_order_relaxed);
+
+                    return writer->writeFromAudioSampleBuffer (block, 0, frames);
+                },
+                shouldStop);
     }
 
     // Someone else may have made it meanwhile: theirs is the same.
@@ -125,19 +132,20 @@ void purgeClipRenders (te::Edit& edit)
 class ClipRenders::Job : public juce::ThreadPoolJob
 {
 public:
-    Job (ClipRenders& o, te::Engine& e, Recipe r, juce::File file, std::shared_ptr<const std::atomic<bool>> stopped)
+    Job (ClipRenders& o, te::Engine& e, Recipe r, juce::File file, std::shared_ptr<Render> shared)
         : juce::ThreadPoolJob ("Clip render"),
           owner (o),
           engine (e),
           recipe (std::move (r)),
           render (std::move (file)),
-          stop (std::move (stopped))
+          made (std::move (shared))
     {
     }
 
     JobStatus runJob() override
     {
-        renderClipAudio (engine, recipe.source, recipe.settings, render, [this] { return shouldExit() || stop->load(); });
+        renderClipAudio (
+            engine, recipe.source, recipe.settings, render, [this] { return shouldExit() || made->stopped.load(); }, &made->written);
         owner.jobFinished (render);
         return jobHasFinished;
     }
@@ -147,7 +155,7 @@ private:
     te::Engine& engine;
     const Recipe recipe;
     const juce::File render;
-    const std::shared_ptr<const std::atomic<bool>> stop;
+    const std::shared_ptr<Render> made;
 };
 
 ClipRenders::ClipRenders (te::Edit& e)
@@ -179,23 +187,61 @@ bool ClipRenders::isRendering() const
     return false;
 }
 
+ClipRenders::Progress ClipRenders::getProgress() const
+{
+    Progress progress;
+    auto written = framesMade;
+
+    for (const auto& [render, made] : running)
+    {
+        if (made->stopped.load())
+            continue;
+
+        ++progress.renders;
+        written += std::min (made->written.load (std::memory_order_relaxed), made->length);
+    }
+
+    if (progress.renders > 0 && framesAll > 0)
+        progress.done = juce::jlimit (0.0, 1.0, (double) written / (double) framesAll);
+
+    return progress;
+}
+
+std::optional<double> ClipRenders::getProgressOf (const juce::File& render) const
+{
+    const auto made = running.find (render);
+
+    if (made == running.end() || made->second->stopped.load())
+        return std::nullopt;
+
+    return juce::jlimit (0.0, 1.0, (double) made->second->written.load (std::memory_order_relaxed) / (double) made->second->length);
+}
+
 void ClipRenders::update()
 {
     const auto needed = getNeededRenders (edit);
 
-    // Those no clip plays any more stop.
-    for (const auto& [render, stop] : running)
-        if (needed.find (render) == needed.end())
-            stop->store (true);
+    // Those no clip plays any more stop, and leave the progress.
+    for (const auto& [render, made] : running)
+    {
+        if (needed.find (render) == needed.end() && ! made->stopped.load())
+        {
+            made->stopped.store (true);
+            framesAll -= made->length;
+        }
+    }
 
     for (const auto& [render, recipe] : needed)
     {
         if (render.existsAsFile() || running.find (render) != running.end())
             continue;
 
-        auto stop = std::make_shared<std::atomic<bool>> (false);
-        running[render] = stop;
-        pool.addJob (new Job (*this, edit.engine, recipe, render, std::move (stop)), true);
+        auto made = std::make_shared<Render>();
+        made->length = std::max<juce::int64> (
+            1, stretch::getStretchedLength (te::AudioFile (edit.engine, recipe.source).getLengthInSamples(), recipe.settings));
+        framesAll += made->length;
+        running[render] = made;
+        pool.addJob (new Job (*this, edit.engine, recipe, render, std::move (made)), true);
     }
 }
 
@@ -228,7 +274,13 @@ void ClipRenders::handleAsyncUpdate()
 
     for (const auto& render : done)
     {
-        running.erase (render);
+        if (const auto made = running.find (render); made != running.end())
+        {
+            if (! made->second->stopped.load())
+                framesMade += made->second->length;
+
+            running.erase (made);
+        }
 
         if (render.existsAsFile())
         {
@@ -241,6 +293,10 @@ void ClipRenders::handleAsyncUpdate()
         edit.restartPlayback();
 
     update(); // starts what waited for one that stopped
+
+    // None being made: the next progress starts over.
+    if (running.empty())
+        framesMade = framesAll = 0;
 }
 
 void ClipRenders::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PlaylistParts.h"
 #include "TrackHeights.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/TimelineModel.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -199,6 +200,7 @@ void Playlist::AddTrackRow::mouseDown (const juce::MouseEvent& e)
 //==============================================================================
 Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     : TimelineEditor (bridge, projectContext, GridOwner::playlist),
+      DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       context (projectContext),
       selection (projectContext.getSongSelection()),
       range (projectContext.getSongRange()),
@@ -292,6 +294,22 @@ void Playlist::showProject()
     addTrackButton.setEnabled (open);
     addTrackRow->setVisible (open);
     rebuild();
+}
+
+void Playlist::tick()
+{
+    const auto rendering = getClipsBeingRendered (context);
+
+    if (rendering.empty() && ! showsRendering)
+        return;
+
+    showsRendering = ! rendering.empty();
+
+    for (auto& [id, component] : clipComponents)
+    {
+        const auto found = rendering.find (id);
+        component->showRendering (found != rendering.end() ? std::optional (found->second) : std::nullopt);
+    }
 }
 
 void Playlist::songChanged (const SongChanges& changes)

@@ -9,6 +9,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/mixer/internal/Sidechain.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DeviceEditors.h"
 
@@ -133,4 +134,59 @@ TEST_CASE ("The compressor's editor shows the level it hears and how far it turn
     // Then, with nothing playing, the meters fall back smoothly.
     editor.refresh();
     CHECK (editor.getShownReduction() == doctest::Approx (8.5f).epsilon (0.01));
+}
+
+TEST_CASE ("The compressor's history shows the track its sidechain listens to, in that track's colour and named")
+{
+    Song song;
+    phazite::ui::CompressorEditor editor ((phazite::makeDeviceHandle (*song.compressor)));
+    editor.refresh();
+    CHECK (editor.getHistory().getKeyName().isEmpty()); // the sound itself, pale
+
+    phazite::setSidechainSource (*song.compressor, te::getAudioTracks (*song.edit)[0]);
+    editor.refresh();
+    CHECK (editor.getHistory().getKeyName() == juce::String ("Kick"));
+
+    phazite::setSidechainSource (*song.compressor, nullptr);
+    editor.refresh();
+    CHECK (editor.getHistory().getKeyName().isEmpty());
+}
+
+TEST_CASE ("How far the compressor turns the sound down reads the same for any number of displays, then falls back")
+{
+    Song song;
+    auto* compressor = phazite::makeDeviceHandle (*song.compressor).getProcessor<Compressor>();
+    REQUIRE (compressor != nullptr);
+    compressor->prepare (48000.0, 24000);
+    const auto* reduction = compressor->getGainReduction();
+    REQUIRE (reduction != nullptr);
+    CHECK (reduction->get() == doctest::Approx (0.0f));
+
+    // 12 dB over the threshold at 4:1 settles 9 dB down; reading it takes nothing away from the next reader.
+    play (*compressor, -6.0f, 24000);
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    const auto first = reduction->get();
+    CHECK (first == doctest::Approx (9.0f).epsilon (0.02));
+    CHECK (reduction->get() == doctest::Approx (first).epsilon (0.01));
+
+    // With nothing played since (a device asleep on silence plays nothing), it falls 15 dB a second.
+    juce::Thread::sleep (200);
+    const auto seconds = (float) ((juce::Time::getMillisecondCounterHiRes() - start) / 1000.0);
+    CHECK (reduction->get() == doctest::Approx (first - 15.0f * seconds).epsilon (0.06));
+}
+
+TEST_CASE ("On a folded card, the compressor shows its history alone, which shows its ducking")
+{
+    Song song;
+    auto picture = phazite::ui::createDevicePicture (phazite::makeDeviceHandle (*song.compressor));
+    auto* editor = dynamic_cast<phazite::ui::CompressorEditor*> (picture.get());
+    REQUIRE (editor != nullptr);
+    CHECK (editor->isPictureOnly());
+    phazite::test::TestWindow window (*editor, 168, 140);
+    CHECK (editor->getHistory().isShowing());
+    CHECK (editor->getHistory().getBounds() == editor->getLocalBounds());
+    CHECK_FALSE (editor->getGraph().isShowing());
+
+    for (auto* knob : phazite::test::findAll<phazite::ui::Knob> (*editor))
+        CHECK_FALSE (knob->isShowing());
 }

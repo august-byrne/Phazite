@@ -28,6 +28,7 @@ namespace
     constexpr int macroHeight = macroKnobSize + labelHeight;
     constexpr int foldedWidth = 184, foldButtonWidth = 22; // an effect's card, folded
     constexpr int foldedKnobs = 2;                         // its key knobs then, beside its mix in its header
+    constexpr int foldedPictureMinimum = 56;               // its picture, over them, if the card has that much height for it
 
     //==============================================================================
     // A device's key knobs, which the model offers, each named (its mix is in the header): a plug-in's, whose own controls
@@ -76,6 +77,65 @@ namespace
         juce::OwnedArray<Knob> knobs;
         juce::OwnedArray<ParameterAttachment> attachments;
         juce::OwnedArray<juce::Label> names;
+    };
+
+    //==============================================================================
+    // An effect's card, folded (roadmap step 2.17): what the device does as it plays, its editor's picture alone (a curve,
+    // a history: DeviceEditors.h), which a click opens the card to, over its key knobs. A container and a plug-in have no
+    // picture, nor has a device while its own window shows its editor, so that one editor shows it at a time.
+    struct FoldedBody : public juce::Component,
+                        public juce::SettableTooltipClient,
+                        public FlexibleHeight
+    {
+        FoldedBody (ProjectContext& context, const DeviceSlot& device, std::function<void()> open)
+            : knobs (context, device, foldedKnobs, foldedKnobs, compactKnobSize),
+              openCard (std::move (open))
+        {
+            if (wantsPicture (device))
+                picture = createDevicePicture (getDeviceHandle (context, device.id));
+
+            if (picture != nullptr)
+            {
+                picture->setInterceptsMouseClicks (false, false); // a click on it opens the card
+                addAndMakeVisible (*picture);
+                setTooltip ("What it does as it plays: click to open it, with all its controls");
+            }
+
+            addAndMakeVisible (knobs);
+            setSize (foldedWidth, knobs.getHeight());
+        }
+
+        static bool wantsPicture (const DeviceSlot& device) { return ! device.isContainer && ! device.opensWindow && ! device.windowOpen; }
+        bool hasPicture() const noexcept { return picture != nullptr; }
+
+        int getMinimumHeight() const override { return knobs.getHeight(); }
+        int getWidthForHeight (int) const override { return foldedWidth; }
+
+        void updateValues() { knobs.updateValues(); }
+
+        void resized() override
+        {
+            auto area = getLocalBounds();
+            knobs.setBounds (area.removeFromBottom (knobs.getHeight()).withWidth (knobs.getWidth()));
+
+            if (picture != nullptr)
+            {
+                const auto shown = area.reduced (Space::s, 0).withTrimmedTop (Space::s);
+                picture->setVisible (shown.getHeight() >= foldedPictureMinimum);
+                picture->setBounds (shown);
+            }
+        }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (picture != nullptr && picture->isVisible() && picture->getBounds().contains (e.getPosition())
+                && ! e.mouseWasDraggedSinceMouseDown() && e.mods.isLeftButtonDown() && openCard != nullptr)
+                openCard(); // which replaces this: nothing after it
+        }
+
+        KeyKnobs knobs;
+        std::unique_ptr<juce::Component> picture;
+        std::function<void()> openCard;
     };
 
     //==============================================================================
@@ -276,10 +336,10 @@ struct DevicesView::Panel : public juce::Component
         bodyView.setViewedComponent (nullptr, false);
         body = nullptr;
 
-        // What shows it: folded, its key knobs; open, one of Phazite's own devices' editor or a container's macros and
-        // devices; a plug-in, its key knobs.
+        // What shows it: folded, its picture and key knobs; open, one of Phazite's own devices' editor or a container's
+        // macros and devices; a plug-in, its key knobs.
         if (folded)
-            body = std::make_unique<KeyKnobs> (view.context, shown, foldedKnobs, foldedKnobs, compactKnobSize);
+            body = std::make_unique<FoldedBody> (view.context, shown, [this] { view.setOpen (shown.id, true); });
         else if (shown.isContainer)
             body = std::make_unique<ContainerBody> (view, view.context, shown);
         else if (! shown.opensWindow)
@@ -332,6 +392,11 @@ struct DevicesView::Panel : public juce::Component
             if (foldButton != nullptr)
                 foldButton->setVisible (! device.windowOpen);
         }
+
+        // Folded, its picture shows while its window doesn't, and goes while the window shows the editor.
+        if (auto* foldedBody = dynamic_cast<FoldedBody*> (body.get());
+            foldedBody != nullptr && foldedBody->hasPicture() != FoldedBody::wantsPicture (device))
+            setFolded (true, true);
 
         // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
         for (auto* control : std::initializer_list<juce::Component*> { &power, &bodyView, windowButton.get(), sidechainButton.get() })
@@ -417,6 +482,8 @@ struct DevicesView::Panel : public juce::Component
 
         if (auto* knobs = dynamic_cast<KeyKnobs*> (body.get()))
             knobs->updateValues();
+        else if (auto* foldedBody = dynamic_cast<FoldedBody*> (body.get()))
+            foldedBody->updateValues();
         else if (auto* containerBody = dynamic_cast<ContainerBody*> (body.get()))
             containerBody->updateValues();
     }

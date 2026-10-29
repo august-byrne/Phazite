@@ -22,8 +22,10 @@ namespace strip
 {
     inline constexpr int slotNameHeight = 22, slotKnobHeight = 30, sendHeight = 26, buttonHeight = 24, headingHeight = 16;
     inline constexpr int keyControlsPerDevice = 2;
-    inline constexpr int slotPowerWidth = 32;      // a slot's On switch
-    inline constexpr int sidechainStripeWidth = 3; // a slot whose sidechain listens to a track: that track's colour
+    inline constexpr int slotPowerWidth = 32;           // a slot's On switch
+    inline constexpr int sidechainStripeWidth = 3;      // a slot whose sidechain listens to a track: that track's colour
+    inline constexpr int reductionMeterWidth = 4;       // a slot whose device turns the sound down: how far, along its right edge
+    inline constexpr float reductionMeterRange = 24.0f; // in decibels, as the compressor's editor shows it
     inline constexpr int panKnobSize = 44, meterWidth = 10, headerHeight = 46, colourBarHeight = 4, outputHeight = 18;
     inline constexpr int minFaderHeight = 72, minSlotsHeight = headingHeight + buttonHeight;
     inline constexpr int loudnessHeight = 4 * 16 + buttonHeight + Space::xs; // the master's readout: four lines and Reset

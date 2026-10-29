@@ -198,5 +198,7 @@ void Multiband::process (const ProcessContext& block)
         bandCuts[band].raise (mostCut[band]);
         bandLifts[band].raise (mostLifted[band]);
     }
+
+    gainReduction.push (*std::max_element (mostCut.begin(), mostCut.end()));
 }
 } // namespace phazite::devices

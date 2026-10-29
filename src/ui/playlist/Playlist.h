@@ -11,6 +11,7 @@
 #include "TrackHeader.h"
 #include "model/automation/AutomationModel.h"
 #include "model/project/ProjectContext.h"
+#include "ui/components/DisplayTicker.h"
 #include "ui/timeline/TimelineEditor.h"
 
 #include <optional>
@@ -25,7 +26,8 @@ class Playlist : public TimelineEditor,
                  private TrackHeader::Owner,
                  private juce::ChangeListener,
                  private juce::AsyncUpdater,
-                 private ProjectContext::Listener
+                 private ProjectContext::Listener,
+                 private DisplayTicker::Display
 {
 public:
     // Shows the open project's tracks and clips, and none while no project is open.
@@ -140,6 +142,11 @@ private:
     void showProject(); // the open project's, or none
     void projectChanged() override { showProject(); }
     void songChanged (const SongChanges&) override;
+
+    // Audio clips whose renders are being made (model/arrangement/AudioClipModel.h): silent until then, and shown so, with
+    // how far each has come. The ticker asks a few times a second; nothing while nothing renders.
+    bool showsRendering = false;
+    void tick() override;
 
     // The rows of tracks.
     std::vector<TrackRow> getShownRows() const; // the playlist's tracks, and the master while it has lanes

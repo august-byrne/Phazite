@@ -105,6 +105,18 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
     return std::make_unique<DeviceKnobs> (device);
 }
 
+std::unique_ptr<juce::Component> createDevicePicture (const DeviceHandle& device)
+{
+    auto editor = createDeviceEditor (device);
+    auto* pictured = dynamic_cast<ShowsPictureOnly*> (editor.get());
+
+    if (pictured == nullptr)
+        return {};
+
+    pictured->showPictureOnly();
+    return editor;
+}
+
 //==============================================================================
 DeviceKnobs::DeviceKnobs (const DeviceHandle& device)
 {

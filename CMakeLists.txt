@@ -78,6 +78,7 @@ target_sources(phazite_core PRIVATE
     src/devices/core/DeviceInfo.cpp
     src/devices/core/DeviceInfo.h
     src/devices/core/DeviceScope.h
+    src/devices/core/FallingValue.h
     src/devices/core/LiveValue.h
     src/devices/core/MeterValue.h
     src/devices/core/Processor.h
