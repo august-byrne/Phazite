@@ -96,7 +96,7 @@ void Playlist::showTrackMenu (TrackID track)
 
     addCommandItems (menu, bridge, { "edit.rename", "track.color" });
     menu.addSeparator();
-    addCommandItems (menu, bridge, { "track.mute", "track.solo", "track.pin" });
+    addCommandItems (menu, bridge, { "track.mute", "track.solo", "track.arm", "track.pin" });
     menu.addSeparator();
     addCommandItems (menu, bridge, { "track.moveUp", "track.moveDown" });
     menu.addSeparator();
@@ -107,7 +107,7 @@ void Playlist::showTrackMenu (TrackID track)
     addCommandItems (modes, bridge, { "automation.read", "automation.touch", "automation.latch", "automation.write" });
     menu.addSubMenu ("Automation Mode", modes);
     menu.addSeparator();
-    addCommandItems (menu, bridge, { "edit.duplicate", "edit.delete" });
+    addCommandItems (menu, bridge, { "edit.paste", "edit.duplicate", "edit.delete" });
     menu.addSeparator();
     addCommandItems (menu, bridge, { "track.freeze", "track.bounceInPlace" });
 

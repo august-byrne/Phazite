@@ -473,6 +473,11 @@ void deleteTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te:
     deleteAutomation (getStretchesOf (tracks, range), closeGap);
 }
 
+void clearClipsIn (te::ClipTrack& track, te::BeatRange range)
+{
+    deleteClipsIn (track, track.edit.tempoSequence.toTime (range), false);
+}
+
 te::BeatRange duplicateTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te::Track*>& tracks)
 {
     const auto length = range.getLength();

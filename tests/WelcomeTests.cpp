@@ -48,14 +48,22 @@ TEST_CASE ("The welcome window asks which app the user comes from, and uses that
     CHECK (page.getChosen() == 0);
     CHECK (w.chosenKeymaps.joinIntoString (", ") == "FL Studio");
 
+    w.click (page.getChoice (1));
+    CHECK (page.getChosen() == 1);
+    CHECK (w.chosenKeymaps.joinIntoString (", ") == "FL Studio, Ableton Live");
+
     w.click (page.getChoice (2));
     CHECK (page.getChosen() == 2);
-    CHECK (w.chosenKeymaps.joinIntoString (", ") == "FL Studio, Phazite");
+    CHECK (w.chosenKeymaps.joinIntoString (", ") == "FL Studio, Ableton Live, Phazite");
 
-    // FL Studio's keymap shows as chosen when the window opens again.
+    // FL Studio's keymap, or Live's, shows as chosen when the window opens again.
     phazite::test::PackRelease again;
     Welcome flStudio (again.release, "FL Studio");
     CHECK (flStudio.panel.getComingFromPage().getChosen() == 0);
+
+    phazite::test::PackRelease third;
+    Welcome live (third.release, "Ableton Live");
+    CHECK (live.panel.getComingFromPage().getChosen() == 1);
 }
 
 TEST_CASE ("The welcome window goes page by page, and its sound page plays a test sound through the chosen output")

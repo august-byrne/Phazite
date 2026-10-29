@@ -49,8 +49,18 @@ void HintBar::setAlert (const juce::String& text, std::function<void()> fix)
 
 void HintBar::mouseUp (const juce::MouseEvent& e)
 {
-    if (alert.isNotEmpty() && fixAlert != nullptr && e.mouseWasClicked())
-        fixAlert();
+    if (! e.mouseWasClicked())
+        return;
+
+    if (alert.isNotEmpty())
+    {
+        if (fixAlert != nullptr)
+            fixAlert();
+    }
+    else if (onClick != nullptr)
+    {
+        onClick();
+    }
 }
 
 void HintBar::timerCallback()

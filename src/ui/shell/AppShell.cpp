@@ -83,7 +83,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       mixer (bridge, context),
       devices (bridge, context),
       statusBar (engine, bridge, context),
-      guide (bridge, s)
+      guide (bridge, s),
+      lessons (bridge, context)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Phazite");
@@ -101,7 +102,13 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
                 });
     };
     browser.onUsed = [this] (const LibraryItem&) { guide.markDone (Guide::Step::addSound); };
-    getHintBar().setDefaultHint ([this] { return getDefaultHint(); });
+    getHintBar().setDefaultHint (
+        [this]
+        {
+            lessons.update(); // a step the song shows done goes on
+            return getDefaultHint();
+        });
+    getHintBar().onClick = [this] { lessons.next(); };
 
     // Double-clicking a clip opens it in the editor dock, a MIDI clip in the piano roll and an audio clip in the audio clip
     // editor, which then has the keys.
@@ -821,6 +828,7 @@ void AppShell::addCommands (CommandRegistry& registry)
     addNoteCommands (registry, projectContext, [this] { return pianoRoll.getGridStepInBeats(); });
     pianoRoll.addCommands (registry);
     guide.addCommands (registry);
+    lessons.addCommands (registry);
     refreshShortcutTexts();
 }
 
@@ -828,6 +836,8 @@ void AppShell::refreshShortcutTexts()
 {
     titleBar.refreshTooltips();
     topBar.refreshTooltips();
+    songViews.refreshTooltips (commands);
+    editorDock.refreshTooltips (commands);
 
     for (const auto panel : allPanels)
         getButtons (panel).refreshTooltips();
@@ -839,6 +849,9 @@ void AppShell::refreshShortcutTexts()
 
 juce::String AppShell::getDefaultHint() const
 {
+    if (auto lesson = lessons.getHint(); lesson.isNotEmpty())
+        return lesson;
+
     if (auto next = guide.getHint(); next.isNotEmpty())
         return next;
 

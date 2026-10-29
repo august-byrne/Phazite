@@ -774,6 +774,8 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
         {
             add (menu, { "edit.undo", "edit.redo", "edit.undoOrRedo" });
             menu.addSeparator();
+            add (menu, { "edit.cut", "edit.copy", "edit.paste" });
+            menu.addSeparator();
             add (menu, { "edit.delete", "edit.duplicate", "edit.duplicateAsAlias", "edit.rename" });
             menu.addSeparator();
             add (menu, { "edit.selectAll", "edit.deselectAll" });
@@ -888,6 +890,19 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
         case 5: // Help: where to find things
             add (menu, { "view.commandPalette", "options.keyboardShortcuts", "view.hoverHelp", "help.guide" });
+
+            {
+                // The lessons, which the hint bar shows step by step (ui/shell/Lessons.h).
+                juce::PopupMenu lessonsMenu;
+
+                for (const auto& lesson : ui::Lessons::getAll())
+                    addOne (lessonsMenu, "help.lesson." + juce::String (lesson.id));
+
+                lessonsMenu.addSeparator();
+                addOne (lessonsMenu, "help.stopLesson");
+                menu.addSubMenu ("Lessons", lessonsMenu);
+            }
+
             menu.addSeparator();
             add (menu, { "help.phaziteSounds", "help.welcome" });
             break;

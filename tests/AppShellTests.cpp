@@ -5,8 +5,11 @@
 #include "AppScreen.h"
 #include "GoldenFiles.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/input/Keymap.h"
 
 #include <algorithm>
+#include <functional>
+#include <typeinfo>
 
 namespace
 {
@@ -306,4 +309,94 @@ TEST_CASE ("The window shows Opening... until a project is open, and says when n
 
     // The tests open no audio device: the hint bar says so, in place of its hints.
     CHECK (screen.shell.getHintBar().getAlert().startsWith ("No audio output"));
+}
+
+TEST_CASE ("Every command has help text: a name, a category, and a sentence that says what it does")
+{
+    Screen screen;
+
+    for (const auto* command : screen.registry.getAll())
+    {
+        CAPTURE (command->id.toStdString());
+        CHECK (command->name.isNotEmpty());
+        CHECK (command->category.isNotEmpty());
+        CHECK (command->description.length() > command->name.length());
+        CHECK (juce::CharacterFunctions::isUpperCase (command->description[0]));
+        CHECK (command->description.endsWithChar ('.'));
+    }
+}
+
+TEST_CASE ("Every command the built-in keymaps give a key to is one the app has")
+{
+    Screen screen;
+
+    // The main window's own (src/app/MainWindow.cpp), which this screen doesn't make.
+    const juce::StringArray mainWindows { "app.quit",
+                                          "options.settings",
+                                          "options.audioSettings",
+                                          "options.midiSettings",
+                                          "input.computerKeyboard",
+                                          "view.interfaceLarger",
+                                          "view.interfaceSmaller",
+                                          "view.interfaceNormal",
+                                          "view.fullScreen",
+                                          "view.hoverHelp" };
+
+    for (const auto& keymap : phazite::ui::Keymap::getBuiltIn())
+    {
+        CAPTURE (keymap.name.toStdString());
+
+        for (const auto& entry : keymap.keys)
+        {
+            CAPTURE (entry.first.toStdString());
+            CHECK ((screen.registry.find (entry.first) != nullptr || mainWindows.contains (entry.first)));
+        }
+    }
+}
+
+TEST_CASE ("Every control in the window explains itself in the hint bar, with a tooltip or a description")
+{
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    juce::StringArray silent;
+
+    // Each visible control, by the titles of the components it is in. A control's own parts (a slider's text box, a list's
+    // scroll bar) are its.
+    std::function<void (juce::Component&, const juce::String&)> visit = [&silent, &visit] (juce::Component& c, const juce::String& path)
+    {
+        if (! c.isVisible() || dynamic_cast<juce::ScrollBar*> (&c) != nullptr)
+            return;
+
+        const auto here = path + " > " + (c.getTitle().isNotEmpty() ? c.getTitle() : juce::String (typeid (c).name()));
+
+        if (dynamic_cast<juce::Button*> (&c) != nullptr || dynamic_cast<juce::Slider*> (&c) != nullptr
+            || dynamic_cast<juce::ComboBox*> (&c) != nullptr || dynamic_cast<juce::TextEditor*> (&c) != nullptr)
+        {
+            auto* client = dynamic_cast<juce::TooltipClient*> (&c);
+
+            if ((client == nullptr || client->getTooltip().isEmpty()) && c.getDescription().isEmpty())
+                silent.addIfNotAlreadyThere (here);
+
+            return;
+        }
+
+        for (auto* child : c.getChildren())
+            visit (*child, here);
+    };
+
+    visit (screen.shell, "Window");
+    REQUIRE (screen.registry.invoke ("view.mixer"));
+    phazite::test::dispatchPendingMessages();
+    visit (screen.shell, "Window, mixer");
+
+    for (const auto* view : { "view.pianoRoll", "view.instrument", "view.effects" })
+    {
+        REQUIRE (screen.registry.invoke (view));
+        phazite::test::dispatchPendingMessages();
+        visit (screen.shell, juce::String ("Window, ") + view);
+    }
+
+    INFO (silent.joinIntoString ("\n").toStdString());
+    CHECK (silent.isEmpty());
 }

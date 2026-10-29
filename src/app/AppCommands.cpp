@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppCommands.h"
+#include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -29,6 +30,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context, TrackR
     addUndoCommands (registry, selection);
     addTransportCommands (registry, selection);
     addSelectionCommands (registry, selection, range);
+    addClipboardCommands (registry, context);
     addTrackCommands (registry, selection);
     ui::addTrackViewCommands (registry, context); // right after the model's: the order decides key ties and lists
     addSectionCommands (registry, selection);

@@ -29,17 +29,22 @@ juce::String describe (const char* keyDescription)
 TEST_CASE ("Keymaps load, switch, and keep the user's own changes")
 {
     const auto builtIn = phazite::ui::Keymap::getBuiltIn();
-    REQUIRE (builtIn.size() == 2);
+    REQUIRE (builtIn.size() == 3);
     REQUIRE (phazite::ui::Keymap::findBuiltIn ("Phazite").has_value());
     const auto flStudio = phazite::ui::Keymap::findBuiltIn ("FL Studio");
     REQUIRE (flStudio.has_value());
+    const auto live = phazite::ui::Keymap::findBuiltIn ("Ableton Live");
+    REQUIRE (live.has_value());
 
     // In FL Studio's keymap, right-click deletes clips and a click on empty space places one, as in FL Studio;
-    // otherwise right-click opens a menu and a click selects.
+    // otherwise right-click opens a menu and a click selects, as in Live.
     CHECK (flStudio->rightClickDeletes);
     CHECK (flStudio->clickPlacesClips);
     CHECK_FALSE (phazite::ui::Keymap::findBuiltIn ("Phazite")->rightClickDeletes);
     CHECK_FALSE (phazite::ui::Keymap::findBuiltIn ("Phazite")->clickPlacesClips);
+    CHECK_FALSE (live->rightClickDeletes);
+    CHECK_FALSE (live->clickPlacesClips);
+    CHECK_FALSE (live->selectionLoops);
 
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
@@ -96,6 +101,37 @@ TEST_CASE ("Keymaps load, switch, and keep the user's own changes")
     phazite::ui::switchKeymap (reloaded, "FL Studio", settings);
     CHECK (reloaded.getKeymap().name == juce::String ("FL Studio"));
     CHECK (reloaded.getShortcutDescriptions ("transport.playStop").contains (describe ("F2")));
+}
+
+TEST_CASE ("Each built-in keymap gives a key to every core action")
+{
+    // What making a song needs over and over (roadmap step 3.7): playing, recording and the metronome; undo; the clipboard
+    // and the edits; opening, saving and exporting; the command search, zooming and the views; the Smart and Draw tools;
+    // moving notes; and the computer keyboard.
+    const juce::StringArray core { "transport.playStop", "transport.record",   "transport.metronome",
+                                   "edit.undo",          "edit.cut",           "edit.copy",
+                                   "edit.paste",         "edit.delete",        "edit.duplicate",
+                                   "edit.selectAll",     "edit.split",         "edit.quantize",
+                                   "edit.rename",        "project.open",       "project.save",
+                                   "project.saveAs",     "project.export",     "view.commandPalette",
+                                   "view.zoomIn",        "view.zoomOut",       "view.mixer",
+                                   "view.pianoRoll",     "tool.smart",         "tool.draw",
+                                   "note.transposeUp",   "note.transposeDown", "input.computerKeyboard" };
+
+    for (const auto& keymap : phazite::ui::Keymap::getBuiltIn())
+    {
+        CAPTURE (keymap.name.toStdString());
+
+        for (const auto& id : core)
+        {
+            CAPTURE (id.toStdString());
+            const auto found = keymap.keys.find (id);
+            CHECK ((found != keymap.keys.end() && ! found->second.isEmpty()));
+        }
+
+        // Redo: a key of its own, or Undo's, which redoes as FL Studio's Ctrl+Z does.
+        CHECK ((keymap.keys.count ("edit.redo") > 0 || keymap.keys.count ("edit.undoOrRedo") > 0));
+    }
 }
 
 TEST_CASE ("JUCE's command manager has every command, added before or after the bridge, with its name, state and keys")

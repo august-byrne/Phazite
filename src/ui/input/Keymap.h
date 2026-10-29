@@ -22,7 +22,7 @@ struct Keymap
 
     static std::optional<Keymap> fromJSON (const juce::String&);
 
-    // The keymaps that ship with Phazite (resources/keymaps): "Phazite" (the default) and "FL Studio".
+    // The keymaps that ship with Phazite (resources/keymaps): "Phazite" (the default), "FL Studio" and "Ableton Live".
     static juce::Array<Keymap> getBuiltIn();
     static std::optional<Keymap> findBuiltIn (const juce::String& name);
 };

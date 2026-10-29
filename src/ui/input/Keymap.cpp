@@ -42,7 +42,8 @@ juce::Array<Keymap> Keymap::getBuiltIn()
     juce::Array<Keymap> keymaps;
 
     for (const auto& [data, size] : { std::pair { PhaziteData::phazite_json, PhaziteData::phazite_jsonSize },
-                                      std::pair { PhaziteData::fl_studio_json, PhaziteData::fl_studio_jsonSize } })
+                                      std::pair { PhaziteData::fl_studio_json, PhaziteData::fl_studio_jsonSize },
+                                      std::pair { PhaziteData::ableton_live_json, PhaziteData::ableton_live_jsonSize } })
         if (auto keymap = fromJSON (juce::String::fromUTF8 (data, size)))
             keymaps.add (*keymap);
 

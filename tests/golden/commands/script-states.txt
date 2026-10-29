@@ -25,6 +25,9 @@ after start:
   edit.removeTime: off "Remove Time"
   edit.selectAll: on "Select All"
   edit.deselectAll: off "Deselect All"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
+  edit.paste: off "Paste"
   track.add: on "Add Track"
   track.addFolder: on "Add Folder"
   track.groupIntoFolder: off "Group into Folder"
@@ -407,6 +410,8 @@ after add a MIDI clip on One, with two notes:
   edit.mute: on "Mute"
   edit.split: on "Split"
   edit.deselectAll: on "Deselect All"
+  edit.cut: on "Cut Clip"
+  edit.copy: on "Copy Clip"
   selected: clip on One at 0.000
 after edit.mute:
   edit.undo: on "Undo Mute"
@@ -428,6 +433,8 @@ after edit.delete:
   edit.mute: off "Mute"
   edit.split: off "Split"
   edit.deselectAll: off "Deselect All"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
   selected: nothing
 after select the clip:
   edit.delete: on "Delete Clip"
@@ -437,6 +444,8 @@ after select the clip:
   edit.mute: on "Mute"
   edit.split: on "Split"
   edit.deselectAll: on "Deselect All"
+  edit.cut: on "Cut Clip"
+  edit.copy: on "Copy Clip"
   selected: clip on One at 0.000
 after edit.duplicateAsAlias:
   edit.undo: on "Undo Duplicate as Alias"
@@ -464,6 +473,8 @@ after select the clip's notes:
   edit.duplicate: on "Duplicate 2 Notes"
   edit.duplicateAsAlias: off "Duplicate as Alias"
   edit.split: off "Split"
+  edit.cut: on "Cut 2 Notes"
+  edit.copy: on "Copy 2 Notes"
   note.transposeUp: on "Transpose Up"
   note.transposeDown: on "Transpose Down"
   note.octaveUp: on "Octave Up"
@@ -506,6 +517,8 @@ after note.chop:
   edit.undoOrRedo: on "Undo Chop"
   edit.delete: on "Delete 6 Notes"
   edit.duplicate: on "Duplicate 6 Notes"
+  edit.cut: on "Cut 6 Notes"
+  edit.copy: on "Copy 6 Notes"
   selected: 6 notes (60 at 0.000 for 0.250, 60 at 0.250 for 0.250, 60 at 0.500 for 0.250, 60 at 0.750 for 0.250, 64 at 1.000 for 0.250, 64 at 1.250 for 0.250)
 after edit.mute:
   edit.undo: on "Undo Mute"
@@ -524,6 +537,8 @@ after edit.delete:
   edit.duplicate: off "Duplicate"
   edit.mute: off "Mute"
   edit.deselectAll: off "Deselect All"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
   note.transposeUp: off "Transpose Up"
   note.transposeDown: off "Transpose Down"
   note.octaveUp: off "Octave Up"
@@ -550,6 +565,8 @@ after import a tone onto Two at beat 8, and select it:
   clip.followTempo: on "Follow Tempo"
   edit.split: on "Split"
   edit.deselectAll: on "Deselect All"
+  edit.cut: on "Cut Clip"
+  edit.copy: on "Copy Clip"
   selected: clip on Two at 8.000
 after clip.fadeConvex:
   edit.undo: on "Undo Convex Fades"
@@ -587,6 +604,8 @@ after edit.deleteAndCloseGap:
   clip.followTempo: off "Follow Tempo"
   edit.split: off "Split"
   edit.deselectAll: off "Deselect All"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
   selected: nothing
 after select beats 2 to 6 on One:
   edit.delete: on "Delete Range"
@@ -596,6 +615,8 @@ after select beats 2 to 6 on One:
   edit.insertTime: on "Insert Time"
   edit.removeTime: on "Remove Time"
   edit.deselectAll: on "Deselect All"
+  edit.cut: on "Cut Range"
+  edit.copy: on "Copy Range"
   selected: range 2.000-6.000 beats on One
 after edit.insertTime:
   edit.undo: on "Undo Insert Time"
@@ -623,6 +644,8 @@ after clear the range:
   edit.insertTime: off "Insert Time"
   edit.removeTime: off "Remove Time"
   edit.deselectAll: off "Deselect All"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
   selected: nothing
 after transport.loop:
   transport.loop: on "Loop"
@@ -649,6 +672,8 @@ after edit.selectAll:
   edit.mute: on "Mute"
   edit.split: on "Split"
   edit.deselectAll: on "Deselect All"
+  edit.cut: on "Cut 3 Clips"
+  edit.copy: on "Copy 3 Clips"
   selected: clip on One at 0.000, clip on One at 4.000, clip on One at 2.000
 after select One:
   edit.delete: on "Delete Track"
@@ -657,6 +682,8 @@ after select One:
   edit.duplicateAsAlias: off "Duplicate as Alias"
   edit.mute: off "Mute"
   edit.split: off "Split"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
   track.groupIntoFolder: on "Group into Folder"
   track.collapse: on "Collapse Track"
   track.pin: on, ticked "Pin Track"

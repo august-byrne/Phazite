@@ -12,6 +12,7 @@
 namespace phazite::ui
 {
 class AudioClipEditor;
+class CommandBridge;
 class DevicesView;
 class PianoRoll;
 class TimelineEditor;
@@ -33,6 +34,9 @@ public:
 
     void showTab (Tab tab) { setCurrentTabIndex (tab); }
     Tab getTab() const { return getCurrentTabIndex() == mixer ? mixer : playlist; }
+
+    // What each tab shows, with its key in the keymap in use (AppShell::refreshShortcutTexts()).
+    void refreshTooltips (const CommandBridge&);
 
     void resized() override; // its tabs leave the panel's buttons their corner
 };
@@ -66,6 +70,9 @@ public:
     TimelineEditor& getClipEditor() const noexcept;
     bool showsAudioClip() const noexcept { return showingAudio; }
 
+    // What each tab shows, with its key in the keymap in use (AppShell::refreshShortcutTexts()).
+    void refreshTooltips (const CommandBridge&);
+
     void resized() override; // its tabs leave the panel's buttons their corner
 
 private:
@@ -77,8 +84,10 @@ private:
     DevicesView& devicesView;
     std::unique_ptr<ClipTab> clipTab;
     bool showingAudio = false;
+    const CommandBridge* shortcuts = nullptr; // for the first tab's tooltip, which follows what it shows
 
     void showClipEditor (ClipType);
+    void refreshClipTabTooltip();
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection changed: what it asks the first tab to show
     void currentTabChanged (int, const juce::String&) override;      // the Devices view's page, for the device tabs
 };

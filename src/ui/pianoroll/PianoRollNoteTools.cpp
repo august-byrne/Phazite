@@ -556,6 +556,8 @@ void PianoRoll::NoteGrid::showMenu()
 {
     auto& registry = roll.getCommands();
     juce::PopupMenu menu;
+    addCommandItems (menu, registry, { "edit.cut", "edit.copy", "edit.paste" });
+    menu.addSeparator();
     addCommandItems (menu, registry, { "edit.duplicate", "edit.delete", "edit.mute" });
     menu.addSeparator();
     addCommandItems (menu, registry, { "edit.quantize", "note.legato", "note.chop" });

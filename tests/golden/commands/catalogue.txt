@@ -24,6 +24,9 @@ edit.insertTime | Insert Time | Edit | Inserts empty time, as long as the select
 edit.removeTime | Remove Time | Edit | Removes the selected time range from every track, and moves what comes after it back. Sections that reach into it get shorter. | delete time, remove bars, cut time | enabled-when undo
 edit.selectAll | Select All | Edit | Selects every clip, or every track while tracks are selected. | everything | enabled-when
 edit.deselectAll | Deselect All | Edit | Clears the selection. | select none, clear selection | enabled-when
+edit.cut | Cut | Edit | Copies the selected notes, time range or clips, with the automation under the clips, and deletes them, to paste elsewhere. | clipboard, move, take out | enabled-when undo current-name
+edit.copy | Copy | Edit | Copies the selected notes, time range or clips, with the automation under the clips, to paste elsewhere. | clipboard, copy notes, copy clips | enabled-when current-name
+edit.paste | Paste | Edit | Puts what was cut or copied at the playhead: notes into the clip the piano roll shows there, clips on the selected track, in place of what is there. | clipboard, insert, put | enabled-when undo current-name
 track.add | Add Track | Track | Adds an empty track below the selected one, or at the bottom. | new track, insert track, create | enabled-when undo
 track.addFolder | Add Folder | Track | Adds an empty folder below the selected track, or at the bottom. | new folder, group, bus | enabled-when undo
 track.groupIntoFolder | Group into Folder | Track | Puts the selected tracks into a new folder. A folder becomes a bus when it holds an effect. | group, folder, bus, submix | enabled-when undo

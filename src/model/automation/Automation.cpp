@@ -626,6 +626,71 @@ void deleteAutomation (const std::vector<AutomationStretch>& stretches, bool clo
     }
 }
 
+std::vector<AutomationCopy> copyAutomation (const std::vector<AutomationStretch>& stretches)
+{
+    std::vector<AutomationCopy> copies;
+
+    for (const auto& [track, ranges] : byTrack (stretches))
+    {
+        for (auto* parameter : getAutomatedParameters (*track))
+        {
+            const auto ref = getParameterRef (*parameter);
+
+            if (! ref.isValid())
+                continue;
+
+            const auto& curve = parameter->getCurve();
+            const auto valueAt = [&curve, parameter] (BeatPosition beat)
+            { return curve.getValueAt (toCurvePosition (curve, beat), parameter->getCurrentBaseValue()); };
+
+            // As moveAutomation() takes a stretch: its edges' values, and the points between them, from its start.
+            for (const auto& range : ranges)
+            {
+                AutomationCopy copy { ref, range.getLength(), { { BeatPosition(), valueAt (range.getStart()), 0.0f } }, range.getStart() };
+
+                for (int i = 0; i < curve.getNumPoints(); ++i)
+                    if (const auto beat = getPointBeat (curve, i); beat >= range.getStart() && beat < range.getEnd() - justBefore)
+                        copy.points.push_back (
+                            { BeatPosition() + (beat - range.getStart()), curve.getPointValue (i), curve.getPointCurve (i) });
+
+                copy.points.push_back ({ BeatPosition() + (range.getLength() - justBefore), valueAt (range.getEnd() - justBefore), 0.0f });
+                copies.push_back (std::move (copy));
+            }
+        }
+    }
+
+    return copies;
+}
+
+void pasteAutomation (const te::Edit& edit, const std::vector<AutomationCopy>& copies, BeatDuration distance)
+{
+    for (const auto& copy : copies)
+    {
+        const auto parameter = findParameter (edit, copy.parameter);
+
+        if (parameter == nullptr)
+            continue;
+
+        // Where it lands, in place of what is there, what lies around it keeping its shape, as moveAutomation() copies.
+        auto& curve = parameter->getCurve();
+        auto* undoManager = undoManagerOf (*parameter);
+        const BeatRange landing (copy.start + distance, copy.start + distance + copy.length);
+        addEdge (*parameter, landing.getStart());
+        addEdge (*parameter, landing.getEnd());
+
+        for (auto i = curve.getNumPoints(); --i >= 0;)
+            if (landing.contains (getPointBeat (curve, i)))
+                curve.removePoint (i, undoManager);
+
+        for (const auto& point : copy.points)
+            curve.addPoint (toCurvePosition (curve, landing.getStart() + (point.beat - BeatPosition())),
+                            limitValue (*parameter, point.value), limitCurve (point.curve), undoManager);
+
+        tidyEdges (*parameter, { landing.getStart(), landing.getEnd() });
+        followCurve (*parameter);
+    }
+}
+
 //==============================================================================
 std::vector<AutomationLane> getLanes (te::Track& track)
 {

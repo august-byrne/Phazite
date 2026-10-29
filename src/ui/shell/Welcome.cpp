@@ -2,6 +2,7 @@
 #include "Welcome.h"
 #include "ui/components/Controls.h"
 #include "ui/components/ValueText.h"
+#include "ui/input/Keymap.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // AudioDeviceSelectorComponent
@@ -29,7 +30,11 @@ namespace
           "FL Studio's shortcuts, and its playlist's mouse: a click places the last clip you used, right-click deletes, and "
           "Ctrl+drag selects a time range that loops.",
           "FL Studio" },
-        { "Ableton Live, Logic Pro or another app",
+        { "Ableton Live",
+          "Live's shortcuts: F9 records, Ctrl+L loops the selected time, 0 mutes clips, S solos and C arms tracks, and Ctrl+Alt+M "
+          "shows the mixer.",
+          "Ableton Live" },
+        { "Logic Pro or another app",
           "Phazite's shortcuts, which follow what most music apps share: Space plays, R records, Ctrl+D duplicates.",
           "Phazite" },
         { "None: I'm new to making music",
@@ -59,7 +64,8 @@ ComingFromPage::ComingFromPage (const juce::String& keymapName, std::function<vo
     {
         auto* button = choices.add (new juce::ToggleButton (choice.name));
         button->setRadioGroupId (comingFromGroup);
-        button->setToggleState (keymapName == "FL Studio" && juce::String (choice.keymap) == keymapName, juce::dontSendNotification);
+        button->setToggleState (keymapName != Keymap::defaultName && juce::String (choice.keymap) == keymapName,
+                                juce::dontSendNotification);
         // JUCE calls this for the choice a click turns off too.
         button->onClick = [this, button, keymap = juce::String (choice.keymap)]
         {

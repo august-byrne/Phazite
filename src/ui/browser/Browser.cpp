@@ -428,6 +428,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     setTitle ("Browser");
 
     searchField.setTitle ("Search sounds, instruments and effects");
+    searchField.setTooltip ("Type to find sounds, presets, instruments and effects, the best matches first; Down or Enter goes to them");
     searchField.setFont (juce::FontOptions (TextSize::body));
     searchField.addListener (this);
     searchDelay.search = [this] { updateSearch(); };

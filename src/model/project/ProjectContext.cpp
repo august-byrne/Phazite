@@ -2,6 +2,7 @@
 #include "ProjectContext.h"
 #include "internal/ProjectContext.h"
 #include "model/arrangement/internal/ClipRenders.h"
+#include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/SongRange.h"
 #include "model/arrangement/internal/SongSelection.h"
 #include "model/automation/internal/Automation.h"
@@ -194,6 +195,7 @@ struct ProjectContext::Impl
     std::unique_ptr<ClipRenders> clipRenders;      // renders what the clips play stretched, pitched or reversed
     std::unique_ptr<AudioRecorder> recorder;       // records the armed tracks' audio inputs
     std::unique_ptr<AutomationWatcher> automation; // the parameter touched last, and recorded automation's undo steps
+    Clipboard clipboard;                           // what Cut and Copy keep for Paste
     std::unique_ptr<SongWatcher> songWatcher;
     int projectNumber = 0;
 };
@@ -303,6 +305,11 @@ ClipRenders* getClipRenders (const ProjectContext& context)
     return context.getImpl().clipRenders.get();
 }
 
+Clipboard& getClipboard (ProjectContext& context)
+{
+    return context.getImpl().clipboard;
+}
+
 void setEdit (ProjectContext& context, te::Edit* edit)
 {
     auto& impl = context.getImpl();
@@ -310,8 +317,12 @@ void setEdit (ProjectContext& context, te::Edit* edit)
     if (impl.focus != nullptr)
         impl.focus->setFocusedEdit (nullptr);
 
+    // Another project: views forget what they showed, and the clipboard what it held, which named its files.
     if (edit != impl.selection.getEdit())
+    {
         ++impl.projectNumber;
+        impl.clipboard = {};
+    }
 
     impl.songSelection->setNoteClips ({}); // the editors show the new project's clips, or none
     impl.selection.deselectAll();

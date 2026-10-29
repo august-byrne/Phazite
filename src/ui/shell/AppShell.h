@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Guide.h"
+#include "Lessons.h"
 #include "PanelLayout.h"
 #include "Panels.h"
 #include "StatusBar.h"
@@ -79,6 +80,7 @@ public:
     HintBar& getHintBar() noexcept { return statusBar.getHintBar(); }
     bool showsOpening() const noexcept { return openingLabel.isVisible(); } // for tests
     Guide& getGuide() noexcept { return guide; }
+    Lessons& getLessons() noexcept { return lessons; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -106,6 +108,7 @@ private:
     EditorDock editorDock { projectContext, pianoRoll, audioClipEditor, devices };
     StatusBar statusBar;
     Guide guide;              // the hint bar's next step for newcomers
+    Lessons lessons;          // Help > Lessons, in the hint bar while one runs
     juce::Label openingLabel; // over the centre until a project is open: what the window shows as Phazite starts
 
     // The editor used last, which the time line's commands (zoom, grid, tools, nudge) act on.

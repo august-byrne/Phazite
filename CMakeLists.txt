@@ -145,6 +145,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/AudioClipModel.h
     src/model/arrangement/AudioClips.cpp
     src/model/arrangement/ClipRenders.cpp
+    src/model/arrangement/Clipboard.cpp
     src/model/arrangement/Clips.cpp
     src/model/arrangement/Grid.cpp
     src/model/arrangement/GridSettings.h
@@ -167,6 +168,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/internal/Arrangement.h
     src/model/arrangement/internal/AudioClips.h
     src/model/arrangement/internal/ClipRenders.h
+    src/model/arrangement/internal/Clipboard.h
     src/model/arrangement/internal/Clips.h
     src/model/arrangement/internal/Grid.h
     src/model/arrangement/internal/Import.h
@@ -338,6 +340,7 @@ juce_add_binary_data(phazite_data
     SOURCES
         resources/keymaps/phazite.json
         resources/keymaps/fl_studio.json
+        resources/keymaps/ableton_live.json
         # Song outlines: every file named *.outline.json here is one (src/model/arrangement/Outlines.h)
         resources/outlines/pop.outline.json
         resources/outlines/rock.outline.json
@@ -637,6 +640,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/Guide.h
     src/ui/shell/HintBar.cpp
     src/ui/shell/HintBar.h
+    src/ui/shell/Lessons.cpp
+    src/ui/shell/Lessons.h
     src/ui/shell/NewProjectPanel.cpp
     src/ui/shell/NewProjectPanel.h
     src/ui/shell/PanelLayout.cpp
@@ -777,6 +782,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ChordLaneTests.cpp
         tests/ChordModelTests.cpp
         tests/ChordValueTests.cpp
+        tests/ClipboardTests.cpp
         tests/ClipTests.cpp
         tests/CommandGoldenTests.cpp
         tests/CommandTests.cpp
@@ -816,6 +822,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/LibraryTests.cpp
         tests/LimiterEditorTests.cpp
         tests/LimiterTests.cpp
+        tests/LessonsTests.cpp
         tests/LiveInputTests.cpp
         tests/MessageQueueTests.cpp
         tests/MetronomeTests.cpp

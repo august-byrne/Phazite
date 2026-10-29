@@ -71,6 +71,21 @@ void moveAutomation (const std::vector<AutomationStretch>&, BeatDuration distanc
 // deleteTimeRange()).
 void deleteAutomation (const std::vector<AutomationStretch>&, bool closeGap);
 
+// The automation in stretches as it is now, for Paste to put back later (arrangement/internal/Clipboard.h): for each
+// automated parameter of a stretch's track, a stretch's points as moveAutomation() takes them, with its values at its
+// edges, from its start; and, pasted, the same a distance from where it was, in place of what lies there, what lies
+// around it keeping its shape. A parameter that is gone by then is left out. Pasting joins the caller's undo step.
+struct AutomationCopy
+{
+    ParameterRef parameter {};
+    BeatDuration length {};
+    std::vector<AutomationPoint> points {}; // their beats from the stretch's start
+    BeatPosition start {};                  // where the stretch was
+};
+
+std::vector<AutomationCopy> copyAutomation (const std::vector<AutomationStretch>&);
+void pasteAutomation (const te::Edit&, const std::vector<AutomationCopy>&, BeatDuration distance);
+
 //==============================================================================
 // The lanes a track shows (getAutomationLanes()): those it keeps (Schema.h: PHAZITELANE), of devices on it, then one for
 // each of its parameters with automation that it keeps none for, so that automation never hides. Changes to them are

@@ -98,6 +98,9 @@ void deleteClips (const juce::Array<te::Clip*>&, bool closeGap);
 // (Removing time from the whole song, sections too, is Arrangement.h's removeTime().)
 void deleteTimeRange (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&, bool closeGap);
 
+// The same for a track's clips alone, without the automation there or closing the gap: what Paste lands on (Clipboard.h).
+void clearClipsIn (te::ClipTrack&, te::BeatRange);
+
 // Copies what lies in a time range on some tracks right after it, on the same tracks, and returns where the copy is.
 // The copy is cut at the range's edges, as Split cuts clips; the clips themselves aren't cut there. Each piece of the
 // copy replaces what lies under it (as REAPER's razor edits trim what is behind them), so nothing plays twice, and what

@@ -74,6 +74,8 @@ void Playlist::showClipMenu()
 {
     auto& bridge = getCommands();
     juce::PopupMenu menu;
+    addCommandItems (menu, bridge, { "edit.cut", "edit.copy", "edit.paste" });
+    menu.addSeparator();
     addCommandItems (menu, bridge, { "edit.split", "edit.duplicate", "edit.duplicateAsAlias", "clip.makeUnique" });
     menu.addSeparator();
     addCommandItems (menu, bridge, { "edit.mute", "edit.quantize" });

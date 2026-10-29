@@ -13,8 +13,8 @@
 namespace phazite::ui
 {
 //==============================================================================
-// "Coming from...?": FL Studio's keymap for FL Studio's users, Phazite's own for everyone else. A choice takes effect at
-// once; Options > Keymap changes it later.
+// "Coming from...?": FL Studio's keymap for FL Studio's users, Ableton Live's for Live's, Phazite's own for everyone else. A
+// choice takes effect at once; Options > Keymap changes it later.
 class ComingFromPage : public juce::Component
 {
 public:
@@ -23,9 +23,9 @@ public:
     void resized() override;
     void lookAndFeelChanged() override;
 
-    // The choices, in order: FL Studio, another app, and none. Nothing is chosen until one is clicked, unless FL Studio's
-    // keymap is in use already.
-    static constexpr int numChoices = 3;
+    // The choices, in order: FL Studio, Ableton Live, another app, and none. Nothing is chosen until one is clicked, unless
+    // FL Studio's or Live's keymap is in use already.
+    static constexpr int numChoices = 4;
     juce::ToggleButton& getChoice (int index) noexcept { return *choices[index]; }
     int getChosen() const; // -1 for none
 

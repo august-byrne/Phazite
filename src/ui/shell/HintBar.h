@@ -24,6 +24,10 @@ public:
     // cleared (an empty text); a click runs fix.
     void setAlert (const juce::String& text, std::function<void()> fix);
     juce::String getAlert() const { return alert; }
+
+    // A click while no alert shows: the lesson's next step (AppShell, Lessons.h).
+    std::function<void()> onClick;
+
     void mouseUp (const juce::MouseEvent&) override;
 
 private:

@@ -2,6 +2,8 @@
 #include "ParameterControls.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <cmath>
+
 namespace phazite::ui
 {
 namespace
@@ -21,6 +23,31 @@ namespace
         label->setMinimumHorizontalScale (0.8f);
         label->setInterceptsMouseClicks (false, false);
         return label;
+    }
+
+    // What a parameter's control says in the hint bar: what it ranges over and where it starts, and for a knob how to work it.
+    juce::String describe (const devices::ParameterInfo& parameter, const ParameterHandle& handle)
+    {
+        const auto name = toString (parameter.name);
+
+        if (parameter.unit == devices::Unit::choice)
+        {
+            juce::StringArray choices;
+
+            for (const auto& choice : parameter.choices)
+                choices.add (toString (choice));
+
+            const auto first = (int) std::lround (parameter.defaultValue - parameter.minimum);
+            return name + ": " + choices.joinIntoString (", ")
+                   + (juce::isPositiveAndBelow (first, choices.size()) ? ", " + choices[first] + " at first" : juce::String());
+        }
+
+        if (parameter.unit == devices::Unit::toggle)
+            return name + ": on or off, " + (parameter.defaultValue > 0.5f ? "on" : "off") + " at first";
+
+        return name + ": from " + handle.getText (parameter.minimum) + " to " + handle.getText (parameter.maximum) + ", "
+               + handle.getText (parameter.defaultValue)
+               + " at first. Drag up or down, double-click for where it started, or right-click to automate or modulate it";
     }
 } // namespace
 
@@ -81,6 +108,8 @@ ParameterControls::ParameterControls (const DeviceHandle& device, std::vector<st
 
         const auto& parameter = info->parameters[(size_t) index];
         const auto fullName = toString (parameter.name);
+        auto handle = device.getParameter (parameter.id);
+        const auto help = describe (parameter, handle);
         auto control = std::make_unique<Control>();
         control->id = parameter.id;
         control->name =
@@ -92,7 +121,8 @@ ParameterControls::ParameterControls (const DeviceHandle& device, std::vector<st
             control->box = std::make_unique<juce::ComboBox>();
             control->box->setTitle (fullName);
             control->boxAttachment = std::make_unique<ChoiceAttachment> (*control->box);
-            control->boxAttachment->setParameter (device.getParameter (parameter.id));
+            control->boxAttachment->setParameter (std::move (handle));
+            control->box->setTooltip (help);
             addAndMakeVisible (*control->box);
         }
         else if (parameter.unit == devices::Unit::toggle)
@@ -100,7 +130,8 @@ ParameterControls::ParameterControls (const DeviceHandle& device, std::vector<st
             control->toggle = std::make_unique<juce::ToggleButton>();
             control->toggle->setTitle (fullName);
             control->toggleAttachment = std::make_unique<ToggleAttachment> (*control->toggle);
-            control->toggleAttachment->setParameter (device.getParameter (parameter.id));
+            control->toggleAttachment->setParameter (std::move (handle));
+            control->toggle->setTooltip (help);
             addAndMakeVisible (*control->toggle);
         }
         else
@@ -108,7 +139,8 @@ ParameterControls::ParameterControls (const DeviceHandle& device, std::vector<st
             control->knob = std::make_unique<Knob> (fullName, parameter.defaultValue);
             showAsParameter (*control->knob, parameter);
             control->knobAttachment = std::make_unique<ParameterAttachment> (*control->knob);
-            control->knobAttachment->setParameter (device.getParameter (parameter.id));
+            control->knobAttachment->setParameter (std::move (handle));
+            control->knob->setTooltip (help);
             control->value = makeLabel ({});
             control->value->setColour (juce::Label::textColourId, getPalette (*this).textMuted);
             addAndMakeVisible (*control->knob);

@@ -12,6 +12,7 @@ namespace phazite
 class AutomationWatcher;
 class ClipRenders;
 class ProjectContext;
+struct Clipboard;
 
 te::Edit* getEdit (const ProjectContext&); // nullptr while no project is open
 te::SelectionManager& getSelection (ProjectContext&);
@@ -25,7 +26,10 @@ AutomationWatcher* getAutomationWatcher (const ProjectContext&);
 // nullptr while no project is open.
 ClipRenders* getClipRenders (const ProjectContext&);
 
-// The Edit open now, or none: ProjectSession's (and tests'). Nothing of the previous Edit stays selected. Then tells the
-// listeners.
+// What Cut and Copy keep for Paste (model/arrangement/internal/Clipboard.h), of the open Edit: empty after another opens.
+Clipboard& getClipboard (ProjectContext&);
+
+// The Edit open now, or none: ProjectSession's (and tests'). Nothing of the previous Edit stays selected, and the
+// clipboard is empty. Then tells the listeners.
 void setEdit (ProjectContext&, te::Edit*);
 } // namespace phazite

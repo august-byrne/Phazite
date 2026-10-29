@@ -300,6 +300,7 @@ namespace
                                      renameTrack (context, track, text);
                              });
             nameEditor.setTitle ("Name");
+            nameEditor.setTooltip ("The track's name: type another and press Enter");
             colourButton.setTooltip ("The track's color, which its clips and its channel show. Click for another");
             colourButton.onClick = [this]
             {
@@ -699,6 +700,7 @@ namespace
                                      renameSection (context, section, text);
                              });
             nameEditor.setTitle ("Name");
+            nameEditor.setTooltip ("The section's name: type another and press Enter");
             colourButton.setTooltip ("The section's color, behind the tracks. Click for another");
             colourButton.onClick = [this]
             {

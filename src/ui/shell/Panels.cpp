@@ -3,6 +3,7 @@
 #include "model/arrangement/AudioClipModel.h"
 #include "model/project/ProjectContext.h"
 #include "ui/audioclip/AudioClipEditor.h"
+#include "ui/input/CommandUI.h"
 #include "ui/mixer/DevicesView.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/theme/DesignTokens.h"
@@ -38,6 +39,15 @@ void SongViews::resized()
 {
     juce::TabbedComponent::resized();
     leaveCorner (*this, 2); // maximize and hide
+}
+
+void SongViews::refreshTooltips (const CommandBridge& commands)
+{
+    auto& bar = getTabbedButtonBar();
+    bar.getTabButton (playlist)->setTooltip (
+        withShortcut (commands, "Playlist: the song's tracks and their clips, over time", "view.playlist"));
+    bar.getTabButton (mixer)->setTooltip (
+        withShortcut (commands, "Mixer: a strip for each track, with its devices, sends, pan and fader", "view.mixer"));
 }
 
 //==============================================================================
@@ -110,6 +120,30 @@ void EditorDock::showClipEditor (ClipType type)
     pianoRoll.setVisible (! showingAudio);
     audioClipEditor.setVisible (showingAudio);
     setTabName (clipEditor, showingAudio ? "Audio clip" : "Piano roll");
+    refreshClipTabTooltip();
+}
+
+void EditorDock::refreshTooltips (const CommandBridge& commands)
+{
+    shortcuts = &commands;
+    auto& bar = getTabbedButtonBar();
+    bar.getTabButton (instrument)
+        ->setTooltip (
+            withShortcut (commands, "Instrument: the selected track's instrument, with its modulators and macros", "view.instrument"));
+    bar.getTabButton (effects)->setTooltip (
+        withShortcut (commands, "Effects: the selected track's effects, as cards, one open at a time", "view.effects"));
+    refreshClipTabTooltip();
+}
+
+void EditorDock::refreshClipTabTooltip()
+{
+    if (shortcuts == nullptr)
+        return;
+
+    getTabbedButtonBar()
+        .getTabButton (clipEditor)
+        ->setTooltip (showingAudio ? juce::String ("Audio clip: the selected audio clip's edges, fades, gain, pitch and tempo")
+                                   : withShortcut (*shortcuts, "Piano roll: the notes of the selected clips", "view.pianoRoll"));
 }
 
 void EditorDock::changeListenerCallback (juce::ChangeBroadcaster*)

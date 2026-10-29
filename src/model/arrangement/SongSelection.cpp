@@ -298,6 +298,16 @@ void SongSelection::setNoteClips (const std::vector<ClipID>& ids)
     impl->setNoteClips (ids);
 }
 
+std::vector<ClipID> SongSelection::getNoteClips() const
+{
+    std::vector<ClipID> ids;
+
+    for (auto* clip : impl->getLiveNoteClips())
+        ids.push_back (getClipID (*clip));
+
+    return ids;
+}
+
 std::vector<NoteRef> SongSelection::getNotes() const
 {
     std::vector<NoteRef> refs;

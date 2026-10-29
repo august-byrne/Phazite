@@ -24,6 +24,9 @@ edit.insertTime | ctrl + I
 edit.removeTime | ctrl + shift + delete
 edit.selectAll | ctrl + A
 edit.deselectAll
+edit.cut | ctrl + X
+edit.copy | ctrl + C
+edit.paste | ctrl + V
 track.add | ctrl + T
 track.addFolder
 track.groupIntoFolder | ctrl + G
@@ -159,3 +162,9 @@ pianoRoll.ghostNotes
 pianoRoll.snapToKey
 pianoRoll.keyForAllTracks
 help.guide
+help.lesson.beat
+help.lesson.recording
+help.lesson.arranging
+help.lesson.effects
+help.lesson.chords
+help.stopLesson
