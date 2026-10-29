@@ -122,6 +122,8 @@ namespace
     class ClockKeeper final : public juce::AudioProcessor
     {
     public:
+        using juce::AudioProcessor::processBlock;
+
         void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override { juce::Time::getMillisecondCounter(); }
 
         const juce::String getName() const override { return "Clock keeper"; }
