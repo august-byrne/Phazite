@@ -527,11 +527,9 @@ TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, al
 
     // The compressor's slot has one, the EQ's and the plug-in's none.
     const auto meters = phazite::test::findAll<phazite::ui::ValueMeter> (strip);
-    const auto reductions = std::count_if (meters.begin(), meters.end(),
-                                           [] (const phazite::ui::ValueMeter* meter) { return meter->getTitle() == "Gain reduction"; });
-    REQUIRE (reductions == 1);
-    auto* meter = *std::find_if (meters.begin(), meters.end(),
-                                 [] (const phazite::ui::ValueMeter* meter) { return meter->getTitle() == "Gain reduction"; });
+    const auto isReduction = [] (const phazite::ui::ValueMeter* each) { return each->getTitle() == "Gain reduction"; };
+    REQUIRE (std::count_if (meters.begin(), meters.end(), isReduction) == 1);
+    auto* meter = *std::find_if (meters.begin(), meters.end(), isReduction);
     auto* compressorName = phazite::test::findComponentWithTitle (strip, "Compressor");
     REQUIRE (compressorName != nullptr);
     CHECK (meter->getParentComponent() == compressorName->getParentComponent());

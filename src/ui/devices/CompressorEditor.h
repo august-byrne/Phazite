@@ -2,9 +2,10 @@
 // The compressor's editor (roadmap step 1.6, devices/dynamics/Compressor.h): its curve, with a dot riding it at the level the
 // detector hears and a meter of how far it turns the sound down; beside it the last seconds, as FabFilter's compressor shows
 // them, what it hears (pale, or the track its sidechain listens to, in that track's colour), what goes out and how far it
-// turned the sound down (red, from the top), with the threshold a line across; its Threshold and Ratio, large, then the rest, and its key's cuts with Listen, which plays the key instead of
-// the sound while the editor shows (the track its sidechain listens to is chosen in its header: SidechainMenus.h).
-// Dragging across the curve, or the threshold's line up or down, moves the threshold, as one undo step.
+// turned the sound down (red, from the top), with the threshold a line across; its Threshold and Ratio, large, then the
+// rest, and its key's cuts with Listen, which plays the key instead of the sound while the editor shows (the track its
+// sidechain listens to is chosen in its header: SidechainMenus.h). Dragging across the curve, or the threshold's line up or
+// down, moves the threshold, as one undo step. On a folded card it shows its history alone, which shows the ducking.
 #pragma once
 
 #include "DeviceEditorBase.h"

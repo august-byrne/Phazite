@@ -298,6 +298,10 @@ void Playlist::showProject()
 
 void Playlist::tick()
 {
+    if (ticksToSkip-- > 0)
+        return;
+
+    ticksToSkip = 2;
     const auto rendering = getClipsBeingRendered (context);
 
     if (rendering.empty() && ! showsRendering)

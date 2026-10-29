@@ -144,8 +144,10 @@ private:
     void songChanged (const SongChanges&) override;
 
     // Audio clips whose renders are being made (model/arrangement/AudioClipModel.h): silent until then, and shown so, with
-    // how far each has come. The ticker asks a few times a second; nothing while nothing renders.
+    // how far each has come: asked at every third of the ticker's ticks (ten times a second), which walks the song's audio
+    // clips while anything renders, and nothing otherwise.
     bool showsRendering = false;
+    int ticksToSkip = 0;
     void tick() override;
 
     // The rows of tracks.
