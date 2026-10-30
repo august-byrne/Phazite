@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes. The song holds its
-// MIDI clips in Phazite's own record of it (schema::CLIP, on their tracks' elements; docs/tracktion-migration.md, T1 step
-// 3): where each is, in beats, its name, mute and alias group, and its notes (model/notes/internal/Notes.h). Tracktion's
-// MIDI clips mirror them (model/mirror/internal/Mirror.h), with the same IDs. Audio clips are still Tracktion's own until
-// step 3b: the edits here work on Tracktion's for them.
+// clips in Phazite's own record of it (schema::CLIP, on their tracks' elements; docs/tracktion-migration.md, T1 step 3):
+// where each is, in beats, its name, mute and alias group, and a MIDI clip's notes (model/notes/internal/Notes.h) or an
+// audio clip's part of its file (AudioClips.h). Tracktion's clips mirror them (model/mirror/internal/Mirror.h), with the
+// same IDs.
 #pragma once
 
 #include "model/base/internal/Selection.h"
@@ -15,9 +15,9 @@
 namespace phazite
 {
 //==============================================================================
-// The song's MIDI clips as Phazite's record holds them.
+// The song's clips as Phazite's record holds them.
 
-// A clip's element: invalid for a clip that isn't the song's (gone, or an audio clip).
+// A clip's element: invalid for a clip that isn't the song's (gone).
 juce::ValueTree findClipState (const te::Edit&, ClipID);
 juce::ValueTree findClipState (const te::Clip&);
 
@@ -26,9 +26,16 @@ std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState);
 std::vector<juce::ValueTree> getClipStates (const te::Edit&);
 
 ClipID getClipID (const juce::ValueTree& clipState);
-BeatRange getClipRange (const juce::ValueTree& clipState);
 BeatDuration getClipOffset (const juce::ValueTree& clipState);
 BeatPosition getContentStart (const juce::ValueTree& clipState); // where its notes count from: its start, less its offset
+
+// Where a clip is: a MIDI clip's as its element holds it, and any clip's, an audio clip's for as long as the part of its file
+// it plays takes at the tempo there.
+BeatRange getClipRange (const juce::ValueTree& clipState);
+BeatRange getClipRange (const te::Edit&, const juce::ValueTree& clipState);
+
+// Moves a clip to start at a beat, playing what it did (in the caller's undo step), and Tracktion's clip follows.
+void moveClipState (te::Edit&, juce::ValueTree clipState, BeatPosition start);
 
 // The clips of a clip's alias group, which hold the same notes (schema::clipLink), the clip itself first; only the clip
 // if it is in none.
@@ -43,7 +50,7 @@ juce::ValueTree copyClipState (te::Edit&, const juce::ValueTree& clipState);
 
 // Puts a clip's element on a track's, or moves it there, and has Tracktion's clip follow (in the caller's undo step).
 // Returns Tracktion's clip.
-te::MidiClip* placeClipState (te::Edit&, juce::ValueTree clipState, te::ClipTrack&);
+te::Clip* placeClipState (te::Edit&, juce::ValueTree clipState, te::ClipTrack&);
 
 // Where a clip is, in the caller's undo step, and has Tracktion's clip follow: its start, its length, and how far into
 // its notes it starts.
@@ -114,8 +121,8 @@ void setCrossfade (te::AudioClipBase& first, te::AudioClipBase& second, te::Time
 // Gives the audio clips among these fade-ins and fade-outs of a shape.
 void setFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
 
-// Adds an empty MIDI clip, named after its track, and selects it if a selection manager is given.
-te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, Selection*);
+// Adds an empty MIDI clip, named after its track or as given, and selects it if a selection manager is given.
+te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, Selection*, const juce::String& name = {});
 
 // The same, a bar long (in the time signature there) from a beat.
 te::MidiClip* insertBarLongMidiClip (te::ClipTrack&, te::BeatPosition start, Selection*);

@@ -2,6 +2,7 @@
 #include "internal/Recording.h"
 #include "internal/AudioRecorder.h"
 #include "internal/Playback.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
@@ -181,7 +182,7 @@ namespace
         juce::Array<te::AudioClipBase*> clips;
 
         for (auto* clip : selection.getItemsOfType<te::AudioClipBase>())
-            if ((int) clip->state.getProperty (schema::phaziteTakes, 0) > 1)
+            if (getClipTakeCount (*clip) > 1)
                 clips.add (clip);
 
         return clips;
@@ -218,16 +219,7 @@ void stepTakes (const Selection& selection, int direction)
     // The takes lie one after another in the clip's file, each as long as the range they were recorded round.
     for (auto* clip : getClipsWithTakes (selection))
     {
-        const auto count = (int) clip->state[schema::phaziteTakes];
-        const auto playing = (int) clip->state[schema::phaziteTake];
-        const auto next = juce::jlimit (1, count, playing + direction);
-
-        if (next == playing)
-            continue;
-
-        const auto length = te::TimeDuration::fromSeconds ((double) clip->state[schema::phaziteTakeLength]);
-        clip->setOffset (clip->getPosition().getOffset() + length * (double) (next - playing));
-        clip->state.setProperty (schema::phaziteTake, next, &clip->edit.getUndoManager());
+        playTake (*clip, juce::jlimit (1, getClipTakeCount (*clip), getClipTake (*clip) + direction));
     }
 }
 

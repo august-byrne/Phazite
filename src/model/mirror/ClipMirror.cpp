@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Mirror.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -105,11 +106,45 @@ namespace
         }
     }
 
-    void reconcileClip (te::Edit& edit, const juce::ValueTree& clipState, te::ClipTrack& track)
+    // A new clip's state for Tracktion, of a type, where it plays.
+    juce::ValueTree makeTracktionClip (const juce::Identifier& type, te::EditItemID id, const juce::String& name, te::ClipPosition position)
+    {
+        juce::ValueTree created (type);
+        created.setProperty (te::IDs::name, name, nullptr);
+        created.setProperty (te::IDs::start, position.getStart().inSeconds(), nullptr);
+        created.setProperty (te::IDs::length, position.getLength().inSeconds(), nullptr);
+        created.setProperty (te::IDs::offset, position.getOffset().inSeconds(), nullptr);
+        id.writeID (created, nullptr);
+        return created;
+    }
+
+    // What every clip of Tracktion's gets from the song's: its track and place, its name and mute; in no link group of
+    // Tracktion's (the song keeps its aliases itself), and not looping, which is none of Phazite's.
+    void reconcilePlace (te::Clip& clip, const juce::ValueTree& clipState, te::ClipTrack& track, te::ClipPosition position)
+    {
+        if (clip.getClipTrack() != &track)
+            clip.moveTo (track);
+
+        if (const auto now = clip.getPosition(); now.time != position.time || now.offset != position.offset)
+            clip.setPosition (position);
+
+        if (const auto name = clipState[schema::clipName].toString(); clip.getName() != name)
+            clip.setName (name);
+
+        if (clip.isMuted() != (bool) clipState[schema::clipMute])
+            clip.setMuted (clipState[schema::clipMute]);
+
+        if (clip.isLinked())
+            clip.setLinkGroupID ({});
+
+        if (clip.isLooping())
+            clip.disableLooping();
+    }
+
+    void reconcileMidiClip (te::Edit& edit, const juce::ValueTree& clipState, te::ClipTrack& track)
     {
         const auto id = toTracktion (getClipID (clipState));
         const auto position = getPosition (edit, clipState);
-        const auto name = clipState[schema::clipName].toString();
         auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (edit, id));
 
         if (clip == nullptr)
@@ -118,40 +153,83 @@ namespace
             if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (&track); audioTrack != nullptr && ! audioTrack->containsAnyMIDIClips())
                 audioTrack->setVerticalScaleToDefault();
 
-            juce::ValueTree created (te::IDs::MIDICLIP);
-            created.setProperty (te::IDs::name, name, nullptr);
-            created.setProperty (te::IDs::start, position.getStart().inSeconds(), nullptr);
-            created.setProperty (te::IDs::length, position.getLength().inSeconds(), nullptr);
-            created.setProperty (te::IDs::offset, position.getOffset().inSeconds(), nullptr);
-            id.writeID (created, nullptr);
+            const auto created = makeTracktionClip (te::IDs::MIDICLIP, id, clipState[schema::clipName].toString(), position);
             clip = dynamic_cast<te::MidiClip*> (te::insertClipWithState (track, created));
 
             if (clip == nullptr)
                 return;
         }
-        else if (clip->getClipTrack() != &track)
-        {
-            clip->moveTo (track);
-        }
 
-        if (const auto now = clip->getPosition(); now.time != position.time || now.offset != position.offset)
-            clip->setPosition (position);
-
-        if (clip->getName() != name)
-            clip->setName (name);
-
-        if (clip->isMuted() != (bool) clipState[schema::clipMute])
-            clip->setMuted (clipState[schema::clipMute]);
-
-        if (clip->isLinked())
-            clip->setLinkGroupID ({});
-
-        // A clip of the song's plays its notes once: looping is none of Phazite's.
-        if (clip->isLooping())
-            clip->disableLooping();
-
+        reconcilePlace (*clip, clipState, track, position);
         reconcileNotes (*clip, clipState);
         reconcileControls (*clip, clipState);
+    }
+
+    // The song's fades of an audio clip as Tracktion plays them: scaled down together where they would overrun it, as
+    // Tracktion's own getters give them, so that Tracktion never scales its own outside the undo history.
+    std::pair<double, double> getFittedFades (const juce::ValueTree& clipState, double length)
+    {
+        auto in = juce::jlimit (0.0, length, getClipFade (clipState, true));
+        auto out = juce::jlimit (0.0, length, getClipFade (clipState, false));
+
+        if (in + out > length && in + out > 0.0)
+        {
+            const auto scale = length / (in + out);
+            in *= scale;
+            out *= scale;
+        }
+
+        return { in, out };
+    }
+
+    void reconcileAudioClip (te::Edit& edit, const juce::ValueTree& clipState, te::ClipTrack& track)
+    {
+        const auto id = toTracktion (getClipID (clipState));
+        const auto position = getPlayedPosition (edit, clipState);
+        const auto played = getPlayedFile (edit, clipState);
+        auto* clip = dynamic_cast<te::AudioClipBase*> (te::findClipForID (edit, id));
+
+        if (clip == nullptr)
+        {
+            auto created = makeTracktionClip (te::IDs::AUDIOCLIP, id, clipState[schema::clipName].toString(), position);
+            created.setProperty (te::IDs::source, te::SourceFileReference::findPathFromFile (edit, played, true), nullptr);
+            clip = dynamic_cast<te::AudioClipBase*> (te::insertClipWithState (track, created));
+
+            if (clip == nullptr)
+                return;
+        }
+
+        if (auto& source = clip->getSourceFileReference(); source.getFile() != played)
+            source.source = te::SourceFileReference::findPathFromFile (edit, played, true);
+
+        reconcilePlace (*clip, clipState, track, position);
+        auto* undo = &edit.getUndoManager();
+
+        if (const auto gain = (float) clipState.getProperty (schema::clipGain, 0.0f); ! juce::exactlyEqual (clip->getGainDB(), gain))
+            clip->setGainDB (gain);
+
+        // Written as they are: they fit, so Tracktion's setters, which fit each against the other's old length, aren't needed.
+        const auto [fadeIn, fadeOut] = getFittedFades (clipState, position.getLength().inSeconds());
+
+        if (! juce::exactlyEqual ((double) clip->state.getProperty (te::IDs::fadeIn, 0.0), fadeIn))
+            clip->state.setProperty (te::IDs::fadeIn, fadeIn, undo);
+
+        if (! juce::exactlyEqual ((double) clip->state.getProperty (te::IDs::fadeOut, 0.0), fadeOut))
+            clip->state.setProperty (te::IDs::fadeOut, fadeOut, undo);
+
+        if (const auto shape = getFadeShape (clipState, true); clip->getFadeInType() != shape)
+            clip->setFadeInType (shape);
+
+        if (const auto shape = getFadeShape (clipState, false); clip->getFadeOutType() != shape)
+            clip->setFadeOutType (shape);
+    }
+
+    void reconcileClip (te::Edit& edit, const juce::ValueTree& clipState, te::ClipTrack& track)
+    {
+        if (isAudioState (clipState))
+            reconcileAudioClip (edit, clipState, track);
+        else
+            reconcileMidiClip (edit, clipState, track);
     }
 
     te::ClipTrack* findTrackOf (te::Edit& edit, const juce::ValueTree& clipState)
@@ -175,12 +253,12 @@ void reconcileClips (te::Edit& edit)
             reconcileClip (edit, clipState, *track);
     }
 
-    // Tracktion's MIDI clips the song hasn't go.
+    // Tracktion's clips the song hasn't go.
     juce::Array<te::Clip::Ptr> gone;
 
     for (auto* track : te::getAudioTracks (edit))
         for (auto* clip : track->getClips())
-            if (dynamic_cast<te::MidiClip*> (clip) != nullptr && ! kept.contains (clip->itemID))
+            if (! kept.contains (clip->itemID))
                 gone.add (clip);
 
     for (auto& clip : gone)
@@ -194,7 +272,7 @@ void reconcileClip (te::Edit& edit, ClipID id)
         if (auto* track = findTrackOf (edit, clipState))
             reconcileClip (edit, clipState, *track);
     }
-    else if (auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (edit, toTracktion (id))))
+    else if (auto* clip = te::findClipForID (edit, toTracktion (id)))
     {
         clip->removeFromParent();
     }

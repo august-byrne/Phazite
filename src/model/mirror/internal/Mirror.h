@@ -24,11 +24,13 @@ void reconcileTempoMap (te::Edit&);
 // Nothing for a song without a track list (an Edit that isn't a song's).
 void reconcileTracks (te::Edit&);
 
-// The MIDI clips (model/arrangement/internal/Clips.h): Tracktion gets a MIDI clip for each of the song's, with its ID, on
-// its track, where it is in seconds (from its beats, as the tempo map has them now), with its name, its mute and its
-// notes, each with its ID (schema::phaziteNoteID), in no alias group of Tracktion's (the song keeps its aliases' notes the
-// same itself, so Tracktion's copying between them never runs); Tracktion's MIDI clips on the song's tracks that the song
-// hasn't go. The tempo map's reconcile calls it, since where a clip is in seconds follows the tempo.
+// The clips (model/arrangement/internal/Clips.h): Tracktion gets a clip for each of the song's, with its ID, on its track,
+// where it is in seconds (from its beats, as the tempo map has them now), with its name and its mute, in no alias group of
+// Tracktion's (the song keeps its aliases the same itself, so Tracktion's copying between them never runs): a MIDI clip
+// with its notes, each with its ID (schema::phaziteNoteID), and its controller events; an audio clip playing its file, or
+// Phazite's render of it, from where the part it plays starts, with its gain and its fades, fitted to it as Tracktion would
+// fit them (AudioClips.h). Tracktion's clips on the song's tracks that the song hasn't go. The tempo map's reconcile calls
+// it, since where a clip is in seconds, and how a clip that follows the tempo is stretched, follow the tempo.
 void reconcileClips (te::Edit&);
 
 // The same for one clip, after a change to it alone (its notes, its place), or to its going.

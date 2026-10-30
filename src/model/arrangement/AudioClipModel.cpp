@@ -70,7 +70,7 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
     const auto audio = getAudioTimeRange (*clip);
     info.content = { fromTracktion (tempo.toBeats (audio.getStart())), fromTracktion (tempo.toBeats (audio.getEnd())) };
 
-    info.gain = clip->getGainDB();
+    info.gain = getClipGain (*clip);
     info.pitch = getClipPitch (*clip);
     info.reversed = isClipReversed (*clip);
     info.tempo = getClipTempo (*clip);

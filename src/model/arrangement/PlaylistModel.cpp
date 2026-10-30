@@ -150,7 +150,7 @@ namespace
 
         // The song's own place for one of its clips, without rounding through seconds.
         if (const auto clipState = findClipState (clip); clipState.isValid())
-            info.range = getClipRange (clipState);
+            info.range = getClipRange (clip.edit, clipState);
 
         if (auto* audio = dynamic_cast<te::AudioClipBase*> (&clip))
         {
@@ -164,10 +164,10 @@ namespace
             info.fadeOutShape = toFadeShape (audio->getFadeOutType());
             info.followsTempo = getClipTempo (*audio) > 0.0;
 
-            if (const auto takes = (int) audio->state.getProperty (schema::phaziteTakes, 0); takes > 1)
+            if (const auto takes = getClipTakeCount (*audio); takes > 1)
             {
                 info.takes = takes;
-                info.take = (int) audio->state.getProperty (schema::phaziteTake, 1);
+                info.take = getClipTake (*audio);
             }
         }
 

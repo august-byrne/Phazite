@@ -96,9 +96,30 @@ namespace
         mirror::reconcileClip (edit, id);
     }
 
-    // Moves a clip's start to a beat, its end staying where it is, and its notes too.
+    // How far a move of an audio clip's start or end, from where it plays now to a beat, takes it into its file, in the
+    // file's seconds as it plays them.
+    double getFileSecondsTo (te::Edit& edit, const juce::ValueTree& clipState, te::TimePosition from, BeatPosition to)
+    {
+        return (edit.tempoSequence.toTime (toTracktion (to)) - from).inSeconds() / getClipStretch (edit, clipState).timeRatio;
+    }
+
+    // Moves a clip's start to a beat, its end staying where it is, and what it plays too.
     void trimStartTo (te::Edit& edit, juce::ValueTree clipState, BeatPosition start)
     {
+        if (isAudioState (clipState))
+        {
+            const auto moved = getFileSecondsTo (edit, clipState, getPlayedPosition (edit, clipState).getStart(), start);
+            auto part = getFilePart (clipState);
+
+            if (getClipStretch (edit, clipState).reversed)
+                part.end -= moved;
+            else
+                part.start += moved;
+
+            setAudioPart (edit, clipState, start, part);
+            return;
+        }
+
         const auto range = getClipRange (clipState);
         const auto moved = start - range.getStart();
         setClipPlace (edit, clipState, start, range.getLength() - moved, getClipOffset (clipState) + moved);
@@ -107,15 +128,31 @@ namespace
     void trimEndTo (te::Edit& edit, juce::ValueTree clipState, BeatPosition end)
     {
         const auto range = getClipRange (clipState);
+
+        if (isAudioState (clipState))
+        {
+            const auto moved = getFileSecondsTo (edit, clipState, getPlayedPosition (edit, clipState).getEnd(), end);
+            auto part = getFilePart (clipState);
+
+            if (getClipStretch (edit, clipState).reversed)
+                part.start -= moved;
+            else
+                part.end += moved;
+
+            setAudioPart (edit, clipState, range.getStart(), part);
+            return;
+        }
+
         setClipPlace (edit, clipState, range.getStart(), end - range.getStart(), getClipOffset (clipState));
     }
 
     // Splits a clip of the song into two at a beat, if it is far enough inside it, as Tracktion splits clips: both halves
-    // play what they did, and stay in its alias group if it is in one. Returns the right-hand half's element.
+    // play what they did, and stay in its alias group if it is in one; an audio clip has no fade where it is cut. Returns
+    // the right-hand half's element.
     juce::ValueTree splitClipState (te::Edit& edit, juce::ValueTree clipState, BeatPosition beat)
     {
         const auto& tempo = edit.tempoSequence;
-        const auto range = getClipRange (clipState);
+        const auto range = getClipRange (edit, clipState);
         const auto time = tempo.toTime (toTracktion (beat));
 
         if (! tempo.toTime (toTracktion (range)).reduced (splitMargin).contains (time))
@@ -123,10 +160,38 @@ namespace
 
         auto right = copyClipState (edit, clipState);
         right.setProperty (schema::clipStart, beat.inBeats(), nullptr);
-        right.setProperty (schema::clipLength, (range.getEnd() - beat).inBeats(), nullptr);
-        right.setProperty (schema::clipOffset, (getClipOffset (clipState) + (beat - range.getStart())).inBeats(), nullptr);
-        clipState.getParent().appendChild (right, getUndo (edit));
-        trimEndTo (edit, clipState, beat);
+
+        if (isAudioState (clipState))
+        {
+            const auto into = getFileSecondsTo (edit, clipState, getPlayedPosition (edit, clipState).getStart(), beat);
+            auto left = getFilePart (clipState), rest = left;
+
+            if (getClipStretch (edit, clipState).reversed) // the left half plays the end of the part, backwards
+            {
+                left.start = left.end - into;
+                rest.end = left.start;
+            }
+            else
+            {
+                left.end = left.start + into;
+                rest.start = left.end;
+            }
+
+            right.setProperty (schema::clipFileStart, rest.start, nullptr);
+            right.setProperty (schema::clipFileEnd, rest.end, nullptr);
+            right.removeProperty (schema::clipFadeIn, nullptr);
+            clipState.getParent().appendChild (right, getUndo (edit));
+            clipState.removeProperty (schema::clipFadeOut, getUndo (edit));
+            setAudioPart (edit, clipState, range.getStart(), left);
+        }
+        else
+        {
+            right.setProperty (schema::clipLength, (range.getEnd() - beat).inBeats(), nullptr);
+            right.setProperty (schema::clipOffset, (getClipOffset (clipState) + (beat - range.getStart())).inBeats(), nullptr);
+            clipState.getParent().appendChild (right, getUndo (edit));
+            trimEndTo (edit, clipState, beat);
+        }
+
         mirror::reconcileClip (edit, getClipID (right));
         return right;
     }
@@ -135,7 +200,7 @@ namespace
     // own: the whole clip, or its start or end, or its middle, splitting it in two.
     void deleteRegionOf (te::Edit& edit, juce::ValueTree clipState, BeatRange region)
     {
-        const auto range = getClipRange (clipState);
+        const auto range = getClipRange (edit, clipState);
 
         if (region.getStart() <= range.getStart() && range.getEnd() <= region.getEnd())
         {
@@ -155,7 +220,7 @@ namespace
         }
     }
 
-    // Removes a clip from its track: the song's, or else Tracktion's own (an audio clip, until T1 step 3b).
+    // Removes a clip from its track: the song's, or else one of Tracktion's alone.
     void removeClip (te::Clip& clip)
     {
         if (const auto clipState = findClipState (clip); clipState.isValid())
@@ -164,11 +229,11 @@ namespace
             clip.removeFromParent();
     }
 
-    // Moves a clip to start at a beat on its track, keeping its length.
+    // Moves a clip to start at a beat on its track, keeping what it plays.
     void moveClipStart (te::Clip& clip, BeatPosition start)
     {
         if (auto clipState = findClipState (clip); clipState.isValid())
-            setClipPlace (clip.edit, clipState, start, getClipRange (clipState).getLength(), getClipOffset (clipState));
+            moveClipState (clip.edit, clipState, start);
         else
             clip.setStart (clip.edit.tempoSequence.toTime (toTracktion (start)), false, true);
     }
@@ -204,7 +269,7 @@ namespace
         {
             if (const auto clipState = findClipState (*clip); clipState.isValid())
             {
-                if (getClipRange (clipState).overlaps (fromTracktion (range)))
+                if (getClipRange (edit, clipState).overlaps (fromTracktion (range)))
                     deleteRegionOf (edit, clipState, fromTracktion (range));
             }
             else if (clip->getEditTimeRange().overlaps (time))
@@ -295,9 +360,6 @@ juce::ValueTree findClipState (const te::Edit& edit, ClipID id)
 
 juce::ValueTree findClipState (const te::Clip& clip)
 {
-    if (dynamic_cast<const te::MidiClip*> (&clip) == nullptr)
-        return {};
-
     // On its track's element, most likely.
     if (auto* track = clip.getTrack())
         if (auto found = findIn (findTrackState (*track), getClipID (clip)); found.isValid())
@@ -338,6 +400,19 @@ BeatRange getClipRange (const juce::ValueTree& clipState)
 {
     const auto start = BeatPosition::fromBeats (clipState[schema::clipStart]);
     return { start, start + BeatDuration::fromBeats (clipState[schema::clipLength]) };
+}
+
+BeatRange getClipRange (const te::Edit& edit, const juce::ValueTree& clipState)
+{
+    return isAudioState (clipState) ? getAudioClipRange (edit, clipState) : getClipRange (clipState);
+}
+
+void moveClipState (te::Edit& edit, juce::ValueTree clipState, BeatPosition start)
+{
+    if (isAudioState (clipState))
+        setAudioPart (edit, clipState, start, getFilePart (clipState));
+    else
+        setClipPlace (edit, clipState, start, getClipRange (clipState).getLength(), getClipOffset (clipState));
 }
 
 BeatDuration getClipOffset (const juce::ValueTree& clipState)
@@ -387,7 +462,7 @@ juce::ValueTree makeMidiClipState (te::Edit& edit, const juce::String& name, Bea
     return clipState;
 }
 
-te::MidiClip* placeClipState (te::Edit& edit, juce::ValueTree clipState, te::ClipTrack& track)
+te::Clip* placeClipState (te::Edit& edit, juce::ValueTree clipState, te::ClipTrack& track)
 {
     auto trackState = findTrackState (track);
 
@@ -403,7 +478,7 @@ te::MidiClip* placeClipState (te::Edit& edit, juce::ValueTree clipState, te::Cli
     }
 
     mirror::reconcileClip (edit, getClipID (clipState));
-    return dynamic_cast<te::MidiClip*> (te::findClipForID (edit, toTracktion (getClipID (clipState))));
+    return te::findClipForID (edit, toTracktion (getClipID (clipState)));
 }
 
 void setClipPlace (te::Edit& edit, juce::ValueTree clipState, BeatPosition start, BeatDuration length, BeatDuration offset)
@@ -631,9 +706,9 @@ bool hasFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type
 
     for (auto* clip : clips)
     {
-        if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
+        if (const auto clipState = findClipState (*clip); isAudioState (clipState))
         {
-            if (audio->getFadeInType() != type || audio->getFadeOutType() != type)
+            if (getFadeShape (clipState, true) != type || getFadeShape (clipState, false) != type)
                 return false;
 
             any = true;
@@ -670,38 +745,26 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAl
 
     for (auto* clip : clips)
     {
-        if (auto clipState = findClipState (*clip); clipState.isValid())
-        {
-            auto& edit = clip->edit;
+        auto clipState = findClipState (*clip);
+        auto* track = clip->getClipTrack();
 
-            // Aliases share an alias group, which the original gets if it is in none; a copy that isn't an alias leaves
-            // the original's.
-            if (asAliases && ! clipState.hasProperty (schema::clipLink))
-                clipState.setProperty (schema::clipLink, (juce::int64) edit.createNewItemID().getRawID(), getUndo (edit));
-
-            auto copy = copyClipState (edit, clipState);
-
-            if (! asAliases)
-                copy.removeProperty (schema::clipLink, nullptr);
-
-            if (auto* track = clip->getClipTrack())
-                if (auto* made = placeClipState (edit, copy, *track))
-                    copies.add (made);
-
+        if (! clipState.isValid() || track == nullptr)
             continue;
-        }
 
-        // Linked clips share a link group; a copy that isn't an alias leaves its original's.
-        if (asAliases && ! clip->isLinked())
-            clip->setLinkGroupID (juce::Uuid().toString());
+        auto& edit = clip->edit;
 
-        if (auto copy = te::duplicateClip (*clip))
-        {
-            if (! asAliases)
-                copy->setLinkGroupID ({});
+        // Aliases share an alias group, which the original gets if it is in none; a copy that isn't an alias leaves the
+        // original's.
+        if (asAliases && ! clipState.hasProperty (schema::clipLink))
+            clipState.setProperty (schema::clipLink, (juce::int64) edit.createNewItemID().getRawID(), getUndo (edit));
 
-            copies.add (copy.get());
-        }
+        auto copy = copyClipState (edit, clipState);
+
+        if (! asAliases)
+            copy.removeProperty (schema::clipLink, nullptr);
+
+        if (auto* made = placeClipState (edit, copy, *track))
+            copies.add (made);
     }
 
     return copies;
@@ -709,24 +772,30 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAl
 
 void moveClip (te::Clip& clip, te::BeatPosition start, te::ClipTrack& track)
 {
+    // To its new start (playing what it did) and track, which Tracktion's clip follows at once.
     if (auto clipState = findClipState (clip); clipState.isValid())
     {
         clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), getUndo (clip.edit));
         placeClipState (clip.edit, clipState, track);
-        return;
     }
-
-    const auto time = clip.edit.tempoSequence.toTime (te::BeatPosition::fromBeats (std::max (0.0, start.inBeats())));
-
-    if (clip.getClipTrack() != &track)
-        clip.moveTo (track);
-
-    clip.setStart (time, false, true);
 }
 
 void trimClipStart (te::Clip& clip, te::BeatPosition beat)
 {
-    if (const auto clipState = findClipState (clip); clipState.isValid())
+    const auto clipState = findClipState (clip);
+
+    if (isAudioState (clipState))
+    {
+        // As far back as its audio starts.
+        const auto& tempo = clip.edit.tempoSequence;
+        const auto position = getPlayedPosition (clip.edit, clipState);
+        const auto earliest = std::max (te::TimePosition(), position.getStart() - position.getOffset());
+        const auto latest = tempo.toTime (toTracktion (getClipRange (clip.edit, clipState).getEnd()) - minimumClipLength);
+
+        if (latest >= earliest)
+            trimStartTo (clip.edit, clipState, fromTracktion (tempo.toBeats (juce::jlimit (earliest, latest, tempo.toTime (beat)))));
+    }
+    else if (clipState.isValid())
     {
         const auto range = getClipRange (clipState);
         const auto earliest = std::max (0.0, getContentStart (clipState).inBeats());
@@ -734,82 +803,79 @@ void trimClipStart (te::Clip& clip, te::BeatPosition beat)
 
         if (latest >= earliest)
             trimStartTo (clip.edit, clipState, BeatPosition::fromBeats (juce::jlimit (earliest, latest, beat.inBeats())));
-
-        return;
     }
-
-    const auto& tempo = clip.edit.tempoSequence;
-    const auto earliest = std::max (te::TimePosition(), clip.getPosition().getStartOfSource());
-    const auto latest = tempo.toTime (clip.getEndBeat() - minimumClipLength);
-
-    if (latest < earliest)
-        return;
-
-    clip.setStart (juce::jlimit (earliest, latest, tempo.toTime (beat)), true, false);
 }
 
 void trimClipEnd (te::Clip& clip, te::BeatPosition beat)
 {
     const auto& tempo = clip.edit.tempoSequence;
+    const auto clipState = findClipState (clip);
 
-    if (const auto clipState = findClipState (clip); clipState.isValid())
-    {
-        const auto start = getClipRange (clipState).getStart().inBeats();
-        const auto latest = tempo.toBeats (te::Edit::getMaximumEditEnd()).inBeats();
-        trimEndTo (clip.edit, clipState,
-                   BeatPosition::fromBeats (juce::jlimit (start + minimumClipLength.inBeats(), latest, beat.inBeats())));
-        return;
-    }
-
-    const auto earliest = tempo.toTime (clip.getStartBeat() + minimumClipLength);
-    const auto latest = getLatestEnd (clip);
-
-    if (latest < earliest)
+    if (! clipState.isValid())
         return;
 
-    clip.setEnd (juce::jlimit (earliest, latest, tempo.toTime (beat)), true);
+    // An audio clip as far as its audio goes on.
+    const auto start = getClipRange (clip.edit, clipState).getStart();
+    const auto earliest = tempo.toTime (toTracktion (start) + minimumClipLength);
+    const auto latest = isAudioState (clipState) ? getLatestEnd (clip) : te::Edit::getMaximumEditEnd();
+
+    if (latest >= earliest)
+        trimEndTo (clip.edit, clipState, fromTracktion (tempo.toBeats (juce::jlimit (earliest, latest, tempo.toTime (beat)))));
 }
 
 void setClipFade (te::AudioClipBase& clip, bool fadeIn, te::TimeDuration length)
 {
-    const auto limited = juce::jlimit (te::TimeDuration(), clip.getPosition().getLength(), length);
-
-    if (fadeIn)
-        clip.setFadeIn (limited);
-    else
-        clip.setFadeOut (limited);
+    if (const auto clipState = findClipState (clip); isAudioState (clipState))
+        setClipFade (clip.edit, clipState, fadeIn,
+                     juce::jlimit (te::TimeDuration(), getPlayedPosition (clip.edit, clipState).getLength(), length).inSeconds());
 }
 
 void setCrossfade (te::AudioClipBase& first, te::AudioClipBase& second, te::TimePosition boundary, te::TimeDuration length)
 {
+    const auto firstState = findClipState (first), secondState = findClipState (second);
+
+    if (! isAudioState (firstState) || ! isAudioState (secondState))
+        return;
+
     // How far each can reach over the boundary: the first as far as its audio goes on, the second as far
     // back as its audio starts.
+    auto& edit = first.edit;
+    const auto secondPosition = getPlayedPosition (edit, secondState);
     const auto firstReach = getLatestEnd (first) - boundary;
-    const auto secondReach = boundary - std::max (te::TimePosition(), second.getPosition().getStartOfSource());
+    const auto secondReach = boundary - std::max (te::TimePosition(), secondPosition.getStart() - secondPosition.getOffset());
     const auto half = std::max (te::TimeDuration(), std::min ({ length / 2.0, firstReach, secondReach }));
 
     // Tracktion plays both where they overlap; the fades make that a crossfade.
-    first.setEnd (boundary + half, true);
-    second.setStart (boundary - half, true, false);
-    first.setFadeOut (half * 2.0);
-    second.setFadeIn (half * 2.0);
+    const auto& tempo = edit.tempoSequence;
+    trimEndTo (edit, firstState, fromTracktion (tempo.toBeats (boundary + half)));
+    trimStartTo (edit, secondState, fromTracktion (tempo.toBeats (boundary - half)));
+    setClipFade (edit, firstState, false, (half * 2.0).inSeconds());
+    setClipFade (edit, secondState, true, (half * 2.0).inSeconds());
 }
 
 void setFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type shape)
 {
     for (auto* clip : clips)
     {
-        if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
+        if (auto clipState = findClipState (*clip); isAudioState (clipState))
         {
-            audio->setFadeInType (shape);
-            audio->setFadeOutType (shape);
+            for (const auto& property : { schema::clipFadeInShape, schema::clipFadeOutShape })
+            {
+                if (shape == te::AudioFadeCurve::linear)
+                    clipState.removeProperty (property, getUndo (clip->edit));
+                else
+                    clipState.setProperty (property, getSavedFadeShape (shape), getUndo (clip->edit));
+            }
+
+            mirror::reconcileClip (clip->edit, getClipID (clipState));
         }
     }
 }
 
-te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selection* selection)
+te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selection* selection, const juce::String& name)
 {
-    auto* clip = placeClipState (track.edit, makeMidiClipState (track.edit, getTrackName (track), fromTracktion (range)), track);
+    const auto clipState = makeMidiClipState (track.edit, name.isNotEmpty() ? name : getTrackName (track), fromTracktion (range));
+    auto* clip = dynamic_cast<te::MidiClip*> (placeClipState (track.edit, clipState, track));
 
     if (clip != nullptr && selection != nullptr)
         selection->selectOnly (clip);
@@ -853,17 +919,31 @@ void slipClip (te::Clip& clip, te::TimeDuration startOffset, te::TimeDuration di
 {
     // Tracktion keeps the offset at 0 or more, and so does the song.
     const auto offset = std::max (te::TimeDuration(), startOffset - distance);
+    const auto clipState = findClipState (clip);
 
-    if (auto clipState = findClipState (clip); clipState.isValid())
+    if (isAudioState (clipState))
+    {
+        // The same length of its file, from as far into what it plays.
+        const auto settings = getClipStretch (clip.edit, clipState);
+        const auto from = offset.inSeconds() / settings.timeRatio;
+        auto part = getFilePart (clipState);
+        const auto length = part.end - part.start;
+
+        if (settings.reversed)
+            part.end = getClipFileLength (clip.edit, clipState) - from;
+        else
+            part.end = from + length;
+
+        part.start = part.end - length;
+        setAudioPart (clip.edit, clipState, getClipRange (clipState).getStart(), part);
+    }
+    else if (clipState.isValid())
     {
         const auto& tempo = clip.edit.tempoSequence;
         const auto range = getClipRange (clipState);
         const auto contentStart = tempo.toBeats (tempo.toTime (toTracktion (range.getStart())) - offset);
         setClipPlace (clip.edit, clipState, range.getStart(), range.getLength(), range.getStart() - fromTracktion (contentStart));
-        return;
     }
-
-    clip.setOffset (offset);
 }
 
 //==============================================================================
@@ -872,24 +952,10 @@ juce::Array<te::Clip*> splitClips (const juce::Array<te::Clip*>& clips, te::Beat
     juce::Array<te::Clip*> parts;
 
     for (auto* clip : clips)
-    {
         if (const auto clipState = findClipState (*clip); clipState.isValid())
-        {
             if (const auto right = splitClipState (clip->edit, clipState, fromTracktion (beat)); right.isValid())
                 if (auto* part = te::findClipForID (clip->edit, toTracktion (getClipID (right))))
                     parts.add (part);
-
-            continue;
-        }
-
-        const auto time = clip->edit.tempoSequence.toTime (beat);
-        const auto range = clip->getEditTimeRange();
-
-        if (time > range.getStart() && time < range.getEnd())
-            if (auto* track = clip->getClipTrack())
-                if (auto* part = track->splitClip (*clip, time))
-                    parts.add (part);
-    }
 
     return parts;
 }
@@ -945,31 +1011,17 @@ void makeClipsUnique (const juce::Array<te::Clip*>& clips)
 {
     for (auto* clip : clips)
     {
-        if (auto clipState = findClipState (*clip); clipState.isValid())
-        {
-            const auto aliases = getAliasStates (clipState);
+        auto clipState = findClipState (*clip);
 
-            if (! clipState.hasProperty (schema::clipLink))
-                continue;
-
-            clipState.removeProperty (schema::clipLink, getUndo (clip->edit));
-
-            // The last one left in the group leaves it too.
-            if (auto last = aliases.size() == 2 ? aliases[1] : juce::ValueTree(); last.isValid())
-                last.removeProperty (schema::clipLink, getUndo (clip->edit));
-
-            continue;
-        }
-
-        const auto group = clip->getLinkGroupID();
-
-        if (group.isEmpty())
+        if (! clipState.hasProperty (schema::clipLink))
             continue;
 
-        clip->setLinkGroupID ({});
+        const auto aliases = getAliasStates (clipState);
+        clipState.removeProperty (schema::clipLink, getUndo (clip->edit));
 
-        if (const auto rest = clip->edit.findClipsInLinkGroup (group); rest.size() == 1)
-            rest.getFirst()->setLinkGroupID ({});
+        // The last one left in the group leaves it too.
+        if (auto last = aliases.size() == 2 ? aliases[1] : juce::ValueTree(); last.isValid())
+            last.removeProperty (schema::clipLink, getUndo (clip->edit));
     }
 }
 

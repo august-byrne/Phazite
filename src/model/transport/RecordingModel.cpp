@@ -2,6 +2,7 @@
 #include "RecordingModel.h"
 #include "internal/AudioRecorder.h"
 #include "internal/Recording.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -178,10 +179,10 @@ ClipTakes getClipTakes (const ProjectContext& context, ClipID id)
 {
     const auto* clip = findAudioClip (context, id);
 
-    if (clip == nullptr || (int) clip->state.getProperty (schema::phaziteTakes, 0) < 2)
+    if (clip == nullptr || getClipTakeCount (*clip) < 2)
         return {};
 
-    return { (int) clip->state[schema::phaziteTakes], (int) clip->state[schema::phaziteTake] };
+    return { getClipTakeCount (*clip), getClipTake (*clip) };
 }
 
 void setClipTake (ProjectContext& context, ClipID id, int take)
@@ -192,10 +193,7 @@ void setClipTake (ProjectContext& context, ClipID id, int take)
     if (clip == nullptr || takes.count < 2 || take < 1 || take > takes.count || take == takes.playing)
         return;
 
-    // The takes lie one after another in the clip's file, each as long as the range they were recorded round.
     const UndoStep step (clip->edit, "Choose Take");
-    const auto length = te::TimeDuration::fromSeconds ((double) clip->state[schema::phaziteTakeLength]);
-    clip->setOffset (clip->getPosition().getOffset() + length * (double) (take - takes.playing));
-    clip->state.setProperty (schema::phaziteTake, take, &clip->edit.getUndoManager());
+    playTake (*clip, take);
 }
 } // namespace phazite

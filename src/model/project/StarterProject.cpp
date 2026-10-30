@@ -80,8 +80,7 @@ namespace
     // A 4-bar MIDI clip at bar 1: 16 beats, 8 seconds at 120 BPM.
     te::MidiClip* addFourBars (te::AudioTrack& track, const juce::String& name)
     {
-        auto& edit = track.edit;
-        return placeClipState (edit, makeMidiClipState (edit, name, { BeatPosition(), BeatPosition::fromBeats (16.0) }), track);
+        return insertMidiClip (track, toTracktion (BeatRange { BeatPosition(), BeatPosition::fromBeats (16.0) }), nullptr, name);
     }
 
     void addBeat (te::AudioTrack& track)

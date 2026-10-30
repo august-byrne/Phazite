@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/AudioRecorder.h"
+#include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/LiveInput.h"
@@ -603,11 +605,15 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
 
     auto& track = recording.track;
     const auto name = getTrackName (track);
-    const auto place = [&] (double clipStart, double clipEnd, double fileStart) -> te::WaveAudioClip*
+    const auto& tempo = edit.tempoSequence;
+    const auto toBeats = [&tempo] (double seconds) { return fromTracktion (tempo.toBeats (te::TimePosition::fromSeconds (seconds))); };
+
+    // A clip of the song's playing the file from a time in it, as it was recorded.
+    const auto place = [&] (double clipStart, double clipEnd, double fileStart) -> te::AudioClipBase*
     {
-        const te::ClipPosition position { { te::TimePosition::fromSeconds (clipStart), te::TimePosition::fromSeconds (clipEnd) },
-                                          te::TimeDuration::fromSeconds (std::max (0.0, fileStart)) };
-        return track.insertWaveClip (name, recording.file, position, false).get();
+        const auto from = std::max (0.0, fileStart);
+        const auto clipState = makeAudioClipState (edit, name, recording.file, toBeats (clipStart), { from, from + (clipEnd - clipStart) });
+        return dynamic_cast<te::AudioClipBase*> (placeClipState (edit, clipState, track));
     };
 
     // Punched in: only what falls in the range, in place of what was there, cross-fading at the edges: the new clip
@@ -625,9 +631,8 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
 
         const auto half = crossfadeSeconds / 2.0;
         const auto clipStart = std::max (from, in - half), clipEnd = std::min (to, out + half);
-        track.deleteRegion (
-            { te::TimePosition::fromSeconds (clipStart + crossfadeSeconds), te::TimePosition::fromSeconds (clipEnd - crossfadeSeconds) },
-            nullptr);
+        clearClipsIn (track, toTracktion (BeatRange (toBeats (clipStart + crossfadeSeconds), toBeats (clipEnd - crossfadeSeconds))));
+        const auto crossfade = te::TimeDuration::fromSeconds (crossfadeSeconds);
 
         for (auto* clip : track.getClips())
             if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
@@ -635,16 +640,16 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
                 const auto range = audio->getPosition().time;
 
                 if (std::abs (range.getEnd().inSeconds() - (clipStart + crossfadeSeconds)) < 1.0e-6)
-                    audio->setFadeOut (te::TimeDuration::fromSeconds (crossfadeSeconds));
+                    setClipFade (*audio, false, crossfade);
 
                 if (std::abs (range.getStart().inSeconds() - (clipEnd - crossfadeSeconds)) < 1.0e-6)
-                    audio->setFadeIn (te::TimeDuration::fromSeconds (crossfadeSeconds));
+                    setClipFade (*audio, true, crossfade);
             }
 
         if (auto* clip = place (clipStart, clipEnd, frameOf (clipStart) / rate))
         {
-            clip->setFadeIn (te::TimeDuration::fromSeconds (crossfadeSeconds));
-            clip->setFadeOut (te::TimeDuration::fromSeconds (crossfadeSeconds));
+            setClipFade (*clip, true, crossfade);
+            setClipFade (*clip, false, crossfade);
         }
 
         return;
@@ -679,11 +684,11 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
 
                 if (auto* clip = place (loopStart, loopStart + length, frameOf (passStart) / rate))
                 {
-                    clip->state.setProperty (schema::phaziteTakes, (int) takes.size(), &edit.getUndoManager());
-                    clip->state.setProperty (schema::phaziteTake,
-                                             (int) (std::find (takes.begin(), takes.end(), playing) - takes.begin()) + 1,
-                                             &edit.getUndoManager());
-                    clip->state.setProperty (schema::phaziteTakeLength, length, &edit.getUndoManager());
+                    auto clipState = findClipState (*clip);
+                    clipState.setProperty (schema::clipTakes, (int) takes.size(), &edit.getUndoManager());
+                    clipState.setProperty (schema::clipTake, (int) (std::find (takes.begin(), takes.end(), playing) - takes.begin()) + 1,
+                                           &edit.getUndoManager());
+                    clipState.setProperty (schema::clipTakeLength, length, &edit.getUndoManager());
                 }
 
                 return;

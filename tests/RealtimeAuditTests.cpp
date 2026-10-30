@@ -138,7 +138,7 @@ te::Plugin& addPlugin (te::Track& track, const juce::String& type)
 
 void addSineClip (te::AudioTrack& track, const SineFile& sine)
 {
-    track.insertWaveClip ("Sine", sine.getFile(), { te::TimeRange (0_tp, 2_tp) }, false);
+    phazite::test::addAudioClip (track, "Sine", sine.getFile(), { 0_tp, 2_tp });
 }
 
 // Tracktion's tone generator, a sound that reads no files. Tracktion doesn't register it with the others.
@@ -1209,7 +1209,7 @@ TEST_SUITE ("realtime-audit")
         // Tracktion plays the render, so the audio thread only reads a file.
         SineFile sine;
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        auto clip = getTrack (*edit, 0).insertWaveClip ("Sine", sine.getFile(), { te::TimeRange (0_tp, 2_tp) }, false);
+        auto* clip = phazite::test::addAudioClip (getTrack (*edit, 0), "Sine", sine.getFile(), { 0_tp, 2_tp });
         REQUIRE (clip != nullptr);
         phazite::setClipGain (*clip, 6.0f);
         phazite::setClipPitch (*clip, 3.0f);

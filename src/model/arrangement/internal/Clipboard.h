@@ -35,9 +35,8 @@ struct Clipboard
         range // a time range's clips, cut to it
     };
 
-    // A clip as it was: a copy of its element (the song's for a MIDI clip, Tracktion's state for an audio clip until T1
-    // step 3b), where it was in the song, and its track's place from the first of the copy's tracks, counting those that
-    // hold clips in the playlist's order.
+    // A clip as it was: a copy of the song's element for it, where it was in the song, and its track's place from the first of
+    // the copy's tracks, counting those that hold clips in the playlist's order.
     struct CopiedClip
     {
         juce::ValueTree state;

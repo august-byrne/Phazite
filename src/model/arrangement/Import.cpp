@@ -102,8 +102,9 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
             if (length <= te::TimeDuration())
                 return nullptr;
 
-            const auto time = edit.tempoSequence.toTime (start);
-            auto clip = track.insertWaveClip (file.getFileNameWithoutExtension(), copy, { te::TimeRange (time, time + length) }, false);
+            const auto clipState =
+                makeAudioClipState (edit, file.getFileNameWithoutExtension(), copy, fromTracktion (start), { 0.0, length.inSeconds() });
+            auto* clip = dynamic_cast<te::AudioClipBase*> (placeClipState (edit, clipState, track));
 
             if (clip == nullptr)
                 return nullptr;
@@ -113,7 +114,7 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
             if (const auto loop = audio.getInfo().loopInfo; loop.getNumBeats() > 0.0 && ! loop.isOneShot())
                 setClipFollowsTempo (*clip, true);
 
-            return clip.get();
+            return clip;
         }
 
         case FileKind::midi:

@@ -82,19 +82,11 @@ namespace
         return te::TimeDuration::fromSeconds (beats.inBeats() * setting.getApproxBeatLength().inSeconds());
     }
 
-    // Moves a clip later on its track (earlier if negative), keeping its length: one of the song's by beats, one of
-    // Tracktion's own (an audio clip, until T1 step 3b) by seconds.
-    void moveLater (te::Clip& clip, BeatDuration beats, te::TimeDuration time)
+    // Moves a clip of the song later on its track (earlier if negative), playing what it did.
+    void moveLater (te::Clip& clip, BeatDuration beats)
     {
         if (auto clipState = findClipState (clip); clipState.isValid())
-        {
-            const auto range = getClipRange (clipState);
-            setClipPlace (clip.edit, clipState, range.getStart() + beats, range.getLength(), getClipOffset (clipState));
-        }
-        else
-        {
-            clip.setStart (clip.getPosition().getStart() + time, false, true);
-        }
+            moveClipState (clip.edit, clipState, getClipRange (clipState).getStart() + beats);
     }
 } // namespace
 
@@ -123,7 +115,7 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
     for (auto* track : te::getClipTracks (edit))
         for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
             if (clip->getPosition().getStart() >= time - tinyTime)
-                moveLater (*clip, fromTracktion (length), timeLength);
+                moveLater (*clip, fromTracktion (length));
 
     for (auto* parameter : getAutomatedParameters (edit))
         parameter->getCurve().insertSpace (*parameter, time, timeLength);
@@ -154,7 +146,7 @@ void removeTime (te::Edit& edit, te::BeatRange range)
 
         for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
             if (clip->getPosition().getStart() > time.getCentre())
-                moveLater (*clip, BeatDuration::fromBeats (-range.getLength().inBeats()), te::TimeDuration() - length);
+                moveLater (*clip, BeatDuration::fromBeats (-range.getLength().inBeats()));
     }
 
     for (auto* parameter : getAutomatedParameters (edit))

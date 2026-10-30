@@ -271,9 +271,9 @@ inline const juce::Identifier chordInversion { "inversion" };
 inline const juce::Identifier CHORDKEY { "CHORDKEY" };
 
 //==============================================================================
-// The song's clips (model/arrangement/internal/Clips.h; docs/tracktion-migration.md, T1 step 3): its MIDI clips so far,
-// each on its track's element with its notes. Tracktion's MIDI clips mirror them (model/mirror/internal/Mirror.h), with
-// the same IDs while T1 lasts; audio clips are still Tracktion's own. song
+// The song's clips (model/arrangement/internal/Clips.h; docs/tracktion-migration.md, T1 step 3), each on its track's element:
+// its MIDI clips with their notes, and its audio clips with the part of their files each plays and how. Tracktion's clips
+// mirror them (model/mirror/internal/Mirror.h), with the same IDs while T1 lasts. song
 
 // Child of a TRACK that holds clips (trackIsTrack): a clip on it, in no particular order.
 inline const juce::Identifier CLIP { "CLIP" };
@@ -281,19 +281,20 @@ inline const juce::Identifier CLIP { "CLIP" };
 // On CLIP. int64, more than 0: its ID (ClipID), which while T1 lasts is its Tracktion clip's.
 inline const juce::Identifier clipID { "id" };
 
-// On CLIP: what it holds: clipIsMidi, notes.
+// On CLIP: what it holds: clipIsMidi, notes, or clipIsAudio, a part of an audio file.
 inline const juce::Identifier clipKind { "kind" };
 inline constexpr const char* clipIsMidi = "midi";
+inline constexpr const char* clipIsAudio = "audio";
 
 // On CLIP: its name.
 inline const juce::Identifier clipName { "name" };
 
-// On CLIP. double, 0 or more: where it starts, in beats from the song's start; and double, more than 0: how long it lasts,
-// in beats.
+// On CLIP. double, 0 or more: where it starts, in beats from the song's start. On a MIDI CLIP, double, more than 0: how long
+// it lasts, in beats (an audio clip lasts as long as the part of its file it plays takes to play).
 inline const juce::Identifier clipStart { "start" };
 inline const juce::Identifier clipLength { "length" };
 
-// On CLIP. double, 0 or more, default 0: how far into its notes it starts, in beats. Its notes count from its content
+// On a MIDI CLIP. double, 0 or more, default 0: how far into its notes it starts, in beats. Its notes count from its content
 // start, that many beats before its start: trimming its start or slipping it moves that.
 inline const juce::Identifier clipOffset { "offset" };
 
@@ -350,24 +351,41 @@ inline const juce::Identifier controlBeat { "beat" };
 inline const juce::Identifier controlValue { "value" };
 
 //==============================================================================
-// On audio clips (Tracktion's AUDIOCLIP) whose sound Phazite renders itself (model/arrangement/internal/AudioClips.h;
-// roadmap step 2.18): one that follows the song's tempo, or is pitched or reversed. Tracktion plays such a clip as a
-// plain clip of the render (its source, a file in the Edit's temporary folder, the project's Cache folder), and these
-// say what the render is made from. A clip without phaziteSource plays its source as it is. song
+// On an audio CLIP (model/arrangement/internal/AudioClips.h). One that follows the song's tempo, or is pitched or reversed,
+// plays a render of its file that Phazite makes itself (roadmap step 2.18), which Tracktion's clip plays as a plain clip.
 
-// The audio file the clip's sound comes from, as Tracktion names a clip's source: a path relative to the project's
-// file, or a full path.
-inline const juce::Identifier phaziteSource { "phaziteSource" };
+// The audio file it plays: a path relative to the project's file, with / between its parts whatever the system, or a full
+// path.
+inline const juce::Identifier clipFile { "file" };
 
-// double 20..300 (AudioClipModel.h: minClipTempo..maxClipTempo), or none: the tempo the file was played at, in beats
-// per minute, while the clip stretches to follow the song's; none while it plays at the file's own speed.
-inline const juce::Identifier phaziteTempo { "phaziteTempo" };
+// double, 0 or more: the part of the file it plays, from and to, in seconds of the file as it was recorded, from < to,
+// whichever way it plays.
+inline const juce::Identifier clipFileStart { "fileStart" };
+inline const juce::Identifier clipFileEnd { "fileEnd" };
 
-// float -48..48, default 0: how many semitones the clip is pitched up or down, with cents as hundredths.
-inline const juce::Identifier phazitePitch { "phazitePitch" };
+// double 20..300 (AudioClipModel.h: minClipTempo..maxClipTempo), or none: the tempo the file was played at, in beats per
+// minute, while the clip stretches to follow the song's; none while it plays at the file's own speed.
+inline const juce::Identifier clipTempo { "tempo" };
 
-// bool, default false: the clip plays its file backwards.
-inline const juce::Identifier phaziteReversed { "phaziteReversed" };
+// float -48..48, default 0: how many semitones it is pitched up or down, with cents as hundredths.
+inline const juce::Identifier clipPitch { "pitch" };
+
+// true, or none: it plays its file backwards.
+inline const juce::Identifier clipReversed { "reversed" };
+
+// float, default 0: how much louder or quieter it plays, in decibels.
+inline const juce::Identifier clipGain { "gain" };
+
+// double, 0 or more, default 0: how long it fades in, and out, in seconds; and the shapes of the fades: fadeIsLinear,
+// fadeIsConvex, fadeIsConcave or fadeIsSCurve, default linear.
+inline const juce::Identifier clipFadeIn { "fadeIn" };
+inline const juce::Identifier clipFadeOut { "fadeOut" };
+inline const juce::Identifier clipFadeInShape { "fadeInShape" };
+inline const juce::Identifier clipFadeOutShape { "fadeOutShape" };
+inline constexpr const char* fadeIsLinear = "linear";
+inline constexpr const char* fadeIsConvex = "convex";
+inline constexpr const char* fadeIsConcave = "concave";
+inline constexpr const char* fadeIsSCurve = "sCurve";
 
 //==============================================================================
 // Recording audio (model/transport/RecordingModel.h; roadmap step 3.4).
@@ -381,16 +399,16 @@ inline const juce::Identifier lastInput { "lastInput" };
 // change. state
 inline const juce::Identifier punch { "punch" };
 
-// On AUDIOCLIP: a clip recorded round a looped range, whose file holds a take for each time round, one after another
+// On an audio CLIP recorded round a looped range, whose file holds a take for each time round, one after another
 // (ClipTakes). song
 // int, 2 or more: how many takes the file holds.
-inline const juce::Identifier phaziteTakes { "phaziteTakes" };
+inline const juce::Identifier clipTakes { "takes" };
 
-// int, 1..phaziteTakes: the take the clip plays.
-inline const juce::Identifier phaziteTake { "phaziteTake" };
+// int, 1..clipTakes: the take the clip plays.
+inline const juce::Identifier clipTake { "take" };
 
 // double, more than 0: how long each take is, in seconds: the looped range's length when it was recorded.
-inline const juce::Identifier phaziteTakeLength { "phaziteTakeLength" };
+inline const juce::Identifier clipTakeLength { "takeLength" };
 
 //==============================================================================
 // On Tracktion's NOTEs, in the SEQUENCE of a MIDI clip that mirrors one of the song's: the ID of the song's note it plays

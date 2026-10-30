@@ -3,6 +3,7 @@
 // written whole or not at all (src/model/project/Export.h), and the window that does it (src/ui/shell/ExportPanel.h). And
 // its stems (step 2.11): a file for each channel that reaches the master, lined up, into a folder written whole or not
 // at all.
+#include "TestClips.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/mixer/internal/Mixer.h"
@@ -26,8 +27,8 @@ struct SineSong
 {
     SineSong()
     {
-        clip = te::getAudioTracks (*edit)[0]->insertWaveClip (
-            "Sine", sound, { te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.5)) }, false);
+        clip = phazite::test::addAudioClip (*te::getAudioTracks (*edit)[0], "Sine", sound,
+                                            { te::TimePosition(), te::TimePosition::fromSeconds (1.5) });
         REQUIRE (clip != nullptr);
     }
 
@@ -129,7 +130,7 @@ TEST_CASE ("An export covers the song to its end, and needs a song")
     CHECK (phazite::getExportRange (*song.edit) == te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (2.0)));
     CHECK (phazite::canExport (*song.edit));
 
-    song.clip->removeFromParent();
+    phazite::deleteClips ({ song.clip.get() }, false);
     CHECK_FALSE (phazite::canExport (*song.edit));
 
     const auto file = song.renders.getChildFile ("Song.wav");
@@ -310,8 +311,7 @@ struct Band
     {
         phazite::setTrackName (track, name);
         const auto sound = phazite::test::writeSound (temp.folder.getChildFile (name + ".wav"), 2.0, frequency);
-        REQUIRE (track.insertWaveClip (name, sound, { te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.5)) }, false)
-                 != nullptr);
+        REQUIRE (phazite::test::addAudioClip (track, name, sound, { te::TimePosition(), te::TimePosition::fromSeconds (1.5) }) != nullptr);
     }
 
     phazite::test::TemporaryFolder temp;
@@ -592,7 +592,7 @@ TEST_CASE ("The export window exports stems into a folder next to the song's fil
 TEST_CASE ("The export window says why an export failed")
 {
     ExportWindow w;
-    w.song.clip->removeFromParent(); // nothing to export
+    phazite::deleteClips ({ w.song.clip.get() }, false); // nothing to export
 
     w.click (w.panel.getExportButton());
     REQUIRE (w.waitUntilDone());

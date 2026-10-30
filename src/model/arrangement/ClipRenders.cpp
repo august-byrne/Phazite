@@ -301,7 +301,7 @@ void ClipRenders::handleAsyncUpdate()
 
 void ClipRenders::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (tree.hasType (te::IDs::AUDIOCLIP) && (property == te::IDs::source || property == schema::phaziteSource))
+    if (tree.hasType (te::IDs::AUDIOCLIP) && property == te::IDs::source)
         startTimer (quietMilliseconds);
 }
 

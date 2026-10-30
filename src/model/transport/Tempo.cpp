@@ -62,7 +62,8 @@ namespace
                 return;
 
             for (const auto& clipState : getClipStates (edit))
-                keepSpeed (clipState, scale);
+                if (! isAudioState (clipState))
+                    keepSpeed (clipState, scale);
         }
 
     private:
@@ -202,10 +203,9 @@ void setTempo (te::Edit& edit, double bpm)
 
     const UndoStep step (edit, "Change Tempo");
     const AutomationOnBeats keepAutomation (edit);    // as Tracktion keeps the clips
-    const FollowingClipsOnBeats keepFollowing (edit); // stretched again for the new tempo
     const PatternsKeepTheirSpeed keepPatterns (edit); // unless they follow it
     getFirstOfMap (edit, schema::TEMPO).setProperty (schema::bpm, rounded, &edit.getUndoManager());
-    mirror::reconcileTempoMap (edit); // Tracktion moves the clips with their beats
+    mirror::reconcileTempoMap (edit); // which places the clips again, an audio clip that follows it stretched again
 }
 
 TempoStretch getTempoStretch (te::Edit& edit)

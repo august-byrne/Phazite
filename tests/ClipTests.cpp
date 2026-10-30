@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -167,8 +168,8 @@ TEST_CASE ("Fades stay within an audio clip")
 {
     ClipEdit e;
     SilentFile file;
-    auto clip = e.tracks[0]->insertWaveClip ("Silence", file.temp.getFile(),
-                                             { te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.0)) }, false);
+    auto* clip = phazite::test::addAudioClip (*e.tracks[0], "Silence", file.temp.getFile(),
+                                              { te::TimePosition(), te::TimePosition::fromSeconds (1.0) });
     REQUIRE (clip != nullptr);
 
     phazite::setClipFade (*clip, true, te::TimeDuration::fromSeconds (0.25));
@@ -421,9 +422,9 @@ TEST_CASE ("A crossfade overlaps two touching audio clips, as far as their audio
     ClipEdit e;
     SilentFile file; // a second long
     const auto seconds = [] (double s) { return te::TimePosition::fromSeconds (s); };
-    auto first = e.tracks[0]->insertWaveClip ("A", file.temp.getFile(), { te::TimeRange (seconds (0.0), seconds (0.5)) }, false);
-    auto second = e.tracks[0]->insertWaveClip (
-        "B", file.temp.getFile(), { te::TimeRange (seconds (0.5), seconds (1.0)), te::TimeDuration::fromSeconds (0.25) }, false);
+    auto* first = phazite::test::addAudioClip (*e.tracks[0], "A", file.temp.getFile(), { seconds (0.0), seconds (0.5) });
+    auto* second = phazite::test::addAudioClip (*e.tracks[0], "B", file.temp.getFile(), { seconds (0.5), seconds (1.0) },
+                                                te::TimeDuration::fromSeconds (0.25));
     REQUIRE (first != nullptr);
     REQUIRE (second != nullptr);
 
@@ -444,7 +445,7 @@ TEST_CASE ("A crossfade overlaps two touching audio clips, as far as their audio
     CHECK (second->getPosition().getStart().inSeconds() == doctest::Approx (0.5));
     CHECK (second->getFadeIn().inSeconds() == doctest::Approx (0.0));
 
-    phazite::setFadeShape ({ first.get(), second.get() }, te::AudioFadeCurve::sCurve);
+    phazite::setFadeShape ({ first, second }, te::AudioFadeCurve::sCurve);
     CHECK (first->getFadeOutType() == te::AudioFadeCurve::sCurve);
     CHECK (second->getFadeInType() == te::AudioFadeCurve::sCurve);
 }
@@ -508,17 +509,17 @@ TEST_CASE ("Aliases, audio clips and fade shapes")
 
     // The shape is on when every audio clip fades in and out with it; MIDI clips don't count.
     SilentFile file;
-    auto audio = e.tracks[1]->insertWaveClip ("Silence", file.temp.getFile(),
-                                              { te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.0)) }, false);
+    auto* audio = phazite::test::addAudioClip (*e.tracks[1], "Silence", file.temp.getFile(),
+                                               { te::TimePosition(), te::TimePosition::fromSeconds (1.0) });
     REQUIRE (audio != nullptr);
-    const juce::Array<te::Clip*> both { &midi, audio.get() };
+    const juce::Array<te::Clip*> both { &midi, audio };
     CHECK (phazite::hasAudioClips (both));
 
     phazite::setFadeShape (both, te::AudioFadeCurve::convex);
     CHECK (phazite::hasFadeShape (both, te::AudioFadeCurve::convex));
     CHECK_FALSE (phazite::hasFadeShape (both, te::AudioFadeCurve::linear));
 
-    audio->setFadeOutType (te::AudioFadeCurve::linear); // in and out differ
+    phazite::findClipState (*audio).removeProperty (phazite::schema::clipFadeOutShape, nullptr); // in and out differ: out is linear
     CHECK_FALSE (phazite::hasFadeShape (both, te::AudioFadeCurve::convex));
 }
 

@@ -2,7 +2,9 @@
 #include "internal/Freeze.h"
 #include "FreezeModel.h"
 #include "internal/Mixer.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -688,7 +690,8 @@ namespace
                 if (auto* copy = addSend (*bounced, send->getBusNumber(), isPreFader (*send)))
                     copy->setGainDb (send->getGainDb());
 
-            if (bounced->insertWaveClip (name, target, { te::TimeRange (te::TimePosition(), length) }, false) == nullptr)
+            if (placeClipState (edit, makeAudioClipState (edit, name, target, BeatPosition(), { 0.0, length.inSeconds() }), *bounced)
+                == nullptr)
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");
 
             setTrackMuted (track, true, &edit.getUndoManager());

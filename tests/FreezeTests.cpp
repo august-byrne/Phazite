@@ -3,6 +3,7 @@
 // background up to the fader (stopping before a sidechained device or a send before the fader), played from a file in the
 // project's Cache folder, kept frozen while only its mixer changes and unfrozen when what it froze changes, opened frozen,
 // and cancelled without a trace; and a bounce onto a new audio track under the original, as one undo step.
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
@@ -41,7 +42,7 @@ struct Song
         phazite::setTrackName (*bass, "Bass");
 
         const auto sound = phazite::test::writeSound (temp.folder.getChildFile ("Sine.wav"), 2.0);
-        clip = bass->insertWaveClip ("Sine", sound, { te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.5)) }, false);
+        clip = phazite::test::addAudioClip (*bass, "Sine", sound, { te::TimePosition(), te::TimePosition::fromSeconds (1.5) });
         REQUIRE (clip != nullptr);
 
         expander = phazite::insertDevice (*bass, edit.getPluginCache().createNewPlugin (phazite::devices::StereoExpander::typeID, {}));
@@ -203,7 +204,7 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     // Its clip: unfrozen, in the clip's own undo step.
     {
         const phazite::UndoStep step (song.edit(), "Move Clip");
-        song.clip->setStart (te::TimePosition::fromSeconds (0.5), true, false);
+        phazite::trimClipStart (*song.clip, te::BeatPosition::fromBeats (1.0)); // half a second at 120 BPM
     }
 
     CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
@@ -225,7 +226,7 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     // Undo of a change made before the freeze: unfrozen.
     {
         const phazite::UndoStep step (song.edit(), "Clip Gain");
-        song.clip->setGainDB (-3.0f);
+        phazite::setClipGain (*song.clip, -3.0f);
     }
 
     song.freeze();

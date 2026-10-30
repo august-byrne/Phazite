@@ -4,6 +4,7 @@
 // back into its input a block later, as a cable from an audio interface's output to its input would bring it: the
 // metronome's clicks, recorded, show where Phazite puts what comes in.
 #include "RealTimePlayback.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -329,9 +330,9 @@ TEST_CASE ("Punched in, only what falls in the looped range is kept, in place of
 {
     Studio studio;
     phazite::test::TemporaryFolder sounds;
-    const auto before =
-        studio.track->insertWaveClip ("Before", phazite::test::writeSound (sounds.folder.getChildFile ("Before.wav"), 6.0),
-                                      { { te::TimePosition(), te::TimePosition::fromSeconds (6.0) }, te::TimeDuration() }, false);
+    const auto* before =
+        phazite::test::addAudioClip (*studio.track, "Before", phazite::test::writeSound (sounds.folder.getChildFile ("Before.wav"), 6.0),
+                                     { te::TimePosition(), te::TimePosition::fromSeconds (6.0) });
     REQUIRE (before != nullptr);
     phazite::loopRange (*studio.edit, { te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (4.0) });
     phazite::setPunchOn (*studio.edit, true);
