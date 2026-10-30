@@ -2,6 +2,7 @@
 #include "internal/Arrangement.h"
 #include "internal/Clips.h"
 #include "internal/Sections.h"
+#include "model/automation/internal/Automation.h"
 #include "model/chords/internal/Chords.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -13,73 +14,10 @@ namespace
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
     const auto tinyTime = te::TimeDuration::fromSeconds (1.0e-6);
 
-    juce::Array<te::AutomatableParameter*> getAutomatedParameters (const te::Edit& edit)
-    {
-        juce::Array<te::AutomatableParameter*> parameters;
-
-        for (auto* item : te::getAllAutomatableEditItems (edit))
-            for (auto* parameter : item->getAutomatableParameters())
-                if (parameter->getCurve().getNumPoints() > 0)
-                    parameters.add (parameter);
-
-        return parameters;
-    }
-
     void splitContentAt (te::Edit& edit, te::BeatPosition beat)
     {
         for (auto* track : te::getClipTracks (edit))
             splitClips (juce::Array<te::Clip*> (track->getClips()), beat); // a copy: splitting adds clips to the list
-    }
-
-    // An automation point, by its position in beats, so that it can be put back elsewhere.
-    struct StoredPoint
-    {
-        te::AutomatableParameter* parameter;
-        te::BeatPosition beat;
-        float value, curve;
-    };
-
-    // Points where the edges of what moves are, at the values the curves have there: one just before each beat
-    // and one at it, so that each part keeps its shape at its edges wherever it goes.
-    void addEdgePoints (te::Edit& edit, std::initializer_list<te::BeatPosition> beats)
-    {
-        const auto& tempo = edit.tempoSequence;
-        auto& undoManager = edit.getUndoManager();
-        const auto justBefore = te::BeatDuration::fromBeats (1.0e-4);
-
-        for (auto* parameter : getAutomatedParameters (edit))
-        {
-            auto& curve = parameter->getCurve();
-
-            for (const auto beat : beats)
-            {
-                const auto value = curve.getValueAt (tempo.toTime (beat), parameter->getCurrentValue());
-
-                if (beat > te::BeatPosition() + justBefore)
-                    curve.addPoint (tempo.toTime (beat - justBefore), value, 0.0f, &undoManager);
-
-                curve.addPoint (tempo.toTime (beat), value, 0.0f, &undoManager);
-            }
-        }
-    }
-
-    std::vector<StoredPoint> getPointsIn (te::Edit& edit, te::BeatRange range)
-    {
-        const auto& tempo = edit.tempoSequence;
-        std::vector<StoredPoint> points;
-
-        for (auto* parameter : getAutomatedParameters (edit))
-            for (const auto& point : parameter->getCurve().getPointsInRegion (tempo.toTime (range)))
-                points.push_back ({ parameter, te::toBeats (point.time, tempo), point.value, point.curve });
-
-        return points;
-    }
-
-    // Like Tracktion's insertSpaceIntoEditFromBeatRange(): the time some beats take at the tempo where they go.
-    te::TimeDuration getLengthInTime (const te::TempoSequence& tempo, te::TimePosition at, te::BeatDuration beats)
-    {
-        const auto& setting = tempo.getTempoAt (at - te::TimeDuration::fromSeconds (0.0001));
-        return te::TimeDuration::fromSeconds (beats.inBeats() * setting.getApproxBeatLength().inSeconds());
     }
 
     // Moves a clip of the song later on its track (earlier if negative), playing what it did.
@@ -97,7 +35,6 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
         return;
 
     const auto time = edit.tempoSequence.toTime (at);
-    const auto timeLength = getLengthInTime (edit.tempoSequence, time, length);
 
     // As Tracktion's insertSpaceIntoEdit() does: in an Edit counted in bars and beats, clips move before the
     // tempo changes after them, since they follow the beat.
@@ -117,9 +54,7 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
             if (clip->getPosition().getStart() >= time - tinyTime)
                 moveLater (*clip, fromTracktion (length));
 
-    for (auto* parameter : getAutomatedParameters (edit))
-        parameter->getCurve().insertSpace (*parameter, time, timeLength);
-
+    insertAutomationTime (edit, fromTracktion (at), fromTracktion (length));
     insertSectionTime (edit, fromTracktion (at), fromTracktion (length));
     insertLaneTime (edit, fromTracktion (at), fromTracktion (length));
 
@@ -149,9 +84,7 @@ void removeTime (te::Edit& edit, te::BeatRange range)
                 moveLater (*clip, BeatDuration::fromBeats (-range.getLength().inBeats()));
     }
 
-    for (auto* parameter : getAutomatedParameters (edit))
-        parameter->getCurve().removeRegionAndCloseGap (*parameter, time, &edit.getUndoManager());
-
+    removeAutomationTime (edit, fromTracktion (range));
     removeSectionTime (edit, fromTracktion (range));
     removeLaneTime (edit, fromTracktion (range));
 
@@ -200,22 +133,20 @@ void moveTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
             if (const auto beat = clip->getStartBeat(); isInChanged (beat))
                 moves.push_back ({ clip, newPosition (beat) });
 
-    addEdgePoints (edit, { start, end, destination });
-    const auto points = getPointsIn (edit, { changedStart, changedEnd });
+    // Automation keeps its shape where the edges are; the points in the stretch are put back where their beats go.
+    addAutomationEdges (edit, { fromTracktion (start), fromTracktion (end), fromTracktion (destination) });
+    const BeatRange changed (fromTracktion (changedStart), fromTracktion (changedEnd));
+    auto points = getAutomationPointsIn (edit, changed);
 
     for (auto& move : moves)
         if (auto* track = move.clip->getClipTrack())
             moveClip (*move.clip, move.start, *track);
 
-    // Automation the same way: the points in the stretch are put back where their beats go.
-    auto& undoManager = edit.getUndoManager();
-    const auto& tempo = edit.tempoSequence;
+    for (auto& [parameter, point] : points)
+        point.beat = fromTracktion (newPosition (toTracktion (point.beat)));
 
-    for (auto* parameter : getAutomatedParameters (edit))
-        parameter->getCurve().removePointsInRegion (tempo.toTime (te::BeatRange (changedStart, changedEnd)), &undoManager);
-
-    for (const auto& point : points)
-        point.parameter->getCurve().addPoint (tempo.toTime (newPosition (point.beat)), point.value, point.curve, &undoManager);
+    removeAutomationPointsIn (edit, changed);
+    addAutomationPoints (edit, points);
 
     moveSectionTime (edit, fromTracktion (range), fromTracktion (destination));
     moveLaneTime (edit, fromTracktion (range), fromTracktion (destination));
@@ -246,8 +177,8 @@ void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
             if (clip->getStartBeat() >= start - tinyBeats && clip->getEndBeat() <= end + tinyBeats)
                 sources.push_back ({ clip, clip->getStartBeat() - start });
 
-    addEdgePoints (edit, { start, end, destination });
-    const auto points = getPointsIn (edit, range);
+    addAutomationEdges (edit, { fromTracktion (start), fromTracktion (end), fromTracktion (destination) });
+    auto points = getAutomationPointsIn (edit, fromTracktion (range));
     const auto sections = copySections (edit, fromTracktion (range));
     const auto chords = copyLaneChords (edit, fromTracktion (range));
 
@@ -266,10 +197,9 @@ void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
             moveClip (*copies.getFirst(), destination + source.offset, *track);
     }
 
-    auto& undoManager = edit.getUndoManager();
+    for (auto& [parameter, point] : points)
+        point.beat = fromTracktion (destination) + (point.beat - fromTracktion (start));
 
-    for (const auto& point : points)
-        point.parameter->getCurve().addPoint (edit.tempoSequence.toTime (destination + (point.beat - start)), point.value, point.curve,
-                                              &undoManager);
+    addAutomationPoints (edit, points);
 }
 } // namespace phazite

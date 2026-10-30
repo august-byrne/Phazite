@@ -15,6 +15,7 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/chords/Progressions.h"
 #include "model/chords/internal/Chords.h"
@@ -145,9 +146,8 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
 
     auto* keysVolume = keys->getVolumePlugin();
     REQUIRE (keysVolume != nullptr);
-    auto& volumeCurve = keysVolume->volParam->getCurve();
-    volumeCurve.addPoint (0_tp, te::decibelsToVolumeFaderPosition (0.0f), 0.0f, nullptr);
-    volumeCurve.addPoint (4_tp, te::decibelsToVolumeFaderPosition (-6.0f), 0.0f, nullptr);
+    phazite::addPoint (*keysVolume->volParam, { phazite::BeatPosition(), te::decibelsToVolumeFaderPosition (0.0f), 0.0f });
+    phazite::addPoint (*keysVolume->volParam, { phazite::BeatPosition::fromBeats (8.0), te::decibelsToVolumeFaderPosition (-6.0f), 0.0f });
 
     // Pad: a new track, which gets the key set last.
     auto* pad = phazite::insertTrack (edit, keys, nullptr);

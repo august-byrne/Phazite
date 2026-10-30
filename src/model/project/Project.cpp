@@ -38,8 +38,9 @@ namespace
     }
 
     // What every project has, added before the project watches for changes: Phazite's state with its tempo map and its track
-    // list, which Tracktion's tempo sequence, tracks and clips mirror, and the master's loudness meter. It isn't the user's
-    // change, so it is neither an undo step nor an unsaved change.
+    // list, which Tracktion's tempo sequence, tracks, clips and automation mirror (without the curves of devices gone, which
+    // no undo can bring back now), and the master's loudness meter. It isn't the user's change, so it is neither an undo
+    // step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
@@ -49,6 +50,8 @@ namespace
         getTrackList (edit);
         mirror::reconcileTracks (edit);
         mirror::reconcileClips (edit);
+        forgetCurvesOfGoneDevices (edit);
+        mirror::reconcileAutomation (edit);
         ensureLoudnessMeter (edit);
         edit.getUndoManager().clearUndoHistory();
 
@@ -574,9 +577,8 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
 
 bool Project::isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)
 {
-    return element.hasType (te::IDs::INPUTDEVICES)
-           || (parent.hasType (schema::PHAZITE) && (element.hasType (schema::PIANOROLL) || element.hasType (schema::MASTER)))
-           || (parent.hasType (schema::TRACK) && schema::isTrackViewElement (element));
+    return element.hasType (te::IDs::INPUTDEVICES) || (parent.hasType (schema::PHAZITE) && element.hasType (schema::PIANOROLL))
+           || ((parent.hasType (schema::TRACK) || parent.hasType (schema::MASTER)) && schema::isTrackViewElement (element));
 }
 
 bool Project::isCounted (const juce::ValueTree& tree, const juce::Identifier& property)

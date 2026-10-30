@@ -11,8 +11,10 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -385,7 +387,7 @@ TEST_CASE ("Automation keeps its beats when the tempo or the time signature chan
     CHECK (phazite::getAutomationPoints (context, threshold)[0].beat.inBeats() == doctest::Approx (4.0));
 }
 
-TEST_CASE ("Write modes are each track's, as Tracktion saves them, and changing one is no undo step")
+TEST_CASE ("Write modes are each track's, the song's, which Tracktion's tracks mirror, and changing one is no undo step")
 {
     Song song;
     auto& context = song.context;
@@ -395,9 +397,15 @@ TEST_CASE ("Write modes are each track's, as Tracktion saves them, and changing 
     phazite::setAutomationMode (context, a, AutomationMode::touch);
     CHECK (phazite::getAutomationMode (context, a) == AutomationMode::touch);
     CHECK (phazite::getAutomationMode (context, b) == AutomationMode::read);
-    CHECK (song.a->state[te::IDs::automationMode].toString() == juce::String ("touch"));
+    CHECK (phazite::findTrackState (*song.a)[phazite::schema::trackAutomationMode].toString() == juce::String ("touch"));
+    CHECK ((song.a->automationMode.get() == te::AutomationMode::touch)); // Tracktion's toString() for it isn't doctest's
     CHECK (phazite::isWritingAutomation (*song.edit));
     CHECK_FALSE (song.edit->getUndoManager().canUndo());
+
+    // Tracktion puts a track that wrote into latch itself as a pass ends, which the song takes in.
+    song.a->automationMode = te::AutomationMode::latch;
+    CHECK (phazite::getAutomationMode (context, a) == AutomationMode::latch);
+    phazite::setAutomationMode (context, a, AutomationMode::touch);
 
     // The commands set the selected tracks' modes.
     phazite::CommandRegistry registry;
@@ -560,6 +568,118 @@ TEST_CASE ("Show Automation collapses the selected tracks' lanes while one shows
     CHECK (registry.find ("automation.showLanes")->isTicked());
 }
 
+TEST_CASE ("Automation is the song's own, which Tracktion's curves mirror one way, undo and redo too")
+{
+    Song song;
+    auto& edit = *song.edit;
+    const auto threshold = song.threshold();
+    const auto parameter = phazite::findParameter (edit, threshold);
+    REQUIRE (parameter != nullptr);
+    const auto& curve = parameter->getCurve();
+
+    // A point goes into the song's curve for the parameter, in beats, and Tracktion's follows, in seconds at 120 BPM.
+    phazite::addAutomationPoint (song.context, threshold, { beats (4), -30.0f });
+    const auto state = phazite::findCurveState (edit, threshold);
+    REQUIRE (state.isValid());
+    CHECK (state.getParent().hasType (phazite::schema::AUTOMATION));
+    CHECK (phazite::getCurveParameter (state) == threshold);
+    REQUIRE (state.getNumChildren() == 1);
+    CHECK ((double) state.getChild (0)[phazite::schema::pointBeat] == doctest::Approx (4.0));
+    CHECK ((float) state.getChild (0)[phazite::schema::pointValue] == doctest::Approx (-30.0f));
+    REQUIRE (curve.getNumPoints() == 1);
+    CHECK (curve.getPointTime (0).inSeconds() == doctest::Approx (2.0));
+    CHECK (curve.getPointValue (0) == doctest::Approx (-30.0f));
+
+    // An undo takes both away, the song's curve with its last point, and a redo puts both back.
+    phazite::undo (edit);
+    CHECK_FALSE (phazite::findCurveState (edit, threshold).isValid());
+    CHECK (curve.getNumPoints() == 0);
+    phazite::redo (edit);
+    CHECK (phazite::getAutomationPoints (song.context, threshold).size() == 1);
+    CHECK (curve.getNumPoints() == 1);
+
+    // One way: a point in Tracktion's curve is none of the song's, and the mirror takes it out, as it empties a curve of
+    // Tracktion's that the song has none for. Once they agree, it changes nothing.
+    parameter->getCurve().addPoint (te::TimePosition::fromSeconds (3.0), -10.0f, 0.0f, nullptr);
+    const auto volume = phazite::findParameter (edit, song.volume());
+    REQUIRE (volume != nullptr);
+    volume->getCurve().addPoint (te::TimePosition(), 0.5f, 0.0f, nullptr);
+    CHECK (phazite::getAutomationPoints (song.context, threshold).size() == 1);
+    CHECK (phazite::getAutomationPoints (song.context, song.volume()).empty());
+
+    phazite::mirror::reconcileAutomation (edit);
+    CHECK (curve.getNumPoints() == 1);
+    CHECK (volume->getCurve().getNumPoints() == 0);
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileAutomation (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+}
+
+TEST_CASE ("A control turned moves its curve's one point, the song's too, in the control's undo step")
+{
+    // As Tracktion moves it, with the song playing or not (it has a playback context then).
+    Song song;
+    auto& context = song.context;
+    song.edit->getTransport().ensureContextAllocated();
+    phazite::addAutomationPoint (context, song.volume(), { beats (2), 0.5f });
+    song.edit->getUndoManager().clearUndoHistory();
+
+    auto volume = phazite::getVolume (context, idOf (*song.a));
+    volume.beginGesture();
+    volume.setValue (0.7f);
+    volume.endGesture();
+
+    auto points = phazite::getAutomationPoints (context, song.volume());
+    REQUIRE (points.size() == 1);
+    CHECK (points[0].beat.inBeats() == doctest::Approx (2.0));
+    CHECK (points[0].value == doctest::Approx (0.7f));
+
+    phazite::undo (*song.edit);
+    points = phazite::getAutomationPoints (context, song.volume());
+    REQUIRE (points.size() == 1);
+    CHECK (points[0].value == doctest::Approx (0.5f));
+    CHECK (phazite::findParameter (*song.edit, song.volume())->getCurve().getPointValue (0) == doctest::Approx (0.5f));
+}
+
+TEST_CASE ("A duplicated track's automation is its own devices', and the original's stays")
+{
+    Song song;
+    auto& context = song.context;
+    phazite::addAutomationPoint (context, song.threshold(), { beats (4), -30.0f });
+    phazite::addAutomationPoint (context, song.volume(), { beats (2), 0.25f });
+
+    juce::Array<te::Track*> copies;
+
+    {
+        const phazite::UndoStep step (*song.edit, "Duplicate Track");
+        copies = phazite::duplicateTracks ({ song.a }, nullptr);
+    }
+
+    REQUIRE (copies.size() == 1);
+    const auto copy = idOf (*copies[0]);
+    const auto copiedEffects = phazite::getEffects (context, copy);
+    REQUIRE (copiedEffects.size() == 1);
+    const ParameterRef copiedThreshold { copiedEffects[0].id, "threshold" };
+    const auto copiedVolume = phazite::getVolume (context, copy).getRef();
+
+    for (const auto& [original, copied] : { std::pair (song.threshold(), copiedThreshold), std::pair (song.volume(), copiedVolume) })
+    {
+        const auto points = phazite::getAutomationPoints (context, original);
+        REQUIRE (points.size() == 1);
+        const auto copiedPoints = phazite::getAutomationPoints (context, copied);
+        REQUIRE (copiedPoints.size() == 1);
+        CHECK (copiedPoints[0].beat.inBeats() == doctest::Approx (points[0].beat.inBeats()));
+        CHECK (copiedPoints[0].value == doctest::Approx (points[0].value));
+        CHECK (phazite::findParameter (*song.edit, copied)->getCurve().getNumPoints() == 1);
+    }
+
+    // The copy's curves go with it in one undo.
+    phazite::undo (*song.edit);
+    CHECK_FALSE (phazite::findCurveState (*song.edit, copiedThreshold).isValid());
+    CHECK (phazite::getAutomationPoints (context, song.threshold()).size() == 1);
+}
+
 TEST_CASE ("A duplicated track's lanes show its own devices")
 {
     Song song;
@@ -592,7 +712,7 @@ TEST_CASE ("Lanes and the values automation plays are no unsaved changes")
     REQUIRE (volume != nullptr);
 
     // Automation is a change; then it is saved.
-    volume->volParam->getCurve().addPoint (te::TimePosition(), 0.5f, 0.0f, &edit.getUndoManager());
+    phazite::addPoint (*volume->volParam, { phazite::BeatPosition(), 0.5f, 0.0f });
     CHECK (project->hasUnsavedChanges());
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());

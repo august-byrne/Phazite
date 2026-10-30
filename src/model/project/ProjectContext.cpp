@@ -63,7 +63,7 @@ namespace
                 if (element.hasType (te::IDs::TRANSPORT) || element.hasType (te::IDs::INPUTDEVICES))
                     return;
 
-                if (element.hasType (te::IDs::AUTOMATIONCURVE))
+                if (element.hasType (te::IDs::AUTOMATIONCURVE) || element.hasType (schema::AUTOMATION))
                     return add (pending.automation);
 
                 // A track's modulators and macros, and what they modulate, in its devices' states.
@@ -71,8 +71,12 @@ namespace
                     || element.hasType (te::IDs::MODIFIERASSIGNMENTS))
                     return add (pending.modulation);
 
-                if (schema::isTrackViewElement (element) || element.hasType (schema::MASTER))
+                if (schema::isTrackViewElement (element))
                     return add (pending.view);
+
+                // The master's own element: its write mode (its lanes are view state, above).
+                if (element.hasType (schema::MASTER))
+                    return add (pending.tracks);
 
                 if (element.hasType (schema::SECTIONS))
                     return add (pending.sections);
@@ -112,7 +116,7 @@ namespace
         // A child that is gone has no parent to say where it was: its own type does, or else its old parent's.
         void markRemoved (const juce::ValueTree& parent, const juce::ValueTree& child)
         {
-            if (child.hasType (te::IDs::AUTOMATIONCURVE))
+            if (child.hasType (te::IDs::AUTOMATIONCURVE) || child.hasType (schema::AUTOMATION) || child.hasType (schema::CURVE))
                 add (pending.automation);
             else if (schema::isTrackViewElement (child))
                 add (pending.view);

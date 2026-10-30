@@ -61,7 +61,7 @@ namespace
         target.deviceName = isMixerControl (device) ? juce::String ("Mixer") : device->getName();
         target.name = getName (parameter);
         target.kind = getKind (parameter);
-        target.automated = parameter.hasAutomationPoints();
+        target.automated = hasPoints (parameter);
         return target;
     }
 
@@ -86,9 +86,9 @@ namespace
     // automation, and the lane with it.
     void deleteAutomationOf (te::AutomatableParameter& parameter)
     {
-        if (parameter.hasAutomationPoints())
+        if (const auto points = getPoints (parameter); ! points.empty())
         {
-            std::vector<int> indices ((size_t) parameter.getCurve().getNumPoints());
+            std::vector<int> indices (points.size());
             std::iota (indices.begin(), indices.end(), 0);
             const UndoStep step (parameter.getEdit(), "Delete Automation");
             deletePoints (parameter, indices);
@@ -280,7 +280,7 @@ void replaceAutomationPoints (ProjectContext& context, const ParameterRef& param
 bool isAutomated (const ParameterHandle& handle)
 {
     const auto found = findParameter (handle);
-    return found != nullptr && found->hasAutomationPoints();
+    return found != nullptr && hasPoints (*found);
 }
 
 void showAutomationLane (const ParameterHandle& handle)

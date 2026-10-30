@@ -549,10 +549,8 @@ TEST_SUITE ("realtime-audit")
         auto* volume = track.getVolumePlugin();
         REQUIRE (volume != nullptr);
 
-        auto& curve = volume->volParam->getCurve();
-        curve.addPoint (0_tp, 0.5f, 0.0f, nullptr);
-        curve.addPoint (1_tp, 0.8f, 0.0f, nullptr);
-        curve.addPoint (2_tp, 0.5f, 0.0f, nullptr);
+        for (const auto& [beat, value] : { std::pair (0.0, 0.5f), std::pair (2.0, 0.8f), std::pair (4.0, 0.5f) })
+            phazite::addPoint (*volume->volParam, { phazite::BeatPosition::fromBeats (beat), value, 0.0f });
 
         auto lfo = track.getModifierList()->insertModifier (juce::ValueTree (te::IDs::LFO), -1, nullptr);
         REQUIRE (lfo != nullptr);
@@ -612,9 +610,9 @@ TEST_SUITE ("realtime-audit")
                                                                                                                     juce::sendNotification);
         }
 
-        auto& curve = device->findParameter ("band3Gain")->getCurve();
-        curve.addPoint (0_tp, -12.0f, 0.0f, nullptr);
-        curve.addPoint (1_tp, 12.0f, 0.0f, nullptr);
+        auto* gain = device->findParameter ("band3Gain");
+        phazite::addPoint (*gain, { phazite::BeatPosition(), -12.0f, 0.0f });
+        phazite::addPoint (*gain, { phazite::BeatPosition::fromBeats (2.0), 12.0f, 0.0f });
 
         auto& tap = dynamic_cast<Equalizer&> (device->getProcessor()).getOutputTap();
         tap.setListening (true);
@@ -932,8 +930,8 @@ TEST_SUITE ("realtime-audit")
 
         for (int beat = 0; beat < 8; ++beat)
         {
-            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat)), 200.0f, 0.0f, nullptr);
-            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat + 0.5)), 8000.0f, 0.0f, nullptr);
+            phazite::addPoint (*cutoff, { phazite::BeatPosition::fromBeats (beat), 200.0f, 0.0f });
+            phazite::addPoint (*cutoff, { phazite::BeatPosition::fromBeats (beat + 0.5), 8000.0f, 0.0f });
         }
 
         const auto m = playAndMeasure (*edit);
@@ -996,8 +994,8 @@ TEST_SUITE ("realtime-audit")
 
         for (int beat = 0; beat < 8; ++beat)
         {
-            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat)), 100.0f, 0.0f, nullptr);
-            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat + 0.5)), 4000.0f, 0.0f, nullptr);
+            phazite::addPoint (*cutoff, { phazite::BeatPosition::fromBeats (beat), 100.0f, 0.0f });
+            phazite::addPoint (*cutoff, { phazite::BeatPosition::fromBeats (beat + 0.5), 4000.0f, 0.0f });
         }
 
         const auto m = playAndMeasure (*edit);
@@ -1049,8 +1047,8 @@ TEST_SUITE ("realtime-audit")
 
         for (int beat = 0; beat < 8; ++beat)
         {
-            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat)), 200.0f, 0.0f, nullptr);
-            cutoff->getCurve().addPoint (edit->tempoSequence.toTime (te::BeatPosition::fromBeats (beat + 0.5)), 5000.0f, 0.0f, nullptr);
+            phazite::addPoint (*cutoff, { phazite::BeatPosition::fromBeats (beat), 200.0f, 0.0f });
+            phazite::addPoint (*cutoff, { phazite::BeatPosition::fromBeats (beat + 0.5), 5000.0f, 0.0f });
         }
 
         const auto m = playAndMeasure (*edit);

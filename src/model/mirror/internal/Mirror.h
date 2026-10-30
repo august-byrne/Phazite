@@ -11,17 +11,19 @@
 #pragma once
 
 #include "model/base/internal/Tracktion.h"
+#include "model/devices/ParameterRef.h"
 
 namespace phazite::mirror
 {
 // The tempo map (model/transport/internal/Tempo.h): Tracktion's tempo sequence gets the document's tempos and time
-// signatures, each at its beat; and the clips are placed again for them (reconcileClips()).
+// signatures, each at its beat; and the clips and the automation are placed again for them (reconcileClips(),
+// reconcileAutomation()).
 void reconcileTempoMap (te::Edit&);
 
 // The tracks (model/arrangement/internal/Tracks.h): Tracktion gets a track for each of the document's, with its ID, in
 // its place and folder (made as Tracktion makes one, with its fader and meter, or a plain folder's), and the mute, solo
-// and solo isolation (a return's) that it plays with; Tracktion's tracks that the document hasn't go, with what they hold.
-// Nothing for a song without a track list (an Edit that isn't a song's).
+// and solo isolation (a return's) that it plays with, and its write mode (the master's too); Tracktion's tracks that the
+// document hasn't go, with what they hold. Nothing for a song without a track list (an Edit that isn't a song's).
 void reconcileTracks (te::Edit&);
 
 // The clips (model/arrangement/internal/Clips.h): Tracktion gets a clip for each of the song's, with its ID, on its track,
@@ -36,8 +38,18 @@ void reconcileClips (te::Edit&);
 // The same for one clip, after a change to it alone (its notes, its place), or to its going.
 void reconcileClip (te::Edit&, ClipID);
 
-// Only the switches Tracktion keeps outside its undo history (the tracks' mute, solo and solo isolation): after an undo or
-// a redo (phazite::undo(), model/commands/internal/Undo.h), which puts the document's back but not those, when a step changed
-// them (a bounce mutes the track it rendered). Begins no undo step, so the redo history stays.
+// The automation (model/automation/internal/Automation.h): the curve of each device's parameter gets the song's points
+// for it, each in seconds from its beat, as the tempo map has them now, with its value and its curve; Tracktion's curves
+// that the song hasn't are emptied. Not those of devices the song keeps curves for while an undo can bring them back, and
+// not a curve Tracktion records, until it stops (adoptRecordedAutomation()).
+void reconcileAutomation (te::Edit&);
+
+// The same for one parameter's curve, after a change to it alone.
+void reconcileCurve (te::Edit&, const ParameterRef&);
+
+// Only the switches Tracktion keeps outside its undo history (the tracks' mute, solo and solo isolation), and the write
+// modes, which Phazite sets outside it: after an undo or a redo (phazite::undo(), model/commands/internal/Undo.h), which
+// puts the document's back but not those, when a step changed them (a bounce mutes the track it rendered); and after a
+// write mode changed. Begins no undo step, so the redo history stays.
 void reconcileTrackSwitches (te::Edit&);
 } // namespace phazite::mirror

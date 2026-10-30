@@ -31,11 +31,10 @@ commit that fixes it. Races and allocations on the audio thread that Tracktion's
   range looped on purpose.
 - **Why:** Tracktion keeps the loop range (in the transport's state) and the play start (`TransportControl::
   startPosition`) in seconds, and a tempo change notifies only clips (`Edit::sendTempoOrPitchSequenceChangedUpdates()`).
-  `phazite::setTempo()` (`src/model/transport/Tempo.cpp`) keeps the automation, the clips that follow the tempo and the
-  patterns on their beats, but not those two. Found by the inventory for the plan to move off Tracktion (2026-10-30), in
-  the code, not yet reproduced by hand.
-- **How to fix:** in `setTempo()`, keep the loop range and the play start on their beats as the automation is kept
-  (`AutomationOnBeats`): read them in beats before the change and set them again after it, unless the loop follows the
-  song; with a test that changes the tempo under a looped range and checks the range in beats. Undoing a tempo change
-  must do the same. [tracktion-migration.md](tracktion-migration.md) (T1 and T2) puts the transport in beats, which ends
-  it for good.
+  The song keeps the automation and the clips in beats (T1, steps 3 and 4), and `phazite::setTempo()`
+  (`src/model/transport/Tempo.cpp`) the patterns, but nothing keeps those two. Found by the inventory for the plan to move
+  off Tracktion (2026-10-30), in the code, not yet reproduced by hand.
+- **How to fix:** keep the loop range and the play start in beats in the song, as the automation is, and have the mirror
+  set Tracktion's transport from them, unless the loop follows the song ([tracktion-migration.md](tracktion-migration.md),
+  T1 step 7); with a test that changes the tempo under a looped range and checks the range in beats. Undoing a tempo
+  change must do the same.

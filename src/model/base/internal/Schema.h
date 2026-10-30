@@ -114,6 +114,14 @@ inline const juce::Identifier trackColour { "colour" };
 inline const juce::Identifier trackMute { "mute" };
 inline const juce::Identifier trackSolo { "solo" };
 
+// On TRACK, and on MASTER: how the track writes its automation as the song plays (AutomationMode): automationTouch,
+// automationLatch or automationWrite; none = read, which plays its lanes and writes nothing. Changing it is no undo step,
+// as mute and solo aren't. song
+inline const juce::Identifier trackAutomationMode { "automationMode" };
+inline constexpr const char* automationTouch = "touch";
+inline constexpr const char* automationLatch = "latch";
+inline constexpr const char* automationWrite = "write";
+
 // On a folder's TRACK. true, or none: the folder was made a bus with the bus switch, so it stays one without effects.
 inline const juce::Identifier folderBus { "bus" };
 
@@ -151,7 +159,8 @@ inline const juce::Identifier drumOrder { "drumOrder" };
 // On TRACK: the drum rows hidden, as note numbers separated by commas. view
 inline const juce::Identifier drumHidden { "drumHidden" };
 
-// Child of PHAZITE, which every project has: the master channel's view: its automation lanes (LANE). view
+// Child of PHAZITE, which every project has: the master channel's own element, with its write mode
+// (trackAutomationMode) and its automation lanes (LANE, view).
 inline const juce::Identifier MASTER { "MASTER" };
 
 // Child of TRACK and of MASTER, one for each automation lane the playlist shows under the track, in their order
@@ -173,10 +182,33 @@ inline const juce::Identifier laneHeight { "height" };
 // On LANE. true, or none: the lane shows as a thin row.
 inline const juce::Identifier laneCollapsed { "collapsed" };
 
+//==============================================================================
+// The song's automation (model/automation/internal/Automation.h; docs/tracktion-migration.md, T1 step 4): each automated
+// parameter's curve, by its device and its own ID, with its points in beats. Tracktion's curves mirror them
+// (model/mirror/internal/Mirror.h). song
+
+// Child of PHAZITE, added with the first curve: the curves (CURVE), in no particular order. A curve whose device the song
+// hasn't any more stays while an undo could bring the device back, and goes as the project opens.
+inline const juce::Identifier AUTOMATION { "AUTOMATION" };
+
+// Child of AUTOMATION: a parameter's curve, with its points (POINT) in time order, two at one beat in the order they go (a
+// jump). On CURVE: the device, by the EditItemID Tracktion saves it with ("1042"); and the parameter, by its ID in its
+// device, as a lane names them (laneDevice, laneParameter).
+inline const juce::Identifier CURVE { "CURVE" };
+inline const juce::Identifier curveDevice { "device" };
+inline const juce::Identifier curveParameter { "parameter" };
+
+// Child of CURVE: a point. On POINT: where it is, in beats from the song's start (double, 0 or more); the parameter's value
+// there (float, in the parameter's own range); and how the line to the next point bends (float -1..1, 0 for straight).
+inline const juce::Identifier POINT { "POINT" };
+inline const juce::Identifier pointBeat { "beat" };
+inline const juce::Identifier pointValue { "value" };
+inline const juce::Identifier pointCurve { "curve" };
+
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; Project's isUncountedProperty()
 // and isUncountedElement()): on tracks, their heights, collapsed and pinned, drum mode and rows, and their automation
-// lanes; on PHAZITE, the playlist's grid; on devices (PLUGIN), where their windows were. PIANOROLL, MASTER and LANE hold
-// view settings only. Keep these lists exact: anything else a project holds is song or state.
+// lanes (the master's too); on PHAZITE, the playlist's grid; on devices (PLUGIN), where their windows were. PIANOROLL and
+// LANE hold view settings only. Keep these lists exact: anything else a project holds is song or state.
 inline bool isTrackViewProperty (const juce::Identifier& p)
 {
     return p == trackHeight || p == trackCollapsed || p == trackPinned || p == drumMode || p == drumOrder || p == drumHidden;

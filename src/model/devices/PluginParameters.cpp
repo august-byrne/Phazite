@@ -96,9 +96,16 @@ namespace
         }
     }
 
-    // Everything in the project that names one of the plug-in's parameters, renamed: its automation curves, what modulates
-    // them (modulators and macros are assigned in the state of what they move), its values set by hand, its quick control,
-    // and its automation lanes.
+    // The device's automation curves in the song (Schema.h: AUTOMATION), renamed.
+    void renameCurves (const juce::ValueTree& phazite, const juce::String& device, const Rename& rename)
+    {
+        renameChildren (phazite.getChildWithName (schema::AUTOMATION), schema::curveParameter, rename,
+                        [&device] (const juce::ValueTree& curve) { return curve[schema::curveDevice].toString() == device; });
+    }
+
+    // Everything in the project that names one of the plug-in's parameters, renamed: its automation curves (the song's,
+    // and Tracktion's), what modulates them (modulators and macros are assigned in the state of what they move), its values
+    // set by hand, its quick control, and its automation lanes.
     void renameReferences (te::ExternalPlugin& plugin, const Rename& rename)
     {
         auto& state = plugin.state;
@@ -116,7 +123,9 @@ namespace
                 state.removeProperty (te::IDs::quickParamName, nullptr);
         }
 
-        renameLanes (findPhaziteState (plugin.edit), state[te::IDs::id].toString(), rename);
+        const auto device = state[te::IDs::id].toString();
+        renameLanes (findPhaziteState (plugin.edit), device, rename);
+        renameCurves (findPhaziteState (plugin.edit), device, rename);
     }
 
     // What phaziteParameterIDs holds: each Tracktion ID with the plug-in's own ID for it.

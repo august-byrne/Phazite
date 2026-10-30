@@ -38,6 +38,15 @@
            gridTriplets="0"
            loopFollowsSong="0"
            outline="golden">
+    <AUTOMATION>
+      <CURVE device="1020"
+             parameter="volume">
+        <POINT beat="0"
+               value="0.7408182"/>
+        <POINT beat="8"
+               value="0.5488116"/>
+      </CURVE>
+    </AUTOMATION>
     <CHORDLANE>
       <CHORD degree="1"
              length="8"

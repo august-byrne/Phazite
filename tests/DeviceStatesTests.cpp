@@ -7,6 +7,7 @@
 #include "TestPlugin.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceStates.h"
@@ -39,12 +40,19 @@ te::ExternalPlugin* findStandIn (te::Track& track)
     return nullptr;
 }
 
-// Moves a parameter where automation would as the song plays, away from its value set by hand.
+// Moves a parameter where automation would as the song plays, away from its value set by hand: a device's by the song's
+// automation, a modulator's (which the song doesn't automate) by a curve of Tracktion's. Nothing to undo.
 void automate (te::AutomatableParameter& parameter)
 {
     const auto range = parameter.getValueRange();
     const auto value = juce::exactlyEqual (parameter.getCurrentExplicitValue(), range.getStart()) ? range.getEnd() : range.getStart();
-    parameter.getCurve().addPoint (te::TimePosition(), value, 0.0f, nullptr);
+
+    if (phazite::getParameterRef (parameter).isValid())
+        phazite::addPoint (parameter, { phazite::BeatPosition(), value, 0.0f });
+    else
+        parameter.getCurve().addPoint (te::TimePosition(), value, 0.0f, nullptr);
+
+    parameter.getEdit().getUndoManager().clearUndoHistory();
     parameter.updateToFollowCurve (te::TimePosition());
     REQUIRE_FALSE (juce::exactlyEqual (parameter.getCurrentValue(), parameter.getCurrentExplicitValue()));
 }

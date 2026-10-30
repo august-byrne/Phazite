@@ -44,10 +44,30 @@ namespace
         return nullptr;
     }
 
+    // How Tracktion writes a track's automation as the song plays, which Phazite sets outside the undo history, as the song
+    // keeps it (Schema.h: trackAutomationMode).
+    void setAutomationMode (te::Track& track, const juce::ValueTree& state)
+    {
+        const auto mode = state[schema::trackAutomationMode].toString();
+        auto wanted = te::AutomationMode::read;
+
+        if (mode == schema::automationTouch)
+            wanted = te::AutomationMode::touch;
+        else if (mode == schema::automationLatch)
+            wanted = te::AutomationMode::latch;
+        else if (mode == schema::automationWrite)
+            wanted = te::AutomationMode::write;
+
+        if (track.automationMode.get() != wanted)
+            track.state.setProperty (te::IDs::automationMode, te::toString (wanted), nullptr);
+    }
+
     // The switches Tracktion plays a track with, which it keeps outside its undo history: mute, solo, and solo isolation
-    // (a return's).
+    // (a return's); and its write mode.
     void setSwitches (te::Track& track, const juce::ValueTree& state)
     {
+        setAutomationMode (track, state);
+
         if (track.isMuted (false) != (bool) state[schema::trackMute])
             track.setMute (state[schema::trackMute]);
 
@@ -130,6 +150,9 @@ void reconcileTracks (te::Edit& edit)
     for (auto& track : gone)
         if (te::findTrackForID (edit, track->itemID) == track.get())
             edit.deleteTrack (track.get());
+
+    if (auto* master = edit.getMasterTrack())
+        setAutomationMode (*master, findPhaziteState (edit).getChildWithName (schema::MASTER));
 }
 
 void reconcileTrackSwitches (te::Edit& edit)
@@ -137,5 +160,9 @@ void reconcileTrackSwitches (te::Edit& edit)
     for (const auto& state : getTrackStates (edit))
         if (auto* track = te::findTrackForID (edit, toTracktion (getTrackID (state))))
             setSwitches (*track, state);
+
+    // The master's write mode, from its own element.
+    if (auto* master = edit.getMasterTrack())
+        setAutomationMode (*master, findPhaziteState (edit).getChildWithName (schema::MASTER));
 }
 } // namespace phazite::mirror

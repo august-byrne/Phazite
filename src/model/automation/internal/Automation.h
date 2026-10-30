@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Automation's Tracktion side (model/automation/AutomationModel.h), for the model, the app and tests: parameters by their
-// ParameterRefs, the points of a parameter's curve in beats, the lanes a track shows (Schema.h: PHAZITELANE), the selected
-// points as Phazite's selection holds them, automation that keeps its beats when the tempo changes, the
-// watcher that remembers the parameter touched last and gives recorded automation an undo step of its own. Not for the
-// UI.
+// ParameterRefs, the points of a parameter's curve in beats, which the song holds (Schema.h: AUTOMATION; T1 step 4) and
+// Tracktion's curves mirror, the lanes a track shows (Schema.h: LANE), the selected points as Phazite's selection holds
+// them, the watcher that remembers the parameter touched last and gives recorded automation an undo step of its own. Not
+// for the UI.
 #pragma once
 
 #include "model/automation/AutomationValues.h"
@@ -42,6 +42,7 @@ juce::String getParameterName (const te::AutomatableParameter&);
 // beginning a step: they join the caller's. Each keeps the parameter's value at the playhead in step with the curve
 // while the song isn't playing.
 std::vector<AutomationPoint> getPoints (const te::AutomatableParameter&);
+bool hasPoints (const te::AutomatableParameter&);
 std::vector<float> getValues (const te::AutomatableParameter&, BeatRange, int numValues); // getAutomationValues()
 int addPoint (te::AutomatableParameter&, AutomationPoint);
 BeatDuration movePoints (te::AutomatableParameter&, const std::vector<int>& indices, BeatDuration, float valueChange);
@@ -99,11 +100,16 @@ void setLaneHeight (te::Track&, const ParameterRef&, int height);
 void setLaneCollapsed (te::Track&, const ParameterRef&, bool);
 
 // After a track was copied (a folder with its tracks): the copy's lanes show the copy's devices, as the original's show
-// the original's, those in its containers too.
-void copyLanes (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers = {});
+// the original's, those in its containers too (the map: from each original's ID to its copy's); and each of the copy's
+// devices gets its original's automation in the song, as Tracktion copied it, in the caller's undo step.
+void copyLanesAndCurves (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers = {});
 
+// A track's write mode, the song's (Schema.h: trackAutomationMode), which Tracktion's track mirrors: set without an undo
+// step. Tracktion puts a track that wrote into latch itself as a pass ends, and an undo of the pass back, which the song
+// takes in (adoptAutomationMode(): AutomationWatcher).
 AutomationMode getAutomationMode (const te::Track&);
 void setAutomationMode (te::Track&, AutomationMode);
+void adoptAutomationMode (te::Track&);
 
 //==============================================================================
 // Automation points selected: one parameter's, by their indices, as the selection holds them (Selection: getPoints()), so
@@ -120,38 +126,53 @@ std::optional<PointSelection> getSelectedPoints (const Selection&);
 void selectPoints (Selection&, const te::AutomatableParameter&, const std::vector<int>& indices);
 
 //==============================================================================
-// Keeps every automation point at its beat across a change of the tempo or the time signature: Tracktion keeps track
-// automation at its time in seconds. Make one before the change, in its undo step; it moves the points back to their
-// beats when it goes.
-class AutomationOnBeats
+// The song's curves (Schema.h: AUTOMATION; T1 step 4), which Tracktion's curves mirror (model/mirror/internal/Mirror.h):
+// a parameter's, invalid for one without; every one; and the parameter each is for.
+juce::ValueTree findCurveState (const te::Edit&, const ParameterRef&);
+std::vector<juce::ValueTree> getCurveStates (const te::Edit&);
+ParameterRef getCurveParameter (const juce::ValueTree& curveState);
+
+// The time edits' automation (model/arrangement/internal/Arrangement.h), on every automated parameter of the song: room
+// made at a beat, as Tracktion's insertSpace() makes it; a range taken out, what comes after moving back, as its
+// removeRegionAndCloseGap() does; points where edges are (one just before each beat and one at it, at the value at the
+// beat, so that each part keeps its shape); the points in a range, from its start up to its end; those taken out; and
+// points added, each after any at its beat. They join the caller's undo step.
+struct ParameterPoint
 {
-public:
-    explicit AutomationOnBeats (te::Edit&);
-    ~AutomationOnBeats();
-
-private:
-    struct Curve
-    {
-        te::AutomatableParameter::Ptr parameter;
-        std::vector<te::BeatPosition> beats;
-    };
-
-    te::Edit& edit;
-    std::vector<Curve> curves;
-
-    JUCE_DECLARE_NON_COPYABLE (AutomationOnBeats)
+    ParameterRef parameter;
+    AutomationPoint point;
 };
+
+void insertAutomationTime (te::Edit&, BeatPosition, BeatDuration);
+void removeAutomationTime (te::Edit&, BeatRange);
+void addAutomationEdges (te::Edit&, const std::vector<BeatPosition>&);
+std::vector<ParameterPoint> getAutomationPointsIn (te::Edit&, BeatRange);
+void removeAutomationPointsIn (te::Edit&, BeatRange);
+void addAutomationPoints (te::Edit&, const std::vector<ParameterPoint>&);
+
+// Takes what Tracktion writes into its curves itself into the song: what it recorded, as recording automation stops (in
+// its undo step; until then, a curve it records is its own: mirror::reconcileCurve()); and the one point of a curve,
+// which it moves to its parameter's value as the value changes, unless it records (in the change's step).
+void adoptRecordedAutomation (te::Edit&);
+void adoptMovedPoint (te::AutomatableParameter&);
+
+// Forgets the curves of devices the song hasn't any more (the song keeps them while an undo can bring the device back), as
+// a project opens: without an undo step. A device keeps those of parameters it hasn't, as a plug-in that isn't installed.
+void forgetCurvesOfGoneDevices (te::Edit&);
 
 //==============================================================================
 // Watches an open Edit's automation: remembers the parameter last changed by hand (not by its automation), and holds a
 // "Record Automation" undo step (Undo.h: RecordingStep) from when playback starts while a track writes automation until
-// it stops, so that what Tracktion records joins that step rather than the change before it. A control's own drag
-// (ParameterHandle) begins a step of its own, which what is recorded meanwhile joins.
+// it stops, so that what Tracktion records joins that step rather than the change before it, and the song takes it in
+// as the step ends. A control's own drag (ParameterHandle) begins a step of its own, which what is recorded meanwhile
+// joins. The song takes in what else Tracktion writes itself as it does: a curve's one point that a control moved, and
+// a track's write mode.
 class RecordingStep;
 
 class AutomationWatcher : private te::ParameterChangeHandler::Listener,
                           private juce::ChangeListener,
-                          private juce::AsyncUpdater
+                          private juce::AsyncUpdater,
+                          private juce::ValueTree::Listener
 {
 public:
     explicit AutomationWatcher (te::Edit&);
@@ -174,6 +195,7 @@ private:
     void pluginParameterChanged (te::AutomatableParameter&, bool isFollowingAutomation) override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the transport
     void handleAsyncUpdate() override;
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override; // Tracktion's tracks' write modes
 
     JUCE_DECLARE_NON_COPYABLE (AutomationWatcher)
 };

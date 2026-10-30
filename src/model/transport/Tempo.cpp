@@ -2,7 +2,6 @@
 #include "internal/Tempo.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
-#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -202,10 +201,9 @@ void setTempo (te::Edit& edit, double bpm)
         return;
 
     const UndoStep step (edit, "Change Tempo");
-    const AutomationOnBeats keepAutomation (edit);    // as Tracktion keeps the clips
     const PatternsKeepTheirSpeed keepPatterns (edit); // unless they follow it
     getFirstOfMap (edit, schema::TEMPO).setProperty (schema::bpm, rounded, &edit.getUndoManager());
-    mirror::reconcileTempoMap (edit); // which places the clips again, an audio clip that follows it stretched again
+    mirror::reconcileTempoMap (edit); // which places the clips and the automation again, a clip that follows it stretched again
 }
 
 TempoStretch getTempoStretch (te::Edit& edit)
@@ -283,7 +281,6 @@ void setTimeSignature (te::Edit& edit, TimeSignature timeSignature)
         return;
 
     const UndoStep step (edit, "Change Time Signature");
-    const AutomationOnBeats keepAutomation (edit);
     auto first = getFirstOfMap (edit, schema::TIMESIGNATURE);
     first.setProperty (schema::numerator, timeSignature.numerator, &edit.getUndoManager());
     first.setProperty (schema::denominator, timeSignature.denominator, &edit.getUndoManager());

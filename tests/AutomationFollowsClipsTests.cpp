@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Automation that goes with the clips above it (docs/design.md, section 10; model/automation/internal/Automation.h:
 // moveAutomation()): clips nudged, duplicated or deleted with their gap closed, and time ranges deleted or duplicated on
-// tracks, take the automation of their tracks' parameters with them, in the same undo step; other tracks keep theirs.
+// tracks, take the automation of their tracks' parameters with them, in the same undo step; other tracks keep theirs. Time
+// inserted, taken out, moved or copied across the song (model/arrangement/internal/Arrangement.h) takes every track's.
 #include "TestHelpers.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/automation/internal/Automation.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
@@ -159,4 +162,69 @@ TEST_CASE ("Duplicating a time range on tracks copies their automation right aft
     CHECK (song.valueAt (10.0) == doctest::Approx (0.9f));
     CHECK (song.valueAt (16.0) == doctest::Approx (0.5f)); // after the copy, the line goes on as it went
     CHECK (song.valueAt (song.other, 10.0) == doctest::Approx (0.3f));
+}
+
+TEST_CASE ("Time inserted, taken out, moved and copied across the song takes every track's automation with it, in beats")
+{
+    Song song;
+    auto& edit = *song.edit;
+    const auto beatsOf = [&song] (const phazite::ParameterRef& parameter)
+    {
+        std::vector<double> result;
+
+        for (const auto& point : phazite::getAutomationPoints (song.context, parameter))
+            result.push_back (point.beat.inBeats());
+
+        return result;
+    };
+
+    // Four beats inserted at beat 4: the peak at beat 6 goes to beat 10, Tracktion's at 5 seconds, and an undo puts both
+    // back.
+    {
+        const phazite::UndoStep step (edit, "Insert Time");
+        phazite::insertTime (edit, teBeats (4.0), te::BeatDuration::fromBeats (4.0));
+    }
+
+    CHECK (beatsOf (song.volume) == std::vector { 0.0, 9.0, 10.0, 11.0, 20.0 });
+    CHECK (song.valueAt (10.0) == doctest::Approx (0.9f));
+    CHECK (song.valueAt (6.0) == doctest::Approx (0.5f));
+    CHECK (beatsOf (song.other) == std::vector { 0.0, 20.0 });
+    const auto volume = phazite::findParameter (edit, song.volume);
+    REQUIRE (volume != nullptr);
+    CHECK (volume->getCurve().getPointTime (2).inSeconds() == doctest::Approx (5.0));
+
+    phazite::undo (edit);
+    CHECK (beatsOf (song.volume) == std::vector { 0.0, 5.0, 6.0, 7.0, 16.0 });
+    CHECK (volume->getCurve().getPointTime (2).inSeconds() == doctest::Approx (3.0));
+
+    // Beats 4 to 8 taken out: the peak goes with them, and what follows comes back four beats.
+    {
+        const phazite::UndoStep step (edit, "Remove Time");
+        phazite::removeTime (edit, { teBeats (4.0), teBeats (8.0) });
+    }
+
+    CHECK (beatsOf (song.volume) == std::vector { 0.0, 12.0 });
+    CHECK (song.valueAt (6.0) == doctest::Approx (0.5f));
+    phazite::undo (edit);
+
+    // Beats 4 to 8 moved to beat 12: the peak plays at beat 10, and what was between comes back to where they were.
+    {
+        const phazite::UndoStep step (edit, "Move Time");
+        phazite::moveTime (edit, { teBeats (4.0), teBeats (8.0) }, teBeats (12.0));
+    }
+
+    CHECK (song.valueAt (10.0) == doctest::Approx (0.9f));
+    CHECK (song.valueAt (6.0) == doctest::Approx (0.5f));
+    CHECK (song.valueAt (song.other, 6.0) == doctest::Approx (0.3f));
+    phazite::undo (edit);
+
+    // Copied to beat 12: the peak plays at beat 6 and at beat 14, and what was from beat 12 on goes four beats later.
+    {
+        const phazite::UndoStep step (edit, "Copy Time");
+        phazite::copyTime (edit, { teBeats (4.0), teBeats (8.0) }, teBeats (12.0), false);
+    }
+
+    CHECK (song.valueAt (6.0) == doctest::Approx (0.9f));
+    CHECK (song.valueAt (14.0) == doctest::Approx (0.9f));
+    CHECK (beatsOf (song.volume).back() == doctest::Approx (20.0));
 }

@@ -774,7 +774,7 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
             parent.addChild (copied, parent.indexOf (original) + 1, getUndo (track->edit));
 
             const auto inContainers = copyContainers (*track, *copy); // its containers hold devices of their own,
-            copyLanes (*track, *copy, inContainers);                  // and its lanes show its own devices
+            copyLanesAndCurves (*track, *copy, inContainers);         // and its lanes and automation are its own devices'
             copies.add (copy.get());
         }
     }

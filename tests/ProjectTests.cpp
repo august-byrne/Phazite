@@ -3,6 +3,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "devices/eq/Equalizer.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Grid.h"
@@ -10,6 +11,7 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/internal/Mixer.h"
@@ -365,6 +367,38 @@ TEST_CASE ("A project with MIDI clips and an alias opens without unsaved changes
     CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
 }
 
+TEST_CASE ("A project forgets, as it opens, the automation of devices it hasn't any more, and keeps the rest")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Automated");
+    auto& edit = project->getEdit();
+    auto& track = *te::getAudioTracks (edit)[0];
+    auto* eq = phazite::insertDevice (track, edit.getPluginCache().createNewPlugin (phazite::devices::Equalizer::typeID, {}));
+    REQUIRE (eq != nullptr);
+    auto& gain = *eq->getAutomatableParameter (0);
+    auto& volume = *track.getVolumePlugin()->volParam;
+    const auto gainRef = phazite::getParameterRef (gain), volumeRef = phazite::getParameterRef (volume);
+    phazite::addPoint (gain, { phazite::BeatPosition::fromBeats (2.0), gain.getCurrentValue(), 0.0f });
+    phazite::addPoint (volume, { phazite::BeatPosition::fromBeats (2.0), 0.5f, 0.0f });
+
+    // A device removed leaves its curve in the song, for an undo to bring back with it; the file keeps it too.
+    phazite::removeDevice (*eq);
+    CHECK (phazite::findCurveState (edit, gainRef).isValid());
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+
+    // Opened, nothing can bring the device back: its curve goes, without an unsaved change, and the volume's stays,
+    // with Tracktion's.
+    project = openProject (file);
+    auto& reopened = project->getEdit();
+    CHECK_FALSE (phazite::findCurveState (reopened, gainRef).isValid());
+    REQUIRE (phazite::findCurveState (reopened, volumeRef).getNumChildren() == 1);
+    CHECK (phazite::findParameter (reopened, volumeRef)->getCurve().getNumPoints() == 1);
+    phazite::test::settle();
+    CHECK_FALSE (project->hasUnsavedChanges());
+}
+
 TEST_CASE ("Only a change to what the project holds is an unsaved change, made with an undo step or not")
 {
     TemporaryFolder temp;
@@ -462,6 +496,26 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 
     phazite::findTrackState (*track).setProperty (phazite::schema::keyRoot, 3, nullptr);
     CHECK (project->hasUnsavedChanges());
+}
+
+TEST_CASE ("A write mode, the master's too, is an unsaved change without an undo step, and the master's lanes are view state")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Modes");
+    auto& edit = project->getEdit();
+    auto& master = *edit.getMasterTrack();
+    phazite::test::settle();
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    phazite::showLane (master, phazite::getParameterRef (*edit.getMasterVolumePlugin()->volParam));
+    phazite::test::settle();
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    phazite::setAutomationMode (master, phazite::AutomationMode::latch);
+    phazite::test::settle();
+    CHECK (project->hasUnsavedChanges());
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK (phazite::isWritingAutomation (edit));
 }
 
 TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
