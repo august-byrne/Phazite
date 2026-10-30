@@ -7,6 +7,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
 
 namespace phazite
 {
@@ -235,7 +236,7 @@ BeatDuration getProgressionLength (const ProjectContext& context, const Progress
 
     for (const auto& chord : progression.chords)
     {
-        const auto beatsPerBar = edit != nullptr ? edit->tempoSequence.getTimeSigAt (toTracktion (beat)).numerator.get() : 4;
+        const auto beatsPerBar = edit != nullptr ? getTimeSignatureAt (*edit, beat).numerator : 4;
         beat += BeatDuration::fromBeats (chord.bars * std::max (1, beatsPerBar));
     }
 
@@ -329,8 +330,7 @@ bool writeProgressionPreview (const ProjectContext& context, const Progression& 
 
     for (const auto& chord : progression.chords)
     {
-        const auto beatsPerBar =
-            edit != nullptr ? edit->tempoSequence.getTimeSigAt (toTracktion (from + (beat - BeatPosition()))).numerator.get() : 4;
+        const auto beatsPerBar = edit != nullptr ? getTimeSignatureAt (*edit, from + (beat - BeatPosition())).numerator : 4;
         const auto length = BeatDuration::fromBeats (chord.bars * std::max (1, beatsPerBar));
         chords.push_back ({ { beat, length }, chord.numeral, progressionKey });
         beat += length;

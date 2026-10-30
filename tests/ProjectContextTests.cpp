@@ -11,6 +11,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
 
 TEST_CASE ("The open project's Edit, selection and Tracktion's focus move together")
 {
@@ -201,7 +202,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     // A section; and the tempo, which moves the clips in time (Tracktion keeps them in seconds; sections are in beats).
     REQUIRE (phazite::insertSection (*edit, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) }).isValid());
     CHECK (juce::String (hear()).contains ("sections"));
-    edit->tempoSequence.getTempo (0)->setBpm (100.0);
+    phazite::setTempo (*edit, 100.0);
     CHECK (hear() == "clips tempo");
 
     // What Tracktion writes as it plays is no change to the song; view state, such as how tall a track shows, is a group of

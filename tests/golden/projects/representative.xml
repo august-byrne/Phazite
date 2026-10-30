@@ -104,6 +104,13 @@
                start="24"
                tip="Let it fade."/>
     </SECTIONS>
+    <TEMPOMAP>
+      <TEMPO beat="0"
+             bpm="120"/>
+      <TIMESIGNATURE beat="0"
+                     denominator="4"
+                     numerator="4"/>
+    </TEMPOMAP>
   </PHAZITE>
   <PITCHSEQUENCE>
     <PITCH pitch="60"

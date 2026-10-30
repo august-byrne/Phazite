@@ -3,6 +3,7 @@
 #include "internal/Clips.h"
 #include "internal/Sections.h"
 #include "model/chords/internal/Chords.h"
+#include "model/transport/internal/Tempo.h"
 
 namespace phazite
 {
@@ -93,11 +94,7 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
 
     // As Tracktion's insertSpaceIntoEdit() does: in an Edit counted in bars and beats, clips move before the
     // tempo changes after them, since they follow the beat.
-    const auto moveTempo = [&edit, time, timeLength]
-    {
-        edit.pitchSequence.insertSpaceIntoSequence (time, timeLength, false);
-        edit.tempoSequence.insertSpaceIntoSequence (time, timeLength, false);
-    };
+    const auto moveTempo = [&edit, at, length] { insertTempoMapTime (edit, fromTracktion (at), fromTracktion (length)); };
 
     const auto tempoFirst = ! edit.getTimecodeFormat().isBarsBeats();
 
@@ -151,9 +148,8 @@ void removeTime (te::Edit& edit, te::BeatRange range)
     removeSectionTime (edit, fromTracktion (range));
     removeLaneTime (edit, fromTracktion (range));
 
-    // Tempo and key changes last, as Tracktion's deleteRegionOfTracks() does.
-    edit.pitchSequence.deleteRegion (time);
-    edit.tempoSequence.deleteRegion (time);
+    // Tempo changes last, as Tracktion's deleteRegionOfTracks() does.
+    removeTempoMapTime (edit, fromTracktion (range));
 }
 
 void moveTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination)

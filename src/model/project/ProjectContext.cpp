@@ -81,7 +81,7 @@ namespace
                 if (element.hasType (te::IDs::PLUGIN) || element.hasType (te::IDs::MASTERPLUGINS) || element.hasType (te::IDs::RACK))
                     return add (pending.devices);
 
-                if (element.hasType (te::IDs::TEMPOSEQUENCE))
+                if (element.hasType (schema::TEMPOMAP) || element.hasType (te::IDs::TEMPOSEQUENCE))
                     return add (pending.tempo);
 
                 if (te::TrackList::isTrack (element))

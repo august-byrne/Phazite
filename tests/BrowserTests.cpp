@@ -9,6 +9,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 #include "services/Library.h"
 #include "ui/browser/Browser.h"
 #include "ui/browser/PluginPicker.h"
@@ -283,7 +284,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
 
     // A loop that knows its tempo follows the song's, as it played in the preview: two bars at 120 BPM span two bars
     // at 100.
-    edit->tempoSequence.getTempos()[0]->setBpm (100.0);
+    phazite::setTempo (*edit, 100.0);
     phazite::LibraryItem breakLoop;
     breakLoop.name = "Break 120 BPM";
     breakLoop.file = phazite::test::writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);

@@ -304,10 +304,6 @@ TEST_CASE ("Keys: shading, snapping and transposing in the key")
     CHECK (phazite::transpose (notes, -3, cMajor)[0].pitch == 59);
     CHECK (phazite::transpose (notes, 7, cMajor)[0].pitch == 76); // an octave
     CHECK (phazite::transpose ({ noteData (125, 0.0, 1.0, 100) }, 12, std::nullopt)[0].pitch == 127);
-
-    // A new Edit is in C major.
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    CHECK (phazite::describeKey (phazite::getKeyAt (*edit, beats (0.0))) == juce::String ("C major"));
 }
 
 TEST_CASE ("A track has no key until one is chosen, and new tracks get the key chosen last")

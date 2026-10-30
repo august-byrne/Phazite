@@ -23,6 +23,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/StarterProject.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 #include "ui/pianoroll/DrumRows.h"
 #include "ui/playlist/TrackHeights.h"
 
@@ -81,8 +82,8 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     using phazite::test::createBuiltInDevice;
 
     auto& edit = project.getEdit();
-    edit.tempoSequence.getTempos()[0]->setBpm (120.0);
-    edit.tempoSequence.getTimeSigs()[0]->setStringTimeSig ("4/4");
+    phazite::setTempo (edit, 120.0);
+    phazite::setTimeSignature (edit, { 4, 4 });
 
     auto* drums = te::getAudioTracks (edit)[0];
     REQUIRE (drums != nullptr);

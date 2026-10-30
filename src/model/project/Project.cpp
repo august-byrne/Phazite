@@ -5,10 +5,12 @@
 #include "model/devices/internal/DeviceStates.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 
@@ -35,12 +37,15 @@ namespace
         return a == b && b == a;
     }
 
-    // What every project has, added before the project watches for changes: Phazite's state, the master's loudness meter,
-    // and an ID for each note. It isn't the user's change, so it is neither an undo step nor an unsaved change.
+    // What every project has, added before the project watches for changes: Phazite's state with its tempo map, which
+    // Tracktion's tempo sequence mirrors, the master's loudness meter, and an ID for each note. It isn't the user's change,
+    // so it is neither an undo step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
         getPhaziteState (edit);
+        ensureTempoMap (edit);
+        mirror::reconcileTempoMap (edit);
         ensureLoudnessMeter (edit);
         assignNoteIDs (edit);
         edit.getUndoManager().clearUndoHistory();

@@ -10,6 +10,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <set>
 
@@ -163,7 +164,7 @@ TEST_CASE ("The built-in outlines are the design's four and four more, with thei
 TEST_CASE ("Applying the electronic outline creates its seven sections at the project tempo")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->tempoSequence.getTempos()[0]->setBpm (128.0);
+    phazite::setTempo (*edit, 128.0);
 
     const auto* outline = phazite::findOutline ("electronic");
     REQUIRE (outline != nullptr);

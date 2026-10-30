@@ -3,15 +3,19 @@
 // samples that follow it, which Phazite renders (roadmap step 2.18), and patterns unless they keep their speed.
 #include "HostedDevice.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/Preview.h"
 #include "model/engine/internal/PreviewLoop.h"
+#include "model/mirror/internal/Mirror.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
@@ -91,6 +95,47 @@ TEST_CASE ("The time signature changes as one undo step, to one Phazite takes")
 
     phazite::undo (*edit);
     CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 4, 4 });
+}
+
+TEST_CASE ("The tempo map is Phazite's own, which Tracktion's tempo sequence mirrors one way, undo and redo too")
+{
+    phazite::test::TestSong song;
+    auto& edit = *phazite::getEdit (song.context);
+
+    // Every project has one, at 120 BPM in 4/4 from the song's start.
+    const auto map = phazite::findPhaziteState (edit).getChildWithName (phazite::schema::TEMPOMAP);
+    REQUIRE (map.isValid());
+    CHECK ((double) map.getChildWithName (phazite::schema::TEMPO)[phazite::schema::bpm] == doctest::Approx (120.0));
+    CHECK ((int) map.getChildWithName (phazite::schema::TIMESIGNATURE)[phazite::schema::numerator] == 4);
+
+    // A change goes into the map, and Tracktion follows; an undo puts both back, and a redo both again.
+    phazite::setTempo (edit, 96.5);
+    phazite::setTimeSignature (edit, { 7, 8 });
+    CHECK ((double) map.getChildWithName (phazite::schema::TEMPO)[phazite::schema::bpm] == doctest::Approx (96.5));
+    CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (96.5));
+    CHECK (edit.tempoSequence.getTimeSig (0)->numerator.get() == 7);
+    CHECK (edit.tempoSequence.getTimeSig (0)->denominator.get() == 8);
+
+    phazite::undo (edit);
+    CHECK (phazite::getTimeSignature (edit) == phazite::TimeSignature { 4, 4 });
+    CHECK (edit.tempoSequence.getTimeSig (0)->numerator.get() == 4);
+    phazite::undo (edit);
+    CHECK (phazite::getTempo (edit) == doctest::Approx (120.0));
+    CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (120.0));
+    phazite::redo (edit);
+    CHECK (phazite::getTempo (edit) == doctest::Approx (96.5));
+    CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (96.5));
+
+    // One way: what Tracktion holds is never the song's tempo; the mirror puts it back as the map says, and once they
+    // agree, it changes nothing.
+    edit.tempoSequence.getTempo (0)->setBpm (150.0);
+    CHECK (phazite::getTempo (edit) == doctest::Approx (96.5));
+    phazite::mirror::reconcileTempoMap (edit);
+    CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (96.5));
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileTempoMap (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
 }
 
 TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite renders, and leaves the others at their speed")
@@ -202,7 +247,7 @@ TEST_CASE ("A loop stretched to the song's tempo plays every hit once and on its
     // Known bug 1, which Tracktion's renders had: clips stretched by SoundTouch played 20 to 28 ms early, and doubled hits.
     phazite::test::TemporaryFolder temp;
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->tempoSequence.getTempos()[0]->setBpm (100.0);
+    phazite::setTempo (*edit, 100.0);
     auto* loop = dynamic_cast<te::AudioClipBase*> (
         phazite::importFile (*te::getAudioTracks (*edit)[0], writeClicks (temp.folder, 8, 120.0), te::BeatPosition()));
     REQUIRE (loop != nullptr);
@@ -249,7 +294,7 @@ TEST_CASE ("A loop previewed in time plays stretched as its clip would be, every
     phazite::test::TemporaryFolder temp;
     const auto file = writeClicks (temp.folder, 4, 120.0);
     auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    project->tempoSequence.getTempos()[0]->setBpm (100.0);
+    phazite::setTempo (*project, 100.0);
 
     auto inTime = false;
     auto preview = phazite::createPreviewEdit (phazite::test::getEngine(), file, project.get(), inTime);

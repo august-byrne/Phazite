@@ -49,6 +49,7 @@
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Recording.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <chrono>
 #include <thread>
@@ -1187,7 +1188,7 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (sine.getFile().copyFileTo (loop));
 
         auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-        edit->tempoSequence.getTempos()[0]->setBpm (100.0);
+        phazite::setTempo (*edit, 100.0);
         auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (getTrack (*edit, 0), loop, te::BeatPosition()));
         REQUIRE (clip != nullptr);
         REQUIRE (phazite::getClipTempo (*clip) == doctest::Approx (120.0));
@@ -1240,7 +1241,7 @@ TEST_SUITE ("realtime-audit")
         phazite::test::getEngine().getDeviceManager().dispatchPendingUpdates();
 
         auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-        project->tempoSequence.getTempos()[0]->setBpm (100.0);
+        phazite::setTempo (*project, 100.0);
         auto inTime = false;
         auto preview = phazite::createPreviewEdit (phazite::test::getEngine(), loop, project.get(), inTime);
         REQUIRE (preview != nullptr);

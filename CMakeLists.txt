@@ -256,6 +256,8 @@ target_sources(phazite_core PRIVATE
     src/model/engine/internal/PluginScanner.h
     src/model/engine/internal/Preview.h
     src/model/engine/internal/PreviewLoop.h
+    src/model/mirror/TempoMirror.cpp
+    src/model/mirror/internal/Mirror.h
     src/model/mixer/Buses.cpp
     src/model/mixer/ContainerModel.cpp
     src/model/mixer/ContainerModel.h

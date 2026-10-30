@@ -4,6 +4,7 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <cmath>
 
@@ -23,7 +24,7 @@ namespace
 int getBeatsPerBar (const ProjectContext& context, BeatPosition where)
 {
     auto* edit = getEdit (context);
-    return edit != nullptr ? edit->tempoSequence.getTimeSigAt (toTracktion (where)).numerator.get() : 4;
+    return edit != nullptr ? getTimeSignatureAt (*edit, where).numerator : 4;
 }
 
 int getBarAt (const ProjectContext& context, BeatPosition where)

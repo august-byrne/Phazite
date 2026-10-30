@@ -6,6 +6,7 @@
 #include "model/base/Toggles.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 #include <cmath>
@@ -293,7 +294,7 @@ te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selecti
 
 te::MidiClip* insertBarLongMidiClip (te::ClipTrack& track, te::BeatPosition start, Selection* selection)
 {
-    const auto bar = te::BeatDuration::fromBeats (track.edit.tempoSequence.getTimeSigAt (start).numerator.get());
+    const auto bar = te::BeatDuration::fromBeats (getTimeSignatureAt (track.edit, fromTracktion (start)).numerator);
     return insertMidiClip (track, { start, start + bar }, selection);
 }
 

@@ -9,6 +9,7 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 
@@ -130,7 +131,7 @@ namespace
 
     int getBeatsPerBar (const te::Edit& edit, BeatPosition where)
     {
-        return std::max (1, edit.tempoSequence.getTimeSigAt (toTracktion (where)).numerator.get());
+        return std::max (1, getTimeSignatureAt (edit, where).numerator);
     }
 
     //==============================================================================

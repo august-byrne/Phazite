@@ -36,6 +36,30 @@ inline const juce::Identifier patternsKeepTheirSpeed { "patternsKeepTheirSpeed" 
 inline const juce::Identifier LASTKEY { "LASTKEY" };
 
 //==============================================================================
+// The song's tempo map (model/transport/internal/Tempo.h; docs/tracktion-migration.md, T1): its tempos and time signatures,
+// each from a beat on, which everything in the song is placed on. Tracktion's tempo sequence is a mirror of it
+// (model/mirror/internal/Mirror.h). For now a song has one tempo and one time signature, from its start; a tempo lane will
+// add changes along it. song
+
+// Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tempos (TEMPO) and time
+// signatures (TIMESIGNATURE), in no particular order. Without one, the song is at 120 BPM in 4/4.
+inline const juce::Identifier TEMPOMAP { "TEMPOMAP" };
+
+// Child of TEMPOMAP: a tempo, from where it starts (mapBeat) to the next one's start, in beats per minute (bpm, 20..300,
+// to a hundredth). The first starts at 0.
+inline const juce::Identifier TEMPO { "TEMPO" };
+inline const juce::Identifier bpm { "bpm" };
+
+// Child of TEMPOMAP: a time signature, from where it starts (mapBeat), as many beats in a bar (numerator, int 1..32) of a
+// note value (denominator: 2, 4, 8 or 16). The first starts at 0.
+inline const juce::Identifier TIMESIGNATURE { "TIMESIGNATURE" };
+inline const juce::Identifier numerator { "numerator" };
+inline const juce::Identifier denominator { "denominator" };
+
+// On TEMPO and TIMESIGNATURE. double, 0 or more: where it starts, in beats from the song's start.
+inline const juce::Identifier mapBeat { "beat" };
+
+//==============================================================================
 // A grid's settings (GridSettings): the playlist's on PHAZITE, the piano roll's on PIANOROLL. view
 
 // bool, default true: positions snap to the grid.

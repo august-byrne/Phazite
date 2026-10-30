@@ -119,11 +119,8 @@ std::vector<ClipNote> replaceSelectedNotes (Selection&, const std::function<std:
 //==============================================================================
 // Keys.
 
-// The song's key at a beat, from Tracktion's pitch sequence (which holds its key changes).
-Key getKeyAt (const te::Edit&, te::BeatPosition);
-
-// A track's key, which the piano roll shades its rows by and can snap notes to. A track has none until one
-// is chosen: Phazite keeps it per track, since Tracktion's pitch sequence is one key for the whole song.
+// A track's key, which the piano roll shades its rows by and can snap notes to. A track has none until one is chosen:
+// Phazite keeps a key for each track, and the chord lane's keys along the song (model/chords/ChordModel.h).
 std::optional<Key> getTrackKey (const te::Track&);
 
 // Sets a track's key (or none), with the Edit's undo manager. The song remembers it, and new tracks get it

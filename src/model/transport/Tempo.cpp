@@ -5,13 +5,42 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace phazite
 {
 namespace
 {
+    juce::ValueTree findTempoMap (const te::Edit& edit)
+    {
+        return findPhaziteState (edit).getChildWithName (schema::TEMPOMAP);
+    }
+
+    // A tempo map's tempos or time signatures (their type), in the song's order.
+    std::vector<juce::ValueTree> getEntries (const juce::ValueTree& map, const juce::Identifier& type)
+    {
+        std::vector<juce::ValueTree> entries;
+
+        for (const auto& entry : map)
+            if (entry.hasType (type))
+                entries.push_back (entry);
+
+        std::stable_sort (entries.begin(), entries.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+                          { return (double) a[schema::mapBeat] < (double) b[schema::mapBeat]; });
+        return entries;
+    }
+
+    // The song's tempo or time signature (the first of its type, at the song's start), to change: the tempo map gets
+    // them first if it has none.
+    juce::ValueTree getFirstOfMap (te::Edit& edit, const juce::Identifier& type)
+    {
+        ensureTempoMap (edit);
+        return getEntries (findTempoMap (edit), type).front();
+    }
+
     // Keeps the song's patterns at their speed while the tempo changes, when the song says so (doPatternsFollowTempo()).
     // Tracktion keeps a MIDI clip's notes on their beats, so this scales the beats of its notes, its length, its offset and
     // its loop by how much the tempo changed, which leaves them at their times. Each clip still starts on its beat.
@@ -68,24 +97,115 @@ namespace
     };
 } // namespace
 
+//==============================================================================
+std::vector<TempoChange> getTempoChanges (const te::Edit& edit)
+{
+    std::vector<TempoChange> changes;
+
+    for (const auto& entry : getEntries (findTempoMap (edit), schema::TEMPO))
+        changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]), (double) entry.getProperty (schema::bpm, 120.0) });
+
+    if (changes.empty())
+        changes.push_back ({});
+
+    return changes;
+}
+
+std::vector<TimeSignatureChange> getTimeSignatureChanges (const te::Edit& edit)
+{
+    std::vector<TimeSignatureChange> changes;
+
+    for (const auto& entry : getEntries (findTempoMap (edit), schema::TIMESIGNATURE))
+        changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]),
+                             { (int) entry.getProperty (schema::numerator, 4), (int) entry.getProperty (schema::denominator, 4) } });
+
+    if (changes.empty())
+        changes.push_back ({});
+
+    return changes;
+}
+
+TimeSignature getTimeSignatureAt (const te::Edit& edit, BeatPosition beat)
+{
+    const auto changes = getTimeSignatureChanges (edit);
+    auto signature = changes.front().signature;
+
+    for (const auto& change : changes)
+        if (change.beat <= beat)
+            signature = change.signature;
+
+    return signature;
+}
+
+void ensureTempoMap (te::Edit& edit)
+{
+    auto phazite = getPhaziteState (edit);
+    auto map = phazite.getChildWithName (schema::TEMPOMAP);
+
+    if (! map.isValid())
+    {
+        map = juce::ValueTree (schema::TEMPOMAP);
+        phazite.appendChild (map, nullptr);
+    }
+
+    if (getEntries (map, schema::TEMPO).empty())
+        map.appendChild (juce::ValueTree (schema::TEMPO, { { schema::mapBeat, 0.0 }, { schema::bpm, 120.0 } }), nullptr);
+
+    if (getEntries (map, schema::TIMESIGNATURE).empty())
+        map.appendChild (
+            juce::ValueTree (schema::TIMESIGNATURE, { { schema::mapBeat, 0.0 }, { schema::numerator, 4 }, { schema::denominator, 4 } }),
+            nullptr);
+}
+
+void insertTempoMapTime (te::Edit& edit, BeatPosition at, BeatDuration length)
+{
+    for (auto entry : findTempoMap (edit))
+        if (const auto beat = (double) entry[schema::mapBeat]; beat > 0.0 && beat >= at.inBeats())
+            entry.setProperty (schema::mapBeat, beat + length.inBeats(), &edit.getUndoManager());
+
+    mirror::reconcileTempoMap (edit);
+}
+
+void removeTempoMapTime (te::Edit& edit, BeatRange range)
+{
+    auto map = findTempoMap (edit);
+
+    for (int i = map.getNumChildren(); --i >= 0;)
+    {
+        auto entry = map.getChild (i);
+        const auto beat = (double) entry[schema::mapBeat];
+
+        if (beat <= 0.0 || beat < range.getStart().inBeats())
+            continue;
+
+        if (beat < range.getEnd().inBeats())
+            map.removeChild (i, &edit.getUndoManager());
+        else
+            entry.setProperty (schema::mapBeat, beat - range.getLength().inBeats(), &edit.getUndoManager());
+    }
+
+    mirror::reconcileTempoMap (edit);
+}
+
+//==============================================================================
 double getTempo (const te::Edit& edit)
 {
-    return edit.tempoSequence.getTempo (0)->getBpm();
+    return getTempoChanges (edit).front().bpm;
 }
 
 void setTempo (te::Edit& edit, double bpm)
 {
     const auto rounded = std::round (juce::jlimit (minTempo, maxTempo, bpm) * 100.0) / 100.0;
-    auto* tempo = edit.tempoSequence.getTempo (0);
 
-    if (juce::approximatelyEqual (tempo->getBpm(), rounded))
+    if (juce::approximatelyEqual (getTempo (edit), rounded))
         return;
 
     const UndoStep step (edit, "Change Tempo");
     const AutomationOnBeats keepAutomation (edit);    // as Tracktion keeps the clips
     const FollowingClipsOnBeats keepFollowing (edit); // stretched again for the new tempo
     const PatternsKeepTheirSpeed keepPatterns (edit); // unless they follow it
-    tempo->setBpm (rounded);                          // Tracktion moves the clips with their beats
+    getFirstOfMap (edit, schema::TEMPO).setProperty (schema::bpm, rounded, &edit.getUndoManager());
+    mirror::reconcileTempoMap (edit); // Tracktion moves the clips with their beats
 }
 
 TempoStretch getTempoStretch (te::Edit& edit)
@@ -147,8 +267,7 @@ void togglePatternsFollowTempo (te::Edit& edit)
 
 TimeSignature getTimeSignature (const te::Edit& edit)
 {
-    const auto* timeSig = edit.tempoSequence.getTimeSig (0);
-    return { timeSig->numerator.get(), timeSig->denominator.get() };
+    return getTimeSignatureChanges (edit).front().signature;
 }
 
 bool isValid (TimeSignature timeSignature)
@@ -165,9 +284,10 @@ void setTimeSignature (te::Edit& edit, TimeSignature timeSignature)
 
     const UndoStep step (edit, "Change Time Signature");
     const AutomationOnBeats keepAutomation (edit);
-    auto* timeSig = edit.tempoSequence.getTimeSig (0);
-    timeSig->numerator = timeSignature.numerator;
-    timeSig->denominator = timeSignature.denominator;
+    auto first = getFirstOfMap (edit, schema::TIMESIGNATURE);
+    first.setProperty (schema::numerator, timeSignature.numerator, &edit.getUndoManager());
+    first.setProperty (schema::denominator, timeSignature.denominator, &edit.getUndoManager());
+    mirror::reconcileTempoMap (edit);
 }
 
 void addTempoCommands (CommandRegistry& registry, Selection& selection)

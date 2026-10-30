@@ -21,7 +21,15 @@
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
   </MASTERVOLUME>
-  <PHAZITE/>
+  <PHAZITE>
+    <TEMPOMAP>
+      <TEMPO beat="0"
+             bpm="120"/>
+      <TIMESIGNATURE beat="0"
+                     denominator="4"
+                     numerator="4"/>
+    </TEMPOMAP>
+  </PHAZITE>
   <PITCHSEQUENCE>
     <PITCH pitch="60"
            startBeat="0"/>

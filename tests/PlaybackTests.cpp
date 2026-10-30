@@ -13,6 +13,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/StarterProject.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 namespace
 {
@@ -84,7 +85,7 @@ TEST_CASE ("The song's loop runs to the end of the bar its last clip ends in")
 
     // Bars last longer at a slower tempo: 4 seconds at 60 BPM.
     Song slow;
-    slow.edit->tempoSequence.getTempos()[0]->setBpm (60.0);
+    phazite::setTempo (*slow.edit, 60.0);
     slow.addClip (0, 0.0, 6.0);
     CHECK (slow.getSongLoop() == "0.000-8.000");
 }
@@ -119,7 +120,7 @@ TEST_CASE ("The loop follows the song as clips are added, moved, trimmed and del
     song.addClip (1, 0.0, 6.0);
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-4.000");
-    song.edit->tempoSequence.getTempos()[0]->setBpm (240.0);
+    phazite::setTempo (*song.edit, 240.0);
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == song.getSongLoop());
     CHECK (song.getLoop() != "0.000-4.000");
@@ -318,7 +319,7 @@ TEST_CASE ("The song ends with the bar its last clip ends in, and its sections d
     clip.setMuted (true); // a muted clip counts
     CHECK (songEnd() == "4.000");
 
-    song.edit->tempoSequence.getTimeSigs()[0]->setStringTimeSig ("3/4"); // beat 4.5 is in the second bar of three beats
+    phazite::setTimeSignature (*song.edit, { 3, 4 }); // beat 4.5 is in the second bar of three beats
     CHECK (songEnd() == "3.000");
 }
 

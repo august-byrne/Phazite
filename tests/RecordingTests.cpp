@@ -147,7 +147,7 @@ TEST_CASE ("The song's own loop doesn't loop a recording, and is back around the
     auto edit = te::Edit::createSingleTrackEdit (engine);
     auto* track = te::getAudioTracks (*edit)[0];
     addInstrument (*track);
-    edit->tempoSequence.getTempo (0)->setBpm (240.0); // a bar a second, the loop of a song without clips
+    phazite::setTempo (*edit, 240.0); // a bar a second, the loop of a song without clips
     phazite::loopSong (*edit);
     REQUIRE (edit->getTransport().getLoopRange().getEnd().inSeconds() == doctest::Approx (1.0));
     phazite::setCountInOn (*edit, false);

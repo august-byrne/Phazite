@@ -108,6 +108,15 @@ Phazite's project becomes the truth, and Tracktion's Edit becomes a mirror that 
 - **The bridge (the mirror):** builds a `te::Edit` from the document and turns each change into the change Tracktion needs; Tracktion's changed flag, its notifications and the values it writes as it plays no longer reach the project. Recording, which Tracktion does for MIDI, hands what it recorded to the model, which writes it into the document.
 - *Done when:* the mirror's Edit can be thrown away and built again from the document at any moment with no difference in what plays or what is saved; no model function reads Tracktion's state as the truth; the project file holds nothing of Tracktion's; every golden render and command script is unchanged.
 
+**How T1 moves the song, part by part (decided 2026-10-30, by Claude):** each step leaves Phazite whole, so while some parts are in the document and others still in Tracktion's state, both are kept in one tree and one undo history:
+- The document is Phazite's state in the Edit (`getPhaziteState()`), where the sections and the chord lane already are; one undo manager, the Edit's, holds both. So a change that touches both (a track deleted with the clips that are still Tracktion's) undoes as one, as it does today.
+- The mirror is a set of reconcile functions, one for each part (`src/model/mirror/`): each writes into Tracktion's state what differs from the document, with the Edit's undo manager, and changes nothing when nothing differs. The model's functions call one after they change the document. An undo or a redo puts back both trees together, so the mirror has nothing to do then.
+- IDs stay the Edit's, and the file stays the Edit's XML with the document in it, until the last steps: then the document leaves the Edit with an undo manager of its own and IDs of its own, the mirror listens to it and builds the Edit from it (an undo then changes only the document, and the mirror follows), and the file is the document alone.
+- The model's functions keep taking the Edit while the document is in it; the budgets of the areas whose functions gain one go up with a reason, and come down when the document leaves.
+
+**T1 steps done:**
+1. *The tempo map* (2026-10-30): the song's tempos and time signatures, each from a beat on, are Phazite's (`schema::TEMPOMAP`, `model/transport/internal/Tempo.h`), which every project has; Tracktion's tempo sequence mirrors them (`mirror::reconcileTempoMap()`); the time edits move the document's tempo changes; the bars of the time line, the chord lane and new clips are counted from it. The song's key isn't Tracktion's either: Phazite keeps a key for each track and the chord lane's keys, so Tracktion's pitch sequence, which only a test read, is left alone.
+
 ### T2. The sound of Phazite's own (XL)
 
 A playback engine of Phazite's own, in a new engine-neutral layer, `src/engine/`, beside `src/devices/` and below the model, which feeds it from the document.
@@ -208,7 +217,7 @@ Conventions and workarounds that exist only because Tracktion works the way it d
 |---|---|---|
 | Clips and automation placed in seconds, and the clips moved when the tempo changes | conversions throughout the model; `AutomationOnBeats`, `FollowingClipsOnBeats` and `PatternsKeepTheirSpeed` keep the rest on their beats (`Tempo.cpp`) | everything placed in beats; seconds worked out only as it plays |
 | The loop and the play start kept in seconds, so that a tempo change moves them off their beats | none yet: known bug 5 | the transport in beats (T2) |
-| One tempo and one time signature at the song's start; one key for the song, in the pitch sequence | Phazite changes the first ones only; keys per track are Phazite's own | a tempo map and keys of Phazite's own |
+| One tempo and one time signature at the song's start; one key for the song, in the pitch sequence | *Gone (T1, step 1):* the tempo map is Phazite's, which Tracktion's tempo sequence mirrors; keys are Phazite's (each track's, the chord lane's), and the pitch sequence is left alone | a tempo map and keys of Phazite's own |
 | The grid's levels are Tracktion's snap types (3 to 18; a beat is 9, a bar 10), and snapping goes through seconds | `GridSettings.h`, `Grid.cpp` | a grid in beats |
 | `ClipTrack::insertSpace()` misses clips when its list is unsorted, and moving a clip doesn't sort it | Phazite's time edits move every clip themselves (`Arrangement.cpp`) | the document's own order |
 | A clip's maximum length ignores a trimmed start, and its offset can't go below 0 | `Clips.cpp` | clips of Phazite's own |

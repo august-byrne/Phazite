@@ -657,12 +657,6 @@ std::vector<NoteData> chop (std::vector<NoteData> notes, double pieceBeats)
 }
 
 //==============================================================================
-Key getKeyAt (const te::Edit& edit, te::BeatPosition beat)
-{
-    const auto& pitch = edit.pitchSequence.getPitchAtBeat (beat);
-    return { floorModulo (pitch.getPitch(), 12), toScale (pitch.getScale()) };
-}
-
 juce::String getScaleName (Scale scale)
 {
     return te::Scale::getNameForType (toTracktion (scale));

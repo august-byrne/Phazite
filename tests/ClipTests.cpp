@@ -6,6 +6,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
+#include "model/transport/internal/Tempo.h"
 #include "ui/timeline/SmartTool.h"
 
 namespace
@@ -521,7 +522,7 @@ TEST_CASE ("Aliases, audio clips and fade shapes")
 TEST_CASE ("A double-click's MIDI clip lasts a bar of the time signature there, as one undo step")
 {
     ClipEdit e;
-    e.edit->tempoSequence.getTimeSigs()[0]->setStringTimeSig ("3/4");
+    phazite::setTimeSignature (*e.edit, { 3, 4 });
     e.edit->getUndoManager().clearUndoHistory();
 
     auto* clip = phazite::addMidiClipAt (*e.tracks[0], beats (6.0), &e.selection);
