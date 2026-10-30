@@ -682,7 +682,7 @@ namespace
 
             for (auto* send : getSends (track))
                 if (auto* copy = addSend (*bounced, send->getBusNumber(), isPreFader (*send)))
-                    copy->setGainDb (send->getGainDb());
+                    setSendLevel (*copy, getSendLevel (*send));
 
             if (placeClipState (edit, makeAudioClipState (edit, name, target, BeatPosition(), { 0.0, length.inSeconds() }), *bounced)
                 == nullptr)

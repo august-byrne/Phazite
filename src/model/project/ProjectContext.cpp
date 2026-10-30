@@ -89,7 +89,7 @@ namespace
                     return add (pending.clips);
 
                 // The song's devices (T1, step 5), on a track's element or the master's.
-                if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER))
+                if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::SEND))
                     return add (pending.devices);
 
                 // Devices, and containers' rack types (model/mixer/internal/Containers.h): their names and what they hold.
@@ -131,7 +131,7 @@ namespace
             else if (te::Clip::isClipState (child) || child.hasType (schema::CLIP))
                 add (pending.clips);
             else if (child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK) || child.hasType (schema::DEVICE)
-                     || child.hasType (schema::CONTAINER))
+                     || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
                 add (pending.devices);
             else if (isTrackElement (child))
                 add (pending.tracks);
@@ -148,7 +148,7 @@ namespace
             const auto moved = parent.getChild (newIndex);
             const auto isTrack = isTrackElement (moved);
             const auto isDevice = moved.hasType (te::IDs::PLUGIN) || moved.hasType (te::IDs::PLUGININSTANCE)
-                                  || moved.hasType (schema::DEVICE) || moved.hasType (schema::CONTAINER);
+                                  || moved.hasType (schema::DEVICE) || moved.hasType (schema::CONTAINER) || moved.hasType (schema::SEND);
 
             // The elements it passed: now between its new place and its old one.
             const auto first = newIndex < oldIndex ? newIndex + 1 : oldIndex;
@@ -163,7 +163,7 @@ namespace
 
                 if (isDevice
                     && (passed.hasType (te::IDs::PLUGIN) || passed.hasType (te::IDs::PLUGININSTANCE) || passed.hasType (schema::DEVICE)
-                        || passed.hasType (schema::CONTAINER)))
+                        || passed.hasType (schema::CONTAINER) || passed.hasType (schema::SEND)))
                     return add (pending.devices);
             }
         }
@@ -171,12 +171,13 @@ namespace
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
-            // makes one at each move (docs/performance-audit.md, U1); a channel's volume and pan neither. Nor is where a
-            // device's window was, which no view shows.
+            // makes one at each move (docs/performance-audit.md, U1); a channel's volume and pan, and a send's level, neither.
+            // Nor is where a device's window was, which no view shows.
             if (isParameterValue (tree, property) || tree.hasType (schema::VALUES)
                 || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property))
                 || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
-                    && (property == schema::channelVolume || property == schema::channelPan)))
+                    && (property == schema::channelVolume || property == schema::channelPan))
+                || (tree.hasType (schema::SEND) && property == schema::sendLevel))
                 return;
 
             // How tall a track shows, and the like, is view state (Schema.h), not the song.

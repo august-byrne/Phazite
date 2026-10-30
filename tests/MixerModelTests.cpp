@@ -417,6 +417,63 @@ TEST_CASE ("A channel's volume and pan are the song's, which its fader plays one
     CHECK_FALSE (edit.getUndoManager().canUndo());
 }
 
+TEST_CASE ("A send is the song's, to a return by its track, which Tracktion's sends mirror one way")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto& context = song.context;
+    auto& edit = *song.edit;
+    const auto a = idOf (*song.a);
+    const auto reverb = phazite::addReturnWith (context, a, song.find ("phaziteReverb"));
+    const auto track = phazite::findTrackState (*song.a);
+    const auto element = track.getChildWithName (schema::SEND);
+    const auto sends = phazite::getSends (context, a);
+
+    // The song's: to the return, by its track, at -6 dB, after the fader; Tracktion's on the return's bus.
+    REQUIRE (element.isValid());
+    REQUIRE (sends.size() == 1);
+    CHECK ((juce::int64) element[schema::sendID] == (juce::int64) sends[0].id.getRaw());
+    CHECK ((juce::int64) element[schema::sendTo] == (juce::int64) reverb.getRaw());
+    CHECK ((double) element[schema::sendLevel] == doctest::Approx (-6.0));
+    CHECK_FALSE (element.hasProperty (schema::sendPreFader));
+    REQUIRE (phazite::getSendTargets (context, a).size() == 1);
+    CHECK (phazite::getSendTargets (context, a)[0].send.has_value());
+
+    // Its level and its place before the fader are the song's, which Tracktion plays; an undo takes both back.
+    phazite::getSendLevel (context, sends[0].id).setValue (phazite::decibelsToFaderPosition (-12.0f));
+    CHECK ((double) element[schema::sendLevel] == doctest::Approx (-12.0));
+    const auto beforeFader = [&song]
+    {
+        auto& list = song.a->pluginList;
+        return list.indexOf (phazite::getSends (*song.a).getFirst()) < list.indexOf (song.a->getVolumePlugin());
+    };
+
+    CHECK_FALSE (beforeFader());
+    phazite::setPreFader (context, sends[0].id, true);
+    CHECK ((bool) element[schema::sendPreFader]);
+    CHECK (beforeFader());
+    phazite::undo (edit);
+    CHECK_FALSE (element.hasProperty (schema::sendPreFader));
+    CHECK_FALSE (beforeFader());
+
+    // One way: a send Tracktion lost is made again from the song, on its return's bus, at its level.
+    phazite::getSends (*song.a).getFirst()->deleteFromParent();
+    CHECK (phazite::getSends (*song.a).isEmpty());
+    phazite::mirror::reconcileDevices (edit);
+    REQUIRE (phazite::getSends (*song.a).size() == 1);
+    CHECK (phazite::getSends (*song.a).getFirst()->getGainDb() == doctest::Approx (-12.0f).epsilon (0.01));
+    CHECK (phazite::getSendTargets (context, a)[0].send.has_value());
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileDevices (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+
+    // Removed, the song's goes, and Tracktion's with it.
+    phazite::removeSend (context, phazite::getSends (context, a)[0].id);
+    CHECK_FALSE (track.getChildWithName (schema::SEND).isValid());
+    CHECK (phazite::getSends (*song.a).isEmpty());
+}
+
 TEST_CASE ("A device's channel, its handle for an editor, and whether its controls open in a window of their own")
 {
     phazite::test::TestPlugin testPlugin;

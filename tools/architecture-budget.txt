@@ -33,8 +33,8 @@ tracktion-chords              73
 tracktion-commands            43
 tracktion-devices            174
 tracktion-engine             175
-tracktion-mirror             160
-tracktion-mixer              679
+tracktion-mirror             175
+tracktion-mixer              681
 tracktion-modulation         108
 tracktion-notes              155
 tracktion-presets             84

@@ -176,8 +176,9 @@ te::FolderTrack* getOutputBus (const te::Track&);
 juce::Array<te::Track*> getChannelTracks (const te::Edit&);
 
 //==============================================================================
-// Returns and sends. A return track takes in an aux bus (Tracktion's AuxReturnPlugin, its first plug-in), so its
-// devices, such as a reverb, process what the sends feed it.
+// Returns and sends. A return track takes in an aux bus (Tracktion's AuxReturnPlugin, its first plug-in, which the mirror
+// gives each of the song's returns, on the first bus no other return takes), so its devices, such as a reverb, process
+// what the sends feed it.
 int getReturnBus (const te::Track&); // -1 if it isn't a return track
 juce::Array<te::AudioTrack*> getReturnTracks (const te::Edit&);
 te::AudioTrack* findReturnTrack (const te::Edit&, int bus);
@@ -196,11 +197,17 @@ te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& e
 
 juce::Array<te::AuxSendPlugin*> getSends (const te::Track&);
 
-// Adds a send from a track to a return's bus: after the fader, or before it with preFader. Its level starts at
-// -6 dB. Returns nullptr if the track can't hold it.
+// Sends are the song's (Schema.h: SEND; T1 step 5f), each to a return by the return's track, which Tracktion's sends
+// mirror on the returns' buses. Adds a send from a track to the return on a bus: after the fader, or before it with
+// preFader. Its level starts at -6 dB. Returns nullptr if the track can't hold it, or no return has the bus. Joins the
+// caller's step.
 te::AuxSendPlugin* addSend (te::Track&, int bus, bool preFader);
 bool isPreFader (const te::AuxSendPlugin&);
 void setPreFader (te::AuxSendPlugin&, bool); // as one undo step, "Change Send"
+
+// A send's level in decibels, the song's (setDeviceValue() sets it too, given its parameter), in the caller's step.
+void setSendLevel (te::AuxSendPlugin&, float decibels);
+float getSendLevel (const te::AuxSendPlugin&);
 
 // The send menus' choices, each one undo step named "Add Send": a send after the fader to a return's bus, or to a new,
 // empty return. Each returns the send, or nullptr. And removing one, "Remove Send".

@@ -147,6 +147,17 @@ namespace
         return track.isMasterTrack() ? findChainState (track.edit, nullptr) : findTrackState (track);
     }
 
+    // A send's element in the song (Schema.h: SEND), on its track's; invalid for one the song hasn't.
+    juce::ValueTree findSendState (const te::AuxSendPlugin& send)
+    {
+        if (auto* track = send.getOwnerTrack())
+            for (const auto& child : findTrackState (*track))
+                if (child.hasType (schema::SEND) && (juce::int64) child[schema::sendID] == (juce::int64) send.itemID.getRawID())
+                    return child;
+
+        return {};
+    }
+
     // A value of a channel's in the song, to a ten-thousandth (a volume comes back from a fader's position a little off),
     // none where it is the one it has without.
     void setChannelValue (juce::ValueTree state, const juce::Identifier& property, float value, float none, juce::UndoManager* undo)
@@ -602,26 +613,13 @@ te::AudioTrack* addNewReturnTrack (te::Edit& edit, Selection* selection)
 
 te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, Selection* selection)
 {
-    // The first bus no return uses.
-    auto bus = 0;
-
-    while (findReturnTrack (edit, bus) != nullptr)
-        ++bus;
-
     // Solo-safe, as Studio One's effect channels are: soloing a track keeps its reverb, say, audible (a return's solo
-    // isolation, which the mirror gives it).
+    // isolation, which the mirror gives it); and its input on a bus of its own, which the mirror gives it too.
     auto* track = insertReturnTrack (edit, name, selection);
 
-    if (track == nullptr)
-        return nullptr;
+    if (track != nullptr)
+        mirror::reconcileDevices (edit);
 
-    auto input = edit.getPluginCache().createNewPlugin (te::AuxReturnPlugin::xmlTypeName, {});
-
-    if (auto* aux = dynamic_cast<te::AuxReturnPlugin*> (input.get()))
-        aux->busNumber = bus;
-
-    track->pluginList.insertPlugin (input, 0, nullptr);
-    edit.setAuxBusName (bus, name);
     return track;
 }
 
@@ -663,27 +661,35 @@ juce::Array<te::AuxSendPlugin*> getSends (const te::Track& track)
 
 te::AuxSendPlugin* addSend (te::Track& track, int bus, bool preFader)
 {
-    auto plugin = track.edit.getPluginCache().createNewPlugin (te::AuxSendPlugin::xmlTypeName, {});
-    auto* send = dynamic_cast<te::AuxSendPlugin*> (plugin.get());
-    auto* volume = getVolumeDevice (track);
+    // The song's, after the track's other sends, to the return on the bus, which the mirror makes.
+    auto* target = findReturnTrack (track.edit, bus);
+    auto state = findTrackState (track);
 
-    if (send == nullptr || volume == nullptr)
+    if (target == nullptr || ! state.isValid() || getVolumeDevice (track) == nullptr)
         return nullptr;
 
-    send->busNumber = bus;
-    send->setGainDb (newSendDb);
+    const auto id = track.edit.createNewItemID();
+    juce::ValueTree send (schema::SEND);
+    send.setProperty (schema::sendID, (juce::int64) id.getRawID(), nullptr);
+    send.setProperty (schema::sendTo, (juce::int64) getTrackID (*target).getRaw(), nullptr);
+    send.setProperty (schema::sendLevel, newSendDb, nullptr);
 
-    // Just before the fader, or just after it.
-    const auto volumeIndex = track.pluginList.indexOf (volume);
-    track.pluginList.insertPlugin (plugin, preFader ? volumeIndex : volumeIndex + 1, nullptr);
-    return track.pluginList.contains (send) ? send : nullptr;
+    if (preFader)
+        send.setProperty (schema::sendPreFader, true, nullptr);
+
+    state.appendChild (send, &track.edit.getUndoManager());
+    mirror::reconcileDevices (track.edit);
+
+    for (auto* made : getSends (track))
+        if (made->itemID == id)
+            return made;
+
+    return nullptr;
 }
 
 bool isPreFader (const te::AuxSendPlugin& send)
 {
-    auto* track = send.getOwnerTrack();
-    auto* volume = track != nullptr ? getVolumeDevice (*track) : nullptr;
-    return volume != nullptr && track->pluginList.indexOf (&send) < track->pluginList.indexOf (volume);
+    return (bool) findSendState (send)[schema::sendPreFader];
 }
 
 void setDeviceOn (te::Plugin& device, bool on)
@@ -896,12 +902,27 @@ void setDeviceValue (te::AutomatableParameter& parameter, float value)
             state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (parameter.paramID), stored, undo);
         }
     }
+    else if (auto* send = dynamic_cast<te::AuxSendPlugin*> (parameter.getPlugin()))
+    {
+        if (auto state = findSendState (*send); state.isValid())
+            setChannelValue (state, schema::sendLevel, faderPositionToDecibels (stored), 0.0f, &send->edit.getUndoManager());
+    }
     else if (auto* fader = parameter.getPlugin())
     {
         storeFaderValue (*fader, parameter.paramID, stored);
     }
 
     parameter.setParameter (stored, juce::sendNotification);
+}
+
+void setSendLevel (te::AuxSendPlugin& send, float decibels)
+{
+    setDeviceValue (*send.gain, decibelsToFaderPosition (decibels));
+}
+
+float getSendLevel (const te::AuxSendPlugin& send)
+{
+    return (float) findSendState (send).getProperty (schema::sendLevel, 0.0f);
 }
 
 void setChannelVolume (te::Track& channel, float decibels)
@@ -984,24 +1005,31 @@ te::AuxSendPlugin* addSendToNewReturn (te::Track& track)
 
 void removeSend (te::AuxSendPlugin& send)
 {
-    const UndoStep step (send.edit, "Remove Send");
-    send.deleteFromParent();
+    auto& edit = send.edit;
+    const UndoStep step (edit, "Remove Send");
+
+    if (auto state = findSendState (send); state.isValid())
+    {
+        state.getParent().removeChild (state, &edit.getUndoManager());
+        mirror::reconcileDevices (edit);
+    }
 }
 
 void setPreFader (te::AuxSendPlugin& send, bool preFader)
 {
-    auto* track = send.getOwnerTrack();
-    auto* volume = track != nullptr ? getVolumeDevice (*track) : nullptr;
+    auto state = findSendState (send);
 
-    if (volume == nullptr || isPreFader (send) == preFader)
+    if (! state.isValid() || isPreFader (send) == preFader)
         return;
 
     const UndoStep step (send.edit, "Change Send");
 
-    // Moving it to the fader's place puts it just before the fader when it comes from after, and just after
-    // it when it comes from before.
-    auto parent = send.state.getParent();
-    parent.moveChild (parent.indexOf (send.state), parent.indexOf (volume->state), &send.edit.getUndoManager());
+    if (preFader)
+        state.setProperty (schema::sendPreFader, true, &send.edit.getUndoManager());
+    else
+        state.removeProperty (schema::sendPreFader, &send.edit.getUndoManager());
+
+    mirror::reconcileDevices (send.edit);
 }
 
 //==============================================================================

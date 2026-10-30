@@ -264,6 +264,17 @@ inline const juce::Identifier pluginParameterIDs { "parameterIDs" };
 inline const juce::Identifier CONTAINER { "CONTAINER" };
 inline const juce::Identifier containerName { "name" };
 
+// Child of a track's TRACK (T1, step 5f): a send to a return, in the order the track's sends were added, which Tracktion's
+// sends mirror, each to its return's bus (model/mixer/internal/Mixer.h). On SEND: its ID (DeviceID, its Tracktion plug-in's
+// while T1 lasts); the return it sends to, by the return's track's ID (sendTo); its level in decibels, as a fader's
+// (sendLevel; -100 for silence; none for 0 dB); and sendPreFader, true for a send before the track's fader, none for one
+// after it. A send to a return the song hasn't any more stays, for an undo that brings the return back.
+inline const juce::Identifier SEND { "SEND" };
+inline const juce::Identifier sendID { "id" };
+inline const juce::Identifier sendTo { "to" };
+inline const juce::Identifier sendLevel { "level" };
+inline const juce::Identifier sendPreFader { "preFader" };
+
 //==============================================================================
 // The song's automation (model/automation/internal/Automation.h; docs/tracktion-migration.md, T1 step 4): each automated
 // parameter's curve, by its device and its own ID, with its points in beats. Tracktion's curves mirror them

@@ -197,7 +197,7 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     phazite::renameTrack (*song.bass, "Bass Line");
     phazite::setTrackMuted (*song.bass, true);
     phazite::setTrackMuted (*song.bass, false);
-    phazite::getSends (*song.bass)[0]->setGainDb (-12.0f);
+    phazite::setSendLevel (*phazite::getSends (*song.bass)[0], -12.0f);
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::isFrozen (song.context, song.id()));
 

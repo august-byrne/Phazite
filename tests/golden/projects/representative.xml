@@ -218,6 +218,10 @@
                   type="phaziteReverb">
             <VALUES mix="0.25"/>
           </DEVICE>
+          <SEND id="1050"
+                level="-6"
+                preFader="1"
+                to="1045"/>
         </TRACK>
         <TRACK colour="ff009e73"
                id="1029"
@@ -250,6 +254,9 @@
                 kind="audio"
                 name="Tone"
                 start="4"/>
+          <SEND id="1049"
+                level="-6"
+                to="1045"/>
         </TRACK>
       </TRACK>
       <TRACK colour="ff0072b2"

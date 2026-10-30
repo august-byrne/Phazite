@@ -251,17 +251,18 @@ namespace
         return edit.getPluginCache().createNewPlugin (container);
     }
 
+    // A fader's or a send's position set by hand, as near as it comes back from decibels.
+    void play (te::AutomatableParameter* parameter, float wanted)
+    {
+        if (parameter != nullptr && std::abs (parameter->getCurrentExplicitValue() - wanted) > 1.0e-5f)
+            parameter->setParameter (wanted, juce::sendNotification);
+    }
+
     // A channel's fader plays the song's volume and pan, set by hand (setChannelVolume() in Mixer.h): a track's, a return's,
-    // a bus's or the master's VolumeAndPanPlugin, or a plain folder's VCA. Positions are compared as near as they come back
-    // from decibels.
+    // a bus's or the master's VolumeAndPanPlugin, or a plain folder's VCA.
     void reconcileFader (te::Plugin* fader, const juce::ValueTree& state, float noVolume)
     {
         const auto position = decibelsToFaderPosition ((float) state.getProperty (schema::channelVolume, noVolume));
-        const auto play = [] (te::AutomatableParameter* parameter, float wanted)
-        {
-            if (parameter != nullptr && std::abs (parameter->getCurrentExplicitValue() - wanted) > 1.0e-5f)
-                parameter->setParameter (wanted, juce::sendNotification);
-        };
 
         if (auto* volume = dynamic_cast<te::VolumeAndPanPlugin*> (fader))
         {
@@ -271,6 +272,117 @@ namespace
         else if (auto* vca = dynamic_cast<te::VCAPlugin*> (fader))
         {
             play (vca->volParam.get(), position);
+        }
+    }
+
+    // A return's input in Tracktion: its AuxReturnPlugin, first in its list, on the first bus no other return takes, named
+    // after it, as Tracktion names its buses.
+    void reconcileReturn (te::Edit& edit, te::AudioTrack& track)
+    {
+        if (getReturnBus (track) >= 0)
+            return;
+
+        auto bus = 0;
+
+        while (findReturnTrack (edit, bus) != nullptr)
+            ++bus;
+
+        juce::ValueTree input (te::IDs::PLUGIN);
+        input.setProperty (te::IDs::type, te::AuxReturnPlugin::xmlTypeName, nullptr);
+        input.setProperty (te::IDs::busNum, bus, nullptr);
+        track.pluginList.insertPlugin (edit.getPluginCache().createNewPlugin (input), 0, nullptr);
+        edit.setAuxBusName (bus, getTrackName (track));
+    }
+
+    // Puts an element of a parent just before another, or just after it.
+    void placeNextTo (juce::ValueTree parent, const juce::ValueTree& element, const juce::ValueTree& other, bool after,
+                      juce::UndoManager* undo)
+    {
+        const auto from = parent.indexOf (element), at = parent.indexOf (other);
+        const auto to = after ? (from < at ? at : at + 1) : (from < at ? at - 1 : at);
+
+        if (from >= 0 && at >= 0 && from != to)
+            parent.moveChild (from, to, undo);
+    }
+
+    // A track's sends in Tracktion as the song has them (Schema.h: SEND): those it hasn't go; those it has are made (but one
+    // whose return the song hasn't any more), each on its return's bus, at its level, the ones before the fader just before
+    // it and the others just after it, in the song's order.
+    void reconcileSends (te::Edit& edit, te::Track& track, const juce::ValueTree& state)
+    {
+        auto* undo = &edit.getUndoManager();
+        std::vector<juce::ValueTree> wanted;
+
+        for (const auto& child : state)
+            if (child.hasType (schema::SEND))
+                wanted.push_back (child);
+
+        const auto findSend = [&track] (const juce::ValueTree& element) -> te::AuxSendPlugin*
+        {
+            for (auto* send : getSends (track))
+                if ((juce::int64) send->itemID.getRawID() == (juce::int64) element[schema::sendID])
+                    return send;
+
+            return nullptr;
+        };
+
+        for (auto* send : getSends (track))
+            if (std::none_of (wanted.begin(), wanted.end(),
+                              [send, &findSend] (const juce::ValueTree& element) { return findSend (element) == send; }))
+                send->deleteFromParent();
+
+        auto* fader = getVolumeDevice (track);
+
+        if (fader == nullptr)
+            return;
+
+        for (const auto& element : wanted)
+        {
+            const auto* target =
+                te::findTrackForID (edit, toTracktion (TrackID::fromRaw ((std::uint64_t) (juce::int64) element[schema::sendTo])));
+            const auto bus = target != nullptr ? getReturnBus (*target) : -1;
+            const auto position = decibelsToFaderPosition ((float) element.getProperty (schema::sendLevel, 0.0f));
+
+            if (auto* send = findSend (element))
+            {
+                if (bus >= 0 && send->busNumber.get() != bus)
+                    send->busNumber = bus;
+
+                play (send->gain.get(), position);
+            }
+            else if (bus >= 0)
+            {
+                auto made = te::AuxSendPlugin::create();
+                toTracktion (DeviceID::fromRaw ((std::uint64_t) (juce::int64) element[schema::sendID])).writeID (made, nullptr);
+                made.setProperty (te::IDs::busNum, bus, nullptr);
+                made.setProperty (te::IDs::auxSendSliderPos, position, nullptr);
+                track.pluginList.insertPlugin (edit.getPluginCache().createNewPlugin (made), track.pluginList.indexOf (fader), nullptr);
+            }
+        }
+
+        // Before the fader in the song's order: each just before the next, the last just before the fader; after it, each
+        // just after the one before, the first just after the fader.
+        const auto parent = fader->state.getParent();
+        auto next = fader->state;
+
+        for (auto element = wanted.rbegin(); element != wanted.rend(); ++element)
+        {
+            if (auto* send = findSend (*element); send != nullptr && (bool) (*element)[schema::sendPreFader])
+            {
+                placeNextTo (parent, send->state, next, false, undo);
+                next = send->state;
+            }
+        }
+
+        auto previous = fader->state;
+
+        for (const auto& element : wanted)
+        {
+            if (auto* send = findSend (element); send != nullptr && ! (bool) element[schema::sendPreFader])
+            {
+                placeNextTo (parent, send->state, previous, true, undo);
+                previous = send->state;
+            }
         }
     }
 
@@ -354,12 +466,21 @@ namespace
 
 void reconcileDevices (te::Edit& edit)
 {
-    for (const auto& state : getTrackStates (edit))
+    const auto states = getTrackStates (edit);
+
+    // The returns' inputs first, whose buses the sends find.
+    for (const auto& state : states)
+        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (state))));
+            track != nullptr && isReturnTrack (*track))
+            reconcileReturn (edit, *track);
+
+    for (const auto& state : states)
     {
         if (auto* track = te::findTrackForID (edit, toTracktion (getTrackID (state))))
         {
             reconcileChain (edit, track->pluginList, state);
             reconcileFader (getVolumeDevice (*track), state, 0.0f);
+            reconcileSends (edit, *track, state);
         }
     }
 
