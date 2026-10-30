@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Modulation.h"
 #include "model/automation/internal/Automation.h"
+#include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/internal/Containers.h"
 
 #include <algorithm>
@@ -432,5 +433,123 @@ void removeModulation (const ModulatorAccess& modulator, te::AutomatableParamete
             parameter.removeModifier (*modulation.assignment);
 
     followModulation (parameter);
+}
+
+//==============================================================================
+namespace
+{
+    bool isSame (const DeviceModulation& a, const DeviceModulation& b)
+    {
+        const auto sameSource = [] (const DeviceModulation::Source& x, const DeviceModulation::Source& y)
+        { return x.modifier == y.modifier && x.macro == y.macro; };
+
+        const auto sameRoute = [] (const DeviceModulation::Route& x, const DeviceModulation::Route& y)
+        { return x.parameter == y.parameter && x.source == y.source && juce::exactlyEqual (x.amount, y.amount); };
+
+        return std::equal (a.sources.begin(), a.sources.end(), b.sources.begin(), b.sources.end(), sameSource)
+               && std::equal (a.routes.begin(), a.routes.end(), b.routes.begin(), b.routes.end(), sameRoute);
+    }
+
+    // Whether a modulation adds its source's value times its amount, as Phazite makes them: no offset or curve, and a
+    // macro's whole range.
+    bool isPlain (const ModulationAccess& modulation)
+    {
+        const auto& assignment = *modulation.assignment;
+        return juce::exactlyEqual (assignment.offset.get(), 0.0f) && juce::exactlyEqual (assignment.curve.get(), 0.0f)
+               && juce::exactlyEqual (assignment.inputStart.get(), 0.0f) && juce::exactlyEqual (assignment.inputEnd.get(), 1.0f);
+    }
+} // namespace
+
+void updateDeviceModulation (DevicePlugin& device)
+{
+    const auto& info = device.getDeviceInfo();
+    auto modulation = std::make_unique<DeviceModulation>();
+    modulation->isModulated.assign (info.parameters.size(), false);
+
+    for (size_t i = 0; i < info.parameters.size(); ++i)
+    {
+        auto* parameter = device.findParameter (info.parameters[i].id);
+
+        if (parameter == nullptr)
+            continue;
+
+        // One with a modulation made otherwise, or moved by anything else of Tracktion's, stays Tracktion's to move, once a
+        // block.
+        const auto modulations = getModulations (*parameter);
+
+        if ((int) modulations.size() != parameter->getAssignments().size()
+            || ! std::all_of (modulations.begin(), modulations.end(), isPlain))
+            continue;
+
+        for (const auto& each : modulations)
+        {
+            const auto& modulator = each.modulator;
+            auto& sources = modulation->sources;
+            auto source = std::find_if (sources.begin(), sources.end(), [&modulator] (const DeviceModulation::Source& s)
+                                        { return s.modifier == modulator.modifier && s.macro == modulator.macro; });
+
+            if (source == sources.end())
+            {
+                DeviceModulation::Source added;
+                added.modifier = modulator.modifier;
+                added.macro = modulator.macro;
+                added.lfo = dynamic_cast<te::LFOModifier*> (modulator.modifier.get());
+                source = sources.insert (sources.end(), std::move (added));
+            }
+
+            modulation->routes.push_back ({ (int) i, (int) std::distance (sources.begin(), source), each.assignment->value.get() });
+            modulation->isModulated[i] = true;
+        }
+    }
+
+    if (modulation->routes.empty())
+        modulation = nullptr;
+
+    // As it was: left playing, rather than started again.
+    if (const auto* playing = device.getModulation();
+        modulation == nullptr ? playing == nullptr : playing != nullptr && isSame (*playing, *modulation))
+        return;
+
+    device.setModulation (std::move (modulation));
+}
+
+void updateDeviceModulation (te::Edit& edit)
+{
+    for (auto* plugin : te::getAllPlugins (edit, false))
+        if (auto* device = dynamic_cast<DevicePlugin*> (plugin))
+            updateDeviceModulation (*device);
+}
+
+DeviceModulationKeeper::DeviceModulationKeeper (te::Edit& e)
+    : edit (e),
+      state (e.state)
+{
+    updateDeviceModulation (edit);
+    state.addListener (this);
+}
+
+DeviceModulationKeeper::~DeviceModulationKeeper()
+{
+    state.removeListener (this);
+    cancelPendingUpdate();
+}
+
+void DeviceModulationKeeper::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
+{
+    // Modulators, macros and what they modulate; and devices (in containers too), containers' rack types and tracks,
+    // which come and go with theirs. Not what tracks and devices hold otherwise, such as clips and notes.
+    const auto isModulation = [] (const juce::ValueTree& v)
+    { return v.hasType (te::IDs::MODIFIERASSIGNMENTS) || v.hasType (te::IDs::MODIFIERS) || v.hasType (te::IDs::MACROPARAMETERS); };
+
+    if (isModulation (parent) || isModulation (child) || child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK)
+        || te::TrackList::isTrack (child))
+        triggerAsyncUpdate();
+}
+
+void DeviceModulationKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
+{
+    // Of properties, only an amount: an assignment's, in a device's MODIFIERASSIGNMENTS.
+    if (tree.getParent().hasType (te::IDs::MODIFIERASSIGNMENTS))
+        triggerAsyncUpdate();
 }
 } // namespace phazite

@@ -117,6 +117,8 @@ target_sources(phazite_core PRIVATE
     src/devices/eq/Equalizer.h
     src/devices/filter/FilterEffect.cpp
     src/devices/filter/FilterEffect.h
+    src/devices/modulation/Modulation.cpp
+    src/devices/modulation/Modulation.h
     src/devices/motion/Flanger.cpp
     src/devices/motion/Flanger.h
     src/devices/motion/Phaser.cpp
@@ -224,6 +226,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/Wavetables.cpp
     src/model/devices/internal/DeviceFiles.h
     src/model/devices/internal/DeviceHandle.h
+    src/model/devices/internal/DeviceModulation.h
     src/model/devices/internal/DevicePlugin.h
     src/model/devices/internal/DeviceStates.h
     src/model/devices/internal/Devices.h
@@ -805,6 +808,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DesignTokenTests.cpp
         tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp
+        tests/DeviceModulationTests.cpp
         tests/DevicePluginTests.cpp
         tests/DeviceStatesTests.cpp
         tests/DevicesViewTests.cpp

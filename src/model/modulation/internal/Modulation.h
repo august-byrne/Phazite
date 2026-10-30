@@ -12,6 +12,8 @@
 
 namespace phazite
 {
+class DevicePlugin;
+
 //==============================================================================
 // A modulator or a macro: what moves the parameters assigned to it (Tracktion's ModifierSource), as one or the other.
 struct ModulatorAccess
@@ -81,4 +83,34 @@ bool canModulate (const ModulatorAccess&, const te::AutomatableParameter&);
 // value as modulated where the playhead is, while the song doesn't play.
 void setModulation (const ModulatorAccess&, te::AutomatableParameter&, float amount);
 void removeModulation (const ModulatorAccess&, te::AutomatableParameter&);
+
+//==============================================================================
+// Gives one of Phazite's devices, or each of them in an Edit, what modulates its parameters as Tracktion's assignments
+// say (model/devices/internal/DeviceModulation.h), so that the device moves them itself in every stretch of a block
+// (roadmap A5, part 4). A device whose modulation is as it was keeps playing it. Message thread.
+void updateDeviceModulation (DevicePlugin&);
+void updateDeviceModulation (te::Edit&);
+
+// Keeps each of Phazite's devices in an Edit playing what modulates it: from the start, and after each turn of the
+// message loop in which devices, modulators or macros came or went, or what they modulate changed. The project context
+// keeps one for the open Edit.
+class DeviceModulationKeeper : private juce::ValueTree::Listener,
+                               private juce::AsyncUpdater
+{
+public:
+    explicit DeviceModulationKeeper (te::Edit&);
+    ~DeviceModulationKeeper() override;
+
+private:
+    te::Edit& edit;
+    juce::ValueTree state;
+
+    void changed (const juce::ValueTree& parent, const juce::ValueTree& child);
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
+    void handleAsyncUpdate() override { updateDeviceModulation (edit); }
+
+    JUCE_DECLARE_NON_COPYABLE (DeviceModulationKeeper)
+};
 } // namespace phazite

@@ -652,6 +652,11 @@ TEST_SUITE ("realtime-audit")
             ++band;
         }
 
+        // The EQ moves its bands itself, in every stretch of a block (model/devices/internal/DeviceModulation.h).
+        phazite::updateDeviceModulation (*device);
+        REQUIRE (device->getModulation() != nullptr);
+        CHECK (device->getModulation()->routes.size() == std::size (phazite::allModulatorTypes));
+
         const auto m = playAndMeasure (*edit);
         report ("Every kind of modulator, and a macro, moving Phazite's EQ", m);
         CHECK (m.peakLevel > 0.01f);

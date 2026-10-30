@@ -10,9 +10,11 @@
 #include "devices/core/Processor.h"
 #include "devices/dsp/DelayLine.h"
 #include "model/base/internal/Tracktion.h"
+#include "model/devices/internal/DeviceModulation.h"
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -35,6 +37,11 @@ public:
 
     // The parameter with that ID, or nullptr.
     te::AutomatableParameter* findParameter (std::string_view id) const;
+
+    // Gives the audio thread what modulates the device's parameters (DeviceModulation.h), which it then moves itself in
+    // every stretch of a block; with nothing, Tracktion's modulation moves them, once a block. Message thread.
+    void setModulation (std::unique_ptr<DeviceModulation>);
+    const DeviceModulation* getModulation() const noexcept { return modulation.get(); } // as last given, or none
 
     juce::String getName() const override;
     juce::String getPluginType() override;
@@ -79,6 +86,18 @@ private:
     std::vector<bool> glides;
     bool hasPreviousValues = false;
     void keepValues() noexcept;
+
+    // What modulates its parameters: the plan the audio thread plays, the one the message thread gave it last, and those
+    // given before, each kept until the audio thread has finished a block since it was replaced (counted in blocksPlayed),
+    // so that the audio thread never frees one.
+    std::atomic<DeviceModulation*> playingModulation { nullptr };
+    std::unique_ptr<DeviceModulation> modulation;
+    std::vector<std::pair<std::unique_ptr<DeviceModulation>, std::uint64_t>> replacedModulations;
+    std::atomic<std::uint64_t> blocksPlayed { 0 };
+    std::vector<juce::NormalisableRange<float>> ranges; // each parameter's, in which modulation moves it
+    std::vector<float> offsets;                         // each parameter's modulation, in a stretch
+    void startModulation (DeviceModulation&, double tempo, int numerator, bool isPlaying);
+    void setStretchValues (const DeviceModulation*, int done, int length, int numSamples);
     std::array<devices::NoteEvent, maximumEvents> events {};
 
     juce::AudioBuffer<float> stereo; // for a mono channel: sized in initialise(), as long as the stretches played at once

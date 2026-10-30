@@ -36,6 +36,32 @@ namespace
 
         return {};
     }
+
+    // How far an LFO's cycle moves in a sample, as Tracktion's LFO moves it from block to block (its LFOModifierTimer):
+    // its rate in hertz, or in parts of a bar at the tempo. One that follows the song's position stands still while the
+    // song doesn't play.
+    double getCyclesPerSample (const te::LFOModifier& lfo, double tempo, int numerator, double sampleRate, bool isPlaying)
+    {
+        if (juce::roundToInt (lfo.syncTypeParam->getCurrentValue()) == te::ModifierCommon::transport && ! isPlaying)
+            return 0.0;
+
+        const auto rate = (double) lfo.rateParam->getCurrentValue();
+        const auto rateType = static_cast<te::ModifierCommon::RateType> (juce::roundToInt (lfo.rateTypeParam->getCurrentValue()));
+
+        if (rateType == te::ModifierCommon::hertz)
+            return rate / sampleRate;
+
+        return tempo / 60.0 / numerator * rate / te::ModifierCommon::getBarFraction (rateType) / sampleRate;
+    }
+
+    // Counts a block as it ends, however the plug-in leaves it.
+    struct BlockCount
+    {
+        std::atomic<std::uint64_t>& blocks;
+        ~BlockCount() { blocks.fetch_add (1, std::memory_order_release); }
+    };
+
+    static_assert (std::atomic<std::uint64_t>::is_always_lock_free);
 } // namespace
 
 DevicePlugin::DevicePlugin (te::PluginCreationInfo creation, const devices::DeviceInfo& info, std::unique_ptr<devices::Processor> dsp)
@@ -60,6 +86,8 @@ DevicePlugin::DevicePlugin (te::PluginCreationInfo creation, const devices::Devi
         targetValues.push_back (description.defaultValue);
         previousValues.push_back (description.defaultValue);
         glides.push_back (description.unit != devices::Unit::choice && description.unit != devices::Unit::toggle);
+        ranges.push_back (devices::getRange (description));
+        offsets.push_back (0.0f);
     }
 
     // An effect's mix, which this applies (an instrument has none).
@@ -233,41 +261,47 @@ int DevicePlugin::collectEvents (const te::PluginRenderContext& context)
 
 void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
 {
+    const BlockCount count { blocksPlayed };
+
     // A device that looks ahead lets the sound through as it comes while low latency is on (model/engine/internal/EngineSetup.h).
     if (context.destBuffer == nullptr || context.bufferNumSamples <= 0 || isBypassedForLowLatency())
         return;
 
     // Each parameter's value now. A continuous one that moved since the last block glides there over this one, in stretches
-    // of smoothingStep, rather than jumping, so automation and modulation don't step (docs/performance-audit.md, A7).
+    // of smoothingStep, rather than jumping, so automation and modulation don't step (docs/performance-audit.md, A7). One
+    // the device modulates itself starts from its value without Tracktion's modulation.
+    auto* plan = playingModulation.load (std::memory_order_acquire);
     auto gliding = false;
 
     for (size_t i = 0; i < parameters.size(); ++i)
     {
-        targetValues[i] = devices::constrain (deviceInfo.parameters[i], parameters[i]->getCurrentValue());
+        const auto& parameter = *parameters[i];
+        const auto value = plan != nullptr && plan->isModulated[i] ? parameter.getCurrentBaseValue() : parameter.getCurrentValue();
+        targetValues[i] = devices::constrain (deviceInfo.parameters[i], value);
         currentValues[i] = targetValues[i];
         gliding = gliding || (glides[i] && hasPreviousValues && ! juce::exactlyEqual (previousValues[i], targetValues[i]));
     }
-
-    const auto glideFrom = [this] (int done, int length, int numSamples)
-    {
-        const auto along = (float) (done + length) / (float) numSamples;
-
-        for (size_t i = 0; i < currentValues.size(); ++i)
-            if (glides[i])
-                currentValues[i] = previousValues[i] + (targetValues[i] - previousValues[i]) * along;
-    };
 
     const auto numEvents = collectEvents (context);
     devices::ProcessContext block;
     block.parameters = currentValues;
     block.isPlaying = context.isPlaying;
 
+    auto numerator = 4;
+
     if (tempoPosition.has_value())
     {
         tempoPosition->set (context.editTime.getStart());
         block.tempo = tempoPosition->getTempo();
         block.beat = tempoPosition->getBeats().inBeats();
+        numerator = tempoPosition->getTimeSignature().numerator;
     }
+
+    // Modulated, it plays in stretches too, each with its modulators where it is.
+    if (plan != nullptr)
+        startModulation (*plan, block.tempo, numerator, context.isPlaying);
+
+    const auto inStretches = gliding || (plan != nullptr && ! plan->routes.empty());
 
     auto& buffer = *context.destBuffer;
     const auto start = context.bufferStartSample, numSamples = context.bufferNumSamples;
@@ -327,10 +361,11 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
 
     for (int done = 0; done < numSamples;)
     {
-        const auto length = std::min (numSamples - done, gliding ? smoothingStep : stereo.getNumSamples());
+        const auto length = std::min (numSamples - done, inStretches ? smoothingStep : stereo.getNumSamples());
 
-        if (gliding)
-            glideFrom (done, length, numSamples);
+        if (inStretches)
+            setStretchValues (plan, done, length, numSamples);
+
         float* channels[2];
 
         if (isMono)
@@ -370,9 +405,12 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
 
         processor->process (block);
 
-        // Its mix, unless it plays something else for now (a compressor's key, to listen to).
+        // Its mix, unless it plays something else for now (a compressor's key, to listen to); modulated, as it is now.
         if (mixIndex >= 0)
-            mixWithDry (channels, length, processor->overridesMix() ? 1.0f : targetMix);
+        {
+            const auto isMixModulated = plan != nullptr && plan->isModulated[(size_t) mixIndex];
+            mixWithDry (channels, length, processor->overridesMix() ? 1.0f : isMixModulated ? currentValues[(size_t) mixIndex] : targetMix);
+        }
 
         if (isMono)
         {
@@ -408,6 +446,86 @@ void DevicePlugin::keepValues() noexcept
 {
     std::copy (targetValues.begin(), targetValues.end(), previousValues.begin());
     hasPreviousValues = true;
+}
+
+//==============================================================================
+void DevicePlugin::setModulation (std::unique_ptr<DeviceModulation> newModulation)
+{
+    // Those replaced before the audio thread last started a block that has since ended are no longer played.
+    const auto played = blocksPlayed.load (std::memory_order_acquire);
+    std::erase_if (replacedModulations, [played] (const auto& replaced) { return played >= replaced.second; });
+
+    playingModulation.store (newModulation.get(), std::memory_order_release);
+
+    if (modulation != nullptr)
+        replacedModulations.emplace_back (std::move (modulation), blocksPlayed.load (std::memory_order_acquire) + 2);
+
+    modulation = std::move (newModulation);
+}
+
+void DevicePlugin::startModulation (DeviceModulation& plan, double tempo, int numerator, bool isPlaying)
+{
+    // Each source as the block starts: Tracktion has moved its modulators on to it, and its parameters' macros.
+    for (auto& source : plan.sources)
+    {
+        const auto value = source.macro != nullptr ? source.macro->getCurrentValue() : source.modifier->getCurrentValue();
+        source.isOn = source.macro != nullptr || source.modifier->enabledParam->getCurrentValue() >= 0.5f;
+        source.previous = source.started ? source.now : value;
+        source.now = value;
+        source.started = true;
+        source.followsWave = false;
+
+        if (source.lfo == nullptr)
+            continue;
+
+        // An LFO with a wave of its cycle alone is followed through the block from where Tracktion's cycle is now.
+        const auto& lfo = *source.lfo;
+        const auto wave = static_cast<devices::LfoWave> (juce::roundToInt (lfo.waveParam->getCurrentValue()));
+
+        if (! devices::isPeriodic (wave))
+            continue;
+
+        source.followsWave = true;
+        source.shape = { wave, lfo.depthParam->getCurrentValue(), lfo.offsetParam->getCurrentValue(),
+                         lfo.bipolarParam->getCurrentValue() >= 0.5f };
+        source.phase = lfo.getCurrentPhase();
+        source.cyclesPerSample = getCyclesPerSample (lfo, tempo, numerator, sampleRate, isPlaying);
+    }
+}
+
+void DevicePlugin::setStretchValues (const DeviceModulation* plan, int done, int length, int numSamples)
+{
+    // A continuous parameter that moved since the last block glides there, as far as the stretch's end.
+    const auto along = (float) (done + length) / (float) numSamples;
+
+    for (size_t i = 0; i < currentValues.size(); ++i)
+        currentValues[i] =
+            glides[i] && hasPreviousValues ? previousValues[i] + (targetValues[i] - previousValues[i]) * along : targetValues[i];
+
+    if (plan == nullptr)
+        return;
+
+    // Then a modulated one is moved by its sources where the stretch is: an LFO by its wave at the stretch's middle, a
+    // modulator or a macro by its value gliding as far as the stretch's end.
+    std::fill (offsets.begin(), offsets.end(), 0.0f);
+    const auto middle = done + length / 2;
+
+    for (const auto& route : plan->routes)
+    {
+        const auto& source = plan->sources[(size_t) route.source];
+
+        if (! source.isOn)
+            continue;
+
+        const auto value = source.followsWave
+                               ? devices::getLfoValue (source.shape, devices::movePhase (source.phase, middle * source.cyclesPerSample))
+                               : source.previous + (source.now - source.previous) * along;
+        offsets[(size_t) route.parameter] += route.amount * value;
+    }
+
+    for (size_t i = 0; i < currentValues.size(); ++i)
+        if (plan->isModulated[i])
+            currentValues[i] = devices::modulate (deviceInfo.parameters[i], ranges[i], currentValues[i], offsets[i]);
 }
 
 void DevicePlugin::mixWithDry (float* const* wet, int length, float targetMix)
