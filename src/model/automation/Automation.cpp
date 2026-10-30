@@ -314,21 +314,6 @@ namespace
         return indices;
     }
 
-    // The IDs of a copied track's devices by its original's: where they are in its list, and in a folder's copy those of
-    // the copies of its tracks.
-    void mapCopiedDevices (const te::Track& original, const te::Track& copy, te::EditItemID::IDMap& devices)
-    {
-        const auto originals = original.getAllPlugins(), copies = copy.getAllPlugins();
-
-        for (int i = 0; i < originals.size() && i < copies.size(); ++i)
-            devices[originals[i]->itemID] = copies[i]->itemID;
-
-        const auto originalTracks = original.getAllSubTracks (false), copiedTracks = copy.getAllSubTracks (false);
-
-        for (int i = 0; i < originalTracks.size() && i < copiedTracks.size(); ++i)
-            mapCopiedDevices (*originalTracks[i], *copiedTracks[i], devices);
-    }
-
     //==============================================================================
     // A device's ID as a lane or a curve keeps it.
     DeviceID readDeviceID (const juce::var& id)

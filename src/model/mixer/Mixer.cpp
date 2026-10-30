@@ -969,18 +969,39 @@ void setDeviceSound (te::Plugin& device, const juce::Identifier& property, const
         device.state.removeProperty (property, undo);
 }
 
-void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy, const te::EditItemID::IDMap& inContainers)
+void mapCopiedDevices (const te::Track& original, const te::Track& copy, te::EditItemID::IDMap& devices)
 {
-    const auto devices = getDevicesIn (copy.pluginList); // Tracktion's copies, in the original's order
-    const auto states = getDeviceStates (copiedChain);
+    const auto originals = original.getAllPlugins(), copies = copy.getAllPlugins();
 
-    for (size_t i = 0; i < states.size() && (int) i < devices.size(); ++i)
+    for (int i = 0; i < originals.size() && i < copies.size(); ++i)
+        devices[originals[i]->itemID] = copies[i]->itemID;
+
+    const auto originalTracks = original.getAllSubTracks (false), copiedTracks = copy.getAllSubTracks (false);
+
+    for (int i = 0; i < originalTracks.size() && i < copiedTracks.size(); ++i)
+        mapCopiedDevices (*originalTracks[i], *copiedTracks[i], devices);
+}
+
+void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::EditItemID::IDMap& copied)
+{
+    const auto giveCopiedID = [&copied] (juce::ValueTree element, const juce::Identifier& property)
     {
-        juce::ValueTree (states[i]).setProperty (schema::deviceID, (juce::int64) devices[(int) i]->itemID.getRawID(), nullptr);
+        if (const auto found = copied.find (te::EditItemID::fromVar (element[property])); found != copied.end())
+            element.setProperty (property, (juce::int64) found->second.getRawID(), nullptr);
+    };
 
-        for (auto inside : getDeviceStates (states[i]))
-            if (const auto copied = inContainers.find (toTracktion (getDeviceID (inside))); copied != inContainers.end())
-                inside.setProperty (schema::deviceID, (juce::int64) copied->second.getRawID(), nullptr);
+    for (auto child : copiedChain)
+    {
+        if (child.hasType (schema::SEND))
+            giveCopiedID (child, schema::sendID);
+
+        if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER))
+        {
+            giveCopiedID (child, schema::deviceID);
+
+            for (const auto& inside : getDeviceStates (child))
+                giveCopiedID (inside, schema::deviceID);
+        }
     }
 }
 

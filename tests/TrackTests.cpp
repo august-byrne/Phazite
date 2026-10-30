@@ -6,6 +6,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/mixer/MixerModel.h"
 #include "model/notes/NotesModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -621,6 +622,33 @@ TEST_CASE ("A duplicated track's clips are its own, the song's, and the original
     CHECK (copiedClips[0].id != clip);
     CHECK (phazite::getNotes (context, { copiedClips[0].id }).size() == 1);
     CHECK (phazite::getNotes (context, { clip }).size() == 1);
+}
+
+TEST_CASE ("A duplicated track's devices and sends are its own, the song's, and the original keeps its")
+{
+    Tracks tracks (1);
+    auto& context = tracks.context;
+    const auto original = phazite::getTrackID (*tracks["A"]);
+
+    for (const auto& type : phazite::getDeviceTypes (context))
+        if (type.description.fileOrIdentifier == juce::String ("phaziteEq"))
+            phazite::addEffect (context, original, type);
+
+    phazite::addSendToNewReturn (context, original);
+    const auto copies = phazite::duplicateTracks ({ tracks["A"] }, nullptr);
+    REQUIRE (copies.size() == 1);
+    const auto copy = phazite::getTrackID (*copies.getFirst());
+    phazite::mirror::reconcileDevices (tracks["A"]->edit); // as anything that changes a device would
+
+    // Each has its effect and its send, the copy's with IDs of their own.
+    const auto originalEffects = phazite::getEffects (context, original), copiedEffects = phazite::getEffects (context, copy);
+    const auto originalSends = phazite::getSends (context, original), copiedSends = phazite::getSends (context, copy);
+    REQUIRE (originalEffects.size() == 1);
+    REQUIRE (copiedEffects.size() == 1);
+    REQUIRE (originalSends.size() == 1);
+    REQUIRE (copiedSends.size() == 1);
+    CHECK (copiedEffects[0].id != originalEffects[0].id);
+    CHECK (copiedSends[0].id != originalSends[0].id);
 }
 
 TEST_CASE ("The selected tracks, or all of them")
