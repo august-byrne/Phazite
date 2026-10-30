@@ -335,9 +335,9 @@ TEST_CASE ("A plug-in is the song's: which it is, its mix, its settings as the p
     // Its mix is the song's; an undo takes it back.
     auto mix = phazite::getMix (context, id);
     mix.setValue (0.25f);
-    CHECK ((float) element[schema::pluginMix] == doctest::Approx (0.25f));
+    CHECK ((float) element[schema::deviceMix] == doctest::Approx (0.25f));
     phazite::undo (edit);
-    CHECK_FALSE (element.hasProperty (schema::pluginMix));
+    CHECK_FALSE (element.hasProperty (schema::deviceMix));
     phazite::redo (edit);
 
     // Its settings, as its window sets them, go into the song as the project stores them, with its channels.

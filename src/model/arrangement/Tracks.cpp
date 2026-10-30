@@ -160,12 +160,13 @@ namespace
     }
 
     // Each track's element in a copy of a track's, given the ID its copy in Tracktion has: the copy's tracks are in the
-    // same order as the original's, and its devices' elements name the copy's devices. Its clips get IDs of their own, as
-    // copyClipState() gives a clip's copy, with the same notes, in the same alias group.
-    void giveCopiedIDs (juce::ValueTree& copied, const te::Track& copy)
+    // same order as the original's, and its devices' elements name the copy's devices, its containers' the devices their
+    // copies hold (copyContainers()). Its clips get IDs of their own, as copyClipState() gives a clip's copy, with the same
+    // notes, in the same alias group.
+    void giveCopiedIDs (juce::ValueTree& copied, const te::Track& copy, const te::EditItemID::IDMap& inContainers)
     {
         copied.setProperty (schema::trackID, (juce::int64) copy.itemID.getRawID(), nullptr);
-        giveCopiedDeviceIDs (copied, copy);
+        giveCopiedDeviceIDs (copied, copy, inContainers);
 
         for (auto child : copied)
             if (child.hasType (schema::CLIP))
@@ -178,7 +179,7 @@ namespace
 
             for (auto child : copied)
                 if (child.hasType (schema::TRACK) && index < subTracks.size())
-                    giveCopiedIDs (child, *subTracks[index++]);
+                    giveCopiedIDs (child, *subTracks[index++], inContainers);
         }
     }
 } // namespace
@@ -771,18 +772,17 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
         storeDeviceStates (*track);
         const auto original = findTrackState (*track);
 
-        // Tracktion copies what the track holds that is still Tracktion's (its devices), giving the copy, and the tracks in
-        // it, IDs of their own; the song's track list gets the same copy, with those IDs, right after it. The song's clips
-        // in the copy, with IDs of their own, replace the clips Tracktion copied as the clips are placed again.
+        // Tracktion copies the track's devices, giving the copy, and the tracks in it, IDs of their own, and its containers
+        // hold devices of their own; the song's track list gets the same copy, with those IDs, right after it. The song's
+        // clips in the copy, with IDs of their own, replace the clips Tracktion copied as the clips are placed again.
         if (auto copy = track->edit.copyTrack (track, getInsertPointAfter (*track)); copy != nullptr && original.isValid())
         {
+            const auto inContainers = copyContainers (*track, *copy);
             auto copied = original.createCopy();
-            giveCopiedIDs (copied, *copy);
+            giveCopiedIDs (copied, *copy, inContainers);
             auto parent = original.getParent();
             parent.addChild (copied, parent.indexOf (original) + 1, getUndo (track->edit));
-
-            const auto inContainers = copyContainers (*track, *copy); // its containers hold devices of their own,
-            copyLanesAndCurves (*track, *copy, inContainers);         // and its lanes and automation are its own devices'
+            copyLanesAndCurves (*track, *copy, inContainers); // its lanes and automation are its own devices'
             copies.add (copy.get());
         }
     }

@@ -119,7 +119,7 @@ namespace
 
     // In a plug-in's element in the song, the values set by hand of its parameters that automation or modulation moves
     // (Schema.h: VALUE), as storeChangedParameters() stores them in its state; but its mix's levels, which the song keeps
-    // as its mix (Schema.h: pluginMix). Written again only if they differ.
+    // as its mix (Schema.h: deviceMix). Written again only if they differ.
     void storeValuesSetByHand (te::ExternalPlugin& plugin, juce::ValueTree& device)
     {
         juce::Array<juce::ValueTree> values, stored;
@@ -149,8 +149,8 @@ namespace
     }
 
     // What ExternalPlugin::flushPluginStateToValueTree() stores besides: which plug-in it is, its program, its own
-    // settings and its channel layout; in its PLUGIN, and in its element in the song (none for one in a container, whose
-    // devices are still Tracktion's: T1, step 5), with its values set by hand.
+    // settings and its channel layout; in its PLUGIN, and in its element in the song (none for one the song hasn't: a
+    // preset's, made on no channel yet), with its values set by hand.
     void storePluginState (te::ExternalPlugin& plugin)
     {
         auto& state = plugin.state;

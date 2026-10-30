@@ -9,8 +9,10 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Containers.h"
@@ -234,6 +236,79 @@ TEST_CASE ("A container's devices are wired one after the other, and move, come 
     phazite::undo (*song.edit);
     CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { "Space", "Compressor" });
     CHECK (phazite::getContainerDevices (context, container).size() == 2);
+}
+
+TEST_CASE ("A container is the song's, with its name, mix and devices, which Tracktion's mirror one way")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto& context = song.context;
+    auto& edit = *song.edit;
+    const auto effects = song.effectsOf (*song.a);
+    const auto eq = effects[0], reverb = effects[2];
+    const auto container = groupEqAndReverb (song);
+    const auto element = phazite::findDeviceState (edit, container);
+
+    // The song's container, in the EQ's place, with its name and its devices' elements in their order.
+    REQUIRE (element.hasType (schema::CONTAINER));
+    CHECK (element[schema::containerName].toString() == juce::String ("Container"));
+    CHECK (phazite::getDeviceStates (phazite::findTrackState (*song.a)).size() == 3); // the synth, the container, the compressor
+    const auto devicesIn = [&element]
+    {
+        std::vector<DeviceID> ids;
+
+        for (const auto& state : phazite::getDeviceStates (element))
+            ids.push_back (phazite::getDeviceID (state));
+
+        return ids;
+    };
+
+    CHECK (devicesIn() == std::vector<DeviceID> { eq, reverb });
+
+    // Its name, its mix, and its devices' switches and values are the song's, which Tracktion plays.
+    phazite::renameContainer (context, container, "Space");
+    CHECK (element[schema::containerName].toString() == juce::String ("Space"));
+    phazite::getMix (context, container).setValue (0.5f);
+    CHECK ((float) element[schema::deviceMix] == doctest::Approx (0.5f));
+    phazite::setDeviceOn (context, reverb, false);
+    CHECK ((bool) phazite::findDeviceState (edit, reverb)[schema::deviceOff]);
+    CHECK_FALSE (phazite::getContainerDevices (context, container)[1].isOn);
+    phazite::getParameter (context, { eq, "band4Gain" }).setValue (6.0f);
+    CHECK ((float) phazite::findDeviceState (edit, eq).getChildWithName (schema::VALUES)["band4Gain"] == doctest::Approx (6.0f));
+    CHECK (song.find ({ eq, "band4Gain" })->getCurrentValue() == doctest::Approx (6.0f));
+
+    // Moved in the song, which Tracktion's rack type follows; an undo puts both back.
+    phazite::moveEffect (context, reverb, -1);
+    CHECK (devicesIn() == std::vector<DeviceID> { reverb, eq });
+    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Reverb", "EQ" });
+    phazite::undo (edit);
+    CHECK (devicesIn() == std::vector<DeviceID> { eq, reverb });
+    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
+
+    // One way: a device put in Tracktion's container alone goes; a container the song gains is made, with its devices.
+    auto* rack = phazite::getContainerRack (*te::findPluginForID (edit, phazite::toTracktion (container)));
+    REQUIRE (rack != nullptr);
+    rack->addPlugin (edit.getPluginCache().createNewPlugin ("phaziteDelay", {}), { 0.5f, 0.5f }, false);
+    CHECK (phazite::getRackDevices (*rack).size() == 3);
+    phazite::mirror::reconcileDevices (edit);
+    CHECK (phazite::getRackDevices (*rack).size() == 2);
+
+    juce::ValueTree made (schema::CONTAINER), delay (schema::DEVICE);
+    const auto madeID = DeviceID::fromRaw (edit.createNewItemID().getRawID());
+    made.setProperty (schema::deviceID, (juce::int64) madeID.getRaw(), nullptr);
+    made.setProperty (schema::containerName, "Echoes", nullptr);
+    delay.setProperty (schema::deviceID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    delay.setProperty (schema::deviceType, "phaziteDelay", nullptr);
+    made.appendChild (delay, nullptr);
+    phazite::findTrackState (*song.b).appendChild (made, nullptr);
+    phazite::mirror::reconcileDevices (edit);
+    CHECK (song.effectNamesOf (*song.b) == std::vector<juce::String> { "EQ", "Echoes" });
+    CHECK (song.namesOf (phazite::getContainerDevices (context, madeID)) == std::vector<juce::String> { "Delay" });
+    CHECK (phazite::getContainerMacros (context, madeID).size() == 8);
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileDevices (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
 }
 
 TEST_CASE ("A container's macros modulate its devices; its track's modulators reach them too")

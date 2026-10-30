@@ -108,14 +108,13 @@ juce::String getContainerName (const ProjectContext& context, DeviceID id)
 void renameContainer (ProjectContext& context, DeviceID id, const juce::String& name)
 {
     auto* container = findContainer (context, id);
-    auto* rack = container != nullptr ? container->type.get() : nullptr;
     const auto trimmed = name.trim();
 
-    if (rack == nullptr || trimmed.isEmpty() || trimmed == rack->rackName.get())
+    if (container == nullptr || trimmed.isEmpty() || trimmed == container->getName())
         return;
 
-    const UndoStep step (rack->edit, "Rename Container");
-    rack->rackName = trimmed;
+    const UndoStep step (container->edit, "Rename Container");
+    setContainerName (*container, trimmed);
 }
 
 std::vector<ModulatorInfo> getContainerMacros (const ProjectContext& context, DeviceID id)

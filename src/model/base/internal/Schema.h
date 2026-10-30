@@ -197,8 +197,8 @@ inline const juce::Identifier laneCollapsed { "collapsed" };
 //==============================================================================
 // The song's devices (model/mixer/internal/Mixer.h; docs/tracktion-migration.md, T1 step 5): each track's, a folder's (as a
 // bus) and the master's, in the order its sound goes through them, an instrument first, which Tracktion's devices mirror,
-// each with what it is set to. A container's devices are still in Tracktion's state while step 5 lasts, and the model
-// makes a device in Tracktion as it adds it to the song. song
+// each with what it is set to, and each container with its devices; the model makes a device in Tracktion as it adds it
+// to the song, while step 5 lasts. song
 
 // Child of TRACK and of MASTER: a device. On DEVICE: its ID (DeviceID, its Tracktion plug-in's while T1 lasts); its type:
 // the typeID of one of Phazite's own (src/devices/<area>/: "phaziteEq"), deviceIsPlugin for a plug-in, or the type of one
@@ -218,13 +218,15 @@ inline const juce::Identifier SOUNDS { "SOUNDS" };
 
 // On a plug-in's DEVICE (T1, step 5c): which plug-in it is, as scanning found it and a preset names it (preset::plugin):
 // its format ("VST3"), name, maker (manufacturer), identifier (its file, or what its format finds it by) and unique ID
-// (int); and its mix: 0 to 1, as setMix() sets it, none for 1.
+// (int).
 inline const juce::Identifier pluginFormat { "format" };
 inline const juce::Identifier pluginName { "name" };
 inline const juce::Identifier pluginMaker { "manufacturer" };
 inline const juce::Identifier pluginIdentifier { "identifier" };
 inline const juce::Identifier pluginUid { "uid" };
-inline const juce::Identifier pluginMix { "mix" };
+
+// On a plug-in's DEVICE and on a CONTAINER: its mix, 0 to 1, as setMix() sets it; none for 1.
+inline const juce::Identifier deviceMix { "mix" };
 
 // On a plug-in's DEVICE: what the plug-in keeps of its own, which the project stores outside the undo history as it saves,
 // before it copies the plug-in or takes it away, and as a preset loads into it (model/devices/internal/DeviceStates.h):
@@ -243,9 +245,18 @@ inline const juce::Identifier VALUE { "VALUE" };
 inline const juce::Identifier valueParameter { "parameter" };
 inline const juce::Identifier valueSetByHand { "value" };
 
-// Child of TRACK and of MASTER, among its devices: a container of effects (model/mixer/internal/Containers.h), with its ID
-// and deviceOff, as a device has them. What it holds is still Tracktion's while step 5 lasts.
+// On a plug-in's DEVICE, stored with its state: each parameter the project refers to (its automation, what modulates it,
+// its value set by hand under automation, its automation lane), as the ID Tracktion knows it by, its place in the
+// plug-in's list, then "=" and the plug-in's own ID for it (a VST3's), which stays the same through the plug-in's updates;
+// separated by spaces ("3=1084 7=2001"). Or none. A plug-in that opens moves what refers to a parameter that its update
+// moved (model/devices/internal/PluginParameters.h).
+inline const juce::Identifier pluginParameterIDs { "parameterIDs" };
+
+// Child of TRACK and of MASTER, among its devices: a container of effects (model/mixer/internal/Containers.h), with its ID,
+// deviceOff and deviceMix, as a device has them, and its name (T1, step 5d); its devices (DEVICE) are its children, in the
+// order its sound goes through them. Its macros, and what they modulate, are still Tracktion's while step 6 lasts.
 inline const juce::Identifier CONTAINER { "CONTAINER" };
+inline const juce::Identifier containerName { "name" };
 
 //==============================================================================
 // The song's automation (model/automation/internal/Automation.h; docs/tracktion-migration.md, T1 step 4): each automated
@@ -548,15 +559,6 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
     static const juce::Identifier names[] = { "osc1WavetableFile", "osc2WavetableFile" };
     return names[juce::jlimit (0, 1, osc)];
 }
-
-// On a plug-in's DEVICE (pluginParameterIDs), or on its PLUGIN (Tracktion's "vst" type, whatever the plug-in's format)
-// while it is in a container, whose devices are still Tracktion's (phaziteParameterIDs): each parameter the project refers
-// to (its automation, what modulates it, its value set by hand under automation, its automation lane), as the ID Tracktion
-// knows it by, its place in the plug-in's list, then "=" and the plug-in's own ID for it (a VST3's), which stays the same
-// through the plug-in's updates; separated by spaces ("3=1084 7=2001"). Or none. A plug-in that opens moves what refers to
-// a parameter that its update moved (model/devices/internal/PluginParameters.h). state
-inline const juce::Identifier pluginParameterIDs { "parameterIDs" };
-inline const juce::Identifier phaziteParameterIDs { "phaziteParameterIDs" };
 
 //==============================================================================
 // Presets (model/presets/PresetModel.h): files of their own (".phazitepreset"), outside any project, in JSON, in Phazite's

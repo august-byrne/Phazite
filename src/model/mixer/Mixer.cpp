@@ -264,10 +264,7 @@ void removeDevice (te::Plugin& device)
 
     // A container goes with what it holds (its rack type stays: Containers.h), and the devices after a device in a
     // container take its place.
-    if (device.isInRack())
-        deleteFromContainer (device);
-    else
-        removeDeviceState (device);
+    removeDeviceState (device);
 
     if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty()
         && ! findTrackState (*folder).getProperty (schema::folderBus, false))
@@ -341,13 +338,13 @@ void setMix (te::Plugin& device, float mix)
     {
         const auto wet = juce::jlimit (0.0f, 1.0f, mix);
 
-        // A plug-in's, in the song (a container's is still Tracktion's: T1, step 5).
-        if (auto state = findDeviceState (device.edit, getDeviceID (device)); isPluginState (state))
+        // A plug-in's or a container's, in the song.
+        if (auto state = findDeviceState (device.edit, getDeviceID (device)); isPluginState (state) || state.hasType (schema::CONTAINER))
         {
             if (wet < 1.0f)
-                state.setProperty (schema::pluginMix, wet, &device.edit.getUndoManager());
+                state.setProperty (schema::deviceMix, wet, &device.edit.getUndoManager());
             else
-                state.removeProperty (schema::pluginMix, &device.edit.getUndoManager());
+                state.removeProperty (schema::deviceMix, &device.edit.getUndoManager());
         }
 
         setDeviceValue (*levels->wet, wet);
@@ -652,7 +649,7 @@ void setDeviceOn (te::Plugin& device, bool on)
 
     const UndoStep step (device.edit, on ? "Turn Device On" : "Turn Device Off");
 
-    // A device in a container is still Tracktion's (T1, step 5).
+    // A device of an Edit that isn't a song's (a preview's) is Tracktion's alone.
     if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
     {
         if (on)
@@ -694,11 +691,18 @@ std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain)
 
 juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
 {
+    // In a chain, or in one of its containers.
     const auto findIn = [id] (const juce::ValueTree& chain)
     {
         for (const auto& state : getDeviceStates (chain))
+        {
             if (getDeviceID (state) == id)
                 return state;
+
+            for (const auto& inside : getDeviceStates (state))
+                if (getDeviceID (inside) == id)
+                    return inside;
+        }
 
         return juce::ValueTree();
     };
@@ -746,7 +750,7 @@ juce::ValueTree makeDeviceState (te::Plugin& device)
             state.setProperty (schema::pluginProgram, (int) device.state[te::IDs::programNum], nullptr);
 
         if (const auto mix = getMix (device); mix < 1.0f)
-            state.setProperty (schema::pluginMix, mix, nullptr);
+            state.setProperty (schema::deviceMix, mix, nullptr);
     }
 
     // One of Phazite's own: its values set by hand and its files, as its state has them.
@@ -767,6 +771,18 @@ juce::ValueTree makeDeviceState (te::Plugin& device)
 
         if (sounds.getNumProperties() > 0)
             state.appendChild (sounds, nullptr);
+    }
+
+    // A container: its name, its mix, and its devices in their order (a preset's, as it made them).
+    if (auto* rack = getContainerRack (device))
+    {
+        state.setProperty (schema::containerName, rack->rackName.get(), nullptr);
+
+        if (const auto mix = getMix (device); mix < 1.0f)
+            state.setProperty (schema::deviceMix, mix, nullptr);
+
+        for (auto* inside : getContainerDevices (device))
+            state.appendChild (makeDeviceState (*inside), nullptr);
     }
 
     return state;
@@ -858,13 +874,19 @@ void setDeviceSound (te::Plugin& device, const juce::Identifier& property, const
         device.state.removeProperty (property, undo);
 }
 
-void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy)
+void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy, const te::EditItemID::IDMap& inContainers)
 {
     const auto devices = getDevicesIn (copy.pluginList); // Tracktion's copies, in the original's order
     const auto states = getDeviceStates (copiedChain);
 
     for (size_t i = 0; i < states.size() && (int) i < devices.size(); ++i)
+    {
         juce::ValueTree (states[i]).setProperty (schema::deviceID, (juce::int64) devices[(int) i]->itemID.getRawID(), nullptr);
+
+        for (auto inside : getDeviceStates (states[i]))
+            if (const auto copied = inContainers.find (toTracktion (getDeviceID (inside))); copied != inContainers.end())
+                inside.setProperty (schema::deviceID, (juce::int64) copied->second.getRawID(), nullptr);
+    }
 }
 
 void rememberWindowPosition (te::Plugin& device, juce::Point<int> topLeft)

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Containers.h"
 #include "internal/Mixer.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mirror/internal/Mirror.h"
 
 #include <algorithm>
 
@@ -10,30 +13,10 @@ namespace phazite
 {
 namespace
 {
-    // A rack type's devices, in the order of their places in its state: the order the sound goes through them.
-    juce::Array<te::Plugin*> getDevicesOf (const te::RackType& rack)
-    {
-        juce::Array<te::Plugin*> devices;
-        const auto plugins = rack.getPlugins();
-
-        for (const auto& place : rack.state)
-            if (place.hasType (te::IDs::PLUGININSTANCE))
-                for (auto* plugin : plugins)
-                    if (plugin->state.getParent() == place)
-                        devices.add (plugin);
-
-        return devices;
-    }
-
     // A channel's devices: a track's, or with none the master's.
     juce::Array<te::Plugin*> getChannelDevices (te::Edit& edit, te::Track* track)
     {
         return track != nullptr ? getDevices (*track) : getMasterDevices (edit);
-    }
-
-    te::Plugin* insertOnChannel (te::Edit& edit, te::Track* track, const te::Plugin::Ptr& device, int index)
-    {
-        return track != nullptr ? insertDevice (*track, device, index) : insertMasterDevice (edit, device, index);
     }
 
     // What each of a track's modulators and macros, and those of the tracks in it, is in a copy of it: the one in the
@@ -174,13 +157,44 @@ te::RackInstance* findContainerOf (const te::RackType& rack)
 juce::Array<te::Plugin*> getContainerDevices (const te::Plugin& container)
 {
     auto* rack = getContainerRack (container);
-    return rack != nullptr ? getDevicesOf (*rack) : juce::Array<te::Plugin*>();
+
+    if (rack == nullptr)
+        return {};
+
+    const auto inRack = getRackDevices (*rack);
+    const auto state = findDeviceState (container.edit, getDeviceID (container));
+
+    if (! state.isValid())
+        return inRack;
+
+    juce::Array<te::Plugin*> devices;
+
+    for (const auto& inside : getDeviceStates (state))
+        for (auto* device : inRack)
+            if (getDeviceID (*device) == getDeviceID (inside))
+                devices.add (device);
+
+    return devices;
 }
 
 juce::ReferenceCountedArray<te::MacroParameter> getContainerMacros (const te::Plugin& container)
 {
     auto* rack = getContainerRack (container);
     return rack != nullptr ? rack->getMacroParameters() : juce::ReferenceCountedArray<te::MacroParameter>();
+}
+
+juce::Array<te::Plugin*> getRackDevices (const te::RackType& rack)
+{
+    juce::Array<te::Plugin*> devices;
+    const auto plugins = rack.getPlugins();
+
+    for (const auto& place : rack.state)
+        if (place.hasType (te::IDs::PLUGININSTANCE))
+            for (auto* plugin : plugins)
+                if (plugin->state.getParent() == place)
+                    devices.add (plugin);
+
+    return devices;
 }
 
 te::Track* getTrackOfContainer (const te::RackInstance& container)
@@ -230,35 +244,39 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
         if (effects.contains (device))
             grouped.add (device);
 
-    const auto index = channel.indexOf (grouped.getFirst().get());
-    const auto name = makeContainerName (edit);
-    const auto rack = addContainerRack (edit);
+    auto chain = findChainState (edit, track);
+    auto first = findDeviceState (edit, getDeviceID (*grouped.getFirst()));
 
-    if (rack == nullptr)
+    if (! chain.isValid() || ! first.isValid())
         return nullptr;
 
-    rack->rackName = name;
+    // The song's container, in the first one's place, with a new ID and name; the devices' elements go into it, with what
+    // they hold of their states (which an undo brings back), and the mirror puts Tracktion's devices in its rack type.
+    auto* undo = &edit.getUndoManager();
+    const auto id = DeviceID::fromRaw (edit.createNewItemID().getRawID());
+    juce::ValueTree container (schema::CONTAINER);
+    container.setProperty (schema::deviceID, (juce::int64) id.getRaw(), nullptr);
+    container.setProperty (schema::containerName, makeContainerName (edit), nullptr);
+    chain.addChild (container, chain.indexOf (first), undo);
 
-    // Out of the song's chain, which the container takes their place in, and into the container, whose devices are still
-    // Tracktion's (T1, step 5).
     for (auto* device : grouped)
     {
         if (device->getSidechainSourceID().isValid())
             device->setSidechainSourceID ({});
 
-        storeDeviceState (*device); // the song's element too, which an undo brings back
-
-        if (auto state = findDeviceState (edit, getDeviceID (*device)); state.isValid())
-            state.getParent().removeChild (state, &edit.getUndoManager());
-
-        rack->addPlugin (device, { 0.5f, 0.5f }, false);
+        storeDeviceState (*device);
+        auto state = findDeviceState (edit, getDeviceID (*device));
+        chain.removeChild (state, undo);
+        container.appendChild (state, undo);
     }
 
-    wireContainer (*rack);
-    addContainerMacros (*rack);
+    mirror::reconcileDevices (edit);
 
-    const auto container = edit.getPluginCache().createNewPlugin (te::RackInstance::create (*rack));
-    return dynamic_cast<te::RackInstance*> (insertOnChannel (edit, track, container, index));
+    for (auto* device : getChannelDevices (edit, track))
+        if (getDeviceID (*device) == id)
+            return dynamic_cast<te::RackInstance*> (device);
+
+    return nullptr;
 }
 
 te::Plugin::Ptr createContainer (te::Edit& edit, const te::Plugin::Array& devices, const juce::String& name)
@@ -281,39 +299,43 @@ te::Plugin::Ptr createContainer (te::Edit& edit, const te::Plugin::Array& device
 
 void ungroupContainer (te::RackInstance& container)
 {
-    const te::RackType::Ptr rack = container.type;
+    auto& edit = container.edit;
+    auto state = findDeviceState (edit, getDeviceID (container));
 
-    if (rack == nullptr || container.getOwnerList() == nullptr)
+    if (container.type == nullptr || ! state.isValid())
         return;
 
-    auto& edit = container.edit;
-    auto* track = container.getOwnerTrack();
-    auto index = getChannelDevices (edit, track).indexOf (&container);
+    // Without what its macros modulated (Tracktion's while T1 step 6 lasts), its devices' elements go back in its place,
+    // in their order, and it goes; the mirror moves Tracktion's devices out of its rack type.
+    removeMacroModulations (*container.type);
+    auto* undo = &edit.getUndoManager();
+    auto chain = state.getParent();
+    auto index = chain.indexOf (state);
 
-    // Its devices go back in its place, in their order, without what its macros modulated, before it goes.
-    removeMacroModulations (*rack);
-    te::Plugin::Array devices;
-
-    for (auto* device : getDevicesOf (*rack))
-        devices.add (device);
-
-    for (auto* device : devices)
+    for (auto inside : getDeviceStates (state))
     {
-        device->removeFromParent();
-        insertOnChannel (edit, track, device, index++);
+        state.removeChild (inside, undo);
+        chain.addChild (inside, index++, undo);
     }
 
-    if (auto state = findDeviceState (edit, getDeviceID (container)); state.isValid())
-        state.getParent().removeChild (state, &edit.getUndoManager());
+    chain.removeChild (state, undo);
+    mirror::reconcileDevices (edit);
+}
 
-    container.deleteFromParent();
+void setContainerName (te::Plugin& container, const juce::String& name)
+{
+    if (auto state = findDeviceState (container.edit, getDeviceID (container)); state.hasType (schema::CONTAINER))
+    {
+        state.setProperty (schema::containerName, name, &container.edit.getUndoManager());
+        mirror::reconcileDevices (container.edit);
+    }
 }
 
 void deleteContainer (te::RackInstance& container)
 {
-    // Its devices' windows close with it; its rack type stays for the session.
+    // The windows of the devices it holds close with it; its rack type stays for the session.
     if (container.type != nullptr)
-        for (auto* device : getDevicesOf (*container.type))
+        for (auto* device : getRackDevices (*container.type))
             device->hideWindowForShutdown();
 
     container.deleteFromParent();
@@ -353,106 +375,132 @@ void dropUnusedContainerRacks (juce::ValueTree& editState)
 te::Plugin* insertIntoContainer (te::RackInstance& container, const te::Plugin::Ptr& device, int index)
 {
     auto* rack = container.type.get();
+    auto state = findDeviceState (container.edit, getDeviceID (container));
 
-    if (rack == nullptr || device == nullptr || isInstrument (*device) || isContainer (*device)
-        || ! rack->addPlugin (device, { 0.5f, 0.5f }, false)) // at the end
+    // The model makes the device in Tracktion as it adds it to the song (T1, step 5), at the rack type's end; the mirror
+    // puts it in its place and wires the row again.
+    if (rack == nullptr || ! state.hasType (schema::CONTAINER) || device == nullptr || isInstrument (*device) || isContainer (*device)
+        || ! rack->addPlugin (device, { 0.5f, 0.5f }, false))
         return nullptr;
 
-    const auto devices = getDevicesOf (*rack);
-
-    if (juce::isPositiveAndBelow (index, devices.size() - 1))
-        moveInContainer (*device, index);
-    else
-        wireContainer (*rack);
-
+    const auto devices = getDeviceStates (state);
+    const auto at = juce::isPositiveAndBelow (index, (int) devices.size()) ? state.indexOf (devices[(size_t) index]) : -1;
+    state.addChild (makeDeviceState (*device), at, &container.edit.getUndoManager());
+    mirror::reconcileDevices (container.edit);
     return device.get();
 }
 
 void moveInContainer (te::Plugin& device, int newIndex)
 {
-    const auto rack = device.getOwnerRackType();
+    auto state = findDeviceState (device.edit, getDeviceID (device));
+    auto container = state.getParent();
 
-    if (rack == nullptr)
+    if (! container.hasType (schema::CONTAINER))
         return;
 
     // To the place of the device that is there now: after it when moving later, before it when moving earlier.
-    const auto devices = getDevicesOf (*rack);
-    const auto from = devices.indexOf (&device);
-    const auto to = juce::jlimit (0, devices.size() - 1, newIndex);
-
-    if (from >= 0 && from != to)
-    {
-        auto& state = rack->state;
-        state.moveChild (state.indexOf (device.state.getParent()), state.indexOf (devices[to]->state.getParent()),
-                         &device.edit.getUndoManager());
-    }
-
-    wireContainer (*rack);
+    const auto devices = getDeviceStates (container);
+    const auto& target = devices[(size_t) juce::jlimit (0, (int) devices.size() - 1, newIndex)];
+    container.moveChild (container.indexOf (state), container.indexOf (target), &device.edit.getUndoManager());
+    mirror::reconcileDevices (device.edit);
 }
 
-void deleteFromContainer (te::Plugin& device)
+namespace
 {
-    const auto rack = device.getOwnerRackType();
-    device.deleteFromParent();
-
-    if (rack != nullptr)
-        wireContainer (*rack);
-}
-
-void wireContainer (te::RackType& rack)
-{
-    auto* undoManager = &rack.edit.getUndoManager();
-
-    // Every connection goes; then each device takes the one before it (or the container's input), MIDI and its own two
-    // channels (not a sidechain's), and the last one goes to the output.
     struct Wire
     {
         te::EditItemID source;
         int sourcePin;
         te::EditItemID destination;
         int destinationPin;
+
+        bool operator== (const Wire&) const = default;
     };
 
-    std::vector<Wire> wires;
-
-    for (const auto* connection : rack.getConnections())
-        wires.push_back ({ connection->sourceID.get(), connection->sourcePin.get(), connection->destID.get(), connection->destPin.get() });
-
-    for (const auto& wire : wires)
-        rack.removeConnection (wire.source, wire.sourcePin, wire.destination, wire.destinationPin);
-
-    const auto devices = getDevicesOf (rack);
-    te::EditItemID previous;                                 // the container's input,
-    auto previousChannels = rack.getInputNames().size() - 1; // past its MIDI pin
-
-    for (int i = 0; i < devices.size(); ++i)
+    std::vector<Wire> getWires (const te::RackType& rack)
     {
-        auto* device = devices[i];
-        juce::StringArray ins, outs;
-        device->getChannelNames (&ins, &outs);
-        rack.addConnection (previous, 0, device->itemID, 0);
+        std::vector<Wire> wires;
 
-        for (int pin = 1; pin <= std::min ({ previousChannels, (int) ins.size(), 2 }); ++pin)
-            rack.addConnection (previous, pin, device->itemID, pin);
+        for (const auto* connection : rack.getConnections())
+            wires.push_back (
+                { connection->sourceID.get(), connection->sourcePin.get(), connection->destID.get(), connection->destPin.get() });
 
-        // Left to right in their order, where Tracktion's own view of a rack would show them.
-        device->state.getParent().setProperty (te::IDs::x, (float) (i + 1) / (float) (devices.size() + 1), undoManager);
-        previous = device->itemID;
-        previousChannels = outs.size();
+        return wires;
     }
 
-    rack.addConnection (previous, 0, {}, 0);
+    // Each device takes the one before it (or the container's input), MIDI and its own two channels (not a sidechain's),
+    // and the last one goes to the output.
+    std::vector<Wire> getWiresInOrder (const te::RackType& rack)
+    {
+        std::vector<Wire> wires;
+        te::EditItemID previous;                                 // the container's input,
+        auto previousChannels = rack.getInputNames().size() - 1; // past its MIDI pin
 
-    for (int pin = 1; pin <= std::min (previousChannels, rack.getOutputNames().size() - 1); ++pin)
-        rack.addConnection (previous, pin, {}, pin);
+        for (auto* device : getRackDevices (rack))
+        {
+            juce::StringArray ins, outs;
+            device->getChannelNames (&ins, &outs);
+            wires.push_back ({ previous, 0, device->itemID, 0 });
+
+            for (int pin = 1; pin <= std::min ({ previousChannels, (int) ins.size(), 2 }); ++pin)
+                wires.push_back ({ previous, pin, device->itemID, pin });
+
+            previous = device->itemID;
+            previousChannels = outs.size();
+        }
+
+        wires.push_back ({ previous, 0, {}, 0 });
+
+        for (int pin = 1; pin <= std::min (previousChannels, rack.getOutputNames().size() - 1); ++pin)
+            wires.push_back ({ previous, pin, {}, pin });
+
+        return wires;
+    }
+
+    // The MIDI wires, which go through every device in its order.
+    std::vector<Wire> getMidiWires (std::vector<Wire> wires)
+    {
+        wires.erase (std::remove_if (wires.begin(), wires.end(), [] (const Wire& wire) { return wire.sourcePin != 0; }), wires.end());
+        return wires;
+    }
+} // namespace
+
+void wireContainer (te::RackType& rack)
+{
+    // Not again while its devices are wired in their order, by the MIDI wires: how many channels a plug-in passes on is
+    // unknown while it isn't loaded (a project opened with its plug-ins off), and wiring it again then would lose its audio.
+    const auto wired = getMidiWires (getWires (rack)), wanted = getMidiWires (getWiresInOrder (rack));
+
+    if (wired.size() == wanted.size()
+        && std::all_of (wanted.begin(), wanted.end(),
+                        [&wired] (const Wire& wire) { return std::find (wired.begin(), wired.end(), wire) != wired.end(); }))
+        return;
+
+    auto* undoManager = &rack.edit.getUndoManager();
+
+    for (const auto& wire : getWires (rack))
+        rack.removeConnection (wire.source, wire.sourcePin, wire.destination, wire.destinationPin);
+
+    for (const auto& wire : getWiresInOrder (rack))
+        rack.addConnection (wire.source, wire.sourcePin, wire.destination, wire.destinationPin);
+
+    // Left to right in their order, where Tracktion's own view of a rack would show them.
+    const auto devices = getRackDevices (rack);
+
+    for (int i = 0; i < devices.size(); ++i)
+        devices[i]->state.getParent().setProperty (te::IDs::x, (float) (i + 1) / (float) (devices.size() + 1), undoManager);
 }
 
 juce::String makeContainerName (const te::Edit& edit)
 {
     juce::StringArray taken;
+    auto chains = getTrackStates (edit);
+    chains.push_back (findChainState (edit, nullptr));
 
-    for (auto* rack : edit.getRackList().getTypes())
-        taken.add (rack->rackName.get());
+    for (const auto& chain : chains)
+        for (const auto& state : getDeviceStates (chain))
+            if (state.hasType (schema::CONTAINER))
+                taken.add (state[schema::containerName].toString());
 
     juce::String name ("Container");
 

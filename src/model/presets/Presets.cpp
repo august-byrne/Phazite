@@ -753,8 +753,8 @@ bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target
     // A container is named after its preset.
     auto* device = addDeviceFromPreset (*edit, track, preset, &selection);
 
-    if (auto* rack = device != nullptr ? getContainerRack (*device) : nullptr)
-        rack->rackName = name;
+    if (device != nullptr && isContainer (*device))
+        setContainerName (*device, name);
 
     return device != nullptr;
 }

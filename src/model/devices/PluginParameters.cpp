@@ -104,22 +104,6 @@ namespace
                         [&device] (const juce::ValueTree& curve) { return curve[schema::curveDevice].toString() == device; });
     }
 
-    // Where the plug-in's own IDs of its parameters are kept: in its element in the song, or in its PLUGIN while it is in a
-    // container, whose devices are still Tracktion's (Schema.h: pluginParameterIDs, phaziteParameterIDs).
-    struct StoredIDs
-    {
-        juce::ValueTree element;
-        juce::Identifier property;
-    };
-
-    StoredIDs findStoredIDs (te::ExternalPlugin& plugin)
-    {
-        if (auto device = findDeviceState (plugin.edit, getDeviceID (plugin)); device.isValid())
-            return { device, schema::pluginParameterIDs };
-
-        return { plugin.state, schema::phaziteParameterIDs };
-    }
-
     // Everything in the project that names one of the plug-in's parameters, renamed: its automation curves (the song's,
     // and Tracktion's), what modulates them (modulators and macros are assigned in the state of what they move), its values
     // set by hand (in the song's element of it too), its quick control, and its automation lanes.
@@ -147,19 +131,20 @@ namespace
         renameCurves (findPhaziteState (plugin.edit), device, rename);
     }
 
-    // What the IDs hold: each Tracktion ID with the plug-in's own ID for it.
-    std::map<juce::String, juce::String> readStoredIDs (const StoredIDs& ids)
+    // What the plug-in's element in the song holds of its own IDs (Schema.h: pluginParameterIDs): each Tracktion ID with
+    // the plug-in's own ID for it.
+    std::map<juce::String, juce::String> readStoredIDs (const juce::ValueTree& device)
     {
         std::map<juce::String, juce::String> stored;
 
-        for (const auto& pair : juce::StringArray::fromTokens (ids.element[ids.property].toString(), " ", {}))
+        for (const auto& pair : juce::StringArray::fromTokens (device[schema::pluginParameterIDs].toString(), " ", {}))
             if (const auto at = pair.indexOfChar ('='); at > 0)
                 stored.emplace (pair.substring (0, at), pair.substring (at + 1));
 
         return stored;
     }
 
-    void writeStoredIDs (StoredIDs ids, const std::map<juce::String, juce::String>& stored)
+    void writeStoredIDs (juce::ValueTree device, const std::map<juce::String, juce::String>& stored)
     {
         juce::StringArray pairs;
 
@@ -167,17 +152,18 @@ namespace
             pairs.add (id + "=" + own);
 
         if (pairs.isEmpty())
-            ids.element.removeProperty (ids.property, nullptr);
+            device.removeProperty (schema::pluginParameterIDs, nullptr);
         else
-            store (ids.element, ids.property, pairs.joinIntoString (" "));
+            store (device, schema::pluginParameterIDs, pairs.joinIntoString (" "));
     }
 } // namespace
 
 void storeParameterIDs (te::ExternalPlugin& plugin)
 {
     auto* instance = plugin.getAudioPluginInstance();
+    const auto device = findDeviceState (plugin.edit, getDeviceID (plugin));
 
-    if (instance == nullptr)
+    if (instance == nullptr || ! device.isValid())
         return;
 
     std::set<juce::String> referredTo;
@@ -197,13 +183,13 @@ void storeParameterIDs (te::ExternalPlugin& plugin)
             if (const auto own = getOwnID (*parameters.getUnchecked (index)))
                 stored.emplace (id, *own);
 
-    writeStoredIDs (findStoredIDs (plugin), stored);
+    writeStoredIDs (device, stored);
 }
 
 void findMovedParameters (te::ExternalPlugin& plugin)
 {
-    const auto ids = findStoredIDs (plugin);
-    const auto stored = readStoredIDs (ids);
+    const auto device = findDeviceState (plugin.edit, getDeviceID (plugin));
+    const auto stored = readStoredIDs (device);
     auto* instance = plugin.getAudioPluginInstance();
 
     if (stored.empty() || instance == nullptr)
@@ -248,7 +234,7 @@ void findMovedParameters (te::ExternalPlugin& plugin)
                           const auto move = moves.find (id);
                           return move != moves.end() ? move->second : id;
                       });
-    writeStoredIDs (ids, nowStored);
+    writeStoredIDs (device, nowStored);
 
     if (! gone.isEmpty())
         juce::Logger::writeToLog ("The plug-in " + plugin.getName() + " no longer has the parameters " + gone.joinIntoString (", ")

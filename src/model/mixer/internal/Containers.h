@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Containers' Tracktion side (model/mixer/ContainerModel.h), for the model, the app and tests; not for the UI. A
-// container is a Tracktion rack instance on a channel, playing a rack type of its own (Tracktion plays every instance
-// of a type through one graph), which holds its devices in a row, wired one after the other (audio and MIDI), and its
-// eight macros.
+// container is the song's (Schema.h: CONTAINER, with its name, mix and devices; T1 step 5d), which Tracktion mirrors
+// (model/mirror/internal/Mirror.h) as a rack instance on a channel, playing a rack type of its own (Tracktion plays every
+// instance of a type through one graph), which holds its devices in a row, wired one after the other (audio and MIDI),
+// and its eight macros (still Tracktion's: T1 step 6).
 //
 // Rack types stay in the Edit for the whole session, also once no container plays them, as Tracktion's own rack list
 // keeps them: Tracktion's plug-in cache keeps a container that was removed, to bring the same object back when the
@@ -28,9 +29,11 @@ te::RackType* getContainerRack (const te::Plugin&);
 te::RackInstance* findContainerOf (const te::Plugin&);
 te::RackInstance* findContainerOf (const te::RackType&);
 
-// A container's devices, in the order the sound goes through them; and its macros, in their order.
+// A container's devices, in the order the sound goes through them (the song's, or its rack type's for one the song hasn't
+// yet, a preset's); and its macros, in their order. And a rack type's devices, in the order of their places in its state.
 juce::Array<te::Plugin*> getContainerDevices (const te::Plugin& container);
 juce::ReferenceCountedArray<te::MacroParameter> getContainerMacros (const te::Plugin& container);
+juce::Array<te::Plugin*> getRackDevices (const te::RackType&);
 
 // The track a container is on, the master track for the master's; and the one a device in a container is on, through
 // its container.
@@ -39,7 +42,8 @@ te::Track* getTrackOfContainerDevice (const te::Plugin&);
 
 // Whether effects can be grouped: devices of one channel, none of them its instrument or a container. Grouping puts them
 // into a new container in the first one's place, in their order on the channel, keeping their states, their IDs and
-// what modulates them. A device in a container listens to the sound passing through it, so a sidechain that listened to
+// what modulates them: their elements go into the container's in the song, and the mirror moves Tracktion's devices into
+// its rack type. A device in a container listens to the sound passing through it, so a sidechain that listened to
 // another track is turned off. Returns the container, or nullptr. Joins the caller's undo step.
 bool canGroupIntoContainer (const juce::Array<te::Plugin*>&);
 te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>&);
@@ -53,7 +57,11 @@ te::Plugin::Ptr createContainer (te::Edit&, const te::Plugin::Array& devices, co
 // macros and what they modulated. Joins the caller's step.
 void ungroupContainer (te::RackInstance&);
 
-// Deletes a container, closing its devices' windows. Joins the caller's step.
+// Renames a container, the song's (Schema.h: containerName), which its rack type mirrors. Joins the caller's step.
+void setContainerName (te::Plugin& container, const juce::String&);
+
+// Deletes Tracktion's container, closing the windows of the devices it still holds (the mirror's, as the song's container
+// goes). Joins the caller's step.
 void deleteContainer (te::RackInstance&);
 
 // Adds a rack type to the Edit for the session (see above): a new one, empty but for its pins, or a copy of one (from
@@ -64,17 +72,18 @@ te::RackType::Ptr addContainerRack (te::Edit&, const juce::ValueTree& rackState)
 // Drops the rack types no container plays from a saved project's state, before an Edit is made from it.
 void dropUnusedContainerRacks (juce::ValueTree& editState);
 
-// Inside a container: adding a device (at a place among its devices, or -1 for the end: instruments can't go in),
-// moving one to another place, and deleting one. Each wires the row again, and joins the caller's step.
+// Inside a container: adding a device (at a place among its devices, or -1 for the end: instruments can't go in), and
+// moving one to another place, in the song, which the mirror follows, wiring the row again. Each joins the caller's step.
+// (Removing one is removeDevice() in Mixer.h, as for any device.)
 te::Plugin* insertIntoContainer (te::RackInstance&, const te::Plugin::Ptr&, int index = -1);
 void moveInContainer (te::Plugin&, int newIndex);
-void deleteFromContainer (te::Plugin&);
 
 // Wires a container's devices one after the other, in their order, from its input to its output (straight through
-// while it holds none). Joins the caller's step.
+// while it holds none), unless they are wired in their order already. Joins the caller's step.
 void wireContainer (te::RackType&);
 
-// A new container's name: "Container", or "Container 2" and on while the song has one of that name.
+// A new container's name: "Container", or "Container 2" and on while the song has one of that name (Schema.h:
+// containerName).
 juce::String makeContainerName (const te::Edit&);
 
 // A container's macros as a new container gets them: eight, "Macro 1" to "Macro 8", each at 0, so that what one

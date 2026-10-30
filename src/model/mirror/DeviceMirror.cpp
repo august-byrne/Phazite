@@ -9,6 +9,8 @@
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 
+#include <algorithm>
+
 namespace phazite::mirror
 {
 namespace
@@ -22,6 +24,32 @@ namespace
                 devices.add (plugin);
 
         return devices;
+    }
+
+    te::Plugin* findByID (const juce::Array<te::Plugin*>& devices, DeviceID id)
+    {
+        for (auto* device : devices)
+            if (getDeviceID (*device) == id)
+                return device;
+
+        return nullptr;
+    }
+
+    bool isWanted (const std::vector<juce::ValueTree>& states, DeviceID id)
+    {
+        return std::any_of (states.begin(), states.end(), [id] (const juce::ValueTree& state) { return getDeviceID (state) == id; });
+    }
+
+    // The dry and wet levels of a plug-in or a container, in the state Tracktion makes it from, as the song's mix sets them
+    // (setMix() in Mixer.h).
+    void writeMix (juce::ValueTree& plugin, const juce::ValueTree& state)
+    {
+        if (state.hasProperty (schema::deviceMix))
+        {
+            const auto mix = (float) state[schema::deviceMix];
+            plugin.setProperty (te::IDs::wet, mix, nullptr);
+            plugin.setProperty (te::IDs::dry, 1.0f - mix, nullptr);
+        }
     }
 
     bool isOwnType (const juce::String& type)
@@ -73,18 +101,12 @@ namespace
         if (const auto values = makeTracktionValues (state); values.getSize() > 0)
             plugin.setProperty (te::IDs::parameters, values, nullptr);
 
-        if (state.hasProperty (schema::pluginMix))
-        {
-            const auto mix = (float) state[schema::pluginMix];
-            plugin.setProperty (te::IDs::wet, mix, nullptr);
-            plugin.setProperty (te::IDs::dry, 1.0f - mix, nullptr);
-        }
-
+        writeMix (plugin, state);
         return edit.getPluginCache().createNewPlugin (plugin);
     }
 
-    // A device the song has and Tracktion hasn't, made as the song has it. Nothing for a container, which the model makes as
-    // it adds one while step 5 lasts, nor for one of Tracktion's own, which only tests make.
+    // A device the song has and Tracktion hasn't, made as the song has it. Nothing for one of Tracktion's own, which only
+    // tests make (a container is made by makeContainer()).
     te::Plugin::Ptr makeDevice (te::Edit& edit, const juce::ValueTree& state)
     {
         if (isPluginState (state))
@@ -96,18 +118,18 @@ namespace
         return {};
     }
 
-    // A plug-in plays the song's mix, as the dry and wet levels Tracktion gives it, set by hand (setMix() in Mixer.h).
-    void reconcilePlugin (te::ExternalPlugin& plugin, const juce::ValueTree& state)
+    // A plug-in or a container plays the song's mix, as the dry and wet levels Tracktion gives it, set by hand.
+    void reconcileMix (te::AutomatableParameter* wet, te::AutomatableParameter* dry, const juce::ValueTree& state)
     {
-        const auto mix = (float) state.getProperty (schema::pluginMix, 1.0f);
+        const auto mix = (float) state.getProperty (schema::deviceMix, 1.0f);
         const auto play = [] (te::AutomatableParameter* level, float wanted)
         {
             if (level != nullptr && ! juce::exactlyEqual (level->getCurrentExplicitValue(), wanted))
                 level->setParameter (wanted, juce::sendNotification);
         };
 
-        play (plugin.wetGain.get(), mix);
-        play (plugin.dryGain.get(), 1.0f - mix);
+        play (wet, mix);
+        play (dry, 1.0f - mix);
     }
 
     // One of Phazite's own devices plays the song's values set by hand (a value the song hasn't is the parameter's
@@ -142,21 +164,136 @@ namespace
         }
     }
 
-    // A chain's devices in Tracktion as the song has them: those it hasn't go (a container with what it holds, its rack
-    // type kept: Containers.h), those it has go in its order (made, but for a container), switched on or off, Phazite's
-    // own with their values and files, and plug-ins with their mixes.
+    // What a device is set to, as the song has it: on or off, Phazite's own device's values and files, a plug-in's or a
+    // container's mix.
+    void reconcileSettings (te::Plugin& device, const juce::ValueTree& state)
+    {
+        if (const auto on = ! (bool) state[schema::deviceOff]; device.isEnabled() != on)
+            device.setEnabled (on);
+
+        if (auto* own = dynamic_cast<DevicePlugin*> (&device))
+            reconcileOwnDevice (*own, state);
+        else if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (&device); plugin != nullptr && isPluginState (state))
+            reconcileMix (plugin->wetGain.get(), plugin->dryGain.get(), state);
+        else if (auto* container = dynamic_cast<te::RackInstance*> (&device); container != nullptr && state.hasType (schema::CONTAINER))
+            reconcileMix (container->wetGain.get(), container->dryGain.get(), state);
+    }
+
+    // A container's devices in Tracktion as the song has them (Schema.h: CONTAINER), in its rack type: each found there, or
+    // on the channel it is grouped from (and moved in), or made; those the song hasn't go; in the song's order, wired so;
+    // each with its settings; and the container's name.
+    void reconcileInside (te::Edit& edit, te::PluginList& list, te::RackType& rack, const juce::ValueTree& container)
+    {
+        auto* undo = &edit.getUndoManager();
+        const auto states = getDeviceStates (container);
+
+        for (const auto& state : states)
+        {
+            if (findByID (getRackDevices (rack), getDeviceID (state)) != nullptr)
+                continue;
+
+            te::Plugin::Ptr device = findByID (getTracktionDevices (list), getDeviceID (state));
+
+            if (device == nullptr)
+                device = makeDevice (edit, state);
+
+            if (device != nullptr)
+                rack.addPlugin (device, { 0.5f, 0.5f }, false); // out of the channel's list, for one grouped
+        }
+
+        for (auto* device : getRackDevices (rack))
+            if (! isWanted (states, getDeviceID (*device)))
+                device->deleteFromParent();
+
+        // Each in its place: to the place of the device that is there now, among the rack type's other elements.
+        for (size_t i = 0; i < states.size(); ++i)
+        {
+            const auto devices = getRackDevices (rack);
+            auto* device = findByID (devices, getDeviceID (states[i]));
+
+            if (device == nullptr)
+                continue;
+
+            if (const auto place = (int) i; place < devices.size() && devices[place] != device)
+                rack.state.moveChild (rack.state.indexOf (device->state.getParent()),
+                                      rack.state.indexOf (devices[place]->state.getParent()), undo);
+
+            reconcileSettings (*device, states[i]);
+        }
+
+        wireContainer (rack);
+
+        if (const auto name = container[schema::containerName].toString(); rack.rackName.get() != name)
+            rack.rackName = name;
+    }
+
+    // A container made as the song has it: a rack type of its own for the session (Containers.h), holding the song's
+    // devices (each found on the channel it is grouped from, or made), wired, with its name and eight macros (Tracktion's
+    // while T1 step 6 lasts); and Tracktion's container that plays it, with the song's ID, switch and mix.
+    te::Plugin::Ptr makeContainer (te::Edit& edit, te::PluginList& list, const juce::ValueTree& state)
+    {
+        const auto rack = addContainerRack (edit);
+
+        if (rack == nullptr)
+            return {};
+
+        reconcileInside (edit, list, *rack, state);
+        addContainerMacros (*rack);
+
+        auto container = te::RackInstance::create (*rack);
+        toTracktion (getDeviceID (state)).writeID (container, nullptr);
+
+        if ((bool) state[schema::deviceOff])
+            container.setProperty (te::IDs::enabled, false, nullptr);
+
+        writeMix (container, state);
+        return edit.getPluginCache().createNewPlugin (container);
+    }
+
+    // A chain's devices in Tracktion as the song has them. First, what the song has on the channel comes out of Tracktion's
+    // containers (one ungrouped), and its containers are made or follow it, taking in what the song has them hold from the
+    // channel (devices grouped); then what it hasn't on the channel goes (a container with what it still holds, its rack
+    // type kept: Containers.h); then each goes in its place (made, for a device), with its settings.
     void reconcileChain (te::Edit& edit, te::PluginList& list, const juce::ValueTree& chain)
     {
         auto* undo = &edit.getUndoManager();
         const auto states = getDeviceStates (chain);
-        std::vector<DeviceID> wanted;
-
-        for (const auto& state : states)
-            wanted.push_back (getDeviceID (state));
 
         for (auto* device : getTracktionDevices (list))
         {
-            if (std::find (wanted.begin(), wanted.end(), getDeviceID (*device)) != wanted.end())
+            if (auto* rack = getContainerRack (*device))
+            {
+                for (auto* inside : getRackDevices (*rack))
+                {
+                    if (isWanted (states, getDeviceID (*inside)))
+                    {
+                        const te::Plugin::Ptr moved (inside);
+                        moved->removeFromParent();
+                        list.insertPlugin (moved, getDevicePlace (list, -1), nullptr);
+                    }
+                }
+            }
+        }
+
+        for (size_t i = 0; i < states.size(); ++i)
+        {
+            if (! states[i].hasType (schema::CONTAINER))
+                continue;
+
+            if (auto* container = dynamic_cast<te::RackInstance*> (findByID (getTracktionDevices (list), getDeviceID (states[i]))))
+            {
+                if (container->type != nullptr)
+                    reconcileInside (edit, list, *container->type, states[i]);
+            }
+            else if (const auto made = makeContainer (edit, list, states[i]))
+            {
+                list.insertPlugin (made, getDevicePlace (list, (int) i), nullptr);
+            }
+        }
+
+        for (auto* device : getTracktionDevices (list))
+        {
+            if (isWanted (states, getDeviceID (*device)))
                 continue;
 
             if (auto* container = dynamic_cast<te::RackInstance*> (device))
@@ -170,11 +307,7 @@ namespace
         for (size_t i = 0; i < states.size(); ++i)
         {
             const auto devices = getTracktionDevices (list);
-            te::Plugin* device = nullptr;
-
-            for (auto* each : devices)
-                if (getDeviceID (*each) == wanted[i])
-                    device = each;
+            auto* device = findByID (devices, getDeviceID (states[i]));
 
             if (device == nullptr)
             {
@@ -190,13 +323,7 @@ namespace
                 parent.moveChild (parent.indexOf (device->state), parent.indexOf (devices[place]->state), undo);
             }
 
-            if (const auto on = ! (bool) states[i][schema::deviceOff]; device->isEnabled() != on)
-                device->setEnabled (on);
-
-            if (auto* own = dynamic_cast<DevicePlugin*> (device))
-                reconcileOwnDevice (*own, states[i]);
-            else if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (device); plugin != nullptr && isPluginState (states[i]))
-                reconcilePlugin (*plugin, states[i]);
+            reconcileSettings (*device, states[i]);
         }
     }
 } // namespace
