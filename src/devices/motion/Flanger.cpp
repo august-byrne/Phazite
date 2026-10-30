@@ -45,9 +45,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: the comb's length, and how much it rings.
-    constexpr std::string_view keyControls[] = { "delay", "feedback" };
-
     constexpr double leastLoss = 0.02;        // what the loop loses each time round at full feedback: 2 %
     constexpr double signGlideSeconds = 0.01; // the feedback's sign, turning from one side to the other
     constexpr float lowestBass = 20.0f;       // Safe Bass's lowest: off
@@ -80,11 +77,7 @@ namespace
     }
 } // namespace
 
-const DeviceInfo Flanger::info { .typeID = typeID,
-                                 .name = "Flanger",
-                                 .kind = DeviceKind::effect,
-                                 .parameters = parameters,
-                                 .keyControls = keyControls };
+const DeviceInfo Flanger::info { .typeID = typeID, .name = "Flanger", .kind = DeviceKind::effect, .parameters = parameters };
 
 double Flanger::getSweptDelay (std::span<const float> values, float lfoValue)
 {

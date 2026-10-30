@@ -64,7 +64,10 @@ void MixerView::showProject()
     strips.clear();
     addReturnButton.setEnabled (context.hasProject());
     addReturnButton.setTooltip (
-        withShortcut (commands, "Adds a return track, for an effect such as a reverb that tracks send to", "track.addReturn"));
+        withShortcut (commands,
+                      "Adds a return track, for an effect that several tracks share, such as a reverb: each sends it a copy of "
+                      "its sound, and it plays its effect alongside them",
+                      "track.addReturn"));
     rebuild();
 }
 

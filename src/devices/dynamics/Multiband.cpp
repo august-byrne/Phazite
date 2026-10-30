@@ -39,9 +39,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: how much, and how fast.
-    constexpr std::string_view keyControls[] = { "depth", "time" };
-
     // Each band is turned down hard above the downward threshold (10:1, across a soft knee) and brought up 3:1 below the
     // upward one, by at most maxBoost, the boost fading out toward silence so that noise isn't raised.
     constexpr float downThreshold = Multiband::downwardThreshold, downSlope = 0.9f, knee = 6.0f;
@@ -81,11 +78,7 @@ namespace
     }
 } // namespace
 
-const DeviceInfo Multiband::info { .typeID = typeID,
-                                   .name = "Multiband",
-                                   .kind = DeviceKind::effect,
-                                   .parameters = parameters,
-                                   .keyControls = keyControls };
+const DeviceInfo Multiband::info { .typeID = typeID, .name = "Multiband", .kind = DeviceKind::effect, .parameters = parameters };
 
 float Multiband::getGainChange (std::span<const float> values, float level)
 {

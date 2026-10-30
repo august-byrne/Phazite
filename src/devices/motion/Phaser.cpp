@@ -48,9 +48,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: how far it sweeps, and how much it rings.
-    constexpr std::string_view keyControls[] = { "depth", "feedback" };
-
     constexpr float lowestCentre = 20.0f;
     constexpr float sweepOctaves = 2.0f; // each way, at full depth
 
@@ -72,11 +69,7 @@ namespace
     constexpr float outputGain = 0.5f;
 } // namespace
 
-const DeviceInfo Phaser::info { .typeID = typeID,
-                                .name = "Phaser",
-                                .kind = DeviceKind::effect,
-                                .parameters = parameters,
-                                .keyControls = keyControls };
+const DeviceInfo Phaser::info { .typeID = typeID, .name = "Phaser", .kind = DeviceKind::effect, .parameters = parameters };
 
 double Phaser::getSweptCentre (std::span<const float> values, float lfoValue, double rate)
 {

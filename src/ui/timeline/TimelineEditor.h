@@ -90,6 +90,10 @@ public:
     void zoomTo (BeatRange);
     void zoomToFit(); // shows getContentRange()
     void centreOnPlayhead();
+
+    // Whether the view stays where the editor puts it (zoomTo()): zooming, scrolling and centring by the user, and turning
+    // the page while playing, leave it. The audio clip editor's shows its clip's whole audio, always.
+    virtual bool isViewFixed() const { return false; }
     void movePlayheadTo (BeatPosition); // playback starts there from now on (phazite::movePlayhead())
     BeatPosition getPlayheadBeat() const;
     bool isPlayheadShowingLinkedClip() const; // where a linked clip plays elsewhere (getLinkedPlayheadBeat()), for tests

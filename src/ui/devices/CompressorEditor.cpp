@@ -273,11 +273,6 @@ juce::Button& CompressorEditor::getListenButton()
     return keyPart->listen;
 }
 
-juce::Component* CompressorEditor::getFoldedPicture() const
-{
-    return &activity->history;
-}
-
 juce::Point<float> CompressorEditor::getGraphPosition (float inputDecibels, float outputDecibels) const
 {
     return activity->graph.getPosition (inputDecibels, outputDecibels);

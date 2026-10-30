@@ -115,9 +115,6 @@ namespace
 
     constexpr auto parameters = makeParameters();
 
-    // In a mixer slot: the low and the high shelf's gains, a quick tilt of the sound.
-    constexpr std::string_view keyControls[] = { "band2Gain", "band7Gain" };
-
     constexpr int stretch = 32;               // samples between updates of moving coefficients
     constexpr double smoothingSeconds = 0.02; // how long a parameter's change takes to settle, about
 
@@ -181,11 +178,7 @@ namespace
     }
 } // namespace
 
-const DeviceInfo Equalizer::info { .typeID = typeID,
-                                   .name = "EQ",
-                                   .kind = DeviceKind::effect,
-                                   .parameters = parameters,
-                                   .keyControls = keyControls };
+const DeviceInfo Equalizer::info { .typeID = typeID, .name = "EQ", .kind = DeviceKind::effect, .parameters = parameters };
 
 double Equalizer::getBandMagnitude (std::span<const float> values, int band, double frequency, double sampleRate)
 {

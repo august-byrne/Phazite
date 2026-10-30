@@ -249,19 +249,10 @@ juce::StringArray getKeyControls (te::Plugin& device, int maximum)
 {
     juce::StringArray ids;
 
-    // A container's own parameters are Tracktion's levels in and out, which Phazite doesn't show.
-    if (isContainer (device))
+    // A container's own parameters are Tracktion's levels in and out, which Phazite doesn't show; Phazite's own devices show
+    // theirs in their editors.
+    if (isContainer (device) || dynamic_cast<DevicePlugin*> (&device) != nullptr)
         return ids;
-
-    // Phazite's own devices name theirs.
-    if (auto* own = dynamic_cast<DevicePlugin*> (&device))
-    {
-        for (const auto id : own->getDeviceInfo().keyControls)
-            if (ids.size() < maximum)
-                ids.add (juce::String (id.data(), id.size()));
-
-        return ids;
-    }
 
     if (auto quick = device.getQuickControlParameter(); quick != nullptr && ! isMixLevel (*quick))
         ids.add (quick->paramID);

@@ -25,9 +25,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: how hard it is pushed, and how loud it may get.
-    constexpr std::string_view keyControls[] = { "gain", "ceiling" };
-
     constexpr double gainSeconds = 0.02; // how long a change of the gain takes, about
     constexpr double pi = 3.14159265358979323846;
 
@@ -42,11 +39,7 @@ namespace
     }
 } // namespace
 
-const DeviceInfo Limiter::info { .typeID = typeID,
-                                 .name = "Limiter",
-                                 .kind = DeviceKind::effect,
-                                 .parameters = parameters,
-                                 .keyControls = keyControls };
+const DeviceInfo Limiter::info { .typeID = typeID, .name = "Limiter", .kind = DeviceKind::effect, .parameters = parameters };
 
 void Limiter::prepare (double newSampleRate, int)
 {

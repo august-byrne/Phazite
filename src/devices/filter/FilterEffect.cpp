@@ -39,9 +39,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: the sweep.
-    constexpr std::string_view keyControls[] = { "cutoff", "resonance" };
-
     constexpr double glideSeconds = 0.01; // how long the cutoff takes to follow a change, about
     constexpr double driveSeconds = 0.02;
 
@@ -67,11 +64,7 @@ namespace
     }
 } // namespace
 
-const DeviceInfo FilterEffect::info { .typeID = typeID,
-                                      .name = "Filter",
-                                      .kind = DeviceKind::effect,
-                                      .parameters = parameters,
-                                      .keyControls = keyControls };
+const DeviceInfo FilterEffect::info { .typeID = typeID, .name = "Filter", .kind = DeviceKind::effect, .parameters = parameters };
 
 double FilterEffect::getMagnitude (std::span<const float> values, double frequency, double sampleRate)
 {

@@ -67,8 +67,8 @@ void setDeviceOn (te::Plugin&, bool on);
 // and finds it written already.
 void rememberWindowPosition (te::Plugin&, juce::Point<int> topLeft);
 
-// The parameters a device's slot shows as small knobs, by ID: its quick control, then the first others (not the dry
-// and wet levels, which its mix sets). A container has none of its own: its key controls are its macros.
+// A plug-in's key parameters, by ID (MixerModel.h): its quick control, then the first others (not the dry and wet levels,
+// which its mix sets). None for Phazite's own devices or a container.
 juce::StringArray getKeyControls (te::Plugin&, int maximum);
 
 // A device as a slot shows it (MixerModel.h).

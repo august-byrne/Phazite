@@ -47,9 +47,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 0.25f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: how long it rings and how big it is.
-    constexpr std::string_view keyControls[] = { "decay", "size" };
-
     // The lines' lengths at the largest size, in milliseconds: spread apart, and sharing no common period.
     constexpr double lineMilliseconds[Reverb::numLines] = { 44.3, 49.8, 57.1, 63.4, 69.7, 74.3, 82.9, 89.5 };
     constexpr double smallest = 0.25; // of those lengths, at size 0
@@ -78,11 +75,7 @@ namespace
     }
 } // namespace
 
-const DeviceInfo Reverb::info { .typeID = typeID,
-                                .name = "Reverb",
-                                .kind = DeviceKind::effect,
-                                .parameters = parameters,
-                                .keyControls = keyControls };
+const DeviceInfo Reverb::info { .typeID = typeID, .name = "Reverb", .kind = DeviceKind::effect, .parameters = parameters };
 
 double Reverb::getDecayAt (std::span<const float> values, double frequency, double sampleRate)
 {

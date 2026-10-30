@@ -52,6 +52,5 @@ private:
     KeyPart* keyPart = nullptr;
 
     void tick() override { refresh(); }
-    juce::Component* getFoldedPicture() const override; // its history, which shows the ducking
 };
 } // namespace phazite::ui

@@ -288,16 +288,6 @@ std::vector<ParameterHandle> getKeyControls (ProjectContext& context, DeviceID i
     std::vector<ParameterHandle> handles;
     auto* device = findDevice (context, id);
 
-    // A container's are its first macros.
-    if (auto* rack = device != nullptr ? getContainerRack (*device) : nullptr)
-    {
-        for (auto* macro : getContainerMacros (*device))
-            if ((int) handles.size() < maximum)
-                handles.push_back (makeMacroHandle (*rack, *macro, "Change " + macro->macroName.get()));
-
-        return handles;
-    }
-
     if (device != nullptr)
         for (const auto& parameterID : phazite::getKeyControls (*device, maximum))
             handles.push_back (makeParameterHandle (device, parameterID));

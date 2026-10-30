@@ -45,9 +45,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: how loud, and how far it may go.
-    constexpr std::string_view keyControls[] = { "gain", "ceiling" };
-
     // Each band's compressor: above the threshold, across a soft knee, at a ratio from 1:1 (no squeeze) to 10:1.
     constexpr float threshold = Maximizer::squeezeThreshold, knee = 6.0f, mostRatio = 10.0f;
     constexpr float attacks[] = { 0.01f, 0.005f, 0.002f }; // seconds: the low band slower, as its waves are longer
@@ -55,11 +52,7 @@ namespace
     constexpr double smoothingSeconds = 0.02;
 } // namespace
 
-const DeviceInfo Maximizer::info { .typeID = typeID,
-                                   .name = "Maximizer",
-                                   .kind = DeviceKind::effect,
-                                   .parameters = parameters,
-                                   .keyControls = keyControls };
+const DeviceInfo Maximizer::info { .typeID = typeID, .name = "Maximizer", .kind = DeviceKind::effect, .parameters = parameters };
 
 float Maximizer::getReduction (float squeeze, float level)
 {

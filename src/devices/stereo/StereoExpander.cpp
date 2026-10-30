@@ -29,20 +29,13 @@ namespace
         { .id = "gain", .name = "Gain", .minimum = -36.0f, .maximum = 36.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
     };
 
-    // In a mixer slot: how wide, and how much stereo it makes.
-    constexpr std::string_view keyControls[] = { "width", "spread" };
-
     constexpr double smoothingSeconds = 0.02;  // how long a change takes, about
     constexpr double averageSeconds = 0.5;     // the correlation's averaging, as hardware meters take about 600 ms
     constexpr float quietest = 1.0e-6f;        // -60 dB, squared: below it, no correlation is shown
     constexpr std::uint32_t velvetSeed = 2017; // the velvet noise's pulses, the same every time
 } // namespace
 
-const DeviceInfo StereoExpander::info { .typeID = typeID,
-                                        .name = "Stereo Expander",
-                                        .kind = DeviceKind::effect,
-                                        .parameters = parameters,
-                                        .keyControls = keyControls };
+const DeviceInfo StereoExpander::info { .typeID = typeID, .name = "Stereo Expander", .kind = DeviceKind::effect, .parameters = parameters };
 
 float StereoExpander::Correlation::get() const noexcept
 {

@@ -220,10 +220,7 @@ TEST_CASE ("A container's devices are wired one after the other, and move, come 
     CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
     CHECK (wiredInOrder());
 
-    // A container's key controls are its first macros, and it has a mix of its own.
-    const auto controls = phazite::getKeyControls (context, container, 3);
-    REQUIRE (controls.size() == 3);
-    CHECK (controls[0].getName() == juce::String ("Macro 1"));
+    // A container has a mix of its own.
     CHECK (phazite::getEffects (context, idOf (*song.a))[0].hasMix);
     CHECK (phazite::getMix (context, container).getValue() == doctest::Approx (1.0f));
 

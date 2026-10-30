@@ -20,14 +20,16 @@ struct ChannelStrip::SendSlot : public juce::Component
         : context (projectContext),
           from (fromTrack)
     {
-        nameButton.setTooltip ("Turn the knob to send some of this track to this return. Right-click to remove the send");
+        nameButton.setTooltip ("Turn the knob to send a copy of this track to this return, whose effect then plays alongside it: the "
+                               "track itself still goes to its Out. Right-click to remove the send");
         nameButton.onClicked = [this] (bool isMenuClick)
         {
             if (isMenuClick)
                 showMenu();
         };
 
-        level.setTooltip ("How much of this track the send feeds the return: off until you turn it. Double-click for 0 dB");
+        level.setTooltip ("How much of a copy of this track goes to the return: off until you turn it. The track itself still plays "
+                          "through its Out. Double-click for 0 dB");
         showAsDecibels (level);
         attachment.setParameter (getSendLevelTo (context, from, target.returnTrack));
 
@@ -127,8 +129,9 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
     volume.setTooltip ("The track's volume. Double-click for 0 dB; drag with Shift held for fine steps");
     pan.setTooltip ("Where the track sits between the left and right speakers. Double-click to center it");
 
-    addSendButton.setTooltip ("Sends some of this track to a return track, which holds an effect that several tracks share, "
-                              "such as a reverb");
+    addSendButton.setTooltip ("Makes a return and sends it a copy of this track: the return's effect, such as a reverb, plays alongside "
+                              "the track, which still goes to its Out. To run several tracks' whole sound through one effect, put "
+                              "them in a bus instead (Out)");
     addSendButton.onClick = [this] { showSendMenu(); };
 
     slotView.setViewedComponent (&slotHolder, false);
@@ -225,7 +228,8 @@ void ChannelStrip::showChannel()
     const auto chooses = channel.has_value() && channel->kind != ChannelKind::plainFolder && canChooseOutput (context, track);
     outputButton.setEnabled (chooses);
     outputButton.setTooltip (chooses ? "Where the sound goes: to the master, which you hear, or into a bus, which the track goes "
-                                       "into as a folder. Click to choose"
+                                       "into as a folder. A bus runs its tracks' whole sound through its effects; a return only "
+                                       "gets copies, through sends. Click to choose"
                                      : "Where the sound goes");
 }
 
@@ -342,8 +346,6 @@ void ChannelStrip::timerCallback()
 
     volumeAttachment.update();
     panAttachment.update();
-    instrument.updateValues();
-    effects.updateValues();
 
     for (auto* slot : sendSlots)
         slot->attachment.update();
@@ -434,13 +436,9 @@ void ChannelStrip::resized()
 
     inputLabel.setBounds (header);
 
-    // At the bottom: the fader with the meter, mute and solo, pan, and where the sound goes. The instrument, effects
-    // and sends get what is left above them, and scroll; the fader shrinks, down to its shortest, so that they show
-    // whole when they can, as the mixer shares the window's height with the Devices view under it. (The mixer keeps the
-    // strip at least getMinimumHeight() tall.)
-    layOutSlots();
-    const auto slotsWanted = std::max (minSlotsHeight, slotHolder.getHeight());
-    const auto faderHeight = getFaderHeight (area.getHeight(), buttonHeight + panKnobSize + outputHeight + 4 * Space::xs + slotsWanted);
+    // At the bottom: the fader with the meter, as tall in every strip, mute and solo, pan, and where the sound goes. The
+    // instrument, effects and sends get what is left above them, and scroll. (The mixer keeps the strip at least
+    // getMinimumHeight() tall.)
     auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);
@@ -469,9 +467,9 @@ void ChannelStrip::resized()
 
 int ChannelStrip::getMinimumHeight()
 {
-    // As resized() lays it out: the header, a heading and a button, where the sound goes, pan, mute and solo, the
-    // shortest fader, and the CPU bar.
-    return 2 * Space::xs + headerHeight + minSlotsHeight + outputHeight + panKnobSize + buttonHeight + minFaderHeight + 4 * Space::xs
+    // As resized() lays it out: the header, a heading and a button, where the sound goes, pan, mute and solo, the fader,
+    // and the CPU bar.
+    return 2 * Space::xs + headerHeight + minSlotsHeight + outputHeight + panKnobSize + buttonHeight + faderHeight + 4 * Space::xs
            + CpuBar::height + Space::xs;
 }
 

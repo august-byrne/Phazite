@@ -48,9 +48,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: how loud it starts and how hard it pushes.
-    constexpr std::string_view keyControls[] = { "threshold", "ratio" };
-
     constexpr double makeupSeconds = 0.02;   // how long a change of the makeup gain takes, about
     constexpr float highCutOff = 19999.0f;   // the key's high cut at its top: off
     constexpr double keyFadeSeconds = 0.005; // between the key and the sound, as Listen turns on or off
@@ -84,7 +81,6 @@ const DeviceInfo Compressor::info { .typeID = typeID,
                                     .name = "Compressor",
                                     .kind = DeviceKind::effect,
                                     .parameters = parameters,
-                                    .keyControls = keyControls,
                                     .hasSidechain = true };
 
 float Compressor::getReduction (std::span<const float> values, float levelDecibels)

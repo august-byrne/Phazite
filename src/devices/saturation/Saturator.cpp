@@ -27,20 +27,13 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: how hard, and how it sounds.
-    constexpr std::string_view keyControls[] = { "drive", "tone" };
-
     constexpr double gainSeconds = 0.02;        // how long a change of the drive or the output takes, about
     constexpr double tiltFrequency = 1000.0;    // where the tone tilts around
     constexpr float tiltDecibels = 6.0f;        // how far the tone tilts each end, at its ends
     constexpr double dcBlockerFrequency = 10.0; // under what the tube's lopsided curve leaves
 } // namespace
 
-const DeviceInfo Saturator::info { .typeID = typeID,
-                                   .name = "Saturator",
-                                   .kind = DeviceKind::effect,
-                                   .parameters = parameters,
-                                   .keyControls = keyControls };
+const DeviceInfo Saturator::info { .typeID = typeID, .name = "Saturator", .kind = DeviceKind::effect, .parameters = parameters };
 
 float Saturator::shapeSample (Shape shape, float x) noexcept
 {

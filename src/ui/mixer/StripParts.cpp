@@ -9,12 +9,6 @@ namespace phazite::ui
 {
 namespace strip
 {
-    int getFaderHeight (int available, int forTheRest)
-    {
-        return juce::jlimit (minFaderHeight, std::max (minFaderHeight, available - forTheRest), std::max (120, available / 2));
-    }
-
-    //==============================================================================
     void showOutputMenu (ProjectContext& context, CommandBridge& commands, TrackID track, juce::Component& target)
     {
         juce::PopupMenu menu;

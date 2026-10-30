@@ -153,12 +153,12 @@ TEST_CASE ("A channel's devices by ID: its instrument, its effects in their orde
     CHECK (namesOf (phazite::getEffects (context, a)) == std::vector<juce::String> { "EQ", "Compressor" });
     CHECK (namesOf (phazite::getEffects (context, {})).back() == juce::String ("Limiter"));
 
-    // Each effect has a mix, and a few key controls for its slot.
+    // Each effect has a mix; Phazite's own devices have no key controls, which only a plug-in's card shows.
     const auto eq = phazite::getEffects (context, a).front();
     CHECK (eq.hasMix);
     CHECK (eq.isOn);
     CHECK (phazite::getMix (context, eq.id).isValid());
-    CHECK (phazite::getKeyControls (context, eq.id, 2).size() == 2);
+    CHECK (phazite::getKeyControls (context, eq.id, 2).empty());
 
     phazite::setDeviceOn (context, eq.id, false);
     CHECK_FALSE (phazite::getEffects (context, a).front().isOn);

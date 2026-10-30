@@ -195,9 +195,6 @@ namespace
     static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::unisonDetune + 1);
     static_assert (std::size (modSources) == (size_t) Synth::ModSource::random + 1);
 
-    // In a mixer slot: where the first oscillator plays in its table, and the filter.
-    constexpr std::string_view keyControls[] = { "osc1Position", "cutoff" };
-
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
     constexpr std::uint32_t noiseSeed = 0x7ab1e5u, unisonSeed = 0x0715e7u, lfoSeed = 0x1f0e5u, randomSeed = 0x2a7d0u;
 
@@ -318,11 +315,7 @@ void WavetableSynth::renderStep (const OscillatorRun& run, Reader& reader, float
     reader.phase = t;
 }
 
-const DeviceInfo WavetableSynth::info { .typeID = typeID,
-                                        .name = "Wavetable",
-                                        .kind = DeviceKind::instrument,
-                                        .parameters = parameters,
-                                        .keyControls = keyControls };
+const DeviceInfo WavetableSynth::info { .typeID = typeID, .name = "Wavetable", .kind = DeviceKind::instrument, .parameters = parameters };
 
 namespace
 {

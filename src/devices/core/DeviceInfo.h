@@ -71,9 +71,6 @@ struct DeviceInfo
     DeviceKind kind = DeviceKind::effect;
     std::span<const ParameterInfo> parameters {};
 
-    // The IDs of the parameters a mixer slot shows as small knobs, the most useful first.
-    std::span<const std::string_view> keyControls {};
-
     // Whether the device listens to a sidechain: another track's sound, such as a kick that a compressor turns a bass
     // down to. Its thin plug-in hands it the sound of the track picked as the source (ProcessContext::sidechain).
     bool hasSidechain = false;
@@ -86,7 +83,6 @@ inline constexpr std::string_view mixParameterID = "mix";
 // The index of the parameter with that ID among the device's parameters, or -1.
 int findParameter (const DeviceInfo&, std::string_view id);
 
-// Whether the device has a type ID and a name, parameters that are valid, with IDs that are unique and not empty, and
-// key controls that are among its parameters.
+// Whether the device has a type ID and a name, and parameters that are valid, with IDs that are unique and not empty.
 bool isValid (const DeviceInfo&);
 } // namespace phazite::devices

@@ -52,17 +52,10 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 0.25f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: how long the echoes take, and how many there are.
-    constexpr std::string_view keyControls[] = { "time", "feedback" };
-
     constexpr double glideSeconds = 0.05; // how long a change of time takes to glide, about
 } // namespace
 
-const DeviceInfo Delay::info { .typeID = typeID,
-                               .name = "Delay",
-                               .kind = DeviceKind::effect,
-                               .parameters = parameters,
-                               .keyControls = keyControls };
+const DeviceInfo Delay::info { .typeID = typeID, .name = "Delay", .kind = DeviceKind::effect, .parameters = parameters };
 
 double Delay::getDelaySeconds (std::span<const float> values, double tempo)
 {

@@ -195,7 +195,6 @@ TEST_CASE ("The wavetable synth's description holds together")
     CHECK (devices::findParameter (WavetableSynth::info, "osc2Position") == WavetableSynth::osc2Position);
     CHECK (devices::findParameter (WavetableSynth::info, "mod8Amount") == WavetableSynth::mod8Amount);
     CHECK (devices::findParameter (WavetableSynth::info, "voiceMode") == WavetableSynth::voiceMode);
-    CHECK (WavetableSynth::info.keyControls.size() == 2);
 }
 
 TEST_CASE ("A wavetable keeps each frame band-limited at every level, half an octave apart")

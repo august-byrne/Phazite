@@ -13,9 +13,9 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr int panelWidth = 196;    // the clip's settings, down the left
-    constexpr int labelWidth = 52;     // their names
-    constexpr double zoomMargin = 0.1; // how much of its length shows on either side of a clip that opens
+    constexpr int panelWidth = 196;     // the clip's settings, down the left
+    constexpr int labelWidth = 52;      // their names
+    constexpr double viewMargin = 0.02; // how much of the audio's length shows on either side of it, for its edges' grips
 
     // How the fields show their values.
     constexpr devices::ParameterInfo gainInfo { "gain", "Gain", minClipGain, maxClipGain, 0.0f, devices::Unit::decibels };
@@ -36,7 +36,7 @@ namespace
 } // namespace
 
 //==============================================================================
-// The clip's audio across the time line, with its handles. The hint bar shows what a drag does where the pointer is.
+// The clip's whole audio, with its handles. The hint bar shows what a drag does where the pointer is.
 struct AudioClipEditor::Waveform : public juce::Component
 {
     explicit Waveform (AudioClipEditor& e)
@@ -62,7 +62,7 @@ struct AudioClipEditor::Waveform : public juce::Component
     Zone hovered = Zone::none, dragging = Zone::none;
     std::unique_ptr<TimelineGesture> gesture; // from mouse down to mouse up
     bool dragged = false;                     // past the threshold: not a click
-    double slipStartOffset = 0.0;             // the clip's offset when the drag began, for Slip
+    double slipStartOffset = 0.0;             // the clip's offset when the drag began, for moving its part along the audio
 
     float beatToX (BeatPosition beat) const { return (float) editor.getView().beatToX (beat); }
     BeatPosition xToBeat (float x) const { return editor.getView().xToBeat (x); }
@@ -146,8 +146,8 @@ struct AudioClipEditor::Waveform : public juce::Component
             case Zone::fadeOut:
                 return "Drag to fade the clip out, and double-click to take the fade away.";
             case Zone::audio:
-                return "Drag the audio to move it inside the clip, which stays where it is. Hold Alt to move it freely. Right-click "
-                       "for the fades' shape.";
+                return "Drag the clip along its audio to play another part of it: the clip stays where it is in the song. Hold Alt "
+                       "to move it freely. Right-click for the fades' shape.";
             case Zone::none:
             default:
                 return {};
@@ -310,10 +310,8 @@ struct AudioClipEditor::Waveform : public juce::Component
                                                 : dragging == Zone::fadeIn  ? "Fade In"
                                                 : dragging == Zone::fadeOut ? "Fade Out"
                                                                             : "Slip Clip");
-            beginDragAutoRepeat (TimelineEditor::autoRepeatInterval);
         }
 
-        editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
         const auto beat = xToBeat (e.position.x);
         auto& song = editor.context;
         const auto edited = editor.clip;
@@ -334,8 +332,15 @@ struct AudioClipEditor::Waveform : public juce::Component
                 break;
 
             case Zone::audio:
-                slipClip (song, edited, slipStartOffset, editor.snap (gesture->startBeat, e.mods), editor.snap (beat, e.mods));
+            {
+                // The clip's part goes along the audio, which stays where it is on the screen (the view follows the audio):
+                // so by the pointer's distance from where it was pressed, and the audio the other way in the song.
+                const auto along =
+                    BeatDuration::fromBeats ((e.position.x - (float) gesture->startPosition.x) / editor.getView().pixelsPerBeat);
+                slipClip (song, edited, slipStartOffset, editor.snap (gesture->startBeat, e.mods),
+                          editor.snap (gesture->startBeat - along, e.mods));
                 break;
+            }
 
             case Zone::none:
             default:
@@ -401,11 +406,12 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Audio clip editor");
-    setDescription ("The selected audio clip. Drag its edges to trim it, the squares at its top to fade it, and its audio to move it "
-                    "inside the clip");
+    setDescription ("The selected audio clip's whole audio. Drag the clip's edges to trim it, the squares at its top to fade it, and "
+                    "the clip along its audio to play another part of it");
 
-    // The clip being edited stays in view while the song plays, as in the piano roll.
+    // The view shows the clip's whole audio, always: no scroll bar, and no turning pages while the song plays.
     setFollowingPlayback (false);
+    horizontalScrollBar.setVisible (false);
 
     showAsParameter (gainField, gainInfo);
     showAsParameter (pitchField, pitchInfo);
@@ -485,7 +491,7 @@ void AudioClipEditor::projectChanged()
     shownProject = context.getProjectNumber();
     fieldDrag = nullptr;
     showProject();
-    setClip ({}, true);
+    setClip ({});
 }
 
 void AudioClipEditor::songChanged (const SongChanges& changes)
@@ -498,12 +504,12 @@ void AudioClipEditor::songChanged (const SongChanges& changes)
 void AudioClipEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     if (const auto toShow = getAudioClipToEdit (context, getPlayheadBeat()); toShow.has_value() && *toShow != clip)
-        setClip (*toShow, false);
+        setClip (*toShow);
 }
 
 void AudioClipEditor::showClip (ClipID toShow)
 {
-    setClip (toShow, false);
+    setClip (toShow);
 }
 
 ClipID AudioClipEditor::getClip() const
@@ -511,21 +517,18 @@ ClipID AudioClipEditor::getClip() const
     return getAudioClip (context, clip).has_value() ? clip : ClipID();
 }
 
-void AudioClipEditor::setClip (ClipID toShow, bool keepView)
+void AudioClipEditor::setClip (ClipID toShow)
 {
     fieldDrag = nullptr;
     clip = getAudioClip (context, toShow).has_value() ? toShow : ClipID();
     refresh();
-
-    if (! keepView && info.has_value())
-        zoomToClip();
 }
 
 void AudioClipEditor::refresh()
 {
     info = clip.isValid() ? getAudioClip (context, clip) : std::nullopt;
     updateControls();
-    updateScrollBar();
+    fitView(); // wherever the clip and its audio are now in the song
     waveform->clipChanged();
 
     // Tracktion says nothing when it has prepared the audio: look again until it has.
@@ -597,11 +600,14 @@ void AudioClipEditor::updateControls()
     clipLabel.setText (text, juce::dontSendNotification);
 }
 
-void AudioClipEditor::zoomToClip()
+void AudioClipEditor::fitView()
 {
-    const auto& range = info->clip.range;
-    const auto margin = range.getLength() * zoomMargin;
-    zoomTo ({ range.getStart() - margin, range.getEnd() + margin });
+    if (! info.has_value() || waveform->getWidth() <= 0)
+        return;
+
+    const auto shown = getContentRange();
+    const auto margin = shown.getLength() * viewMargin;
+    zoomTo ({ shown.getStart() - margin, shown.getEnd() + margin });
 }
 
 //==============================================================================
@@ -667,7 +673,6 @@ void AudioClipEditor::resized()
     const auto toolbar = layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
     clipLabel.setBounds (toolbar.withTrimmedLeft (Space::s));
 
-    horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (panelWidth));
     auto panel = area.removeFromLeft (panelWidth).reduced (Space::s);
 
     const auto nextRow = [&panel]
@@ -692,22 +697,10 @@ void AudioClipEditor::resized()
 
     ruler.setBounds (area.removeFromTop (rulerHeight));
     waveform->setBounds (area);
-    setViewStart (getView().start);
-}
 
-void AudioClipEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
-{
-    // Ctrl+wheel zooms around the pointer, as in the playlist; otherwise the wheel scrolls through the song, as nothing here
-    // scrolls up and down.
-    if (e.mods.isCommandDown())
-    {
-        zoomByWheel (e.getEventRelativeTo (waveform.get()).position.x, wheel.deltaY);
-        return;
-    }
-
-    const auto sideways = juce::exactlyEqual (wheel.deltaX, 0.0f) ? wheel.deltaY : wheel.deltaX;
-
-    if (! juce::exactlyEqual (sideways, 0.0f))
-        scrollByWheel (sideways);
+    if (info.has_value())
+        fitView();
+    else
+        setViewStart (getView().start);
 }
 } // namespace phazite::ui

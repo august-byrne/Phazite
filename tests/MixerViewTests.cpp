@@ -9,6 +9,7 @@
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/MasterStrip.h"
 #include "ui/mixer/MixerView.h"
+#include "ui/mixer/StripParts.h"
 #include "ui/theme/DesignTokens.h"
 
 TEST_CASE ("The mixer's strips keep their parts apart, however short the window is")
@@ -91,6 +92,54 @@ TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks 
     CHECK (buttonsIn ("Effects").contains (reverb->getName()));
     CHECK (buttonsIn ("Effects").contains ("+ Effect"));
     phazite::test::checkChildrenApart (strip);
+}
+
+TEST_CASE ("A strip lists its devices a line each, with no knobs, over a fader as tall in every strip")
+{
+    // The owner (2026-10-30): the mixer showed knobs for effects' parameters, and a strip with many effects squeezed its
+    // fader shorter than its neighbours'.
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    edit->ensureNumberOfAudioTracks (2);
+    auto* busy = te::getAudioTracks (*edit)[0];
+
+    for (int i = 0; i < 6; ++i)
+        REQUIRE (phazite::insertDevice (*busy, edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {})) != nullptr);
+
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, edit.get());
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::MixerView mixer { commands, context };
+    phazite::test::TestWindow window { mixer, 900, 700 };
+    phazite::test::dispatchPendingMessages();
+
+    for (const auto height : { 700, 420 })
+    {
+        CAPTURE (height);
+        window.setSize (900, height);
+        const auto strips = phazite::test::findAll<phazite::ui::ChannelStrip> (mixer);
+        REQUIRE (strips.size() == 2);
+
+        const auto fader = [] (juce::Component& strip)
+        {
+            auto* found = phazite::test::findComponentWithTitle (strip, "Volume");
+            REQUIRE (found != nullptr);
+            return found->getHeight();
+        };
+
+        CHECK (fader (*strips[0]) == fader (*strips[1]));
+        CHECK (fader (*strips[0]) == phazite::ui::strip::faderHeight);
+
+        // The busy strip's six effects, each a line with its switch and name only; they scroll in what is left.
+        auto* effects = phazite::test::findComponentWithTitle (*strips[0], "Effects");
+        REQUIRE (effects != nullptr);
+        CHECK (phazite::test::findAll<phazite::ui::Knob> (*effects).isEmpty());
+        CHECK (effects->getHeight()
+               <= 6 * (phazite::ui::strip::slotNameHeight + phazite::ui::Space::xs) + phazite::ui::strip::buttonHeight);
+        phazite::test::checkChildrenApart (*strips[0]);
+    }
+
+    setEdit (context, nullptr);
 }
 
 TEST_CASE ("The mixer puts the returns next to the master, and outlines what the selected channel sends to")

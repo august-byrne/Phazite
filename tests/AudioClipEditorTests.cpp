@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The audio clip editor (src/ui/audioclip/AudioClipEditor.h), driven with the mouse as the user would: it shows the
-// selected audio clip in the song's bars; its edges trim the clip, its handles fade it and a drag moves the audio inside
-// it; its fields and switches change the clip's gain, pitch, direction and tempo; and every change is one undo step (the
-// roadmap's step 2.6: a vocal clip trimmed, faded, turned up, pitched and stretched to the tempo). And the editor dock's
-// first tab, which shows the piano roll or the audio clip editor as the selection asks, named for what it shows.
+// selected audio clip's whole audio, and stays on it; its edges trim the clip, its handles fade it and a drag moves the
+// clip along its audio; its fields and switches change the clip's gain, pitch, direction and tempo; and every change is
+// one undo step (the roadmap's step 2.6: a vocal clip trimmed, faded, turned up, pitched and stretched to the tempo). And
+// the editor dock's first tab, which shows the piano roll or the audio clip editor as the selection asks, named for what
+// it shows.
 #include "UiTestHelpers.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/internal/Clips.h"
@@ -186,14 +187,59 @@ TEST_CASE ("In the audio clip editor, the clip's edges trim it and its handles f
     CHECK (screen.get().clip.fadeOut == doctest::Approx (1.0 / 6.0).epsilon (0.01));
     CHECK (screen.describeUndo() == juce::String ("Undo Fade Out"));
 
-    // The audio, dragged a beat later inside the clip, which stays where it is.
+    // The clip, dragged a beat later along its audio: it plays from a beat later in it, and stays where it is in the song,
+    // so its audio starts a beat earlier there. The audio stays where it was on the screen.
     mouse.pause();
-    mouse.press ({ screen.xOf (8.0), middleY });
-    mouse.dragTo ({ screen.xOf (9.0), middleY });
+    const auto audioStartX = screen.xOf (screen.get().content.getStart().inBeats());
+    const auto pressX = screen.xOf (8.0), beatWidth = screen.xOf (9.0) - pressX;
+    mouse.press ({ pressX, middleY });
+    mouse.dragTo ({ pressX + beatWidth / 2, middleY });
+    mouse.dragTo ({ pressX + beatWidth, middleY });
     mouse.release();
-    CHECK (screen.get().content.getStart().inBeats() == doctest::Approx (5.0));
+    CHECK (screen.get().content.getStart().inBeats() == doctest::Approx (3.0));
     CHECK (screen.get().clip.range.getStart().inBeats() == doctest::Approx (5.0));
     CHECK (screen.describeUndo() == juce::String ("Undo Slip Clip"));
+    CHECK (std::abs (screen.xOf (screen.get().content.getStart().inBeats()) - audioStartX) <= 1);
+}
+
+TEST_CASE ("The audio clip editor shows the clip's whole audio and stays on it: no scrolling or zooming, wherever the clip goes")
+{
+    // The owner (2026-10-30): it scrolled like a playlist, so the clip could be lost in it, and selecting the clip again
+    // didn't bring it back.
+    EditorScreen screen;
+    screen.editor.showClip (screen.vocal);
+    phazite::test::dispatchPendingMessages();
+    auto& waveform = screen.waveform();
+
+    // The audio, from beat 4 to 12, fills the width, but for a narrow margin either side for the edges' grips.
+    const auto fills = [&]
+    {
+        const auto content = screen.get().content;
+        const auto left = screen.xOf (content.getStart().inBeats()), right = screen.xOf (content.getEnd().inBeats());
+        return left > 0 && left < waveform.getWidth() / 20 && right < waveform.getWidth() && right > waveform.getWidth() * 19 / 20;
+    };
+
+    CHECK (fills());
+
+    // The wheel, with or without Ctrl, and the zoom and centre commands, leave it.
+    phazite::test::Mouse mouse (waveform);
+    const auto start = screen.editor.getView().start;
+    mouse.wheel (waveform.getLocalBounds().getCentre(), -0.5f);
+    mouse.wheel (waveform.getLocalBounds().getCentre(), 0.5f, juce::ModifierKeys::commandModifier);
+    screen.editor.zoom (2.0);
+    screen.editor.centreOnPlayhead();
+    CHECK (screen.editor.getView().start == start);
+    CHECK (fills());
+
+    // Moved later in the song, it still fills the width.
+    phazite::moveClip (screen.context, screen.vocal, BeatPosition::fromBeats (40.0), phazite::getTrackID (*screen.b));
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.get().content.getStart().inBeats() == doctest::Approx (40.0));
+    CHECK (fills());
+
+    // A narrower editor too.
+    screen.window.setSize (600, 400);
+    CHECK (fills());
 }
 
 TEST_CASE ("In the audio clip editor, a vocal is turned up, pitched, reversed and stretched to the tempo, each change one undo step")

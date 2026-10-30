@@ -87,7 +87,7 @@ juce::DragAndDropTarget::SourceDetails dragOf (const juce::var& description, juc
 }
 } // namespace
 
-TEST_CASE ("Ctrl-clicking devices' names selects them, Group into Container groups them, and its slot shows its macros")
+TEST_CASE ("Ctrl-clicking devices' names selects them, and Group into Container groups them into one slot")
 {
     Song song;
     phazite::ui::ChannelStrip strip { song.commands, song.context };
@@ -113,12 +113,11 @@ TEST_CASE ("Ctrl-clicking devices' names selects them, Group into Container grou
     REQUIRE (song.registry.invoke ("device.group"));
     CHECK (song.describeUndo() == juce::String ("Undo Group into Container"));
 
-    // The strip shows the container, with its mix and its first macros as knobs.
+    // The strip shows the container in one slot of one line, as any device: its macros and mix are in the Devices view.
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (strip, "Container") != nullptr; }));
     CHECK (phazite::test::findComponentWithTitle (strip, "EQ") == nullptr);
-    CHECK (phazite::test::findComponentWithTitle (strip, "Macro 1") != nullptr);
-    CHECK (phazite::test::findComponentWithTitle (strip, "Macro 2") != nullptr);
-    CHECK (phazite::test::findComponentWithTitle (strip, "Mix") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (strip, "Macro 1") == nullptr);
+    CHECK (phazite::test::findAll<phazite::ui::Knob> (*phazite::test::findComponentWithTitle (strip, "Effects")).isEmpty());
     phazite::test::checkChildrenApart (strip);
 }
 

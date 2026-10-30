@@ -553,6 +553,9 @@ void TimelineEditor::setTimeOrigin (BeatPosition newOrigin)
 
 void TimelineEditor::zoomAround (double x, double factor)
 {
+    if (isViewFixed())
+        return;
+
     view.zoomAround (x, factor);
     setViewStart (view.start);
     updateGridControls(); // an adaptive grid's size changes with the zoom
@@ -597,6 +600,9 @@ void TimelineEditor::zoomToFit()
 
 void TimelineEditor::centreOnPlayhead()
 {
+    if (isViewFixed())
+        return;
+
     setViewStart (getPlayheadBeat() - BeatDuration::fromBeats (getTimelineArea().getWidth() / 2.0 / view.pixelsPerBeat));
 }
 
@@ -662,6 +668,9 @@ void TimelineEditor::zoomByWheel (float x, float wheelDelta)
 
 void TimelineEditor::scrollByWheel (float wheelDelta)
 {
+    if (isViewFixed())
+        return;
+
     setViewStart (view.xToBeat (-getWheelNotches (wheelDelta) * scrollPerNotch));
 }
 
@@ -675,7 +684,7 @@ bool TimelineEditor::autoScroll (juce::Point<int> position, juce::Rectangle<int>
 
     auto scrolled = false;
 
-    if (directions != ScrollDirections::upAndDown)
+    if (directions != ScrollDirections::upAndDown && ! isViewFixed())
     {
         if (const auto speed = getAutoScrollSpeed (position.x - area.getX(), area.getWidth()); ! juce::exactlyEqual (speed, 0.0))
         {
@@ -925,7 +934,7 @@ void TimelineEditor::timerCallback()
 void TimelineEditor::followPlayhead()
 {
     // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end).
-    if (followPlayback && isPlaying (timelineContext) && ! horizontalScrollBar.isMouseButtonDown())
+    if (followPlayback && ! isViewFixed() && isPlaying (timelineContext) && ! horizontalScrollBar.isMouseButtonDown())
     {
         const auto beat = getPlayheadBeat();
         const auto width = getTimelineArea().getWidth();

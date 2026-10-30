@@ -58,9 +58,6 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    // In a mixer slot: the size of the voice, and its consonants.
-    constexpr std::string_view keyControls[] = { "formant", "unvoiced" };
-
     constexpr double buzzHertz = 130.8127826502993; // C3
     constexpr double sectionShare = 0.6435942529;   // each band's two sections' Q, of the band's: sqrt (sqrt (2) - 1)
     constexpr float closed = 3.16e-4f;              // -70 dB: a band of the voice quieter than this plays nothing
@@ -94,7 +91,6 @@ const DeviceInfo Vocoder::info { .typeID = typeID,
                                  .name = "Vocoder",
                                  .kind = DeviceKind::effect,
                                  .parameters = parameters,
-                                 .keyControls = keyControls,
                                  .hasSidechain = true };
 
 int Vocoder::getNumBands (std::span<const float> values)

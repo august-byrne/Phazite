@@ -119,7 +119,8 @@ std::optional<DeviceSlot> getInstrument (const ProjectContext&, TrackID);
 std::vector<DeviceSlot> getEffects (const ProjectContext&, TrackID);
 bool canHoldInstrument (const ProjectContext&, TrackID); // a track that isn't a return
 
-// As a slot's small knobs: a device's key parameters, or a container's first macros.
+// A plug-in's key parameters, which its card in the Devices view shows open, its own controls being in its window; none
+// for Phazite's own devices, whose editors show them all, or a container, which shows its macros.
 std::vector<ParameterHandle> getKeyControls (ProjectContext&, DeviceID, int maximum);
 MixHandle getMix (ProjectContext&, DeviceID);
 

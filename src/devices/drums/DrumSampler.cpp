@@ -128,9 +128,6 @@ namespace
 
     constexpr auto parameters = makeParameters();
 
-    // In a mixer slot: the kick's and snare's levels.
-    constexpr std::string_view keyControls[] = { "pad1Level", "pad3Level" };
-
     using drums::makeClap;
     using drums::makeHat;
     using drums::makeKick;
@@ -188,11 +185,7 @@ namespace
     }
 } // namespace
 
-const DeviceInfo DrumSampler::info { .typeID = typeID,
-                                     .name = "Drum Sampler",
-                                     .kind = DeviceKind::instrument,
-                                     .parameters = parameters,
-                                     .keyControls = keyControls };
+const DeviceInfo DrumSampler::info { .typeID = typeID, .name = "Drum Sampler", .kind = DeviceKind::instrument, .parameters = parameters };
 
 const DrumSampler::Sound& DrumSampler::getKitSound (int pad)
 {

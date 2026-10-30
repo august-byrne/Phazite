@@ -73,7 +73,6 @@ void MasterStrip::timerCallback()
         return;
 
     volumeAttachment.update();
-    effects.updateValues();
 
     // LUFS to one decimal, or a dash until enough has been measured.
     juce::String text;
@@ -154,8 +153,8 @@ void MasterStrip::resized()
     loudness.setBounds (readout);
     area.removeFromBottom (Space::s);
 
-    // The fader, and above it the effects, which scroll. (The mixer keeps the strip at least getMinimumHeight() tall.)
-    const auto faderHeight = getFaderHeight (area.getHeight(), Space::xs + minSlotsHeight);
+    // The fader, as tall as the channels', and above it the effects, which scroll. (The mixer keeps the strip at least
+    // getMinimumHeight() tall.)
     auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);
@@ -168,8 +167,8 @@ void MasterStrip::resized()
 
 int MasterStrip::getMinimumHeight()
 {
-    // As resized() lays it out: the name, a heading and a button, the shortest fader and the loudness readout.
-    return 2 * Space::s + controlHeight + minSlotsHeight + Space::xs + minFaderHeight + Space::s + loudnessHeight;
+    // As resized() lays it out: the name, a heading and a button, the fader and the loudness readout.
+    return 2 * Space::s + controlHeight + minSlotsHeight + Space::xs + faderHeight + Space::s + loudnessHeight;
 }
 
 } // namespace phazite::ui

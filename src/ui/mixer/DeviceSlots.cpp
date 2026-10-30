@@ -49,8 +49,9 @@ namespace
 } // namespace
 
 //==============================================================================
-// A device: its name, which shows it in the Devices view (right-click for more), an on/off switch, its key controls, and
-// how far it turns the sound down if it does.
+// A device, on one line (the owner, 2026-10-30: the mixer lists devices, the Devices view controls them): an on/off
+// switch, its name, which shows it in the Devices view (right-click for more), and how far it turns the sound down if it
+// does.
 struct DeviceSlots::Slot : public juce::Component
 {
     Slot (DeviceSlots& o, const DeviceSlot& device)
@@ -65,6 +66,9 @@ struct DeviceSlots::Slot : public juce::Component
 
         nameButton.onClickedWith = [this] (const juce::ModifierKeys& mods)
         {
+            if (std::exchange (dragged, false)) // a drag that moved it, let go over its name
+                return;
+
             if (mods.isPopupMenu())
                 owner.showSlotMenu (shown);
             else if (mods.isCommandDown() || mods.isShiftDown())
@@ -79,16 +83,33 @@ struct DeviceSlots::Slot : public juce::Component
         power.setClickingTogglesState (true);
         power.onClick = [this] { setDeviceOn (owner.context, shown.id, power.getToggleState()); };
 
-        // An effect's mix first, as FL Studio's mixer slots have it, then its key controls (a container's: its macros).
-        if (owner.kind != Kind::instrument && device.hasMix)
-            addMixKnob (*this, knobs, mixAttachment, owner.context, device);
-
-        for (auto& control : getKeyControls (owner.context, device.id, keyControlsPerDevice))
-            addParameterKnob (*this, knobs, attachments, std::move (control));
+        // An effect moves by a drag on its name, up or down among the channel's effects.
+        if (owner.kind == Kind::effects)
+            nameButton.addMouseListener (this, false);
 
         addAndMakeVisible (nameButton);
         addAndMakeVisible (power);
         show (device);
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (e.eventComponent != &nameButton || dragged || ! e.mods.isLeftButtonDown() || shown.frozen
+            || e.getDistanceFromDragStart() < dragThreshold)
+            return;
+
+        if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
+        {
+            dragged = true;
+            container->startDragging (describeEffectDrag (shown.id), &nameButton);
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        // Let go away from its name, the button hears no click to forget.
+        if (e.eventComponent == &nameButton && ! nameButton.getLocalBounds().contains (e.getPosition()))
+            dragged = false;
     }
 
     // Its name and switch, as they are now.
@@ -104,30 +125,16 @@ struct DeviceSlots::Slot : public juce::Component
             owner.kind == Kind::instrument ? juce::String ("replace or remove it") : juce::String ("move, group or remove it");
         const auto listens =
             device.sidechain.track.isValid() ? ". Listens to " + device.sidechain.name + " (its sidechain)" : juce::String();
+        const auto moves = owner.kind == Kind::effects ? juce::String ("; drag it up or down to move it") : juce::String();
         nameButton.setTooltip (device.frozen ? "Frozen with its track: unfreeze the track (its snowflake) to change it"
                                              : "Shows " + what + listens
-                                                   + ". Ctrl-click to select it with others; right-click to turn it off, " + more);
+                                                   + ". Ctrl-click to select it with others; right-click to turn it off, " + more + moves);
         power.setToggleState (device.isOn, juce::dontSendNotification);
 
-        // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
+        // A frozen device's sound is in its track's file: its switch is off until the track is unfrozen.
         power.setEnabled (! device.frozen);
-
-        for (auto* knob : knobs)
-        {
-            knob->setEnabled (! device.frozen);
-            knob->setAlpha (device.frozen ? FrozenTint::frozenDevice : 1.0f);
-        }
-
+        nameButton.setAlpha (device.frozen ? FrozenTint::frozenDevice : 1.0f);
         repaint();
-    }
-
-    void updateValues()
-    {
-        for (auto* attachment : attachments)
-            attachment->update();
-
-        if (mixAttachment != nullptr)
-            mixAttachment->update();
     }
 
     // A selected device, behind its controls; and along its left edge, the colour of the track its sidechain listens to.
@@ -153,26 +160,17 @@ struct DeviceSlots::Slot : public juce::Component
         if (reductionMeter != nullptr)
             reductionMeter->setBounds (area.removeFromRight (reductionMeterWidth).reduced (0, 2));
 
-        auto top = area.removeFromTop (slotNameHeight);
-        power.setBounds (top.removeFromRight (slotPowerWidth));
-        nameButton.setBounds (top.withTrimmedRight (2));
-
-        if (knobs.isEmpty())
-            return;
-
-        const auto knobWidth = area.getWidth() / knobs.size();
-
-        for (auto* knob : knobs)
-            knob->setBounds (area.removeFromLeft (knobWidth).reduced (2, 1));
+        power.setBounds (area.removeFromRight (slotPowerWidth));
+        nameButton.setBounds (area.withTrimmedRight (2));
     }
+
+    static constexpr int dragThreshold = 5; // pixels a press on its name moves before it carries the device
 
     DeviceSlots& owner;
     DeviceSlot shown;
+    bool dragged = false; // its name dragged since the mouse went down: the click that ends it isn't one
     MenuButton nameButton;
     juce::TextButton power;
-    juce::OwnedArray<Knob> knobs;
-    juce::OwnedArray<ParameterAttachment> attachments;
-    std::unique_ptr<MixAttachment> mixAttachment;   // an effect's, for its first knob
     std::unique_ptr<ReductionMeter> reductionMeter; // a device's that turns the sound down
 };
 
@@ -245,12 +243,6 @@ void DeviceSlots::refreshNeed()
         updateAddButton();
 }
 
-void DeviceSlots::updateValues()
-{
-    for (auto* slot : slots)
-        slot->updateValues();
-}
-
 void DeviceSlots::rebuild (const std::vector<DeviceSlot>& devices)
 {
     slots.clear();
@@ -301,12 +293,7 @@ void DeviceSlots::lookAndFeelChanged()
 
 int DeviceSlots::getPreferredHeight() const
 {
-    auto height = addButton.isVisible() ? buttonHeight : 0;
-
-    for (auto* slot : slots)
-        height += slotNameHeight + (slot->knobs.isEmpty() ? 0 : slotKnobHeight) + Space::xs;
-
-    return height;
+    return (addButton.isVisible() ? buttonHeight : 0) + slots.size() * (slotNameHeight + Space::xs);
 }
 
 void DeviceSlots::resized()
@@ -315,11 +302,67 @@ void DeviceSlots::resized()
 
     for (auto* slot : slots)
     {
-        slot->setBounds (area.removeFromTop (slotNameHeight + (slot->knobs.isEmpty() ? 0 : slotKnobHeight)));
+        slot->setBounds (area.removeFromTop (slotNameHeight));
         area.removeFromTop (Space::xs);
     }
 
     addButton.setBounds (area.removeFromTop (buttonHeight));
+}
+
+void DeviceSlots::paintOverChildren (juce::Graphics& g)
+{
+    // Where a dragged effect would go: a line between the slots.
+    if (dropIndex < 0 || slots.isEmpty())
+        return;
+
+    const auto y = dropIndex < slots.size() ? slots[dropIndex]->getY() - Space::xs / 2 : slots.getLast()->getBottom() + Space::xs / 2;
+    g.setColour (getPalette (*this).accent);
+    g.fillRect (0, y - 1, getWidth(), 2);
+}
+
+bool DeviceSlots::isInterestedInDragSource (const SourceDetails& details)
+{
+    const auto effect = getDraggedEffect (details.description);
+    return kind == Kind::effects && effect.has_value()
+           && std::find (shownDevices.begin(), shownDevices.end(), *effect) != shownDevices.end();
+}
+
+int DeviceSlots::getDropIndex (juce::Point<int> position) const
+{
+    for (int i = 0; i < slots.size(); ++i)
+        if (position.y < slots[i]->getBounds().getCentreY())
+            return i;
+
+    return slots.size();
+}
+
+void DeviceSlots::itemDragMove (const SourceDetails& details)
+{
+    if (const auto index = getDropIndex (details.localPosition); index != dropIndex)
+    {
+        dropIndex = index;
+        repaint();
+    }
+}
+
+void DeviceSlots::itemDragExit (const SourceDetails&)
+{
+    dropIndex = -1;
+    repaint();
+}
+
+void DeviceSlots::itemDropped (const SourceDetails& details)
+{
+    const auto index = getDropIndex (details.localPosition);
+    dropIndex = -1;
+    repaint();
+
+    if (const auto effect = getDraggedEffect (details.description))
+        if (const auto places = getPlacesMoved (shownDevices, *effect, index); places != 0)
+        {
+            moveEffect (context, *effect, places);
+            refresh(); // at once, before the song's change comes
+        }
 }
 
 void DeviceSlots::showAddMenu()
@@ -358,6 +401,35 @@ void DeviceSlots::showSlotMenu (const DeviceSlot& device)
                         if (safeThis != nullptr)
                             safeThis->refresh();
                     });
+}
+
+//==============================================================================
+juce::var describeEffectDrag (DeviceID device)
+{
+    return "phazite-effect:" + juce::String ((juce::int64) device.getRaw());
+}
+
+std::optional<DeviceID> getDraggedEffect (const juce::var& description)
+{
+    const auto text = description.toString();
+
+    if (! text.startsWith ("phazite-effect:"))
+        return {};
+
+    const auto raw = text.fromFirstOccurrenceOf (":", false, false).getLargeIntValue();
+    return raw > 0 ? std::optional (DeviceID::fromRaw ((std::uint64_t) raw)) : std::nullopt;
+}
+
+int getPlacesMoved (const std::vector<DeviceID>& order, DeviceID device, int insertionIndex)
+{
+    const auto from = (int) (std::find (order.begin(), order.end(), device) - order.begin());
+
+    if (from == (int) order.size())
+        return 0;
+
+    // Before a device after it: the device leaves its place first, so it lands one before.
+    const auto to = juce::jlimit (0, (int) order.size() - 1, insertionIndex > from ? insertionIndex - 1 : insertionIndex);
+    return to - from;
 }
 
 //==============================================================================

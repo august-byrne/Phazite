@@ -66,9 +66,6 @@ TEST_CASE ("Devices go before the fader, instruments first")
 
     phazite::removeDevice (*reverb);
     CHECK (phazite::getDevices (*mix.a).size() == 2);
-
-    // A device's slot shows its first parameters.
-    CHECK (phazite::getKeyControls (*delay, 2).size() == 2);
 }
 
 TEST_CASE ("A track's instrument plays its notes, and its effects come after it")
@@ -281,10 +278,6 @@ TEST_CASE ("Phazite's effects have a mix of their own, and name their key contro
     CHECK (eq->getAutomatableParameterByID ("mix")->getCurrentValue() == doctest::Approx (0.3f));
     REQUIRE (phazite::getMixParameters (*eq).size() == 1);
     CHECK (phazite::getMixParameters (*eq)[0]->paramID == juce::String ("mix"));
-
-    // The EQ's slot shows its low and high shelves' gains.
-    CHECK (phazite::getKeyControls (*eq, 2) == juce::StringArray { "band2Gain", "band7Gain" });
-    CHECK (phazite::getKeyControls (*eq, 1) == juce::StringArray { "band2Gain" });
 }
 
 TEST_CASE ("A folder's bus switch makes it a bus that stays one, and plain again while it has no effects")

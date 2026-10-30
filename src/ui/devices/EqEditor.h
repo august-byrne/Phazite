@@ -21,15 +21,11 @@ namespace phazite::ui
 {
 class EqEditor : public juce::Component,
                  public FlexibleHeight,
-                 public ShowsPictureOnly,
                  private DisplayTicker::Display
 {
 public:
     explicit EqEditor (const DeviceHandle&);
     ~EqEditor() override;
-
-    void showPictureOnly() override; // its graph, filling it
-    bool isPictureOnly() const noexcept override { return pictureOnly; }
 
     static constexpr int numKnobs = 4; // the band's frequency, gain and Q, and the EQ's output
 
@@ -58,7 +54,6 @@ private:
     std::vector<ParameterHandle> parameters; // every parameter, in the EQ's order, for the curve
     std::vector<float> values;
     int selectedBand = 2;
-    bool pictureOnly = false;
 
     std::unique_ptr<Graph> graph;
     juce::OwnedArray<juce::TextButton> bandButtons;

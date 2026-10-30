@@ -14,6 +14,7 @@
 namespace phazite::ui
 {
 class MixerView : public juce::Component,
+                  public juce::DragAndDropContainer, // an effect dragged by its name in a strip, to move it
                   private juce::ChangeListener,
                   private ProjectContext::Listener,
                   private juce::Timer

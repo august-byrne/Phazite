@@ -109,9 +109,6 @@ namespace
 
     static_assert (std::size (parameters) == (size_t) Synth::level + 1);
 
-    // In a mixer slot: the filter, the synth's most played-with controls.
-    constexpr std::string_view keyControls[] = { "cutoff", "resonance" };
-
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
     constexpr std::uint32_t noiseSeed = 0x51a7e5u, unisonSeed = 0x0715e5u;
     constexpr double lowestCutoff = 20.0; // where the filter's envelope, keys and LFO can take it, at the lowest
@@ -123,11 +120,7 @@ namespace
     }
 } // namespace
 
-const DeviceInfo Synth::info { .typeID = typeID,
-                               .name = "Synth",
-                               .kind = DeviceKind::instrument,
-                               .parameters = parameters,
-                               .keyControls = keyControls };
+const DeviceInfo Synth::info { .typeID = typeID, .name = "Synth", .kind = DeviceKind::instrument, .parameters = parameters };
 
 void Synth::prepare (double newSampleRate, int)
 {

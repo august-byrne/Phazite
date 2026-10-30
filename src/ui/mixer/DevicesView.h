@@ -5,10 +5,10 @@
 // channel's name and its modulators and macros (the one whose name is clicked opens its editor beside them). The
 // Instrument page shows the instrument as wide as the dock, under a header in the track's colour, its editor wrapping into
 // rows where it is narrower and scrolling up and down, or a button that chooses one. The Effects page shows each effect as
-// a card: folded, its header (an on/off switch, a chevron, its name: click to select it, right-click for its menu) over its
-// key knobs; one at a time opened to its whole editor (or a container's macros and devices, cards again), so that a long
-// chain stays short; a plug-in's card keeps its key knobs, its controls being in its own window. A button after them adds
-// an effect.
+// a card: folded, narrow, with only what every effect has, one under another (an on/off switch, a chevron, its name: click
+// to select it, right-click for its menu, drag to move it; its sidechain, its mix and its window's button); one at a time
+// opened to its whole editor (a container's macros and devices, cards again; a plug-in's key knobs, its controls being in
+// its own window), so that a long chain stays short. A button after them adds an effect.
 #pragma once
 
 #include "DeviceSlots.h"

@@ -174,19 +174,3 @@ TEST_CASE ("How far the compressor turns the sound down reads the same for any n
     const auto seconds = (float) ((juce::Time::getMillisecondCounterHiRes() - start) / 1000.0);
     CHECK (reduction->get() == doctest::Approx (first - 15.0f * seconds).epsilon (0.06));
 }
-
-TEST_CASE ("On a folded card, the compressor shows its history alone, which shows its ducking")
-{
-    Song song;
-    auto picture = phazite::ui::createDevicePicture (phazite::makeDeviceHandle (*song.compressor));
-    auto* editor = dynamic_cast<phazite::ui::CompressorEditor*> (picture.get());
-    REQUIRE (editor != nullptr);
-    CHECK (editor->isPictureOnly());
-    phazite::test::TestWindow window (*editor, 168, 140);
-    CHECK (editor->getHistory().isShowing());
-    CHECK (editor->getHistory().getBounds() == editor->getLocalBounds());
-    CHECK_FALSE (editor->getGraph().isShowing());
-
-    for (auto* knob : phazite::test::findAll<phazite::ui::Knob> (*editor))
-        CHECK_FALSE (knob->isShowing());
-}
