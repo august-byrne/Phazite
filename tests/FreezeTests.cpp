@@ -370,7 +370,7 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK (phazite::getDevices (*bounced).isEmpty());
 
     // The original, muted and collapsed; one undo step, which takes it all back, mute included, though a mute alone is no
-    // undo step (and Tracktion, which plays it, keeps it outside its undo history).
+    // undo step (and Tracktion, which plays it, keeps it outside its undo history); Redo brings it back.
     CHECK (phazite::isTrackMuted (*song.bass, false));
     CHECK (song.bass->isMuted (false));
     CHECK (phazite::isCollapsed (*song.bass));
@@ -379,6 +379,11 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK (te::getAudioTracks (song.edit()).size() == 2);
     CHECK_FALSE (phazite::isTrackMuted (*song.bass, false));
     CHECK_FALSE (song.bass->isMuted (false));
+    REQUIRE (phazite::canRedo (song.edit()));
+    phazite::redo (song.edit());
+    CHECK (phazite::getPlaylistTracks (song.edit()).size() == 3);
+    CHECK (phazite::isTrackMuted (*song.bass, false));
+    CHECK (song.bass->isMuted (false));
 }
 
 namespace

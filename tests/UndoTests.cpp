@@ -3,6 +3,7 @@
 // joins a step already in progress for the same Edit, and a drag is a Gesture.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
 
@@ -149,6 +150,47 @@ TEST_CASE ("Undo and redo say what they would undo")
     CHECK (phazite::canUndo (*edit));
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo"));
     CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Undo"));
+}
+
+TEST_CASE ("An undo that puts back what devices play keeps what it undid to redo")
+{
+    auto edit = createEdit();
+    auto* track = phazite::ensureTracks (*edit, 1).getFirst();
+    REQUIRE (track != nullptr);
+
+    SUBCASE ("A fader turned on a track the step added, which the undo takes away")
+    {
+        {
+            const phazite::UndoStep step (*edit, "Add and Turn");
+            auto* added = phazite::insertPlainTrack (*edit, track);
+            REQUIRE (added != nullptr);
+            added->getVolumePlugin()->setVolumeDb (-6.0f);
+        }
+
+        phazite::undo (*edit);
+        CHECK (phazite::ensureTracks (*edit, 1).size() == 1);
+        REQUIRE (phazite::canRedo (*edit));
+        phazite::redo (*edit);
+        const auto tracks = phazite::ensureTracks (*edit, 1);
+        REQUIRE (tracks.size() == 2);
+        CHECK (tracks[1]->getVolumePlugin()->getVolumeDb() == doctest::Approx (-6.0f).epsilon (0.01));
+    }
+
+    SUBCASE ("A fader turned for the first time")
+    {
+        const auto before = track->getVolumePlugin()->getVolumeDb();
+
+        {
+            const phazite::UndoStep step (*edit, "Turn");
+            track->getVolumePlugin()->setVolumeDb (-6.0f);
+        }
+
+        phazite::undo (*edit);
+        CHECK (track->getVolumePlugin()->getVolumeDb() == doctest::Approx (before));
+        REQUIRE (phazite::canRedo (*edit));
+        phazite::redo (*edit);
+        CHECK (track->getVolumePlugin()->getVolumeDb() == doctest::Approx (-6.0f).epsilon (0.01));
+    }
 }
 
 TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back leaves nothing to undo or redo")

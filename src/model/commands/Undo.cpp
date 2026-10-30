@@ -43,16 +43,12 @@ namespace
                 parameter->removeListener (this);
         }
 
+        // Those still in the Edit, and those of devices and modulators the undo or redo brought back too: it puts back what
+        // they stored after making them. Not those of devices it took away, which play nowhere.
         void play (te::Edit& edit)
         {
-            for (auto* parameter : changed)
-                if (parameter->getCurve().getNumPoints() == 0)
-                    parameter->updateFromAttachedValue();
-
-            // Those of devices and modulators the undo or redo brought back too: it puts back what they stored after
-            // making them.
             for (auto* parameter : getAllParameters (edit))
-                if (! before.contains (parameter) && parameter->getCurve().getNumPoints() == 0)
+                if ((changed.contains (parameter) || ! before.contains (parameter)) && parameter->getCurve().getNumPoints() == 0)
                     parameter->updateFromAttachedValue();
         }
 
@@ -74,6 +70,12 @@ namespace
         undoOrRedoIt();
         changes.play (edit);
         mirror::reconcileTrackSwitches (edit);
+
+        // A parameter plays a value by writing it into its device's state through the undo manager, which records it when
+        // the undo took the stored one away (a knob turned for the first time goes back to its default). Taken back at
+        // once, which gives back what there is to redo: JUCE puts that aside when anything is done after an undo.
+        if (auto& undoManager = edit.getUndoManager(); undoManager.getNumActionsInCurrentTransaction() > 0)
+            undoManager.undoCurrentTransactionOnly();
     }
 
     // The undo managers of the Edits with a gesture in progress (message thread only).
