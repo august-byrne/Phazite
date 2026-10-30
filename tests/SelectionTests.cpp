@@ -10,6 +10,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/internal/Project.h"
 
 #include <algorithm>
 
@@ -26,11 +27,11 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
-        a->setName ("A");
-        b->setName ("B");
+        phazite::setTrackName (*a, "A");
+        phazite::setTrackName (*b, "B");
         selection.setEdit (edit.get());
 
         first = phazite::insertMidiClip (*a, { beats (0.0), beats (4.0) }, nullptr);
@@ -79,7 +80,7 @@ struct Song
         return parts.joinIntoString (" ");
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::NoteIDKeeper noteIDs { *edit }; // as the project context gives the notes added their IDs, which select them
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;

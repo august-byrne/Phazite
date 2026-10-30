@@ -9,7 +9,9 @@
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/mixer/DevicesView.h"
@@ -26,7 +28,7 @@ struct EditorScreen
 {
     EditorScreen()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
         setEdit (context, edit.get());
@@ -82,7 +84,7 @@ struct EditorScreen
     }
 
     phazite::test::TemporaryFolder temp;
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
     phazite::ClipID midi, vocal;

@@ -8,6 +8,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/Export.h"
 #include "model/project/internal/Export.h"
+#include "model/project/internal/Project.h"
 #include "services/Settings.h"
 #include "ui/shell/ExportPanel.h"
 
@@ -33,7 +34,7 @@ struct SineSong
     phazite::test::TemporaryFolder temp;
     const juce::File sound = phazite::test::writeSound (temp.folder.getChildFile ("Sine.wav"), 2.0);
     const juce::File renders = temp.folder.getChildFile ("Renders");
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::WaveAudioClip::Ptr clip;
 };
 
@@ -275,7 +276,7 @@ struct Band
 {
     Band()
     {
-        edit->ensureNumberOfAudioTracks (6);
+        phazite::ensureTracks (*edit, 6);
         const auto tracks = te::getAudioTracks (*edit);
         kick = tracks[0];
         snare = tracks[1];
@@ -289,15 +290,15 @@ struct Band
         play (*bass, "Bass", 165.0);
         play (*pad, "Pad", 880.0);
         play (*lead, "Lead", 330.0);
-        empty->setName ("Empty");
-        pad->setMute (true);
+        phazite::setTrackName (*empty, "Empty");
+        phazite::setTrackMuted (*pad, true);
 
         drums = phazite::groupIntoFolder ({ kick, snare }, nullptr);
         REQUIRE (drums != nullptr);
-        drums->setName ("Drums");
+        phazite::setTrackName (*drums, "Drums");
         auto* plain = phazite::groupIntoFolder ({ lead }, nullptr);
         REQUIRE (plain != nullptr);
-        plain->setName ("Plain");
+        phazite::setTrackName (*plain, "Plain");
         phazite::setMixedAsBus (*plain, false);
 
         reverb = phazite::addReturnTrack (*edit, "Reverb", nullptr);
@@ -307,7 +308,7 @@ struct Band
 
     void play (te::AudioTrack& track, const juce::String& name, double frequency)
     {
-        track.setName (name);
+        phazite::setTrackName (track, name);
         const auto sound = phazite::test::writeSound (temp.folder.getChildFile (name + ".wav"), 2.0, frequency);
         REQUIRE (track.insertWaveClip (name, sound, { te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.5)) }, false)
                  != nullptr);
@@ -316,7 +317,7 @@ struct Band
     phazite::test::TemporaryFolder temp;
     const juce::File renders = temp.folder.getChildFile ("Renders");
     const juce::File folder = renders.getChildFile ("Band Stems");
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::AudioTrack *kick = nullptr, *snare = nullptr, *bass = nullptr, *pad = nullptr, *lead = nullptr, *empty = nullptr, *reverb = nullptr;
     te::FolderTrack* drums = nullptr;
 };
@@ -353,7 +354,7 @@ TEST_CASE ("Stems are the channels that reach the master and play something, in 
     CHECK (phazite::getStemsFolder (band.renders.getChildFile ("Band.wav")) == band.folder);
 
     // A solo leaves the others silent, and a return plays on (returns are solo-safe).
-    band.bass->setSolo (true);
+    phazite::setTrackSoloed (*band.bass, true);
     names.clear();
 
     for (auto* track : phazite::getStemTracks (*band.edit))
@@ -425,7 +426,7 @@ TEST_CASE ("A cancelled export of stems leaves no stems, and the folder that was
 
     // Nothing to export: no stems, and a reason.
     for (auto* track : std::initializer_list<te::Track*> { band.bass, band.lead, band.drums, band.reverb })
-        track->setMute (true);
+        phazite::setTrackMuted (*track, true);
 
     const auto report = exportAndWait (*band.edit, band.renders.getChildFile ("None"), stems());
     CHECK (report.result.failed());

@@ -4,10 +4,12 @@
 #include "UiTestHelpers.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/SongSelection.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
@@ -25,7 +27,7 @@ struct Screen
 {
     Screen()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         setEdit (context, edit.get());
         edit->getUndoManager().clearUndoHistory();
         phazite::test::dispatchPendingMessages();
@@ -45,7 +47,7 @@ struct Screen
                                [&text] (juce::TextButton* button) { return button->getButtonText() == text; });
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };

@@ -221,7 +221,8 @@ void removeDevice (te::Plugin& device)
     else
         device.deleteFromParent();
 
-    if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty() && ! folder->state.getProperty (schema::phaziteBus, false))
+    if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty()
+        && ! findTrackState (*folder).getProperty (schema::folderBus, false))
         makePlainFolder (*folder);
 }
 
@@ -383,17 +384,17 @@ te::Plugin* placeDevice (te::Edit& edit, te::Track* track, const te::Plugin::Ptr
                             && std::any_of (audioTrack->getClips().begin(), audioTrack->getClips().end(),
                                             [] (te::Clip* clip) { return dynamic_cast<te::AudioClipBase*> (clip) != nullptr; });
 
-    if (audioTrack == nullptr || getReturnBus (*audioTrack) >= 0 || holdsAudio)
+    if (audioTrack == nullptr || isReturnTrack (*audioTrack) || holdsAudio)
     {
         audioTrack = insertTrack (edit, track, selection);
 
         if (audioTrack == nullptr)
             return nullptr;
 
-        audioTrack->setName (device->getName());
+        setTrackName (*audioTrack, device->getName());
 
         if (const auto colour = getColourForName (device->getName()))
-            audioTrack->setColour (*colour);
+            setTrackColour (*audioTrack, *colour);
     }
 
     return setInstrument (*audioTrack, device);
@@ -410,7 +411,7 @@ void setMixedAsBus (te::FolderTrack& folder, bool bus)
     }
     else if (getDevices (folder).isEmpty())
     {
-        folder.state.removeProperty (schema::phaziteBus, &folder.edit.getUndoManager());
+        findTrackState (folder).removeProperty (schema::folderBus, &folder.edit.getUndoManager());
         makePlainFolder (folder);
     }
 }
@@ -452,7 +453,7 @@ te::LevelMeasurer* getLevelMeasurer (te::Track& track)
 
 te::FolderTrack* getOutputBus (const te::Track& track)
 {
-    for (auto* parent = track.getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
+    for (auto* parent = getParentFolder (track); parent != nullptr; parent = getParentFolder (*parent))
         if (isBus (*parent))
             return parent;
 
@@ -482,9 +483,9 @@ juce::Array<te::AudioTrack*> getReturnTracks (const te::Edit& edit)
 {
     juce::Array<te::AudioTrack*> returns;
 
-    for (auto* track : te::getAudioTracks (edit))
-        if (getReturnBus (*track) >= 0)
-            returns.add (track);
+    for (auto* track : getPlaylistTracks (edit))
+        if (auto* audio = dynamic_cast<te::AudioTrack*> (track); audio != nullptr && isReturnTrack (*audio))
+            returns.add (audio);
 
     return returns;
 }
@@ -511,12 +512,13 @@ te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, Select
     while (findReturnTrack (edit, bus) != nullptr)
         ++bus;
 
-    auto* track = insertTrack (edit, nullptr, selection);
+    // Solo-safe, as Studio One's effect channels are: soloing a track keeps its reverb, say, audible (a return's solo
+    // isolation, which the mirror gives it).
+    auto* track = insertReturnTrack (edit, name, selection);
 
     if (track == nullptr)
         return nullptr;
 
-    track->setName (name);
     auto input = edit.getPluginCache().createNewPlugin (te::AuxReturnPlugin::xmlTypeName, {});
 
     if (auto* aux = dynamic_cast<te::AuxReturnPlugin*> (input.get()))
@@ -524,9 +526,6 @@ te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, Select
 
     track->pluginList.insertPlugin (input, 0, nullptr);
     edit.setAuxBusName (bus, name);
-
-    // Solo-safe, as Studio One's effect channels are: soloing a track keeps its reverb, say, audible.
-    track->setSoloIsolate (true);
     return track;
 }
 
@@ -539,7 +538,7 @@ te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& e
     auto& edit = sender.edit;
     const auto returns = getReturnTracks (edit);
     const auto isTaken = [&returns] (const juce::String& candidate)
-    { return std::any_of (returns.begin(), returns.end(), [&candidate] (te::AudioTrack* r) { return r->getName() == candidate; }); };
+    { return std::any_of (returns.begin(), returns.end(), [&candidate] (te::AudioTrack* r) { return getTrackName (*r) == candidate; }); };
 
     auto name = effect->getName();
 

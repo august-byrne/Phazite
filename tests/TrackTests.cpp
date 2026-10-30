@@ -5,6 +5,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/playlist/TrackHeights.h"
 
@@ -15,10 +16,10 @@ struct Tracks
 {
     explicit Tracks (int numTracks)
     {
-        edit->ensureNumberOfAudioTracks (numTracks);
+        phazite::ensureTracks (*edit, numTracks);
 
         for (int i = 0; i < numTracks; ++i)
-            te::getAudioTracks (*edit)[i]->setName (juce::String::charToString ((juce::juce_wchar) ('A' + i)));
+            phazite::setTrackName (*te::getAudioTracks (*edit)[i], juce::String::charToString ((juce::juce_wchar) ('A' + i)));
 
         edit->getUndoManager().clearUndoHistory();
         setEdit (context, edit.get());
@@ -80,7 +81,7 @@ struct Tracks
         phazite::ui::setShownTrackHeight (context, phazite::getTrackID (track), height);
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     phazite::Selection& selection = getSelection (context);
     phazite::RangeSelection& range = getRangeSelection (context);
@@ -109,12 +110,13 @@ TEST_CASE ("The playlist shows audio tracks and folders, but not the global trac
     edit.ensureTempoTrack();
     edit.ensureArrangerTrack();
 
-    auto folder = edit.insertNewFolderTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr, false);
+    auto* folder = phazite::insertFolder (edit, nullptr, nullptr);
     REQUIRE (folder != nullptr);
-    folder->setName ("Folder");
-    auto inFolder = edit.insertNewAudioTrack (te::TrackInsertPoint (folder.get(), nullptr), nullptr);
+    phazite::setTrackName (*folder, "Folder");
+    auto* inFolder = phazite::insertPlainTrack (edit, nullptr);
     REQUIRE (inFolder != nullptr);
-    inFolder->setName ("Inside");
+    phazite::moveTrackIntoFolder (*inFolder, *folder);
+    phazite::setTrackName (*inFolder, "Inside");
 
     CHECK (tracks.getOrder() == juce::String ("A Folder Inside"));
 
@@ -122,7 +124,7 @@ TEST_CASE ("The playlist shows audio tracks and folders, but not the global trac
     const auto& colours = phazite::getTrackColours();
     CHECK (phazite::getTrackColour (*tracks["A"], 0) == colours[0].colour);
     CHECK (phazite::getTrackColour (*tracks["A"], 9) == colours[1].colour);
-    tracks["A"]->setColour (colours[4].colour);
+    phazite::setTrackColour (*tracks["A"], colours[4].colour);
     CHECK (phazite::getTrackColour (*tracks["A"], 0) == colours[4].colour);
 }
 
@@ -135,7 +137,7 @@ TEST_CASE ("A new track goes below the selected one, in the next color, and is s
     REQUIRE (tracks.registry.invoke ("track.add"));
     CHECK (tracks.getUndoName() == juce::String ("Add Track"));
     auto added = phazite::getPlaylistTracks (*tracks.edit).getLast();
-    added->setName ("New");
+    phazite::setTrackName (*added, "New");
     CHECK (tracks.getOrder() == juce::String ("A B New"));
     CHECK (tracks.getSelectedNames() == juce::String ("New"));
     CHECK (added->getColour() == colours[2].colour); // B shows the palette's second color
@@ -231,7 +233,7 @@ TEST_CASE ("Mute and solo switch the selected tracks on together, then off")
     const auto* mute = tracks.registry.find ("track.mute");
     REQUIRE (mute != nullptr);
 
-    tracks["A"]->setMute (true);
+    phazite::setTrackMuted (*tracks["A"], true);
     tracks.select ({ "A", "B" });
     CHECK_FALSE (mute->isTicked());
 
@@ -394,13 +396,13 @@ TEST_CASE ("Solo leaves the mute switches alone, and a track can be soloed alone
     auto& a = *tracks["A"];
     auto& b = *tracks["B"];
     auto& c = *tracks["C"];
-    c.setMute (true);
+    phazite::setTrackMuted (c, true);
 
-    a.setSolo (true);
+    phazite::setTrackSoloed (a, true);
     CHECK (phazite::isSilencedBySolo (b));
     CHECK_FALSE (phazite::isSilencedBySolo (a));
     CHECK_FALSE (phazite::isSilencedBySolo (c)); // muted by its own switch
-    b.setSolo (true);
+    phazite::setTrackSoloed (b, true);
 
     // Alone: the other solos go, and the mute switches stay as they were.
     phazite::toggleSoloAlone (a);
@@ -461,7 +463,7 @@ TEST_CASE ("The track switches work on lists of tracks")
     {
         auto* folder = phazite::groupIntoFolder ({ b }, nullptr);
         REQUIRE (folder != nullptr);
-        folder->setMute (true);
+        phazite::setTrackMuted (*folder, true);
         CHECK (b->isMuted (true)); // silent, through its folder
         CHECK_FALSE (phazite::areAllTracksMuted ({ b }));
 
@@ -481,7 +483,7 @@ TEST_CASE ("Tracks and folders go in after the selection")
     tracks.select ({ "A", "B" });
     auto* track = phazite::insertTrackAfterSelection (tracks.selection);
     REQUIRE (track != nullptr);
-    track->setName ("New");
+    phazite::setTrackName (*track, "New");
     CHECK (tracks.getOrder() == juce::String ("A B New C"));
     CHECK (tracks.getSelectedNames() == juce::String ("New"));
 
@@ -505,10 +507,10 @@ TEST_CASE ("Selected folders ungroup together")
     Tracks tracks (4);
     auto* first = phazite::groupIntoFolder ({ tracks["A"], tracks["B"] }, nullptr);
     REQUIRE (first != nullptr);
-    first->setName ("F1");
+    phazite::setTrackName (*first, "F1");
     auto* second = phazite::groupIntoFolder ({ tracks["C"] }, nullptr);
     REQUIRE (second != nullptr);
-    second->setName ("F2");
+    phazite::setTrackName (*second, "F2");
     CHECK (tracks.getOrder() == juce::String ("F1 A B F2 C D"));
 
     tracks.select ({ "F1", "F2", "D" });
@@ -625,7 +627,7 @@ TEST_CASE ("Palette colours are found by name, whatever the case")
 
 TEST_CASE ("Renaming a track is an undo step, and an empty name gives it its number back")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     edit->getUndoManager().clearUndoHistory();
 
@@ -651,13 +653,13 @@ TEST_CASE ("Adding a track at the end, coloring tracks and moving them are undo 
     CHECK (phazite::getPlaylistTracks (*t.edit).getLast() == added);
     CHECK (t.selection.isSelected (added));
     CHECK (t.getUndoName() == juce::String ("Add Track"));
-    added->setName ("D");
+    phazite::setTrackName (*added, "D");
 
     auto* folder = phazite::addTrackAtEnd (*t.edit, true, nullptr);
     REQUIRE (folder != nullptr);
     CHECK (folder->isFolderTrack());
     CHECK (t.getUndoName() == juce::String ("Add Folder"));
-    folder->setName ("F");
+    phazite::setTrackName (*folder, "F");
 
     phazite::setTrackColours ({ t["A"], t["B"] }, juce::Colours::red);
     CHECK (t["A"]->getColour() == juce::Colours::red);

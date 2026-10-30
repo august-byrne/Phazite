@@ -46,7 +46,7 @@ struct Song
         juce::String error;
         project = phazite::Project::create (phazite::test::getEngine(), parent, name, error);
         REQUIRE (project != nullptr);
-        edit().ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (edit(), 2);
         setEdit (context, &edit());
         edit().getUndoManager().clearUndoHistory();
     }
@@ -249,7 +249,7 @@ TEST_CASE ("A track's preset makes a new track with its devices, mix and modulat
         const auto track = first.track (0);
         auto* bass = te::getAudioTracks (first.edit())[0];
         phazite::renameTrack (*bass, "Bass");
-        bass->setColour (juce::Colours::orange);
+        phazite::setTrackColour (*bass, juce::Colours::orange);
         phazite::chooseInstrument (context, track, first.find ("phaziteSynth"));
         const auto eq = first.addEffect (track, "phaziteEq");
         const auto reverb = first.addEffect (track, "phaziteReverb");

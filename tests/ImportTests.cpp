@@ -57,7 +57,7 @@ std::unique_ptr<phazite::Project> createProject (const juce::File& folder)
     auto project = phazite::Project::create (phazite::test::getEngine(), folder, "Import", error);
     INFO (error.toStdString());
     REQUIRE (project != nullptr);
-    project->getEdit().ensureNumberOfAudioTracks (1);
+    phazite::ensureTracks (project->getEdit(), 1);
     return project;
 }
 } // namespace

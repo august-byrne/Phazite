@@ -13,6 +13,7 @@
 #include "model/engine/internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/internal/Project.h"
 
 #include <cmath>
 #include <vector>
@@ -277,7 +278,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
     writeWav (sample, 0.2);
 
     {
-        auto edit = te::createEmptyEdit (engine, projectFile);
+        auto edit = phazite::createSongEdit (engine, projectFile);
         auto* track = te::getAudioTracks (*edit)[0];
         auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
         REQUIRE (phazite::setInstrument (*track, plugin) != nullptr);

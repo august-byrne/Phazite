@@ -34,7 +34,7 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
         setEdit (context, edit.get());
@@ -73,7 +73,7 @@ struct Song
         return names;
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;

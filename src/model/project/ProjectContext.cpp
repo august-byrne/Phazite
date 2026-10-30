@@ -18,6 +18,12 @@ namespace phazite
 {
 namespace
 {
+    // A track's element: Tracktion's (TRACK, FOLDERTRACK...), or the song's own in its track list (schema::TRACK).
+    bool isTrackElement (const juce::ValueTree& element)
+    {
+        return te::TrackList::isTrack (element) || element.hasType (schema::TRACK);
+    }
+
     //==============================================================================
     // Listens to the open Edit's state and tells the context's listeners which groups changed, once per turn of the message
     // loop. What Tracktion writes as it plays (the transport, the input devices) is no change to the song.
@@ -65,7 +71,7 @@ namespace
                     || element.hasType (te::IDs::MODIFIERASSIGNMENTS))
                     return add (pending.modulation);
 
-                if (schema::isTrackViewElement (element))
+                if (schema::isTrackViewElement (element) || element.hasType (schema::MASTER))
                     return add (pending.view);
 
                 if (element.hasType (schema::SECTIONS))
@@ -84,7 +90,7 @@ namespace
                 if (element.hasType (schema::TEMPOMAP) || element.hasType (te::IDs::TEMPOSEQUENCE))
                     return add (pending.tempo);
 
-                if (te::TrackList::isTrack (element))
+                if (isTrackElement (element))
                     return add (pending.tracks);
             }
         }
@@ -117,7 +123,7 @@ namespace
                 add (pending.clips);
             else if (child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK))
                 add (pending.devices);
-            else if (te::TrackList::isTrack (child))
+            else if (isTrackElement (child))
                 add (pending.tracks);
             else
                 mark (parent);
@@ -130,7 +136,7 @@ namespace
         {
             // A device in a container moves with its place in the container's rack type.
             const auto moved = parent.getChild (newIndex);
-            const auto isTrack = te::TrackList::isTrack (moved);
+            const auto isTrack = isTrackElement (moved);
             const auto isDevice = moved.hasType (te::IDs::PLUGIN) || moved.hasType (te::IDs::PLUGININSTANCE);
 
             // The elements it passed: now between its new place and its old one.
@@ -141,7 +147,7 @@ namespace
             {
                 const auto passed = parent.getChild (i);
 
-                if (isTrack && te::TrackList::isTrack (passed))
+                if (isTrack && isTrackElement (passed))
                     return add (pending.tracks);
 
                 if (isDevice && (passed.hasType (te::IDs::PLUGIN) || passed.hasType (te::IDs::PLUGININSTANCE)))
@@ -157,7 +163,7 @@ namespace
                 return;
 
             // How tall a track shows, and the like, is view state (Schema.h), not the song.
-            if (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property))
+            if (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
                 add (pending.view);
             else
                 mark (tree);

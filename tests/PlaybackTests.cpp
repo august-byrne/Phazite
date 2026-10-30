@@ -9,8 +9,10 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Selection.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/StarterProject.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
@@ -39,7 +41,7 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
         selection.setEdit (edit.get());
         phazite::addSelectionCommands (registry, selection, range);
@@ -61,7 +63,7 @@ struct Song
     bool isLooping() const { return edit->getTransport().looping.get(); }
     bool isTicked (const char* id) const { return registry.find (id)->isTicked(); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     juce::Array<te::AudioTrack*> tracks;
     phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
@@ -240,7 +242,7 @@ TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, s
 
 TEST_CASE ("The starter project loops its song")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::addStarterContent (*edit);
 
     CHECK (edit->getTransport().looping.get());
@@ -393,7 +395,7 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
 
     const auto leftAfterStop = [&] (const char* type, int note, double length, float release)
     {
-        auto edit = te::Edit::createSingleTrackEdit (engine);
+        auto edit = phazite::createSongEdit (engine);
         auto& track = *te::getAudioTracks (*edit)[0];
         auto instrument = edit->getPluginCache().createNewPlugin (type, {});
         REQUIRE (phazite::setInstrument (track, instrument) != nullptr);

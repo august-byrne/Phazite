@@ -45,11 +45,11 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
-        a->setName ("A");
-        b->setName ("B");
+        phazite::setTrackName (*a, "A");
+        phazite::setTrackName (*b, "B");
         setEdit (context, edit.get());
         phazite::chooseInstrument (context, idOf (*a), find ("phaziteSynth"));
         phazite::addEffect (context, idOf (*a), find ("phaziteCompressor"));
@@ -80,7 +80,7 @@ struct Song
 
     juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;

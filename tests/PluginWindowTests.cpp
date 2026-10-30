@@ -5,6 +5,7 @@
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
 #include "app/PluginWindow.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
@@ -32,7 +33,7 @@ struct Studio
         project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Levels", error);
         REQUIRE (project != nullptr);
         auto& edit = project->getEdit();
-        edit.ensureNumberOfAudioTracks (1);
+        phazite::ensureTracks (edit, 1);
         plugin = dynamic_cast<te::ExternalPlugin*> (phazite::insertDevice (*te::getAudioTracks (edit)[0], TestPlugin::create (edit)));
         REQUIRE (plugin != nullptr);
         setEdit (context, &edit);
@@ -145,7 +146,7 @@ TEST_CASE ("A plug-in window's Send All Keys to the Plug-in is kept for the plug
 
     // The same plug-in in another project has it on too.
     {
-        auto other = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto other = phazite::createSongEdit (phazite::test::getEngine());
         const auto plugin = TestPlugin::create (*other);
         te::getAudioTracks (*other)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
         juce::Component otherEditor;

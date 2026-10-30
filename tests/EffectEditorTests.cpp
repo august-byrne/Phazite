@@ -17,6 +17,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/project/internal/Project.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceWindowContent.h"
@@ -49,7 +50,7 @@ struct Song
     float valueOf (const char* id) const { return plugin->getAutomatableParameterByID (id)->getCurrentValue(); }
     juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr plugin;
 };
 

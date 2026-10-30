@@ -2,6 +2,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Grid.h"
 #include "model/base/internal/Schema.h"
+#include "model/project/internal/Project.h"
 
 using namespace tracktion::literals; // 4_bp: beat positions
 
@@ -43,7 +44,7 @@ void checkLines (const std::vector<Line>& lines, std::initializer_list<Line> exp
 
 TEST_CASE ("The adaptive grid follows the zoom, and the settings change its size")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    auto edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     const auto& tempo = edit->tempoSequence;
     const auto levelAt = [&tempo] (const phazite::GridSettings& grid, double pixelsPerBeat)
     { return phazite::getGridSnapType (grid, tempo, 0_bp, pixelsPerBeat, 20.0).getLevel(); };
@@ -83,7 +84,7 @@ TEST_CASE ("The adaptive grid follows the zoom, and the settings change its size
 
 TEST_CASE ("Positions snap to the nearest grid line")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto& tempo = edit->tempoSequence;
     const auto snap = [&tempo] (double beat, int level, bool triplets = false)
     { return phazite::snapToGrid (te::BeatPosition::fromBeats (beat), gridLevel (level), tempo, triplets).inBeats(); };
@@ -98,7 +99,7 @@ TEST_CASE ("Positions snap to the nearest grid line")
 
 TEST_CASE ("Grid lines are bars, beats and the steps between them")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto& tempo = edit->tempoSequence;
     const auto bar = GridLineType::bar, beat = GridLineType::beat, step = GridLineType::subdivision;
 
@@ -140,13 +141,14 @@ TEST_CASE ("Grid settings are kept in the project")
 
 TEST_CASE ("Each editor keeps its own grid in the project")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     edit->getUndoManager().clearUndoHistory();
 
     // A project that has none reads the defaults, and reading adds nothing to it.
     CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == phazite::GridSettings());
     CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::playlist) == phazite::GridSettings());
-    CHECK_FALSE (phazite::findPhaziteState (*edit).isValid());
+    CHECK_FALSE (phazite::findPhaziteState (*edit).getChildWithName (phazite::schema::PIANOROLL).isValid());
+    CHECK_FALSE (phazite::findPhaziteState (*edit).hasProperty (phazite::schema::gridSnap));
 
     // The piano roll's grid goes on its own child of the Phazite state, and the playlist's stays as it was.
     const phazite::GridSettings pianoRollGrid { .adaptive = false, .fixedLevel = 8, .triplets = true };

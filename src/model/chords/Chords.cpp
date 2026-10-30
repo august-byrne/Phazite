@@ -32,17 +32,17 @@ namespace
 
     std::optional<Key> readKey (const juce::ValueTree& state)
     {
-        if (! state.hasProperty (schema::phaziteKeyRoot))
+        if (! state.hasProperty (schema::keyRoot))
             return std::nullopt;
 
-        return Key { juce::jlimit (0, 11, (int) state[schema::phaziteKeyRoot]),
-                     findScale (state[schema::phaziteKeyScale].toString()).value_or (Scale::major) };
+        return Key { juce::jlimit (0, 11, (int) state[schema::keyRoot]),
+                     findScale (state[schema::keyScale].toString()).value_or (Scale::major) };
     }
 
     void writeKey (juce::ValueTree state, const Key& key, juce::UndoManager* undo)
     {
-        state.setProperty (schema::phaziteKeyRoot, key.root, undo);
-        state.setProperty (schema::phaziteKeyScale, getSavedScaleName (key.scale), undo);
+        state.setProperty (schema::keyRoot, key.root, undo);
+        state.setProperty (schema::keyScale, getSavedScaleName (key.scale), undo);
     }
 
     // The key before any is written: the one new tracks get, which a new project sets, or else C major.
@@ -675,10 +675,10 @@ te::MidiClip* addChordPart (te::Edit& edit, PartStyle style, BeatRange range, Se
         return nullptr;
 
     const auto kind = getPartKind (style);
-    track->setName (getPartKindName (kind));
+    setTrackName (*track, getPartKindName (kind));
 
-    if (const auto colour = getColourForName (track->getName()))
-        track->setColour (*colour);
+    if (const auto colour = getColourForName (getTrackName (*track)))
+        setTrackColour (*track, *colour);
 
     setInstrument (*track, createSynth (edit, kind));
 

@@ -4,6 +4,7 @@
 #include "devices/dynamics/Limiter.h"
 #include "devices/dynamics/Maximizer.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Selection.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
@@ -52,8 +53,8 @@ TEST_CASE ("Live MIDI goes to the first track with an instrument")
     REQUIRE (allMidiInputs != nullptr);
     CHECK (allMidiInputs->getMonitorMode() == te::InputDevice::MonitorMode::on); // heard without arming
 
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->ensureNumberOfAudioTracks (3);
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::ensureTracks (*edit, 3);
     const auto tracks = te::getAudioTracks (*edit);
     addInstrument (*tracks[1]);
 
@@ -73,7 +74,7 @@ TEST_CASE ("Without an instrument, live MIDI goes nowhere")
 {
     REQUIRE (findAllMidiInputs() != nullptr);
 
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::routeLiveMidiInput (*edit);
     CHECK (phazite::getLiveMidiTrack (*edit) == nullptr);
 }
@@ -92,7 +93,7 @@ TEST_CASE ("Playing and routing live MIDI don't count as unsaved changes")
         REQUIRE (project != nullptr);
 
         auto& edit = project->getEdit();
-        edit.ensureNumberOfAudioTracks (1);
+        phazite::ensureTracks (edit, 1);
         addInstrument (*te::getAudioTracks (edit)[0]);
         REQUIRE (project->save().wasOk());
         REQUIRE_FALSE (project->hasUnsavedChanges());
@@ -113,8 +114,8 @@ TEST_CASE ("Live MIDI follows the selected track, if it has an instrument")
 {
     REQUIRE (findAllMidiInputs() != nullptr);
 
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->ensureNumberOfAudioTracks (3);
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::ensureTracks (*edit, 3);
     const auto tracks = te::getAudioTracks (*edit);
     addInstrument (*tracks[0]);
     addInstrument (*tracks[2]);
@@ -165,8 +166,8 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     REQUIRE (findAllMidiInputs() != nullptr);
     phazite::test::HostedDevice device;
 
-    auto edit = te::Edit::createSingleTrackEdit (engine);
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (engine);
+    phazite::ensureTracks (*edit, 2);
     const auto tracks = te::getAudioTracks (*edit);
     addInstrument (*tracks[0]);
     phazite::routeLiveMidiInput (*edit);
@@ -209,8 +210,8 @@ TEST_CASE ("Low latency plays live notes without delay compensation, and back wi
     phazite::test::HostedDevice device;
 
     // A limiter, which looks ahead, on another track.
-    auto edit = te::Edit::createSingleTrackEdit (engine);
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (engine);
+    phazite::ensureTracks (*edit, 2);
     const auto tracks = te::getAudioTracks (*edit);
     addInstrument (*tracks[0]);
     tracks[1]->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {}), 0, nullptr);
@@ -252,8 +253,8 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
     REQUIRE (findAllMidiInputs() != nullptr);
     phazite::test::HostedDevice device;
 
-    auto edit = te::Edit::createSingleTrackEdit (engine);
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (engine);
+    phazite::ensureTracks (*edit, 2);
     addInstrument (*te::getAudioTracks (*edit)[0]);
 
     SUBCASE ("Alone in the song")
@@ -294,7 +295,7 @@ TEST_CASE ("Low latency leaves what renders play as the song has it")
 {
     // A synth's chord into a limiter on the master, which low latency would bypass while playing.
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto edit = phazite::createSongEdit (engine);
     auto& track = *te::getAudioTracks (*edit)[0];
     addInstrument (track);
     auto clip =

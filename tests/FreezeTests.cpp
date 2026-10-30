@@ -36,9 +36,9 @@ struct Song
         project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Song", error);
         REQUIRE (project != nullptr);
         auto& edit = project->getEdit();
-        edit.ensureNumberOfAudioTracks (1);
+        phazite::ensureTracks (edit, 1);
         bass = te::getAudioTracks (edit)[0];
-        bass->setName ("Bass");
+        phazite::setTrackName (*bass, "Bass");
 
         const auto sound = phazite::test::writeSound (temp.folder.getChildFile ("Sine.wav"), 2.0);
         clip = bass->insertWaveClip ("Sine", sound, { te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.5)) }, false);
@@ -194,8 +194,8 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     // Its fader, name, mute switch and send: still frozen.
     song.bass->getVolumePlugin()->setVolumeDb (-3.0f);
     phazite::renameTrack (*song.bass, "Bass Line");
-    song.bass->setMute (true);
-    song.bass->setMute (false);
+    phazite::setTrackMuted (*song.bass, true);
+    phazite::setTrackMuted (*song.bass, false);
     phazite::getSends (*song.bass)[0]->setGainDb (-12.0f);
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::isFrozen (song.context, song.id()));
@@ -216,7 +216,7 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
 
     // A frozen device: unfrozen too.
-    song.bass->setName ("Bass"); // the render's title
+    phazite::setTrackName (*song.bass, "Bass"); // the render's title
     song.freeze();
     Song::setParameter (*song.expander, "gain", 3.0f);
     phazite::test::dispatchPendingMessages(); // the value reaches the device's state
@@ -268,7 +268,7 @@ TEST_CASE ("Freezing stops before a device that listens to a sidechain or a send
 {
     Song song;
     auto& edit = song.edit();
-    const auto kick = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr);
+    auto* kick = phazite::insertPlainTrack (edit, nullptr);
     REQUIRE (kick != nullptr);
 
     auto* compressor = phazite::insertDevice (*song.bass, edit.getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
@@ -301,9 +301,9 @@ TEST_CASE ("Returns, buses and empty tracks aren't frozen or bounced, and say wh
     CHECK (phazite::getWhyNotFreeze (song.context, phazite::getTrackID (*bus))
            == "Folders and buses can't be frozen: their sound is their tracks'.");
 
-    auto* empty = song.edit().insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (song.edit()), nullptr).get();
+    auto* empty = phazite::insertPlainTrack (song.edit(), nullptr);
     REQUIRE (empty != nullptr);
-    empty->setName ("Empty");
+    phazite::setTrackName (*empty, "Empty");
     CHECK (phazite::getWhyNotBounce (song.context, phazite::getTrackID (*empty)) == "Empty has nothing to bounce: it has no clips.");
 
     // The command tells the host why.
@@ -317,7 +317,7 @@ TEST_CASE ("Returns, buses and empty tracks aren't frozen or bounced, and say wh
 TEST_CASE ("A freeze cancelled leaves the track as it was")
 {
     Song song;
-    song.bass->setMute (true);
+    phazite::setTrackMuted (*song.bass, true);
     phazite::toggleFreeze (song.context, song.host);
     REQUIRE (song.host.render != nullptr);
     CHECK_FALSE (song.bass->isMuted (false)); // rendering
@@ -369,12 +369,15 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK (phazite::getSends (*bounced)[0]->getBusNumber() == phazite::getReturnBus (*song.reverb));
     CHECK (phazite::getDevices (*bounced).isEmpty());
 
-    // The original, muted and collapsed; one undo step, which takes it all back.
+    // The original, muted and collapsed; one undo step, which takes it all back, mute included, though a mute alone is no
+    // undo step (and Tracktion, which plays it, keeps it outside its undo history).
+    CHECK (phazite::isTrackMuted (*song.bass, false));
     CHECK (song.bass->isMuted (false));
     CHECK (phazite::isCollapsed (*song.bass));
     CHECK (phazite::describeUndo (&song.edit()) == juce::String ("Undo Bounce in Place"));
     phazite::undo (song.edit());
     CHECK (te::getAudioTracks (song.edit()).size() == 2);
+    CHECK_FALSE (phazite::isTrackMuted (*song.bass, false));
     CHECK_FALSE (song.bass->isMuted (false));
 }
 

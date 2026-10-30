@@ -3,6 +3,7 @@
 // instead of Tracktion's, and their conversions in the model's prelude.
 #include "TestHelpers.h"
 #include "model/base/internal/Tracktion.h"
+#include "model/project/internal/Project.h"
 
 #include <unordered_set>
 
@@ -82,7 +83,7 @@ TEST_CASE ("The model turns Phazite's beats and IDs into Tracktion's and back")
     CHECK (phazite::fromTracktion (inTracktion) == range);
     CHECK (phazite::fromTracktion (phazite::toTracktion (BeatDuration::fromBeats (0.75))) == BeatDuration::fromBeats (0.75));
 
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     REQUIRE (track != nullptr);
     const auto id = phazite::getTrackID (*track);

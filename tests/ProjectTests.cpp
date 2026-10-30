@@ -94,7 +94,7 @@ TEST_CASE ("A project saves and reopens with Phazite's own data")
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Round Trip");
 
-    project->getEdit().ensureNumberOfAudioTracks (3);
+    phazite::ensureTracks (project->getEdit(), 3);
     project->getPhaziteState().setProperty ("outline", "Electronic", nullptr);
     CHECK (project->hasUnsavedChanges());
 
@@ -232,7 +232,7 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     auto project = createProject (temp.folder.getChildFile ("Unsaved"), "Untitled");
     const auto oldFile = project->getFile();
     auto& edit = project->getEdit();
-    edit.ensureNumberOfAudioTracks (1);
+    phazite::ensureTracks (edit, 1);
 
     // Audio imported into it (the project's own copy, by its path relative to the project), unsaved and autosaved.
     const auto kick = phazite::test::writeSound (temp.folder.getChildFile ("Samples").getChildFile ("Kick.wav"), 0.5);
@@ -402,8 +402,8 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // The same value written as another type (the file holds text).
-    REQUIRE (track->state[phazite::schema::phaziteKeyRoot].isString());
-    track->state.setProperty (phazite::schema::phaziteKeyRoot, 2, nullptr);
+    REQUIRE (phazite::findTrackState (*track)[phazite::schema::keyRoot].isString());
+    phazite::findTrackState (*track).setProperty (phazite::schema::keyRoot, 2, nullptr);
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // A note taken out and put back as it was.
@@ -419,8 +419,8 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // A change taken back before anything asked.
-    track->state.setProperty (phazite::schema::phaziteKeyRoot, 5, nullptr);
-    track->state.setProperty (phazite::schema::phaziteKeyRoot, 2, nullptr);
+    phazite::findTrackState (*track).setProperty (phazite::schema::keyRoot, 5, nullptr);
+    phazite::findTrackState (*track).setProperty (phazite::schema::keyRoot, 2, nullptr);
     CHECK_FALSE (project->hasUnsavedChanges());
     REQUIRE (project->autosave().wasOk());
     CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
@@ -459,7 +459,7 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    track->state.setProperty (phazite::schema::phaziteKeyRoot, 3, nullptr);
+    phazite::findTrackState (*track).setProperty (phazite::schema::keyRoot, 3, nullptr);
     CHECK (project->hasUnsavedChanges());
 }
 
@@ -565,8 +565,8 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (isUnsavedChange ([f] { phazite::setMixedAsBus (*f, false); })); // a new folder is a bus
 
     // Those two are undo steps, which Tracktion counts by itself; written without one, they count too.
-    CHECK (isUnsavedChange ([t] { t->state.setProperty (schema::phaziteKeyScale, "lydian", nullptr); }));
-    CHECK (isUnsavedChange ([f] { f->state.setProperty (schema::phaziteBus, true, nullptr); }));
+    CHECK (isUnsavedChange ([t] { phazite::findTrackState (*t).setProperty (schema::keyScale, "lydian", nullptr); }));
+    CHECK (isUnsavedChange ([f] { phazite::findTrackState (*f).setProperty (schema::folderBus, true, nullptr); }));
 
     REQUIRE (phazite::insertSection (reopened, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) }).isValid());
     auto section = phazite::findPhaziteState (reopened).getChildWithName (schema::SECTIONS).getChild (0);

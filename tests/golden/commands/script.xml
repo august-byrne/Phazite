@@ -25,6 +25,7 @@
   </MASTERVOLUME>
   <PHAZITE loopFollowsSong="1"
            outline="rock">
+    <MASTER/>
     <SECTIONS>
       <SECTION energy="0.45"
                id="1042"
@@ -97,6 +98,33 @@
                      denominator="4"
                      numerator="4"/>
     </TEMPOMAP>
+    <TRACKS>
+      <TRACK bus="1"
+             colour="ffe69f00"
+             id="1018"
+             kind="folder"
+             mute="0"
+             name="Group">
+        <TRACK collapsed="0"
+               height="80"
+               id="1003"
+               kind="track"
+               mute="0"
+               name="One"
+               pinned="1"
+               solo="0"/>
+        <TRACK collapsed="0"
+               colour="ff56b4e9"
+               height="80"
+               id="1011"
+               kind="track"
+               name="Two"/>
+      </TRACK>
+      <TRACK colour="ff009e73"
+             id="1022"
+             kind="return"
+             name="Return 1"/>
+    </TRACKS>
   </PHAZITE>
   <PITCHSEQUENCE>
     <PITCH pitch="60"
@@ -129,8 +157,7 @@
   <FOLDERTRACK colour="ffe69f00"
                id="1018"
                mute="0"
-               name="Group"
-               phaziteBus="1">
+               name="Group">
     <MODIFIERS/>
     <PLUGIN enabled="1"
             id="1020"
@@ -146,9 +173,6 @@
     <TRACK id="1003"
            mute="0"
            name="One"
-           phaziteCollapsed="0"
-           phaziteHeight="80"
-           phazitePinned="1"
            solo="0">
       <MIDICLIP colour="ff00ff00"
                 currentTake="0"
@@ -287,9 +311,7 @@
     </TRACK>
     <TRACK colour="ff56b4e9"
            id="1011"
-           name="Two"
-           phaziteCollapsed="0"
-           phaziteHeight="80">
+           name="Two">
       <CLIPSLOTS/>
       <MODIFIERS/>
       <OUTPUTDEVICES>

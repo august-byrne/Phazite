@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/AudioRecorder.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
@@ -30,13 +31,13 @@ namespace
 
     juce::String getInputOf (const te::Track& track)
     {
-        return track.state.getProperty (schema::phaziteInput).toString();
+        return findTrackState (track).getProperty (schema::trackInput).toString();
     }
 
     // When the track hears its input: schema::monitorAlways, schema::monitorNever, or while it is armed (none).
     juce::String getMonitoringOf (const te::Track& track)
     {
-        return track.state.getProperty (schema::phaziteMonitoring).toString();
+        return findTrackState (track).getProperty (schema::trackMonitoring).toString();
     }
 
     int getNumDeviceInputs (te::Engine& engine)
@@ -565,7 +566,8 @@ void AudioRecorder::finishRecordings (te::SyncPoint stopped, bool discard)
 juce::File AudioRecorder::getTakeFile (const te::AudioTrack& track) const
 {
     const auto folder = edit.engine.getEngineBehaviour().getDefaultFolderForAudioRecordings (edit);
-    const auto name = juce::File::createLegalFileName (track.getName().isNotEmpty() ? track.getName() : juce::String ("Recording"));
+    const auto name =
+        juce::File::createLegalFileName (getTrackName (track).isNotEmpty() ? getTrackName (track) : juce::String ("Recording"));
 
     for (int take = 1;; ++take)
         if (const auto file = folder.getChildFile (name + " Take " + juce::String (take) + ".wav"); ! file.exists())
@@ -600,7 +602,7 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
     }
 
     auto& track = recording.track;
-    const auto name = track.getName();
+    const auto name = getTrackName (track);
     const auto place = [&] (double clipStart, double clipEnd, double fileStart) -> te::WaveAudioClip*
     {
         const te::ClipPosition position { { te::TimePosition::fromSeconds (clipStart), te::TimePosition::fromSeconds (clipEnd) },
@@ -710,11 +712,10 @@ void AudioRecorder::playbackContextChanged()
 
 void AudioRecorder::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if ((property == schema::phaziteInput || property == schema::phaziteMonitoring) && tree.hasType (te::IDs::TRACK)
-        && alive.get() != nullptr)
+    if ((property == schema::trackInput || property == schema::trackMonitoring) && tree.hasType (schema::TRACK) && alive.get() != nullptr)
     {
         // A track left without an input can't stay armed.
-        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForState (edit, tree));
+        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (tree))));
             track != nullptr && getInputChannels (getInputOf (*track)).empty())
             armed.erase (track->itemID);
 

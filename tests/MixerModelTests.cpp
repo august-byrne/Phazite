@@ -10,6 +10,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
 namespace
@@ -19,11 +20,11 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
-        a->setName ("A");
-        b->setName ("B");
+        phazite::setTrackName (*a, "A");
+        phazite::setTrackName (*b, "B");
         setEdit (context, edit.get());
     }
 
@@ -39,7 +40,7 @@ struct Song
         return {};
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
@@ -67,10 +68,10 @@ TEST_CASE ("The mixer's channels are the playlist's tracks, then the returns, ea
     auto& context = song.context;
     auto* folder = phazite::groupIntoFolder ({ song.b }, nullptr); // a bus, as every new folder is
     REQUIRE (folder != nullptr);
-    folder->setName ("Drums");
+    phazite::setTrackName (*folder, "Drums");
     auto* reverb = phazite::addReturnTrack (*song.edit, "Reverb", nullptr);
     REQUIRE (reverb != nullptr);
-    song.edit->moveTrack (reverb, { nullptr, nullptr }); // first in the playlist, but last in the mixer
+    phazite::moveTracksAfter ({ reverb }, nullptr); // first in the playlist, but last in the mixer
 
     const auto channels = phazite::getMixerChannels (context);
     CHECK (channels.tracks == std::vector { idOf (*song.a), idOf (*folder), idOf (*song.b) });
@@ -273,7 +274,11 @@ TEST_CASE ("Mixer functions give nothing, and do nothing, for what is gone or wi
     CHECK (phazite::getEffects (context, {}).size() == phazite::getMasterDevices (*song.edit).size()); // not the master's
 
     CHECK (phazite::getMasterVolume (context).isValid());
-    CHECK_FALSE (phazite::getLoudness (context).has_value()); // no loudness meter on the master yet
+    // Nothing without a loudness meter on the master, which every song has (Project.h: createSongEdit()).
+    auto* meter = phazite::ensureLoudnessMeter (*song.edit);
+    REQUIRE (meter != nullptr);
+    meter->deleteFromParent();
+    CHECK_FALSE (phazite::getLoudness (context).has_value());
     REQUIRE (phazite::ensureLoudnessMeter (*song.edit) != nullptr);
     const auto loudness = phazite::getLoudness (context);
     REQUIRE (loudness.has_value());

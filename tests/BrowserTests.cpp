@@ -7,6 +7,7 @@
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
@@ -80,7 +81,7 @@ struct BrowserScreen
 
     phazite::test::TemporaryFolder temp;
     phazite::SoundPack soundPack { writeSoundPack (temp.folder) };
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // with the Edit open
     phazite::Settings settings;
     phazite::Library library { phazite::test::getEngineContext(), settings, soundPack.getFolder() };
@@ -237,7 +238,7 @@ TEST_CASE ("The plug-in picker finds a device as its name is typed, and Enter ad
 TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or below the tracks, or at the play start")
 {
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine);                // 120 BPM, 4/4
+    auto edit = phazite::createSongEdit (engine);                        // 120 BPM, 4/4
     phazite::ProjectContext context (phazite::test::getEngineContext()); // the open project, as the app has it
     auto& selection = getSelection (context);
     phazite::CommandRegistry registry;

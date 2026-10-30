@@ -8,7 +8,7 @@
 
 TEST_CASE ("The metronome's and the count-in's commands switch them on and off, without undo steps")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::Selection selection (phazite::test::getEngine());
     selection.setEdit (edit.get());
     phazite::CommandRegistry registry;
@@ -36,7 +36,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
     CHECK (countIn->isTicked());
     CHECK (edit->getNumCountInBeats() == 4);
 
-    auto other = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto other = phazite::createSongEdit (phazite::test::getEngine());
     CHECK (phazite::isCountInOn (*other));
 
     REQUIRE (registry.invoke ("transport.countIn"));

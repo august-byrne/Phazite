@@ -9,6 +9,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 
@@ -45,11 +46,11 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
-        a->setName ("A");
-        b->setName ("B");
+        phazite::setTrackName (*a, "A");
+        phazite::setTrackName (*b, "B");
 
         auto* midi = phazite::insertMidiClip (*a, { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
         REQUIRE (midi != nullptr);
@@ -71,7 +72,7 @@ struct Song
         return {};
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;

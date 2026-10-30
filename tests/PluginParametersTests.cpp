@@ -10,6 +10,7 @@
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/project/internal/Project.h"
 
 namespace
 {
@@ -38,7 +39,7 @@ te::ExternalPlugin* findStandIn (te::Edit& edit)
 // automated from 0.2 to 0.8 and shown in a lane, and Tone moved by an LFO; saved as a project saves it.
 juce::ValueTree makeSavedSong()
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto& track = *te::getAudioTracks (*edit)[0];
     auto* plugin = dynamic_cast<te::ExternalPlugin*> (phazite::insertDevice (track, TestPlugin::create (*edit)));
     REQUIRE (plugin != nullptr);
@@ -153,7 +154,7 @@ TEST_CASE ("What a project refers to follows the parameters of a plug-in in a co
 
     // Its lane is on the container's track, not with the plug-in in the container's rack.
     {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = *te::getAudioTracks (*edit)[0];
         REQUIRE (phazite::groupIntoContainer ({ phazite::insertDevice (track, TestPlugin::create (*edit)) }) != nullptr);
         auto* plugin = findStandIn (*edit);

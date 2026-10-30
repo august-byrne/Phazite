@@ -5,11 +5,13 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/project/internal/Project.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DeviceEditors.h"
 
@@ -24,11 +26,11 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (3);
+        phazite::ensureTracks (*edit, 3);
         const auto tracks = te::getAudioTracks (*edit);
-        tracks[0]->setName ("Kick");
-        tracks[1]->setName ("Bass");
-        tracks[2]->setName ("Keys");
+        phazite::setTrackName (*tracks[0], "Kick");
+        phazite::setTrackName (*tracks[1], "Bass");
+        phazite::setTrackName (*tracks[2], "Keys");
         compressor = edit->getPluginCache().createNewPlugin (Compressor::typeID, {});
         REQUIRE (phazite::insertDevice (*tracks[1], compressor) != nullptr);
         phazite::test::settle();
@@ -37,7 +39,7 @@ struct Song
 
     float valueOf (const char* id) const { return compressor->getAutomatableParameterByID (id)->getCurrentValue(); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr compressor;
 };
 

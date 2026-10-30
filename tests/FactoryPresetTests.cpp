@@ -28,6 +28,7 @@
 #include "model/devices/internal/Devices.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
+#include "model/project/internal/Project.h"
 
 #include <cmath>
 
@@ -311,7 +312,7 @@ TEST_SUITE ("golden")
     // PHAZITE_UPDATE_GOLDEN=1, as the golden files are (GoldenFiles.h); then read git diff resources/presets in full.
     TEST_CASE ("Golden presets: Phazite's presets are written as Save Preset writes them")
     {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto* track = te::getAudioTracks (*edit)[0];
         const auto update = phazite::test::isUpdatingGoldenFiles();
 

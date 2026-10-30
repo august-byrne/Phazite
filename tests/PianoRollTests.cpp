@@ -10,6 +10,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "ui/pianoroll/PianoRoll.h"
@@ -26,7 +27,7 @@ struct PianoRollScreen
 {
     PianoRollScreen()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
         edit->getUndoManager().clearUndoHistory();
 
@@ -60,7 +61,7 @@ struct PianoRollScreen
         return { juce::roundToInt (pianoRoll.getView().beatToX (phazite::fromTracktion (beats (beat)))), notes->getHeight() / 2 };
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     phazite::Selection& selection = getSelection (context);

@@ -8,6 +8,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/LimiterEditor.h"
 
@@ -62,7 +63,7 @@ TEST_CASE ("A value meter jumps up and falls back smoothly, and screen readers r
 
 TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the ceiling a line to drag")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto plugin = edit->getPluginCache().createNewPlugin (Limiter::typeID, {});
     REQUIRE (phazite::insertMasterDevice (*edit, plugin) != nullptr);
     phazite::test::settle();

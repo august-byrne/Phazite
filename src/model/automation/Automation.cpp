@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Automation.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
@@ -157,7 +158,7 @@ namespace
 
     juce::ValueTree findLaneState (const te::Track& track, const ParameterRef& parameter)
     {
-        for (const auto& child : track.state)
+        for (const auto& child : findTrackState (track))
             if (schema::isTrackViewElement (child) && readLane (child) == parameter)
                 return child;
 
@@ -180,9 +181,9 @@ namespace
             if (findLaneState (track, shown.parameter).isValid())
                 continue;
 
-            juce::ValueTree lane (schema::PHAZITELANE);
+            juce::ValueTree lane (schema::LANE);
             writeLane (lane, shown.parameter);
-            track.state.appendChild (lane, nullptr);
+            findTrackState (track).appendChild (lane, nullptr);
         }
     }
 
@@ -352,7 +353,7 @@ juce::String getParameterName (const te::AutomatableParameter& parameter)
     if (auto* send = dynamic_cast<te::AuxSendPlugin*> (device))
     {
         const auto* returnTrack = findReturnTrack (send->edit, send->getBusNumber());
-        return "Send to " + (returnTrack != nullptr ? returnTrack->getName() : juce::String ("Return"));
+        return "Send to " + (returnTrack != nullptr ? getTrackName (*returnTrack) : juce::String ("Return"));
     }
 
     if (auto* volume = dynamic_cast<te::VolumeAndPanPlugin*> (device))
@@ -696,7 +697,7 @@ std::vector<AutomationLane> getLanes (te::Track& track)
 {
     std::vector<AutomationLane> lanes;
 
-    for (const auto& child : track.state)
+    for (const auto& child : findTrackState (track))
     {
         if (! schema::isTrackViewElement (child))
             continue;
@@ -735,15 +736,15 @@ void showLane (te::Track& track, const ParameterRef& parameter)
         return;
     }
 
-    juce::ValueTree lane (schema::PHAZITELANE);
+    juce::ValueTree lane (schema::LANE);
     writeLane (lane, parameter);
-    track.state.appendChild (lane, nullptr);
+    findTrackState (track).appendChild (lane, nullptr);
 }
 
 void removeLane (te::Track& track, const ParameterRef& parameter)
 {
     if (auto lane = findLaneState (track, parameter); lane.isValid())
-        track.state.removeChild (lane, nullptr);
+        findTrackState (track).removeChild (lane, nullptr);
 }
 
 void replaceLane (te::Track& track, const ParameterRef& parameter, const ParameterRef& replacement)
@@ -784,7 +785,7 @@ void copyLanes (const te::Track& original, te::Track& copy, const te::EditItemID
     // The copy's devices are where the original's are in its list, and those in its containers as the map says.
     const auto originals = original.getAllPlugins(), copies = copy.getAllPlugins();
 
-    for (auto lane : copy.state)
+    for (auto lane : findTrackState (copy))
     {
         if (! schema::isTrackViewElement (lane))
             continue;

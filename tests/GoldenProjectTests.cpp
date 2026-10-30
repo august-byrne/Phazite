@@ -87,7 +87,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
 
     auto* drums = te::getAudioTracks (edit)[0];
     REQUIRE (drums != nullptr);
-    drums->setName ("Drums");
+    phazite::setTrackName (*drums, "Drums");
 
     // Sections: two from an outline, and one of their own.
     const auto outline = phazite::Outline::fromJSON (R"({ "id": "golden", "name": "Golden", "sections": [
@@ -118,13 +118,13 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     phazite::setDrumRowOrder (*drums, phazite::ui::getDrumOrderAfterMove (drumRows, 38, 0)); // the snare's row dragged to the top
     phazite::hideDrumRow (*drums, 49);
     phazite::setPinned (*drums, true);
-    drums->setMute (true);
+    phazite::setTrackMuted (*drums, true);
 
     // Keys: an instrument, and an effect with a mix of its own; a key; chords with a muted note, and an alias of them;
     // a height of its own, and a volume curve.
     auto* keys = phazite::insertTrack (edit, drums, nullptr);
     REQUIRE (keys != nullptr);
-    keys->setName ("Keys");
+    phazite::setTrackName (*keys, "Keys");
     REQUIRE (phazite::setInstrument (*keys, createBuiltInDevice (edit, phazite::devices::Synth::typeID)) != nullptr);
     auto* reverb = phazite::insertDevice (*keys, createBuiltInDevice (edit, phazite::devices::Reverb::typeID));
     REQUIRE (reverb != nullptr);
@@ -152,13 +152,13 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     // Pad: a new track, which gets the key set last.
     auto* pad = phazite::insertTrack (edit, keys, nullptr);
     REQUIRE (pad != nullptr);
-    pad->setName ("Pad");
+    phazite::setTrackName (*pad, "Pad");
 
     // Tone: imported audio with fades of a shape and a color of its own, on a track panned left. (No digits in the
     // file's name: Phazite would read a tempo in them and stretch the clip.)
     auto* tone = phazite::insertTrack (edit, pad, nullptr);
     REQUIRE (tone != nullptr);
-    tone->setName ("Tone");
+    phazite::setTrackName (*tone, "Tone");
     auto* audio = dynamic_cast<te::WaveAudioClip*> (
         phazite::importFile (*tone, phazite::test::writeSound (scratch.getChildFile ("Tone.wav"), 2.0), beats (4.0)));
     REQUIRE (audio != nullptr);
@@ -173,12 +173,12 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     // Folders: Keys and Pad in a collapsed folder, and Tone in a bus at -3 dB.
     auto* group = phazite::groupIntoFolder ({ keys, pad }, nullptr);
     REQUIRE (group != nullptr);
-    group->setName ("Group");
+    phazite::setTrackName (*group, "Group");
     phazite::setCollapsed (*group, true);
 
     auto* bus = phazite::groupIntoFolder ({ tone }, nullptr);
     REQUIRE (bus != nullptr);
-    bus->setName ("Bus");
+    phazite::setTrackName (*bus, "Bus");
     phazite::setMixedAsBus (*bus, true);
     auto* busVolume = dynamic_cast<te::VolumeAndPanPlugin*> (phazite::getVolumeDevice (*bus));
     REQUIRE (busVolume != nullptr);
@@ -335,10 +335,10 @@ TEST_SUITE ("golden")
 
         // The comparison: float noise beyond 7 digits isn't a difference; a changed value is one, with its path; an
         // attribute only the actual one has is one unless it may add some.
-        const auto expected = juce::parseXML (R"(<EDIT><TRACK id="1003" phaziteHeight="64" volume="0.6376281"/></EDIT>)");
-        const auto noisy = juce::parseXML (R"(<EDIT><TRACK id="1003" phaziteHeight="64" volume="0.6376282"/></EDIT>)");
-        const auto taller = juce::parseXML (R"(<EDIT><TRACK id="1003" phaziteHeight="96" volume="0.6376281"/></EDIT>)");
-        const auto added = juce::parseXML (R"(<EDIT><TRACK id="1003" phaziteHeight="64" volume="0.6376281" mute="1"/></EDIT>)");
+        const auto expected = juce::parseXML (R"(<EDIT><TRACK id="1003" height="64" volume="0.6376281"/></EDIT>)");
+        const auto noisy = juce::parseXML (R"(<EDIT><TRACK id="1003" height="64" volume="0.6376282"/></EDIT>)");
+        const auto taller = juce::parseXML (R"(<EDIT><TRACK id="1003" height="96" volume="0.6376281"/></EDIT>)");
+        const auto added = juce::parseXML (R"(<EDIT><TRACK id="1003" height="64" volume="0.6376281" mute="1"/></EDIT>)");
         REQUIRE (expected != nullptr);
         REQUIRE (noisy != nullptr);
         REQUIRE (taller != nullptr);
@@ -348,7 +348,7 @@ TEST_SUITE ("golden")
 
         const auto heightChange = phazite::test::findDifferences (*expected, *taller);
         REQUIRE (heightChange.size() == 1);
-        CHECK (heightChange[0].startsWith ("EDIT/TRACK#1003@phaziteHeight: "));
+        CHECK (heightChange[0].startsWith ("EDIT/TRACK#1003@height: "));
 
         CHECK (phazite::test::findDifferences (*expected, *added).size() == 1);
         CHECK (phazite::test::findDifferences (*expected, *added, { .actualMayAdd = true }).isEmpty());

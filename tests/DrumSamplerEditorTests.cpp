@@ -9,6 +9,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DrumSamplerEditor.h"
 
@@ -42,7 +43,7 @@ float playNext (DrumSampler& sampler)
 TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops sounds on them")
 {
     phazite::test::TemporaryFolder project, elsewhere;
-    auto edit = te::createEmptyEdit (phazite::test::getEngine(), project.folder.getChildFile ("Song.tracktionedit"));
+    auto edit = phazite::createSongEdit (phazite::test::getEngine(), project.folder.getChildFile ("Song.tracktionedit"));
     const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
@@ -105,7 +106,7 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
 
 TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's ramp and its cut to drag, and where it plays")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();

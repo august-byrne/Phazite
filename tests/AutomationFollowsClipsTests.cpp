@@ -5,10 +5,12 @@
 #include "TestHelpers.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
 #include <utility>
@@ -34,7 +36,7 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
         setEdit (context, edit.get());
         clip = phazite::insertMidiClip (*tracks[0], { teBeats (4.0), teBeats (8.0) }, nullptr);
@@ -61,7 +63,7 @@ struct Song
 
     juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::MidiClip* clip = nullptr;

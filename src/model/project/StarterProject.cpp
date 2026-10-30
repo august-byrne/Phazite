@@ -56,15 +56,15 @@ namespace
 
     void setUpDrums (te::AudioTrack& track)
     {
-        track.setName ("Drums");
-        track.setColour (getColourForName (track.getName()).value_or (getTrackColours()[1].colour));
+        setTrackName (track, "Drums");
+        setTrackColour (track, getColourForName ("Drums").value_or (getTrackColours()[1].colour));
         setInstrument (track, createOwnDevice (track.edit, devices::DrumSampler::typeID));
     }
 
     void setUpSynth (te::AudioTrack& track)
     {
-        track.setName ("Synth");
-        track.setColour (getTrackColours()[0].colour);
+        setTrackName (track, "Synth");
+        setTrackColour (track, getTrackColours()[0].colour);
         const auto synth = createOwnDevice (track.edit, devices::Synth::typeID);
 
         if (auto* device = dynamic_cast<DevicePlugin*> (synth.get()))
@@ -101,8 +101,7 @@ namespace
 
 void addInstrumentTracks (te::Edit& edit)
 {
-    edit.ensureNumberOfAudioTracks (2);
-    const auto tracks = te::getAudioTracks (edit);
+    const auto tracks = ensureTracks (edit, 2);
 
     if (tracks.size() < 2)
         return;
@@ -113,8 +112,7 @@ void addInstrumentTracks (te::Edit& edit)
 
 void addStarterContent (te::Edit& edit)
 {
-    edit.ensureNumberOfAudioTracks (2);
-    const auto tracks = te::getAudioTracks (edit);
+    const auto tracks = ensureTracks (edit, 2);
 
     if (tracks.size() < 2)
         return;

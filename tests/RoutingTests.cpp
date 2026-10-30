@@ -10,6 +10,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/devices/SidechainMenus.h"
 #include "ui/mixer/ChannelStrip.h"
@@ -22,18 +23,18 @@ struct Mix
 {
     Mix()
     {
-        edit->ensureNumberOfAudioTracks (3);
+        phazite::ensureTracks (*edit, 3);
         const auto tracks = te::getAudioTracks (*edit);
         kick = tracks[0];
         bass = tracks[1];
         keys = tracks[2];
-        kick->setName ("Kick");
-        bass->setName ("Bass");
-        keys->setName ("Keys");
+        phazite::setTrackName (*kick, "Kick");
+        phazite::setTrackName (*bass, "Bass");
+        phazite::setTrackName (*keys, "Keys");
 
         drums = phazite::groupIntoFolder ({ kick }, nullptr);
         REQUIRE (drums != nullptr);
-        drums->setName ("Drums");
+        phazite::setTrackName (*drums, "Drums");
 
         reverb = phazite::addReturnTrack (*edit, "Reverb", nullptr);
         delay = phazite::addReturnTrack (*edit, "Delay", nullptr);
@@ -59,7 +60,7 @@ struct Mix
         return dynamic_cast<te::AudioTrack*> (te::findTrackForID (*edit, phazite::toTracktion (trackID)));
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack *kick = nullptr, *bass = nullptr, *keys = nullptr, *reverb = nullptr, *delay = nullptr;
     te::FolderTrack* drums = nullptr;

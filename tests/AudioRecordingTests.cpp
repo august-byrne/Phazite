@@ -6,9 +6,11 @@
 #include "RealTimePlayback.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
 #include "model/transport/internal/AudioRecorder.h"
@@ -37,8 +39,8 @@ struct Studio
         phazite::setMetronomeOn (*edit, true);
         edit->getTransport().looping = false;
         track = te::getAudioTracks (*edit)[0];
-        track->state.setProperty (phazite::schema::phaziteInput, "1", nullptr);
-        track->state.setProperty (phazite::schema::phaziteMonitoring, phazite::schema::monitorNever, nullptr);
+        phazite::findTrackState (*track).setProperty (phazite::schema::trackInput, "1", nullptr);
+        phazite::findTrackState (*track).setProperty (phazite::schema::trackMonitoring, phazite::schema::monitorNever, nullptr);
     }
 
     // Arms the track, once the device's inputs are there, and waits for Tracktion to have made them as the track needs.
@@ -59,7 +61,7 @@ struct Studio
     }
 
     phazite::test::TemporaryFolder temp;
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::AudioTrack* track = nullptr;
     std::unique_ptr<phazite::AudioRecorder> recorder; // made once playback runs
 };
@@ -134,7 +136,7 @@ struct SlowToHear : te::TransportControl::Listener
 TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is one undo step, and is heard while armed")
 {
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const RealTimePlayback playback (phazite::test::getEngine()); // a device with two inputs
     setEdit (context, edit.get());
     const auto track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);

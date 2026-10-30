@@ -4,6 +4,7 @@
 #include "TestHelpers.h"
 #include "devices/eq/Equalizer.h"
 #include "model/devices/internal/DevicePlugin.h"
+#include "model/project/internal/Project.h"
 
 #include <cmath>
 #include <vector>
@@ -245,7 +246,7 @@ TEST_CASE ("The EQ taps what it plays while a display listens")
 
 TEST_CASE ("The EQ is one of the engine's devices")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto plugin = edit->getPluginCache().createNewPlugin (Eq::typeID, {});
     auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
     REQUIRE (device != nullptr);

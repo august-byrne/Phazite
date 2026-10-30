@@ -9,6 +9,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/SynthEditor.h"
 
@@ -16,7 +17,7 @@ using phazite::devices::Synth;
 
 TEST_CASE ("The synth's editor has a control for each parameter, in groups, and each control changes its parameter")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
@@ -68,7 +69,7 @@ TEST_CASE ("The synth's editor has a control for each parameter, in groups, and 
 
 TEST_CASE ("Given less height, as a Devices view gives it, a column's groups show one at a time under tabs, as wide as before")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
@@ -117,7 +118,7 @@ TEST_CASE ("Given less height, as a Devices view gives it, a column's groups sho
 
 TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonance, and shows a note's envelope as it plays")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();

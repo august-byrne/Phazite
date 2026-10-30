@@ -9,6 +9,7 @@
 #include "devices/modulation/Modulation.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/project/internal/Project.h"
 
 #include <algorithm>
 #include <cmath>
@@ -90,7 +91,7 @@ struct Modulated
         return gains;
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keep;
     phazite::DevicePlugin* device = nullptr;
     std::optional<phazite::ModulatorAccess> lfo;
@@ -101,7 +102,7 @@ const auto high = juce::Decibels::decibelsToGain (7.2f);
 
 TEST_CASE ("Phazite's LFO waves are Tracktion's: the same value at each point of the cycle, whatever its shape")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto modulator = phazite::addModulator (*te::getAudioTracks (*edit)[0], phazite::ModulatorType::lfo);
     REQUIRE (modulator.has_value());
     auto& lfo = getLfo (*modulator);
@@ -218,7 +219,7 @@ TEST_CASE ("A modulator switched off moves nothing, and a device without modulat
 
 TEST_CASE ("What modulates each of the project's devices follows its modulation as it changes, and stays as it is otherwise")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     te::Plugin::Ptr keep;
     auto& device = phazite::test::createTestDevice (*edit, TestGain::typeID, keep);

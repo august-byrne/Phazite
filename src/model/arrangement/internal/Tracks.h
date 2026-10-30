@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist's tracks: which ones it shows, their colors, and the track commands.
+// The playlist's tracks: which ones it shows, their colors, and the track commands. The song holds them in Phazite's
+// own record of it (schema::TRACKS; docs/tracktion-migration.md, T1): what each is, its name and color, mute and solo,
+// and how it shows. Tracktion's tracks mirror them (model/mirror/internal/Mirror.h), with the same IDs, and hold what is
+// still Tracktion's: their clips and devices.
 #pragma once
 
 #include "model/arrangement/TrackColours.h"
@@ -7,18 +10,66 @@
 #include "model/base/internal/Tracktion.h"
 
 #include <optional>
+#include <vector>
 
 namespace phazite
 {
 class CommandRegistry;
 
 //==============================================================================
+// The song's tracks as Phazite's record holds them: a TRACK element for each (Schema.h), folders holding theirs.
+
+// The track list, which every project has (Project adds it as the project opens, with the master's element, MASTER):
+// added if the song has none yet, without an undo step; or found without adding it (then invalid).
+juce::ValueTree getTrackList (te::Edit&);
+juce::ValueTree findTrackList (const te::Edit&);
+juce::ValueTree getMasterState (te::Edit&);
+
+// A track's element, anywhere in the list; invalid for one that is gone. And each track's, top to bottom, every folder
+// before its tracks.
+juce::ValueTree findTrackState (const te::Edit&, TrackID);
+juce::ValueTree findTrackState (const te::Track&);
+std::vector<juce::ValueTree> getTrackStates (const te::Edit&);
+
+TrackID getTrackID (const juce::ValueTree& trackState);
+bool isFolderState (const juce::ValueTree& trackState);
+bool isReturnState (const juce::ValueTree& trackState);
+
+// A track's name as the song shows it: its own, or for a track or a return without one, its number among them, "Track 3",
+// as Tracktion numbers them.
+juce::String getTrackName (const te::Track&);
+
+// What a track is: a return (it takes in what tracks send to it, and no solo silences it).
+bool isReturnTrack (const te::Track&);
+
+// The folder a track is in, or nullptr.
+te::FolderTrack* getParentFolder (const te::Track&);
+
+// Mute and solo, each track's own switch: muted with its folders' mutes too, or only its own.
+bool isTrackMuted (const te::Track&, bool orInMutedFolder);
+bool isTrackSoloed (const te::Track&);
+bool areAnyTracksSoloed (const te::Edit&);
+
+// The switches set, not as undo steps (as in many DAWs); a mute in the caller's undo step with its undo manager (a bounce
+// mutes the track it rendered as part of its step).
+void setTrackMuted (te::Track&, bool, juce::UndoManager* = nullptr);
+void setTrackSoloed (te::Track&, bool);
+
+// A track's name and color, in the caller's undo step (renameTrack() and setTrackColours() are steps of their own).
+void setTrackName (te::Track&, const juce::String&);
+void setTrackColour (te::Track&, juce::Colour);
+
+// An empty track after another (at the end if that is nullptr), with no color or key of its own (its row's color in the
+// palette), not selected, as Tracktion makes one: the track a bounce renders onto, and those a new song starts with.
+te::AudioTrack* insertPlainTrack (te::Edit&, te::Track* after);
+
+//==============================================================================
 // A track's color: its own, or else the palette's color for its row, so every track has one.
 juce::Colour getTrackColour (const te::Track&, int row);
 
 //==============================================================================
-// The tracks the playlist shows, top to bottom: audio tracks and folders, including the tracks inside
-// folders. Tracktion's global tracks (tempo, markers, chords, arranger) and the master aren't shown.
+// The tracks the playlist shows, top to bottom: tracks, returns and folders, including the tracks inside folders.
+// Tracktion's global tracks (tempo, markers, chords, arranger) and the master aren't shown.
 juce::Array<te::Track*> getPlaylistTracks (const te::Edit&);
 
 // The selected tracks, top to bottom.
@@ -34,13 +85,25 @@ te::TrackInsertPoint getInsertPointAfter (te::Track&);
 //==============================================================================
 // View settings the project keeps for each track, without undo steps; their on-screen meaning is the playlist's
 // (ui/playlist/TrackHeights.h).
-std::optional<int> getSavedTrackHeight (const te::Track&); // schema::phaziteHeight as saved, nothing if never set
+std::optional<int> getSavedTrackHeight (const te::Track&); // schema::trackHeight as saved, nothing if never set
 void setSavedTrackHeight (te::Track&, int height);         // as given: the playlist clamps
 
 //==============================================================================
 // Inserts an empty track after another one (at the end if that is nullptr), in the palette's next
 // color, and selects it alone. Returns nullptr if the Edit already has as many tracks as it can hold.
 te::AudioTrack* insertTrack (te::Edit&, te::Track* after, Selection*);
+
+// The same for a return, at the end, named (model/mixer/internal/Mixer.h gives it what it takes in).
+te::AudioTrack* insertReturnTrack (te::Edit&, const juce::String& name, Selection*);
+
+// The song's tracks (not its folders or returns), top to bottom, after adding empty ones at the end until there are as many
+// as asked for: what a new song starts with.
+juce::Array<te::AudioTrack*> ensureTracks (te::Edit&, int count);
+
+// For a new song whose Edit Tracktion has just made with its first track, as it makes one while it makes the Edit: that
+// track, recorded as the song's first, without an undo step. While T1 lasts: once Tracktion's Edit is made from the song,
+// the song's first track is the song's from the start (docs/tracktion-migration.md).
+void recordFirstTrack (te::Edit&);
 
 //==============================================================================
 // Folders group tracks, and every new one is a bus, which mixes them through its own devices and fader

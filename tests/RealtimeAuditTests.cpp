@@ -46,6 +46,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/project/internal/Project.h"
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Recording.h"
@@ -122,7 +123,7 @@ private:
 
 te::AudioTrack& getTrack (te::Edit& edit, int index)
 {
-    edit.ensureNumberOfAudioTracks (index + 1);
+    phazite::ensureTracks (edit, index + 1);
     return *te::getAudioTracks (edit)[index];
 }
 
@@ -523,7 +524,7 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: one empty track")
     {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         const auto m = playAndMeasure (*edit);
         report ("One empty track", m);
         CHECK (m.peakLevel == 0.0f);
@@ -532,7 +533,7 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: the metronome, clicking louder on each bar's first beat")
     {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         phazite::setMetronomeOn (*edit, true);
         const auto m = playAndMeasure (*edit);
         report ("The metronome", m);
@@ -542,7 +543,7 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: volume automation and an LFO on pan")
     {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         auto* volume = track.getVolumePlugin();
         REQUIRE (volume != nullptr);
@@ -564,13 +565,13 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: a mix with a bus, a reverb return and the loudness meter")
     {
         // Built with the functions the mixer uses (roadmap step 1.4), with a tone generator in place of a recording.
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& tone = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
 
         auto* folder = phazite::insertFolder (*edit, &tone, nullptr); // a bus, as every new folder is
         REQUIRE (folder != nullptr);
-        edit->moveTrack (&tone, te::TrackInsertPoint (folder, nullptr));
+        phazite::moveTrackIntoFolder (tone, *folder);
         REQUIRE (phazite::isBus (*folder));
 
         auto* reverbReturn = phazite::addReturnTrack (*edit, "Reverb", nullptr);
@@ -593,7 +594,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's EQ, every band on and one automated, with its analyzer listening")
     {
         using phazite::devices::Equalizer;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
 
@@ -629,7 +630,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: every kind of modulator, and a macro, moving Phazite's EQ")
     {
         using phazite::devices::Equalizer;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
 
@@ -667,7 +668,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: lanes sweeping Phazite's EQ, a cycle a beat, and fading a track's volume")
     {
         using phazite::devices::Equalizer;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
 
@@ -695,7 +696,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: a container of Phazite's EQ and compressor at half mix, a macro and the track's LFO turning them")
     {
         using phazite::devices::Equalizer;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
 
@@ -728,12 +729,12 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's compressor, ducked by another track at 70 % mix, with its meters read")
     {
         using phazite::devices::Compressor;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         auto& source = getTrack (*edit, 1);
         REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
         REQUIRE (phazite::insertDevice (source, createToneGenerator (*edit)) != nullptr);
-        source.setMute (true); // still heard by the sidechain
+        phazite::setTrackMuted (source, true); // still heard by the sidechain
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Compressor::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -757,12 +758,12 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's vocoder at 40 bands, its carrier another track through the sidechain")
     {
         using phazite::devices::Vocoder;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& voice = getTrack (*edit, 0);
         auto& carrier = getTrack (*edit, 1);
         REQUIRE (phazite::insertDevice (voice, createToneGenerator (*edit)) != nullptr);
         REQUIRE (phazite::insertDevice (carrier, createToneGenerator (*edit)) != nullptr);
-        carrier.setMute (true); // still heard by the sidechain
+        phazite::setTrackMuted (carrier, true); // still heard by the sidechain
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Vocoder::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -782,7 +783,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's limiter on the master, pushed 12 dB, with its meters read")
     {
         using phazite::devices::Limiter;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         REQUIRE (phazite::insertDevice (getTrack (*edit, 0), createToneGenerator (*edit)) != nullptr);
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Limiter::typeID, {});
@@ -805,7 +806,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: MIDI into Phazite's synth, notes overlapping, with noise and its LFO")
     {
         using phazite::devices::Synth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -832,7 +833,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's synth with seven unison voices, spread wide")
     {
         using phazite::devices::Synth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -860,7 +861,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's wavetable synth, eight unison voices and warps, an envelope sweeping each note's table")
     {
         using phazite::devices::WavetableSynth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         const auto plugin = edit->getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -905,7 +906,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and maximizer in a "
                "row, the filter swept")
     {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
 
@@ -946,7 +947,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's effects with their editors' displays listening, what goes in and out of each tapped")
     {
         // Each device's scope (devices/core/DeviceScope.h) taking its sound in and out, and its peaks, as open editors have it.
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
 
@@ -971,8 +972,8 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: comb filters swept on Phazite's synth, chords a sixteenth apart, and on its filter, on a tone")
     {
         using phazite::devices::Synth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-        edit->ensureNumberOfAudioTracks (2);
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
+        phazite::ensureTracks (*edit, 2);
 
         // The synth's Comb +, swept by its filter envelope at each note, in unison.
         auto& notes = getTrack (*edit, 0);
@@ -1008,7 +1009,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's wavetable synth's comb, swept by an envelope at each note, chords a sixteenth apart")
     {
         using phazite::devices::WavetableSynth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         const auto wavetable = edit->getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
         REQUIRE (phazite::setInstrument (track, wavetable) != nullptr);
@@ -1027,8 +1028,8 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: the synth's vowel swept by its filter envelope, chords a sixteenth apart, and the filter's phaser")
     {
         using phazite::devices::Synth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-        edit->ensureNumberOfAudioTracks (2);
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
+        phazite::ensureTracks (*edit, 2);
 
         auto& notes = getTrack (*edit, 0);
         const auto synth = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
@@ -1061,7 +1062,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: Phazite's wavetable synth's sample and hold, swept by an envelope at each note, chords a sixteenth apart")
     {
         using phazite::devices::WavetableSynth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         const auto wavetable = edit->getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
         REQUIRE (phazite::setInstrument (track, wavetable) != nullptr);
@@ -1080,7 +1081,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: notes recorded from the computer keyboard onto Phazite's synth")
     {
         using phazite::devices::Synth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::setInstrument (track, edit->getPluginCache().createNewPlugin (Synth::typeID, {})) != nullptr);
 
@@ -1094,7 +1095,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: a beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor")
     {
         using phazite::devices::DrumSampler;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
         auto* device = dynamic_cast<phazite::DrumSamplerPlugin*> (plugin.get());
@@ -1125,7 +1126,7 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: Phazite's reverb on a return, with an 8-second decay")
     {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
 
@@ -1149,7 +1150,7 @@ TEST_SUITE ("realtime-audit")
         // As Freeze Track leaves a track (roadmap step 2.11): its file plays, and its synth doesn't. Tracktion's own freeze,
         // which renders on this thread, leaves it playing the same way.
         using phazite::devices::Synth;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::setInstrument (track, edit->getPluginCache().createNewPlugin (Synth::typeID, {})) != nullptr);
         auto clip = track.insertMIDIClip ("Notes", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
@@ -1171,7 +1172,7 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: an audio clip")
     {
         SineFile sine;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         addSineClip (getTrack (*edit, 0), sine);
 
         const auto m = playAndMeasure (*edit);
@@ -1187,7 +1188,7 @@ TEST_SUITE ("realtime-audit")
         const auto loop = temp.folder.getChildFile ("Loop 120 BPM.wav");
         REQUIRE (sine.getFile().copyFileTo (loop));
 
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         phazite::setTempo (*edit, 100.0);
         auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (getTrack (*edit, 0), loop, te::BeatPosition()));
         REQUIRE (clip != nullptr);
@@ -1208,7 +1209,7 @@ TEST_SUITE ("realtime-audit")
         // As the audio clip editor sets them (roadmap step 2.6). Phazite renders the file pitched and backwards, and
         // Tracktion plays the render, so the audio thread only reads a file.
         SineFile sine;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto clip = getTrack (*edit, 0).insertWaveClip ("Sine", sine.getFile(), { te::TimeRange (0_tp, 2_tp) }, false);
         REQUIRE (clip != nullptr);
         phazite::setClipGain (*clip, 6.0f);
@@ -1240,7 +1241,7 @@ TEST_SUITE ("realtime-audit")
         audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
         phazite::test::getEngine().getDeviceManager().dispatchPendingUpdates();
 
-        auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto project = phazite::createSongEdit (phazite::test::getEngine());
         phazite::setTempo (*project, 100.0);
         auto inTime = false;
         auto preview = phazite::createPreviewEdit (phazite::test::getEngine(), loop, project.get(), inTime);
@@ -1263,17 +1264,17 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: two tracks in a folder bus")
     {
         SineFile sine;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
 
         auto& first = getTrack (*edit, 0);
         auto& second = getTrack (*edit, 1);
         addSineClip (first, sine);
         addSineClip (second, sine);
 
-        auto folder = edit->insertNewFolderTrack (te::TrackInsertPoint (nullptr, nullptr), nullptr, true);
+        auto* folder = phazite::insertFolder (*edit, nullptr, nullptr);
         REQUIRE (folder != nullptr);
-        edit->moveTrack (&first, te::TrackInsertPoint (folder.get(), nullptr));
-        edit->moveTrack (&second, te::TrackInsertPoint (folder.get(), &first));
+        phazite::moveTrackIntoFolder (first, *folder);
+        phazite::moveTrackIntoFolder (second, *folder);
         addPlugin (*folder, phazite::devices::Compressor::typeID);
 
         const auto m = playAndMeasure (*edit);
@@ -1285,7 +1286,7 @@ TEST_SUITE ("realtime-audit")
     // nothing recording (the scenario after it records one).
     TEST_CASE ("Real-time audit: two enabled audio inputs")
     {
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         const auto m = playAndMeasure (*edit, 2);
         report ("One empty track, with two audio inputs enabled", m);
     }
@@ -1293,12 +1294,12 @@ TEST_SUITE ("realtime-audit")
     TEST_CASE ("Real-time audit: an audio input recorded onto an armed track, heard as it comes in")
     {
         phazite::test::TemporaryFolder temp;
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         const auto file = temp.folder.getChildFile ("Audit.phazite"); // there, as a project's file always is
         REQUIRE (file.create());
         edit->editFileRetriever = [file] { return file; };
         auto& track = getTrack (*edit, 0);
-        track.state.setProperty (phazite::schema::phaziteInput, "1", nullptr);
+        phazite::findTrackState (track).setProperty (phazite::schema::trackInput, "1", nullptr);
 
         const auto m = recordAudioAndMeasure (*edit, track);
         report ("An audio input recorded onto an armed track, heard as it comes in", m);

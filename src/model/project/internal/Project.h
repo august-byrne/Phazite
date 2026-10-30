@@ -10,6 +10,11 @@ namespace phazite
 {
 class SongFollower;
 
+// A new song's Edit, as a new project's starts (Project::create() makes one in a project folder): Phazite's parts (its
+// tempo map, its track list, the master's loudness meter) and one empty track, with no undo steps. Its file, if given, is
+// where its audio files' paths start from. For a song outside a project: tests' songs, and what is rendered alone.
+std::unique_ptr<te::Edit> createSongEdit (te::Engine&, const juce::File& file = {});
+
 //==============================================================================
 // The project folder:
 //   <name>.phazite   the project file: Tracktion's Edit, with Phazite's own data inside

@@ -4,12 +4,13 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "model/commands/internal/Undo.h"
+#include "model/project/internal/Project.h"
 
 namespace
 {
 std::unique_ptr<te::Edit> createEdit()
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     edit->getUndoManager().clearUndoHistory();
     return edit;
 }

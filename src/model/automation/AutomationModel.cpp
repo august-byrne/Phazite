@@ -68,7 +68,7 @@ namespace
     // A lane that shows needs its track, and the folders it is in, open (view state, without undo steps).
     void openToShow (te::Track& track)
     {
-        for (auto* t = &track; t != nullptr; t = t->getParentFolderTrack())
+        for (auto* t = &track; t != nullptr; t = getParentFolder (*t))
             if (isCollapsed (*t))
                 setCollapsed (*t, false);
     }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 
 #include <algorithm>
 #include <vector>
@@ -65,12 +66,14 @@ namespace
         JUCE_DECLARE_NON_COPYABLE (StoredValueChanges)
     };
 
+    // Tracktion's switches that its undo history leaves out follow the song's too (docs/tracktion-migration.md, T1).
     template <typename UndoOrRedo>
     void undoOrRedo (te::Edit& edit, UndoOrRedo&& undoOrRedoIt)
     {
         StoredValueChanges changes (edit);
         undoOrRedoIt();
         changes.play (edit);
+        mirror::reconcileTrackSwitches (edit);
     }
 
     // The undo managers of the Edits with a gesture in progress (message thread only).

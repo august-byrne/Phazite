@@ -3,8 +3,10 @@
 // step for the open project (src/model/commands/SongGesture.h).
 #include "TestHelpers.h"
 #include "model/arrangement/TimelineModel.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/SongGesture.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
@@ -21,7 +23,7 @@ BeatPosition beat (double beats)
 
 TEST_CASE ("The time line's bars follow the time signature, and the grid snaps in beats")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     // With no project open, a new song's 4/4.
@@ -67,7 +69,7 @@ TEST_CASE ("The time line's bars follow the time signature, and the grid snaps i
 
 TEST_CASE ("The playhead and the loop by beats, through the project's context")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     CHECK (phazite::getPlayheadBeat (context).inBeats() == doctest::Approx (0.0));
@@ -97,7 +99,7 @@ TEST_CASE ("The playhead and the loop by beats, through the project's context")
 
 TEST_CASE ("A song gesture is one undo step for the open project, and nothing without one")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     const auto name = track->getName();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
@@ -113,8 +115,8 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
     {
         phazite::SongGesture gesture (context, "Rename Twice");
         CHECK (gesture.isOpen());
-        track->setName ("Once");
-        track->setName ("Twice");
+        phazite::setTrackName (*track, "Once");
+        phazite::setTrackName (*track, "Twice");
     }
 
     CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Rename Twice"));
@@ -124,7 +126,7 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
     // Rolled back, it leaves the song as it was, and nothing to redo.
     {
         phazite::SongGesture gesture (context, "Rename");
-        track->setName ("Gone");
+        phazite::setTrackName (*track, "Gone");
         gesture.rollBack();
         CHECK_FALSE (gesture.isOpen());
     }

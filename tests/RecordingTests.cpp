@@ -11,6 +11,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/internal/Project.h"
 #include "model/transport/internal/Capture.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
@@ -48,7 +49,7 @@ TEST_CASE ("Overdub and quantizing recordings are the app's settings, which thei
     auto& engine = phazite::test::getEngine();
     REQUIRE (waitForAllMidiInputs() != nullptr);
 
-    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto edit = phazite::createSongEdit (engine);
     phazite::Selection selection (engine);
     selection.setEdit (edit.get());
     phazite::CommandRegistry registry;
@@ -80,7 +81,7 @@ TEST_CASE ("Overdub and quantizing recordings are the app's settings, which thei
 TEST_CASE ("Recording needs a track for live MIDI to play")
 {
     REQUIRE (waitForAllMidiInputs() != nullptr);
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::routeLiveMidiInput (*edit);
     CHECK_FALSE (phazite::canRecord (*edit)); // no instrument anywhere
     CHECK_FALSE (phazite::canToggleRecording (*edit));
@@ -97,7 +98,7 @@ TEST_CASE ("What is played while recording becomes a clip on live MIDI's track, 
 {
     REQUIRE (waitForAllMidiInputs() != nullptr);
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine); // 120 BPM: a beat is half a second
+    auto edit = phazite::createSongEdit (engine); // 120 BPM: a beat is half a second
     auto* track = te::getAudioTracks (*edit)[0];
     addInstrument (*track);
     edit->getTransport().looping = false;
@@ -144,7 +145,7 @@ TEST_CASE ("The song's own loop doesn't loop a recording, and is back around the
 {
     REQUIRE (waitForAllMidiInputs() != nullptr);
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto edit = phazite::createSongEdit (engine);
     auto* track = te::getAudioTracks (*edit)[0];
     addInstrument (*track);
     phazite::setTempo (*edit, 240.0); // a bar a second, the loop of a song without clips
@@ -274,7 +275,7 @@ TEST_CASE ("Capture while stopped, in a song without clips, sets the tempo from 
 {
     REQUIRE (waitForAllMidiInputs() != nullptr);
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine); // at 120 BPM
+    auto edit = phazite::createSongEdit (engine); // at 120 BPM
     auto* track = te::getAudioTracks (*edit)[0];
     addInstrument (*track);
     phazite::routeLiveMidiInput (*edit);
@@ -310,7 +311,7 @@ TEST_CASE ("Capture while stopped, in a song with clips, keeps its tempo and goe
 {
     REQUIRE (waitForAllMidiInputs() != nullptr);
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto edit = phazite::createSongEdit (engine);
     auto* track = te::getAudioTracks (*edit)[0];
     addInstrument (*track);
     phazite::insertMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, nullptr);
@@ -334,7 +335,7 @@ TEST_CASE ("Capture while the song plays keeps the notes where they were played"
 {
     REQUIRE (waitForAllMidiInputs() != nullptr);
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine); // 120 BPM: a beat is half a second
+    auto edit = phazite::createSongEdit (engine); // 120 BPM: a beat is half a second
     auto* track = te::getAudioTracks (*edit)[0];
     addInstrument (*track);
     edit->getTransport().looping = false;

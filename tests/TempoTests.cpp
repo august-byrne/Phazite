@@ -15,6 +15,7 @@
 #include "model/engine/internal/Preview.h"
 #include "model/engine/internal/PreviewLoop.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -47,7 +48,7 @@ std::pair<double, int> findLoudestMillisecond (const float* samples, int from, i
 
 TEST_CASE ("The tempo changes as one undo step, within Tracktion's limits, and clips stay on their beats")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     auto* clip = phazite::insertMidiClip (*track, { te::BeatPosition::fromBeats (8.0), te::BeatPosition::fromBeats (12.0) }, nullptr);
     REQUIRE (clip != nullptr);
@@ -77,7 +78,7 @@ TEST_CASE ("The tempo changes as one undo step, within Tracktion's limits, and c
 
 TEST_CASE ("The time signature changes as one undo step, to one Phazite takes")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     edit->getUndoManager().clearUndoHistory();
     CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 4, 4 });
 
@@ -141,7 +142,7 @@ TEST_CASE ("The tempo map is Phazite's own, which Tracktion's tempo sequence mir
 TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite renders, and leaves the others at their speed")
 {
     phazite::test::TemporaryFolder temp;
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto& track = *te::getAudioTracks (*edit)[0];
 
     // A loop that knows its tempo follows the song's; a sound that doesn't plays at its own speed.
@@ -195,7 +196,7 @@ TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite r
 TEST_CASE ("A project's renders are made in the background, and one that no clip needs any more stops and leaves nothing")
 {
     phazite::test::TemporaryFolder temp;
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto& track = *te::getAudioTracks (*edit)[0];
 
     // A loop rendered in no time, and one so long that its render is still going when the tempo changes back (Tracktion
@@ -246,7 +247,7 @@ TEST_CASE ("A loop stretched to the song's tempo plays every hit once and on its
 {
     // Known bug 1, which Tracktion's renders had: clips stretched by SoundTouch played 20 to 28 ms early, and doubled hits.
     phazite::test::TemporaryFolder temp;
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::setTempo (*edit, 100.0);
     auto* loop = dynamic_cast<te::AudioClipBase*> (
         phazite::importFile (*te::getAudioTracks (*edit)[0], writeClicks (temp.folder, 8, 120.0), te::BeatPosition()));
@@ -293,7 +294,7 @@ TEST_CASE ("A loop previewed in time plays stretched as its clip would be, every
     phazite::test::HostedDevice device;
     phazite::test::TemporaryFolder temp;
     const auto file = writeClicks (temp.folder, 4, 120.0);
-    auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto project = phazite::createSongEdit (phazite::test::getEngine());
     phazite::setTempo (*project, 100.0);
 
     auto inTime = false;
@@ -349,7 +350,7 @@ TEST_CASE ("A loop previewed in time plays stretched as its clip would be, every
 
 TEST_CASE ("Patterns follow the tempo, their notes on their beats, unless the song says they keep their speed")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* clip = phazite::insertMidiClip (*te::getAudioTracks (*edit)[0],
                                           { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
     REQUIRE (clip != nullptr);
@@ -390,7 +391,7 @@ TEST_CASE ("Patterns follow the tempo, their notes on their beats, unless the so
 TEST_CASE ("What a tempo change stretches: every sample follows it or none does, and patterns follow or keep their speed")
 {
     phazite::test::TemporaryFolder temp;
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto& track = *te::getAudioTracks (*edit)[0];
     REQUIRE (phazite::importFile (track, writeClicks (temp.folder, 8, 120.0), te::BeatPosition()) != nullptr);
     REQUIRE (phazite::importFile (track, phazite::test::writeSound (temp.folder.getChildFile ("One-second hit.wav"), 1.0),

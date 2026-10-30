@@ -2,6 +2,7 @@
 #include "RecordingModel.h"
 #include "internal/AudioRecorder.h"
 #include "internal/Recording.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
@@ -59,13 +60,13 @@ juce::String describeInput (const juce::String& inputID)
 bool canRecordAudio (const ProjectContext& context, TrackID id)
 {
     auto* track = findTrack (context, id);
-    return track != nullptr && getReturnBus (*track) < 0 && ! hasInstrument (*track);
+    return track != nullptr && ! isReturnTrack (*track) && ! hasInstrument (*track);
 }
 
 juce::String getTrackInput (const ProjectContext& context, TrackID id)
 {
     auto* track = findTrack (context, id);
-    return track != nullptr ? track->state.getProperty (schema::phaziteInput).toString() : juce::String();
+    return track != nullptr ? findTrackState (*track).getProperty (schema::trackInput).toString() : juce::String();
 }
 
 juce::String getLastInput (const ProjectContext& context)
@@ -84,9 +85,9 @@ void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inp
     const UndoStep step (track->edit, "Change Input");
 
     if (inputID.isEmpty())
-        track->state.removeProperty (schema::phaziteInput, &track->edit.getUndoManager());
+        findTrackState (*track).removeProperty (schema::trackInput, &track->edit.getUndoManager());
     else
-        track->state.setProperty (schema::phaziteInput, inputID, &track->edit.getUndoManager());
+        findTrackState (*track).setProperty (schema::trackInput, inputID, &track->edit.getUndoManager());
 
     // The input chosen last comes first in the next track's list: remembered, not an undo step.
     if (inputID.isNotEmpty())
@@ -96,7 +97,7 @@ void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inp
 InputMonitoring getInputMonitoring (const ProjectContext& context, TrackID id)
 {
     const auto* track = findTrack (context, id);
-    const auto value = track != nullptr ? track->state.getProperty (schema::phaziteMonitoring).toString() : juce::String();
+    const auto value = track != nullptr ? findTrackState (*track).getProperty (schema::trackMonitoring).toString() : juce::String();
     return value == schema::monitorAlways  ? InputMonitoring::always
            : value == schema::monitorNever ? InputMonitoring::never
                                            : InputMonitoring::whileArmed;
@@ -113,10 +114,10 @@ void setInputMonitoring (ProjectContext& context, TrackID id, InputMonitoring mo
     auto* undoManager = &track->edit.getUndoManager();
 
     if (monitoring == InputMonitoring::whileArmed)
-        track->state.removeProperty (schema::phaziteMonitoring, undoManager);
+        findTrackState (*track).removeProperty (schema::trackMonitoring, undoManager);
     else
-        track->state.setProperty (schema::phaziteMonitoring,
-                                  monitoring == InputMonitoring::always ? schema::monitorAlways : schema::monitorNever, undoManager);
+        findTrackState (*track).setProperty (
+            schema::trackMonitoring, monitoring == InputMonitoring::always ? schema::monitorAlways : schema::monitorNever, undoManager);
 }
 
 bool isArmed (const ProjectContext& context, TrackID id)

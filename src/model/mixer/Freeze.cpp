@@ -50,16 +50,16 @@ namespace
         auto* audioTrack = dynamic_cast<const te::AudioTrack*> (track);
 
         if (audioTrack == nullptr)
-            return track->getName() + " can't be " + done + ".";
+            return getTrackName (*track) + " can't be " + done + ".";
 
         if (isRecording (track->edit))
             return "Stop recording first.";
 
         if (audioTrack->getClips().isEmpty())
-            return track->getName() + " has nothing to " + verb + ": it has no clips.";
+            return getTrackName (*track) + " has nothing to " + verb + ": it has no clips.";
 
         if (audioTrack->getOutput().getDestinationTrack() != nullptr)
-            return track->getName() + "'s sound goes into another track, so it can't be " + done + " on its own.";
+            return getTrackName (*track) + "'s sound goes into another track, so it can't be " + done + " on its own.";
 
         return {};
     }
@@ -576,7 +576,7 @@ namespace
     {
     public:
         FreezeRender (ProjectContext& c, te::AudioTrack& track, std::function<void (const juce::Result&)> callback)
-            : RenderOfTrack (c, track, "Freezing " + track.getName(), std::move (callback))
+            : RenderOfTrack (c, track, "Freezing " + getTrackName (track), std::move (callback))
         {
             auto& devices = edit.engine.getDeviceManager();
             juce::BigInteger trackBit;
@@ -620,8 +620,8 @@ namespace
     {
     public:
         BounceRender (ProjectContext& c, te::AudioTrack& track, std::function<void (const juce::Result&)> callback)
-            : RenderOfTrack (c, track, "Bouncing " + track.getName(), std::move (callback)),
-              name (track.getName() + " (Bounce)")
+            : RenderOfTrack (c, track, "Bouncing " + getTrackName (track), std::move (callback)),
+              name (getTrackName (track) + " (Bounce)")
         {
             const auto folder = edit.engine.getEngineBehaviour().getDefaultFolderForAudioRecordings (edit);
             target = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav", false);
@@ -667,13 +667,13 @@ namespace
             // One undo step: the new track under the original, with the original's color and mixer settings, and the
             // original muted and collapsed.
             const UndoStep step (edit, "Bounce in Place");
-            auto bounced = edit.insertNewAudioTrack (getInsertPointAfter (track), nullptr);
+            auto* bounced = insertPlainTrack (edit, &track);
 
             if (bounced == nullptr)
                 return juce::Result::fail ("Phazite couldn't add a track for the bounce.");
 
-            bounced->setName (name);
-            setTrackColours ({ bounced.get() }, getTrackColour (track, getPlaylistTracks (edit).indexOf (&track)));
+            setTrackName (*bounced, name);
+            setTrackColours ({ bounced }, getTrackColour (track, getPlaylistTracks (edit).indexOf (&track)));
 
             if (auto* from = track.getVolumePlugin(); from != nullptr)
             {
@@ -691,9 +691,9 @@ namespace
             if (bounced->insertWaveClip (name, target, { te::TimeRange (te::TimePosition(), length) }, false) == nullptr)
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");
 
-            track.state.setProperty (te::IDs::mute, true, &edit.getUndoManager());
+            setTrackMuted (track, true, &edit.getUndoManager());
             setCollapsed (track, true);
-            getSelection (context).selectOnly (bounced.get());
+            getSelection (context).selectOnly (bounced);
             return juce::Result::ok();
         }
     };
@@ -767,7 +767,7 @@ juce::String getWhyNotFreeze (const ProjectContext& context, TrackID id)
 
     if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (track);
         audioTrack != nullptr && audioTrack->isFrozen (te::Track::individualFreeze))
-        return audioTrack->getName() + " is frozen already.";
+        return getTrackName (*audioTrack) + " is frozen already.";
 
     return getWhyNotRender (track, "freeze", "frozen");
 }
@@ -818,7 +818,7 @@ void toggleFreeze (ProjectContext& context, TrackRenderHost& host)
     }
 
     auto* track = getSelectedAudioTrack (context);
-    const auto title = "Freezing " + (track != nullptr ? track->getName() : juce::String ("the track"));
+    const auto title = "Freezing " + (track != nullptr ? getTrackName (*track) : juce::String ("the track"));
     runOrExplain (host, title, getWhyNotFreeze (context, id),
                   [&context, id] (std::function<void (const juce::Result&)> done) { return startFreeze (context, id, std::move (done)); });
 }
@@ -843,7 +843,7 @@ void bounceSelectedTrack (ProjectContext& context, TrackRenderHost& host)
 {
     const auto id = getSelectedTrackID (context);
     auto* track = getSelectedAudioTrack (context);
-    const auto title = "Bouncing " + (track != nullptr ? track->getName() : juce::String ("the track"));
+    const auto title = "Bouncing " + (track != nullptr ? getTrackName (*track) : juce::String ("the track"));
     runOrExplain (host, title, getWhyNotBounce (context, id), [&context, id] (std::function<void (const juce::Result&)> done)
                   { return startBounceInPlace (context, id, std::move (done)); });
 }

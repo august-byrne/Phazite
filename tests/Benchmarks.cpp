@@ -26,6 +26,7 @@
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/PreviewLoop.h"
@@ -294,8 +295,8 @@ TEST_CASE ("Benchmark: a live note's way through Tracktion" * doctest::test_suit
     REQUIRE (findAllMidiInputs() != nullptr);
     HostedDevice device;
 
-    auto edit = te::Edit::createSingleTrackEdit (engine);
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (engine);
+    phazite::ensureTracks (*edit, 2);
     auto* track = te::getAudioTracks (*edit)[0];
     track->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (dev::Synth::typeID, {}), 0, nullptr);
     phazite::routeLiveMidiInput (*edit);
@@ -350,8 +351,8 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
 
     const auto makeEdit = [&engine] (int numTracks, bool withDevices)
     {
-        auto edit = te::Edit::createSingleTrackEdit (engine);
-        edit->ensureNumberOfAudioTracks (numTracks);
+        auto edit = phazite::createSongEdit (engine);
+        phazite::ensureTracks (*edit, numTracks);
 
         for (auto* track : te::getAudioTracks (*edit))
         {
@@ -407,7 +408,7 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
     auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Big", error);
     REQUIRE (project != nullptr);
     auto& edit = project->getEdit();
-    edit.ensureNumberOfAudioTracks (40);
+    phazite::ensureTracks (edit, 40);
 
     // 40 tracks, each a synth, an EQ and a compressor, and 16 bars of 16th notes: 10,240 notes.
     for (auto* track : te::getAudioTracks (edit))
@@ -431,7 +432,7 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
     phazite::test::settle (300);
     report << "Save again: " << milliseconds (millisecondsOf ([&] { REQUIRE (project->save().wasOk()); }), 1) << "\n";
 
-    te::getAudioTracks (edit)[0]->setName ("Changed");
+    phazite::setTrackName (*te::getAudioTracks (edit)[0], "Changed");
     phazite::test::settle (100);
     report << "Autosave: " << milliseconds (millisecondsOf ([&] { REQUIRE (project->autosave().wasOk()); }), 1) << "\n";
 
@@ -541,7 +542,7 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     REQUIRE (edit != nullptr);
 
     // 16 tracks with a synth, each 16 clips of 4 bars with 64 notes: 256 clips and 16,384 notes.
-    edit->ensureNumberOfAudioTracks (16);
+    phazite::ensureTracks (*edit, 16);
     te::MidiClip* firstClip = nullptr;
 
     for (auto* track : te::getAudioTracks (*edit))
@@ -638,7 +639,7 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     report << "| Save | " << milliseconds (millisecondsOf ([&] { REQUIRE (project->save().wasOk()); }), 1) << " |\n";
 
     // Autosave: what the UI thread does (the devices' states and a copy of the song), the rest on a background thread.
-    te::getAudioTracks (*edit)[3]->setName ("Changed");
+    phazite::setTrackName (*te::getAudioTracks (*edit)[3], "Changed");
     phazite::test::dispatchPendingMessages();
     report << "| Autosave, on the UI thread | " << milliseconds (millisecondsOf ([&] { project->autosaveInBackground(); }), 1) << " |\n";
     phazite::test::runTimersUntil ([project] { return ! project->isAutosaving(); }, 10000);
@@ -674,7 +675,7 @@ TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite (
     REQUIRE (edit != nullptr);
 
     // 100 tracks, each with 24 clips of 4 bars and 16 notes: 2,400 clips and 38,400 notes.
-    edit->ensureNumberOfAudioTracks (100);
+    phazite::ensureTracks (*edit, 100);
     te::MidiClip* lastClip = nullptr;
     int numClips = 0;
 

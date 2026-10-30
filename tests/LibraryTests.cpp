@@ -4,6 +4,7 @@
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "services/Library.h"
@@ -90,7 +91,7 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
 TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")
 {
     TemporaryFolder temp;
-    auto project = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto project = phazite::createSongEdit (phazite::test::getEngine());
     phazite::setTempo (*project, 100.0);
     phazite::ProjectContext context (phazite::test::getEngineContext()); // with the project open
     setEdit (context, project.get());

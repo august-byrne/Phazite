@@ -8,6 +8,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/ReverbEditor.h"
 
@@ -15,7 +16,7 @@ using phazite::devices::Reverb;
 
 TEST_CASE ("The reverb's editor shows a knob for each control, and its graph follows the decay")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto plugin = edit->getPluginCache().createNewPlugin (Reverb::typeID, {});
     REQUIRE (phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();

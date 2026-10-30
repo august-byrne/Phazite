@@ -9,6 +9,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
+#include "model/project/internal/Project.h"
 
 namespace
 {
@@ -27,7 +28,7 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     CHECK (empty.getValue() == doctest::Approx (0.0f));
 
     phazite::test::TestPlugin testPlugin;
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr plugin = phazite::test::TestPlugin::create (*edit);
     te::getAudioTracks (*edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
     auto handle = phazite::makeParameterHandle (plugin.get(), phazite::test::TestPlugin::toneID);
@@ -58,7 +59,7 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
 
 TEST_CASE ("Changes through a parameter handle are named undo steps: one per gesture, and one per single change")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto reverb = addReverb (*edit);
     phazite::test::settle();
     edit->getUndoManager().clearUndoHistory();
@@ -106,7 +107,7 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
 
 TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keep;
     auto& device = phazite::test::createTestDevice (*edit, phazite::test::TestGain::typeID, keep);
 
@@ -125,7 +126,7 @@ TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices
 
 TEST_CASE ("A gesture begun during another for the same project joins it: a drag that moves two parameters is one step")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto reverb = addReverb (*edit);
     phazite::test::settle();
     edit->getUndoManager().clearUndoHistory();

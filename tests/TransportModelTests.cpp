@@ -6,6 +6,7 @@
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
@@ -13,7 +14,7 @@
 
 TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each change outside a drag")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     auto& undo = edit->getUndoManager();
 
@@ -54,7 +55,7 @@ TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each c
 
 TEST_CASE ("The transport's switches and the time signature by the project's context")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     CHECK_FALSE (phazite::isPlaying (context));

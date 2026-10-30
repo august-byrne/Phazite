@@ -3,11 +3,13 @@
 // and dragging it, a modulator dropped on a knob, and a modulator's editor with a step sequencer's steps. The track's
 // modulators show in the Devices view (DevicesViewTests.cpp).
 #include "UiTestHelpers.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/ModulatorDrag.h"
@@ -23,7 +25,7 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
         setEdit (context, edit.get());
@@ -40,7 +42,7 @@ struct Song
     ParameterRef threshold() const { return { phazite::getEffects (context, phazite::getTrackID (*a))[0].id, "threshold" }; }
     juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;

@@ -51,7 +51,7 @@ namespace
         for (auto* track : te::getAudioTracks (edit))
             for (auto* send : phazite::getSends (*track))
                 if (send->getBusNumber() == bus)
-                    names.addIfNotAlreadyThere (track->getName());
+                    names.addIfNotAlreadyThere (getTrackName (*track));
 
         return names;
     }
@@ -64,7 +64,7 @@ namespace
                 if (send->getBusNumber() == bus)
                     return true;
 
-        for (auto* parent = from.getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
+        for (auto* parent = getParentFolder (from); parent != nullptr; parent = getParentFolder (*parent))
             if (parent == &to && isBus (*parent))
                 return true;
 
@@ -95,7 +95,7 @@ MixerChannels getMixerChannels (const ProjectContext& context)
 
     if (auto* edit = getEdit (context))
         for (auto* track : getPlaylistTracks (*edit))
-            (getReturnBus (*track) >= 0 ? channels.returns : channels.tracks).push_back (getTrackID (*track));
+            (isReturnTrack (*track) ? channels.returns : channels.tracks).push_back (getTrackID (*track));
 
     return channels;
 }
@@ -109,22 +109,22 @@ std::optional<Channel> getChannel (const ProjectContext& context, TrackID id)
 
     Channel channel;
     channel.id = id;
-    channel.name = track->getName();
+    channel.name = getTrackName (*track);
     channel.colour = getTrackColour (*track, getPlaylistTracks (track->edit).indexOf (track));
     channel.hasEffects = ! phazite::getEffects (*track).isEmpty();
     channel.needsInstrument = phazite::needsInstrument (*track);
 
     if (auto* folder = dynamic_cast<te::FolderTrack*> (track))
         channel.kind = isBus (*folder) ? ChannelKind::bus : ChannelKind::plainFolder;
-    else if (const auto bus = getReturnBus (*track); bus >= 0)
-        channel.kind = ChannelKind::returnTrack, channel.senders = getSenderNames (track->edit, bus);
+    else if (isReturnTrack (*track))
+        channel.kind = ChannelKind::returnTrack, channel.senders = getSenderNames (track->edit, getReturnBus (*track));
 
     // A track's sound goes into the nearest bus it is in, or else to the master.
-    for (auto* parent = track->getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
+    for (auto* parent = getParentFolder (*track); parent != nullptr; parent = getParentFolder (*parent))
     {
         if (isBus (*parent))
         {
-            channel.outputBus = parent->getName();
+            channel.outputBus = getTrackName (*parent);
             break;
         }
     }
@@ -229,7 +229,7 @@ std::optional<MuteSolo> getMuteSolo (const ProjectContext& context, TrackID id)
     if (track == nullptr)
         return {};
 
-    return MuteSolo { track->isMuted (false), track->isSolo (false), isSilencedBySolo (*track) };
+    return MuteSolo { isTrackMuted (*track, false), isTrackSoloed (*track), isSilencedBySolo (*track) };
 }
 
 void toggleMute (ProjectContext& context, TrackID id)
@@ -280,7 +280,7 @@ std::vector<DeviceSlot> getEffects (const ProjectContext& context, TrackID id)
 bool canHoldInstrument (const ProjectContext& context, TrackID id)
 {
     auto* track = dynamic_cast<te::AudioTrack*> (findTrack (context, id));
-    return track != nullptr && getReturnBus (*track) < 0;
+    return track != nullptr && ! isReturnTrack (*track);
 }
 
 std::vector<ParameterHandle> getKeyControls (ProjectContext& context, DeviceID id, int maximum)
@@ -465,7 +465,7 @@ std::vector<Return> getReturns (const ProjectContext& context)
 
     if (auto* edit = getEdit (context))
         for (auto* track : getReturnTracks (*edit))
-            returns.push_back ({ getTrackID (*track), track->getName() });
+            returns.push_back ({ getTrackID (*track), getTrackName (*track) });
 
     return returns;
 }
@@ -520,10 +520,10 @@ std::vector<SendTarget> getSendTargets (const ProjectContext& context, TrackID i
         if (! canSendTo (*track, *returnTrack))
             continue;
 
-        SendTarget target { getTrackID (*returnTrack), returnTrack->getName(), std::nullopt };
+        SendTarget target { getTrackID (*returnTrack), getTrackName (*returnTrack), std::nullopt };
 
         if (auto* send = findSendTo (*track, getReturnBus (*returnTrack)))
-            target.send = Send { getDeviceID (*send), returnTrack->getName(), isPreFader (*send) };
+            target.send = Send { getDeviceID (*send), getTrackName (*returnTrack), isPreFader (*send) };
 
         targets.push_back (target);
     }
@@ -544,7 +544,7 @@ ParameterHandle getSendLevelTo (ProjectContext& context, TrackID from, TrackID r
     const auto locate = [bus] (te::Track& sender) -> te::Plugin* { return findSendTo (sender, bus); };
     const auto create = [bus] (te::Track& sender) -> te::Plugin* { return addSend (sender, bus, false); };
     const auto identity = "send " + juce::String (from.getRaw()) + " " + juce::String (returnTrack.getRaw());
-    return makeCreatingHandle (*track, locate, create, identity, sendLevelID, { 0.0f, 1.0f }, "Send to " + target->getName(),
+    return makeCreatingHandle (*track, locate, create, identity, sendLevelID, { 0.0f, 1.0f }, "Send to " + getTrackName (*target),
                                "Change Send Level");
 }
 
@@ -554,7 +554,7 @@ std::vector<OutputChoice> getOutputChoices (const ProjectContext& context, Track
     std::vector<OutputChoice> choices;
     auto* track = findTrack (context, id);
 
-    if (track == nullptr || getReturnBus (*track) >= 0)
+    if (track == nullptr || isReturnTrack (*track))
         return choices;
 
     const auto* current = getOutputBus (*track);
@@ -565,8 +565,8 @@ std::vector<OutputChoice> getOutputChoices (const ProjectContext& context, Track
     {
         auto* folder = dynamic_cast<te::FolderTrack*> (other);
 
-        if (folder != nullptr && folder != track && isBus (*folder) && ! folder->isAChildOf (*track))
-            choices.push_back ({ getTrackID (*folder), folder->getName(), folder == current });
+        if (folder != nullptr && folder != track && isBus (*folder) && ! findTrackState (*folder).isAChildOf (findTrackState (*track)))
+            choices.push_back ({ getTrackID (*folder), getTrackName (*folder), folder == current });
     }
 
     return choices;
@@ -575,7 +575,7 @@ std::vector<OutputChoice> getOutputChoices (const ProjectContext& context, Track
 bool canChooseOutput (const ProjectContext& context, TrackID id)
 {
     auto* track = findTrack (context, id);
-    return track != nullptr && getReturnBus (*track) < 0;
+    return track != nullptr && ! isReturnTrack (*track);
 }
 
 void setOutput (ProjectContext& context, TrackID id, TrackID busID)
@@ -583,10 +583,10 @@ void setOutput (ProjectContext& context, TrackID id, TrackID busID)
     auto* track = findTrack (context, id);
     auto* bus = busID.isValid() ? dynamic_cast<te::FolderTrack*> (findTrack (context, busID)) : nullptr;
 
-    if (track == nullptr || getReturnBus (*track) >= 0 || (busID.isValid() && bus == nullptr))
+    if (track == nullptr || isReturnTrack (*track) || (busID.isValid() && bus == nullptr))
         return;
 
-    if (bus != nullptr && (bus == track || ! isBus (*bus) || bus->isAChildOf (*track)))
+    if (bus != nullptr && (bus == track || ! isBus (*bus) || findTrackState (*bus).isAChildOf (findTrackState (*track))))
         return;
 
     if (getOutputBus (*track) == bus)
@@ -603,12 +603,12 @@ void setOutput (ProjectContext& context, TrackID id, TrackID busID)
     // Out of its buses, after the outermost: a plain folder around them keeps it.
     te::FolderTrack* outermost = nullptr;
 
-    for (auto* parent = track->getParentFolderTrack(); parent != nullptr; parent = parent->getParentFolderTrack())
+    for (auto* parent = getParentFolder (*track); parent != nullptr; parent = getParentFolder (*parent))
         if (isBus (*parent))
             outermost = parent;
 
     if (outermost != nullptr)
-        track->edit.moveTrack (track, getInsertPointAfter (*outermost));
+        moveTracksAfter ({ track }, outermost);
 }
 
 //==============================================================================
@@ -746,7 +746,8 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
             if (plugin->isEnabled())
                 if (const auto latency = plugin->getLatencySeconds(); latency > 0.0)
                     compensation.devices.push_back (
-                        { plugin->getName() + " on " + (track->isMasterTrack() ? juce::String ("Master") : track->getName()), latency });
+                        { plugin->getName() + " on " + (track->isMasterTrack() ? juce::String ("Master") : getTrackName (*track)),
+                          latency });
 
     std::stable_sort (compensation.devices.begin(), compensation.devices.end(),
                       [] (const auto& a, const auto& b) { return a.second > b.second; });

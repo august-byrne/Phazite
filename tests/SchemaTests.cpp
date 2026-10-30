@@ -5,7 +5,7 @@
 
 TEST_CASE ("Reading Phazite's state doesn't add it")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // Tracktion's, not a song's (Project.h: createSongEdit())
     edit->getUndoManager().clearUndoHistory();
     const auto numChildren = edit->state.getNumChildren();
 

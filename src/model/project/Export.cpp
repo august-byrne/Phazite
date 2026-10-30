@@ -2,6 +2,7 @@
 #include "Export.h"
 #include "internal/Export.h"
 #include "model/arrangement/internal/ClipRenders.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
@@ -225,7 +226,7 @@ juce::Array<te::Track*> getStemTracks (const te::Edit& edit)
 
 juce::String getStemFileName (int index, const te::Track& track, const juce::String& suffix)
 {
-    const auto name = juce::File::createLegalFileName (track.getName().trim());
+    const auto name = juce::File::createLegalFileName (getTrackName (track).trim());
     return juce::String (index + 1).paddedLeft ('0', 2) + " " + (name.isNotEmpty() ? name : juce::String ("Track")) + suffix;
 }
 
@@ -394,11 +395,11 @@ namespace
             {
                 queue = nullptr;
                 deliverTo (std::weak_ptr<StemsRender*> (alive),
-                           { juce::Result::fail ("Phazite couldn't render " + tracks[i]->getName() + "."), folder });
+                           { juce::Result::fail ("Phazite couldn't render " + getTrackName (*tracks[i]) + "."), folder });
                 return;
             }
 
-            job->name = tracks[i]->getName();
+            job->name = getTrackName (*tracks[i]);
             queue->addJob (std::move (*job));
             stems.add (folder.getChildFile (fileName));
         }

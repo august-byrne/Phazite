@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -27,7 +28,7 @@ struct Screen
         juce::String error;
         project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Editor", error);
         REQUIRE (project != nullptr);
-        project->getEdit().ensureNumberOfAudioTracks (1);
+        phazite::ensureTracks (project->getEdit(), 1);
         synth = phazite::setInstrument (*te::getAudioTracks (project->getEdit())[0],
                                         project->getEdit().getPluginCache().createNewPlugin (WavetableSynth::typeID, {}));
         REQUIRE (synth != nullptr);

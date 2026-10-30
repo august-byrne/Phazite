@@ -6,6 +6,7 @@
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "devices/core/Processor.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Mixer.h"
@@ -38,7 +39,7 @@ te::PluginRenderContext makeContext (juce::AudioBuffer<float>& buffer, te::MidiM
 
 TEST_CASE ("A device's parameters are automatable, and stored in its state under their IDs")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keep;
     auto& device = createDevice (*edit, TestGain::typeID, keep);
 
@@ -82,7 +83,7 @@ TEST_CASE ("A device's parameters are automatable, and stored in its state under
 
 TEST_CASE ("An effect gets its parameters' values and stereo audio, and reports its latency and tail")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keep;
     auto& device = createDevice (*edit, TestGain::typeID, keep);
     auto& gain = dynamic_cast<TestGain&> (device.getProcessor());
@@ -125,7 +126,7 @@ TEST_CASE ("An effect gets its parameters' values and stereo audio, and reports 
 
 TEST_CASE ("An instrument gets its notes at their samples, and plays from silence")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keep;
     auto& device = createDevice (*edit, TestTone::typeID, keep);
     auto& tone = dynamic_cast<TestTone&> (device.getProcessor());
@@ -178,7 +179,7 @@ TEST_CASE ("An instrument gets its notes at their samples, and plays from silenc
 TEST_CASE ("An effect's mix blends its sound with what came in, lined up with its latency")
 {
     using phazite::test::TestDelay;
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keep;
     auto& device = createDevice (*edit, TestDelay::typeID, keep);
     device.baseClassInitialise ({ 0_tp, testRate, testBlock });
@@ -230,7 +231,7 @@ TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a sav
         REQUIRE (project != nullptr);
         auto& edit = project->getEdit();
         const auto own = phazite::getOwnDevices();
-        edit.ensureNumberOfAudioTracks ((int) own.size());
+        phazite::ensureTracks (edit, (int) own.size());
 
         for (size_t d = 0; d < own.size(); ++d)
         {
@@ -311,7 +312,7 @@ TEST_CASE ("No parameter of Phazite's devices is named as a property Tracktion k
 
 TEST_CASE ("A device sleeps once what comes in and what it plays have been silent a while, and wakes at the first sound")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keepGain, keepTone;
     auto& effect = createDevice (*edit, TestGain::typeID, keepGain);
     auto& gain = dynamic_cast<TestGain&> (effect.getProcessor());
@@ -356,7 +357,7 @@ TEST_CASE ("A device sleeps once what comes in and what it plays have been silen
 
 TEST_CASE ("A continuous parameter that moves between blocks glides there over the next, while choices jump")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keep;
     auto& device = createDevice (*edit, TestGain::typeID, keep);
     auto& gain = dynamic_cast<TestGain&> (device.getProcessor());

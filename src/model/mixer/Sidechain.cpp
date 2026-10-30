@@ -48,7 +48,7 @@ namespace
 
     SidechainChoice describe (te::AudioTrack& track)
     {
-        return { getTrackID (track), track.getName(), getTrackColour (track, getPlaylistTracks (track.edit).indexOf (&track)) };
+        return { getTrackID (track), getTrackName (track), getTrackColour (track, getPlaylistTracks (track.edit).indexOf (&track)) };
     }
 
     bool playsDrumSampler (te::AudioTrack& track)
@@ -163,7 +163,7 @@ std::vector<SidechainChoice> describeTracksToListenTo (te::Edit& edit, te::Track
         auto choice = describe (*track);
 
         if (fed.contains (track))
-            choice.whyNot = "its sound comes from " + listener->getName();
+            choice.whyNot = "its sound comes from " + getTrackName (*listener);
 
         choices.push_back (choice);
     }
@@ -184,7 +184,7 @@ void setSidechainSource (te::Plugin& plugin, te::AudioTrack* source)
     if (source == getSidechainSource (plugin) || (source != nullptr && ! getSidechainSources (plugin).contains (source)))
         return;
 
-    const UndoStep step (plugin.edit, source != nullptr ? "Sidechain from " + source->getName() : juce::String ("Turn Sidechain Off"));
+    const UndoStep step (plugin.edit, source != nullptr ? "Sidechain from " + getTrackName (*source) : juce::String ("Turn Sidechain Off"));
     plugin.setSidechainSourceID (source != nullptr ? source->itemID : te::EditItemID());
 
     // The source's two channels go to the sidechain's inputs: the routing Tracktion guesses for a device's inputs.
@@ -200,7 +200,7 @@ te::Plugin* duckUnder (te::AudioTrack& ducked, te::AudioTrack& key)
     if (&ducked == &key || getTracksFedBy (ducked).contains (&key))
         return nullptr;
 
-    const UndoStep step (ducked.edit, "Duck " + ducked.getName() + " Under " + key.getName());
+    const UndoStep step (ducked.edit, "Duck " + getTrackName (ducked) + " Under " + getTrackName (key));
     auto* compressor = insertDevice (ducked, ducked.edit.getPluginCache().createNewPlugin (devices::Compressor::typeID, {}));
 
     if (compressor != nullptr)

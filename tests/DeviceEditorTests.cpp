@@ -10,6 +10,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/project/internal/Project.h"
 #include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
 
@@ -28,7 +29,7 @@ te::Plugin::Ptr addDevice (te::Edit& edit, const char* type)
 TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
 {
     phazite::test::TestPlugin testPlugin;
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto eq = addDevice (*edit, Equalizer::typeID);
     const auto device = phazite::makeDeviceHandle (*eq);
 
@@ -59,7 +60,7 @@ TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
 
 TEST_CASE ("A device without an editor of its own gets a knob for each parameter, showing its unit")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto eq = addDevice (*edit, Equalizer::typeID);
     edit->getUndoManager().clearUndoHistory();
 
@@ -95,7 +96,7 @@ TEST_CASE ("Every device's editor rests while nothing it shows moves, and shows 
     for (const auto* info : phazite::getOwnDevices())
     {
         CAPTURE (std::string (info->name));
-        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto plugin = addDevice (*edit, std::string (info->typeID).c_str());
         phazite::test::settle();
         auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*plugin));

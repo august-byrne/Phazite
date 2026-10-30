@@ -3,9 +3,11 @@
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/internal/Project.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/timeline/SmartTool.h"
 
@@ -21,7 +23,7 @@ struct ClipEdit
 {
     ClipEdit()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
         edit->getUndoManager().clearUndoHistory();
         selection.setEdit (edit.get());
@@ -37,7 +39,7 @@ struct ClipEdit
         return *clip;
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM: a beat is 0.5 s
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM: a beat is 0.5 s
     juce::Array<te::AudioTrack*> tracks;
     phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
@@ -90,7 +92,7 @@ TEST_CASE ("The Smart Tool picks what a drag does from where it starts on a clip
 TEST_CASE ("A new MIDI clip is named after its track, and selected")
 {
     ClipEdit e;
-    e.tracks[0]->setName ("Bass");
+    phazite::setTrackName (*e.tracks[0], "Bass");
 
     auto* clip = phazite::insertMidiClip (*e.tracks[0], { beats (4.0), beats (8.0) }, &e.selection);
     REQUIRE (clip != nullptr);
@@ -318,7 +320,7 @@ TEST_CASE ("A time range is deleted, split, inserted and removed")
     CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-2.00 2.00-6.00"));
 
     // A range whose tracks are all gone is empty.
-    e.edit->deleteTrack (e.tracks[0]);
+    phazite::deleteTracks ({ e.tracks[0] }, nullptr);
     CHECK (e.range.isEmpty());
 }
 

@@ -3,6 +3,7 @@
 #include "TestHelpers.h"
 #include "devices/synth/Synth.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/project/internal/Project.h"
 
 using namespace tracktion::literals;
 
@@ -11,7 +12,7 @@ namespace
 // An Edit with one track playing a two-bar MIDI clip on Phazite's synth, so renders and freezes produce audio.
 std::unique_ptr<te::Edit> createEditWithSynth (te::Engine& engine, const juce::File& file)
 {
-    auto edit = te::createEmptyEdit (engine, file);
+    auto edit = phazite::createSongEdit (engine, file);
     auto* track = te::getAudioTracks (*edit)[0];
 
     auto synth = edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {});
@@ -87,7 +88,7 @@ TEST_CASE ("The focused Edit is forgotten when it is deleted")
 {
     auto& engine = phazite::test::getEngine();
     auto& ui = phazite::getUIBehaviour (engine);
-    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto edit = phazite::createSongEdit (engine);
 
     ui.setFocusedEdit (edit.get());
     CHECK (ui.getLastFocusedEdit() == edit.get());
@@ -123,7 +124,7 @@ TEST_CASE ("Recordings go into the project's Audio folder")
 {
     auto& engine = phazite::test::getEngine();
     juce::TemporaryFile file (".tracktionedit");
-    auto edit = te::createEmptyEdit (engine, file.getFile());
+    auto edit = phazite::createSongEdit (engine, file.getFile());
 
     CHECK (engine.getEngineBehaviour().getDefaultFolderForAudioRecordings (*edit) == file.getFile().getSiblingFile ("Audio"));
 }

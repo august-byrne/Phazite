@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the playlist's and the piano roll's tools share while the mouse is down (src/ui/timeline/TimelineGesture.h).
 #include "TestHelpers.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/timeline/TimelineGesture.h"
 
@@ -10,7 +12,7 @@ using phazite::BeatPosition;
 
 TEST_CASE ("A gesture's changes are one undo step, the first one's, however many steps it begins")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     const auto name = track->getName();
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
@@ -20,9 +22,9 @@ TEST_CASE ("A gesture's changes are one undo step, the first one's, however many
     {
         phazite::ui::TimelineGesture gesture;
         gesture.beginStep (context, "Add Note");
-        track->setName ("Added");
+        phazite::setTrackName (*track, "Added");
         gesture.beginStep (context, "Move Notes"); // the drag after the click
-        track->setName ("Moved");
+        phazite::setTrackName (*track, "Moved");
     }
 
     CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Add Note"));

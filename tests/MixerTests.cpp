@@ -12,6 +12,7 @@
 #include "model/mixer/MixHandle.h"
 #include "model/mixer/internal/MixHandle.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
 
 using namespace tracktion::literals;
 
@@ -24,16 +25,16 @@ struct Mix
 {
     Mix()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
-        a->setName ("A");
-        b->setName ("B");
+        phazite::setTrackName (*a, "A");
+        phazite::setTrackName (*b, "B");
     }
 
     te::Plugin::Ptr create (const char* xmlType) const { return edit->getPluginCache().createNewPlugin (xmlType, {}); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
 };
@@ -170,10 +171,10 @@ TEST_CASE ("Return tracks take a bus, and sends feed them from before or after t
     CHECK (phazite::getReturnTracks (*mix.edit).size() == 2);
 
     // Returns are solo-safe: soloing a track leaves them audible, so its sends to them are heard.
-    mix.a->setSolo (true);
+    phazite::setTrackSoloed (*mix.a, true);
     CHECK_FALSE (phazite::isSilencedBySolo (*reverbReturn));
     CHECK (phazite::isSilencedBySolo (*mix.b));
-    mix.a->setSolo (false);
+    phazite::setTrackSoloed (*mix.a, false);
 }
 
 TEST_CASE ("The master's loudness meter reads a stereo sine at its level")
@@ -382,7 +383,7 @@ TEST_CASE ("A plug-in's mix crossfades between the sound that comes in and the e
 
 TEST_CASE ("New return tracks are numbered in turn")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::Selection selection (phazite::test::getEngine());
     selection.setEdit (edit.get());
 

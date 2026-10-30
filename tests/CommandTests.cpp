@@ -4,6 +4,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/commands/internal/UndoCommands.h"
+#include "model/project/internal/Project.h"
 
 namespace
 {
@@ -86,7 +87,7 @@ TEST_CASE ("The command palette's search ranks names, synonyms and categories")
 
 TEST_CASE ("A command that changes an Edit is one named undo step")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto& undo = edit->getUndoManager();
 
     // Before the registry, whose undo commands keep a reference to it.
@@ -146,7 +147,7 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
 
 TEST_CASE ("A model function that begins its own undo step is part of the step of the command that runs it")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto& undo = edit->getUndoManager();
     undo.clearUndoHistory();
 
@@ -178,7 +179,7 @@ TEST_CASE ("A model function that begins its own undo step is part of the step o
 
 TEST_CASE ("withEdit and ifEdit act only with an Edit")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::Selection selection { phazite::test::getEngine() };
 
     int runs = 0;

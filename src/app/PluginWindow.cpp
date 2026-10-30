@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginWindow.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DeviceStates.h"
@@ -390,7 +391,7 @@ namespace
             if (track == nullptr)
                 track = getTrackOfContainerDevice (device);
 
-            return device.getName() + " - " + (track != nullptr ? track->getName() : juce::String ("Master"));
+            return device.getName() + " - " + (track != nullptr ? getTrackName (*track) : juce::String ("Master"));
         }
 
         void refresh() override // the device or its track renamed

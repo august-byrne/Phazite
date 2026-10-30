@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Project.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceStates.h"
@@ -37,15 +38,17 @@ namespace
         return a == b && b == a;
     }
 
-    // What every project has, added before the project watches for changes: Phazite's state with its tempo map, which
-    // Tracktion's tempo sequence mirrors, the master's loudness meter, and an ID for each note. It isn't the user's change,
-    // so it is neither an undo step nor an unsaved change.
+    // What every project has, added before the project watches for changes: Phazite's state with its tempo map and its track
+    // list, which Tracktion's tempo sequence and tracks mirror, the master's loudness meter, and an ID for each note. It
+    // isn't the user's change, so it is neither an undo step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
         getPhaziteState (edit);
         ensureTempoMap (edit);
         mirror::reconcileTempoMap (edit);
+        getTrackList (edit);
+        mirror::reconcileTracks (edit);
         ensureLoudnessMeter (edit);
         assignNoteIDs (edit);
         edit.getUndoManager().clearUndoHistory();
@@ -103,6 +106,25 @@ namespace
 } // namespace
 
 //==============================================================================
+std::unique_ptr<te::Edit> createSongEdit (te::Engine& engine, const juce::File& file)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // With the first track Tracktion makes as it makes the Edit, recorded as the song's: a track added once the Edit is
+    // made would leave Tracktion a change to mark later, as if the song had changed after it was made.
+    const auto id = te::ProjectItemID::createNewID (te::ProjectID {});
+    te::Edit::Options options { engine, te::loadEditFromFile (engine, {}, id), id };
+    options.editFileRetriever = [file] { return file; };
+    auto edit = te::Edit::createEdit (std::move (options));
+
+    if (edit == nullptr)
+        return {};
+
+    recordFirstTrack (*edit);
+    addPhaziteParts (*edit);
+    return edit;
+}
+
 std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& parentFolder, const juce::String& name, juce::String& error,
                                           const std::function<void (te::Edit&)>& addContent)
 {
@@ -114,15 +136,13 @@ std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& 
         return {};
 
     const auto file = folder.getChildFile (folder.getFileName() + fileExtension);
-    auto edit = te::createEmptyEdit (engine, file);
+    auto edit = createSongEdit (engine, file);
 
     if (edit == nullptr)
     {
         error = "Phazite couldn't create the project.";
         return {};
     }
-
-    addPhaziteParts (*edit);
 
     if (addContent != nullptr)
         addContent (*edit);
@@ -547,7 +567,7 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
             && (property == te::IDs::position || property == te::IDs::start || property == te::IDs::loopPoint1
                 || property == te::IDs::loopPoint2 || property == te::IDs::looping || property == te::IDs::recordPunchInOut))
            || (tree.hasType (te::IDs::CLICKTRACK) && (property == te::IDs::active || property == te::IDs::emphasiseBars))
-           || (te::TrackList::isTrack (tree) && schema::isTrackViewProperty (property))
+           || (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
            || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property))
            || (tree.hasType (schema::PHAZITE)
                && (schema::isGridProperty (property) || property == schema::loopFollowsSong || property == schema::punch
@@ -557,8 +577,9 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
 
 bool Project::isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)
 {
-    return element.hasType (te::IDs::INPUTDEVICES) || (parent.hasType (schema::PHAZITE) && element.hasType (schema::PIANOROLL))
-           || (te::TrackList::isTrack (parent) && schema::isTrackViewElement (element));
+    return element.hasType (te::IDs::INPUTDEVICES)
+           || (parent.hasType (schema::PHAZITE) && (element.hasType (schema::PIANOROLL) || element.hasType (schema::MASTER)))
+           || (parent.hasType (schema::TRACK) && schema::isTrackViewElement (element));
 }
 
 bool Project::isCounted (const juce::ValueTree& tree, const juce::Identifier& property)

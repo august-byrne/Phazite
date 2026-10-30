@@ -7,9 +7,11 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Selection.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/project/internal/Project.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <set>
@@ -38,7 +40,7 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
         selection.setEdit (edit.get());
         phazite::addSelectionCommands (registry, selection, range);
@@ -89,7 +91,7 @@ struct Song
         return names.joinIntoString (", ");
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     juce::Array<te::AudioTrack*> tracks;
     phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
@@ -163,7 +165,7 @@ TEST_CASE ("The built-in outlines are the design's four and four more, with thei
 
 TEST_CASE ("Applying the electronic outline creates its seven sections at the project tempo")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::setTempo (*edit, 128.0);
 
     const auto* outline = phazite::findOutline ("electronic");
@@ -491,7 +493,7 @@ TEST_CASE ("A new section goes after the last one, 8 bars long and named in turn
     CHECK (phazite::getNewSectionName (*song.edit) == juce::String ("Section 9"));
 
     // In a song without sections, at its start.
-    auto empty = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto empty = phazite::createSongEdit (phazite::test::getEngine());
     const auto first = phazite::getSection (*empty, phazite::appendSection (*empty, nullptr));
     REQUIRE (first.has_value());
     CHECK (first->name == juce::String ("Section 1"));
@@ -597,7 +599,7 @@ TEST_CASE ("Section edits made with the mouse are undo steps of their own, and n
     CHECK (undo.getUndoDescription() == juce::String ("Add Section"));
 
     // In a song without sections: from the bar the beat is in, and a new one before another stops at it.
-    auto empty = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto empty = phazite::createSongEdit (phazite::test::getEngine());
     const auto atStart = phazite::getSection (*empty, phazite::addSectionAt (*empty, at (2.0), nullptr));
     const auto later = phazite::getSection (*empty, phazite::addSectionAt (*empty, at (41.0), nullptr));
     const auto between = phazite::getSection (*empty, phazite::addSectionAt (*empty, at (37.0), nullptr));

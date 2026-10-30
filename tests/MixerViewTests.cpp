@@ -3,8 +3,10 @@
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/MasterStrip.h"
@@ -15,8 +17,8 @@
 TEST_CASE ("The mixer's strips keep their parts apart, however short the window is")
 {
     // A short window used to squeeze the faders over the devices and the names.
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::ensureTracks (*edit, 2);
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     setEdit (context, edit.get());
     phazite::CommandRegistry registry;
@@ -51,7 +53,7 @@ TEST_CASE ("The mixer's strips keep their parts apart, however short the window 
 
 TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks for one when its notes make no sound")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     setEdit (context, edit.get());
@@ -98,8 +100,8 @@ TEST_CASE ("A strip lists its devices a line each, with no knobs, over a fader a
 {
     // The owner (2026-10-30): the mixer showed knobs for effects' parameters, and a strip with many effects squeezed its
     // fader shorter than its neighbours'.
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::ensureTracks (*edit, 2);
     auto* busy = te::getAudioTracks (*edit)[0];
 
     for (int i = 0; i < 6; ++i)
@@ -144,12 +146,12 @@ TEST_CASE ("A strip lists its devices a line each, with no knobs, over a fader a
 
 TEST_CASE ("The mixer puts the returns next to the master, and outlines what the selected channel sends to")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::ensureTracks (*edit, 2);
     const auto tracks = te::getAudioTracks (*edit);
     auto* reverbReturn = phazite::addReturnTrack (*edit, "Reverb", nullptr);
     REQUIRE (reverbReturn != nullptr);
-    edit->moveTrack (reverbReturn, { nullptr, nullptr }); // first in the playlist
+    phazite::moveTracksAfter ({ reverbReturn }, nullptr); // first in the playlist
 
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     setEdit (context, edit.get());

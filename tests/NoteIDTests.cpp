@@ -57,7 +57,7 @@ struct Song
 
     ~Song() { setEdit (context, nullptr); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::MidiClip* clip = nullptr;
 };
@@ -157,7 +157,7 @@ TEST_CASE ("A copy of a clip keeps its notes' IDs, an alias, a duplicate and the
 TEST_CASE ("Notes without IDs, or with another note's, get IDs of their own")
 {
     // An Edit no project context holds: its notes have no IDs until they are assigned.
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* clip = phazite::insertMidiClip (*te::getAudioTracks (*edit)[0], { beats (0.0), beats (4.0) }, nullptr);
     REQUIRE (clip != nullptr);
     auto& first = addNote (*clip, 60, 0.0);

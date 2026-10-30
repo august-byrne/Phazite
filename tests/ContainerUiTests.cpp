@@ -4,6 +4,7 @@
 // line: DevicesViewTests.cpp), presets saved by commands or by a track dragged into the browser, and presets dropped on
 // a mixer channel.
 #include "UiTestHelpers.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/Preview.h"
@@ -36,7 +37,7 @@ struct Song
         juce::String error;
         project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Song", error);
         REQUIRE (project != nullptr);
-        edit().ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (edit(), 2);
         setEdit (context, &edit());
 
         for (const auto* type : { "phaziteEq", "phaziteCompressor" })

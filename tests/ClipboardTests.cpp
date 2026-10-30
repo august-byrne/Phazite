@@ -5,12 +5,14 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
 namespace
@@ -28,7 +30,7 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
         setEdit (context, edit.get());
         phazite::addClipboardCommands (registry, context);
@@ -63,7 +65,7 @@ struct Song
 
     juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
@@ -209,7 +211,7 @@ TEST_CASE ("Another project empties the clipboard")
     REQUIRE (song.registry.invoke ("edit.copy"));
     CHECK (song.isEnabled ("edit.paste"));
 
-    auto another = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto another = phazite::createSongEdit (phazite::test::getEngine());
     setEdit (song.context, another.get());
     CHECK_FALSE (song.isEnabled ("edit.paste"));
     setEdit (song.context, song.edit.get());

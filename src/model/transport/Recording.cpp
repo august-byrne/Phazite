@@ -2,6 +2,7 @@
 #include "internal/Recording.h"
 #include "internal/AudioRecorder.h"
 #include "internal/Playback.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -168,7 +169,7 @@ namespace
 
         if (recorder != nullptr)
             for (auto* track : selection.getItemsOfType<te::AudioTrack>())
-                if (! getInputChannels (track->state[schema::phaziteInput].toString()).empty() && ! hasInstrument (*track))
+                if (! getInputChannels (findTrackState (*track)[schema::trackInput].toString()).empty() && ! hasInstrument (*track))
                     tracks.add (track);
 
         return tracks;

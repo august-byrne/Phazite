@@ -442,14 +442,15 @@ juce::var makeTrackPreset (te::AudioTrack& track)
 {
     storeDeviceStates (track);
     auto saved = makeObject();
-    set (saved, keys::name, track.getName());
-    set (saved, keys::colour, track.getColour().toString());
+    const auto state = findTrackState (track);
+    set (saved, keys::name, getTrackName (track));
+    set (saved, keys::colour, juce::Colour::fromString (state[schema::trackColour].toString()).toString());
 
     for (const auto& [property, key] :
-         { std::pair { &schema::phaziteDrumMode, &keys::drumMode }, std::pair { &schema::phaziteDrumOrder, &keys::drumOrder },
-           std::pair { &schema::phaziteDrumHidden, &keys::drumHidden } })
-        if (track.state.hasProperty (*property))
-            set (saved, *key, track.state[*property]);
+         { std::pair { &schema::drumMode, &keys::drumMode }, std::pair { &schema::drumOrder, &keys::drumOrder },
+           std::pair { &schema::drumHidden, &keys::drumHidden } })
+        if (state.hasProperty (*property))
+            set (saved, *key, state[*property]);
 
     describeMix (saved, track);
 
@@ -609,16 +610,16 @@ te::AudioTrack* addTrackFromPreset (te::Edit& edit, te::Track* after, const juce
     if (track == nullptr)
         return nullptr;
 
-    track->setName (saved[keys::name].toString());
+    setTrackName (*track, saved[keys::name].toString());
 
     if (const auto colour = saved[keys::colour].toString(); colour.isNotEmpty())
-        track->setColour (juce::Colour::fromString (colour));
+        setTrackColour (*track, juce::Colour::fromString (colour));
 
     for (const auto& [property, key] :
-         { std::pair { &schema::phaziteDrumMode, &keys::drumMode }, std::pair { &schema::phaziteDrumOrder, &keys::drumOrder },
-           std::pair { &schema::phaziteDrumHidden, &keys::drumHidden } })
+         { std::pair { &schema::drumMode, &keys::drumMode }, std::pair { &schema::drumOrder, &keys::drumOrder },
+           std::pair { &schema::drumHidden, &keys::drumHidden } })
         if (saved.hasProperty (*key))
-            track->state.setProperty (*property, saved[*key], nullptr); // view state
+            findTrackState (*track).setProperty (*property, saved[*key], nullptr); // view state
 
     applyMix (*track, saved);
 

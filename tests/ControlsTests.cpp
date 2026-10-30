@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "UiTestHelpers.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/LevelSource.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
@@ -15,7 +17,7 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     phazite::ui::ParameterAttachment attachment (slider);
     CHECK_FALSE (slider.isEnabled()); // nothing to control yet
 
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     setEdit (context, edit.get());
     auto* track = te::getAudioTracks (*edit)[0];
@@ -142,8 +144,8 @@ TEST_CASE ("A level meter repaints only while what it shows moves: a silent one 
 
 TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::ensureTracks (*edit, 2);
     const auto tracks = te::getAudioTracks (*edit);
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     setEdit (context, edit.get());
@@ -160,7 +162,7 @@ TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
     CHECK_FALSE (tracks[0]->isMuted (false));
 
     // Solo plays the track along with the others soloed; with Ctrl, alone. Neither touches the mute switch.
-    tracks[1]->setSolo (true);
+    phazite::setTrackSoloed (*tracks[1], true);
     mouse.click (soloButton);
     CHECK (tracks[0]->isSolo (false));
     CHECK (tracks[1]->isSolo (false));

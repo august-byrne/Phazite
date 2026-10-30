@@ -81,16 +81,16 @@ namespace
             state.removeProperty (te::IDs::parameters, nullptr);
     }
 
-    // A device's automation lanes, renamed, on whichever track shows them (a container's devices' on the container's track);
-    // tracks are in the Edit, folders and the tracks in them, and nowhere else.
+    // A device's automation lanes, renamed, on whichever track shows them (a container's devices' on the container's track), or
+    // the master: in the song's tracks (Schema.h: TRACKS, MASTER), folders and the tracks in them.
     void renameLanes (const juce::ValueTree& element, const juce::String& device, const Rename& rename)
     {
         for (const auto& child : element)
         {
-            if (child.hasType (te::IDs::TRACK) || child.hasType (te::IDs::FOLDERTRACK) || child.hasType (te::IDs::MASTERTRACK))
+            if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK) || child.hasType (schema::MASTER))
             {
                 renameChildren (child, schema::laneParameter, rename, [&device] (const juce::ValueTree& lane)
-                                { return lane.hasType (schema::PHAZITELANE) && lane[schema::laneDevice].toString() == device; });
+                                { return lane.hasType (schema::LANE) && lane[schema::laneDevice].toString() == device; });
                 renameLanes (child, device, rename);
             }
         }
@@ -116,7 +116,7 @@ namespace
                 state.removeProperty (te::IDs::quickParamName, nullptr);
         }
 
-        renameLanes (plugin.edit.state, state[te::IDs::id].toString(), rename);
+        renameLanes (findPhaziteState (plugin.edit), state[te::IDs::id].toString(), rename);
     }
 
     // What phaziteParameterIDs holds: each Tracktion ID with the plug-in's own ID for it.

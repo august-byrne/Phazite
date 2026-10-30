@@ -284,7 +284,7 @@ void setFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type
 
 te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selection* selection)
 {
-    const auto clip = track.insertMIDIClip (track.getName(), track.edit.tempoSequence.toTime (range), nullptr);
+    const auto clip = track.insertMIDIClip (getTrackName (track), track.edit.tempoSequence.toTime (range), nullptr);
 
     if (clip != nullptr && selection != nullptr)
         selection->selectOnly (clip.get());

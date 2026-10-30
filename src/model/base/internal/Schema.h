@@ -32,7 +32,7 @@ inline const juce::Identifier outline { "outline" };
 // notes keeping their times, rather than on their beats (model/transport/internal/Tempo.h). song
 inline const juce::Identifier patternsKeepTheirSpeed { "patternsKeepTheirSpeed" };
 
-// Child of PHAZITE: the key set last on any track (phaziteKeyRoot and phaziteKeyScale), which new tracks get. state
+// Child of PHAZITE: the key set last on any track (keyRoot and keyScale), which new tracks get. state
 inline const juce::Identifier LASTKEY { "LASTKEY" };
 
 //==============================================================================
@@ -82,65 +82,104 @@ inline const juce::Identifier gridTriplets { "gridTriplets" };
 inline const juce::Identifier PIANOROLL { "PIANOROLL" };
 
 //==============================================================================
-// On tracks.
+// The song's tracks (model/arrangement/internal/Tracks.h; docs/tracktion-migration.md, T1): the playlist's tracks and
+// folders and the mixer's returns, top to bottom, each folder's tracks in it, with what each is, its name and color, its
+// mute and solo, its key, its audio input and how it shows. Tracktion's tracks mirror them (model/mirror/internal/Mirror.h),
+// with the same IDs while T1 lasts. song, but for what says it is view
 
-// On TRACK and FOLDERTRACK. int 32..320, default 64: the track's height in the playlist, in pixels at an interface
-// scale of 100%. view
-inline const juce::Identifier phaziteHeight { "phaziteHeight" };
+// Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tracks (TRACK), top to
+// bottom.
+inline const juce::Identifier TRACKS { "TRACKS" };
 
-// On TRACK and FOLDERTRACK. bool, default false: the track is a thin row with only its name; a collapsed folder hides
-// its tracks. view
-inline const juce::Identifier phaziteCollapsed { "phaziteCollapsed" };
+// Child of TRACKS, or of a folder's TRACK: a track.
+inline const juce::Identifier TRACK { "TRACK" };
 
-// On TRACK and FOLDERTRACK. bool, default false: the track stays in view while the others scroll. view
-inline const juce::Identifier phazitePinned { "phazitePinned" };
+// On TRACK. int64, more than 0: its ID (TrackID), which while T1 lasts is its Tracktion track's.
+inline const juce::Identifier trackID { "id" };
 
-// A key, on a TRACK (song) and on LASTKEY (state): the root, int 0..11 (0 is C), none = no key; and the scale: "major",
-// "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor".
-inline const juce::Identifier phaziteKeyRoot { "phaziteKeyRoot" };
-inline const juce::Identifier phaziteKeyScale { "phaziteKeyScale" };
+// On TRACK: what it is: trackIsTrack (a track, which holds clips), trackIsFolder (a folder, which holds tracks) or
+// trackIsReturn (a return, which takes in what tracks send to it, and which no solo silences).
+inline const juce::Identifier trackKind { "kind" };
+inline constexpr const char* trackIsTrack = "track";
+inline constexpr const char* trackIsFolder = "folder";
+inline constexpr const char* trackIsReturn = "return";
+
+// On TRACK: its name; empty or none for a track's number, "Track 3", as it is counted among the tracks and returns.
+inline const juce::Identifier trackName { "name" };
+
+// On TRACK: its color, as juce::Colour::toString() writes it; none for its row's in the palette (TrackColours.h).
+inline const juce::Identifier trackColour { "colour" };
+
+// On TRACK. bool, default false: it is muted; and it is soloed. Neither is an undo step (as in many DAWs). song
+inline const juce::Identifier trackMute { "mute" };
+inline const juce::Identifier trackSolo { "solo" };
+
+// On a folder's TRACK. true, or none: the folder was made a bus with the bus switch, so it stays one without effects.
+inline const juce::Identifier folderBus { "bus" };
+
+// A key, on a TRACK (song), on LASTKEY (state) and on CHORDKEY (song): the root, int 0..11 (0 is C), none = no key; and the
+// scale: "major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor".
+inline const juce::Identifier keyRoot { "keyRoot" };
+inline const juce::Identifier keyScale { "keyScale" };
+
+// On TRACK (model/transport/RecordingModel.h; roadmap step 3.4). The audio device's input the track records (AudioInput::id):
+// a channel, counted from 1 ("1"), or a pair of neighbours from an odd-numbered one ("1+2"); none for no input.
+inline const juce::Identifier trackInput { "input" };
+
+// On TRACK. When the track's input is heard through it: monitorAlways, monitorNever, or none, while it is armed.
+inline const juce::Identifier trackMonitoring { "monitoring" };
+inline constexpr const char* monitorAlways = "always";
+inline constexpr const char* monitorNever = "never";
+
+// On TRACK. int 32..320, default 64: the track's height in the playlist, in pixels at an interface scale of 100%. view
+inline const juce::Identifier trackHeight { "height" };
+
+// On TRACK. bool, default false: the track is a thin row with only its name; a collapsed folder hides its tracks. view
+inline const juce::Identifier trackCollapsed { "collapsed" };
+
+// On TRACK. bool, default false: the track stays in view while the others scroll. view
+inline const juce::Identifier trackPinned { "pinned" };
 
 // On TRACK. bool: the piano roll shows the track's clips in drum mode; none = on while the track's instrument is
 // Phazite's drum sampler. view
-inline const juce::Identifier phaziteDrumMode { "phaziteDrumMode" };
+inline const juce::Identifier drumMode { "drumMode" };
 
 // On TRACK: the order of the drum rows, as note numbers separated by commas, top first; rows it doesn't list come
 // after them. view
-inline const juce::Identifier phaziteDrumOrder { "phaziteDrumOrder" };
+inline const juce::Identifier drumOrder { "drumOrder" };
 
 // On TRACK: the drum rows hidden, as note numbers separated by commas. view
-inline const juce::Identifier phaziteDrumHidden { "phaziteDrumHidden" };
+inline const juce::Identifier drumHidden { "drumHidden" };
 
-// On FOLDERTRACK. true, or none: the folder was made a bus with the bus switch, so it stays one without effects. song
-inline const juce::Identifier phaziteBus { "phaziteBus" };
+// Child of PHAZITE, which every project has: the master channel's view: its automation lanes (LANE). view
+inline const juce::Identifier MASTER { "MASTER" };
 
-// Child of TRACK, FOLDERTRACK and MASTERTRACK, one for each automation lane the playlist shows under the track, in their
-// order (docs/design.md, section 10): the automation of a parameter of one of the track's devices, its volume and pan
-// included. A lane of a device that isn't on the track any more is ignored, and a parameter with automation but no lane
-// here shows one after these. view
-inline const juce::Identifier PHAZITELANE { "PHAZITELANE" };
+// Child of TRACK and of MASTER, one for each automation lane the playlist shows under the track, in their order
+// (docs/design.md, section 10): the automation of a parameter of one of the track's devices, its volume and pan included.
+// A lane of a device that isn't on the track any more is ignored, and a parameter with automation but no lane here shows
+// one after these. view
+inline const juce::Identifier LANE { "LANE" };
 
-// On PHAZITELANE: the device, by the EditItemID Tracktion saves it with ("1042").
+// On LANE: the device, by the EditItemID Tracktion saves it with ("1042").
 inline const juce::Identifier laneDevice { "device" };
 
-// On PHAZITELANE: the parameter, by its ID in its device (the paramID of its automation curve in Tracktion's AUTOMATIONCURVE).
+// On LANE: the parameter, by its ID in its device (the paramID of its automation curve in Tracktion's AUTOMATIONCURVE).
 inline const juce::Identifier laneParameter { "parameter" };
 
-// On PHAZITELANE. int 32..320, default 48: the lane's height in the playlist while it isn't collapsed, in pixels at an
-// interface scale of 100%.
+// On LANE. int 32..320, default 48: the lane's height in the playlist while it isn't collapsed, in pixels at an interface
+// scale of 100%.
 inline const juce::Identifier laneHeight { "height" };
 
-// On PHAZITELANE. true, or none: the lane shows as a thin row.
+// On LANE. true, or none: the lane shows as a thin row.
 inline const juce::Identifier laneCollapsed { "collapsed" };
 
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; Project's isUncountedProperty()
 // and isUncountedElement()): on tracks, their heights, collapsed and pinned, drum mode and rows, and their automation
-// lanes; on PHAZITE, the playlist's grid; on devices (PLUGIN), where their windows were. PIANOROLL and PHAZITELANE hold
+// lanes; on PHAZITE, the playlist's grid; on devices (PLUGIN), where their windows were. PIANOROLL, MASTER and LANE hold
 // view settings only. Keep these lists exact: anything else a project holds is song or state.
 inline bool isTrackViewProperty (const juce::Identifier& p)
 {
-    return p == phaziteHeight || p == phaziteCollapsed || p == phazitePinned || p == phaziteDrumMode || p == phaziteDrumOrder
-           || p == phaziteDrumHidden;
+    return p == trackHeight || p == trackCollapsed || p == trackPinned || p == drumMode || p == drumOrder || p == drumHidden;
 }
 
 inline bool isGridProperty (const juce::Identifier& p)
@@ -157,7 +196,7 @@ inline bool isDeviceViewProperty (const juce::Identifier& p)
 
 inline bool isTrackViewElement (const juce::ValueTree& element)
 {
-    return element.hasType (PHAZITELANE);
+    return element.hasType (LANE);
 }
 
 //==============================================================================
@@ -228,7 +267,7 @@ inline const juce::Identifier chordType { "type" };
 inline const juce::Identifier chordInversion { "inversion" };
 
 // Child of CHORDLANE: the key the chords are in from where it starts (chordStart) to the next one's start, with
-// phaziteKeyRoot and phaziteKeyScale. The first starts at 0; a lane without any is in C major.
+// keyRoot and keyScale. The first starts at 0; a lane without any is in C major.
 inline const juce::Identifier CHORDKEY { "CHORDKEY" };
 
 // On a MIDICLIP made from the chord lane: the part it is, "sustainedTriads", "sustainedSevenths", "spreadChords",
@@ -260,16 +299,9 @@ inline const juce::Identifier phaziteReversed { "phaziteReversed" };
 //==============================================================================
 // Recording audio (model/transport/RecordingModel.h; roadmap step 3.4).
 
-// On TRACK. The audio device's input the track records (AudioInput::id): a channel, counted from 1 ("1"), or a pair of
-// neighbours from an odd-numbered one ("1+2"); none for no input. song
-inline const juce::Identifier phaziteInput { "phaziteInput" };
+// A track's input and how it is heard: trackInput and trackMonitoring, with the tracks above.
 
-// On TRACK. When the track's input is heard through it: monitorAlways, monitorNever, or none, while it is armed. song
-inline const juce::Identifier phaziteMonitoring { "phaziteMonitoring" };
-inline constexpr const char* monitorAlways = "always";
-inline constexpr const char* monitorNever = "never";
-
-// On PHAZITE. The input chosen last on any track (an id as phaziteInput's), which the next track's list shows first. state
+// On PHAZITE. The input chosen last on any track (an id as trackInput's), which the next track's list shows first. state
 inline const juce::Identifier lastInput { "lastInput" };
 
 // On PHAZITE. bool, default false: Record punches in and out at the looped range. Like the loop's switch, not an unsaved

@@ -210,7 +210,7 @@ struct Script
     {
         one = te::getAudioTracks (edit)[0];
         REQUIRE (one != nullptr);
-        one->setName ("One");
+        phazite::setTrackName (*one, "One");
         edit.getUndoManager().clearUndoHistory();
 
         setEdit (context, &edit);
@@ -358,11 +358,11 @@ TEST_SUITE ("golden")
                  [&s, &two]
                  {
                      two = &s.getSelectedTrack<te::AudioTrack>();
-                     two->setName ("Two");
+                     phazite::setTrackName (*two, "Two");
                  });
 
         s.run ({ "track.addFolder" });
-        s.setup ("name the new folder Empty", [&s] { s.getSelectedTrack<te::FolderTrack>().setName ("Empty"); });
+        s.setup ("name the new folder Empty", [&s] { phazite::setTrackName (s.getSelectedTrack<te::FolderTrack>(), "Empty"); });
         s.run ({ "track.ungroup" });
 
         s.select ("One", { one });
@@ -381,7 +381,7 @@ TEST_SUITE ("golden")
                  [&s, &group]
                  {
                      group = &s.getSelectedTrack<te::FolderTrack>();
-                     group->setName ("Group");
+                     phazite::setTrackName (*group, "Group");
                  });
 
         s.run ({ "track.mute" }); // the folder

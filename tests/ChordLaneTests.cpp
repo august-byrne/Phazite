@@ -5,11 +5,13 @@
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/chords/ChordModel.h"
 #include "model/chords/Progressions.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/mixer/Inspector.h"
@@ -39,7 +41,7 @@ struct ChordScreen
 {
     ChordScreen()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
         playlist.addCommands (registry);
         setEdit (context, edit.get());
@@ -69,7 +71,7 @@ struct ChordScreen
         return { juce::roundToInt (playlist.getView().beatToX (beat (beats))), lane->getHeight() / 2 };
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
@@ -171,7 +173,7 @@ TEST_CASE ("The chord lane's header: the song's key, which the chords follow, an
 
 TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, and put it on the chord lane")
 {
-    const auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    const auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setEdit (context, edit.get());
     const auto previewer = phazite::createPreviewer (phazite::test::getEngine());
@@ -230,7 +232,7 @@ TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, a
 
 TEST_CASE ("The inspector shows whether a part made from the chords follows them, and turns it back on")
 {
-    const auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    const auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setEdit (context, edit.get());
     phazite::CommandRegistry registry;

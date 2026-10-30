@@ -18,6 +18,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
 namespace
@@ -96,7 +97,7 @@ struct Song
         return pitches;
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 };
 } // namespace
@@ -369,8 +370,8 @@ TEST_CASE ("The chord lane and its parts are saved, and read back the same")
     const auto lane = phazite::findPhaziteState (*song.edit).getChildWithName (phazite::schema::CHORDLANE);
     REQUIRE (lane.isValid());
     const auto key = lane.getChildWithName (phazite::schema::CHORDKEY);
-    CHECK (key[phazite::schema::phaziteKeyScale].toString() == juce::String ("minor"));
-    CHECK ((int) key[phazite::schema::phaziteKeyRoot] == 2);
+    CHECK (key[phazite::schema::keyScale].toString() == juce::String ("minor"));
+    CHECK ((int) key[phazite::schema::keyRoot] == 2);
 
     auto last = juce::ValueTree();
 

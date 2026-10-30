@@ -9,6 +9,7 @@
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
@@ -36,11 +37,11 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         a = te::getAudioTracks (*edit)[0];
         b = te::getAudioTracks (*edit)[1];
-        a->setName ("A");
-        b->setName ("B");
+        phazite::setTrackName (*a, "A");
+        phazite::setTrackName (*b, "B");
         setEdit (context, edit.get());
 
         auto* first = phazite::insertMidiClip (*a, { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
@@ -67,7 +68,7 @@ struct Song
         return {};
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
@@ -115,7 +116,7 @@ TEST_CASE ("The piano roll's clips and notes by ID, in song beats")
     CHECK_FALSE (phazite::hasAudioClips (context, idOf (*song.a)));
 
     // A track shown without clips starts one a bar long for the first note drawn there, without selecting it.
-    song.edit->ensureNumberOfAudioTracks (3);
+    phazite::ensureTracks (*song.edit, 3);
     const auto third = idOf (*te::getAudioTracks (*song.edit)[2]);
     CHECK_FALSE (phazite::getMidiClipNearest (context, third, beat (0.0)).has_value());
     const auto started = phazite::addClipForNotes (context, third, beat (8.0));

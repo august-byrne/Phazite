@@ -11,6 +11,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
 #include "model/transport/internal/Playback.h"
@@ -36,7 +37,7 @@ struct PlaylistScreen
 {
     PlaylistScreen()
     {
-        edit->ensureNumberOfAudioTracks (3);
+        phazite::ensureTracks (*edit, 3);
         tracks = te::getAudioTracks (*edit);
         edit->getUndoManager().clearUndoHistory();
 
@@ -102,7 +103,7 @@ struct PlaylistScreen
         return {};
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     phazite::Selection& selection = getSelection (context);
@@ -496,14 +497,14 @@ TEST_CASE ("The playlist's vertical scroll bar shows only while its tracks don't
     CHECK_FALSE (vertical->isVisible());
     CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
 
-    screen.edit->ensureNumberOfAudioTracks (30);
+    phazite::ensureTracks (*screen.edit, 30);
     phazite::test::dispatchPendingMessages();
     CHECK (vertical->isVisible());
     CHECK (screen.lanes->getRight() == screen.playlist.getWidth() - phazite::ui::TimelineEditor::scrollBarSize);
 
     for (auto* track : te::getAudioTracks (*screen.edit))
         if (! screen.tracks.contains (track))
-            screen.edit->deleteTrack (track);
+            phazite::deleteTracks ({ track }, nullptr);
 
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (vertical->isVisible());
@@ -532,7 +533,7 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
     // A song much bigger than the playlist (docs/performance-audit.md, section 8): its clips once all had components, each
     // moved at every step of a scroll, and all built again at each change of a clip.
     PlaylistScreen screen;
-    screen.edit->ensureNumberOfAudioTracks (40);
+    phazite::ensureTracks (*screen.edit, 40);
     screen.tracks = te::getAudioTracks (*screen.edit);
 
     for (int track = 0; track < 40; ++track)

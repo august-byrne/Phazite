@@ -5,6 +5,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "devices/wavetable/FactoryWavetables.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
@@ -30,7 +31,7 @@ struct Song
         juce::String error;
         project = phazite::Project::create (phazite::test::getEngine(), parent, name, error);
         REQUIRE (project != nullptr);
-        edit().ensureNumberOfAudioTracks (1);
+        phazite::ensureTracks (edit(), 1);
         setEdit (context, &edit());
         synth =
             phazite::setInstrument (*te::getAudioTracks (edit())[0], edit().getPluginCache().createNewPlugin (WavetableSynth::typeID, {}));

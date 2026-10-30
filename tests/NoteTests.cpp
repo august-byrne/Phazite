@@ -8,6 +8,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/internal/Project.h"
 #include "ui/input/KeyDispatcher.h"
 
 #include <algorithm>
@@ -70,7 +71,7 @@ struct Notes
 
     double startOf (const te::MidiNote& note) const { return phazite::getNoteStart (*clip, note).inBeats(); }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::NoteIDKeeper noteIDs { *edit }; // as the project context gives the notes added their IDs, which select them
     te::MidiClip* clip = nullptr;
     phazite::Selection selection { phazite::test::getEngine() };
@@ -308,7 +309,7 @@ TEST_CASE ("Keys: shading, snapping and transposing in the key")
 
 TEST_CASE ("A track has no key until one is chosen, and new tracks get the key chosen last")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit).getFirst();
     REQUIRE (track != nullptr);
     CHECK_FALSE (phazite::getTrackKey (*track).has_value());
@@ -318,7 +319,7 @@ TEST_CASE ("A track has no key until one is chosen, and new tracks get the key c
     const auto key = phazite::getTrackKey (*track);
     REQUIRE (key.has_value());
     CHECK (phazite::describeKey (*key) == juce::String ("A minor"));
-    CHECK (track->state[phazite::schema::phaziteKeyScale].toString() == juce::String ("minor")); // saved by name
+    CHECK (phazite::findTrackState (*track)[phazite::schema::keyScale].toString() == juce::String ("minor")); // saved by name
 
     // A new track gets it.
     auto* added = phazite::insertTrack (*edit, track, nullptr);
@@ -448,8 +449,8 @@ TEST_CASE ("Replacing the selected notes selects the new ones")
 
 TEST_CASE ("Every track can get the same key")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    edit->ensureNumberOfAudioTracks (3);
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::ensureTracks (*edit, 3);
     const auto tracks = phazite::getPlaylistTracks (*edit);
     REQUIRE (tracks.size() == 3);
 
@@ -489,7 +490,7 @@ TEST_CASE ("Scales are saved by name")
 
 TEST_CASE ("The piano roll's key menu, Alt and the wheel, and an applied transform are undo steps of their own")
 {
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
     auto* clip = phazite::insertMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, nullptr);
     REQUIRE (clip != nullptr);

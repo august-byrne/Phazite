@@ -11,6 +11,7 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/project/internal/Project.h"
 
 using namespace tracktion::literals;
 using phazite::test::TestGain;
@@ -24,14 +25,14 @@ struct Song
 {
     Song()
     {
-        edit->ensureNumberOfAudioTracks (3);
+        phazite::ensureTracks (*edit, 3);
         const auto tracks = te::getAudioTracks (*edit);
         kick = tracks[0];
         bass = tracks[1];
         keys = tracks[2];
-        kick->setName ("Kick");
-        bass->setName ("Bass");
-        keys->setName ("Keys");
+        phazite::setTrackName (*kick, "Kick");
+        phazite::setTrackName (*bass, "Bass");
+        phazite::setTrackName (*keys, "Keys");
     }
 
     // Adds a test device of that type to a track's chain.
@@ -43,7 +44,7 @@ struct Song
         return *device;
     }
 
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::AudioTrack* kick = nullptr;
     te::AudioTrack* bass = nullptr;
     te::AudioTrack* keys = nullptr;
@@ -154,7 +155,7 @@ TEST_CASE ("A sidechain's source reaches the device as the song plays, muted or 
     const auto kickAlone = renderPeak (*song.edit); // the bass's sidechain hears nothing yet
     CHECK (kickAlone > 0.1f);
 
-    song.kick->setMute (true);
+    phazite::setTrackMuted (*song.kick, true);
     CHECK (renderPeak (*song.edit) < 1.0e-4f);
 
     // A muted kick still feeds the sidechain, the way a "ghost" kick ducks a bass.

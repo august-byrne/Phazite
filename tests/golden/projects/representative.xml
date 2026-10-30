@@ -66,15 +66,16 @@
              length="8"
              start="24"
              type="suspendedFourth"/>
-      <CHORDKEY phaziteKeyRoot="2"
-                phaziteKeyScale="minor"
+      <CHORDKEY keyRoot="2"
+                keyScale="minor"
                 start="0"/>
-      <CHORDKEY phaziteKeyRoot="5"
-                phaziteKeyScale="major"
+      <CHORDKEY keyRoot="5"
+                keyScale="major"
                 start="24"/>
     </CHORDLANE>
-    <LASTKEY phaziteKeyRoot="2"
-             phaziteKeyScale="minor"/>
+    <LASTKEY keyRoot="2"
+             keyScale="minor"/>
+    <MASTER/>
     <PIANOROLL gridAdaptive="0"
                gridOffset="0"
                gridSnap="1"
@@ -111,6 +112,60 @@
                      denominator="4"
                      numerator="4"/>
     </TEMPOMAP>
+    <TRACKS>
+      <TRACK drumHidden="49"
+             drumMode="1"
+             drumOrder="38,36,37,39,42,46,41,45,48,49,51"
+             id="1003"
+             kind="track"
+             mute="1"
+             name="Drums"
+             pinned="1"/>
+      <TRACK bus="1"
+             collapsed="1"
+             colour="ff56b4e9"
+             id="1030"
+             kind="folder"
+             name="Group">
+        <TRACK colour="ff56b4e9"
+               height="96"
+               id="1015"
+               keyRoot="2"
+               keyScale="minor"
+               kind="track"
+               name="Keys"/>
+        <TRACK colour="ff009e73"
+               id="1022"
+               keyRoot="2"
+               keyScale="minor"
+               kind="track"
+               name="Pad"/>
+      </TRACK>
+      <TRACK bus="1"
+             colour="fff0e442"
+             id="1034"
+             kind="folder"
+             name="Bus">
+        <TRACK colour="fff0e442"
+               id="1025"
+               keyRoot="2"
+               keyScale="minor"
+               kind="track"
+               name="Tone"/>
+      </TRACK>
+      <TRACK colour="ff0072b2"
+             id="1039"
+             keyRoot="2"
+             keyScale="minor"
+             kind="return"
+             name="Reverb"/>
+      <TRACK colour="ff0072b2"
+             id="1046"
+             keyRoot="2"
+             keyScale="minor"
+             kind="track"
+             name="Bass"/>
+    </TRACKS>
   </PHAZITE>
   <PITCHSEQUENCE>
     <PITCH pitch="60"
@@ -142,11 +197,7 @@
   </MASTERTRACK>
   <TRACK id="1003"
          mute="1"
-         name="Drums"
-         phaziteDrumHidden="49"
-         phaziteDrumMode="1"
-         phaziteDrumOrder="38,36,37,39,42,46,41,45,48,49,51"
-         phazitePinned="1">
+         name="Drums">
     <MIDICLIP colour="ff55ff00"
               currentTake="0"
               id="1014"
@@ -206,9 +257,7 @@
   </TRACK>
   <FOLDERTRACK colour="ff56b4e9"
                id="1030"
-               name="Group"
-               phaziteBus="1"
-               phaziteCollapsed="1">
+               name="Group">
     <MODIFIERS/>
     <PLUGIN enabled="1"
             id="1032"
@@ -225,10 +274,7 @@
     </PLUGIN>
     <TRACK colour="ff56b4e9"
            id="1015"
-           name="Keys"
-           phaziteHeight="96"
-           phaziteKeyRoot="2"
-           phaziteKeyScale="minor">
+           name="Keys">
       <MIDICLIP colour="ff00a3ff"
                 currentTake="0"
                 grooveStrength="0.1"
@@ -358,9 +404,7 @@
     </TRACK>
     <TRACK colour="ff009e73"
            id="1022"
-           name="Pad"
-           phaziteKeyRoot="2"
-           phaziteKeyScale="minor">
+           name="Pad">
       <CLIPSLOTS/>
       <MODIFIERS/>
       <OUTPUTDEVICES>
@@ -381,8 +425,7 @@
   </FOLDERTRACK>
   <FOLDERTRACK colour="fff0e442"
                id="1034"
-               name="Bus"
-               phaziteBus="1">
+               name="Bus">
     <MODIFIERS/>
     <PLUGIN enabled="1"
             id="1036"
@@ -399,9 +442,7 @@
     </PLUGIN>
     <TRACK colour="fff0e442"
            id="1025"
-           name="Tone"
-           phaziteKeyRoot="2"
-           phaziteKeyScale="minor">
+           name="Tone">
       <AUDIOCLIP colour="ff0072b2"
                  elastiqueMode="0"
                  fadeIn="0.25"
@@ -459,8 +500,6 @@
   <TRACK colour="ff0072b2"
          id="1039"
          name="Reverb"
-         phaziteKeyRoot="2"
-         phaziteKeyScale="minor"
          soloIsolate="1">
     <CLIPSLOTS/>
     <MODIFIERS/>
@@ -495,9 +534,7 @@
   </TRACK>
   <TRACK colour="ff0072b2"
          id="1046"
-         name="Bass"
-         phaziteKeyRoot="2"
-         phaziteKeyScale="minor">
+         name="Bass">
     <MIDICLIP colour="ff00a3ff"
               currentTake="0"
               id="1050"

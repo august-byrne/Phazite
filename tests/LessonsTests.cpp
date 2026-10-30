@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
 #include "ui/input/CommandBridge.h"
@@ -69,7 +70,7 @@ TEST_CASE ("A lesson shows one step at a time with the keymap's keys, each going
 TEST_CASE ("A lesson's step that the song shows done goes on by itself, and a command without a key is found by its name")
 {
     LessonSetup s;
-    auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
     setEdit (s.context, edit.get());
     const auto track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
 

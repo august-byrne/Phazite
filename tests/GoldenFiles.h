@@ -71,7 +71,7 @@ struct XmlComparison
 };
 
 // The differences between two normalised projects, one per line, at most maxDifferences, each with its path:
-//   EDIT/FOLDERTRACK#1015/TRACK#1004@phaziteHeight: expected "96", got "64"
+//   EDIT/PHAZITE/TRACKS/TRACK#1015/TRACK#1004@height: expected "96", got "64"
 //   EDIT/PHAZITE/PIANOROLL: missing
 // An element in a path is TAG#id if it has an id, otherwise TAG[n] among its siblings of that tag without one, or
 // just TAG if it is the only one. Children are matched by those keys; two values are the same if their texts are, or

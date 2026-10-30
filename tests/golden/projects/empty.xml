@@ -22,6 +22,7 @@
     </PLUGIN>
   </MASTERVOLUME>
   <PHAZITE>
+    <MASTER/>
     <TEMPOMAP>
       <TEMPO beat="0"
              bpm="120"/>
@@ -29,6 +30,10 @@
                      denominator="4"
                      numerator="4"/>
     </TEMPOMAP>
+    <TRACKS>
+      <TRACK id="1003"
+             kind="track"/>
+    </TRACKS>
   </PHAZITE>
   <PITCHSEQUENCE>
     <PITCH pitch="60"

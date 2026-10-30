@@ -6,6 +6,7 @@
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -13,6 +14,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/ModulatorDrag.h"
 #include "ui/devices/CompressorEditor.h"
@@ -77,7 +79,7 @@ struct Screen
 {
     Screen()
     {
-        edit->ensureNumberOfAudioTracks (2);
+        phazite::ensureTracks (*edit, 2);
         setEdit (context, edit.get());
 
         for (const auto* type : { "phaziteEq", "phaziteCompressor", "PhaziteTestEffect" })
@@ -123,7 +125,7 @@ struct Screen
     }
 
     phazite::test::TestPlugin testPlugin; // before the Edit that holds one, and gone after it
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };

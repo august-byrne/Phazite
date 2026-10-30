@@ -10,6 +10,7 @@
 #include "model/engine/internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -17,7 +18,7 @@ TEST_CASE ("The open project's Edit, selection and Tracktion's focus move togeth
 {
     auto& engine = phazite::test::getEngine();
     auto& focus = phazite::getUIBehaviour (engine);
-    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto edit = phazite::createSongEdit (engine);
     auto* track = te::getAudioTracks (*edit)[0];
 
     {
@@ -69,7 +70,7 @@ TEST_CASE ("Views hear when another project opens, or none, before the one that 
     };
 
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto edit = phazite::createSongEdit (engine);
     phazite::ProjectContext context (phazite::test::getEngineContext());
     View view (context);
     context.addListener (&view);
@@ -87,8 +88,8 @@ TEST_CASE ("Views hear when another project opens, or none, before the one that 
 TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
 {
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine); // 120 BPM, 4/4
-    edit->ensureNumberOfAudioTracks (2);
+    auto edit = phazite::createSongEdit (engine); // 120 BPM, 4/4
+    phazite::ensureTracks (*edit, 2);
     const auto tracks = te::getAudioTracks (*edit);
     phazite::ProjectContext context (phazite::test::getEngineContext());
     setEdit (context, edit.get());
@@ -139,7 +140,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     };
 
     auto& engine = phazite::test::getEngine();
-    auto edit = te::Edit::createSingleTrackEdit (engine);
+    auto edit = phazite::createSongEdit (engine);
     auto* track = te::getAudioTracks (*edit)[0];
     phazite::ProjectContext context (phazite::test::getEngineContext());
     setEdit (context, edit.get());
@@ -174,7 +175,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     };
 
     // A track renamed and a device put on it at once: one notification of both.
-    track->setName ("Bass");
+    phazite::setTrackName (*track, "Bass");
     track->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {}), 0, nullptr);
     phazite::test::dispatchPendingMessages();
     CHECK (view.heard.size() == 1);
@@ -187,7 +188,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     CHECK (hear() == "devices");
     track->state.moveChild (track->state.indexOf (delay->state), track->state.getNumChildren() - 1, nullptr);
     CHECK (hear() == "devices");
-    edit->ensureNumberOfAudioTracks (2);
+    phazite::ensureTracks (*edit, 2);
     CHECK (hear() == "tracks devices"); // a new track comes with its fader and meter
     edit->state.moveChild (edit->state.indexOf (track->state), edit->state.indexOf (te::getAudioTracks (*edit)[1]->state), nullptr);
     CHECK (hear() == "tracks");
@@ -222,7 +223,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     CHECK (hear() == "devices");
 
     // Changes not yet told are the closing project's: none come after another opens.
-    track->setName ("Lead");
+    phazite::setTrackName (*track, "Lead");
     setEdit (context, nullptr);
     CHECK (hear().empty());
     context.removeListener (&view);

@@ -22,6 +22,7 @@
     </PLUGIN>
   </MASTERVOLUME>
   <PHAZITE>
+    <MASTER/>
     <TEMPOMAP>
       <TEMPO beat="0"
              bpm="120"/>
@@ -29,6 +30,16 @@
                      denominator="4"
                      numerator="4"/>
     </TEMPOMAP>
+    <TRACKS>
+      <TRACK colour="ffd55e00"
+             id="1003"
+             kind="track"
+             name="Drums"/>
+      <TRACK colour="ffe69f00"
+             id="1011"
+             kind="track"
+             name="Synth"/>
+    </TRACKS>
   </PHAZITE>
   <PITCHSEQUENCE>
     <PITCH pitch="60"

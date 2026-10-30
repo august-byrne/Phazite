@@ -14,6 +14,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/presets/internal/Presets.h"
+#include "model/project/internal/Project.h"
 
 namespace
 {
@@ -82,7 +83,7 @@ struct Devices
     }
 
     TestPlugin testPlugin; // known while the Edit is
-    std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::AudioTrack& track = *te::getAudioTracks (*edit)[0];
     te::ExternalPlugin* plugin = nullptr; // on the track
     te::ExternalPlugin* inside = nullptr; // in a container on it

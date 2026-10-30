@@ -117,10 +117,14 @@ namespace
             return row;
         }
 
-        row.name = track.getName();
+        const auto state = findTrackState (track);
+        row.name = getTrackName (track);
         row.colour = getTrackColour (track, index);
-        row.kind = track.isFolderTrack() ? TrackType::folder : (getReturnBus (track) >= 0 ? TrackType::returnTrack : TrackType::track);
-        row.depth = track.getTrackDepth();
+        row.kind = isFolderState (state) ? TrackType::folder : (isReturnState (state) ? TrackType::returnTrack : TrackType::track);
+
+        for (auto folder = state.getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
+            ++row.depth;
+
         row.pinned = isPinned (track);
         row.savedHeight = getSavedTrackHeight (track);
 

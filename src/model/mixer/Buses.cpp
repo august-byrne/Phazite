@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Buses.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 
 namespace phazite
@@ -54,6 +55,6 @@ void makePlainFolder (te::FolderTrack& folder)
 void mixAsBus (te::FolderTrack& folder)
 {
     makeBus (folder);
-    folder.state.setProperty (schema::phaziteBus, true, &folder.edit.getUndoManager());
+    findTrackState (folder).setProperty (schema::folderBus, true, &folder.edit.getUndoManager());
 }
 } // namespace phazite

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MainWindow.h"
 #include "model/arrangement/Outlines.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/internal/Export.h"
 #include "ui/input/KeymapStore.h"
@@ -484,7 +485,7 @@ void MainWindow::showExport()
     juce::StringArray stemNames;
 
     for (auto* track : getStemTracks (edit))
-        stemNames.add (track->getName());
+        stemNames.add (getTrackName (*track));
 
     auto* panel = new ui::ExportPanel (
         services.settings, defaultFile, getExportRange (edit).getLength().inSeconds(), stemNames,

@@ -158,10 +158,10 @@ juce::Array<te::Clip*> importFiles (te::Edit& edit, const juce::StringArray& pat
             if (track == nullptr)
                 break;
 
-            track->setName (file.getFileNameWithoutExtension());
+            setTrackName (*track, file.getFileNameWithoutExtension());
 
             if (const auto colour = getColourForName (file.getFileNameWithoutExtension()))
-                track->setColour (*colour);
+                setTrackColour (*track, *colour);
         }
 
         if (auto* clip = importFile (*track, file, start))
