@@ -22,7 +22,7 @@
     </PLUGIN>
   </MASTERVOLUME>
   <PHAZITE loop="1">
-    <MASTER/>
+    <MASTER fader="1001"/>
     <TEMPOMAP>
       <TEMPO beat="0"
              bpm="120"/>
@@ -32,6 +32,7 @@
     </TEMPOMAP>
     <TRACKS>
       <TRACK colour="ffd55e00"
+             fader="1004"
              id="1003"
              kind="track"
              name="Drums">
@@ -305,6 +306,7 @@
                 type="phaziteDrums"/>
       </TRACK>
       <TRACK colour="ffe69f00"
+             fader="1012"
              id="1011"
              kind="track"
              name="Synth">
@@ -1106,7 +1108,6 @@
     </PLUGIN>
     <PLUGIN enabled="1"
             id="1012"
-            remapOnTempoChange="1"
             type="volume">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>

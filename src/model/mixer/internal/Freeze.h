@@ -18,12 +18,18 @@ namespace phazite
 int getFreezePointIndex (const te::AudioTrack&);
 
 // Freezes a track with a file rendered from it up to its freeze point, which becomes its frozen file in the Edit's
-// temporary folder: the freeze point goes in, the devices before it stop playing, and the track plays the file. Not an
-// undo step.
+// temporary folder: the song's track is frozen (Schema.h: trackFrozen), and the mirror plays the file. Not an undo step.
 void freezeFromFile (te::AudioTrack&, const juce::File& rendered);
 
-// Plays a frozen track live again. Not an undo step. Its frozen file stays until the cache is purged.
+// Plays a frozen track live again: the song's track isn't frozen. Not an undo step. Its frozen file stays until the cache
+// is purged.
 void unfreeze (te::AudioTrack&);
+
+// Tracktion's side of freezing, for the mirror (model/mirror/internal/Mirror.h): a track plays its frozen file, if it is
+// in the Edit's temporary folder (false if it isn't), its freeze point going in and the devices before it stopping; or it
+// plays live again.
+bool playFrozenFile (te::AudioTrack&);
+void playLive (te::AudioTrack&);
 
 // Whether a plug-in's sound is in its track's frozen file.
 bool isFrozenDevice (const te::Plugin&);
@@ -39,6 +45,10 @@ juce::Array<te::AudioTrack*> getFrozenTracks (const te::Edit&);
 // temporary folder is the Cache folder. Neither is a change.
 juce::Array<te::EditItemID> takeFrozenTracks (juce::ValueTree& state, const juce::File& cacheFolder);
 void restoreFrozenTracks (te::Edit&, const juce::Array<te::EditItemID>&);
+
+// As a project opens: the song's tracks whose frozen files aren't in the Edit's temporary folder (Cache) any more play
+// live, without an undo step.
+void forgetMissingFrozenFiles (te::Edit&);
 
 // Deletes from an Edit's temporary folder what nothing in the Edit uses: renders of clips that have changed since
 // (Tracktion's, and Phazite's: model/arrangement/internal/ClipRenders.h), and the frozen files of tracks that aren't

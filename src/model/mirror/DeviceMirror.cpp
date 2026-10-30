@@ -8,6 +8,7 @@
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Containers.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 
 #include <algorithm>
@@ -62,6 +63,14 @@ namespace
         return false;
     }
 
+    // Where a device's window was, in the state Tracktion makes the device from, which its window opens at.
+    void writeWindowPosition (juce::ValueTree& plugin, const juce::ValueTree& state)
+    {
+        for (const auto& property : { schema::deviceWindowX, schema::deviceWindowY })
+            if (state.hasProperty (property))
+                plugin.setProperty (property, state[property], nullptr);
+    }
+
     // One of Phazite's own devices made as the song has it: its type and ID, its values set by hand and its files as its
     // state keeps them, and whether it is on.
     te::Plugin::Ptr makeOwnDevice (te::Edit& edit, const juce::ValueTree& state)
@@ -77,6 +86,7 @@ namespace
         if ((bool) state[schema::deviceOff])
             plugin.setProperty (te::IDs::enabled, false, nullptr);
 
+        writeWindowPosition (plugin, state);
         return edit.getPluginCache().createNewPlugin (plugin);
     }
 
@@ -103,6 +113,7 @@ namespace
             plugin.setProperty (te::IDs::parameters, values, nullptr);
 
         writeMix (plugin, state);
+        writeWindowPosition (plugin, state);
         return edit.getPluginCache().createNewPlugin (plugin);
     }
 
@@ -165,12 +176,21 @@ namespace
         }
     }
 
-    // What a device is set to, as the song has it: on or off, Phazite's own device's values and files, a plug-in's or a
-    // container's mix.
+    // What a device is set to, as the song has it: on or off, the track it listens to through its sidechain (with the
+    // routing Tracktion guesses for a device's inputs once it has one: the source's two channels to the sidechain's), Phazite's
+    // own device's values and files, a plug-in's or a container's mix.
     void reconcileSettings (te::Plugin& device, const juce::ValueTree& state)
     {
         if (const auto on = ! (bool) state[schema::deviceOff]; device.isEnabled() != on)
             device.setEnabled (on);
+
+        if (const auto source = te::EditItemID::fromVar (state[schema::deviceSidechain]); device.getSidechainSourceID() != source)
+        {
+            device.setSidechainSourceID (source);
+
+            if (source.isValid() && device.getNumWires() == 0)
+                device.guessSidechainRouting();
+        }
 
         if (auto* own = dynamic_cast<DevicePlugin*> (&device))
             reconcileOwnDevice (*own, state);
@@ -445,8 +465,14 @@ namespace
 
             if (device == nullptr)
             {
+                // With what it isn't made with: the track it listens to.
                 if (const auto made = makeDevice (edit, states[i]))
+                {
                     list.insertPlugin (made, getDevicePlace (list, (int) i), nullptr);
+
+                    if (list.contains (made.get()))
+                        reconcileSettings (*made, states[i]);
+                }
 
                 continue;
             }
@@ -461,6 +487,21 @@ namespace
         }
     }
 } // namespace
+
+juce::ValueTree makeEditState (const juce::ValueTree& song)
+{
+    juce::ValueTree state (te::IDs::EDIT);
+
+    if (const auto fader = te::EditItemID::fromVar (song.getChildWithName (schema::MASTER)[schema::channelFader]); fader.isValid())
+    {
+        auto volume = te::VolumeAndPanPlugin::create();
+        fader.writeID (volume, nullptr);
+        state.getOrCreateChildWithName (te::IDs::MASTERVOLUME, nullptr).appendChild (volume, nullptr);
+    }
+
+    state.appendChild (song, nullptr);
+    return state;
+}
 
 void reconcileDevices (te::Edit& edit)
 {
@@ -489,5 +530,18 @@ void reconcileDevices (te::Edit& edit)
     }
 
     reconcileModulation (edit);
+
+    // Last, the frozen tracks, whose freeze points go between the devices: each plays its frozen file, if it is in the
+    // Edit's temporary folder, or live.
+    for (const auto& state : states)
+    {
+        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (state)))))
+        {
+            if (const auto frozen = (bool) state[schema::trackFrozen]; frozen && ! track->isFrozen (te::Track::individualFreeze))
+                playFrozenFile (*track);
+            else if (! frozen && track->isFrozen (te::Track::individualFreeze))
+                playLive (*track);
+        }
+    }
 }
 } // namespace phazite::mirror

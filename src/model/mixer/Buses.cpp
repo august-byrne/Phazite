@@ -3,13 +3,14 @@
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/mirror/internal/Mirror.h"
 
 namespace phazite
 {
 bool isBus (const te::Track& track)
 {
-    auto* folder = dynamic_cast<const te::FolderTrack*> (&track);
-    return folder != nullptr && folder->isSubmixFolder();
+    // A folder whose volume a fader of its own sets, not a VCA (Schema.h: channelFader).
+    return track.isFolderTrack() && findTrackState (track).hasProperty (schema::channelFader);
 }
 
 void makeBus (te::FolderTrack& folder)
@@ -17,23 +18,15 @@ void makeBus (te::FolderTrack& folder)
     if (isBus (folder))
         return;
 
-    // The bus's fader starts where the folder's VCA was. Its volume and meter go straight into the folder's
-    // state: Tracktion's insertPlugin() warns that the folder becomes a bus, which is what this is for.
+    // A fader of its own in place of its VCA, which the mirror makes at the folder's volume (the song's: Schema.h
+    // channelVolume).
     auto& edit = folder.edit;
-    auto* undoManager = &edit.getUndoManager();
-    auto* vca = folder.getVCAPlugin();
-    const auto volumeDb = vca != nullptr ? vca->getVolumeDb() : 0.0f;
-
-    auto volume = edit.getPluginCache().createNewPlugin (te::VolumeAndPanPlugin::create());
-    auto meter = edit.getPluginCache().createNewPlugin (te::LevelMeterPlugin::create());
-    folder.state.addChild (volume->state, -1, undoManager);
-    folder.state.addChild (meter->state, -1, undoManager);
-
-    if (vca != nullptr)
-        vca->deleteFromParent();
-
-    if (auto* fader = dynamic_cast<te::VolumeAndPanPlugin*> (volume.get()))
-        fader->setVolumeDb (volumeDb);
+    auto* undo = &edit.getUndoManager();
+    auto state = findTrackState (folder);
+    state.removeProperty (schema::channelVCA, undo);
+    state.setProperty (schema::channelFader, (juce::int64) edit.createNewItemID().getRawID(), undo);
+    mirror::reconcileTracks (edit);
+    mirror::reconcileDevices (edit);
 }
 
 void makePlainFolder (te::FolderTrack& folder)
@@ -41,22 +34,18 @@ void makePlainFolder (te::FolderTrack& folder)
     if (! isBus (folder))
         return;
 
-    auto* volume = folder.getVolumePlugin();
-    const auto volumeDb = volume != nullptr ? volume->getVolumeDb() : 0.0f;
+    // A VCA of its own in place of its fader, at the folder's volume; its devices go from the song too.
+    auto& edit = folder.edit;
+    auto* undo = &edit.getUndoManager();
+    auto state = findTrackState (folder);
 
-    // Its devices go from the song too.
-    auto chain = findChainState (folder.edit, &folder);
+    for (const auto& device : getDeviceStates (state))
+        state.removeChild (device, undo);
 
-    for (const auto& state : getDeviceStates (chain))
-        chain.removeChild (state, &folder.edit.getUndoManager());
-
-    for (auto* plugin : folder.pluginList.getPlugins()) // a copy that holds them while they are deleted
-        plugin->deleteFromParent();
-
-    folder.pluginList.insertPlugin (te::VCAPlugin::create(), -1);
-
-    if (auto* vca = folder.getVCAPlugin())
-        vca->setVolumeDb (volumeDb);
+    state.removeProperty (schema::channelFader, undo);
+    state.setProperty (schema::channelVCA, (juce::int64) edit.createNewItemID().getRawID(), undo);
+    mirror::reconcileTracks (edit);
+    mirror::reconcileDevices (edit);
 }
 
 void mixAsBus (te::FolderTrack& folder)

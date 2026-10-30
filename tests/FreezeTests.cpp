@@ -9,6 +9,7 @@
 #include "devices/dynamics/Compressor.h"
 #include "devices/stereo/StereoExpander.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/FreezeModel.h"
@@ -176,6 +177,7 @@ TEST_CASE ("Freezing renders a track up to its fader in the background, and play
     // Unfreezing plays it live again, and leaves the file until the project closes.
     phazite::toggleFreeze (song.context, song.host);
     CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
+    CHECK_FALSE (phazite::findTrackState (*song.bass).hasProperty (phazite::schema::trackFrozen));
     CHECK_FALSE (song.expander->isFrozen());
     CHECK_FALSE (song.hasFreezePoint());
     CHECK_FALSE (song.edit().getUndoManager().canUndo());
@@ -240,6 +242,19 @@ TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unf
     song.freeze();
     REQUIRE (song.project->save().wasOk());
 
+    // Frozen in the song (Schema.h: trackFrozen): an Edit built from the song alone plays the file too.
+    CHECK ((bool) phazite::findTrackState (*song.bass)[phazite::schema::trackFrozen]);
+
+    {
+        const auto rebuilt = phazite::createEditFromSong (song.edit().engine, phazite::getPhaziteState (song.edit()).createCopy(),
+                                                          song.project->getFile(), song.project->getCacheFolder());
+        REQUIRE (rebuilt != nullptr);
+        auto* bass = dynamic_cast<te::AudioTrack*> (te::findTrackForID (*rebuilt, song.bass->itemID));
+        REQUIRE (bass != nullptr);
+        CHECK (bass->isFrozen (te::Track::individualFreeze));
+        CHECK (bass->pluginList.findFirstPluginOfType<te::FreezePointPlugin>() != nullptr);
+    }
+
     song.reopen();
     CHECK (phazite::isFrozen (song.context, song.id()));
     CHECK (song.hasFreezePoint());
@@ -263,6 +278,7 @@ TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unf
     CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
     CHECK_FALSE (song.hasFreezePoint());
     CHECK_FALSE (song.expander->isFrozen());
+    CHECK_FALSE (phazite::findTrackState (*song.bass).hasProperty (phazite::schema::trackFrozen));
 }
 
 TEST_CASE ("Freezing stops before a device that listens to a sidechain or a send before the fader")

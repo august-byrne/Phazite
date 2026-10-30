@@ -3,9 +3,11 @@
 #include "devices/dynamics/Compressor.h"
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DrumKit.h"
+#include "model/mirror/internal/Mirror.h"
 
 namespace phazite
 {
@@ -184,12 +186,21 @@ void setSidechainSource (te::Plugin& plugin, te::AudioTrack* source)
     if (source == getSidechainSource (plugin) || (source != nullptr && ! getSidechainSources (plugin).contains (source)))
         return;
 
-    const UndoStep step (plugin.edit, source != nullptr ? "Sidechain from " + getTrackName (*source) : juce::String ("Turn Sidechain Off"));
-    plugin.setSidechainSourceID (source != nullptr ? source->itemID : te::EditItemID());
+    // The song's (Schema.h: deviceSidechain), which the mirror plays.
+    auto state = findDeviceState (plugin.edit, getDeviceID (plugin));
 
-    // The source's two channels go to the sidechain's inputs: the routing Tracktion guesses for a device's inputs.
-    if (source != nullptr && plugin.getNumWires() == 0)
-        plugin.guessSidechainRouting();
+    if (! state.isValid())
+        return;
+
+    const UndoStep step (plugin.edit, source != nullptr ? "Sidechain from " + getTrackName (*source) : juce::String ("Turn Sidechain Off"));
+    auto* undo = &plugin.edit.getUndoManager();
+
+    if (source != nullptr)
+        state.setProperty (schema::deviceSidechain, (juce::int64) getTrackID (*source).getRaw(), undo);
+    else
+        state.removeProperty (schema::deviceSidechain, undo);
+
+    mirror::reconcileDevices (plugin.edit);
 
     if (source != nullptr)
         startDucking (plugin, *source);
@@ -214,18 +225,26 @@ void forgetSidechainSources (const juce::Array<te::Track*>& tracks)
     if (tracks.isEmpty())
         return;
 
-    juce::Array<te::Track*> going;
+    juce::Array<juce::int64> going;
 
     for (auto* track : tracks)
     {
-        going.addIfNotAlreadyThere (track);
+        going.addIfNotAlreadyThere ((juce::int64) getTrackID (*track).getRaw());
 
         for (auto* inside : track->getAllSubTracks (true))
-            going.addIfNotAlreadyThere (inside);
+            going.addIfNotAlreadyThere ((juce::int64) getTrackID (*inside).getRaw());
     }
 
-    for (auto* plugin : tracks.getFirst()->edit.getPluginCache().getPlugins())
-        if (listensToAny (*plugin, going))
-            plugin->setSidechainSourceID ({});
+    // The song's devices that listen to them listen to none, which the mirror plays.
+    auto& edit = tracks.getFirst()->edit;
+    auto chains = getTrackStates (edit);
+    chains.push_back (findChainState (edit, nullptr));
+
+    for (const auto& chain : chains)
+        for (auto device : getDeviceStates (chain))
+            if (going.contains ((juce::int64) device[schema::deviceSidechain]))
+                device.removeProperty (schema::deviceSidechain, &edit.getUndoManager());
+
+    mirror::reconcileDevices (edit);
 }
 } // namespace phazite

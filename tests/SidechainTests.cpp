@@ -8,8 +8,10 @@
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DevicePlugin.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/project/internal/Project.h"
@@ -138,6 +140,38 @@ TEST_CASE ("Picking a sidechain's source is one undo step, and deleting the sour
     auto* restored = phazite::getSidechainSource (ducker);
     REQUIRE (restored != nullptr);
     CHECK (restored->getName() == juce::String ("Kick"));
+}
+
+TEST_CASE ("A device's sidechain is the song's, which Tracktion's and an Edit built from the song alone follow")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto* compressor =
+        phazite::insertDevice (*song.bass, song.edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
+    REQUIRE (compressor != nullptr);
+    phazite::setSidechainSource (*compressor, song.kick);
+
+    // The track it listens to, by its ID (Schema.h: deviceSidechain).
+    const auto element = phazite::findDeviceState (*song.edit, phazite::getDeviceID (*compressor));
+    CHECK ((juce::int64) element[schema::deviceSidechain] == (juce::int64) phazite::getTrackID (*song.kick).getRaw());
+
+    // Built again from the song alone, it listens to the kick, wired as before.
+    {
+        const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getPhaziteState (*song.edit).createCopy());
+        REQUIRE (rebuilt != nullptr);
+        const auto copy = te::findPluginForID (*rebuilt, compressor->itemID);
+        REQUIRE (copy != nullptr);
+        CHECK (copy->getSidechainSourceID() == song.kick->itemID);
+        CHECK (copy->getNumWires() == compressor->getNumWires());
+    }
+
+    // Tracktion's alone turned off is turned on again; the song's turned off, Tracktion's follows.
+    compressor->setSidechainSourceID ({});
+    phazite::mirror::reconcileDevices (*song.edit);
+    CHECK (compressor->getSidechainSourceID() == song.kick->itemID);
+    phazite::setSidechainSource (*compressor, nullptr);
+    CHECK_FALSE (element.hasProperty (schema::deviceSidechain));
+    CHECK_FALSE (compressor->getSidechainSourceID().isValid());
 }
 
 TEST_CASE ("A sidechain's source reaches the device as the song plays, muted or not")

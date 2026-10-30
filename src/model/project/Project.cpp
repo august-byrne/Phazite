@@ -50,6 +50,7 @@ namespace
         getTrackList (edit);
         mirror::reconcileTracks (edit);
         mirror::reconcileClips (edit);
+        forgetMissingFrozenFiles (edit);
         mirror::reconcileDevices (edit);
         forgetCurvesOfGoneDevices (edit);
         mirror::reconcileAutomation (edit);
@@ -124,6 +125,19 @@ std::unique_ptr<te::Edit> createSongEdit (te::Engine& engine, const juce::File& 
 
     recordFirstTrack (*edit);
     addPhaziteParts (*edit);
+    return edit;
+}
+
+std::unique_ptr<te::Edit> createEditFromSong (te::Engine& engine, const juce::ValueTree& song, const juce::File& file,
+                                              const juce::File& cacheFolder)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    auto edit = createEditFromState (engine, mirror::makeEditState (song), file, cacheFolder);
+
+    if (edit != nullptr)
+        addPhaziteParts (*edit);
+
     return edit;
 }
 
@@ -570,7 +584,7 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
                 || property == te::IDs::loopPoint2 || property == te::IDs::looping || property == te::IDs::recordPunchInOut))
            || (tree.hasType (te::IDs::CLICKTRACK) && (property == te::IDs::active || property == te::IDs::emphasiseBars))
            || (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
-           || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property))
+           || ((tree.hasType (schema::DEVICE) || tree.hasType (te::IDs::PLUGIN)) && schema::isDeviceViewProperty (property))
            || (tree.hasType (schema::PHAZITE)
                && (schema::isGridProperty (property) || property == schema::loopFollowsSong || property == schema::punch
                    || property == schema::lastInput || property == schema::loop || property == schema::loopStart

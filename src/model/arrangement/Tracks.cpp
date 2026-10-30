@@ -59,13 +59,15 @@ namespace
         return state.isValid() ? te::findTrackForID (edit, toTracktion (getTrackID (state))) : nullptr;
     }
 
-    // A new track's element, of a kind, with an ID from the Edit's, as Tracktion's tracks get theirs while T1 lasts.
+    // A new track's element, of a kind, with an ID from the Edit's, as Tracktion's tracks get theirs while T1 lasts, and
+    // its fader's: a folder starts as a bus (design question 11).
     juce::ValueTree makeTrackState (te::Edit& edit, const char* kind, juce::Colour colour)
     {
         juce::ValueTree state (schema::TRACK);
         state.setProperty (schema::trackID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
         state.setProperty (schema::trackKind, kind, nullptr);
         state.setProperty (schema::trackColour, colour.toString(), nullptr);
+        state.setProperty (schema::channelFader, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
         return state;
     }
 
@@ -200,7 +202,19 @@ juce::ValueTree findTrackList (const te::Edit& edit)
 
 juce::ValueTree getMasterState (te::Edit& edit)
 {
-    return getPhaziteState (edit).getOrCreateChildWithName (schema::MASTER, nullptr);
+    auto phazite = getPhaziteState (edit);
+
+    if (auto master = phazite.getChildWithName (schema::MASTER); master.isValid())
+        return master;
+
+    // With the master's fader, Tracktion's, which it makes with the Edit (and createEditFromSong() with the song's ID).
+    juce::ValueTree master (schema::MASTER);
+
+    if (const auto fader = edit.getMasterVolumePlugin())
+        master.setProperty (schema::channelFader, (juce::int64) fader->itemID.getRawID(), nullptr);
+
+    phazite.appendChild (master, nullptr);
+    return master;
 }
 
 juce::ValueTree findTrackState (const te::Edit& edit, TrackID id)
@@ -328,6 +342,7 @@ te::AudioTrack* insertPlainTrack (te::Edit& edit, te::Track* after)
     juce::ValueTree state (schema::TRACK);
     state.setProperty (schema::trackID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
     state.setProperty (schema::trackKind, schema::trackIsTrack, nullptr);
+    state.setProperty (schema::channelFader, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
     insertTrackState (edit, state, after);
     mirror::reconcileTracks (edit);
     return dynamic_cast<te::AudioTrack*> (findTrack (edit, state));
@@ -505,6 +520,10 @@ void recordFirstTrack (te::Edit& edit)
         juce::ValueTree state (schema::TRACK);
         state.setProperty (schema::trackID, (juce::int64) tracks.getFirst()->itemID.getRawID(), nullptr);
         state.setProperty (schema::trackKind, schema::trackIsTrack, nullptr);
+
+        if (auto* fader = getVolumeDevice (*tracks.getFirst()))
+            state.setProperty (schema::channelFader, (juce::int64) fader->itemID.getRawID(), nullptr);
+
         list.appendChild (state, nullptr);
     }
 }

@@ -22,7 +22,7 @@
     </PLUGIN>
   </MASTERVOLUME>
   <PHAZITE>
-    <MASTER/>
+    <MASTER fader="1001"/>
     <TEMPOMAP>
       <TEMPO beat="0"
              bpm="120"/>
@@ -31,7 +31,8 @@
                      numerator="4"/>
     </TEMPOMAP>
     <TRACKS>
-      <TRACK id="1003"
+      <TRACK fader="1004"
+             id="1003"
              kind="track"/>
     </TRACKS>
   </PHAZITE>

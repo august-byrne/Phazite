@@ -41,14 +41,16 @@ namespace
             item.elementState.removeProperty (te::IDs::parameters, nullptr);
     }
 
-    // Where its window was (Plugin::flushPluginStateToValueTree()), which Phazite stores as the window moves too
-    // (rememberWindowPosition() in model/mixer/internal/Mixer.h).
+    // Where its window was, in the song's element of the device (Schema.h: deviceWindowX, deviceWindowY), which Phazite
+    // stores as the window moves too (rememberWindowPosition() in model/mixer/internal/Mixer.h); and in its state, as
+    // Plugin::flushPluginStateToValueTree() stores it.
     void storeWindowPosition (te::Plugin& device)
     {
         if (const auto& bounds = device.windowState->lastWindowBounds; bounds.has_value() && ! bounds->isEmpty())
         {
             store (device.state, te::IDs::windowX, bounds->getX());
             store (device.state, te::IDs::windowY, bounds->getY());
+            rememberWindowPosition (device, bounds->getPosition());
         }
     }
 

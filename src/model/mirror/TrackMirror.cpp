@@ -32,6 +32,74 @@ namespace
         return last;
     }
 
+    // The states Tracktion makes a channel's own devices from, as the song has them (Schema.h: channelFader, channelVCA):
+    // a fader, with its meter after it, or a plain folder's VCA, with the song's ID. None for a track the song gives none.
+    juce::Array<juce::ValueTree> makeChannelDevices (const juce::ValueTree& state)
+    {
+        const auto isVCA = state.hasProperty (schema::channelVCA);
+        const auto id = te::EditItemID::fromVar (state[isVCA ? schema::channelVCA : schema::channelFader]);
+
+        if (! id.isValid())
+            return {};
+
+        auto fader = isVCA ? te::VCAPlugin::create() : te::VolumeAndPanPlugin::create();
+        id.writeID (fader, nullptr);
+        return isVCA ? juce::Array<juce::ValueTree> { fader } : juce::Array<juce::ValueTree> { fader, te::LevelMeterPlugin::create() };
+    }
+
+    bool isChannelFader (const te::Plugin& plugin)
+    {
+        return dynamic_cast<const te::VolumeAndPanPlugin*> (&plugin) != nullptr || dynamic_cast<const te::VCAPlugin*> (&plugin) != nullptr;
+    }
+
+    // A channel's own device into its list, before the one at an index (or last), through the list's state: a folder that
+    // becomes a bus takes its fader so without Tracktion warning that it does.
+    void insertChannelDevice (te::Edit& edit, te::PluginList& list, const juce::ValueTree& state, int index)
+    {
+        const auto device = edit.getPluginCache().createNewPlugin (state);
+        const auto at = juce::isPositiveAndBelow (index, list.size()) ? list.state.indexOf (list[index]->state) : -1;
+        list.state.addChild (device->state, at, &edit.getUndoManager());
+    }
+
+    // A channel's own devices in Tracktion as the song has them: its fader, or a plain folder's VCA, with the song's ID. One
+    // of the other kind or with another ID goes (and the meter after a fader, for a VCA), and the song's takes its place,
+    // with a meter after a fader that has none.
+    void reconcileChannelDevices (te::Edit& edit, te::Track& track, const juce::ValueTree& state)
+    {
+        const auto wanted = makeChannelDevices (state);
+
+        if (wanted.isEmpty())
+            return;
+
+        auto& list = track.pluginList;
+        const auto wantedID = te::EditItemID::fromID (wanted.getFirst());
+        const auto wantedType = wanted.getFirst()[te::IDs::type].toString();
+
+        for (auto* plugin : list)
+            if (isChannelFader (*plugin) && plugin->itemID == wantedID && plugin->state[te::IDs::type].toString() == wantedType)
+                return;
+
+        auto index = -1;
+
+        for (int i = list.size(); --i >= 0;)
+        {
+            if (auto* plugin = list[i]; isChannelFader (*plugin) || (wanted.size() == 1 && dynamic_cast<te::LevelMeterPlugin*> (plugin)))
+            {
+                index = isChannelFader (*plugin) ? i : index;
+                plugin->deleteFromParent();
+            }
+        }
+
+        // Without one to take the place of, a fader goes before the meter.
+        if (const auto* meter = list.findFirstPluginOfType<te::LevelMeterPlugin>(); index < 0 && meter != nullptr)
+            index = list.indexOf (meter);
+
+        insertChannelDevice (edit, list, wanted.getFirst(), index);
+
+        if (wanted.size() > 1 && list.getPluginsOfType<te::LevelMeterPlugin>().isEmpty())
+            insertChannelDevice (edit, list, wanted[1], -1);
+    }
+
     // The track before a track in its folder, or at the top level: Tracktion's place for it.
     te::Track* findTrackBefore (te::Track& track)
     {
@@ -93,19 +161,28 @@ namespace
 
             if (track == nullptr)
             {
+                // With its own devices as the song has them, or as Tracktion makes a track's or a plain folder's.
                 juce::ValueTree created (isFolder ? te::IDs::FOLDERTRACK : te::IDs::TRACK);
                 id.writeID (created, nullptr);
+                const auto channelDevices = makeChannelDevices (state);
+
+                for (const auto& device : channelDevices)
+                    created.appendChild (device, nullptr);
+
                 track = edit.insertTrack (te::TrackInsertPoint (folder, preceding), created, nullptr).get();
 
                 if (track == nullptr)
                     continue;
 
-                // As Tracktion makes a track or a plain folder (Phazite makes a folder a bus: model/mixer/internal/Buses.h).
-                track->pluginList.addDefaultTrackPlugins (isFolder);
+                if (channelDevices.isEmpty())
+                    track->pluginList.addDefaultTrackPlugins (isFolder);
             }
-            else if (track->getParentTrack() != folder || findTrackBefore (*track) != preceding)
+            else
             {
-                edit.moveTrack (track, te::TrackInsertPoint (folder, preceding));
+                if (track->getParentTrack() != folder || findTrackBefore (*track) != preceding)
+                    edit.moveTrack (track, te::TrackInsertPoint (folder, preceding));
+
+                reconcileChannelDevices (edit, *track, state);
             }
 
             // Its name and color too, which Tracktion doesn't play with: so that what reads them from Tracktion while T1

@@ -118,6 +118,21 @@ TEST_CASE ("Storing an Edit's devices' states stores all that Tracktion's save w
     CHECK (devices.eq->state.hasProperty (te::IDs::parameters));
     CHECK (devices.lfo->elementState.hasProperty (te::IDs::parameters));
 
+    // Where the window was is the song's (Schema.h: deviceWindowX, deviceWindowY): an Edit built from the song alone opens
+    // the plug-in's window there.
+    const auto element = phazite::findDeviceState (edit, phazite::getDeviceID (*devices.plugin));
+    CHECK ((int) element[phazite::schema::deviceWindowX] == 120);
+    CHECK ((int) element[phazite::schema::deviceWindowY] == 80);
+
+    {
+        const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getPhaziteState (edit).createCopy());
+        REQUIRE (rebuilt != nullptr);
+        const auto plugin = te::findPluginForID (*rebuilt, devices.plugin->itemID);
+        REQUIRE (plugin != nullptr);
+        REQUIRE (plugin->windowState->lastWindowBounds.has_value());
+        CHECK (plugin->windowState->lastWindowBounds->getPosition() == juce::Point<int> (120, 80));
+    }
+
     // Tracktion's own save then finds nothing more to store: it changes nothing, and records nothing.
     const auto stored = edit.state.createCopy();
     edit.flushState();

@@ -27,66 +27,66 @@
            loopFollowsSong="1"
            outline="rock"
            playStart="2">
-    <MASTER/>
+    <MASTER fader="1001"/>
     <SECTIONS>
       <SECTION energy="0.45"
-               id="1042"
+               id="1040"
                length="32"
                name="Intro"
                role="intro"
                start="0"
                tip="Open with the main riff or a drum fill, to set the tempo and the sound."/>
       <SECTION energy="0.5"
-               id="1043"
+               id="1041"
                length="64"
                name="Verse"
                role="verse"
                start="32"
                tip="Riff and rhythm section, with room for the vocal to tell the story."/>
       <SECTION energy="0.85"
-               id="1044"
+               id="1042"
                length="32"
                name="Chorus"
                role="chorus"
                start="96"
                tip="Open up: bigger chords, crash cymbals and the line everyone sings."/>
       <SECTION energy="0.55"
-               id="1045"
+               id="1043"
                length="64"
                name="Verse"
                role="verse"
                start="128"
                tip="The same groove with something new: another guitar part, or heavier drums."/>
       <SECTION energy="0.9"
-               id="1046"
+               id="1044"
                length="32"
                name="Chorus"
                role="chorus"
                start="192"
                tip="The chorus again, at least as big as the first."/>
       <SECTION energy="0.8"
-               id="1047"
+               id="1045"
                length="32"
                name="Solo"
                role="solo"
                start="224"
                tip="Let the lead guitar, or another instrument, take over the melody."/>
       <SECTION energy="0.6"
-               id="1048"
+               id="1046"
                length="32"
                name="Bridge"
                role="bridge"
                start="256"
                tip="A change of chords or feel that builds the tension for the last chorus."/>
       <SECTION energy="1"
-               id="1049"
+               id="1047"
                length="64"
                name="Chorus"
                role="chorus"
                start="288"
                tip="The last chorus, twice through: everything in, maybe up a key."/>
       <SECTION energy="0.45"
-               id="1050"
+               id="1048"
                length="32"
                name="Outro"
                role="outro"
@@ -103,11 +103,13 @@
     <TRACKS>
       <TRACK bus="1"
              colour="ffe69f00"
-             id="1018"
+             fader="1018"
+             id="1017"
              kind="folder"
              mute="0"
              name="Group">
         <TRACK collapsed="0"
+               fader="1004"
                height="80"
                id="1003"
                kind="track"
@@ -115,73 +117,73 @@
                name="One"
                pinned="1"
                solo="0">
-          <CLIP id="1051"
+          <CLIP id="1049"
                 kind="midi"
                 length="2"
                 mute="0"
                 name="One"
                 start="0">
-            <NOTE id="1052"
+            <NOTE id="1050"
                   length="0.25"
                   pitch="60"
                   start="0"
                   velocity="100"/>
-            <NOTE id="1058"
+            <NOTE id="1056"
                   length="0.25"
                   pitch="60"
                   start="0.25"
                   velocity="100"/>
-            <NOTE id="1059"
+            <NOTE id="1057"
                   length="0.25"
                   pitch="60"
                   start="0.5"
                   velocity="100"/>
-            <NOTE id="1060"
+            <NOTE id="1058"
                   length="0.25"
                   pitch="60"
                   start="0.75"
                   velocity="100"/>
-            <NOTE id="1053"
+            <NOTE id="1051"
                   length="0.25"
                   pitch="64"
                   start="1"
                   velocity="100"/>
-            <NOTE id="1061"
+            <NOTE id="1059"
                   length="0.25"
                   pitch="64"
                   start="1.25"
                   velocity="100"/>
           </CLIP>
-          <CLIP id="1056"
+          <CLIP id="1054"
                 kind="midi"
                 length="2"
                 mute="0"
                 name="One"
                 start="4">
-            <NOTE id="1052"
+            <NOTE id="1050"
                   length="0.5"
                   pitch="60"
                   start="0"
                   velocity="100"/>
-            <NOTE id="1053"
+            <NOTE id="1051"
                   length="0.5"
                   pitch="64"
                   start="1"
                   velocity="100"/>
           </CLIP>
-          <CLIP id="1057"
+          <CLIP id="1055"
                 kind="midi"
                 length="2"
                 mute="0"
                 name="One"
                 offset="2"
                 start="2">
-            <NOTE id="1052"
+            <NOTE id="1050"
                   length="0.5"
                   pitch="60"
                   start="0"
                   velocity="100"/>
-            <NOTE id="1053"
+            <NOTE id="1051"
                   length="0.5"
                   pitch="64"
                   start="1"
@@ -190,13 +192,15 @@
         </TRACK>
         <TRACK collapsed="0"
                colour="ff56b4e9"
+               fader="1012"
                height="80"
                id="1011"
                kind="track"
                name="Two"/>
       </TRACK>
       <TRACK colour="ff009e73"
-             id="1022"
+             fader="1021"
+             id="1020"
              kind="return"
              name="Return 1"/>
     </TRACKS>
@@ -230,20 +234,17 @@
     <MODIFIERS/>
   </MASTERTRACK>
   <FOLDERTRACK colour="ffe69f00"
-               id="1018"
+               id="1017"
                mute="0"
                name="Group">
     <MODIFIERS/>
     <PLUGIN enabled="1"
-            id="1020"
-            remapOnTempoChange="1"
-            type="volume"
-            volume="0.7408182">
+            id="1018"
+            type="volume">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"
-            id="1021"
-            remapOnTempoChange="1"
+            id="1019"
             type="level"/>
     <TRACK id="1003"
            mute="0"
@@ -251,7 +252,7 @@
            solo="0">
       <MIDICLIP colour="ff00ff00"
                 currentTake="0"
-                id="1051"
+                id="1049"
                 length="1"
                 mute="0"
                 name="One"
@@ -269,48 +270,48 @@
                 l="0.25"
                 m="0"
                 p="60"
-                phaziteNoteID="1052"
+                phaziteNoteID="1050"
                 v="100"/>
           <NOTE b="0.25"
                 c="0"
                 l="0.25"
                 m="0"
                 p="60"
-                phaziteNoteID="1058"
+                phaziteNoteID="1056"
                 v="100"/>
           <NOTE b="0.5"
                 c="0"
                 l="0.25"
                 m="0"
                 p="60"
-                phaziteNoteID="1059"
+                phaziteNoteID="1057"
                 v="100"/>
           <NOTE b="0.75"
                 c="0"
                 l="0.25"
                 m="0"
                 p="60"
-                phaziteNoteID="1060"
+                phaziteNoteID="1058"
                 v="100"/>
           <NOTE b="1"
                 c="0"
                 l="0.25"
                 m="0"
                 p="64"
-                phaziteNoteID="1053"
+                phaziteNoteID="1051"
                 v="100"/>
           <NOTE b="1.25"
                 c="0"
                 l="0.25"
                 m="0"
                 p="64"
-                phaziteNoteID="1061"
+                phaziteNoteID="1059"
                 v="100"/>
         </SEQUENCE>
       </MIDICLIP>
       <MIDICLIP colour="ff00ff00"
                 currentTake="0"
-                id="1057"
+                id="1055"
                 length="1"
                 name="One"
                 offset="1"
@@ -326,19 +327,19 @@
                 c="0"
                 l="0.5"
                 p="60"
-                phaziteNoteID="1052"
+                phaziteNoteID="1050"
                 v="100"/>
           <NOTE b="1"
                 c="0"
                 l="0.5"
                 p="64"
-                phaziteNoteID="1053"
+                phaziteNoteID="1051"
                 v="100"/>
         </SEQUENCE>
       </MIDICLIP>
       <MIDICLIP colour="ff00ff00"
                 currentTake="0"
-                id="1056"
+                id="1054"
                 length="1"
                 name="One"
                 offset="0"
@@ -354,13 +355,13 @@
                 c="0"
                 l="0.5"
                 p="60"
-                phaziteNoteID="1052"
+                phaziteNoteID="1050"
                 v="100"/>
           <NOTE b="1"
                 c="0"
                 l="0.5"
                 p="64"
-                phaziteNoteID="1053"
+                phaziteNoteID="1051"
                 v="100"/>
         </SEQUENCE>
       </MIDICLIP>
@@ -389,7 +390,6 @@
       </OUTPUTDEVICES>
       <PLUGIN enabled="1"
               id="1012"
-              remapOnTempoChange="1"
               type="volume">
         <MODIFIERASSIGNMENTS/>
       </PLUGIN>
@@ -399,7 +399,7 @@
     </TRACK>
   </FOLDERTRACK>
   <TRACK colour="ff009e73"
-         id="1022"
+         id="1020"
          name="Return 1"
          soloIsolate="1">
     <CLIPSLOTS/>
@@ -409,17 +409,16 @@
     </OUTPUTDEVICES>
     <PLUGIN busNum="0"
             enabled="1"
-            id="1025"
+            id="1023"
             remapOnTempoChange="1"
             type="auxreturn"/>
     <PLUGIN enabled="1"
-            id="1023"
-            remapOnTempoChange="1"
+            id="1021"
             type="volume">
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
     <PLUGIN enabled="1"
-            id="1024"
+            id="1022"
             type="level"/>
   </TRACK>
   <TRACKCOMPS/>

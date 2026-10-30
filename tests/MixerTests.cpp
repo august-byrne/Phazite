@@ -8,8 +8,10 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/MixHandle.h"
 #include "model/mixer/internal/MixHandle.h"
 #include "model/mixer/internal/Mixer.h"
@@ -134,6 +136,56 @@ TEST_CASE ("A new folder is a bus; a plain one becomes a bus with its first devi
     CHECK_FALSE (phazite::isBus (*folder));
     REQUIRE (folder->getVCAPlugin() != nullptr);
     CHECK (folder->getVCAPlugin()->getVolumeDb() == doctest::Approx (-3.0f));
+}
+
+TEST_CASE ("A channel's fader is the song's, by its ID, which Tracktion's and an Edit built from the song alone follow")
+{
+    namespace schema = phazite::schema;
+    Mix mix;
+    const auto idOf = [] (const te::Plugin* device)
+    { return device != nullptr ? (juce::int64) device->itemID.getRawID() : (juce::int64) 0; };
+    const auto a = phazite::findTrackState (*mix.a);
+    CHECK ((juce::int64) a[schema::channelFader] == idOf (mix.a->getVolumePlugin()));
+    CHECK ((juce::int64) phazite::getMasterState (*mix.edit)[schema::channelFader] == idOf (mix.edit->getMasterVolumePlugin().get()));
+
+    // A folder starts as a bus, with a fader; made plain, a VCA of its own takes the fader's place and its meter goes, and
+    // undo brings them back.
+    auto* folder = phazite::groupIntoFolder ({ mix.b }, nullptr);
+    REQUIRE (folder != nullptr);
+    const auto folderState = phazite::findTrackState (*folder);
+    const auto faderID = (juce::int64) folderState[schema::channelFader];
+    CHECK (faderID == idOf (folder->getVolumePlugin()));
+
+    phazite::setMixedAsBus (*folder, false);
+    CHECK_FALSE (folderState.hasProperty (schema::channelFader));
+    CHECK ((juce::int64) folderState[schema::channelVCA] == idOf (folder->getVCAPlugin()));
+    CHECK (folder->getVolumePlugin() == nullptr);
+    CHECK (folder->pluginList.getPluginsOfType<te::LevelMeterPlugin>().isEmpty());
+
+    phazite::undo (*mix.edit);
+    CHECK ((juce::int64) folderState[schema::channelFader] == faderID);
+    CHECK (idOf (folder->getVolumePlugin()) == faderID);
+    CHECK (folder->getVCAPlugin() == nullptr);
+
+    // A fader Tracktion lost is made again with the song's ID, before the meter.
+    mix.a->getVolumePlugin()->deleteFromParent();
+    phazite::mirror::reconcileTracks (*mix.edit);
+    CHECK (idOf (mix.a->getVolumePlugin()) == (juce::int64) a[schema::channelFader]);
+    CHECK (mix.a->pluginList.indexOf (mix.a->getVolumePlugin()) < mix.a->pluginList.indexOf (mix.a->getLevelMeterPlugin()));
+
+    // Built again from the song alone: the same faders, the master's too, at the song's volumes.
+    phazite::setChannelVolume (*mix.a, -6.0f);
+    const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getPhaziteState (*mix.edit).createCopy());
+    REQUIRE (rebuilt != nullptr);
+    auto* rebuiltA = dynamic_cast<te::AudioTrack*> (te::findTrackForID (*rebuilt, mix.a->itemID));
+    auto* rebuiltFolder = dynamic_cast<te::FolderTrack*> (te::findTrackForID (*rebuilt, folder->itemID));
+    REQUIRE (rebuiltA != nullptr);
+    REQUIRE (rebuiltFolder != nullptr);
+    CHECK (idOf (rebuiltA->getVolumePlugin()) == idOf (mix.a->getVolumePlugin()));
+    CHECK (rebuiltA->getVolumePlugin()->getVolumeDb() == doctest::Approx (-6.0f).epsilon (1.0e-3));
+    CHECK (idOf (rebuiltFolder->getVolumePlugin()) == faderID);
+    CHECK (idOf (rebuilt->getMasterVolumePlugin().get()) == idOf (mix.edit->getMasterVolumePlugin().get()));
+    CHECK (rebuilt->getMasterVolumePlugin()->getVolumeDb() == doctest::Approx (-3.0f).epsilon (1.0e-3));
 }
 
 TEST_CASE ("Return tracks take a bus, and sends feed them from before or after the fader")

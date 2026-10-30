@@ -143,6 +143,19 @@ inline const juce::Identifier folderBus { "bus" };
 inline const juce::Identifier channelVolume { "volume" };
 inline const juce::Identifier channelPan { "pan" };
 
+// On TRACK, and on MASTER (T1, step 8): the device that sets the channel's volume, by its ID (DeviceID, its Tracktion
+// plug-in's while T1 lasts), which the automation and the modulation of its volume and pan name. A track's, a return's, a
+// bus's (a folder that mixes its tracks) and the master's is a fader (channelFader: its volume and pan, with its meter after
+// it); a plain folder's is a VCA (channelVCA), which sets its tracks' volume. A folder that becomes a bus or plain again
+// gets one of the other kind, with an ID of its own.
+inline const juce::Identifier channelFader { "fader" };
+inline const juce::Identifier channelVCA { "vca" };
+
+// On a track's TRACK (T1, step 8). true, or none: the track plays its frozen file (model/mixer/internal/Freeze.h), which is
+// in the project's Cache folder, in place of its clips and the devices before its freeze point. Neither freezing nor
+// unfreezing is an undo step; a track whose file is gone as the project opens plays live.
+inline const juce::Identifier trackFrozen { "frozen" };
+
 // A key, on a TRACK (song), on LASTKEY (state) and on CHORDKEY (song): the root, int 0..11 (0 is C), none = no key; and the
 // scale: "major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor".
 inline const juce::Identifier keyRoot { "keyRoot" };
@@ -214,6 +227,14 @@ inline const juce::Identifier deviceID { "id" };
 inline const juce::Identifier deviceType { "type" };
 inline constexpr const char* deviceIsPlugin = "plugin";
 inline const juce::Identifier deviceOff { "off" };
+
+// On a DEVICE (T1, step 8): the track it listens to through its sidechain, by the track's ID (TrackID); none for none.
+inline const juce::Identifier deviceSidechain { "sidechain" };
+
+// On a DEVICE (T1, step 8): where its window was, the left and the top of it on the screen (int, pixels), where it opens
+// again; none for a window never moved. view
+inline const juce::Identifier deviceWindowX { "windowX" };
+inline const juce::Identifier deviceWindowY { "windowY" };
 
 // Children of one of Phazite's own devices' DEVICE (T1, step 5b): VALUES, its parameters' values as they were set by hand
 // (not as automation or a modulator moves them), each a property named by the parameter's ID in the device's description,
@@ -330,7 +351,7 @@ inline const juce::Identifier pointCurve { "curve" };
 
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; Project's isUncountedProperty()
 // and isUncountedElement()): on tracks, their heights, collapsed and pinned, drum mode and rows, and their automation
-// lanes (the master's too); on PHAZITE, the playlist's grid; on devices (PLUGIN), where their windows were. PIANOROLL and
+// lanes (the master's too); on PHAZITE, the playlist's grid; on devices (DEVICE), where their windows were. PIANOROLL and
 // LANE hold view settings only. Keep these lists exact: anything else a project holds is song or state.
 inline bool isTrackViewProperty (const juce::Identifier& p)
 {
@@ -342,11 +363,12 @@ inline bool isGridProperty (const juce::Identifier& p)
     return p == gridSnap || p == gridAdaptive || p == gridOffset || p == gridStep || p == gridTriplets;
 }
 
-// Tracktion's names, which Phazite writes as view settings, without the undo manager (model/mixer/internal/Mixer.h:
-// rememberWindowPosition(), and model/devices/internal/DeviceStates.h as it saves).
+// Written without the undo manager (model/mixer/internal/Mixer.h: rememberWindowPosition(), and
+// model/devices/internal/DeviceStates.h as it saves); the names Tracktion gives them on its devices too, which make their
+// windows from them.
 inline bool isDeviceViewProperty (const juce::Identifier& p)
 {
-    return p == te::IDs::windowX || p == te::IDs::windowY;
+    return p == deviceWindowX || p == deviceWindowY;
 }
 
 inline bool isTrackViewElement (const juce::ValueTree& element)

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RenderHarness.h"
 #include "model/arrangement/internal/ClipRenders.h"
+#include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceStates.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
@@ -94,9 +96,10 @@ namespace
         }
     };
 
-    // Tracktion's engine again, playing an Edit made afresh from a copy of the project as a save would hold it, in a
+    // Tracktion's engine again, playing an Edit built afresh from a copy of the song alone, as a save would hold it, in a
     // context of its own as a project opens in: so that nothing a render leaves behind (where its modulators were) plays
-    // in the next, and the project's state alone makes what it plays (as T1 asks of Phazite's own document).
+    // in the next, and the song alone makes what it plays (as T1 asks of Phazite's own document: Tracktion's Edit a mirror
+    // that can be built again from it at any moment).
     class TracktionOnACopy final : public RenderEngine
     {
     public:
@@ -107,8 +110,8 @@ namespace
             auto* edit = getEdit (context);
             REQUIRE (edit != nullptr);
             storeDeviceStates (*edit); // as a save does
-            const auto copy =
-                createEditFromState (edit->engine, edit->state.createCopy(), edit->editFileRetriever(), edit->getTempDirectory (false));
+            const auto copy = createEditFromSong (edit->engine, getPhaziteState (*edit).createCopy(), edit->editFileRetriever(),
+                                                  edit->getTempDirectory (false));
             REQUIRE (copy != nullptr);
 
             ProjectContext opened (getEngineContext());

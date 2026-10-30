@@ -9,6 +9,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -197,6 +198,27 @@ void freezeFromFile (te::AudioTrack& track, const juce::File& rendered)
 
     engine.getAudioFileManager().forceFileUpdate (te::AudioFile (engine, frozenFile));
 
+    if (auto state = findTrackState (track); state.isValid())
+    {
+        state.setProperty (schema::trackFrozen, true, nullptr);
+        mirror::reconcileDevices (track.edit);
+    }
+}
+
+void unfreeze (te::AudioTrack& track)
+{
+    if (auto state = findTrackState (track); state.isValid())
+    {
+        state.removeProperty (schema::trackFrozen, nullptr);
+        mirror::reconcileDevices (track.edit);
+    }
+}
+
+bool playFrozenFile (te::AudioTrack& track)
+{
+    if (! te::TemporaryFileManager::getFreezeFileForTrack (track).existsAsFile())
+        return false;
+
     // The freeze point, which Tracktion keeps a frozen track by, before the devices that stay live.
     auto& list = track.pluginList;
     const auto point = getFreezePointIndex (track);
@@ -231,9 +253,10 @@ void freezeFromFile (te::AudioTrack& track, const juce::File& rendered)
 
     setFrozenSwitch (track, true); // last: the FreezeKeeper takes what the file holds then
     track.changed();
+    return true;
 }
 
-void unfreeze (te::AudioTrack& track)
+void playLive (te::AudioTrack& track)
 {
     setFrozenSwitch (track, false); // first: the FreezeKeeper lets go of it
 
@@ -323,6 +346,15 @@ void restoreFrozenTracks (te::Edit& edit, const juce::Array<te::EditItemID>& tak
     for (const auto& id : taken)
         if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, id)))
             setFrozenSwitch (*track, true);
+}
+
+void forgetMissingFrozenFiles (te::Edit& edit)
+{
+    for (auto state : getTrackStates (edit))
+        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (state))));
+            (bool) state[schema::trackFrozen]
+            && (track == nullptr || ! te::TemporaryFileManager::getFreezeFileForTrack (*track).existsAsFile()))
+            state.removeProperty (schema::trackFrozen, nullptr);
 }
 
 void purgeCache (te::Edit& edit)

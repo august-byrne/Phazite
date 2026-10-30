@@ -178,7 +178,7 @@ namespace
             // makes one at each move (docs/performance-audit.md, U1); a channel's volume and pan, a send's level and a
             // macro's value neither. Nor is where a device's window was, which no view shows.
             if (isParameterValue (tree, property) || tree.hasType (schema::VALUES)
-                || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property))
+                || ((tree.hasType (schema::DEVICE) || tree.hasType (te::IDs::PLUGIN)) && schema::isDeviceViewProperty (property))
                 || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
                     && (property == schema::channelVolume || property == schema::channelPan))
                 || (tree.hasType (schema::SEND) && property == schema::sendLevel)

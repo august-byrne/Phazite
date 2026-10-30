@@ -90,7 +90,7 @@ juce::PluginDescription getPluginDescription (te::Engine&, const juce::ValueTree
 // After a track was copied (a folder with its tracks): what each of the original's devices is in the copy (by their places
 // in their lists: its channel's devices, sends and the rest, and those of the tracks in it), added to a map (which
 // copyContainers() in Containers.h starts with its containers' devices); and the elements of the devices, containers,
-// their devices and sends in the copy of its element given the copies' IDs.
+// their devices and sends in the copy of its element, and its fader or VCA, given the copies' IDs.
 void mapCopiedDevices (const te::Track& original, const te::Track& copy, te::EditItemID::IDMap&);
 void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::EditItemID::IDMap& copied);
 
@@ -106,8 +106,9 @@ void setDeviceSound (te::Plugin&, const juce::Identifier& property, const juce::
 // device (or after a return's input), so before the sends, the fader and the meters.
 int getDevicePlace (const te::PluginList&, int deviceIndex);
 
-// Where a device's own window was last (docs/design.md, section 9): view state, written without an undo step, which the
-// project saves, so that the window opens there again. A save stores it too (model/devices/internal/DeviceStates.h),
+// Where a device's own window was last (docs/design.md, section 9): view state in the song's element of the device
+// (Schema.h: deviceWindowX, deviceWindowY), written without an undo step, which the project saves, so that the window
+// opens there again (the mirror makes a device with it). A save stores it too (model/devices/internal/DeviceStates.h),
 // and finds it written already.
 void rememberWindowPosition (te::Plugin&, juce::Point<int> topLeft);
 

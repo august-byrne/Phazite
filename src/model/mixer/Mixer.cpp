@@ -1022,6 +1022,9 @@ void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::EditItemID::ID
             element.setProperty (property, (juce::int64) found->second.getRawID(), nullptr);
     };
 
+    giveCopiedID (copiedChain, schema::channelFader);
+    giveCopiedID (copiedChain, schema::channelVCA);
+
     for (auto child : copiedChain)
     {
         if (child.hasType (schema::SEND))
@@ -1039,8 +1042,11 @@ void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::EditItemID::ID
 
 void rememberWindowPosition (te::Plugin& device, juce::Point<int> topLeft)
 {
-    device.state.setProperty (te::IDs::windowX, topLeft.x, nullptr);
-    device.state.setProperty (te::IDs::windowY, topLeft.y, nullptr);
+    if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
+    {
+        store (state, schema::deviceWindowX, topLeft.x);
+        store (state, schema::deviceWindowY, topLeft.y);
+    }
 }
 
 te::AuxSendPlugin* addSendTo (te::Track& track, int bus)

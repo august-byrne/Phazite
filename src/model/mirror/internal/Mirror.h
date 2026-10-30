@@ -21,9 +21,10 @@ namespace phazite::mirror
 void reconcileTempoMap (te::Edit&);
 
 // The tracks (model/arrangement/internal/Tracks.h): Tracktion gets a track for each of the document's, with its ID, in
-// its place and folder (made as Tracktion makes one, with its fader and meter, or a plain folder's), and the mute, solo
-// and solo isolation (a return's) that it plays with, and its write mode (the master's too); Tracktion's tracks that the
-// document hasn't go, with what they hold. Nothing for a song without a track list (an Edit that isn't a song's).
+// its place and folder, with its own devices as the document has them (its fader, with the document's ID, and its meter,
+// or a plain folder's VCA: one of the other kind or with another ID is made again), and the mute, solo and solo isolation
+// (a return's) that it plays with, and its write mode (the master's too); Tracktion's tracks that the document hasn't go,
+// with what they hold. Nothing for a song without a track list (an Edit that isn't a song's).
 void reconcileTracks (te::Edit&);
 
 // The clips (model/arrangement/internal/Clips.h): Tracktion gets a clip for each of the song's, with its ID, on its track,
@@ -50,10 +51,17 @@ void reconcileCurve (te::Edit&, const ParameterRef&);
 // The devices (model/mixer/internal/Mixer.h): each track's and the master's devices in Tracktion are the song's, in its
 // order, each set as the song says, and its containers' devices in their rack types; Tracktion's devices that the song
 // hasn't on that track go (a container with what it still holds, its rack type kept: model/mixer/internal/Containers.h),
-// and those it has and Tracktion hasn't are made. Each channel's fader plays the song's volume and pan, its sends are the
-// song's, and each return has its input. The modulation follows (reconcileModulation()). While step 5 lasts, the model
-// makes a device in Tracktion as it adds it to the song.
+// and those it has and Tracktion hasn't are made, with the tracks they listen to through their sidechains. Each channel's
+// fader plays the song's volume and pan, its sends are the song's, and each return has its input. The modulation follows
+// (reconcileModulation()), and last the frozen tracks: each plays its frozen file, if it is in the Edit's temporary
+// folder, or live. The model still makes a device in Tracktion as it adds it to the song.
 void reconcileDevices (te::Edit&);
+
+// The state Tracktion makes an Edit built from a song alone from (createEditFromSong(), model/project/internal/Project.h):
+// the song in it from the start, so that what Tracktion makes as it makes the Edit takes none of the song's IDs, and the
+// master's fader, which Tracktion makes with the Edit, by the song's ID (Schema.h: channelFader). The rest the reconcile
+// functions make.
+juce::ValueTree makeEditState (const juce::ValueTree& song);
 
 // The modulation (model/modulation/internal/Modulation.h): each track's and the master's modulators in Tracktion's
 // modifier lists, and each track's and container's macros, are the song's, in its order, each set as it has it (made, or
