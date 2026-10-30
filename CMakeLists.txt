@@ -784,6 +784,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ChordValueTests.cpp
         tests/ClipboardTests.cpp
         tests/ClipTests.cpp
+        tests/ClipWaveformTests.cpp
         tests/CommandGoldenTests.cpp
         tests/CommandTests.cpp
         tests/CompressorEditorTests.cpp

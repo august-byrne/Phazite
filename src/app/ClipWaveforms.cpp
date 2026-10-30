@@ -12,7 +12,18 @@ namespace phazite
 {
 namespace
 {
-    class Waveform : public ui::ClipWaveform
+    // The levels of every file a waveform has drawn, by the file and when it last changed, kept in memory while any waveform
+    // shows (the 200 most recently used), so that a clip that plays a file another has drawn draws at once. Loaded on a
+    // thread of its own.
+    struct Levels
+    {
+        juce::AudioThumbnailCache cache { 200 };
+    };
+
+    constexpr int samplesPerLevel = 256; // how many of a file's samples each level the cache keeps sums up
+
+    class Waveform : public ui::ClipWaveform,
+                     private juce::ChangeListener
     {
     public:
         Waveform (ProjectContext& c, ClipID id, juce::Component& component)
@@ -20,6 +31,12 @@ namespace
               clipID (id),
               toRepaint (component)
         {
+        }
+
+        ~Waveform() override
+        {
+            if (thumbnail != nullptr)
+                thumbnail->removeChangeListener (this);
         }
 
         void paint (juce::Graphics& g, juce::Rectangle<int> area, int width) override
@@ -48,8 +65,12 @@ namespace
         ProjectContext& context;
         const ClipID clipID;
         juce::Component& toRepaint;
-        std::unique_ptr<te::SmartThumbnail> thumbnail;
+        juce::SharedResourcePointer<Levels> levels;
+        std::unique_ptr<juce::AudioThumbnail> thumbnail;
         juce::File shownFile; // what it shows
+
+        // More of the file has been read: what shows it shows it.
+        void changeListenerCallback (juce::ChangeBroadcaster*) override { toRepaint.repaint(); }
 
         te::Clip* findClip() const
         {
@@ -103,25 +124,28 @@ namespace
             if (backwards)
                 g.addTransform (juce::AffineTransform::scale (-1.0f, 1.0f, drawn.toFloat().getCentreX(), 0.0f));
 
-            thumbnail->drawChannels (g, drawn, { te::TimePosition::fromSeconds (from), te::TimePosition::fromSeconds (to) },
-                                     audio.getGain());
+            thumbnail->drawChannels (g, drawn, from, to, audio.getGain());
         }
 
         // The file the clip's audio comes from. Not the render it plays while stretched, pitched or reversed, which may not
         // be ready yet: the waveform shows the file unstretched, as Ableton Live shows a sample, and all of it.
         void showFileOf (te::AudioClipBase& audio)
         {
-            const auto file = te::AudioFile (audio.edit.engine, getClipFile (audio));
+            const auto file = getClipFile (audio);
 
-            if (thumbnail != nullptr && file.getFile() == shownFile)
+            if (thumbnail != nullptr && file == shownFile)
                 return;
 
-            shownFile = file.getFile();
+            shownFile = file;
 
             if (thumbnail == nullptr)
-                thumbnail = std::make_unique<te::SmartThumbnail> (audio.edit.engine, file, toRepaint, &audio.edit); // repaints as it loads
-            else
-                thumbnail->setNewFile (file);
+            {
+                thumbnail = std::make_unique<juce::AudioThumbnail> (
+                    samplesPerLevel, audio.edit.engine.getAudioFileFormatManager().readFormatManager, levels->cache);
+                thumbnail->addChangeListener (this); // repaints as it loads
+            }
+
+            thumbnail->setSource (file.existsAsFile() ? new juce::FileInputSource (file) : nullptr);
         }
     };
 } // namespace
