@@ -26,7 +26,7 @@ struct Song
     {
         edit->ensureNumberOfAudioTracks (2);
         tracks = te::getAudioTracks (*edit);
-        selection.edit = edit.get();
+        selection.setEdit (edit.get());
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addSectionCommands (registry, selection);
         phazite::addOutlineCommands (registry, selection);
@@ -75,7 +75,7 @@ struct Song
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     juce::Array<te::AudioTrack*> tracks;
-    te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
     phazite::CommandRegistry registry;
 };

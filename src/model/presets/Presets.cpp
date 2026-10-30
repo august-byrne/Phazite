@@ -565,7 +565,7 @@ bool writePreset (const juce::var& preset, const juce::File& file)
            && file.replaceWithText (juce::JSON::toString (preset, false) + "\n", false, false, "\n");
 }
 
-te::Plugin* addDeviceFromPreset (te::Edit& edit, te::Track* channel, const juce::var& preset, te::SelectionManager* selection)
+te::Plugin* addDeviceFromPreset (te::Edit& edit, te::Track* channel, const juce::var& preset, Selection* selection)
 {
     const auto place = [selection] (te::Edit& in, te::Track* on, const te::Plugin::Ptr& device)
     { return device != nullptr ? placeDevice (in, on, device, selection) : nullptr; };
@@ -582,7 +582,7 @@ te::Plugin* addDeviceFromPreset (te::Edit& edit, te::Track* channel, const juce:
     return device;
 }
 
-te::AudioTrack* addTrackFromPreset (te::Edit& edit, te::Track* after, const juce::var& preset, te::SelectionManager* selection)
+te::AudioTrack* addTrackFromPreset (te::Edit& edit, te::Track* after, const juce::var& preset, Selection* selection)
 {
     const auto saved = preset[keys::track];
 

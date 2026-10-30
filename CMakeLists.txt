@@ -186,9 +186,11 @@ target_sources(phazite_core PRIVATE
     src/model/automation/internal/Automation.h
     src/model/base/Beats.h
     src/model/base/IDs.h
+    src/model/base/Selection.cpp
     src/model/base/Schema.cpp
     src/model/base/Toggles.h
     src/model/base/internal/Schema.h
+    src/model/base/internal/Selection.h
     src/model/base/internal/Tracktion.h
     src/model/chords/ChordModel.cpp
     src/model/chords/ChordModel.h

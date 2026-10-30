@@ -148,7 +148,7 @@ juce::String getOutlineCommandID (const juce::String& outlineID)
 }
 
 //==============================================================================
-void addOutlineCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addOutlineCommands (CommandRegistry& registry, Selection& selection)
 {
     // One command for each outline, so the palette finds them by name.
     for (const auto& outline : getBuiltInOutlines())

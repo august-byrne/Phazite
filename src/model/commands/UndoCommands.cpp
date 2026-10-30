@@ -5,7 +5,7 @@
 
 namespace phazite
 {
-void addUndoCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addUndoCommands (CommandRegistry& registry, Selection& selection)
 {
     registry.add ({ .id = "edit.undo",
                     .name = "Undo",

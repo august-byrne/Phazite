@@ -22,7 +22,7 @@ TEST_CASE ("The open project's Edit, selection and Tracktion's focus move togeth
     {
         phazite::ProjectContext context (phazite::test::getEngineContext(), &focus);
         CHECK (getEdit (context) == nullptr);
-        CHECK (focus.getCurrentlyFocusedSelectionManager() == &getSelection (context));
+        CHECK (focus.getCurrentlyFocusedSelectionManager() == nullptr); // Phazite keeps what is selected itself
 
         setEdit (context, edit.get());
         CHECK (getEdit (context) == edit.get());
@@ -48,8 +48,7 @@ TEST_CASE ("The open project's Edit, selection and Tracktion's focus move togeth
         CHECK (getEdit (context) == nullptr);
     }
 
-    // Gone with the context: Tracktion is left with no selection of Phazite's.
-    CHECK (focus.getCurrentlyFocusedSelectionManager() == nullptr);
+    // Gone with the context.
     CHECK (focus.getLastFocusedEdit() == nullptr);
 }
 

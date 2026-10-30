@@ -3,6 +3,7 @@
 // restoring an autosave after a crash.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineSetup.h"
@@ -34,7 +35,7 @@ public:
     // The open project's Edit and what is selected in it: tracks and clips (live MIDI input follows the selected
     // track), and a time range across tracks.
     ProjectContext& getContext() noexcept { return context; }
-    te::SelectionManager& getSelection() noexcept { return phazite::getSelection (context); }
+    Selection& getSelection() noexcept { return phazite::getSelection (context); }
     RangeSelection& getRangeSelection() noexcept { return phazite::getRangeSelection (context); }
 
     std::function<void()> onProjectClosing;  // the open project is about to close: let go of its Edit

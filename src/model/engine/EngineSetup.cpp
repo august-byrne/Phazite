@@ -294,16 +294,6 @@ juce::Array<te::Edit*> UIBehaviour::getAllOpenEdits()
     return edits;
 }
 
-void UIBehaviour::setSelectionManager (te::SelectionManager* manager)
-{
-    selectionManager = manager;
-}
-
-te::SelectionManager* UIBehaviour::getCurrentlyFocusedSelectionManager()
-{
-    return selectionManager.get();
-}
-
 void UIBehaviour::runTaskWithProgressBar (te::ThreadPoolJobWithProgress& task)
 {
     while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)

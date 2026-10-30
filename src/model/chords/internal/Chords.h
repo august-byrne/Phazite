@@ -4,6 +4,7 @@
 // (docs/design.md, section 14). Edits use the Edit's undo manager and begin no step: their caller's holds them.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/chords/ChordValues.h"
 
@@ -96,5 +97,5 @@ bool followsChords (const te::MidiClip&);
 void setChordPart (te::MidiClip&, std::optional<PartStyle>);
 
 // Adds a track at the end of the song with an instrument for the part, and the part on it over a range. Returns the clip.
-te::MidiClip* addChordPart (te::Edit&, PartStyle, BeatRange, te::SelectionManager*);
+te::MidiClip* addChordPart (te::Edit&, PartStyle, BeatRange, Selection*);
 } // namespace phazite

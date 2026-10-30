@@ -11,6 +11,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <unordered_map>
 
 namespace phazite
 {
@@ -356,36 +357,53 @@ void NoteIDKeeper::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child
 }
 
 //==============================================================================
-te::SelectedMidiEvents* getSelectedMidiEvents (const te::SelectionManager& selection)
-{
-    return selection.getFirstItemOfType<te::SelectedMidiEvents>();
-}
-
-std::vector<ClipNote> getSelectedNotes (const te::SelectionManager& selection)
+std::vector<ClipNote> getSelectedNotes (const Selection& selection)
 {
     std::vector<ClipNote> notes;
+    auto* edit = selection.getEdit();
 
-    if (auto* events = getSelectedMidiEvents (selection))
-        for (auto* note : events->getSelectedNotes())
-            if (auto* clip = events->clipForEvent (note))
-                notes.push_back ({ clip, note });
+    if (edit == nullptr || selection.getNotes().empty())
+        return notes;
+
+    // Each note clip's notes by ID, found once: those of the selected notes still there, in the order they were selected.
+    std::unordered_map<ClipID, std::unordered_map<NoteID, te::MidiNote*>> byClip;
+
+    for (const auto& ref : selection.getNotes())
+    {
+        if (std::find (selection.getNoteClips().begin(), selection.getNoteClips().end(), ref.clip) == selection.getNoteClips().end())
+            continue;
+
+        auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (ref.clip)));
+
+        if (clip == nullptr)
+            continue;
+
+        auto& notesOfClip = byClip[ref.clip];
+
+        if (notesOfClip.empty())
+            for (auto* note : clip->getSequence().getNotes())
+                notesOfClip.emplace (getNoteID (*note), note);
+
+        if (const auto found = notesOfClip.find (ref.note); found != notesOfClip.end())
+            notes.push_back ({ clip, found->second });
+    }
 
     return notes;
 }
 
-bool hasSelectedNotes (const te::SelectionManager& selection)
+void selectNotes (Selection& selection, const std::vector<ClipNote>& notes)
 {
-    return ! getSelectedNotes (selection).empty();
-}
-
-juce::Array<te::MidiNote*> toMidiNotes (const std::vector<ClipNote>& notes)
-{
-    juce::Array<te::MidiNote*> midiNotes;
+    std::vector<NoteRef> refs;
 
     for (const auto& n : notes)
-        midiNotes.add (n.note);
+        refs.push_back (getNoteRef (*n.clip, *n.note));
 
-    return midiNotes;
+    selection.selectNotes (refs);
+}
+
+bool hasSelectedNotes (const Selection& selection)
+{
+    return ! getSelectedNotes (selection).empty();
 }
 
 //==============================================================================
@@ -543,18 +561,16 @@ std::vector<ClipNote> replaceNotes (te::Edit& edit, const std::vector<ClipNote>&
     return replaceNotes (edit, old, replacements);
 }
 
-std::vector<ClipNote> replaceSelectedNotes (te::SelectionManager& selection,
+std::vector<ClipNote> replaceSelectedNotes (Selection& selection,
                                             const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform)
 {
-    // The selection's notes object, before the edit replaces the notes in it.
-    auto* events = getSelectedMidiEvents (selection);
     const auto notes = getSelectedNotes (selection);
 
-    if (events == nullptr || notes.empty())
+    if (notes.empty())
         return {};
 
     auto added = replaceNotes (notes.front().clip->edit, notes, transform (getNoteData (notes)));
-    events->setSelected (selection, toMidiNotes (added), false);
+    selectNotes (selection, added);
     return added;
 }
 
@@ -916,7 +932,7 @@ void showAllDrumRows (te::AudioTrack& track)
 }
 
 //==============================================================================
-void addNoteCommands (CommandRegistry& registry, te::SelectionManager& selection, std::function<double()> getGridStepInBeats)
+void addNoteCommands (CommandRegistry& registry, Selection& selection, std::function<double()> getGridStepInBeats)
 {
     const auto undoTarget = undoTargetOf (selection);
 

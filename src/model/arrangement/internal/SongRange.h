@@ -3,6 +3,7 @@
 #pragma once
 
 #include "model/arrangement/internal/Selection.h"
+#include "model/base/internal/Selection.h"
 
 #include <memory>
 
@@ -11,5 +12,5 @@ namespace phazite
 class SongRange;
 
 // A view of the range, finding tracks in the selection manager's Edit.
-std::unique_ptr<SongRange> createSongRange (RangeSelection&, const te::SelectionManager&);
+std::unique_ptr<SongRange> createSongRange (RangeSelection&, const Selection&);
 } // namespace phazite

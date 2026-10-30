@@ -96,10 +96,8 @@ public:
     te::Edit* getLastFocusedEdit() override;
     juce::Array<te::Edit*> getAllOpenEdits() override;
 
-    // What is selected in the open project. Tracktion's own commands (such as delete and copy) act on it. Kept in step
-    // by ProjectContext too.
-    void setSelectionManager (te::SelectionManager*);
-    te::SelectionManager* getCurrentlyFocusedSelectionManager() override;
+    // Phazite keeps what is selected itself (model/base/internal/Selection.h): Tracktion's own commands, which act on its
+    // focused selection manager, find none (getCurrentlyFocusedSelectionManager() stays Tracktion's, giving nullptr).
 
     // Runs the task to completion on the calling thread. Tracktion calls this for blocking jobs such as
     // freezing a track or rendering to a file. Phazite doesn't enable JUCE's modal loops, so the UI
@@ -108,7 +106,6 @@ public:
 
 private:
     te::SafeSelectable<te::Edit> focusedEdit;
-    juce::WeakReference<te::SelectionManager> selectionManager;
 };
 
 //==============================================================================

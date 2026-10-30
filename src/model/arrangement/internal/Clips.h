@@ -2,6 +2,7 @@
 // Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <optional>
@@ -9,8 +10,8 @@
 namespace phazite
 {
 // The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).
-juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager&);
-bool hasSelectedClips (const te::SelectionManager&);
+juce::Array<te::Clip*> getSelectedClips (const Selection&);
+bool hasSelectedClips (const Selection&);
 
 bool hasAliases (const juce::Array<te::Clip*>&);    // whether any of the clips is linked to others
 bool hasAudioClips (const juce::Array<te::Clip*>&); // whether any of them holds audio
@@ -48,13 +49,13 @@ void setCrossfade (te::AudioClipBase& first, te::AudioClipBase& second, te::Time
 void setFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
 
 // Adds an empty MIDI clip, named after its track, and selects it if a selection manager is given.
-te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, te::SelectionManager*);
+te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, Selection*);
 
 // The same, a bar long (in the time signature there) from a beat.
-te::MidiClip* insertBarLongMidiClip (te::ClipTrack&, te::BeatPosition start, te::SelectionManager*);
+te::MidiClip* insertBarLongMidiClip (te::ClipTrack&, te::BeatPosition start, Selection*);
 
 // The same, as one undo step, "Add MIDI Clip": a double-click on a track with an instrument.
-te::MidiClip* addMidiClipAt (te::ClipTrack&, te::BeatPosition, te::SelectionManager*);
+te::MidiClip* addMidiClipAt (te::ClipTrack&, te::BeatPosition, Selection*);
 
 // What the Draw and Paint tools place at a beat on a track: a copy of the clip used last (of a MIDI clip, an alias that
 // stays linked to it, as FL Studio places the same pattern again), or, before any clip was used or once it is gone, an
@@ -77,7 +78,7 @@ void splitClipsAtEdges (const juce::Array<te::Track*>&, te::BeatRange);
 // the clips span, on its track, and the automation under each is copied with it (model/automation/internal/
 // Automation.h: moveAutomation()). As aliases, the copies stay linked to their originals. With a selection manager, the
 // copies are selected instead of what was. Returns the copies.
-juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>&, bool asAliases, te::SelectionManager*);
+juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>&, bool asAliases, Selection*);
 
 // Turns aliases back into separate clips. A clip left alone in its link group is unlinked too.
 void makeClipsUnique (const juce::Array<te::Clip*>&);

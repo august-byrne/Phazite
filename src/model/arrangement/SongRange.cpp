@@ -7,10 +7,10 @@ namespace phazite
 struct SongRange::Impl
 {
     RangeSelection& range;
-    const te::SelectionManager& selection;
+    const Selection& selection;
 };
 
-std::unique_ptr<SongRange> createSongRange (RangeSelection& range, const te::SelectionManager& selection)
+std::unique_ptr<SongRange> createSongRange (RangeSelection& range, const Selection& selection)
 {
     return std::make_unique<SongRange> (std::make_unique<SongRange::Impl> (range, selection));
 }

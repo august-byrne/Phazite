@@ -39,7 +39,7 @@ void toggleCountIn (te::Edit& edit)
     setCountInOn (edit, ! isCountInOn (edit));
 }
 
-void addMetronomeCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addMetronomeCommands (CommandRegistry& registry, Selection& selection)
 {
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
 

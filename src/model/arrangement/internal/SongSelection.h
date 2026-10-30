@@ -3,6 +3,7 @@
 // Tracktion's selection manager, which the model's commands act on. Not for the UI.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <memory>
@@ -12,5 +13,5 @@ namespace phazite
 class SongSelection;
 
 // A selection of the items selected in this selection manager, which outlives it.
-std::unique_ptr<SongSelection> createSongSelection (te::SelectionManager&);
+std::unique_ptr<SongSelection> createSongSelection (Selection&);
 } // namespace phazite

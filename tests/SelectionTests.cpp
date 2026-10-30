@@ -2,11 +2,13 @@
 // What the selection commands do (src/model/arrangement/internal/Selection.h), called directly: each acts on the first kind of
 // thing selected, in the order notes, time range, sections, clips, tracks.
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 
 #include <algorithm>
@@ -29,7 +31,7 @@ struct Song
         b = te::getAudioTracks (*edit)[1];
         a->setName ("A");
         b->setName ("B");
-        selection.edit = edit.get();
+        selection.setEdit (edit.get());
 
         first = phazite::insertMidiClip (*a, { beats (0.0), beats (4.0) }, nullptr);
         second = phazite::insertMidiClip (*a, { beats (8.0), beats (12.0) }, nullptr);
@@ -38,7 +40,7 @@ struct Song
         REQUIRE (phazite::insertMidiClip (*b, { beats (20.0), beats (24.0) }, nullptr) != nullptr);
         REQUIRE (phazite::addNote (*first, 60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
         REQUIRE (phazite::addNote (*first, 64, beats (1.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
-        events = std::make_unique<te::SelectedMidiEvents> (*first);
+        selection.setNoteClips ({ phazite::getClipID (*first) });
 
         intro = phazite::insertSection (*edit, beats (0.0), { .name = "Intro", .length = te::BeatDuration::fromBeats (16.0) });
         verse = phazite::insertSection (*edit, beats (16.0), { .name = "Verse", .length = te::BeatDuration::fromBeats (16.0) });
@@ -47,14 +49,18 @@ struct Song
         edit->getUndoManager().clearUndoHistory();
     }
 
-    ~Song()
-    {
-        selection.deselectAll();
-        events = nullptr;
-    }
+    ~Song() { selection.deselectAll(); }
 
-    // Selects the first clip's notes, and nothing else: Tracktion selects their events object alone.
-    void selectNotes() { events->setSelected (selection, first->getSequence().getNotes(), false); }
+    // Selects the first clip's notes, and nothing else.
+    void selectNotes()
+    {
+        std::vector<phazite::NoteRef> refs;
+
+        for (auto* note : first->getSequence().getNotes())
+            refs.push_back (phazite::getNoteRef (*first, *note));
+
+        selection.selectNotes (refs);
+    }
 
     int countNotes() const { return first->getSequence().getNumNotes(); }
 
@@ -73,14 +79,14 @@ struct Song
     }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    phazite::NoteIDKeeper noteIDs { *edit }; // as the project context gives the notes added their IDs, which select them
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
     te::MidiClip* first = nullptr;
     te::MidiClip* second = nullptr;
     te::ArrangerClip* intro = nullptr;
     te::ArrangerClip* verse = nullptr;
-    std::unique_ptr<te::SelectedMidiEvents> events;
-    te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
 };
 } // namespace
@@ -240,12 +246,11 @@ TEST_CASE ("Select All and Clear Selection")
     CHECK_FALSE (phazite::isAnythingSelected (s.selection, s.range));
 }
 
-TEST_CASE ("Mute acts on the selected notes rather than their clips")
+TEST_CASE ("Mute acts on the selected notes, and on the selected clips while no notes are")
 {
     Song s;
 
     s.selectNotes();
-    s.selection.addToSelection (s.first);
     CHECK_FALSE (phazite::isSelectionMuted (s.selection));
     phazite::toggleSelectionMuted (s.selection);
     CHECK (phazite::isSelectionMuted (s.selection));
@@ -313,4 +318,61 @@ TEST_CASE ("When the selection commands are enabled")
         s.selectNotes();
         check (true, false, false, true, true);
     }
+}
+
+TEST_CASE ("Phazite's selection holds items by their IDs: one kind at a time, and nothing of an item that is gone")
+{
+    Song s;
+    auto& selection = s.selection;
+    int changes = 0;
+
+    struct Counter : public juce::ChangeListener
+    {
+        explicit Counter (int& c)
+            : count (c)
+        {
+        }
+        void changeListenerCallback (juce::ChangeBroadcaster*) override { ++count; }
+        int& count;
+    } counter { changes };
+
+    selection.addChangeListener (&counter);
+
+    // Clips and tracks together, in the order they were selected; a device starts a selection of its own.
+    selection.selectOnly (s.second);
+    selection.addToSelection (s.a);
+    CHECK (selection.getItemsOfType<te::Selectable>() == juce::Array<te::Selectable*> { s.second, s.a });
+    CHECK (selection.getItemsOfType<te::Clip>() == juce::Array<te::Clip*> { s.second });
+    CHECK (selection.getFirstItemOfType<te::Track>() == s.a);
+
+    auto* device = phazite::insertDevice (*s.b, s.edit->getPluginCache().createNewPlugin ("phaziteEq", {}));
+    REQUIRE (device != nullptr);
+    selection.addToSelection (device);
+    CHECK (selection.getItemsOfType<te::Selectable>() == juce::Array<te::Selectable*> { device });
+    selection.addToSelection (s.b);
+    CHECK (selection.getItemsOfType<te::Selectable>() == juce::Array<te::Selectable*> { s.b });
+
+    // Notes are all that is selected while they are, and only those of the clips the piano roll shows.
+    s.selectNotes();
+    CHECK (selection.getItemsOfType<te::Selectable>().isEmpty());
+    CHECK (phazite::getSelectedNotes (selection).size() == 2);
+    selection.setNoteClips ({ phazite::getClipID (*s.second) });
+    CHECK (phazite::getSelectedNotes (selection).empty());
+
+    // A clip that is deleted is selected no more, without a word from it.
+    selection.selectOnly (s.second);
+    s.second->removeFromParent();
+    CHECK (selection.getItemsOfType<te::Clip>().isEmpty());
+    CHECK (selection.getNumObjectsSelected() == 0);
+
+    // Another Edit: nothing of the last one, and a change to hear.
+    phazite::test::dispatchPendingMessages();
+    const auto before = changes;
+    selection.selectOnly (s.a);
+    selection.setEdit (nullptr);
+    CHECK (selection.getEdit() == nullptr);
+    CHECK_FALSE (selection.isSelected (s.a));
+    phazite::test::dispatchPendingMessages();
+    CHECK (changes > before);
+    selection.removeChangeListener (&counter);
 }

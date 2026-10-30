@@ -4,6 +4,7 @@
 // content start plus the note's own beat), so the notes of several clips line up.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/notes/NoteValues.h"
 
@@ -60,11 +61,11 @@ private:
 };
 
 //==============================================================================
-// The selected notes: Tracktion's SelectedMidiEvents, while the selection manager holds it.
-te::SelectedMidiEvents* getSelectedMidiEvents (const te::SelectionManager&);
-std::vector<ClipNote> getSelectedNotes (const te::SelectionManager&);
-bool hasSelectedNotes (const te::SelectionManager&);
-juce::Array<te::MidiNote*> toMidiNotes (const std::vector<ClipNote>&); // as SelectedMidiEvents takes them
+// The selected notes still there, of the clips the piano roll shows (Selection: getNotes()), as Tracktion's objects; and
+// selecting notes (of those clips), deselecting anything else.
+std::vector<ClipNote> getSelectedNotes (const Selection&);
+bool hasSelectedNotes (const Selection&);
+void selectNotes (Selection&, const std::vector<ClipNote>&);
 
 //==============================================================================
 // Edits, with the clip's Edit's undo manager: a command's undo step holds them.
@@ -113,8 +114,7 @@ std::vector<ClipNote> replaceNotes (te::Edit&, const std::vector<ClipNote>& old,
 
 // Replaces the selected notes with what a transform makes of them (legato, chop), and selects the new notes. Returns
 // them; with no notes selected, nothing changes.
-std::vector<ClipNote> replaceSelectedNotes (te::SelectionManager&,
-                                            const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform);
+std::vector<ClipNote> replaceSelectedNotes (Selection&, const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform);
 
 //==============================================================================
 // Keys.
@@ -163,5 +163,5 @@ void showAllDrumRows (te::AudioTrack&);
 // The note commands, for the selected notes (Command::notePriority, so the arrow keys move notes while
 // notes are selected): transpose by a semitone or an octave, lengthen and shorten by a step of the grid,
 // legato, and chop on the grid. getGridStepInBeats gives the piano roll's grid.
-void addNoteCommands (CommandRegistry&, te::SelectionManager&, std::function<double()> getGridStepInBeats);
+void addNoteCommands (CommandRegistry&, Selection&, std::function<double()> getGridStepInBeats);
 } // namespace phazite

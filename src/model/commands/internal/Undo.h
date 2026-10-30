@@ -3,6 +3,7 @@
 // (through its undoTarget) or a model function that is a change of its own begins with an UndoStep.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <functional>
@@ -97,7 +98,7 @@ private:
 // For registering commands (CommandRegistry.h) that act on a selection manager's Edit, the open project's: the action
 // runs, or the test answers, with that Edit (without one, the action does nothing and the test is false); and the Edit's
 // undo manager as the undo target of a command that changes it.
-std::function<void()> withEdit (const te::SelectionManager&, std::function<void (te::Edit&)> action);
-std::function<bool()> ifEdit (const te::SelectionManager&, std::function<bool (te::Edit&)> test);
-std::function<juce::UndoManager*()> undoTargetOf (const te::SelectionManager&);
+std::function<void()> withEdit (const Selection&, std::function<void (te::Edit&)> action);
+std::function<bool()> ifEdit (const Selection&, std::function<bool (te::Edit&)> test);
+std::function<juce::UndoManager*()> undoTargetOf (const Selection&);
 } // namespace phazite

@@ -10,6 +10,7 @@
 // The clip runs whole bars, and its notes are quantized to sixteenths when recordings are (Recording.h).
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <optional>
@@ -23,7 +24,7 @@ class CommandRegistry;
 bool canCapture (te::Edit&);
 
 // Makes the clip; nullptr if nothing was played. With a selection manager, the clip is selected.
-te::MidiClip* capture (te::Edit&, te::SelectionManager*);
+te::MidiClip* capture (te::Edit&, Selection*);
 
 // The tempo notes were played at, from when they began (in seconds, in order), to a whole beat per minute: the one
 // between 80 and 160 at which they fall best on a grid of sixteenths, with more of them on beats, from the first note.
@@ -31,5 +32,5 @@ te::MidiClip* capture (te::Edit&, te::SelectionManager*);
 std::optional<double> detectTempo (const std::vector<double>& noteStartSeconds);
 
 // The command, for the selection manager's Edit: Capture.
-void addCaptureCommands (CommandRegistry&, te::SelectionManager&);
+void addCaptureCommands (CommandRegistry&, Selection&);
 } // namespace phazite

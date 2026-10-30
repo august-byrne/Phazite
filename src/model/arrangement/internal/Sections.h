@@ -5,6 +5,7 @@
 // (Arrangement.h): move, copy, delete and resize.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <optional>
@@ -27,8 +28,8 @@ struct SectionInfo
 // The sections, in song order.
 juce::Array<te::ArrangerClip*> getSections (const te::Edit&);
 te::ArrangerClip* getSectionAt (const te::Edit&, te::BeatPosition);
-juce::Array<te::ArrangerClip*> getSelectedSections (const te::SelectionManager&);
-bool hasSelectedSections (const te::SelectionManager&);
+juce::Array<te::ArrangerClip*> getSelectedSections (const Selection&);
+bool hasSelectedSections (const Selection&);
 
 juce::String getSectionRole (const te::Clip&);
 juce::String getSectionTip (const te::Clip&);
@@ -51,12 +52,12 @@ juce::String getNewSectionName (const te::Edit&);
 
 // Adds a new section after the last one, or at the start of the song if there is none, and selects it alone if a
 // selection manager is given. Returns nullptr if the Edit can't hold more clips.
-te::ArrangerClip* appendSection (te::Edit&, te::SelectionManager*);
+te::ArrangerClip* appendSection (te::Edit&, Selection*);
 
 // Adds a new section where the user asks for one, as one undo step: from the start of the bar the beat is in (or the
 // end of the section there, if that ends later) for barsPerNewSection bars, or up to the next section, since sections
 // never overlap. Selects it alone if a selection manager is given. Returns nullptr if there is no room.
-te::ArrangerClip* addSectionAt (te::Edit&, te::BeatPosition, te::SelectionManager*);
+te::ArrangerClip* addSectionAt (te::Edit&, te::BeatPosition, Selection*);
 
 // Renames a section, as one undo step; an empty name or the same one changes nothing.
 void renameSection (te::ArrangerClip&, const juce::String& name);
@@ -89,7 +90,7 @@ void deleteSections (const juce::Array<te::ArrangerClip*>&);
 
 // Copies each section right after itself, the last first, and returns the copies. With a selection manager, the
 // copies are selected instead of what was.
-juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::ArrangerClip*>&, bool asAliases, te::SelectionManager*);
+juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::ArrangerClip*>&, bool asAliases, Selection*);
 
 // Makes the section longer or shorter at its end, at least a beat long, as one undo step. With moveRest, what comes after
 // it moves along: time is inserted at its end, or removed from it with what lies there. Otherwise only the
@@ -101,5 +102,5 @@ juce::Array<te::BeatPosition> getSectionBoundaries (const te::Edit&);
 
 // The section commands: add a section. Delete, duplicate and duplicate as aliases are the selection
 // commands (Selection.h); the song outlines' are Outlines.h's; the sections strip adds rename and color.
-void addSectionCommands (CommandRegistry&, te::SelectionManager&);
+void addSectionCommands (CommandRegistry&, Selection&);
 } // namespace phazite

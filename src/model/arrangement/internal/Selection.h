@@ -3,6 +3,7 @@
 // commands that act on whatever is selected: delete, duplicate, select all and deselect all.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
@@ -42,34 +43,34 @@ private:
 // clips, tracks. These don't start an undo step: the command does (Command::undoTarget).
 
 // Deletes it. With closeGap, what comes after a range or clips moves back to close the gap, and tracks stay.
-void deleteSelection (te::SelectionManager&, const RangeSelection&, bool closeGap);
+void deleteSelection (Selection&, const RangeSelection&, bool closeGap);
 
 // Duplicates it right after it (tracks each below its original), and selects the copies; a time range's copy becomes
 // the range, in the same undo step. As aliases, only sections and clips are copied.
-void duplicateSelection (te::SelectionManager&, RangeSelection&, bool asAliases);
+void duplicateSelection (Selection&, RangeSelection&, bool asAliases);
 
 // Splits the clips in the range at its edges, or else the selected clips at the playhead.
-void splitSelection (const te::SelectionManager&, const RangeSelection&);
+void splitSelection (const Selection&, const RangeSelection&);
 
 // Selects every clip, or every track while tracks are selected or there are no clips, and clears the range.
-void selectAllClipsOrTracks (te::SelectionManager&, RangeSelection&);
-void clearSelection (te::SelectionManager&, RangeSelection&); // the range, then everything else
+void selectAllClipsOrTracks (Selection&, RangeSelection&);
+void clearSelection (Selection&, RangeSelection&); // the range, then everything else
 
 // Mutes the selected notes, or else the selected clips, or unmutes them if they all are muted.
-void toggleSelectionMuted (const te::SelectionManager&);
-bool isSelectionMuted (const te::SelectionManager&);
+void toggleSelectionMuted (const Selection&);
+bool isSelectionMuted (const Selection&);
 
 // When the commands can act.
-bool canDeleteSelection (const te::SelectionManager&, const RangeSelection&);      // and duplicate it
-bool hasSelectedRangeOrClips (const te::SelectionManager&, const RangeSelection&); // close a gap, split
-bool canDuplicateAsAliases (const te::SelectionManager&);                          // sections or clips
-bool canMuteSelection (const te::SelectionManager&);                               // notes or clips
-bool isAnythingSelected (const te::SelectionManager&, const RangeSelection&);
+bool canDeleteSelection (const Selection&, const RangeSelection&);      // and duplicate it
+bool hasSelectedRangeOrClips (const Selection&, const RangeSelection&); // close a gap, split
+bool canDuplicateAsAliases (const Selection&);                          // sections or clips
+bool canMuteSelection (const Selection&);                               // notes or clips
+bool isAnythingSelected (const Selection&, const RangeSelection&);
 
 // "Delete Clip", "Delete 3 Tracks", "Delete Range", or the verb alone when nothing is selected.
-juce::String describeSelection (const te::SelectionManager&, const RangeSelection&, const juce::String& verb);
+juce::String describeSelection (const Selection&, const RangeSelection&, const juce::String& verb);
 
 // The selection commands, for the selection manager's Edit: delete, delete and close the gap, duplicate,
 // select all and deselect all.
-void addSelectionCommands (CommandRegistry&, te::SelectionManager&, RangeSelection&);
+void addSelectionCommands (CommandRegistry&, Selection&, RangeSelection&);
 } // namespace phazite

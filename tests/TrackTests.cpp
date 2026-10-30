@@ -82,7 +82,7 @@ struct Tracks
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    te::SelectionManager& selection = getSelection (context);
+    phazite::Selection& selection = getSelection (context);
     phazite::RangeSelection& range = getRangeSelection (context);
     phazite::CommandRegistry registry;
 };
@@ -493,10 +493,10 @@ TEST_CASE ("Tracks and folders go in after the selection")
 
     // Without an Edit, nothing goes in.
     tracks.selection.deselectAll();
-    tracks.selection.edit = nullptr;
+    tracks.selection.setEdit (nullptr);
     CHECK (phazite::insertTrackAfterSelection (tracks.selection) == nullptr);
     CHECK (phazite::insertFolderAfterSelection (tracks.selection) == nullptr);
-    tracks.selection.edit = tracks.edit.get();
+    tracks.selection.setEdit (tracks.edit.get());
     CHECK (phazite::getPlaylistTracks (*tracks.edit).size() == 5);
 }
 
@@ -564,13 +564,13 @@ TEST_CASE ("Deleting and duplicating tracks directly")
 {
     Tracks tracks (3);
 
-    // Each copy goes right after its original. Tracktion adds the copies to what is selected.
+    // Each copy goes right after its original. Without a selection, what is selected stays as it was.
     tracks.select ({ "B" });
     auto copies = phazite::duplicateTracks ({ tracks["A"], tracks["C"] }, nullptr);
     REQUIRE (copies.size() == 2);
     CHECK (tracks.getOrder() == juce::String ("A A B C C"));
-    CHECK (tracks.getSelectedNames() == juce::String ("A B C"));
-    CHECK (tracks.selection.isSelected (copies.getFirst()));
+    CHECK (tracks.getSelectedNames() == juce::String ("B"));
+    CHECK_FALSE (tracks.selection.isSelected (copies.getFirst()));
 
     // With one, the copies are selected instead.
     copies = phazite::duplicateTracks ({ tracks["B"] }, &tracks.selection);
@@ -608,9 +608,9 @@ TEST_CASE ("The selected tracks, or all of them")
 
     // Without an Edit, there are none.
     tracks.selection.deselectAll();
-    tracks.selection.edit = nullptr;
+    tracks.selection.setEdit (nullptr);
     CHECK (phazite::getSelectedTracksOrAll (tracks.selection).isEmpty());
-    tracks.selection.edit = tracks.edit.get();
+    tracks.selection.setEdit (tracks.edit.get());
 }
 
 TEST_CASE ("Palette colours are found by name, whatever the case")

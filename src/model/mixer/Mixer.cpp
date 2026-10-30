@@ -363,13 +363,13 @@ te::AudioTrack* addReturnWith (te::Track& sender, const DeviceType& type)
     return addReturnWithEffect (sender, createDevice (sender.edit, type));
 }
 
-te::Plugin* addDeviceTo (te::Edit& edit, te::Track* track, const DeviceType& type, te::SelectionManager* selection)
+te::Plugin* addDeviceTo (te::Edit& edit, te::Track* track, const DeviceType& type, Selection* selection)
 {
     const UndoStep step (edit, "Add " + type.name);
     return placeDevice (edit, track, createDevice (edit, type), selection);
 }
 
-te::Plugin* placeDevice (te::Edit& edit, te::Track* track, const te::Plugin::Ptr& device, te::SelectionManager* selection)
+te::Plugin* placeDevice (te::Edit& edit, te::Track* track, const te::Plugin::Ptr& device, Selection* selection)
 {
     if (device == nullptr)
         return nullptr;
@@ -498,12 +498,12 @@ te::AudioTrack* findReturnTrack (const te::Edit& edit, int bus)
     return nullptr;
 }
 
-te::AudioTrack* addNewReturnTrack (te::Edit& edit, te::SelectionManager* selection)
+te::AudioTrack* addNewReturnTrack (te::Edit& edit, Selection* selection)
 {
     return addReturnTrack (edit, "Return " + juce::String (getReturnTracks (edit).size() + 1), selection);
 }
 
-te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, te::SelectionManager* selection)
+te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, Selection* selection)
 {
     // The first bus no return uses.
     auto bus = 0;
@@ -642,7 +642,7 @@ void setPreFader (te::AuxSendPlugin& send, bool preFader)
 }
 
 //==============================================================================
-void addMixerCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addMixerCommands (CommandRegistry& registry, Selection& selection)
 {
     registry.add ({ .id = "track.addReturn",
                     .name = "Add Return Track",

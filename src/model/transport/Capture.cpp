@@ -135,7 +135,7 @@ bool canCapture (te::Edit& edit)
     return getLiveMidiTrack (edit) != nullptr && edit.getCurrentPlaybackContext() != nullptr;
 }
 
-te::MidiClip* capture (te::Edit& edit, te::SelectionManager* selection)
+te::MidiClip* capture (te::Edit& edit, Selection* selection)
 {
     auto* track = getLiveMidiTrack (edit);
     auto* context = edit.getCurrentPlaybackContext();
@@ -280,7 +280,7 @@ std::optional<double> detectTempo (const std::vector<double>& noteStartSeconds)
     return std::round (best);
 }
 
-void addCaptureCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addCaptureCommands (CommandRegistry& registry, Selection& selection)
 {
     registry.add (
         { .id = "transport.capture",

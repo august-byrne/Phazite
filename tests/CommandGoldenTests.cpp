@@ -121,11 +121,11 @@ juce::String describeNotes (const std::vector<phazite::NoteData>& notes)
 
 // What is selected, in the order it was selected, and the time range: "selected: track One, track Two", or
 // "selected: nothing".
-juce::String describeSelected (const te::SelectionManager& selection, const phazite::RangeSelection& range)
+juce::String describeSelected (const phazite::Selection& selection, const phazite::RangeSelection& range)
 {
     juce::StringArray items;
 
-    for (auto* selected : selection.getSelectedObjects())
+    for (auto* selected : selection.getItemsOfType<te::Selectable>())
     {
         if (auto* section = dynamic_cast<te::ArrangerClip*> (selected))
         {
@@ -141,16 +141,14 @@ juce::String describeSelected (const te::SelectionManager& selection, const phaz
         {
             items.add ("track " + track->getName());
         }
-        else if (dynamic_cast<te::SelectedMidiEvents*> (selected) != nullptr)
-        {
-            if (const auto notes = phazite::getNoteData (phazite::getSelectedNotes (selection)); ! notes.empty())
-                items.add (describeNotes (notes));
-        }
         else if (selected != nullptr)
         {
             items.add ("other: " + selected->getSelectableDescription());
         }
     }
+
+    if (const auto notes = phazite::getNoteData (phazite::getSelectedNotes (selection)); ! notes.empty())
+        items.add (describeNotes (notes));
 
     if (! range.isEmpty())
     {
@@ -318,10 +316,9 @@ struct Script
     te::Edit& edit = project->getEdit();
     te::AudioTrack* one = nullptr;
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    te::SelectionManager& selection = getSelection (context);
+    phazite::Selection& selection = getSelection (context);
     phazite::RangeSelection& range = getRangeSelection (context);
     phazite::CommandRegistry registry;
-    std::unique_ptr<te::SelectedMidiEvents> events; // the selected notes, while the script edits them
 
     std::map<juce::String, juce::String> states; // each command's state at the last snapshot
     juce::String selected, playhead, loop;       // the lines the last snapshot had for them
@@ -433,9 +430,14 @@ TEST_SUITE ("golden")
         s.setup ("select the clip's notes",
                  [&s, &clip]
                  {
+                     std::vector<phazite::NoteRef> notes;
+
+                     for (auto* note : clip->getSequence().getNotes())
+                         notes.push_back (phazite::getNoteRef (*clip, *note));
+
                      s.selection.selectOnly (clip);
-                     s.events = std::make_unique<te::SelectedMidiEvents> (*clip);
-                     s.events->setSelected (s.selection, clip->getSequence().getNotes(), false);
+                     s.selection.setNoteClips ({ phazite::getClipID (*clip) });
+                     s.selection.selectNotes (notes);
                  });
 
         s.run ({ "note.transposeUp", "note.transposeDown", "note.octaveUp", "note.octaveDown", "note.lengthen", "note.shorten",
@@ -445,7 +447,7 @@ TEST_SUITE ("golden")
                  [&s]
                  {
                      s.selection.deselectAll();
-                     s.events = nullptr;
+                     s.selection.setNoteClips ({});
                  });
 
         // An audio clip on Two: its fade shapes (linear last, as a new clip's fades are linear already), and deleting it
@@ -489,7 +491,7 @@ TEST_SUITE ("golden")
 
         s.range.clear();
         s.selection.deselectAll();
-        s.events = nullptr;
+        s.selection.setNoteClips ({});
         phazite::test::settle();
 
         REQUIRE (s.project->save().wasOk());

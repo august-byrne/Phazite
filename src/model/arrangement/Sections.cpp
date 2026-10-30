@@ -66,7 +66,7 @@ te::ArrangerClip* getSectionAt (const te::Edit& edit, te::BeatPosition beat)
     return nullptr;
 }
 
-juce::Array<te::ArrangerClip*> getSelectedSections (const te::SelectionManager& selection)
+juce::Array<te::ArrangerClip*> getSelectedSections (const Selection& selection)
 {
     juce::Array<te::ArrangerClip*> selected;
 
@@ -78,7 +78,7 @@ juce::Array<te::ArrangerClip*> getSelectedSections (const te::SelectionManager& 
     return selected;
 }
 
-bool hasSelectedSections (const te::SelectionManager& selection)
+bool hasSelectedSections (const Selection& selection)
 {
     return ! getSelectedSections (selection).isEmpty();
 }
@@ -159,7 +159,7 @@ juce::String getNewSectionName (const te::Edit& edit)
     return "Section " + juce::String (getSections (edit).size() + 1);
 }
 
-te::ArrangerClip* appendSection (te::Edit& edit, te::SelectionManager* selection)
+te::ArrangerClip* appendSection (te::Edit& edit, Selection* selection)
 {
     const auto sections = getSections (edit);
     const auto start = sections.isEmpty() ? te::BeatPosition() : sections.getLast()->getEndBeat();
@@ -174,7 +174,7 @@ te::ArrangerClip* appendSection (te::Edit& edit, te::SelectionManager* selection
     return section;
 }
 
-te::ArrangerClip* addSectionAt (te::Edit& edit, te::BeatPosition beat, te::SelectionManager* selection)
+te::ArrangerClip* addSectionAt (te::Edit& edit, te::BeatPosition beat, Selection* selection)
 {
     // From the start of the bar (or the end of the section before, if that ends later), for barsPerNewSection bars or
     // up to the next section: sections never overlap, which the section edits rely on.
@@ -266,8 +266,7 @@ void deleteSections (const juce::Array<te::ArrangerClip*>& sections)
             deleteSection (*s);
 }
 
-juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::ArrangerClip*>& sections, bool asAliases,
-                                                  te::SelectionManager* selection)
+juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::ArrangerClip*>& sections, bool asAliases, Selection* selection)
 {
     juce::Array<te::ArrangerClip*> copies;
 
@@ -345,7 +344,7 @@ juce::Array<te::BeatPosition> getSectionBoundaries (const te::Edit& edit)
 }
 
 //==============================================================================
-void addSectionCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addSectionCommands (CommandRegistry& registry, Selection& selection)
 {
     const auto undoTarget = undoTargetOf (selection);
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };

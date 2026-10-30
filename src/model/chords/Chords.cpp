@@ -663,7 +663,7 @@ void setChordPart (te::MidiClip& clip, std::optional<PartStyle> style)
     setPartNotes (clip, makeChordPartNotes (clip, *style));
 }
 
-te::MidiClip* addChordPart (te::Edit& edit, PartStyle style, BeatRange range, te::SelectionManager* selection)
+te::MidiClip* addChordPart (te::Edit& edit, PartStyle style, BeatRange range, Selection* selection)
 {
     if (range.isEmpty())
         return nullptr;

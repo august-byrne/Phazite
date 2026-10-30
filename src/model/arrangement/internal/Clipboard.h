@@ -13,6 +13,7 @@
 #pragma once
 
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/notes/NoteValues.h"
 
@@ -53,14 +54,14 @@ struct Clipboard
 };
 
 // Whether there is something to copy or cut: notes, a time range or clips.
-bool canCopy (const te::SelectionManager&, const RangeSelection&);
-void copySelection (Clipboard&, const te::SelectionManager&, const RangeSelection&);
+bool canCopy (const Selection&, const RangeSelection&);
+void copySelection (Clipboard&, const Selection&, const RangeSelection&);
 
 // "Copy 3 Notes" or "Cut Range", as the menus and the undo step say; the verb alone while there is nothing to copy.
-juce::String describeCopy (const te::SelectionManager&, const RangeSelection&, const juce::String& verb);
+juce::String describeCopy (const Selection&, const RangeSelection&, const juce::String& verb);
 
 // Copies, then deletes what was copied as Delete does: the clips leave the automation under them, a range takes its own.
-void cutSelection (Clipboard&, te::SelectionManager&, RangeSelection&);
+void cutSelection (Clipboard&, Selection&, RangeSelection&);
 
 // Whether Paste has something to put in, and somewhere to put it: a clip the piano roll shows, for notes; a track, for clips.
 bool canPaste (const Clipboard&, ProjectContext&);

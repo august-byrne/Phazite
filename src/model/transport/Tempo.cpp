@@ -170,7 +170,7 @@ void setTimeSignature (te::Edit& edit, TimeSignature timeSignature)
     timeSig->denominator = timeSignature.denominator;
 }
 
-void addTempoCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addTempoCommands (CommandRegistry& registry, Selection& selection)
 {
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
     const auto undoTarget = undoTargetOf (selection);

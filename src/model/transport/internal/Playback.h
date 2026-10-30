@@ -6,6 +6,7 @@
 #pragma once
 
 #include "model/arrangement/internal/Selection.h"
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <optional>
@@ -116,9 +117,9 @@ private:
 //==============================================================================
 // The transport's commands, for the selection manager's Edit: Play / Stop, Play / Pause, Go to Start, Go to End and Low
 // Latency.
-void addTransportCommands (CommandRegistry&, te::SelectionManager&);
+void addTransportCommands (CommandRegistry&, Selection&);
 
 // The loop's commands: Loop (on or off), Loop Selection (the time range selected in the playlist), Loop
 // Section (the selected sections) and Loop the Song.
-void addLoopCommands (CommandRegistry&, te::SelectionManager&, RangeSelection&);
+void addLoopCommands (CommandRegistry&, Selection&, RangeSelection&);
 } // namespace phazite

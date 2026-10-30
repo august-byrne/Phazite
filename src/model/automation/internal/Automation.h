@@ -7,6 +7,7 @@
 #pragma once
 
 #include "model/automation/AutomationValues.h"
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <optional>
@@ -105,29 +106,18 @@ AutomationMode getAutomationMode (const te::Track&);
 void setAutomationMode (te::Track&, AutomationMode);
 
 //==============================================================================
-// Automation points selected: one parameter's, by their indices, as Tracktion's selection manager holds them, so that
-// selecting anything else deselects them, and the selection commands (arrangement/internal/Selection.h) find them.
-// SongSelection owns the one it selects.
-class SelectedAutomationPoints : public te::Selectable
-{
-public:
-    ~SelectedAutomationPoints() override { notifyListenersOfDeletion(); } // as Tracktion asks of every Selectable
-
-    juce::String getSelectableDescription() override { return "Automation Points"; }
-
-    ParameterRef parameter;
-    std::vector<int> indices; // in order
-};
-
+// Automation points selected: one parameter's, by their indices, as the selection holds them (Selection: getPoints()), so
+// that selecting anything else deselects them, and the selection commands (arrangement/internal/Selection.h) find them.
 struct PointSelection
 {
     te::AutomatableParameter::Ptr parameter;
     std::vector<int> indices; // of points that are there, in order
 };
 
-// The selected points, if points are what the selection manager holds.
-std::optional<PointSelection> getSelectedPoints (const te::SelectionManager&);
-void selectPoints (te::SelectionManager&, const te::AutomatableParameter&, const std::vector<int>& indices);
+// The selected points of a parameter that is there, those still there, if points are what is selected; and selecting
+// points of a parameter, those there (deselecting anything else, or all of them with none).
+std::optional<PointSelection> getSelectedPoints (const Selection&);
+void selectPoints (Selection&, const te::AutomatableParameter&, const std::vector<int>& indices);
 
 //==============================================================================
 // Keeps every automation point at its beat across a change of the tempo or the time signature: Tracktion keeps track

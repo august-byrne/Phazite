@@ -105,7 +105,7 @@ struct PlaylistScreen
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    te::SelectionManager& selection = getSelection (context);
+    phazite::Selection& selection = getSelection (context);
     phazite::RangeSelection& range = getRangeSelection (context);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry }; // with the default keymap

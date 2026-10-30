@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/commands/internal/UndoCommands.h"
@@ -89,7 +90,7 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
     auto& undo = edit->getUndoManager();
 
     // Before the registry, whose undo commands keep a reference to it.
-    te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::Selection selection { phazite::test::getEngine() };
     phazite::CommandRegistry registry;
     registry.add (makeEditChange ("test.one", "Set to One", *edit, 1));
     registry.add (makeEditChange ("test.two", "Set to Two", *edit, 2));
@@ -111,7 +112,7 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
 
     SUBCASE ("FL Studio's undo-or-redo toggles the last change")
     {
-        selection.edit = edit.get();
+        selection.setEdit (edit.get());
         phazite::addUndoCommands (registry, selection);
 
         REQUIRE (registry.invoke ("test.two"));
@@ -122,13 +123,13 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
         REQUIRE (registry.invoke ("edit.undo"));
         CHECK ((int) edit->state["testValue"] == 1);
 
-        selection.edit = nullptr;
+        selection.setEdit (nullptr);
         CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without an Edit
     }
 
     SUBCASE ("Undo and redo show the name of the step")
     {
-        selection.edit = edit.get();
+        selection.setEdit (edit.get());
         phazite::addUndoCommands (registry, selection);
 
         const auto nameOf = [&registry] (const char* id) { return phazite::getCurrentName (*registry.find (id)); };
@@ -138,7 +139,7 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
         CHECK (nameOf ("edit.redo") == juce::String ("Redo Set to One"));
         CHECK (nameOf ("edit.undoOrRedo") == juce::String ("Redo Set to One"));
 
-        selection.edit = nullptr;
+        selection.setEdit (nullptr);
         CHECK (nameOf ("edit.undo") == juce::String ("Undo"));
     }
 }
@@ -178,7 +179,7 @@ TEST_CASE ("A model function that begins its own undo step is part of the step o
 TEST_CASE ("withEdit and ifEdit act only with an Edit")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::Selection selection { phazite::test::getEngine() };
 
     int runs = 0;
     te::Edit* actedOn = nullptr;
@@ -198,14 +199,14 @@ TEST_CASE ("withEdit and ifEdit act only with an Edit")
     CHECK_FALSE (isFalse());
 
     // With one, the action runs with it and the tests answer for it.
-    selection.edit = edit.get();
+    selection.setEdit (edit.get());
     action();
     CHECK (runs == 1);
     CHECK (actedOn == edit.get());
     CHECK (isTrue());
     CHECK_FALSE (isFalse());
 
-    selection.edit = nullptr;
+    selection.setEdit (nullptr);
     action();
     CHECK (runs == 1);
     CHECK_FALSE (isTrue());

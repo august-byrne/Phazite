@@ -220,7 +220,7 @@ RecordingStep::RecordingStep (te::Edit& edit, const juce::String& name)
 }
 
 //==============================================================================
-std::function<void()> withEdit (const te::SelectionManager& selection, std::function<void (te::Edit&)> action)
+std::function<void()> withEdit (const Selection& selection, std::function<void (te::Edit&)> action)
 {
     return [&selection, action]
     {
@@ -229,7 +229,7 @@ std::function<void()> withEdit (const te::SelectionManager& selection, std::func
     };
 }
 
-std::function<bool()> ifEdit (const te::SelectionManager& selection, std::function<bool (te::Edit&)> test)
+std::function<bool()> ifEdit (const Selection& selection, std::function<bool (te::Edit&)> test)
 {
     return [&selection, test]
     {
@@ -238,7 +238,7 @@ std::function<bool()> ifEdit (const te::SelectionManager& selection, std::functi
     };
 }
 
-std::function<juce::UndoManager*()> undoTargetOf (const te::SelectionManager& selection)
+std::function<juce::UndoManager*()> undoTargetOf (const Selection& selection)
 {
     return [&selection]() -> juce::UndoManager*
     {

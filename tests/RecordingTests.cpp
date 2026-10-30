@@ -49,8 +49,8 @@ TEST_CASE ("Overdub and quantizing recordings are the app's settings, which thei
     REQUIRE (waitForAllMidiInputs() != nullptr);
 
     auto edit = te::Edit::createSingleTrackEdit (engine);
-    te::SelectionManager selection (engine);
-    selection.edit = edit.get();
+    phazite::Selection selection (engine);
+    selection.setEdit (edit.get());
     phazite::CommandRegistry registry;
     phazite::addRecordingCommands (registry, selection);
 
@@ -74,7 +74,7 @@ TEST_CASE ("Overdub and quantizing recordings are the app's settings, which thei
     phazite::setRecordQuantizeOn (engine, false);
     CHECK (overdub->isTicked());
     CHECK_FALSE (quantize->isTicked());
-    selection.edit = nullptr;
+    selection.setEdit (nullptr);
 }
 
 TEST_CASE ("Recording needs a track for live MIDI to play")
@@ -282,8 +282,8 @@ TEST_CASE ("Capture while stopped, in a song without clips, sets the tempo from 
     forgetWhatWasPlayed (*edit);
 
     playQuarterNotes (engine, 100.0, { 60, 62, 64, 65, 67, 69 });
-    te::SelectionManager selection (engine);
-    selection.edit = edit.get();
+    phazite::Selection selection (engine);
+    selection.setEdit (edit.get());
     auto* clip = phazite::capture (*edit, &selection);
 
     REQUIRE (clip != nullptr);
@@ -303,7 +303,7 @@ TEST_CASE ("Capture while stopped, in a song without clips, sets the tempo from 
     phazite::undo (*edit);
     CHECK (track->getClips().isEmpty());
     CHECK (phazite::getTempo (*edit) == doctest::Approx (120.0)); // the tempo with it
-    selection.edit = nullptr;
+    selection.setEdit (nullptr);
 }
 
 TEST_CASE ("Capture while stopped, in a song with clips, keeps its tempo and goes after the track's clips")

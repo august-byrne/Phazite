@@ -3,6 +3,7 @@
 // and the commands that do. Not for the UI.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
@@ -25,5 +26,5 @@ bool isOutlineApplied (const te::Edit&, const juce::String& outlineID);
 
 // The outline commands: one for each built-in outline, so the palette finds them by name, each one undo step and
 // ticked while its outline is applied (isOutlineApplied()). The app registers them right after the section commands.
-void addOutlineCommands (CommandRegistry&, te::SelectionManager&);
+void addOutlineCommands (CommandRegistry&, Selection&);
 } // namespace phazite

@@ -383,8 +383,8 @@ TEST_CASE ("A plug-in's mix crossfades between the sound that comes in and the e
 TEST_CASE ("New return tracks are numbered in turn")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    te::SelectionManager selection (phazite::test::getEngine());
-    selection.edit = edit.get();
+    phazite::Selection selection (phazite::test::getEngine());
+    selection.setEdit (edit.get());
 
     auto* first = phazite::addNewReturnTrack (*edit, &selection);
     REQUIRE (first != nullptr);

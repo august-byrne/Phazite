@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The metronome and the count-in (src/model/transport/internal/Metronome.h).
 #include "TestHelpers.h"
+#include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/project/internal/Project.h"
 #include "model/transport/internal/Metronome.h"
@@ -8,8 +9,8 @@
 TEST_CASE ("The metronome's and the count-in's commands switch them on and off, without undo steps")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
-    te::SelectionManager selection (phazite::test::getEngine());
-    selection.edit = edit.get();
+    phazite::Selection selection (phazite::test::getEngine());
+    selection.setEdit (edit.get());
     phazite::CommandRegistry registry;
     phazite::addMetronomeCommands (registry, selection);
     edit->getUndoManager().clearUndoHistory();
@@ -41,7 +42,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
     REQUIRE (registry.invoke ("transport.countIn"));
     CHECK_FALSE (phazite::isCountInOn (*other));
     CHECK_FALSE (edit->getUndoManager().canUndo());
-    selection.edit = nullptr;
+    selection.setEdit (nullptr);
 }
 
 TEST_CASE ("A project keeps its metronome on, as it keeps its loop, though switching it isn't an unsaved change")

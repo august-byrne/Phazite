@@ -34,7 +34,7 @@ namespace
         return devices;
     }
 
-    juce::Array<te::Plugin*> getSelectedDevices (const te::SelectionManager& selection)
+    juce::Array<te::Plugin*> getSelectedDevices (const Selection& selection)
     {
         juce::Array<te::Plugin*> devices;
 
@@ -131,24 +131,24 @@ std::vector<ModulatorInfo> getContainerMacros (const ProjectContext& context, De
 }
 
 //==============================================================================
-bool canGroupSelectedDevices (const te::SelectionManager& selection)
+bool canGroupSelectedDevices (const Selection& selection)
 {
     return canGroupIntoContainer (getSelectedDevices (selection));
 }
 
-void groupSelectedDevices (te::SelectionManager& selection)
+void groupSelectedDevices (Selection& selection)
 {
     if (auto* container = groupIntoContainer (getSelectedDevices (selection)))
         selection.selectOnly (container);
 }
 
-bool canUngroupSelectedContainer (const te::SelectionManager& selection)
+bool canUngroupSelectedContainer (const Selection& selection)
 {
     const auto devices = getSelectedDevices (selection);
     return devices.size() == 1 && isContainer (*devices.getFirst());
 }
 
-void ungroupSelectedContainer (te::SelectionManager& selection)
+void ungroupSelectedContainer (Selection& selection)
 {
     const auto devices = getSelectedDevices (selection);
     auto* container = devices.size() == 1 ? dynamic_cast<te::RackInstance*> (devices.getFirst()) : nullptr;
@@ -169,7 +169,7 @@ void ungroupSelectedContainer (te::SelectionManager& selection)
         selection.addToSelection (device);
 }
 
-void addContainerCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addContainerCommands (CommandRegistry& registry, Selection& selection)
 {
     registry.add ({ .id = "device.group",
                     .name = "Group into Container",

@@ -90,7 +90,7 @@ namespace
     }
 } // namespace
 
-juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager& selection)
+juce::Array<te::Clip*> getSelectedClips (const Selection& selection)
 {
     auto clips = selection.getItemsOfType<te::Clip>();
     auto* edit = selection.getEdit();
@@ -111,7 +111,7 @@ juce::Array<te::Clip*> getSelectedClips (const te::SelectionManager& selection)
     return clips;
 }
 
-bool hasSelectedClips (const te::SelectionManager& selection)
+bool hasSelectedClips (const Selection& selection)
 {
     return ! getSelectedClips (selection).isEmpty();
 }
@@ -284,19 +284,23 @@ void setFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type
     }
 }
 
-te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, te::SelectionManager* selection)
+te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selection* selection)
 {
-    const auto clip = track.insertMIDIClip (track.getName(), track.edit.tempoSequence.toTime (range), selection);
+    const auto clip = track.insertMIDIClip (track.getName(), track.edit.tempoSequence.toTime (range), nullptr);
+
+    if (clip != nullptr && selection != nullptr)
+        selection->selectOnly (clip.get());
+
     return clip.get();
 }
 
-te::MidiClip* insertBarLongMidiClip (te::ClipTrack& track, te::BeatPosition start, te::SelectionManager* selection)
+te::MidiClip* insertBarLongMidiClip (te::ClipTrack& track, te::BeatPosition start, Selection* selection)
 {
     const auto bar = te::BeatDuration::fromBeats (track.edit.tempoSequence.getTimeSigAt (start).numerator.get());
     return insertMidiClip (track, { start, start + bar }, selection);
 }
 
-te::MidiClip* addMidiClipAt (te::ClipTrack& track, te::BeatPosition start, te::SelectionManager* selection)
+te::MidiClip* addMidiClipAt (te::ClipTrack& track, te::BeatPosition start, Selection* selection)
 {
     const UndoStep step (track.edit, "Add MIDI Clip");
     return insertBarLongMidiClip (track, start, selection);
@@ -361,7 +365,7 @@ void splitClipsAtEdges (const juce::Array<te::Track*>& tracks, te::BeatRange ran
     splitClips (all, range.getEnd());
 }
 
-juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>& clips, bool asAliases, te::SelectionManager* selection)
+juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>& clips, bool asAliases, Selection* selection)
 {
     if (clips.isEmpty())
         return {};

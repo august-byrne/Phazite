@@ -4,6 +4,7 @@
 // what it holds made into Tracktion's objects in an Edit (roadmap A5, 2026-10-30).
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
@@ -21,6 +22,6 @@ bool writePreset (const juce::var& preset, const juce::File&);
 // What a preset holds, made anew in an Edit: a device's or a container's on a channel (a track's, or the master's with
 // none) as a dropped device goes (Mixer.h: placeDevice()), and a track's as a new track after another (at the end with
 // none). Each returns what it added, or nullptr (a plug-in that isn't installed, say), and joins the caller's undo step.
-te::Plugin* addDeviceFromPreset (te::Edit&, te::Track*, const juce::var& preset, te::SelectionManager*);
-te::AudioTrack* addTrackFromPreset (te::Edit&, te::Track* after, const juce::var& preset, te::SelectionManager*);
+te::Plugin* addDeviceFromPreset (te::Edit&, te::Track*, const juce::var& preset, Selection*);
+te::AudioTrack* addTrackFromPreset (te::Edit&, te::Track* after, const juce::var& preset, Selection*);
 } // namespace phazite

@@ -116,7 +116,7 @@ void RangeSelection::setInUndoStep (te::Edit& edit, te::BeatRange newRange, cons
 }
 
 //==============================================================================
-void deleteSelection (te::SelectionManager& selection, const RangeSelection& range, bool closeGap)
+void deleteSelection (Selection& selection, const RangeSelection& range, bool closeGap)
 {
     auto* edit = selection.getEdit();
 
@@ -159,7 +159,7 @@ void deleteSelection (te::SelectionManager& selection, const RangeSelection& ran
         deleteTracks (getSelectedOutermostTracks (selection), &selection);
 }
 
-void duplicateSelection (te::SelectionManager& selection, RangeSelection& range, bool asAliases)
+void duplicateSelection (Selection& selection, RangeSelection& range, bool asAliases)
 {
     auto* edit = selection.getEdit();
 
@@ -169,8 +169,7 @@ void duplicateSelection (te::SelectionManager& selection, RangeSelection& range,
     // Notes: the copies go right after them, and are selected instead.
     if (const auto notes = getSelectedNotes (selection); ! notes.empty() && ! asAliases)
     {
-        auto* events = getSelectedMidiEvents (selection); // before the copies change the clips
-        events->setSelected (selection, toMidiNotes (duplicateNotes (notes)), false);
+        selectNotes (selection, duplicateNotes (notes));
         return;
     }
 
@@ -210,7 +209,7 @@ void duplicateSelection (te::SelectionManager& selection, RangeSelection& range,
         duplicateTracks (getSelectedOutermostTracks (selection), &selection);
 }
 
-void splitSelection (const te::SelectionManager& selection, const RangeSelection& range)
+void splitSelection (const Selection& selection, const RangeSelection& range)
 {
     auto* edit = selection.getEdit();
 
@@ -223,7 +222,7 @@ void splitSelection (const te::SelectionManager& selection, const RangeSelection
         splitClips (getSelectedClips (selection), edit->tempoSequence.toBeats (edit->getTransport().getPosition()));
 }
 
-void selectAllClipsOrTracks (te::SelectionManager& selection, RangeSelection& range)
+void selectAllClipsOrTracks (Selection& selection, RangeSelection& range)
 {
     auto* edit = selection.getEdit();
 
@@ -250,13 +249,13 @@ void selectAllClipsOrTracks (te::SelectionManager& selection, RangeSelection& ra
         selection.addToSelection (item);
 }
 
-void clearSelection (te::SelectionManager& selection, RangeSelection& range)
+void clearSelection (Selection& selection, RangeSelection& range)
 {
     range.clear();
     selection.deselectAll();
 }
 
-void toggleSelectionMuted (const te::SelectionManager& selection)
+void toggleSelectionMuted (const Selection& selection)
 {
     if (const auto notes = getSelectedNotes (selection); ! notes.empty())
         toggleNotesMuted (notes);
@@ -264,7 +263,7 @@ void toggleSelectionMuted (const te::SelectionManager& selection)
         toggleClipsMuted (getSelectedClips (selection));
 }
 
-bool isSelectionMuted (const te::SelectionManager& selection)
+bool isSelectionMuted (const Selection& selection)
 {
     if (const auto notes = getSelectedNotes (selection); ! notes.empty())
         return areAllNotesMuted (notes);
@@ -272,33 +271,33 @@ bool isSelectionMuted (const te::SelectionManager& selection)
     return areAllClipsMuted (getSelectedClips (selection));
 }
 
-bool canDeleteSelection (const te::SelectionManager& selection, const RangeSelection& range)
+bool canDeleteSelection (const Selection& selection, const RangeSelection& range)
 {
     return hasSelectedNotes (selection) || getSelectedPoints (selection).has_value() || ! range.isEmpty() || hasSelectedSections (selection)
            || hasSelectedClips (selection) || hasSelectedTracks (selection);
 }
 
-bool hasSelectedRangeOrClips (const te::SelectionManager& selection, const RangeSelection& range)
+bool hasSelectedRangeOrClips (const Selection& selection, const RangeSelection& range)
 {
     return ! range.isEmpty() || hasSelectedClips (selection);
 }
 
-bool canDuplicateAsAliases (const te::SelectionManager& selection)
+bool canDuplicateAsAliases (const Selection& selection)
 {
     return hasSelectedClips (selection) || hasSelectedSections (selection);
 }
 
-bool canMuteSelection (const te::SelectionManager& selection)
+bool canMuteSelection (const Selection& selection)
 {
     return hasSelectedNotes (selection) || hasSelectedClips (selection);
 }
 
-bool isAnythingSelected (const te::SelectionManager& selection, const RangeSelection& range)
+bool isAnythingSelected (const Selection& selection, const RangeSelection& range)
 {
     return selection.getNumObjectsSelected() > 0 || ! range.isEmpty();
 }
 
-juce::String describeSelection (const te::SelectionManager& selection, const RangeSelection& range, const juce::String& verb)
+juce::String describeSelection (const Selection& selection, const RangeSelection& range, const juce::String& verb)
 {
     const auto describe = [&verb] (int count, const char* noun)
     { return verb + " " + (count == 1 ? juce::String (noun) : juce::String (count) + " " + noun + "s"); };
@@ -324,7 +323,7 @@ juce::String describeSelection (const te::SelectionManager& selection, const Ran
     return verb;
 }
 
-void addSelectionCommands (CommandRegistry& registry, te::SelectionManager& selection, RangeSelection& range)
+void addSelectionCommands (CommandRegistry& registry, Selection& selection, RangeSelection& range)
 {
     const auto undoTarget = undoTargetOf (selection);
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };

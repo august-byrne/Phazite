@@ -11,6 +11,7 @@
 // session; those no container plays are dropped when a project opens (dropUnusedContainerRacks()).
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
@@ -88,10 +89,10 @@ te::EditItemID::IDMap copyContainers (const te::Track& original, te::Track& copy
 //==============================================================================
 // The commands act on the selected devices: grouping them, which selects the container ("Group into Container"), and
 // ungrouping the selected container, which selects its devices ("Ungroup Container").
-bool canGroupSelectedDevices (const te::SelectionManager&);
-void groupSelectedDevices (te::SelectionManager&);
-bool canUngroupSelectedContainer (const te::SelectionManager&);
-void ungroupSelectedContainer (te::SelectionManager&);
+bool canGroupSelectedDevices (const Selection&);
+void groupSelectedDevices (Selection&);
+bool canUngroupSelectedContainer (const Selection&);
+void ungroupSelectedContainer (Selection&);
 
-void addContainerCommands (CommandRegistry&, te::SelectionManager&);
+void addContainerCommands (CommandRegistry&, Selection&);
 } // namespace phazite

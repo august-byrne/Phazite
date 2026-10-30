@@ -10,6 +10,7 @@
 // every project, which Tracktion keeps with the MIDI input's own.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
@@ -48,15 +49,15 @@ bool isPunching (const te::Edit&); // on, and a range looped
 void togglePunch (te::Edit&);
 
 // Arm Track: the selected tracks that have inputs armed, or disarmed if they all were.
-bool canArmSelectedTracks (const te::SelectionManager&);
-bool areSelectedTracksArmed (const te::SelectionManager&);
-void toggleArmSelectedTracks (const te::SelectionManager&);
+bool canArmSelectedTracks (const Selection&);
+bool areSelectedTracksArmed (const Selection&);
+void toggleArmSelectedTracks (const Selection&);
 
 // Next Take and Previous Take: each selected clip with takes plays its next or previous one, in the caller's undo step.
-bool canStepTakes (const te::SelectionManager&);
-void stepTakes (const te::SelectionManager&, int direction);
+bool canStepTakes (const Selection&);
+void stepTakes (const Selection&, int direction);
 
 // The commands, for the selection manager's Edit: Record, Overdub, Quantize Recordings, Punch In, Arm Track, and Next and
 // Previous Take.
-void addRecordingCommands (CommandRegistry&, te::SelectionManager&);
+void addRecordingCommands (CommandRegistry&, Selection&);
 } // namespace phazite

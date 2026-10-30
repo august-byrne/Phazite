@@ -3,6 +3,7 @@
 #include "internal/EngineSetup.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
+#include "model/notes/internal/Notes.h"
 
 namespace phazite
 {
@@ -29,7 +30,7 @@ bool hasInstrument (const te::AudioTrack& track)
     return false;
 }
 
-te::AudioTrack* getSelectedAudioTrack (const te::SelectionManager& selection)
+te::AudioTrack* getSelectedAudioTrack (const Selection& selection)
 {
     if (auto* track = selection.getFirstItemOfType<te::AudioTrack>())
         return track;
@@ -38,9 +39,8 @@ te::AudioTrack* getSelectedAudioTrack (const te::SelectionManager& selection)
         return dynamic_cast<te::AudioTrack*> (clip->getTrack());
 
     // Notes selected in the piano roll: their clip's track.
-    if (auto* notes = selection.getFirstItemOfType<te::SelectedMidiEvents>())
-        if (auto* clip = notes->getClips().getFirst())
-            return dynamic_cast<te::AudioTrack*> (clip->getTrack());
+    if (const auto notes = getSelectedNotes (selection); ! notes.empty())
+        return dynamic_cast<te::AudioTrack*> (notes.front().clip->getTrack());
 
     // Devices selected in the mixer: their channel's track (a container's devices: their container's).
     if (auto* device = selection.getFirstItemOfType<te::Plugin>())
@@ -52,7 +52,7 @@ te::AudioTrack* getSelectedAudioTrack (const te::SelectionManager& selection)
     return nullptr;
 }
 
-void followSelectedTrack (const te::SelectionManager& selection)
+void followSelectedTrack (const Selection& selection)
 {
     if (auto* track = getSelectedAudioTrack (selection); track != nullptr && hasInstrument (*track))
         setLiveMidiTrack (*track);

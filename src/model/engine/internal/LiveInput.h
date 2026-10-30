@@ -2,6 +2,7 @@
 // Live MIDI input: what is played on a MIDI keyboard or the computer keyboard goes to one track.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
@@ -41,9 +42,9 @@ bool hasInstrument (const te::AudioTrack&);
 
 // The track the selection is about: the first selected audio track, or else the first selected clip's, the track of the
 // clip whose notes are selected, or the track of the selected devices.
-te::AudioTrack* getSelectedAudioTrack (const te::SelectionManager&);
+te::AudioTrack* getSelectedAudioTrack (const Selection&);
 
 // Live MIDI input follows the selection, as FL Studio's selected channel does: if the selected track (see
 // getSelectedAudioTrack()) has an instrument, it plays that track. Call it when the selection changes.
-void followSelectedTrack (const te::SelectionManager&);
+void followSelectedTrack (const Selection&);
 } // namespace phazite

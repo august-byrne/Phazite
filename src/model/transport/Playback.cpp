@@ -300,7 +300,7 @@ void SongFollower::changed (const juce::ValueTree& tree)
 }
 
 //==============================================================================
-void addTransportCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addTransportCommands (CommandRegistry& registry, Selection& selection)
 {
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
 
@@ -352,7 +352,7 @@ void addTransportCommands (CommandRegistry& registry, te::SelectionManager& sele
                     .isTicked = ifEdit (selection, isLowLatencyOn) });
 }
 
-void addLoopCommands (CommandRegistry& registry, te::SelectionManager& selection, RangeSelection& range)
+void addLoopCommands (CommandRegistry& registry, Selection& selection, RangeSelection& range)
 {
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
 

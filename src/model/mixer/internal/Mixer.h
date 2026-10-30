@@ -4,6 +4,7 @@
 // before or after its fader.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/mixer/DeviceType.h"
 #include "model/mixer/internal/Buses.h"
@@ -93,10 +94,10 @@ te::Plugin::Ptr createDevice (te::Edit&, const DeviceType&);
 // new track after it, named and colored after the instrument, and so does a track with audio clips, which an
 // instrument would silence. An effect goes after the track's effects, or with no track on the master. Returns the
 // device, or nullptr.
-te::Plugin* addDeviceTo (te::Edit&, te::Track*, const DeviceType&, te::SelectionManager*);
+te::Plugin* addDeviceTo (te::Edit&, te::Track*, const DeviceType&, Selection*);
 
 // The same for a device made already (from a preset), joining the caller's step.
-te::Plugin* placeDevice (te::Edit&, te::Track*, const te::Plugin::Ptr&, te::SelectionManager*);
+te::Plugin* placeDevice (te::Edit&, te::Track*, const te::Plugin::Ptr&, Selection*);
 
 // The device menus' choices (ui/devices/DeviceMenus.h), each one undo step named after the device: an instrument for a
 // track, in place of the one it had ("Add Synth", or "Replace Instrument with Synth"); an effect after a track's
@@ -131,10 +132,10 @@ juce::Array<te::AudioTrack*> getReturnTracks (const te::Edit&);
 te::AudioTrack* findReturnTrack (const te::Edit&, int bus);
 
 // Adds a return track after the last track, on a bus of its own, named as given, and selects it.
-te::AudioTrack* addReturnTrack (te::Edit&, const juce::String& name, te::SelectionManager*);
+te::AudioTrack* addReturnTrack (te::Edit&, const juce::String& name, Selection*);
 
 // The same, named "Return" and its number, after the returns there are.
-te::AudioTrack* addNewReturnTrack (te::Edit&, te::SelectionManager*);
+te::AudioTrack* addNewReturnTrack (te::Edit&, Selection*);
 
 // In one step, as Studio One does: a return track holding an effect, named after it, and a send to it from a track,
 // after the track's fader. The effect plays only its effect, at a mix of 100 % (Tracktion's reverb without its dry level):
@@ -157,5 +158,5 @@ te::AuxSendPlugin* addSendToNewReturn (te::Track&);
 void removeSend (te::AuxSendPlugin&);
 
 // The mixer's commands: add a return track.
-void addMixerCommands (CommandRegistry&, te::SelectionManager&);
+void addMixerCommands (CommandRegistry&, Selection&);
 } // namespace phazite

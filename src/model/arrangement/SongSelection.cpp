@@ -11,142 +11,45 @@
 
 namespace phazite
 {
-struct SongSelection::Impl : private te::SelectableListener
+struct SongSelection::Impl
 {
-    explicit Impl (te::SelectionManager& m)
+    explicit Impl (Selection& m)
         : manager (m)
     {
     }
 
-    ~Impl() override { setNoteClips ({}); }
-
-    te::SelectionManager& manager;
-
-    // The note clips, and their notes as Tracktion selects them: made for the clips while they are all there.
-    std::vector<ClipID> noteClipIDs;
-    std::vector<te::SafeSelectable<te::MidiClip>> noteClips;
-    std::unique_ptr<te::SelectedMidiEvents> noteEvents;
-
-    void setNoteClips (const std::vector<ClipID>& ids)
-    {
-        forgetNoteEvents();
-
-        for (auto& c : noteClips)
-            if (auto* clip = c.get())
-                clip->removeSelectableListener (this);
-
-        noteClips.clear();
-        noteClipIDs = ids;
-
-        if (auto* edit = manager.getEdit())
-        {
-            for (const auto id : ids)
-            {
-                if (auto* clip = id.isValid() ? dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr)
-                {
-                    noteClips.emplace_back (clip);
-                    clip->addSelectableListener (this);
-                }
-            }
-        }
-    }
-
-    juce::Array<te::MidiClip*> getLiveNoteClips() const
-    {
-        juce::Array<te::MidiClip*> clips;
-
-        for (const auto& c : noteClips)
-            if (auto* clip = c.get())
-                clips.add (clip);
-
-        return clips;
-    }
-
-    // Made again for the clips left after one of them went.
-    te::SelectedMidiEvents* getNoteEvents()
-    {
-        if (noteEvents == nullptr)
-            if (const auto clips = getLiveNoteClips(); ! clips.isEmpty())
-                noteEvents = std::make_unique<te::SelectedMidiEvents> (clips);
-
-        return noteEvents.get();
-    }
-
-    void forgetNoteEvents()
-    {
-        if (noteEvents != nullptr)
-        {
-            noteEvents->deselect();
-            noteEvents = nullptr;
-        }
-    }
-
-    void selectableObjectChanged (te::Selectable*) override {}
-
-    // The note selection holds pointers to its clips, so it goes when one of them does.
-    void selectableObjectAboutToBeDeleted (te::Selectable*) override { forgetNoteEvents(); }
-
-    // The automation points this selects, when they are what is selected.
-    SelectedAutomationPoints points;
+    Selection& manager;
 };
 
 namespace
 {
-    te::Track* findTrack (const te::SelectionManager& manager, TrackID id)
+    te::Track* findTrack (const Selection& manager, TrackID id)
     {
         auto* edit = manager.getEdit();
         return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
     }
 
-    te::Clip* findClip (const te::SelectionManager& manager, ClipID id)
+    te::Clip* findClip (const Selection& manager, ClipID id)
     {
         auto* edit = manager.getEdit();
         auto* clip = edit != nullptr && id.isValid() ? te::findClipForID (*edit, toTracktion (id)) : nullptr;
         return dynamic_cast<te::ArrangerClip*> (clip) == nullptr ? clip : nullptr; // sections are arranger clips
     }
 
-    te::ArrangerClip* findSection (const te::SelectionManager& manager, SectionID id)
+    te::ArrangerClip* findSection (const Selection& manager, SectionID id)
     {
         auto* edit = manager.getEdit();
         return edit != nullptr && id.isValid() ? dynamic_cast<te::ArrangerClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
     }
 
-    void selectOnlyItem (te::SelectionManager& manager, te::Selectable* item)
-    {
-        if (item != nullptr)
-            manager.selectOnly (item);
-    }
-
-    te::Plugin* findDevice (const te::SelectionManager& manager, DeviceID id)
+    te::Plugin* findDevice (const Selection& manager, DeviceID id)
     {
         auto* edit = manager.getEdit();
         return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
     }
-
-    // Devices are selected on their own: adding one to a selection of anything else starts a new one, and so does adding
-    // anything else to a selection of devices.
-    void addItem (te::SelectionManager& manager, te::Selectable* item)
-    {
-        if (item == nullptr)
-            return;
-
-        const auto isDevice = dynamic_cast<te::Plugin*> (item) != nullptr;
-        const auto holdsDevices = manager.getFirstItemOfType<te::Plugin>() != nullptr;
-
-        if (manager.getNumObjectsSelected() > 0 && holdsDevices != isDevice)
-            manager.deselectAll();
-
-        manager.addToSelection (item);
-    }
-
-    void removeItem (te::SelectionManager& manager, te::Selectable* item)
-    {
-        if (item != nullptr)
-            manager.deselect (item);
-    }
 } // namespace
 
-std::unique_ptr<SongSelection> createSongSelection (te::SelectionManager& manager)
+std::unique_ptr<SongSelection> createSongSelection (Selection& manager)
 {
     return std::make_unique<SongSelection> (std::make_unique<SongSelection::Impl> (manager));
 }
@@ -208,47 +111,47 @@ bool SongSelection::isSelected (SectionID id) const
 
 void SongSelection::selectOnly (TrackID id)
 {
-    selectOnlyItem (impl->manager, findTrack (impl->manager, id));
+    impl->manager.selectOnly (findTrack (impl->manager, id));
 }
 
 void SongSelection::selectOnly (ClipID id)
 {
-    selectOnlyItem (impl->manager, findClip (impl->manager, id));
+    impl->manager.selectOnly (findClip (impl->manager, id));
 }
 
 void SongSelection::selectOnly (SectionID id)
 {
-    selectOnlyItem (impl->manager, findSection (impl->manager, id));
+    impl->manager.selectOnly (findSection (impl->manager, id));
 }
 
 void SongSelection::add (TrackID id)
 {
-    addItem (impl->manager, findTrack (impl->manager, id));
+    impl->manager.addToSelection (findTrack (impl->manager, id));
 }
 
 void SongSelection::add (ClipID id)
 {
-    addItem (impl->manager, findClip (impl->manager, id));
+    impl->manager.addToSelection (findClip (impl->manager, id));
 }
 
 void SongSelection::add (SectionID id)
 {
-    addItem (impl->manager, findSection (impl->manager, id));
+    impl->manager.addToSelection (findSection (impl->manager, id));
 }
 
 void SongSelection::remove (TrackID id)
 {
-    removeItem (impl->manager, findTrack (impl->manager, id));
+    impl->manager.deselect (findTrack (impl->manager, id));
 }
 
 void SongSelection::remove (ClipID id)
 {
-    removeItem (impl->manager, findClip (impl->manager, id));
+    impl->manager.deselect (findClip (impl->manager, id));
 }
 
 void SongSelection::remove (SectionID id)
 {
-    removeItem (impl->manager, findSection (impl->manager, id));
+    impl->manager.deselect (findSection (impl->manager, id));
 }
 
 void SongSelection::clear()
@@ -275,35 +178,33 @@ bool SongSelection::isSelected (DeviceID id) const
 
 void SongSelection::selectOnly (DeviceID id)
 {
-    selectOnlyItem (impl->manager, findDevice (impl->manager, id));
+    impl->manager.selectOnly (findDevice (impl->manager, id));
 }
 
 void SongSelection::add (DeviceID id)
 {
-    addItem (impl->manager, findDevice (impl->manager, id));
+    impl->manager.addToSelection (findDevice (impl->manager, id));
 }
 
 void SongSelection::remove (DeviceID id)
 {
-    removeItem (impl->manager, findDevice (impl->manager, id));
+    impl->manager.deselect (findDevice (impl->manager, id));
 }
 
 //==============================================================================
 void SongSelection::setNoteClips (const std::vector<ClipID>& ids)
 {
-    // The same clips, all still there, change nothing.
-    if (ids == impl->noteClipIDs && (ids.empty() || impl->noteEvents != nullptr))
-        return;
-
-    impl->setNoteClips (ids);
+    impl->manager.setNoteClips (ids);
 }
 
 std::vector<ClipID> SongSelection::getNoteClips() const
 {
     std::vector<ClipID> ids;
+    auto* edit = impl->manager.getEdit();
 
-    for (auto* clip : impl->getLiveNoteClips())
-        ids.push_back (getClipID (*clip));
+    for (const auto id : impl->manager.getNoteClips())
+        if (edit != nullptr && dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) != nullptr)
+            ids.push_back (id);
 
     return ids;
 }
@@ -326,36 +227,7 @@ bool SongSelection::isSelected (NoteRef ref) const
 
 void SongSelection::selectNotes (const std::vector<NoteRef>& refs, bool addToSelection)
 {
-    auto* events = impl->getNoteEvents();
-
-    if (events == nullptr)
-        return;
-
-    // Each note clip's notes by ID, found once.
-    juce::Array<te::MidiNote*> notes;
-
-    for (auto* clip : impl->getLiveNoteClips())
-    {
-        const auto clipID = getClipID (*clip);
-        std::unordered_map<NoteID, te::MidiNote*> byID;
-
-        for (const auto& ref : refs)
-        {
-            if (ref.clip != clipID)
-                continue;
-
-            if (byID.empty())
-                for (auto* note : clip->getSequence().getNotes())
-                    byID.emplace (getNoteID (*note), note);
-
-            if (const auto found = byID.find (ref.note); found != byID.end())
-                notes.add (found->second);
-        }
-    }
-
-    // Adding to a selection that isn't of these clips' notes starts a new one.
-    const auto adding = addToSelection && getSelectedMidiEvents (impl->manager) == events;
-    events->setSelected (impl->manager, notes, adding);
+    impl->manager.selectNotes (refs, addToSelection);
 }
 
 //==============================================================================
@@ -386,15 +258,6 @@ void SongSelection::selectAutomationPoints (const ParameterRef& parameter, const
 
     if (const auto before = getSelectedAutomationPoints(); addToSelection && before.parameter == parameter)
         all.insert (all.end(), before.indices.begin(), before.indices.end());
-
-    if (all.empty())
-    {
-        impl->manager.deselect (&impl->points);
-        return;
-    }
-
-    if (! impl->manager.isSelected (&impl->points))
-        impl->manager.selectOnly (&impl->points);
 
     selectPoints (impl->manager, *found, all);
 }

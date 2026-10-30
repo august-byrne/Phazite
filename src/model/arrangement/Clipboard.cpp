@@ -71,7 +71,7 @@ namespace
     }
 
     // Where Paste puts clips: from the selected track down, else the first selected clip's, else where they came from.
-    te::AudioTrack* getPasteTrack (const Clipboard& clipboard, const te::SelectionManager& selection)
+    te::AudioTrack* getPasteTrack (const Clipboard& clipboard, const Selection& selection)
     {
         auto* edit = selection.getEdit();
 
@@ -229,12 +229,12 @@ namespace
     }
 } // namespace
 
-bool canCopy (const te::SelectionManager& selection, const RangeSelection& range)
+bool canCopy (const Selection& selection, const RangeSelection& range)
 {
     return hasSelectedNotes (selection) || ! range.isEmpty() || hasSelectedClips (selection);
 }
 
-void copySelection (Clipboard& clipboard, const te::SelectionManager& selection, const RangeSelection& range)
+void copySelection (Clipboard& clipboard, const Selection& selection, const RangeSelection& range)
 {
     auto* edit = selection.getEdit();
 
@@ -317,7 +317,7 @@ void copySelection (Clipboard& clipboard, const te::SelectionManager& selection,
     clipboard = std::move (copy);
 }
 
-void cutSelection (Clipboard& clipboard, te::SelectionManager& selection, RangeSelection& range)
+void cutSelection (Clipboard& clipboard, Selection& selection, RangeSelection& range)
 {
     auto* edit = selection.getEdit();
 
@@ -345,7 +345,7 @@ void cutSelection (Clipboard& clipboard, te::SelectionManager& selection, RangeS
     }
 }
 
-juce::String describeCopy (const te::SelectionManager& selection, const RangeSelection& range, const juce::String& verb)
+juce::String describeCopy (const Selection& selection, const RangeSelection& range, const juce::String& verb)
 {
     return canCopy (selection, range) ? describeSelection (selection, range, verb) : verb;
 }

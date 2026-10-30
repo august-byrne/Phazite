@@ -42,18 +42,14 @@ struct Notes
         auto* track = te::getAudioTracks (*edit)[0];
         clip = phazite::insertMidiClip (*track, { beats (4), beats (8) }, nullptr);
         REQUIRE (clip != nullptr);
-        events = std::make_unique<te::SelectedMidiEvents> (*clip);
-        selection.edit = edit.get();
+        selection.setEdit (edit.get());
+        selection.setNoteClips ({ phazite::getClipID (*clip) });
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addNoteCommands (registry, selection, [] { return 0.25; });
         edit->getUndoManager().clearUndoHistory();
     }
 
-    ~Notes()
-    {
-        selection.deselectAll();
-        events = nullptr;
-    }
+    ~Notes() { selection.deselectAll(); }
 
     te::MidiNote& add (int pitch, double start, double noteLength, int velocity = 100)
     {
@@ -62,14 +58,22 @@ struct Notes
         return *note;
     }
 
-    void select (std::initializer_list<te::MidiNote*> notes) { events->setSelected (selection, juce::Array<te::MidiNote*> (notes), false); }
+    void select (std::initializer_list<te::MidiNote*> notes)
+    {
+        std::vector<phazite::NoteRef> refs;
+
+        for (auto* note : notes)
+            refs.push_back (phazite::getNoteRef (*clip, *note));
+
+        selection.selectNotes (refs);
+    }
 
     double startOf (const te::MidiNote& note) const { return phazite::getNoteStart (*clip, note).inBeats(); }
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+    phazite::NoteIDKeeper noteIDs { *edit }; // as the project context gives the notes added their IDs, which select them
     te::MidiClip* clip = nullptr;
-    std::unique_ptr<te::SelectedMidiEvents> events;
-    te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
     phazite::CommandRegistry registry;
 };
@@ -444,11 +448,6 @@ TEST_CASE ("Replacing the selected notes selects the new ones")
 
     std::sort (pitches.begin(), pitches.end());
     CHECK (pitches == std::vector<int> { 72, 76 });
-
-    const auto midiNotes = phazite::toMidiNotes (added);
-    REQUIRE (midiNotes.size() == 2);
-    CHECK (midiNotes[0] == added[0].note);
-    CHECK (midiNotes[1] == added[1].note);
 }
 
 TEST_CASE ("Every track can get the same key")

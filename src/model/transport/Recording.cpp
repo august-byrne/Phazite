@@ -161,7 +161,7 @@ void togglePunch (te::Edit& edit)
 namespace
 {
     // The selected tracks with an input, which arming arms.
-    juce::Array<te::AudioTrack*> getArmableTracks (const te::SelectionManager& selection)
+    juce::Array<te::AudioTrack*> getArmableTracks (const Selection& selection)
     {
         juce::Array<te::AudioTrack*> tracks;
         auto* recorder = selection.getEdit() != nullptr ? AudioRecorder::findFor (*selection.getEdit()) : nullptr;
@@ -175,7 +175,7 @@ namespace
     }
 
     // The selected audio clips with takes.
-    juce::Array<te::AudioClipBase*> getClipsWithTakes (const te::SelectionManager& selection)
+    juce::Array<te::AudioClipBase*> getClipsWithTakes (const Selection& selection)
     {
         juce::Array<te::AudioClipBase*> clips;
 
@@ -187,19 +187,19 @@ namespace
     }
 } // namespace
 
-bool canArmSelectedTracks (const te::SelectionManager& selection)
+bool canArmSelectedTracks (const Selection& selection)
 {
     return ! getArmableTracks (selection).isEmpty();
 }
 
-bool areSelectedTracksArmed (const te::SelectionManager& selection)
+bool areSelectedTracksArmed (const Selection& selection)
 {
     const auto tracks = getArmableTracks (selection);
     auto* recorder = selection.getEdit() != nullptr ? AudioRecorder::findFor (*selection.getEdit()) : nullptr;
     return recorder != nullptr && areAllOn (tracks, [recorder] (te::AudioTrack* track) { return recorder->isArmed (*track); });
 }
 
-void toggleArmSelectedTracks (const te::SelectionManager& selection)
+void toggleArmSelectedTracks (const Selection& selection)
 {
     if (auto* recorder = selection.getEdit() != nullptr ? AudioRecorder::findFor (*selection.getEdit()) : nullptr)
         toggleAll (
@@ -207,12 +207,12 @@ void toggleArmSelectedTracks (const te::SelectionManager& selection)
             [recorder] (te::AudioTrack* track, bool on) { recorder->setArmed (*track, on); });
 }
 
-bool canStepTakes (const te::SelectionManager& selection)
+bool canStepTakes (const Selection& selection)
 {
     return ! getClipsWithTakes (selection).isEmpty();
 }
 
-void stepTakes (const te::SelectionManager& selection, int direction)
+void stepTakes (const Selection& selection, int direction)
 {
     // The takes lie one after another in the clip's file, each as long as the range they were recorded round.
     for (auto* clip : getClipsWithTakes (selection))
@@ -231,7 +231,7 @@ void stepTakes (const te::SelectionManager& selection, int direction)
 }
 
 //==============================================================================
-void addRecordingCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addRecordingCommands (CommandRegistry& registry, Selection& selection)
 {
     registry.add ({ .id = "transport.record",
                     .name = "Record",

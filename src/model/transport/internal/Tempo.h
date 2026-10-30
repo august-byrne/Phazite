@@ -5,6 +5,7 @@
 // stretch with it, the others keep their speed (TempoStretch, TempoValues.h).
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/transport/TempoValues.h"
 
@@ -32,7 +33,7 @@ bool doPatternsFollowTempo (const te::Edit&);
 void togglePatternsFollowTempo (te::Edit&);
 
 // Registers the commands that say what a tempo change stretches.
-void addTempoCommands (CommandRegistry&, te::SelectionManager&);
+void addTempoCommands (CommandRegistry&, Selection&);
 
 TimeSignature getTimeSignature (const te::Edit&);
 

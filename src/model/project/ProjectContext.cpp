@@ -185,8 +185,8 @@ struct ProjectContext::Impl
     }
 
     UIBehaviour* const focus;
-    te::SelectionManager selection;
-    std::unique_ptr<SongSelection> songSelection; // a view of selection, by IDs
+    Selection selection;                          // what is selected, by IDs
+    std::unique_ptr<SongSelection> songSelection; // the UI's view of selection
     RangeSelection rangeSelection;
     std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
     juce::ListenerList<Listener> listeners;
@@ -203,8 +203,6 @@ struct ProjectContext::Impl
 ProjectContext::ProjectContext (EngineContext& engine, UIBehaviour* tracktionFocus)
     : impl (std::make_unique<Impl> (getEngine (engine), tracktionFocus))
 {
-    if (impl->focus != nullptr)
-        impl->focus->setSelectionManager (&impl->selection);
 }
 
 ProjectContext::~ProjectContext()
@@ -217,10 +215,7 @@ ProjectContext::~ProjectContext()
     impl->noteIDs = nullptr;
 
     if (impl->focus != nullptr)
-    {
         impl->focus->setFocusedEdit (nullptr);
-        impl->focus->setSelectionManager (nullptr);
-    }
 }
 
 bool ProjectContext::hasProject() const noexcept
@@ -280,12 +275,12 @@ te::Edit* getEdit (const ProjectContext& context)
     return context.getImpl().selection.getEdit();
 }
 
-te::SelectionManager& getSelection (ProjectContext& context)
+Selection& getSelection (ProjectContext& context)
 {
     return context.getImpl().selection;
 }
 
-const te::SelectionManager& getSelection (const ProjectContext& context)
+const Selection& getSelection (const ProjectContext& context)
 {
     return context.getImpl().selection;
 }
@@ -325,10 +320,8 @@ void setEdit (ProjectContext& context, te::Edit* edit)
     }
 
     impl.songSelection->setNoteClips ({}); // the editors show the new project's clips, or none
-    impl.selection.deselectAll();
-    impl.selection.edit = nullptr;
     impl.rangeSelection.clear();
-    impl.selection.edit = edit;
+    impl.selection.setEdit (edit);                                                     // nothing of the previous one selected
     impl.automation = nullptr;                                                         // before the Edit it watches goes
     impl.freezes = nullptr;                                                            // likewise
     impl.recorder = nullptr;                                                           // likewise, any recording dropped

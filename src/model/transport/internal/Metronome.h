@@ -6,6 +6,7 @@
 // keeps with its own.
 #pragma once
 
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
@@ -21,5 +22,5 @@ void setCountInOn (te::Edit&, bool);
 void toggleCountIn (te::Edit&);
 
 // The commands, for the selection manager's Edit: Metronome and Count-In, each on or off.
-void addMetronomeCommands (CommandRegistry&, te::SelectionManager&);
+void addMetronomeCommands (CommandRegistry&, Selection&);
 } // namespace phazite

@@ -4,6 +4,7 @@
 #include "devices/dynamics/Limiter.h"
 #include "devices/dynamics/Maximizer.h"
 #include "devices/synth/Synth.h"
+#include "model/base/internal/Selection.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/internal/Project.h"
@@ -120,8 +121,8 @@ TEST_CASE ("Live MIDI follows the selected track, if it has an instrument")
     phazite::routeLiveMidiInput (*edit);
     REQUIRE (phazite::getLiveMidiTrack (*edit) == tracks[0]);
 
-    te::SelectionManager selection (phazite::test::getEngine());
-    selection.edit = edit.get();
+    phazite::Selection selection (phazite::test::getEngine());
+    selection.setEdit (edit.get());
 
     selection.selectOnly (tracks[2]);
     phazite::followSelectedTrack (selection);

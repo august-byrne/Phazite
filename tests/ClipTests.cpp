@@ -23,7 +23,7 @@ struct ClipEdit
         edit->ensureNumberOfAudioTracks (2);
         tracks = te::getAudioTracks (*edit);
         edit->getUndoManager().clearUndoHistory();
-        selection.edit = edit.get();
+        selection.setEdit (edit.get());
         phazite::addSelectionCommands (registry, selection, range);
     }
 
@@ -38,7 +38,7 @@ struct ClipEdit
 
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM: a beat is 0.5 s
     juce::Array<te::AudioTrack*> tracks;
-    te::SelectionManager selection { phazite::test::getEngine() };
+    phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
     phazite::CommandRegistry registry;
 };

@@ -84,7 +84,7 @@ juce::Array<te::Track*> getPlaylistTracks (const te::Edit& edit)
     return tracks;
 }
 
-juce::Array<te::Track*> getSelectedTracks (const te::SelectionManager& selection)
+juce::Array<te::Track*> getSelectedTracks (const Selection& selection)
 {
     juce::Array<te::Track*> selected;
 
@@ -96,7 +96,7 @@ juce::Array<te::Track*> getSelectedTracks (const te::SelectionManager& selection
     return selected;
 }
 
-juce::Array<te::Track*> getSelectedOutermostTracks (const te::SelectionManager& selection)
+juce::Array<te::Track*> getSelectedOutermostTracks (const Selection& selection)
 {
     juce::Array<te::Track*> tracks;
 
@@ -183,7 +183,7 @@ bool isSilencedBySolo (const te::Track& track)
 }
 
 //==============================================================================
-te::AudioTrack* insertTrack (te::Edit& edit, te::Track* after, te::SelectionManager* selection)
+te::AudioTrack* insertTrack (te::Edit& edit, te::Track* after, Selection* selection)
 {
     const auto colour = getNextColour (edit, after);
     auto track =
@@ -201,7 +201,7 @@ te::AudioTrack* insertTrack (te::Edit& edit, te::Track* after, te::SelectionMana
     return track.get();
 }
 
-te::FolderTrack* insertFolder (te::Edit& edit, te::Track* after, te::SelectionManager* selection)
+te::FolderTrack* insertFolder (te::Edit& edit, te::Track* after, Selection* selection)
 {
     const auto colour = getNextColour (edit, after);
     auto folder = edit.insertNewFolderTrack (after != nullptr ? getInsertPointAfter (*after) : te::TrackInsertPoint::getEndOfTracks (edit),
@@ -220,7 +220,7 @@ te::FolderTrack* insertFolder (te::Edit& edit, te::Track* after, te::SelectionMa
     return folder.get();
 }
 
-te::FolderTrack* groupIntoFolder (const juce::Array<te::Track*>& tracks, te::SelectionManager* selection)
+te::FolderTrack* groupIntoFolder (const juce::Array<te::Track*>& tracks, Selection* selection)
 {
     if (tracks.isEmpty())
         return nullptr;
@@ -271,12 +271,12 @@ void ungroupFolder (te::FolderTrack& folder)
 }
 
 //==============================================================================
-bool hasSelectedTracks (const te::SelectionManager& selection)
+bool hasSelectedTracks (const Selection& selection)
 {
     return ! getSelectedTracks (selection).isEmpty();
 }
 
-juce::Array<te::FolderTrack*> getSelectedFolders (const te::SelectionManager& selection)
+juce::Array<te::FolderTrack*> getSelectedFolders (const Selection& selection)
 {
     juce::Array<te::FolderTrack*> folders;
 
@@ -287,12 +287,12 @@ juce::Array<te::FolderTrack*> getSelectedFolders (const te::SelectionManager& se
     return folders;
 }
 
-bool hasSelectedFolders (const te::SelectionManager& selection)
+bool hasSelectedFolders (const Selection& selection)
 {
     return ! getSelectedFolders (selection).isEmpty();
 }
 
-juce::Array<te::Track*> getSelectedTracksOrAll (const te::SelectionManager& selection)
+juce::Array<te::Track*> getSelectedTracksOrAll (const Selection& selection)
 {
     auto tracks = getSelectedTracks (selection);
 
@@ -303,13 +303,13 @@ juce::Array<te::Track*> getSelectedTracksOrAll (const te::SelectionManager& sele
     return tracks;
 }
 
-te::AudioTrack* insertTrackAfterSelection (te::SelectionManager& selection)
+te::AudioTrack* insertTrackAfterSelection (Selection& selection)
 {
     auto* edit = selection.getEdit();
     return edit != nullptr ? insertTrack (*edit, getSelectedTracks (selection).getLast(), &selection) : nullptr;
 }
 
-te::FolderTrack* insertFolderAfterSelection (te::SelectionManager& selection)
+te::FolderTrack* insertFolderAfterSelection (Selection& selection)
 {
     auto* edit = selection.getEdit();
     return edit != nullptr ? insertFolder (*edit, getSelectedTracks (selection).getLast(), &selection) : nullptr;
@@ -321,7 +321,7 @@ void ungroupFolders (const juce::Array<te::FolderTrack*>& folders)
         ungroupFolder (*folder);
 }
 
-void selectNeighbourTrack (te::SelectionManager& selection, int direction)
+void selectNeighbourTrack (Selection& selection, int direction)
 {
     auto* edit = selection.getEdit();
 
@@ -344,7 +344,7 @@ void selectNeighbourTrack (te::SelectionManager& selection, int direction)
     selection.selectOnly (tracks[juce::jlimit (0, tracks.size() - 1, row)]);
 }
 
-void moveSelectedTracks (te::SelectionManager& selection, int direction)
+void moveSelectedTracks (Selection& selection, int direction)
 {
     auto* edit = selection.getEdit();
     auto tracks = getSelectedOutermostTracks (selection);
@@ -411,7 +411,7 @@ void toggleTracksPinned (const juce::Array<te::Track*>& tracks)
     toggleAll (tracks, [] (te::Track* track) { return isPinned (*track); }, [] (te::Track* track, bool on) { setPinned (*track, on); });
 }
 
-juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* selection)
+juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, Selection* selection)
 {
     juce::Array<te::Track*> copies;
 
@@ -451,7 +451,7 @@ void renameTrack (te::Track& track, const juce::String& name)
     track.setName (trimmed);
 }
 
-te::Track* addTrackAtEnd (te::Edit& edit, bool folder, te::SelectionManager* selection)
+te::Track* addTrackAtEnd (te::Edit& edit, bool folder, Selection* selection)
 {
     const UndoStep step (edit, folder ? "Add Folder" : "Add Track");
 
@@ -500,7 +500,7 @@ void moveTracksAfter (const juce::Array<te::Track*>& moving, te::Track* previous
     }
 }
 
-void deleteTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* selection)
+void deleteTracks (const juce::Array<te::Track*>& tracks, Selection* selection)
 {
     // A folder takes the tracks inside it along, so those aren't deleted on their own.
     juce::Array<te::Track*> outermost;
@@ -532,7 +532,7 @@ void deleteTracks (const juce::Array<te::Track*>& tracks, te::SelectionManager* 
 }
 
 //==============================================================================
-void addTrackCommands (CommandRegistry& registry, te::SelectionManager& selection)
+void addTrackCommands (CommandRegistry& registry, Selection& selection)
 {
     const auto undoTarget = undoTargetOf (selection);
     const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };

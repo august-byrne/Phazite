@@ -5,6 +5,7 @@
 #pragma once
 
 #include "model/arrangement/internal/Selection.h"
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
@@ -15,8 +16,8 @@ class ProjectContext;
 struct Clipboard;
 
 te::Edit* getEdit (const ProjectContext&); // nullptr while no project is open
-te::SelectionManager& getSelection (ProjectContext&);
-const te::SelectionManager& getSelection (const ProjectContext&);
+Selection& getSelection (ProjectContext&);
+const Selection& getSelection (const ProjectContext&);
 RangeSelection& getRangeSelection (ProjectContext&);
 
 // What watches the open Edit's automation (model/automation/internal/Automation.h): nullptr while no project is open.

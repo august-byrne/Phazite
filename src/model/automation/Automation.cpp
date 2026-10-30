@@ -904,20 +904,19 @@ void restoreValuesSetByHand (juce::ValueTree& state)
 }
 
 //==============================================================================
-std::optional<PointSelection> getSelectedPoints (const te::SelectionManager& manager)
+std::optional<PointSelection> getSelectedPoints (const Selection& selection)
 {
-    auto* selected = manager.getFirstItemOfType<SelectedAutomationPoints>();
-    auto* edit = manager.getEdit();
+    auto* edit = selection.getEdit();
 
-    if (selected == nullptr || edit == nullptr)
+    if (edit == nullptr || ! selection.getPointsParameter().isValid())
         return {};
 
-    const auto parameter = findParameter (*edit, selected->parameter);
+    const auto parameter = findParameter (*edit, selection.getPointsParameter());
 
     if (parameter == nullptr)
         return {};
 
-    auto indices = getValidIndices (parameter->getCurve(), selected->indices);
+    auto indices = getValidIndices (parameter->getCurve(), selection.getPoints());
 
     if (indices.empty())
         return {};
@@ -925,14 +924,9 @@ std::optional<PointSelection> getSelectedPoints (const te::SelectionManager& man
     return PointSelection { parameter, std::move (indices) };
 }
 
-void selectPoints (te::SelectionManager& manager, const te::AutomatableParameter& parameter, const std::vector<int>& indices)
+void selectPoints (Selection& selection, const te::AutomatableParameter& parameter, const std::vector<int>& indices)
 {
-    if (auto* selected = manager.getFirstItemOfType<SelectedAutomationPoints>())
-    {
-        selected->parameter = getParameterRef (parameter);
-        selected->indices = getValidIndices (parameter.getCurve(), indices);
-        manager.sendChangeMessage();
-    }
+    selection.selectPoints (getParameterRef (parameter), getValidIndices (parameter.getCurve(), indices));
 }
 
 //==============================================================================
