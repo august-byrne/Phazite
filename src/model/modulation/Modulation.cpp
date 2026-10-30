@@ -371,7 +371,7 @@ std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType typ
     if (! channel.isValid() || track.getModifierList() == nullptr)
         return {};
 
-    const auto id = ModulatorID::fromRaw (edit.createNewItemID().getRawID());
+    const auto id = ModulatorID::fromRaw (makeID (edit));
     juce::ValueTree modulator (schema::MODULATOR);
     modulator.setProperty (schema::modulatorID, (juce::int64) id.getRaw(), nullptr);
     modulator.setProperty (schema::modulatorType, schema::preset::modulatorTypeNames[(size_t) type], nullptr);
@@ -407,14 +407,14 @@ std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType typ
 te::MacroParameter* addMacro (te::MacroParameterList& macros, const juce::String& name)
 {
     auto& edit = macros.edit;
-    const auto id = edit.createNewItemID();
+    const auto id = ModulatorID::fromRaw (makeID (edit));
 
     // A track's is the song's (Schema.h: MACRO), which the mirror makes; a container's not yet on a channel (a preset's) is
     // Tracktion's until it is.
     if (auto track = macros.getTrack() != nullptr ? findTrackState (*macros.getTrack()) : juce::ValueTree(); track.isValid())
     {
         juce::ValueTree macro (schema::MACRO);
-        macro.setProperty (schema::modulatorID, (juce::int64) id.getRawID(), nullptr);
+        macro.setProperty (schema::modulatorID, (juce::int64) id.getRaw(), nullptr);
         macro.setProperty (schema::macroName, name, nullptr);
         track.appendChild (macro, &edit.getUndoManager());
         mirror::reconcileModulation (edit);
@@ -423,14 +423,14 @@ te::MacroParameter* addMacro (te::MacroParameterList& macros, const juce::String
     {
         // Made with its value in its state, so that redoing the step puts it back at 0 too.
         juce::ValueTree macro (te::IDs::MACROPARAMETER);
-        id.writeID (macro, nullptr);
+        macro.setProperty (te::IDs::id, (juce::int64) id.getRaw(), nullptr);
         macro.setProperty (te::IDs::name, name, nullptr);
         macro.setProperty (te::IDs::value, 0.0f, nullptr);
         macros.state.addChild (macro, -1, &edit.getUndoManager());
     }
 
     for (auto* added : macros.getMacroParameters())
-        if (te::EditItemID::fromID (added->state) == id)
+        if (getModulatorID (*added) == id)
             return added;
 
     return nullptr;

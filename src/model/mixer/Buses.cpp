@@ -24,7 +24,7 @@ void makeBus (te::FolderTrack& folder)
     auto* undo = &edit.getUndoManager();
     auto state = findTrackState (folder);
     state.removeProperty (schema::channelVCA, undo);
-    state.setProperty (schema::channelFader, (juce::int64) edit.createNewItemID().getRawID(), undo);
+    state.setProperty (schema::channelFader, (juce::int64) makeID (edit), undo);
     mirror::reconcileTracks (edit);
     mirror::reconcileDevices (edit);
 }
@@ -43,7 +43,7 @@ void makePlainFolder (te::FolderTrack& folder)
         state.removeChild (device, undo);
 
     state.removeProperty (schema::channelFader, undo);
-    state.setProperty (schema::channelVCA, (juce::int64) edit.createNewItemID().getRawID(), undo);
+    state.setProperty (schema::channelVCA, (juce::int64) makeID (edit), undo);
     mirror::reconcileTracks (edit);
     mirror::reconcileDevices (edit);
 }

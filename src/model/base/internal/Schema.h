@@ -21,6 +21,10 @@ namespace phazite::schema
 // first written to it.
 inline const juce::Identifier PHAZITE { "PHAZITE" };
 
+// On PHAZITE (T1, step 9). int64, above every ID in the song: the next ID it gives an item (makeID()), each kind from the
+// same numbers, never one twice. Written without an undo step, and no change of its own (the item it numbers is). state
+inline const juce::Identifier nextID { "nextID" };
+
 // On PHAZITE. bool, default true: the loop follows the song (getSongLoopRange()); false while a range is looped on
 // purpose. Written only when it changes. state
 inline const juce::Identifier loopFollowsSong { "loopFollowsSong" };
@@ -689,4 +693,15 @@ juce::ValueTree getPhaziteState (te::Edit&);
 // The same, but without adding it if the Edit has none yet (adding it would count as an unsaved change): then the
 // result is invalid, and reading a property from it gives the default.
 juce::ValueTree findPhaziteState (const te::Edit&);
+
+// A new ID for an item of the song (a track, a channel's fader or VCA, a clip, a note, an alias group, a device, a
+// container, a send, a modulator, a macro, a section): the song's next (Schema.h: nextID), never given twice, nor taken back
+// by an undo. While T1 lasts, Tracktion's items take IDs from the same numbers (the mirror gives Tracktion's the song's
+// IDs, and Tracktion numbers what it makes itself above every ID in its state), so it takes Tracktion's next too, and the
+// larger of the two: Tracktion's and the song's never meet.
+std::uint64_t makeID (te::Edit&);
+
+// Brings the song's next ID past every ID the song holds (those Tracktion gave what it made and the song took in: a
+// device made in Tracktion first, a recording's clips), and Tracktion's next past that. As a project opens and saves.
+void countIDs (te::Edit&);
 } // namespace phazite

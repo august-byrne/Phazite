@@ -21,7 +21,8 @@
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
   </MASTERVOLUME>
-  <PHAZITE loop="1">
+  <PHAZITE loop="1"
+           nextID="1102">
     <MASTER fader="1001"/>
     <TEMPOMAP>
       <TEMPO beat="0"

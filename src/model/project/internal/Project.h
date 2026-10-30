@@ -147,7 +147,8 @@ private:
     // Tracktion writes these while it plays, without anyone changing the song, so they don't count as changes: the
     // playhead position, and the Edit's input-device states (the inputs it knows, and which track live input goes to).
     // Nor do the loop (where it is, whether it is on, and whether it follows the song), the metronome's switch and where
-    // playback starts, which are about playing the song rather than the song (design question 18); nor do view settings,
+    // playback starts, which are about playing the song rather than the song (design question 18); nor does the song's
+    // next ID (Schema.h: nextID), which the item it numbers comes with; nor do view settings,
     // which are saved but aren't the song (decision 4: schema::isTrackViewProperty(), isGridProperty(), PIANOROLL, and
     // isDeviceViewProperty(), where a device's window was, since step 2.12). A property
     // (isUncountedProperty()), or an element with everything in it (isUncountedElement()): notifications and the

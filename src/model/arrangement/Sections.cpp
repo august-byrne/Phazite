@@ -45,12 +45,12 @@ namespace
         return SectionID::fromRaw (te::EditItemID::fromVar (state[schema::sectionID]).getRawID());
     }
 
-    // A new ID from the Edit's, which no track, clip or other section of it has, even after an undo.
+    // A new ID of the song's, which no track, clip or other section of it has, even after an undo.
     SectionID giveNewID (te::Edit& edit, juce::ValueTree& state)
     {
-        const auto id = edit.createNewItemID();
-        state.setProperty (schema::sectionID, id.toVar(), nullptr);
-        return SectionID::fromRaw (id.getRawID());
+        const auto id = SectionID::fromRaw (makeID (edit));
+        state.setProperty (schema::sectionID, (juce::int64) id.getRaw(), nullptr);
+        return id;
     }
 
     BeatRange getRange (const juce::ValueTree& state)

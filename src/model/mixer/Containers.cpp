@@ -214,7 +214,7 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
     // The song's container, in the first one's place, with a new ID and name; the devices' elements go into it, with what
     // they hold of their states (which an undo brings back), and the mirror puts Tracktion's devices in its rack type.
     auto* undo = &edit.getUndoManager();
-    const auto id = DeviceID::fromRaw (edit.createNewItemID().getRawID());
+    const auto id = DeviceID::fromRaw (makeID (edit));
     juce::ValueTree container (schema::CONTAINER);
     container.setProperty (schema::deviceID, (juce::int64) id.getRaw(), nullptr);
     container.setProperty (schema::containerName, makeContainerName (edit), nullptr);
@@ -223,7 +223,7 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
     for (int number = 1; number <= macrosPerContainer; ++number)
     {
         juce::ValueTree macro (schema::MACRO);
-        macro.setProperty (schema::modulatorID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+        macro.setProperty (schema::modulatorID, (juce::int64) makeID (edit), nullptr);
         macro.setProperty (schema::macroName, "Macro " + juce::String (number), nullptr);
         container.appendChild (macro, nullptr);
     }
@@ -489,7 +489,7 @@ void addContainerMacros (te::RackType& rack)
     for (auto number = macros.getMacroParameters().size() + 1; number <= macrosPerContainer; ++number)
     {
         juce::ValueTree macro (te::IDs::MACROPARAMETER);
-        edit.createNewItemID().writeID (macro, nullptr);
+        te::EditItemID::fromRawID (makeID (edit)).writeID (macro, nullptr); // the song's once it takes the container in
         macro.setProperty (te::IDs::name, "Macro " + juce::String (number), nullptr);
         macro.setProperty (te::IDs::value, 0.0f, nullptr);
         macros.state.addChild (macro, -1, &edit.getUndoManager());

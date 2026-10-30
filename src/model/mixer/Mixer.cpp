@@ -669,9 +669,9 @@ te::AuxSendPlugin* addSend (te::Track& track, int bus, bool preFader)
     if (target == nullptr || ! state.isValid() || getVolumeDevice (track) == nullptr)
         return nullptr;
 
-    const auto id = track.edit.createNewItemID();
+    const auto id = makeID (track.edit);
     juce::ValueTree send (schema::SEND);
-    send.setProperty (schema::sendID, (juce::int64) id.getRawID(), nullptr);
+    send.setProperty (schema::sendID, (juce::int64) id, nullptr);
     send.setProperty (schema::sendTo, (juce::int64) getTrackID (*target).getRaw(), nullptr);
     send.setProperty (schema::sendLevel, newSendDb, nullptr);
 
@@ -682,7 +682,7 @@ te::AuxSendPlugin* addSend (te::Track& track, int bus, bool preFader)
     mirror::reconcileDevices (track.edit);
 
     for (auto* made : getSends (track))
-        if (made->itemID == id)
+        if (made->itemID.getRawID() == id)
             return made;
 
     return nullptr;

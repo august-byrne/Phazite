@@ -304,10 +304,10 @@ namespace
         note.state.setProperty (schema::phaziteNoteID, id, undo);
     }
 
-    // A new note's ID, from the Edit's (as Tracktion's items get theirs while T1 lasts): one no note has had before.
+    // A new note's ID, the song's (makeID()): one no note has had before.
     juce::int64 makeNoteID (te::Edit& edit)
     {
-        return (juce::int64) edit.createNewItemID().getRawID();
+        return (juce::int64) makeID (edit);
     }
 
     // Where one of Tracktion's MIDI clips is, written into the song's element for it where that differs.
@@ -446,7 +446,7 @@ std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState)
 juce::ValueTree copyClipState (te::Edit& edit, const juce::ValueTree& clipState)
 {
     auto copy = clipState.createCopy();
-    copy.setProperty (schema::clipID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    copy.setProperty (schema::clipID, (juce::int64) makeID (edit), nullptr);
     return copy;
 }
 
@@ -454,7 +454,7 @@ juce::ValueTree makeMidiClipState (te::Edit& edit, const juce::String& name, Bea
 {
     const auto start = std::max (0.0, range.getStart().inBeats());
     juce::ValueTree clipState (schema::CLIP);
-    clipState.setProperty (schema::clipID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    clipState.setProperty (schema::clipID, (juce::int64) makeID (edit), nullptr);
     clipState.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
     clipState.setProperty (schema::clipName, name, nullptr);
     clipState.setProperty (schema::clipStart, start, nullptr);
@@ -756,7 +756,7 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAl
         // Aliases share an alias group, which the original gets if it is in none; a copy that isn't an alias leaves the
         // original's.
         if (asAliases && ! clipState.hasProperty (schema::clipLink))
-            clipState.setProperty (schema::clipLink, (juce::int64) edit.createNewItemID().getRawID(), getUndo (edit));
+            clipState.setProperty (schema::clipLink, (juce::int64) makeID (edit), getUndo (edit));
 
         auto copy = copyClipState (edit, clipState);
 

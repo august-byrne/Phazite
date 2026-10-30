@@ -168,10 +168,10 @@ namespace
         reconcileAll (clip.edit, aliases);
     }
 
-    // A new note's ID, from the Edit's (as Tracktion's items get theirs while T1 lasts): one no note has had before.
+    // A new note's ID, the song's (makeID()): one no note has had before.
     juce::int64 makeNoteID (te::Edit& edit)
     {
-        return (juce::int64) edit.createNewItemID().getRawID();
+        return (juce::int64) makeID (edit);
     }
 
     // Adds a note to a clip and to each of its aliases, with the ID wanted if no note of the clip has it, or else a new

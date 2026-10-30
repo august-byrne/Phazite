@@ -13,6 +13,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
@@ -112,6 +113,57 @@ TEST_CASE ("A project saves and reopens with Phazite's own data")
     CHECK (te::getAudioTracks (reopened->getEdit()).size() == 3);
     CHECK (reopened->getPhaziteState()["outline"].toString() == juce::String ("Electronic"));
     CHECK (reopened->getEdit().getProjectItemRef() == id); // so its temporary folder stays the same
+}
+
+TEST_CASE ("The song numbers its items itself, each new one past every ID it holds, never one twice, and saves where it got to")
+{
+    namespace schema = phazite::schema;
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "IDs");
+    auto& edit = project->getEdit();
+    auto song = project->getPhaziteState();
+    const auto next = [&song] { return (std::uint64_t) (juce::int64) song[schema::nextID]; };
+    const auto idOf = [] (const juce::ValueTree& state, const juce::Identifier& property)
+    { return (std::uint64_t) (juce::int64) state[property]; };
+    const auto addTrack = [&edit]
+    {
+        const phazite::UndoStep step (edit, "Add Track");
+        auto* track = phazite::insertTrack (edit, nullptr, nullptr);
+        REQUIRE (track != nullptr);
+        return phazite::findTrackState (*track);
+    };
+
+    // Past the first track's, its fader's and the master's.
+    const auto first = phazite::getTrackStates (edit).front();
+    CHECK (next() > idOf (first, schema::trackID));
+    CHECK (next() > idOf (first, schema::channelFader));
+    CHECK (next() > idOf (phazite::getMasterState (edit), schema::channelFader));
+
+    // A new track takes the next IDs, which an undo doesn't give back: the track after it gets new ones.
+    auto before = next();
+    const auto added = addTrack();
+    CHECK (idOf (added, schema::trackID) >= before);
+    CHECK (next() > idOf (added, schema::channelFader));
+    const auto undone = idOf (added, schema::trackID);
+    phazite::undo (edit);
+    before = next();
+    const auto another = addTrack();
+    CHECK (idOf (another, schema::trackID) != undone);
+    CHECK (idOf (another, schema::trackID) >= before);
+
+    // A song that has counted further than Tracktion (a project whose last items went before it was saved) goes on from there.
+    song.setProperty (schema::nextID, (juce::int64) 50000, nullptr);
+    CHECK (phazite::makeID (edit) >= 50000u);
+    CHECK (edit.createNewItemID().getRawID() > 50000u); // nor does Tracktion give what the song has
+
+    // Saved, and opened again where it got to.
+    REQUIRE (project->save().wasOk());
+    const auto saved = next();
+    const auto file = project->getFile();
+    project = nullptr;
+    auto reopened = openProject (file);
+    CHECK ((std::uint64_t) (juce::int64) reopened->getPhaziteState()[schema::nextID] == saved);
+    CHECK (phazite::makeID (reopened->getEdit()) >= saved);
 }
 
 TEST_CASE ("Saving keeps the newest backups")

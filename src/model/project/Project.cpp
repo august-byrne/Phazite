@@ -37,17 +37,18 @@ namespace
         return a == b && b == a;
     }
 
-    // What every project has, added before the project watches for changes: Phazite's state with its tempo map and its track
-    // list, which Tracktion's tempo sequence, tracks, clips, devices, automation and transport mirror (without the curves of
-    // devices gone, which no undo can bring back now), and the master's loudness meter. It isn't the user's change, so it
-    // is neither an undo step nor an unsaved change.
+    // What every project has, added before the project watches for changes: Phazite's state with its tempo map, its track
+    // list and its next ID, which Tracktion's tempo sequence, tracks, clips, devices, automation and transport mirror
+    // (without the curves of devices gone, which no undo can bring back now), and the master's loudness meter. It isn't the
+    // user's change, so it is neither an undo step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
         getPhaziteState (edit);
         ensureTempoMap (edit);
-        mirror::reconcileTempoMap (edit);
         getTrackList (edit);
+        countIDs (edit);
+        mirror::reconcileTempoMap (edit);
         mirror::reconcileTracks (edit);
         mirror::reconcileClips (edit);
         forgetMissingFrozenFiles (edit);
@@ -63,10 +64,11 @@ namespace
     }
 
     // What a save writes that the Edit doesn't hold yet: the devices' states as they are now, outside the undo history
-    // (model/devices/internal/DeviceStates.h).
+    // (model/devices/internal/DeviceStates.h), and the song's next ID past the IDs Tracktion gave what the song took in.
     void storeForSaving (te::Edit& edit)
     {
         storeDeviceStates (edit);
+        countIDs (edit);
     }
 
     // Writes a project into a file, through a temporary file that takes its place once it is whole. (Tracktion's save
@@ -586,9 +588,10 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
            || (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
            || ((tree.hasType (schema::DEVICE) || tree.hasType (te::IDs::PLUGIN)) && schema::isDeviceViewProperty (property))
            || (tree.hasType (schema::PHAZITE)
-               && (schema::isGridProperty (property) || property == schema::loopFollowsSong || property == schema::punch
-                   || property == schema::lastInput || property == schema::loop || property == schema::loopStart
-                   || property == schema::loopEnd || property == schema::playStart || property == schema::metronome))
+               && (schema::isGridProperty (property) || property == schema::nextID || property == schema::loopFollowsSong
+                   || property == schema::punch || property == schema::lastInput || property == schema::loop
+                   || property == schema::loopStart || property == schema::loopEnd || property == schema::playStart
+                   || property == schema::metronome))
            || isAutomatedValue (tree, property); // Tracktion writes it as the automation plays
 }
 

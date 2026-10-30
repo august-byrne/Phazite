@@ -59,15 +59,15 @@ namespace
         return state.isValid() ? te::findTrackForID (edit, toTracktion (getTrackID (state))) : nullptr;
     }
 
-    // A new track's element, of a kind, with an ID from the Edit's, as Tracktion's tracks get theirs while T1 lasts, and
-    // its fader's: a folder starts as a bus (design question 11).
+    // A new track's element, of a kind, with an ID of the song's (makeID()), and its fader's: a folder starts as a bus
+    // (design question 11).
     juce::ValueTree makeTrackState (te::Edit& edit, const char* kind, juce::Colour colour)
     {
         juce::ValueTree state (schema::TRACK);
-        state.setProperty (schema::trackID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+        state.setProperty (schema::trackID, (juce::int64) makeID (edit), nullptr);
         state.setProperty (schema::trackKind, kind, nullptr);
         state.setProperty (schema::trackColour, colour.toString(), nullptr);
-        state.setProperty (schema::channelFader, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+        state.setProperty (schema::channelFader, (juce::int64) makeID (edit), nullptr);
         return state;
     }
 
@@ -173,7 +173,7 @@ namespace
 
         for (auto child : copied)
             if (child.hasType (schema::CLIP))
-                child.setProperty (schema::clipID, (juce::int64) copy.edit.createNewItemID().getRawID(), nullptr);
+                child.setProperty (schema::clipID, (juce::int64) makeID (copy.edit), nullptr);
 
         if (auto* folder = dynamic_cast<const te::FolderTrack*> (&copy))
         {
@@ -340,9 +340,9 @@ void setTrackColour (te::Track& track, juce::Colour colour)
 te::AudioTrack* insertPlainTrack (te::Edit& edit, te::Track* after)
 {
     juce::ValueTree state (schema::TRACK);
-    state.setProperty (schema::trackID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    state.setProperty (schema::trackID, (juce::int64) makeID (edit), nullptr);
     state.setProperty (schema::trackKind, schema::trackIsTrack, nullptr);
-    state.setProperty (schema::channelFader, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    state.setProperty (schema::channelFader, (juce::int64) makeID (edit), nullptr);
     insertTrackState (edit, state, after);
     mirror::reconcileTracks (edit);
     return dynamic_cast<te::AudioTrack*> (findTrack (edit, state));
