@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Automation's Tracktion side (model/automation/AutomationModel.h), for the model, the app and tests: parameters by their
 // ParameterRefs, the points of a parameter's curve in beats, the lanes a track shows (Schema.h: PHAZITELANE), the selected
-// points as Tracktion's selection manager holds them, automation that keeps its beats when the tempo changes, the
+// points as Phazite's selection holds them, automation that keeps its beats when the tempo changes, the
 // watcher that remembers the parameter touched last and gives recorded automation an undo step of its own. Not for the
 // UI.
 #pragma once

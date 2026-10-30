@@ -33,7 +33,7 @@ using namespace tracktion::literals;
 namespace
 {
 constexpr float toleranceDb = 0.05f; // how far a level may be from the golden one
-constexpr float floorDb = -70.0f;    // a lower level counts as this (Tracktion's reverb stops below about -78 dBFS)
+constexpr float floorDb = -70.0f;    // a lower level counts as this: the fingerprints don't compare what is quieter
 constexpr int renderSampleRate = 44100;
 constexpr int fingerprintBlockSamples = 4410; // 100 ms
 constexpr int renderChannels = 2;

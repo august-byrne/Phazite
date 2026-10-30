@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The project context's Tracktion side (model/project/ProjectContext.h), for the model, the app and tests: the open
-// Edit, Tracktion's selection manager, which the model's commands act on, and the time range selected across tracks.
+// Edit, the selection, which the model's commands act on, and the time range selected across tracks.
 // Not for the UI.
 #pragma once
 

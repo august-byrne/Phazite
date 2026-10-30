@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the user has selected beyond Tracktion's selection manager (a time range across tracks), and the
-// commands that act on whatever is selected: delete, duplicate, select all and deselect all.
+// What the user has selected beyond Phazite's selection (model/base/internal/Selection.h): a time range across tracks;
+// and the commands that act on whatever is selected: delete, duplicate, select all and deselect all.
 #pragma once
 
 #include "model/base/internal/Selection.h"

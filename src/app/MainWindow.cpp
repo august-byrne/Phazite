@@ -111,7 +111,7 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     // Plug-in windows' menus save and load presets, and keep their key switches in the settings.
     setPluginWindowServices (&pluginWindowServices);
 
-    // The playlist's clips draw their waveforms with Tracktion's thumbnails.
+    // The playlist's clips draw their waveforms from Phazite's own cache of their files' levels (ClipWaveforms.h).
     ui::setClipWaveformMaker (getClipWaveformMaker());
 
     session.dialogParent = this;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SongSelection's Tracktion side (model/arrangement/SongSelection.h), for the model, the app and tests: one over
-// Tracktion's selection manager, which the model's commands act on. Not for the UI.
+// Phazite's selection (model/base/internal/Selection.h), which the model's commands act on. Not for the UI.
 #pragma once
 
 #include "model/base/internal/Selection.h"

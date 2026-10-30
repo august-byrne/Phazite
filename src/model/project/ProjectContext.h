@@ -79,7 +79,7 @@ public:
     void addListener (Listener*);
     void removeListener (Listener*);
 
-    struct Impl; // the open Edit, Tracktion's selection manager and the range selection (internal/ProjectContext.h)
+    struct Impl; // the open Edit, the selection and the range selection (internal/ProjectContext.h)
     Impl& getImpl() const noexcept { return *impl; }
 
 private:

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What is selected in the open project, by IDs, as the UI reads and changes it: tracks, clips, sections, notes,
 // automation points and devices. It is a view of the project's one selection (ProjectContext), which the model's
-// commands act on through Tracktion's selection manager behind it (internal/SongSelection.h). IDs of items that are gone
-// are ignored. Message thread only.
+// commands act on too (model/base/internal/Selection.h). IDs of items that are gone are ignored. Message thread only.
 #pragma once
 
 #include "model/automation/AutomationValues.h"
