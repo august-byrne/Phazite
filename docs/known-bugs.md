@@ -22,3 +22,20 @@ commit that fixes it. Races and allocations on the audio thread that Tracktion's
   `nextBlockStarted()`, before the play). `external/` is read-only, so report it upstream, or fork. A count-in hides it,
   as the block skipped is then silence before the count-in's first click. The recording tests start between beats until
   then (`tests/AudioRecordingTests.cpp`).
+
+## 5. A looped range and the play start drift off their beats when the tempo changes
+
+- **How it shows:** loop bars 5 to 9 on purpose, or put the playhead at a bar, then change the song's tempo: the clips
+  and the automation stay on their beats, but the loop and the play start don't; the loop then starts and ends between
+  beats, and Play starts somewhere else in the song. A loop that follows the song is set again, so it shows only for a
+  range looped on purpose.
+- **Why:** Tracktion keeps the loop range (in the transport's state) and the play start (`TransportControl::
+  startPosition`) in seconds, and a tempo change notifies only clips (`Edit::sendTempoOrPitchSequenceChangedUpdates()`).
+  `phazite::setTempo()` (`src/model/transport/Tempo.cpp`) keeps the automation, the clips that follow the tempo and the
+  patterns on their beats, but not those two. Found by the inventory for the plan to move off Tracktion (2026-10-30), in
+  the code, not yet reproduced by hand.
+- **How to fix:** in `setTempo()`, keep the loop range and the play start on their beats as the automation is kept
+  (`AutomationOnBeats`): read them in beats before the change and set them again after it, unless the loop follows the
+  song; with a test that changes the tempo under a looped range and checks the range in beats. Undoing a tempo change
+  must do the same. [tracktion-migration.md](tracktion-migration.md) (T1 and T2) puts the transport in beats, which ends
+  it for good.
