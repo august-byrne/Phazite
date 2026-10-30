@@ -34,6 +34,11 @@ public:
         auto& deviceManager = engine.getDeviceManager();
         auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
 
+        // As Tracktion's own test player does (tracktion_EnginePlayer.h): after a block that took longer to process than
+        // it lasts, as blocks can in a slow build (ThreadSanitizer's), Tracktion skips the next block, as when the computer
+        // can't keep up: what comes in then is lost, and nothing plays. These tests play as if it always kept up.
+        deviceManager.setCpuLimitBeforeMuting (1000.0);
+
         te::HostedAudioDeviceInterface::Parameters params;
         params.sampleRate = sampleRate;
         params.blockSize = blockSize;
@@ -82,6 +87,7 @@ public:
         deviceManager.closeDevices();
         deviceManager.removeHostedAudioDeviceInterface();
         deviceManager.deviceManager.closeAudioDevice();
+        deviceManager.setCpuLimitBeforeMuting (0.98); // Tracktion's own again
     }
 
     // Lets some time pass on the message thread, which delivers its messages and runs its timers meanwhile.
