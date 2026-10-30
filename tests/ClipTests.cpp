@@ -8,6 +8,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/transport/internal/Tempo.h"
@@ -559,7 +560,7 @@ TEST_CASE ("Draw places a copy of the clip used last, or a bar-long MIDI clip on
     phazite::deleteClips ({ &source }, false);
     CHECK (phazite::placeClip (*e.tracks[0], beats (4.0), used.get()) == nullptr);
 
-    e.tracks[0]->pluginList.insertPlugin (e.edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}), 0, nullptr);
+    phazite::insertDevice (*e.tracks[0], e.edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
     auto* empty = dynamic_cast<te::MidiClip*> (phazite::placeClip (*e.tracks[0], beats (4.0), used.get()));
     REQUIRE (empty != nullptr);
     CHECK (empty->getSequence().getNumNotes() == 0);

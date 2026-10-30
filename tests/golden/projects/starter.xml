@@ -301,6 +301,8 @@
                 start="15.5"
                 velocity="80"/>
         </CLIP>
+        <DEVICE id="1014"
+                type="phaziteDrums"/>
       </TRACK>
       <TRACK colour="ffe69f00"
              id="1011"
@@ -472,6 +474,8 @@
                 start="15.5"
                 velocity="100"/>
         </CLIP>
+        <DEVICE id="1068"
+                type="phaziteSynth"/>
       </TRACK>
     </TRACKS>
   </PHAZITE>

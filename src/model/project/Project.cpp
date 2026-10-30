@@ -38,9 +38,9 @@ namespace
     }
 
     // What every project has, added before the project watches for changes: Phazite's state with its tempo map and its track
-    // list, which Tracktion's tempo sequence, tracks, clips, automation and transport mirror (without the curves of devices
-    // gone, which no undo can bring back now), and the master's loudness meter. It isn't the user's change, so it is neither
-    // an undo step nor an unsaved change.
+    // list, which Tracktion's tempo sequence, tracks, clips, devices, automation and transport mirror (without the curves of
+    // devices gone, which no undo can bring back now), and the master's loudness meter. It isn't the user's change, so it
+    // is neither an undo step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
@@ -50,6 +50,7 @@ namespace
         getTrackList (edit);
         mirror::reconcileTracks (edit);
         mirror::reconcileClips (edit);
+        mirror::reconcileDevices (edit);
         forgetCurvesOfGoneDevices (edit);
         mirror::reconcileAutomation (edit);
         mirror::reconcileTransport (edit);

@@ -195,6 +195,25 @@ inline const juce::Identifier laneHeight { "height" };
 inline const juce::Identifier laneCollapsed { "collapsed" };
 
 //==============================================================================
+// The song's devices (model/mixer/internal/Mixer.h; docs/tracktion-migration.md, T1 step 5): each track's, a folder's (as a
+// bus) and the master's, in the order its sound goes through them, an instrument first, which Tracktion's devices mirror.
+// What each is set to is still in Tracktion's state while step 5 lasts, and the model makes a device in Tracktion as it
+// adds it to the song. song
+
+// Child of TRACK and of MASTER: a device. On DEVICE: its ID (DeviceID, its Tracktion plug-in's while T1 lasts); its type:
+// the typeID of one of Phazite's own (src/devices/<area>/: "phaziteEq"), deviceIsPlugin for a plug-in, or the type of one
+// of Tracktion's own, which only tests make; and deviceOff, bool, default false: it is switched off.
+inline const juce::Identifier DEVICE { "DEVICE" };
+inline const juce::Identifier deviceID { "id" };
+inline const juce::Identifier deviceType { "type" };
+inline constexpr const char* deviceIsPlugin = "plugin";
+inline const juce::Identifier deviceOff { "off" };
+
+// Child of TRACK and of MASTER, among its devices: a container of effects (model/mixer/internal/Containers.h), with its ID
+// and deviceOff, as a device has them. What it holds is still Tracktion's while step 5 lasts.
+inline const juce::Identifier CONTAINER { "CONTAINER" };
+
+//==============================================================================
 // The song's automation (model/automation/internal/Automation.h; docs/tracktion-migration.md, T1 step 4): each automated
 // parameter's curve, by its device and its own ID, with its points in beats. Tracktion's curves mirror them
 // (model/mirror/internal/Mirror.h). song

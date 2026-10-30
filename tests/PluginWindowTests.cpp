@@ -148,7 +148,7 @@ TEST_CASE ("A plug-in window's Send All Keys to the Plug-in is kept for the plug
     {
         auto other = phazite::createSongEdit (phazite::test::getEngine());
         const auto plugin = TestPlugin::create (*other);
-        te::getAudioTracks (*other)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+        phazite::insertDevice (*te::getAudioTracks (*other)[0], plugin);
         juce::Component otherEditor;
         phazite::test::TestWindow otherWindow { otherEditor, 300, 200 };
         studio.keys.watch (otherWindow);

@@ -10,6 +10,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/transport/internal/Capture.h"
@@ -39,7 +40,7 @@ std::shared_ptr<te::MidiInputDevice> waitForAllMidiInputs()
 
 void addInstrument (te::AudioTrack& track)
 {
-    track.pluginList.insertPlugin (track.edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}), 0, nullptr);
+    phazite::insertDevice (track, track.edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
 }
 
 } // namespace

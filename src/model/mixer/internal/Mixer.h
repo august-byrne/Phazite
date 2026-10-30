@@ -60,8 +60,24 @@ void removeDevice (te::Plugin&);
 // Moves a device to another place among its channel's devices, as one undo step.
 void moveDevice (te::Plugin&, int newIndex);
 
-// Turns a device on or off, as one undo step.
+// Turns a device on or off, as one undo step; and whether it is on.
 void setDeviceOn (te::Plugin&, bool on);
+bool isDeviceOn (const te::Plugin&);
+
+// The song's devices (Schema.h: DEVICE, CONTAINER; T1 step 5), which Tracktion's devices mirror
+// (model/mirror/internal/Mirror.h: reconcileDevices()): the element that holds a track's chain (its TRACK), or the
+// master's (MASTER) for nullptr, invalid for an Edit that isn't a song's; a chain's devices' elements, in order; a device's
+// element, invalid for one in a container (whose devices are still Tracktion's) or one that isn't the song's; the ID an
+// element names; and the element of a plug-in that the model has just made.
+juce::ValueTree findChainState (const te::Edit&, const te::Track*);
+std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
+juce::ValueTree findDeviceState (const te::Edit&, DeviceID);
+DeviceID getDeviceID (const juce::ValueTree& deviceState);
+juce::ValueTree makeDeviceState (const te::Plugin&);
+
+// After a track was copied (a folder with its tracks), the devices' elements in the copy of its element name the copy's
+// devices, which are where the original's are in its list.
+void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy);
 
 // Where a device's own window was last (docs/design.md, section 9): view state, written without an undo step, which the
 // project saves, so that the window opens there again. A save stores it too (model/devices/internal/DeviceStates.h),

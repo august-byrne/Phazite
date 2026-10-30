@@ -239,10 +239,15 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
 
     rack->rackName = name;
 
+    // Out of the song's chain, which the container takes their place in, and into the container, whose devices are still
+    // Tracktion's (T1, step 5).
     for (auto* device : grouped)
     {
         if (device->getSidechainSourceID().isValid())
             device->setSidechainSourceID ({});
+
+        if (auto state = findDeviceState (edit, getDeviceID (*device)); state.isValid())
+            state.getParent().removeChild (state, &edit.getUndoManager());
 
         storeDeviceState (*device);
         rack->addPlugin (device, { 0.5f, 0.5f }, false);
@@ -296,6 +301,9 @@ void ungroupContainer (te::RackInstance& container)
         device->removeFromParent();
         insertOnChannel (edit, track, device, index++);
     }
+
+    if (auto state = findDeviceState (edit, getDeviceID (container)); state.isValid())
+        state.getParent().removeChild (state, &edit.getUndoManager());
 
     container.deleteFromParent();
 }

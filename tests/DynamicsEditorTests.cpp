@@ -29,7 +29,7 @@ struct Song
     explicit Song (const char* typeID)
     {
         plugin = edit->getPluginCache().createNewPlugin (typeID, {});
-        te::getAudioTracks (*edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+        phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
         phazite::test::settle();
         edit->getUndoManager().clearUndoHistory();
     }

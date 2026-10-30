@@ -9,6 +9,7 @@
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Containers.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
 
@@ -159,11 +160,12 @@ namespace
     }
 
     // Each track's element in a copy of a track's, given the ID its copy in Tracktion has: the copy's tracks are in the
-    // same order as the original's. Its clips get IDs of their own, as copyClipState() gives a clip's copy, with the
-    // same notes, in the same alias group.
+    // same order as the original's, and its devices' elements name the copy's devices. Its clips get IDs of their own, as
+    // copyClipState() gives a clip's copy, with the same notes, in the same alias group.
     void giveCopiedIDs (juce::ValueTree& copied, const te::Track& copy)
     {
         copied.setProperty (schema::trackID, (juce::int64) copy.itemID.getRawID(), nullptr);
+        giveCopiedDeviceIDs (copied, copy);
 
         for (auto child : copied)
             if (child.hasType (schema::CLIP))

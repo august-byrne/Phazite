@@ -9,6 +9,7 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mirror/internal/Mirror.h"
 
 #include <optional>
 
@@ -76,6 +77,52 @@ namespace
         return devices;
     }
 
+    bool isDeviceState (const juce::ValueTree& state)
+    {
+        return state.hasType (schema::DEVICE) || state.hasType (schema::CONTAINER);
+    }
+
+    // The song's devices of a chain, as Tracktion's plug-ins in its list, in the song's order; Tracktion's list's own for an
+    // Edit that isn't a song's (a preview's).
+    juce::Array<te::Plugin*> getChainDevices (const te::PluginList& list, const juce::ValueTree& chain)
+    {
+        if (! chain.isValid())
+            return getDevicesIn (list);
+
+        juce::Array<te::Plugin*> devices;
+
+        for (const auto& state : getDeviceStates (chain))
+            for (auto* plugin : list)
+                if (getDeviceID (*plugin) == getDeviceID (state))
+                    devices.add (plugin);
+
+        return devices;
+    }
+
+    // Puts a device's element among a chain's, before the one at a place, or after the last.
+    void addDeviceState (te::Edit& edit, juce::ValueTree chain, const juce::ValueTree& device, int deviceIndex)
+    {
+        const auto devices = getDeviceStates (chain);
+        auto index = chain.getNumChildren();
+
+        if (juce::isPositiveAndBelow (deviceIndex, (int) devices.size()))
+            index = chain.indexOf (devices[(size_t) deviceIndex]);
+        else if (! devices.empty())
+            index = chain.indexOf (devices.back()) + 1;
+
+        chain.addChild (device, index, &edit.getUndoManager());
+    }
+
+    // Takes a device out of the song, and Tracktion's with it (in the caller's undo step).
+    void removeDeviceState (te::Plugin& device)
+    {
+        if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
+        {
+            state.getParent().removeChild (state, &device.edit.getUndoManager());
+            mirror::reconcileDevices (device.edit);
+        }
+    }
+
     // Where in a channel's plug-ins a device goes: before the device at that place among its devices, or else
     // after the last device (or after a return's input), so before the sends, the fader and the meters.
     int getInsertIndex (const te::PluginList& list, int deviceIndex)
@@ -94,13 +141,22 @@ namespace
         return index;
     }
 
+    // Adds a device to the song and makes it in Tracktion, which can't make a device from the song yet (T1, step 5).
     te::Plugin* insertInto (te::PluginList& list, const te::Plugin::Ptr& plugin, int deviceIndex)
     {
         if (plugin == nullptr)
             return nullptr;
 
-        list.insertPlugin (plugin, getInsertIndex (list, isInstrument (*plugin) ? 0 : deviceIndex), nullptr); // instruments come first
-        return list.contains (plugin.get()) ? plugin.get() : nullptr;
+        const auto index = isInstrument (*plugin) ? 0 : deviceIndex; // instruments come first
+        list.insertPlugin (plugin, getInsertIndex (list, index), nullptr);
+
+        if (! list.contains (plugin.get()))
+            return nullptr;
+
+        if (auto chain = findChainState (plugin->edit, list.getOwnerTrack()); chain.isValid())
+            addDeviceState (plugin->edit, chain, makeDeviceState (*plugin), index);
+
+        return plugin.get();
     }
 
     DeviceType makeBuiltIn (const juce::String& name, const juce::String& xmlType, bool instrument, const juce::String& maker)
@@ -149,12 +205,12 @@ bool isWindowOpen (const te::Plugin& device)
 
 juce::Array<te::Plugin*> getDevices (const te::Track& track)
 {
-    return getDevicesIn (track.pluginList);
+    return getChainDevices (track.pluginList, findChainState (track.edit, &track));
 }
 
 juce::Array<te::Plugin*> getMasterDevices (const te::Edit& edit)
 {
-    return getDevicesIn (edit.getMasterPluginList());
+    return getChainDevices (edit.getMasterPluginList(), findChainState (edit, nullptr));
 }
 
 te::Plugin* getInstrument (const te::Track& track)
@@ -190,7 +246,7 @@ te::Plugin* setInstrument (te::AudioTrack& track, const te::Plugin::Ptr& plugin)
         return nullptr;
 
     if (auto* old = getInstrument (track))
-        old->deleteFromParent();
+        removeDeviceState (*old);
 
     return insertInto (track.pluginList, plugin, 0);
 }
@@ -213,13 +269,12 @@ void removeDevice (te::Plugin& device)
     const UndoStep step (device.edit, "Remove " + device.getName());
     auto* folder = dynamic_cast<te::FolderTrack*> (device.getOwnerTrack());
 
-    // A container goes with its rack type, and the devices after a device in a container take its place.
-    if (auto* container = dynamic_cast<te::RackInstance*> (&device))
-        deleteContainer (*container);
-    else if (device.isInRack())
+    // A container goes with what it holds (its rack type stays: Containers.h), and the devices after a device in a
+    // container take its place.
+    if (device.isInRack())
         deleteFromContainer (device);
     else
-        device.deleteFromParent();
+        removeDeviceState (device);
 
     if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty()
         && ! findTrackState (*folder).getProperty (schema::folderBus, false))
@@ -229,21 +284,18 @@ void removeDevice (te::Plugin& device)
 void moveDevice (te::Plugin& device, int newIndex)
 {
     const UndoStep step (device.edit, "Move Device");
-    auto* list = device.getOwnerList();
+    auto state = findDeviceState (device.edit, getDeviceID (device));
 
-    if (list == nullptr)
+    if (! state.isValid())
         return;
 
-    // To the place of the device that is there now: after it when moving down, before it when moving up. Other
-    // plug-ins (such as sends) and clips can sit between devices in the track's state.
-    const auto devices = getDevicesIn (*list);
-
-    if (! devices.contains (&device))
-        return;
-
-    auto parent = device.state.getParent();
-    const auto& target = devices[juce::jlimit (0, devices.size() - 1, newIndex)]->state;
-    parent.moveChild (parent.indexOf (device.state), parent.indexOf (target), &device.edit.getUndoManager());
+    // To the place of the device that is there now: after it when moving down, before it when moving up. Clips, lanes
+    // and a folder's tracks can sit between devices in the track's element.
+    auto chain = state.getParent();
+    const auto devices = getDeviceStates (chain);
+    const auto& target = devices[(size_t) juce::jlimit (0, (int) devices.size() - 1, newIndex)];
+    chain.moveChild (chain.indexOf (state), chain.indexOf (target), &device.edit.getUndoManager());
+    mirror::reconcileDevices (device.edit);
 }
 
 juce::StringArray getKeyControls (te::Plugin& device, int maximum)
@@ -592,11 +644,97 @@ bool isPreFader (const te::AuxSendPlugin& send)
 
 void setDeviceOn (te::Plugin& device, bool on)
 {
-    if (device.isEnabled() == on)
+    if (isDeviceOn (device) == on)
         return;
 
     const UndoStep step (device.edit, on ? "Turn Device On" : "Turn Device Off");
-    device.setEnabled (on);
+
+    // A device in a container is still Tracktion's (T1, step 5).
+    if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
+    {
+        if (on)
+            state.removeProperty (schema::deviceOff, &device.edit.getUndoManager());
+        else
+            state.setProperty (schema::deviceOff, true, &device.edit.getUndoManager());
+
+        mirror::reconcileDevices (device.edit);
+    }
+    else
+    {
+        device.setEnabled (on);
+    }
+}
+
+bool isDeviceOn (const te::Plugin& device)
+{
+    if (const auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
+        return ! (bool) state[schema::deviceOff];
+
+    return device.isEnabled();
+}
+
+juce::ValueTree findChainState (const te::Edit& edit, const te::Track* track)
+{
+    return track != nullptr ? findTrackState (*track) : findPhaziteState (edit).getChildWithName (schema::MASTER);
+}
+
+std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain)
+{
+    std::vector<juce::ValueTree> devices;
+
+    for (const auto& child : chain)
+        if (isDeviceState (child))
+            devices.push_back (child);
+
+    return devices;
+}
+
+juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
+{
+    const auto findIn = [id] (const juce::ValueTree& chain)
+    {
+        for (const auto& state : getDeviceStates (chain))
+            if (getDeviceID (state) == id)
+                return state;
+
+        return juce::ValueTree();
+    };
+
+    for (const auto& track : getTrackStates (edit))
+        if (const auto found = findIn (track); found.isValid())
+            return found;
+
+    return findIn (findChainState (edit, nullptr));
+}
+
+DeviceID getDeviceID (const juce::ValueTree& deviceState)
+{
+    return DeviceID::fromRaw ((std::uint64_t) (juce::int64) deviceState[schema::deviceID]);
+}
+
+juce::ValueTree makeDeviceState (const te::Plugin& device)
+{
+    juce::ValueTree state (isContainer (device) ? schema::CONTAINER : schema::DEVICE);
+    state.setProperty (schema::deviceID, (juce::int64) device.itemID.getRawID(), nullptr);
+
+    // A plug-in is the one kind of device with a window of its own.
+    if (state.hasType (schema::DEVICE))
+        state.setProperty (schema::deviceType,
+                           opensWindow (device) ? juce::String (schema::deviceIsPlugin) : device.state[te::IDs::type].toString(), nullptr);
+
+    if (! device.isEnabled())
+        state.setProperty (schema::deviceOff, true, nullptr);
+
+    return state;
+}
+
+void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy)
+{
+    const auto devices = getDevicesIn (copy.pluginList); // Tracktion's copies, in the original's order
+    const auto states = getDeviceStates (copiedChain);
+
+    for (size_t i = 0; i < states.size() && (int) i < devices.size(); ++i)
+        juce::ValueTree (states[i]).setProperty (schema::deviceID, (juce::int64) devices[(int) i]->itemID.getRawID(), nullptr);
 }
 
 void rememberWindowPosition (te::Plugin& device, juce::Point<int> topLeft)

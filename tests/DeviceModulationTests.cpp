@@ -8,6 +8,7 @@
 #include "UiTestHelpers.h"
 #include "devices/modulation/Modulation.h"
 #include "model/devices/internal/DevicePlugin.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/project/internal/Project.h"
 
@@ -223,7 +224,7 @@ TEST_CASE ("What modulates each of the project's devices follows its modulation 
     auto* track = te::getAudioTracks (*edit)[0];
     te::Plugin::Ptr keep;
     auto& device = phazite::test::createTestDevice (*edit, TestGain::typeID, keep);
-    track->pluginList.insertPlugin (keep, 0, nullptr);
+    phazite::insertDevice (*track, keep);
     auto& gain = *device.findParameter ("gain");
 
     phazite::DeviceModulationKeeper keeper (*edit);

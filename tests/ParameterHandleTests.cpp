@@ -9,6 +9,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 
 namespace
@@ -16,7 +17,7 @@ namespace
 te::Plugin::Ptr addReverb (te::Edit& edit)
 {
     auto plugin = edit.getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {});
-    te::getAudioTracks (edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+    phazite::insertDevice (*te::getAudioTracks (edit)[0], plugin);
     return plugin;
 }
 } // namespace
@@ -30,7 +31,7 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     phazite::test::TestPlugin testPlugin;
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr plugin = phazite::test::TestPlugin::create (*edit);
-    te::getAudioTracks (*edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+    phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
     auto handle = phazite::makeParameterHandle (plugin.get(), phazite::test::TestPlugin::toneID);
 
     REQUIRE (handle.isValid());

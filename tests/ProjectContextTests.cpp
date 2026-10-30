@@ -177,7 +177,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
 
     // A track renamed and a device put on it at once: one notification of both.
     phazite::setTrackName (*track, "Bass");
-    track->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {}), 0, nullptr);
+    phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {}));
     phazite::test::dispatchPendingMessages();
     CHECK (view.heard.size() == 1);
     CHECK (hear() == "tracks devices");
@@ -185,9 +185,9 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     // Devices and tracks that change places.
     const auto delay = edit->getPluginCache().createNewPlugin (phazite::devices::Delay::typeID, {});
     REQUIRE (delay != nullptr);
-    track->pluginList.insertPlugin (delay, 0, nullptr);
+    phazite::insertDevice (*track, delay);
     CHECK (hear() == "devices");
-    track->state.moveChild (track->state.indexOf (delay->state), track->state.getNumChildren() - 1, nullptr);
+    phazite::moveDevice (*delay, 0);
     CHECK (hear() == "devices");
     phazite::ensureTracks (*edit, 2);
     CHECK (hear() == "tracks devices"); // a new track comes with its fader and meter
@@ -220,7 +220,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     delay->getAutomatableParameterByID ("feedback")->setParameter (0.7f, juce::sendNotification);
     track->getVolumePlugin()->volParam->setParameter (0.5f, juce::sendNotification);
     CHECK (hear().empty());
-    delay->setEnabled (false);
+    phazite::setDeviceOn (*delay, false);
     CHECK (hear() == "devices");
 
     // Changes not yet told are the closing project's: none come after another opens.

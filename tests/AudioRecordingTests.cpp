@@ -10,6 +10,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -176,7 +177,7 @@ TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is on
     // A track with an instrument plays what is played on MIDI instead.
     phazite::setTrackInput (context, track, "1");
     auto* audioTrack = te::getAudioTracks (*edit)[0];
-    audioTrack->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin ("phaziteSynth", {}), 0, nullptr);
+    phazite::insertDevice (*audioTrack, edit->getPluginCache().createNewPlugin ("phaziteSynth", {}));
     CHECK_FALSE (phazite::canRecordAudio (context, track));
     phazite::setArmed (context, track, true);
     CHECK_FALSE (phazite::isArmed (context, track));

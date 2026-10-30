@@ -11,6 +11,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
@@ -873,7 +874,7 @@ TEST_CASE ("A track without an instrument has an arm switch: with an input, a cl
     auto* arm = findArm (0);
     REQUIRE (arm != nullptr);
     CHECK (arm->isVisible());
-    screen.tracks[1]->pluginList.insertPlugin (screen.edit->getPluginCache().createNewPlugin ("phaziteSynth", {}), 0, nullptr);
+    phazite::insertDevice (*screen.tracks[1], screen.edit->getPluginCache().createNewPlugin ("phaziteSynth", {}));
     phazite::test::dispatchPendingMessages();
     REQUIRE (findArm (1) != nullptr);
     CHECK_FALSE (findArm (1)->isVisible());

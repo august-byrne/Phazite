@@ -10,6 +10,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
@@ -21,7 +22,7 @@ using phazite::devices::Equalizer;
 te::Plugin::Ptr addDevice (te::Edit& edit, const char* type)
 {
     auto plugin = edit.getPluginCache().createNewPlugin (type, {});
-    te::getAudioTracks (edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+    phazite::insertDevice (*te::getAudioTracks (edit)[0], plugin);
     return plugin;
 }
 } // namespace
@@ -43,7 +44,7 @@ TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
 
     // A plug-in isn't one of Phazite's devices.
     te::Plugin::Ptr plugin = phazite::test::TestPlugin::create (*edit);
-    te::getAudioTracks (*edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+    phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
     const auto notOurs = phazite::makeDeviceHandle (*plugin);
     CHECK_FALSE (notOurs.isValid());
     CHECK (notOurs.getInfo() == nullptr);

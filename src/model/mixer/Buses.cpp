@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Buses.h"
+#include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 
@@ -42,6 +43,12 @@ void makePlainFolder (te::FolderTrack& folder)
 
     auto* volume = folder.getVolumePlugin();
     const auto volumeDb = volume != nullptr ? volume->getVolumeDb() : 0.0f;
+
+    // Its devices go from the song too.
+    auto chain = findChainState (folder.edit, &folder);
+
+    for (const auto& state : getDeviceStates (chain))
+        chain.removeChild (state, &folder.edit.getUndoManager());
 
     for (auto* plugin : folder.pluginList.getPlugins()) // a copy that holds them while they are deleted
         plugin->deleteFromParent();

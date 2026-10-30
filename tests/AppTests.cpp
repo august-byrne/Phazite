@@ -507,8 +507,7 @@ TEST_CASE ("After a crash, Phazite asks how to open the last project, and can op
         juce::String error;
         auto project = phazite::Project::create (engine, projects, "Crashing", error);
         REQUIRE (project != nullptr);
-        te::getAudioTracks (project->getEdit())[0]->pluginList.insertPlugin (phazite::test::TestPlugin::create (project->getEdit()), 0,
-                                                                             nullptr);
+        phazite::insertDevice (*te::getAudioTracks (project->getEdit())[0], phazite::test::TestPlugin::create (project->getEdit()));
         REQUIRE (project->save().wasOk());
         file = project->getFile();
     }

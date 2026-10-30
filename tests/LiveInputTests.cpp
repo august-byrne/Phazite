@@ -9,6 +9,7 @@
 #include "model/base/internal/Selection.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 
 namespace
@@ -29,7 +30,7 @@ std::shared_ptr<te::MidiInputDevice> findAllMidiInputs()
 
 void addInstrument (te::AudioTrack& track)
 {
-    track.pluginList.insertPlugin (track.edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}), 0, nullptr);
+    phazite::insertDevice (track, track.edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
 }
 
 // Plays a note until it sounds as wanted, a few times at most, and says when it sounded the last time: Tracktion makes its
@@ -192,14 +193,14 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
 
     // A limiter on another track looks ahead, and delay compensation holds what is played back to match it...
     auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
-    tracks[1]->pluginList.insertPlugin (limiter, 0, nullptr);
+    phazite::insertDevice (*tracks[1], limiter);
     phazite::test::settle (500);
     const auto latency = juce::roundToInt (limiter->getLatencySeconds() * phazite::test::HostedDevice::sampleRate);
     REQUIRE (latency > 0);
     CHECK (playUntil (playNote, [&] (int samples) { return samples == atOnce + latency; }) == atOnce + latency);
 
     // ...but not once it is switched off.
-    limiter->setEnabled (false);
+    phazite::setDeviceOn (*limiter, false);
     phazite::test::settle (500);
     CHECK (playUntil (playNote, [atOnce] (int samples) { return samples == atOnce; }) == atOnce);
 }
@@ -215,7 +216,7 @@ TEST_CASE ("Low latency plays live notes without delay compensation, and back wi
     phazite::ensureTracks (*edit, 2);
     const auto tracks = te::getAudioTracks (*edit);
     addInstrument (*tracks[0]);
-    tracks[1]->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {}), 0, nullptr);
+    phazite::insertDevice (*tracks[1], edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {}));
     phazite::routeLiveMidiInput (*edit);
     edit->getTransport().ensureContextAllocated();
     phazite::test::settle (500);
@@ -266,7 +267,7 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
     SUBCASE ("With a limiter and a maximizer on the master")
     {
         for (const auto* type : { phazite::devices::Limiter::typeID, phazite::devices::Maximizer::typeID })
-            edit->getMasterPluginList().insertPlugin (edit->getPluginCache().createNewPlugin (type, {}), -1, nullptr);
+            phazite::insertMasterDevice (*edit, edit->getPluginCache().createNewPlugin (type, {}));
     }
 
     phazite::routeLiveMidiInput (*edit);
@@ -305,7 +306,7 @@ TEST_CASE ("Low latency leaves what renders play as the song has it")
         phazite::test::addMidiNote (*clip, note, te::BeatPosition(), te::BeatDuration::fromBeats (3.0), 120);
 
     auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
-    edit->getMasterPluginList().insertPlugin (limiter, 0, nullptr);
+    phazite::insertMasterDevice (*edit, limiter);
     limiter->getAutomatableParameterByID ("gain")->setParameter (12.0f, juce::sendNotification);
 
     const auto render = [&edit]

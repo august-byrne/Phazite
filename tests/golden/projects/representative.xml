@@ -87,7 +87,10 @@
     </CHORDLANE>
     <LASTKEY keyRoot="2"
              keyScale="minor"/>
-    <MASTER/>
+    <MASTER>
+      <DEVICE id="1051"
+              type="phaziteReverb"/>
+    </MASTER>
     <PIANOROLL gridAdaptive="0"
                gridOffset="0"
                gridSnap="1"
@@ -209,6 +212,10 @@
                   start="2"
                   velocity="70"/>
           </CLIP>
+          <DEVICE id="1022"
+                  type="phaziteSynth"/>
+          <DEVICE id="1023"
+                  type="phaziteReverb"/>
         </TRACK>
         <TRACK colour="ff009e73"
                id="1029"
@@ -246,7 +253,10 @@
              keyRoot="2"
              keyScale="minor"
              kind="return"
-             name="Reverb"/>
+             name="Reverb">
+        <DEVICE id="1044"
+                type="phaziteReverb"/>
+      </TRACK>
       <TRACK colour="ff0072b2"
              id="1052"
              keyRoot="2"
@@ -420,6 +430,8 @@
                 start="31"
                 velocity="88"/>
         </CLIP>
+        <DEVICE id="1055"
+                type="phaziteSynth"/>
       </TRACK>
     </TRACKS>
   </PHAZITE>

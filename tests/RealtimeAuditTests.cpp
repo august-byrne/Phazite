@@ -132,7 +132,7 @@ te::AudioTrack& getTrack (te::Edit& edit, int index)
 te::Plugin& addPlugin (te::Track& track, const juce::String& type)
 {
     auto plugin = track.edit.getPluginCache().createNewPlugin (type, {});
-    track.pluginList.insertPlugin (plugin, juce::jmax (0, track.pluginList.size() - 2), nullptr);
+    phazite::insertDevice (track, plugin);
     return *plugin;
 }
 

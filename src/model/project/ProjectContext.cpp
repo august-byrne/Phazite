@@ -88,6 +88,10 @@ namespace
                 if (te::Clip::isClipState (element) || element.hasType (schema::CLIP))
                     return add (pending.clips);
 
+                // The song's devices (T1, step 5), on a track's element or the master's.
+                if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER))
+                    return add (pending.devices);
+
                 // Devices, and containers' rack types (model/mixer/internal/Containers.h): their names and what they hold.
                 if (element.hasType (te::IDs::PLUGIN) || element.hasType (te::IDs::MASTERPLUGINS) || element.hasType (te::IDs::RACK))
                     return add (pending.devices);
@@ -126,7 +130,8 @@ namespace
                 add (pending.chords);
             else if (te::Clip::isClipState (child) || child.hasType (schema::CLIP))
                 add (pending.clips);
-            else if (child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK))
+            else if (child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK) || child.hasType (schema::DEVICE)
+                     || child.hasType (schema::CONTAINER))
                 add (pending.devices);
             else if (isTrackElement (child))
                 add (pending.tracks);
@@ -142,7 +147,8 @@ namespace
             // A device in a container moves with its place in the container's rack type.
             const auto moved = parent.getChild (newIndex);
             const auto isTrack = isTrackElement (moved);
-            const auto isDevice = moved.hasType (te::IDs::PLUGIN) || moved.hasType (te::IDs::PLUGININSTANCE);
+            const auto isDevice = moved.hasType (te::IDs::PLUGIN) || moved.hasType (te::IDs::PLUGININSTANCE)
+                                  || moved.hasType (schema::DEVICE) || moved.hasType (schema::CONTAINER);
 
             // The elements it passed: now between its new place and its old one.
             const auto first = newIndex < oldIndex ? newIndex + 1 : oldIndex;
@@ -155,7 +161,9 @@ namespace
                 if (isTrack && isTrackElement (passed))
                     return add (pending.tracks);
 
-                if (isDevice && (passed.hasType (te::IDs::PLUGIN) || passed.hasType (te::IDs::PLUGININSTANCE)))
+                if (isDevice
+                    && (passed.hasType (te::IDs::PLUGIN) || passed.hasType (te::IDs::PLUGININSTANCE) || passed.hasType (schema::DEVICE)
+                        || passed.hasType (schema::CONTAINER)))
                     return add (pending.devices);
             }
         }

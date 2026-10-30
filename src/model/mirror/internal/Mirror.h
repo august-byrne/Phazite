@@ -47,6 +47,12 @@ void reconcileAutomation (te::Edit&);
 // The same for one parameter's curve, after a change to it alone.
 void reconcileCurve (te::Edit&, const ParameterRef&);
 
+// The devices (model/mixer/internal/Mixer.h): each track's and the master's devices in Tracktion are the song's, in its
+// order, each switched on or off as the song says; Tracktion's devices that the song hasn't on that track go (a container
+// with what it holds, its rack type kept: model/mixer/internal/Containers.h). While step 5 lasts, the model makes a
+// device in Tracktion as it adds it to the song, and a container's devices are Tracktion's.
+void reconcileDevices (te::Edit&);
+
 // Only the switches Tracktion keeps outside its undo history (the tracks' mute, solo and solo isolation), and the write
 // modes, which Phazite sets outside it: after an undo or a redo (phazite::undo(), model/commands/internal/Undo.h), which
 // puts the document's back but not those, when a step changed them (a bounce mutes the track it rendered); and after a

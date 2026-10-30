@@ -76,7 +76,7 @@ DeviceSlot makeDeviceSlot (te::Plugin& device)
 {
     return { .id = getDeviceID (device),
              .name = device.getName(),
-             .isOn = device.isEnabled(),
+             .isOn = isDeviceOn (device),
              .hasMix = hasMix (device),
              .latencySeconds = device.getLatencySeconds(),
              .isContainer = isContainer (device),

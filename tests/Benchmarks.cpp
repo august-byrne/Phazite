@@ -299,7 +299,7 @@ TEST_CASE ("Benchmark: a live note's way through Tracktion" * doctest::test_suit
     auto edit = phazite::createSongEdit (engine);
     phazite::ensureTracks (*edit, 2);
     auto* track = te::getAudioTracks (*edit)[0];
-    track->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (dev::Synth::typeID, {}), 0, nullptr);
+    phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (dev::Synth::typeID, {}));
     phazite::routeLiveMidiInput (*edit);
     REQUIRE (phazite::getLiveMidiTrack (*edit) == track);
     edit->getTransport().ensureContextAllocated();
@@ -324,18 +324,18 @@ TEST_CASE ("Benchmark: a live note's way through Tracktion" * doctest::test_suit
 
     // A limiter on another track: delay compensation holds back the track played too.
     auto limiter = edit->getPluginCache().createNewPlugin (dev::Limiter::typeID, {});
-    te::getAudioTracks (*edit)[1]->pluginList.insertPlugin (limiter, 0, nullptr);
+    phazite::insertDevice (*te::getAudioTracks (*edit)[1], limiter);
     phazite::test::settle (500);
     playNote ("With a limiter on another track");
 
     // Switched off, the limiter delays nothing.
-    limiter->setEnabled (false);
+    phazite::setDeviceOn (*limiter, false);
     phazite::test::settle (500);
     playNote ("With that limiter switched off");
-    limiter->setEnabled (true);
+    phazite::setDeviceOn (*limiter, true);
 
     // A limiter on the master too.
-    edit->getMasterPluginList().insertPlugin (edit->getPluginCache().createNewPlugin (dev::Limiter::typeID, {}), 0, nullptr);
+    phazite::insertMasterDevice (*edit, edit->getPluginCache().createNewPlugin (dev::Limiter::typeID, {}));
     phazite::test::settle (500);
     playNote ("With a limiter on the master too");
 
@@ -361,10 +361,10 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
                 continue;
 
             auto& cache = edit->getPluginCache();
-            track->pluginList.insertPlugin (cache.createNewPlugin (dev::Synth::typeID, {}), 0, nullptr);
-            track->pluginList.insertPlugin (cache.createNewPlugin (dev::Equalizer::typeID, {}), 1, nullptr);
-            track->pluginList.insertPlugin (cache.createNewPlugin (dev::Compressor::typeID, {}), 2, nullptr);
-            track->pluginList.insertPlugin (cache.createNewPlugin (dev::Reverb::typeID, {}), 3, nullptr);
+            phazite::insertDevice (*track, cache.createNewPlugin (dev::Synth::typeID, {}));
+            phazite::insertDevice (*track, cache.createNewPlugin (dev::Equalizer::typeID, {}));
+            phazite::insertDevice (*track, cache.createNewPlugin (dev::Compressor::typeID, {}));
+            phazite::insertDevice (*track, cache.createNewPlugin (dev::Reverb::typeID, {}));
 
             // A chord on every beat for 32 beats.
             auto* clip = phazite::test::addMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (32.0) }, "Chords");
@@ -413,9 +413,9 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
     for (auto* track : te::getAudioTracks (edit))
     {
         auto& cache = edit.getPluginCache();
-        track->pluginList.insertPlugin (cache.createNewPlugin (dev::Synth::typeID, {}), 0, nullptr);
-        track->pluginList.insertPlugin (cache.createNewPlugin (dev::Equalizer::typeID, {}), 1, nullptr);
-        track->pluginList.insertPlugin (cache.createNewPlugin (dev::Compressor::typeID, {}), 2, nullptr);
+        phazite::insertDevice (*track, cache.createNewPlugin (dev::Synth::typeID, {}));
+        phazite::insertDevice (*track, cache.createNewPlugin (dev::Equalizer::typeID, {}));
+        phazite::insertDevice (*track, cache.createNewPlugin (dev::Compressor::typeID, {}));
         auto* clip = phazite::test::addMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (64.0) }, "Notes");
 
         for (int step = 0; step < 256; ++step)
@@ -546,7 +546,7 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     for (auto* track : te::getAudioTracks (*edit))
     {
         if (phazite::getInstrument (*track) == nullptr)
-            track->pluginList.insertPlugin (edit->getPluginCache().createNewPlugin (dev::Synth::typeID, {}), 0, nullptr);
+            phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (dev::Synth::typeID, {}));
 
         for (int c = 0; c < 16; ++c)
         {

@@ -4,8 +4,11 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -181,6 +184,81 @@ TEST_CASE ("A channel's devices by ID: its instrument, its effects in their orde
     CHECK (phazite::getInstrument (context, a)->name == juce::String ("Drum Sampler"));
     CHECK (phazite::addDeviceTo (context, {}, song.find ("phaziteReverb")));
     CHECK (namesOf (phazite::getEffects (context, {})).back() == juce::String ("Reverb"));
+}
+
+TEST_CASE ("A channel's devices are the song's, in order and on or off, which Tracktion's mirror one way, undo and redo too")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto& context = song.context;
+    auto& edit = *song.edit;
+    const auto a = idOf (*song.a);
+    phazite::chooseInstrument (context, a, song.find ("phaziteSynth"));
+    phazite::addEffect (context, a, song.find ("phaziteEq"));
+    phazite::addEffect (context, a, song.find ("phaziteCompressor"));
+    phazite::addEffect (context, {}, song.find ("phaziteLimiter"));
+
+    // The song's: a track's element holds its devices in order, the instrument first, by their IDs and types; the master's
+    // element its own. What Tracktion plays: the track's devices in its list, in order, each switched on or off.
+    const auto typesIn = [] (const juce::ValueTree& chain)
+    {
+        juce::StringArray types;
+
+        for (const auto& state : phazite::getDeviceStates (chain))
+            types.add (state[schema::deviceType].toString());
+
+        return types.joinIntoString (" ");
+    };
+
+    const auto played = [&song]
+    {
+        juce::StringArray names;
+
+        for (auto* plugin : song.a->pluginList)
+            if (phazite::isDevice (*plugin))
+                names.add (plugin->getName() + (plugin->isEnabled() ? "" : " (off)"));
+
+        return names.joinIntoString (", ");
+    };
+
+    const auto chain = phazite::findTrackState (*song.a);
+    CHECK (typesIn (chain) == "phaziteSynth phaziteEq phaziteCompressor");
+    CHECK (typesIn (phazite::findChainState (edit, nullptr)) == "phaziteLimiter");
+    CHECK (played() == "Synth, EQ, Compressor");
+    const auto effects = phazite::getEffects (context, a);
+    REQUIRE (effects.size() == 2);
+    CHECK (phazite::getDeviceID (phazite::getDeviceStates (chain)[1]) == effects[0].id);
+
+    // Switched off, moved and removed in the song, which Tracktion follows; undo and redo put both back.
+    const auto eq = effects[0].id, compressor = effects[1].id;
+    phazite::setDeviceOn (context, eq, false);
+    CHECK ((bool) phazite::findDeviceState (edit, eq)[schema::deviceOff]);
+    CHECK (played() == "Synth, EQ (off), Compressor");
+    phazite::moveEffect (context, eq, 1);
+    CHECK (typesIn (chain) == "phaziteSynth phaziteCompressor phaziteEq");
+    CHECK (played() == "Synth, Compressor, EQ (off)");
+    phazite::removeDevice (context, compressor);
+    CHECK (typesIn (chain) == "phaziteSynth phaziteEq");
+    CHECK (played() == "Synth, EQ (off)");
+
+    phazite::undo (edit);
+    CHECK (typesIn (chain) == "phaziteSynth phaziteCompressor phaziteEq");
+    CHECK (played() == "Synth, Compressor, EQ (off)");
+    phazite::undo (edit);
+    phazite::undo (edit);
+    CHECK (played() == "Synth, EQ, Compressor");
+    phazite::redo (edit);
+    CHECK (played() == "Synth, EQ (off), Compressor");
+
+    // One way: a device of Tracktion's that the song hasn't goes; once they agree, the mirror changes nothing.
+    song.a->pluginList.insertPlugin (edit.getPluginCache().createNewPlugin ("phaziteDelay", {}), 0, nullptr);
+    CHECK (played() == "Delay, Synth, EQ (off), Compressor");
+    phazite::mirror::reconcileDevices (edit);
+    CHECK (played() == "Synth, EQ (off), Compressor");
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileDevices (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
 }
 
 TEST_CASE ("A device's channel, its handle for an editor, and whether its controls open in a window of their own")

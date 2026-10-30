@@ -8,6 +8,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/EqEditor.h"
@@ -22,7 +23,7 @@ using Eq = phazite::devices::Equalizer;
 te::Plugin::Ptr addEq (te::Edit& edit)
 {
     auto plugin = edit.getPluginCache().createNewPlugin (Eq::typeID, {});
-    te::getAudioTracks (edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+    phazite::insertDevice (*te::getAudioTracks (edit)[0], plugin);
     return plugin;
 }
 

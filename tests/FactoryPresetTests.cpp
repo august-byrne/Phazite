@@ -26,6 +26,7 @@
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
 #include "model/project/internal/Project.h"
@@ -332,7 +333,7 @@ TEST_SUITE ("golden")
             else
                 CHECK_MESSAGE (differences.isEmpty(), differences.joinIntoString ("\n").toStdString());
 
-            device->deleteFromParent();
+            phazite::removeDevice (*device);
         }
     }
 }

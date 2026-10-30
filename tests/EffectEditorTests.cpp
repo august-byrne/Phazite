@@ -17,6 +17,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
@@ -40,7 +41,7 @@ struct Song
     explicit Song (const char* typeID)
     {
         plugin = edit->getPluginCache().createNewPlugin (typeID, {});
-        te::getAudioTracks (*edit)[0]->pluginList.insertPlugin (plugin, 0, nullptr);
+        phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
         phazite::test::settle();
         edit->getUndoManager().clearUndoHistory();
     }

@@ -4,6 +4,7 @@
 #include "TestHelpers.h"
 #include "devices/synth/Synth.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 
 using namespace tracktion::literals;
@@ -17,7 +18,7 @@ std::unique_ptr<te::Edit> createEditWithSynth (te::Engine& engine, const juce::F
     auto* track = te::getAudioTracks (*edit)[0];
 
     auto synth = edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {});
-    track->pluginList.insertPlugin (synth, 0, nullptr);
+    phazite::insertDevice (*track, synth);
 
     auto* clip = phazite::test::addMidiClip (*track, { 0_bp, 8_bp }, "Notes");
 
