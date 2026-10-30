@@ -11,6 +11,7 @@
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 
 #include <algorithm>
@@ -160,12 +161,13 @@ namespace
     }
 
     // Each track's element in a copy of a track's, given the ID its copy in Tracktion has: the copy's tracks are in the
-    // same order as the original's, and its devices', containers' and sends' elements name the copy's (mapCopiedDevices()).
+    // same order as the original's, and its devices', containers', sends', modulators' and macros' elements name the copy's.
     // Its clips get IDs of their own, as copyClipState() gives a clip's copy, with the same notes, in the same alias group.
     void giveCopiedIDs (juce::ValueTree& copied, const te::Track& copy, const te::EditItemID::IDMap& copiedDevices)
     {
         copied.setProperty (schema::trackID, (juce::int64) copy.itemID.getRawID(), nullptr);
         giveCopiedDeviceIDs (copied, copiedDevices);
+        giveCopiedModulatorIDs (copied, copiedDevices);
 
         for (auto child : copied)
             if (child.hasType (schema::CLIP))
@@ -779,6 +781,7 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
             const auto inContainers = copyContainers (*track, *copy);
             auto copiedDevices = inContainers;
             mapCopiedDevices (*track, *copy, copiedDevices);
+            mapCopiedModulators (*track, *copy, copiedDevices);
             auto copied = original.createCopy();
             giveCopiedIDs (copied, *copy, copiedDevices);
             auto parent = original.getParent();

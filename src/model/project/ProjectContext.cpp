@@ -66,8 +66,10 @@ namespace
                 if (element.hasType (te::IDs::AUTOMATIONCURVE) || element.hasType (schema::AUTOMATION))
                     return add (pending.automation);
 
-                // A track's modulators and macros, and what they modulate, in its devices' states.
-                if (element.hasType (te::IDs::MODIFIERS) || element.hasType (te::IDs::MACROPARAMETERS)
+                // A track's modulators and macros, and what they modulate: the song's (T1, step 6), and Tracktion's, in its
+                // devices' states.
+                if (element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO) || element.hasType (schema::MODULATES)
+                    || element.hasType (te::IDs::MODIFIERS) || element.hasType (te::IDs::MACROPARAMETERS)
                     || element.hasType (te::IDs::MODIFIERASSIGNMENTS))
                     return add (pending.modulation);
 
@@ -122,6 +124,8 @@ namespace
         {
             if (child.hasType (te::IDs::AUTOMATIONCURVE) || child.hasType (schema::AUTOMATION) || child.hasType (schema::CURVE))
                 add (pending.automation);
+            else if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO) || child.hasType (schema::MODULATES))
+                add (pending.modulation);
             else if (schema::isTrackViewElement (child))
                 add (pending.view);
             else if (child.hasType (schema::SECTIONS))
@@ -171,13 +175,14 @@ namespace
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
-            // makes one at each move (docs/performance-audit.md, U1); a channel's volume and pan, and a send's level, neither.
-            // Nor is where a device's window was, which no view shows.
+            // makes one at each move (docs/performance-audit.md, U1); a channel's volume and pan, a send's level and a
+            // macro's value neither. Nor is where a device's window was, which no view shows.
             if (isParameterValue (tree, property) || tree.hasType (schema::VALUES)
                 || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property))
                 || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
                     && (property == schema::channelVolume || property == schema::channelPan))
-                || (tree.hasType (schema::SEND) && property == schema::sendLevel))
+                || (tree.hasType (schema::SEND) && property == schema::sendLevel)
+                || (tree.hasType (schema::MACRO) && property == schema::macroValue))
                 return;
 
             // How tall a track shows, and the like, is view state (Schema.h), not the song.

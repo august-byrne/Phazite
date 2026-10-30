@@ -293,18 +293,23 @@ TEST_CASE ("A container is the song's, with its name, mix and devices, which Tra
     phazite::mirror::reconcileDevices (edit);
     CHECK (phazite::getRackDevices (*rack).size() == 2);
 
-    juce::ValueTree made (schema::CONTAINER), delay (schema::DEVICE);
+    juce::ValueTree made (schema::CONTAINER), delay (schema::DEVICE), macro (schema::MACRO);
     const auto madeID = DeviceID::fromRaw (edit.createNewItemID().getRawID());
     made.setProperty (schema::deviceID, (juce::int64) madeID.getRaw(), nullptr);
     made.setProperty (schema::containerName, "Echoes", nullptr);
     delay.setProperty (schema::deviceID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
     delay.setProperty (schema::deviceType, "phaziteDelay", nullptr);
     made.appendChild (delay, nullptr);
+    macro.setProperty (schema::modulatorID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    macro.setProperty (schema::macroName, "Space", nullptr);
+    made.appendChild (macro, nullptr);
     phazite::findTrackState (*song.b).appendChild (made, nullptr);
     phazite::mirror::reconcileDevices (edit);
     CHECK (song.effectNamesOf (*song.b) == std::vector<juce::String> { "EQ", "Echoes" });
     CHECK (song.namesOf (phazite::getContainerDevices (context, madeID)) == std::vector<juce::String> { "Delay" });
-    CHECK (phazite::getContainerMacros (context, madeID).size() == 8);
+    const auto macros = phazite::getContainerMacros (context, madeID);
+    REQUIRE (macros.size() == 1);
+    CHECK (macros[0].name == juce::String ("Space"));
 
     edit.getUndoManager().clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);

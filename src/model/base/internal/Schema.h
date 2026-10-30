@@ -276,6 +276,36 @@ inline const juce::Identifier sendLevel { "level" };
 inline const juce::Identifier sendPreFader { "preFader" };
 
 //==============================================================================
+// The song's modulation (model/modulation/internal/Modulation.h; docs/tracktion-migration.md, T1 step 6): each track's
+// modulators and macros, and a container's macros, with what each modulates, which Tracktion's modifiers, macro parameters
+// and their assignments mirror. song
+
+// Child of TRACK and of MASTER: a modulator, in their order. On MODULATOR: its ID (ModulatorID, its Tracktion modifier's
+// while T1 lasts); its type, one of preset::modulatorTypeNames ("lfo"); and deviceOff, true when it is switched off. Its
+// parameters' values set by hand are its VALUES, by the IDs Tracktion gives them ("rate"), as a device's are, none for one
+// never set; a step sequencer's steps are modulatorSteps: each step's value, -1 to 1, to a ten-thousandth, separated by
+// spaces, without the zeros at the end.
+inline const juce::Identifier MODULATOR { "MODULATOR" };
+inline const juce::Identifier modulatorID { "id" };
+inline const juce::Identifier modulatorType { "type" };
+inline const juce::Identifier modulatorSteps { "steps" };
+
+// Child of a track's TRACK and of a CONTAINER: a macro, in their order (Tracktion keeps a track's on tracks that hold
+// clips; a container has eight). On MACRO: its ID (ModulatorID, its Tracktion macro parameter's while T1 lasts); its name;
+// and its value, 0 to 1, none for 0.
+inline const juce::Identifier MACRO { "MACRO" };
+inline const juce::Identifier macroName { "name" };
+inline const juce::Identifier macroValue { "value" };
+
+// Child of MODULATOR and of MACRO: what it modulates, in the order its modulations were made. On MODULATES: the parameter,
+// by its device's ID as a curve names it (curveDevice: "1042") and its own ID; and the amount, -1 to 1, to a
+// ten-thousandth.
+inline const juce::Identifier MODULATES { "MODULATES" };
+inline const juce::Identifier modulatesDevice { "device" };
+inline const juce::Identifier modulatesParameter { "parameter" };
+inline const juce::Identifier modulatesAmount { "amount" };
+
+//==============================================================================
 // The song's automation (model/automation/internal/Automation.h; docs/tracktion-migration.md, T1 step 4): each automated
 // parameter's curve, by its device and its own ID, with its points in beats. Tracktion's curves mirror them
 // (model/mirror/internal/Mirror.h). song

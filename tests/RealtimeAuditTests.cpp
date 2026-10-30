@@ -550,9 +550,9 @@ TEST_SUITE ("realtime-audit")
         for (const auto& [beat, value] : { std::pair (0.0, 0.5f), std::pair (2.0, 0.8f), std::pair (4.0, 0.5f) })
             phazite::addPoint (*volume->volParam, { phazite::BeatPosition::fromBeats (beat), value, 0.0f });
 
-        auto lfo = track.getModifierList()->insertModifier (juce::ValueTree (te::IDs::LFO), -1, nullptr);
-        REQUIRE (lfo != nullptr);
-        volume->panParam->addModifier (*lfo, 0.5f, 0.0f, 0.0f);
+        const auto lfo = phazite::addModulator (track, phazite::ModulatorType::lfo);
+        REQUIRE (lfo.has_value());
+        phazite::setModulation (*lfo, *volume->panParam, 0.5f);
 
         const auto m = playAndMeasure (*edit);
         report ("Volume automation and an LFO on pan", m);
@@ -709,7 +709,7 @@ TEST_SUITE ("realtime-audit")
         const auto macro = phazite::getContainerMacros (*container)[0];
         phazite::setModulation ({ nullptr, macro }, *eq->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::gain)],
                                 0.5f);
-        macro->setParameter (0.7f, juce::sendNotification);
+        phazite::setDeviceValue (*macro, 0.7f);
         const auto lfo = phazite::addModulator (track, phazite::ModulatorType::lfo);
         REQUIRE (lfo.has_value());
         phazite::setModulation (*lfo, *compressor->getAutomatableParameterByID ("threshold"), 0.5f);

@@ -264,7 +264,7 @@ void setStep (ProjectContext& context, ModulatorID id, int index, float value)
             sequencer != nullptr && juce::isPositiveAndBelow (index, getNumSteps (*sequencer)))
         {
             const UndoStep step (sequencer->edit, "Change Step");
-            sequencer->setStep (index, juce::jlimit (-1.0f, 1.0f, value));
+            setModulatorStep (*modulator, index, value);
         }
     }
 }

@@ -293,7 +293,7 @@ namespace
         if (const auto name = preset[keys::name].toString(); name.isNotEmpty())
             renameMacro (*macro.macro, name);
 
-        macro.macro->setParameter (juce::jlimit (0.0f, 1.0f, (float) preset[keys::value]), juce::sendNotification);
+        setDeviceValue (*macro.macro, juce::jlimit (0.0f, 1.0f, (float) preset[keys::value]));
     }
 
     // What a modulator or a macro modulates, from a preset; find() gives a target's parameter.
@@ -371,14 +371,6 @@ namespace
             setChannelPan (track, (float) preset[keys::pan]);
     }
 
-    std::optional<ModulatorType> findModulatorType (const juce::String& name)
-    {
-        for (size_t i = 0; i < std::size (keys::modulatorTypeNames); ++i)
-            if (name == keys::modulatorTypeNames[i])
-                return (ModulatorType) i;
-
-        return {};
-    }
 } // namespace
 
 //==============================================================================
@@ -654,12 +646,11 @@ te::AudioTrack* addTrackFromPreset (te::Edit& edit, te::Track* after, const juce
             if (auto* values = modulator[keys::parameters].getDynamicObject())
                 for (const auto& [id, value] : values->getProperties())
                     if (auto parameter = added->modifier->getAutomatableParameterByID (id.toString()); parameter != nullptr)
-                        parameter->setParameter ((float) value, juce::sendNotification);
+                        setDeviceValue (*parameter, (float) value);
 
-            if (auto* sequencer = dynamic_cast<te::StepModifier*> (added->modifier.get()))
-                if (const auto* steps = modulator[keys::steps].getArray())
-                    for (int i = 0; i < steps->size(); ++i)
-                        sequencer->setStep (i, juce::jlimit (-1.0f, 1.0f, (float) steps->getReference (i)));
+            if (const auto* steps = modulator[keys::steps].getArray())
+                for (int i = 0; i < steps->size(); ++i)
+                    setModulatorStep (*added, i, (float) steps->getReference (i));
 
             applyModulations (*added, modulator, find);
         }

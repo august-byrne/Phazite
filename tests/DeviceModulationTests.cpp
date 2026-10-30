@@ -49,7 +49,9 @@ struct Modulated
 {
     Modulated()
     {
+        // On the track, as the song can modulate only what it holds.
         device = &phazite::test::createTestDevice (*edit, TestGain::typeID, keep);
+        REQUIRE (phazite::insertDevice (*te::getAudioTracks (*edit)[0], keep) != nullptr);
         lfo = phazite::addModulator (*te::getAudioTracks (*edit)[0], phazite::ModulatorType::lfo);
         REQUIRE (lfo.has_value());
 

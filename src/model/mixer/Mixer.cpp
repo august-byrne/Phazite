@@ -13,6 +13,7 @@
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/modulation/internal/Modulation.h"
 
 #include <optional>
 
@@ -823,13 +824,25 @@ juce::ValueTree makeDeviceState (te::Plugin& device)
             state.appendChild (sounds, nullptr);
     }
 
-    // A container: its name, its mix, and its devices in their order (a preset's, as it made them).
+    // A container: its name, its mix, its macros and its devices in their order (a preset's, as it made them).
     if (auto* rack = getContainerRack (device))
     {
         state.setProperty (schema::containerName, rack->rackName.get(), nullptr);
 
         if (const auto mix = getMix (device); mix < 1.0f)
             state.setProperty (schema::deviceMix, mix, nullptr);
+
+        for (auto* macro : getContainerMacros (device))
+        {
+            juce::ValueTree made (schema::MACRO);
+            made.setProperty (schema::modulatorID, (juce::int64) getModulatorID (*macro).getRaw(), nullptr);
+            made.setProperty (schema::macroName, macro->macroName.get(), nullptr);
+
+            if (const auto value = macro->getCurrentExplicitValue(); ! juce::exactlyEqual (value, 0.0f))
+                made.setProperty (schema::macroValue, value, nullptr);
+
+            state.appendChild (made, nullptr);
+        }
 
         for (auto* inside : getContainerDevices (device))
             state.appendChild (makeDeviceState (*inside), nullptr);
@@ -906,6 +919,25 @@ void setDeviceValue (te::AutomatableParameter& parameter, float value)
     {
         if (auto state = findSendState (*send); state.isValid())
             setChannelValue (state, schema::sendLevel, faderPositionToDecibels (stored), 0.0f, &send->edit.getUndoManager());
+    }
+    else if (auto* modifier = dynamic_cast<te::Modifier*> (&parameter.automatableEditElement))
+    {
+        // A modulator's, but its switch (setModulatorOn() in model/modulation/internal/Modulation.h).
+        if (auto state = findModulatorState (modifier->edit, getModulatorID (*modifier)); state.isValid() && parameter.paramID != "enabled")
+        {
+            auto* undo = &modifier->edit.getUndoManager();
+            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (parameter.paramID), stored, undo);
+        }
+    }
+    else if (auto* macro = dynamic_cast<te::MacroParameter*> (&parameter))
+    {
+        if (auto state = findModulatorState (macro->getEdit(), getModulatorID (*macro)); state.isValid())
+        {
+            if (juce::exactlyEqual (stored, 0.0f))
+                state.removeProperty (schema::macroValue, &macro->getEdit().getUndoManager());
+            else
+                state.setProperty (schema::macroValue, stored, &macro->getEdit().getUndoManager());
+        }
     }
     else if (auto* fader = parameter.getPlugin())
     {

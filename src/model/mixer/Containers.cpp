@@ -6,6 +6,7 @@
 #include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/modulation/internal/Modulation.h"
 
 #include <algorithm>
 
@@ -17,38 +18,6 @@ namespace
     juce::Array<te::Plugin*> getChannelDevices (te::Edit& edit, te::Track* track)
     {
         return track != nullptr ? getDevices (*track) : getMasterDevices (edit);
-    }
-
-    // What each of a track's modulators and macros, and those of the tracks in it, is in a copy of it: the one in the
-    // same place.
-    void mapModulators (const te::Track& original, const te::Track& copy, te::EditItemID::IDMap& map)
-    {
-        auto* originals = original.getModifierList();
-        auto* copies = copy.getModifierList();
-
-        if (originals != nullptr && copies != nullptr)
-        {
-            const auto from = originals->getModifiers(), to = copies->getModifiers();
-
-            for (int i = 0; i < from.size() && i < to.size(); ++i)
-                map[from[i]->itemID] = to[i]->itemID;
-        }
-
-        auto* originalTrack = dynamic_cast<const te::AudioTrack*> (&original);
-        auto* copiedTrack = dynamic_cast<const te::AudioTrack*> (&copy);
-
-        if (originalTrack != nullptr && copiedTrack != nullptr)
-        {
-            const auto from = originalTrack->getMacroParameters(), to = copiedTrack->getMacroParameters();
-
-            for (int i = 0; i < from.size() && i < to.size(); ++i)
-                map[te::EditItemID::fromID (from[i]->state)] = te::EditItemID::fromID (to[i]->state);
-        }
-
-        const auto originalTracks = original.getAllSubTracks (false), copiedTracks = copy.getAllSubTracks (false);
-
-        for (int i = 0; i < originalTracks.size() && i < copiedTracks.size(); ++i)
-            mapModulators (*originalTracks[i], *copiedTracks[i], map);
     }
 
     // Points what a state's devices are modulated by at other modulators.
@@ -107,14 +76,6 @@ namespace
 
         for (auto* inside : track.getAllSubTracks (false))
             copyContainersOf (*inside, modulators, devices);
-    }
-
-    // What a container's macros modulate: its devices' parameters.
-    void removeMacroModulations (te::RackType& rack)
-    {
-        for (auto* macro : rack.getMacroParameters())
-            for (auto* parameter : te::getAllParametersBeingModifiedBy (rack.edit, *macro))
-                parameter->removeModifier (*macro);
     }
 
     // The IDs of the rack types that containers in a saved state play.
@@ -257,6 +218,16 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
     juce::ValueTree container (schema::CONTAINER);
     container.setProperty (schema::deviceID, (juce::int64) id.getRaw(), nullptr);
     container.setProperty (schema::containerName, makeContainerName (edit), nullptr);
+
+    // Its eight macros, as addContainerMacros() gives a container: "Macro 1" to "Macro 8", each at 0.
+    for (int number = 1; number <= macrosPerContainer; ++number)
+    {
+        juce::ValueTree macro (schema::MACRO);
+        macro.setProperty (schema::modulatorID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+        macro.setProperty (schema::macroName, "Macro " + juce::String (number), nullptr);
+        container.appendChild (macro, nullptr);
+    }
+
     chain.addChild (container, chain.indexOf (first), undo);
 
     for (auto* device : grouped)
@@ -305,9 +276,8 @@ void ungroupContainer (te::RackInstance& container)
     if (container.type == nullptr || ! state.isValid())
         return;
 
-    // Without what its macros modulated (Tracktion's while T1 step 6 lasts), its devices' elements go back in its place,
-    // in their order, and it goes; the mirror moves Tracktion's devices out of its rack type.
-    removeMacroModulations (*container.type);
+    // Its devices' elements go back in its place, in their order, and it goes with its macros and what they modulated; the
+    // mirror moves Tracktion's devices out of its rack type, and takes away what its macros modulated.
     auto* undo = &edit.getUndoManager();
     auto chain = state.getParent();
     auto index = chain.indexOf (state);
@@ -530,7 +500,7 @@ void addContainerMacros (te::RackType& rack)
 te::EditItemID::IDMap copyContainers (const te::Track& original, te::Track& copy)
 {
     te::EditItemID::IDMap modulators, devices;
-    mapModulators (original, copy, modulators);
+    mapCopiedModulators (original, copy, modulators);
     copyContainersOf (copy, modulators, devices);
     return devices;
 }

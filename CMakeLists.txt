@@ -259,6 +259,7 @@ target_sources(phazite_core PRIVATE
     src/model/mirror/AutomationMirror.cpp
     src/model/mirror/ClipMirror.cpp
     src/model/mirror/DeviceMirror.cpp
+    src/model/mirror/ModulationMirror.cpp
     src/model/mirror/TempoMirror.cpp
     src/model/mirror/TrackMirror.cpp
     src/model/mirror/TransportMirror.cpp

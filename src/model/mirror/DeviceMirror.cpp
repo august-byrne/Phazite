@@ -229,8 +229,8 @@ namespace
     }
 
     // A container made as the song has it: a rack type of its own for the session (Containers.h), holding the song's
-    // devices (each found on the channel it is grouped from, or made), wired, with its name and eight macros (Tracktion's
-    // while T1 step 6 lasts); and Tracktion's container that plays it, with the song's ID, switch and mix.
+    // devices (each found on the channel it is grouped from, or made), wired, with its name (its macros follow:
+    // reconcileModulation()); and Tracktion's container that plays it, with the song's ID, switch and mix.
     te::Plugin::Ptr makeContainer (te::Edit& edit, te::PluginList& list, const juce::ValueTree& state)
     {
         const auto rack = addContainerRack (edit);
@@ -239,8 +239,6 @@ namespace
             return {};
 
         reconcileInside (edit, list, *rack, state);
-        addContainerMacros (*rack);
-
         auto container = te::RackInstance::create (*rack);
         toTracktion (getDeviceID (state)).writeID (container, nullptr);
 
@@ -489,5 +487,7 @@ void reconcileDevices (te::Edit& edit)
         reconcileChain (edit, edit.getMasterPluginList(), master);
         reconcileFader (edit.getMasterVolumePlugin().get(), master, defaultMasterVolume);
     }
+
+    reconcileModulation (edit);
 }
 } // namespace phazite::mirror

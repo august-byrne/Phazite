@@ -8,7 +8,9 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/modulation/internal/Modulation.h"
@@ -119,6 +121,70 @@ TEST_CASE ("A track's modulators and macros are added and removed, each one name
     CHECK (phazite::addModulator (context, idOf (*folder), ModulatorType::random).isValid());
     CHECK_FALSE (phazite::addModulator (context, idOf (*folder), ModulatorType::macro).isValid());
     CHECK (phazite::addModulator (context, phazite::getMasterTrack (context), ModulatorType::lfo).isValid());
+}
+
+TEST_CASE ("Modulators and macros are the song's, with what they modulate, which Tracktion's mirror one way")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto& context = song.context;
+    auto& edit = *song.edit;
+    const auto a = idOf (*song.a);
+
+    // The song's LFO: its kind, as Phazite starts one (both ways); its rate, its switch and what it modulates.
+    const auto lfo = phazite::addModulator (context, a, ModulatorType::lfo);
+    const auto element = phazite::findModulatorState (edit, lfo);
+    REQUIRE (element.isValid());
+    CHECK (element[schema::modulatorType].toString() == juce::String ("lfo"));
+    CHECK ((float) element.getChildWithName (schema::VALUES)["biopolar"] == doctest::Approx (1.0f));
+    CHECK (phazite::isBipolar (context, lfo));
+
+    phazite::getModulatorParameter (context, lfo, "rate").setValue (4.0f);
+    CHECK ((float) element.getChildWithName (schema::VALUES)["rate"] == doctest::Approx (4.0f));
+    phazite::setModulatorOn (context, lfo, false);
+    CHECK ((bool) element[schema::deviceOff]);
+    CHECK_FALSE (phazite::isModulatorOn (context, lfo));
+    phazite::setModulatorOn (context, lfo, true);
+    phazite::modulate (context, lfo, song.cutoff(), 0.5f);
+    const auto modulates = element.getChildWithName (schema::MODULATES);
+    CHECK (modulates[schema::modulatesParameter].toString() == juce::String ("cutoff"));
+    CHECK ((double) modulates[schema::modulatesAmount] == doctest::Approx (0.5));
+    CHECK (phazite::getModulations (context, song.cutoff()).size() == 1);
+    phazite::undo (edit);
+    CHECK_FALSE (element.getChildWithName (schema::MODULATES).isValid());
+    CHECK (phazite::getModulations (context, song.cutoff()).empty());
+    phazite::redo (edit);
+    CHECK (phazite::getModulations (context, song.cutoff()).size() == 1);
+
+    // A macro's name and value, and a step sequencer's steps, are the song's.
+    const auto macro = phazite::addModulator (context, a, ModulatorType::macro);
+    const auto macroElement = phazite::findModulatorState (edit, macro);
+    REQUIRE (macroElement.hasType (schema::MACRO));
+    phazite::renameMacro (context, macro, "Air");
+    CHECK (macroElement[schema::macroName].toString() == juce::String ("Air"));
+    phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id).setValue (0.25f);
+    CHECK ((float) macroElement[schema::macroValue] == doctest::Approx (0.25f));
+    const auto steps = phazite::addModulator (context, a, ModulatorType::steps);
+    phazite::setStep (context, steps, 1, 0.5f);
+    CHECK (phazite::getModulatorSteps (phazite::findModulatorState (edit, steps))[1] == doctest::Approx (0.5f));
+    CHECK (phazite::getSteps (context, steps)[1] == doctest::Approx (0.5f));
+
+    // One way: a modulator Tracktion lost is made again from the song, with its rate and what it modulates.
+    phazite::findModulator (edit, lfo)->modifier->remove();
+    CHECK (phazite::getModulations (context, song.cutoff()).empty());
+    phazite::mirror::reconcileModulation (edit);
+    REQUIRE (phazite::getModulations (context, song.cutoff()).size() == 1);
+    CHECK (phazite::getModulations (context, song.cutoff())[0].modulator == lfo);
+    CHECK (phazite::getModulatorParameter (context, lfo, "rate").getValue() == doctest::Approx (4.0f));
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileModulation (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+
+    // Removed, it goes from both, with what it modulates.
+    phazite::removeModulator (context, lfo);
+    CHECK_FALSE (phazite::findModulatorState (edit, lfo).isValid());
+    CHECK (phazite::getModulations (context, song.cutoff()).empty());
 }
 
 TEST_CASE ("A modulator modulates its track's parameters by an amount, each change one named undo step")

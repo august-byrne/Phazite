@@ -3,7 +3,7 @@
 // container is the song's (Schema.h: CONTAINER, with its name, mix and devices; T1 step 5d), which Tracktion mirrors
 // (model/mirror/internal/Mirror.h) as a rack instance on a channel, playing a rack type of its own (Tracktion plays every
 // instance of a type through one graph), which holds its devices in a row, wired one after the other (audio and MIDI),
-// and its eight macros (still Tracktion's: T1 step 6).
+// and its eight macros (the song's too: Schema.h MACRO, T1 step 6).
 //
 // Rack types stay in the Edit for the whole session, also once no container plays them, as Tracktion's own rack list
 // keeps them: Tracktion's plug-in cache keeps a container that was removed, to bring the same object back when the
@@ -87,7 +87,8 @@ void wireContainer (te::RackType&);
 juce::String makeContainerName (const te::Edit&);
 
 // A container's macros as a new container gets them: eight, "Macro 1" to "Macro 8", each at 0, so that what one
-// modulates doesn't move until it is turned. Joins the caller's step.
+// modulates doesn't move until it is turned (the song's containers get theirs in the song, from groupIntoContainer();
+// this gives a preset's container, made on no channel yet, its own). Joins the caller's step.
 void addContainerMacros (te::RackType&);
 
 // After a track was copied (a folder with its tracks): the copy's containers play rack types of their own, copies of the

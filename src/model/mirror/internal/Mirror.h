@@ -50,9 +50,16 @@ void reconcileCurve (te::Edit&, const ParameterRef&);
 // The devices (model/mixer/internal/Mixer.h): each track's and the master's devices in Tracktion are the song's, in its
 // order, each set as the song says, and its containers' devices in their rack types; Tracktion's devices that the song
 // hasn't on that track go (a container with what it still holds, its rack type kept: model/mixer/internal/Containers.h),
-// and those it has and Tracktion hasn't are made. Each channel's fader plays the song's volume and pan. While step 5
-// lasts, the model makes a device in Tracktion as it adds it to the song.
+// and those it has and Tracktion hasn't are made. Each channel's fader plays the song's volume and pan, its sends are the
+// song's, and each return has its input. The modulation follows (reconcileModulation()). While step 5 lasts, the model
+// makes a device in Tracktion as it adds it to the song.
 void reconcileDevices (te::Edit&);
+
+// The modulation (model/modulation/internal/Modulation.h): each track's and the master's modulators in Tracktion's
+// modifier lists, and each track's and container's macros, are the song's, in its order, each set as it has it (made, or
+// taken away with what it modulates); and what each modulates, by its amount: Tracktion's assignments, of which those of a
+// modulator or macro the song hasn't go.
+void reconcileModulation (te::Edit&);
 
 // Only the switches Tracktion keeps outside its undo history (the tracks' mute, solo and solo isolation), and the write
 // modes, which Phazite sets outside it: after an undo or a redo (phazite::undo(), model/commands/internal/Undo.h), which
