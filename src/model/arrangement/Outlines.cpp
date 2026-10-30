@@ -104,16 +104,15 @@ const Outline* findOutline (const juce::String& id)
 
 void applyOutline (te::Edit& edit, const Outline& outline)
 {
-    for (auto* section : getSections (edit))
-        section->removeFromParent();
+    removeSections (edit);
 
     const auto& tempo = edit.tempoSequence;
     auto bar = 0;
 
     for (const auto& section : outline.sections)
     {
-        const auto start = tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 });
-        const auto end = tempo.toBeats (te::tempo::BarsAndBeats { bar + section.bars, {}, 0 });
+        const auto start = fromTracktion (tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 }));
+        const auto end = fromTracktion (tempo.toBeats (te::tempo::BarsAndBeats { bar + section.bars, {}, 0 }));
         insertSection (edit, start, { section.name, end - start, section.role, section.tip, section.energy, section.colour });
         bar += section.bars;
     }
@@ -139,7 +138,7 @@ juce::String getAppliedOutline (const te::Edit& edit)
 
 bool isOutlineApplied (const te::Edit& edit, const juce::String& outlineID)
 {
-    return getAppliedOutline (edit) == outlineID && ! getSections (edit).isEmpty();
+    return getAppliedOutline (edit) == outlineID && ! getSections (edit).empty();
 }
 
 juce::String getOutlineCommandID (const juce::String& outlineID)

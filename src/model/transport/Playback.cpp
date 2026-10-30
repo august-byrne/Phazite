@@ -155,10 +155,10 @@ void loopSelection (te::Edit& edit, const RangeSelection& range)
         loopRange (edit, edit.tempoSequence.toTime (range.getRange()));
 }
 
-void loopSections (const juce::Array<te::ArrangerClip*>& sections)
+void loopSections (te::Edit& edit, const std::vector<Section>& sections)
 {
-    if (! sections.isEmpty())
-        loopRange (sections.getFirst()->edit, getSectionsTimeRange (sections));
+    if (! sections.empty())
+        loopRange (edit, edit.tempoSequence.toTime (toTracktion (getSectionsRange (sections))));
 }
 
 te::TimePosition getPlayStart (const te::Edit& edit)
@@ -373,13 +373,14 @@ void addLoopCommands (CommandRegistry& registry, Selection& selection, RangeSele
                     .perform = withEdit (selection, [&range] (te::Edit& edit) { loopSelection (edit, range); }),
                     .isEnabled = hasEdit });
 
-    registry.add ({ .id = "section.loop",
-                    .name = "Loop Section",
-                    .category = "Section",
-                    .description = "Loops the selected sections instead of the whole song.",
-                    .synonyms = { "repeat section", "cycle", "practice" },
-                    .perform = [&selection] { loopSections (getSelectedSections (selection)); },
-                    .isEnabled = [&selection] { return hasSelectedSections (selection); } });
+    registry.add (
+        { .id = "section.loop",
+          .name = "Loop Section",
+          .category = "Section",
+          .description = "Loops the selected sections instead of the whole song.",
+          .synonyms = { "repeat section", "cycle", "practice" },
+          .perform = withEdit (selection, [&selection] (te::Edit& edit) { loopSections (edit, getSelectedSections (selection)); }),
+          .isEnabled = [&selection] { return hasSelectedSections (selection); } });
 
     registry.add (
         { .id = "transport.loopSong",

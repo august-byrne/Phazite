@@ -137,16 +137,40 @@ inline bool isTrackViewElement (const juce::ValueTree& element)
 }
 
 //==============================================================================
-// On sections: Tracktion's arranger clips (ARRANGERCLIP). song
+// The song's sections (model/arrangement/internal/Sections.h; docs/design.md, section 6): named, colored parts of the
+// song over every track. song
 
-// What the section does in the song, such as "intro", "verse" or "drop", or none.
-inline const juce::Identifier phaziteRole { "phaziteRole" };
+// Child of PHAZITE, added with the first section: the sections (SECTION), in no particular order.
+inline const juce::Identifier SECTIONS { "SECTIONS" };
 
-// A one-line suggestion of what to put in the section, or none.
-inline const juce::Identifier phaziteTip { "phaziteTip" };
+// Child of SECTIONS: a section. Sections don't overlap.
+inline const juce::Identifier SECTION { "SECTION" };
 
-// float 0..1, default 0.5: how intense the section is, for the energy curve.
-inline const juce::Identifier phaziteEnergy { "phaziteEnergy" };
+// On SECTION. int64, more than 0: its ID (SectionID), which the Edit gives it as it gives its tracks and clips theirs, so
+// that no other item of the project has it. Tracktion's name for an item's ID, so that Tracktion counts it too.
+inline const juce::Identifier sectionID { "id" };
+
+// On SECTION. double, 0 or more: where it starts, in beats from the song's start.
+inline const juce::Identifier sectionStart { "start" };
+
+// On SECTION. double, more than 0: how long it lasts, in beats.
+inline const juce::Identifier sectionLength { "length" };
+
+// On SECTION: its name.
+inline const juce::Identifier sectionName { "name" };
+
+// On SECTION: what it does in the song, such as "intro", "verse" or "drop", or none.
+inline const juce::Identifier sectionRole { "role" };
+
+// On SECTION: a one-line suggestion of what to put in it, or none.
+inline const juce::Identifier sectionTip { "tip" };
+
+// On SECTION. double 0..1, default 0.5: how intense it is, for the energy curve.
+inline const juce::Identifier sectionEnergy { "energy" };
+
+// On SECTION, if it was given a color of its own: the color, as juce::Colour::toString() writes it. Without it, its
+// role's.
+inline const juce::Identifier sectionColour { "colour" };
 
 //==============================================================================
 // The chord lane (model/chords/ChordModel.h; docs/design.md, section 14): the song's chords, each a Roman numeral in the

@@ -42,10 +42,11 @@ struct Song
         REQUIRE (phazite::addNote (*first, 64, beats (1.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
         selection.setNoteClips ({ phazite::getClipID (*first) });
 
-        intro = phazite::insertSection (*edit, beats (0.0), { .name = "Intro", .length = te::BeatDuration::fromBeats (16.0) });
-        verse = phazite::insertSection (*edit, beats (16.0), { .name = "Verse", .length = te::BeatDuration::fromBeats (16.0) });
-        REQUIRE (intro != nullptr);
-        REQUIRE (verse != nullptr);
+        intro = phazite::insertSection (*edit, {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (16.0) });
+        verse = phazite::insertSection (*edit, phazite::BeatPosition::fromBeats (16.0),
+                                        { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
+        REQUIRE (intro.isValid());
+        REQUIRE (verse.isValid());
         edit->getUndoManager().clearUndoHistory();
     }
 
@@ -84,8 +85,7 @@ struct Song
     te::AudioTrack* b = nullptr;
     te::MidiClip* first = nullptr;
     te::MidiClip* second = nullptr;
-    te::ArrangerClip* intro = nullptr;
-    te::ArrangerClip* verse = nullptr;
+    phazite::SectionID intro, verse;
     phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
 };

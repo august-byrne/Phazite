@@ -312,13 +312,13 @@ TEST_CASE ("The playlist's sections, play start and time line by plain values")
     CHECK (phazite::getSongSections (context).empty());
     CHECK (phazite::getTimelineEnd (context).inBeats() == doctest::Approx (8.0)); // the clip's end
 
-    REQUIRE (phazite::insertSection (*song.edit, {}, { .name = "Intro", .length = te::BeatDuration::fromBeats (32.0) }) != nullptr);
+    REQUIRE (phazite::insertSection (*song.edit, {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (32.0) }).isValid());
     const auto sections = phazite::getSongSections (context);
     REQUIRE (sections.size() == 1);
     CHECK (sections[0].name == juce::String ("Intro"));
     CHECK (sections[0].range.getStart().inBeats() == doctest::Approx (0.0));
     CHECK (sections[0].range.getEnd().inBeats() == doctest::Approx (32.0));
-    CHECK (sections[0].colour == phazite::getSectionColour (*phazite::getSections (*song.edit).getFirst()));
+    CHECK (sections[0].colour == phazite::getRoleColour ({}));                     // without a role or a color of its own
     CHECK (phazite::getTimelineEnd (context).inBeats() == doctest::Approx (32.0)); // sections count, unlike for the song's end
 
     phazite::movePlayhead (*song.edit, song.edit->tempoSequence.toTime (te::BeatPosition::fromBeats (6.0)));

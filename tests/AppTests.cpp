@@ -134,7 +134,7 @@ TEST_CASE ("A new project starts as the new-project window chooses, with the com
     REQUIRE (edit != nullptr);
     CHECK (phazite::getTempo (*edit) == doctest::Approx (90.0));
     CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 6, 8 });
-    CHECK (phazite::getSections (*edit).size() == (int) phazite::findOutline ("hipHop")->sections.size());
+    CHECK (phazite::getSections (*edit).size() == phazite::findOutline ("hipHop")->sections.size());
 
     const auto tracks = te::getAudioTracks (*edit);
     REQUIRE (tracks.size() == 2);
@@ -165,7 +165,7 @@ TEST_CASE ("A new project starts as the new-project window chooses, with the com
     auto* plainEdit = getEdit (session.getContext());
     REQUIRE (plainEdit != nullptr);
     CHECK (phazite::getTempo (*plainEdit) == doctest::Approx (120.0));
-    CHECK (phazite::getSections (*plainEdit).isEmpty());
+    CHECK (phazite::getSections (*plainEdit).empty());
     CHECK (phazite::findSynthTrack (*plainEdit) == nullptr);
 }
 

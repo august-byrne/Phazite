@@ -54,16 +54,9 @@ namespace
         return clips;
     }
 
-    te::ArrangerClip* findSection (const ProjectContext& context, SectionID id)
+    SongSection makeSongSection (const Section& section)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::ArrangerClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
-    }
-
-    SongSection makeSection (te::ArrangerClip& section)
-    {
-        return { getSectionID (section),     section.getName(),       fromTracktion (section.getEditBeatRange()),
-                 getSectionColour (section), getSectionTip (section), getSectionEnergy (section) };
+        return { section.id, section.name, section.range, section.colour, section.tip, section.energy };
     }
 
     std::vector<ClipID> idsOf (const juce::Array<te::Clip*>& clips)
@@ -589,16 +582,17 @@ std::vector<SongSection> getSongSections (const ProjectContext& context)
     std::vector<SongSection> sections;
 
     if (auto* edit = getEdit (context))
-        for (auto* section : getSections (*edit))
-            sections.push_back (makeSection (*section));
+        for (const auto& section : getSections (*edit))
+            sections.push_back (makeSongSection (section));
 
     return sections;
 }
 
 std::optional<SongSection> getSongSection (const ProjectContext& context, SectionID id)
 {
-    if (auto* section = findSection (context, id))
-        return makeSection (*section);
+    if (auto* edit = getEdit (context))
+        if (const auto section = getSection (*edit, id))
+            return makeSongSection (*section);
 
     return {};
 }
@@ -606,50 +600,43 @@ std::optional<SongSection> getSongSection (const ProjectContext& context, Sectio
 SectionID addSectionAt (ProjectContext& context, BeatPosition beat)
 {
     auto* edit = getEdit (context);
-    auto* added = edit != nullptr ? addSectionAt (*edit, toTracktion (beat), &getSelection (context)) : nullptr;
-    return added != nullptr ? getSectionID (*added) : SectionID();
+    return edit != nullptr ? addSectionAt (*edit, beat, &getSelection (context)) : SectionID();
 }
 
 void renameSection (ProjectContext& context, SectionID id, const juce::String& name)
 {
-    if (auto* section = findSection (context, id))
-        renameSection (*section, name);
+    if (auto* edit = getEdit (context))
+        renameSection (*edit, id, name);
 }
 
 void setSectionColour (ProjectContext& context, SectionID id, juce::Colour colour)
 {
-    if (auto* section = findSection (context, id))
-        setSectionColour (*section, colour);
+    if (auto* edit = getEdit (context))
+        setSectionColour (*edit, id, colour);
 }
 
 std::vector<BeatPosition> getSectionBoundaries (const ProjectContext& context)
 {
-    std::vector<BeatPosition> boundaries;
-
-    if (auto* edit = getEdit (context))
-        for (const auto boundary : getSectionBoundaries (*edit))
-            boundaries.push_back (fromTracktion (boundary));
-
-    return boundaries;
+    auto* edit = getEdit (context);
+    return edit != nullptr ? getSectionBoundaries (*edit) : std::vector<BeatPosition>();
 }
 
 void moveSection (ProjectContext& context, SectionID id, BeatPosition destination)
 {
-    if (auto* section = findSection (context, id))
-        moveSection (*section, toTracktion (destination));
+    if (auto* edit = getEdit (context))
+        moveSection (*edit, id, destination);
 }
 
 SectionID copySection (ProjectContext& context, SectionID id, BeatPosition destination, bool asAliases)
 {
-    auto* section = findSection (context, id);
-    auto* copy = section != nullptr ? copySection (*section, toTracktion (destination), asAliases) : nullptr;
-    return copy != nullptr ? getSectionID (*copy) : SectionID();
+    auto* edit = getEdit (context);
+    return edit != nullptr ? copySection (*edit, id, destination, asAliases) : SectionID();
 }
 
 void resizeSection (ProjectContext& context, SectionID id, BeatDuration newLength, bool moveRest)
 {
-    if (auto* section = findSection (context, id))
-        resizeSection (*section, toTracktion (newLength), moveRest);
+    if (auto* edit = getEdit (context))
+        resizeSection (*edit, id, newLength, moveRest);
 }
 
 BeatPosition getPlayStartBeat (const ProjectContext& context)
@@ -665,7 +652,7 @@ BeatPosition getTimelineEnd (const ProjectContext& context)
     if (edit == nullptr)
         return {};
 
-    auto end = fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength())));
+    auto end = std::max (fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength()))), getSectionsEnd (*edit));
 
     for (const auto& chord : getLaneChords (*edit))
         end = std::max (end, chord.range.getEnd());

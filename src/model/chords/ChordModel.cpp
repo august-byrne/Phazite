@@ -181,18 +181,10 @@ std::optional<BeatRange> getSelectedSectionsRange (const ProjectContext& context
 
     const auto sections = getSelectedSections (getSelection (context));
 
-    if (sections.isEmpty())
+    if (sections.empty())
         return std::nullopt;
 
-    auto start = fromTracktion (sections.getFirst()->getStartBeat()), end = fromTracktion (sections.getFirst()->getEndBeat());
-
-    for (auto* section : sections)
-    {
-        start = std::min (start, fromTracktion (section->getStartBeat()));
-        end = std::max (end, fromTracktion (section->getEndBeat()));
-    }
-
-    return BeatRange (start, end);
+    return getSectionsRange (sections);
 }
 
 std::optional<BeatRange> getSelectedTimeRange (const ProjectContext& context)
@@ -212,7 +204,7 @@ std::optional<BeatRange> getWholeSongRange (const ProjectContext& context)
     if (edit == nullptr)
         return std::nullopt;
 
-    const auto end = fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength())));
+    const auto end = std::max (fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength()))), getSectionsEnd (*edit));
 
     if (end <= BeatPosition::fromBeats (tiny))
         return std::nullopt;

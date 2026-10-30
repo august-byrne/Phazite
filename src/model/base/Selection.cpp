@@ -83,9 +83,29 @@ te::Selectable* Selection::find (te::EditItemID id) const
     return te::findPluginForID (*in, id).get();
 }
 
+bool Selection::isThere (SectionID id) const
+{
+    auto* in = edit.get();
+
+    if (in == nullptr || ! id.isValid())
+        return false;
+
+    for (const auto& section : findPhaziteState (*in).getChildWithName (schema::SECTIONS))
+        if (te::EditItemID::fromVar (section[schema::sectionID]).getRawID() == id.getRaw())
+            return true;
+
+    return false;
+}
+
+bool Selection::holdsDevices() const
+{
+    return ! items.empty() && isDevice (find (items.front()));
+}
+
 void Selection::clearItems()
 {
     items.clear();
+    sections.clear();
 }
 
 bool Selection::clearNotesAndPoints()
@@ -110,9 +130,10 @@ void Selection::selectOnly (te::Selectable* item)
     if (! id.isValid())
         return;
 
-    if (items == std::vector { id } && notes.empty() && ! pointsParameter.isValid())
+    if (items == std::vector { id } && sections.empty() && notes.empty() && ! pointsParameter.isValid())
         return;
 
+    clearItems();
     clearNotesAndPoints();
     items = { id };
     changed();
@@ -127,8 +148,8 @@ void Selection::addToSelection (te::Selectable* item)
 
     // Devices are selected on their own: one added to a selection of anything else starts a new one, and so does anything
     // else added to a selection of devices.
-    if (! items.empty() && isDevice (find (items.front())) != isDevice (item))
-        items.clear();
+    if (isDevice (item) != holdsDevices())
+        clearItems();
 
     clearNotesAndPoints();
     items.push_back (id);
@@ -149,8 +170,8 @@ void Selection::deselect (te::Selectable* item)
 
 void Selection::deselectAll()
 {
-    const auto had = ! items.empty();
-    items.clear();
+    const auto had = ! items.empty() || ! sections.empty();
+    clearItems();
 
     if (clearNotesAndPoints() || had)
         changed();
@@ -164,10 +185,58 @@ int Selection::getNumObjectsSelected() const
         if (find (id) != nullptr)
             ++count;
 
+    for (const auto& id : sections)
+        if (isThere (id))
+            ++count;
+
     if (auto* in = edit.get(); in != nullptr && ! notes.empty())
         count += countNotesThere (*in, noteClips, notes);
 
     return count + (int) points.size();
+}
+
+//==============================================================================
+bool Selection::isSelected (SectionID id) const
+{
+    return std::find (sections.begin(), sections.end(), id) != sections.end() && isThere (id);
+}
+
+void Selection::selectOnly (SectionID id)
+{
+    if (! isThere (id))
+        return;
+
+    if (sections == std::vector { id } && items.empty() && notes.empty() && ! pointsParameter.isValid())
+        return;
+
+    clearItems();
+    clearNotesAndPoints();
+    sections = { id };
+    changed();
+}
+
+void Selection::addToSelection (SectionID id)
+{
+    if (! isThere (id) || std::find (sections.begin(), sections.end(), id) != sections.end())
+        return;
+
+    if (holdsDevices())
+        clearItems();
+
+    clearNotesAndPoints();
+    sections.push_back (id);
+    changed();
+}
+
+void Selection::deselect (SectionID id)
+{
+    const auto found = std::find (sections.begin(), sections.end(), id);
+
+    if (found == sections.end())
+        return;
+
+    sections.erase (found);
+    changed();
 }
 
 //==============================================================================
@@ -201,10 +270,10 @@ void Selection::selectNotes (const std::vector<NoteRef>& refs, bool addToSelecti
             && std::find (chosen.begin(), chosen.end(), ref) == chosen.end())
             chosen.push_back (ref);
 
-    if (chosen == notes && items.empty() && ! pointsParameter.isValid())
+    if (chosen == notes && items.empty() && sections.empty() && ! pointsParameter.isValid())
         return;
 
-    items.clear();
+    clearItems();
     pointsParameter = {};
     points.clear();
     notes = std::move (chosen);
@@ -230,10 +299,10 @@ void Selection::selectPoints (const ParameterRef& parameter, const std::vector<i
         return;
     }
 
-    if (parameter == pointsParameter && sorted == points && items.empty() && notes.empty())
+    if (parameter == pointsParameter && sorted == points && items.empty() && sections.empty() && notes.empty())
         return;
 
-    items.clear();
+    clearItems();
     notes.clear();
     pointsParameter = parameter;
     points = std::move (sorted);

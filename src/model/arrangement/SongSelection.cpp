@@ -32,14 +32,7 @@ namespace
     te::Clip* findClip (const Selection& manager, ClipID id)
     {
         auto* edit = manager.getEdit();
-        auto* clip = edit != nullptr && id.isValid() ? te::findClipForID (*edit, toTracktion (id)) : nullptr;
-        return dynamic_cast<te::ArrangerClip*> (clip) == nullptr ? clip : nullptr; // sections are arranger clips
-    }
-
-    te::ArrangerClip* findSection (const Selection& manager, SectionID id)
-    {
-        auto* edit = manager.getEdit();
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::ArrangerClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
+        return edit != nullptr && id.isValid() ? te::findClipForID (*edit, toTracktion (id)) : nullptr;
     }
 
     te::Plugin* findDevice (const Selection& manager, DeviceID id)
@@ -85,8 +78,8 @@ std::vector<SectionID> SongSelection::getSections() const
 {
     std::vector<SectionID> ids;
 
-    for (auto* section : getSelectedSections (impl->manager))
-        ids.push_back (getSectionID (*section));
+    for (const auto& section : getSelectedSections (impl->manager))
+        ids.push_back (section.id);
 
     return ids;
 }
@@ -105,8 +98,7 @@ bool SongSelection::isSelected (ClipID id) const
 
 bool SongSelection::isSelected (SectionID id) const
 {
-    auto* section = findSection (impl->manager, id);
-    return section != nullptr && impl->manager.isSelected (section);
+    return impl->manager.isSelected (id);
 }
 
 void SongSelection::selectOnly (TrackID id)
@@ -121,7 +113,7 @@ void SongSelection::selectOnly (ClipID id)
 
 void SongSelection::selectOnly (SectionID id)
 {
-    impl->manager.selectOnly (findSection (impl->manager, id));
+    impl->manager.selectOnly (id);
 }
 
 void SongSelection::add (TrackID id)
@@ -136,7 +128,7 @@ void SongSelection::add (ClipID id)
 
 void SongSelection::add (SectionID id)
 {
-    impl->manager.addToSelection (findSection (impl->manager, id));
+    impl->manager.addToSelection (id);
 }
 
 void SongSelection::remove (TrackID id)
@@ -151,7 +143,7 @@ void SongSelection::remove (ClipID id)
 
 void SongSelection::remove (SectionID id)
 {
-    impl->manager.deselect (findSection (impl->manager, id));
+    impl->manager.deselect (id);
 }
 
 void SongSelection::clear()

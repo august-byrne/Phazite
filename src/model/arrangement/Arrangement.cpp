@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Arrangement.h"
 #include "internal/Clips.h"
+#include "internal/Sections.h"
 #include "model/chords/internal/Chords.h"
 
 namespace phazite
@@ -10,31 +11,6 @@ namespace
     // Positions this close count as the same: rounding between beats and seconds leaves differences this small.
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
     const auto tinyTime = te::TimeDuration::fromSeconds (1.0e-6);
-
-    bool isSectionTrack (const te::ClipTrack& track)
-    {
-        return track.isArrangerTrack();
-    }
-
-    // The tracks whose clips are split where an edit cuts them: every clip track but the sections'.
-    juce::Array<te::ClipTrack*> getContentTracks (const te::Edit& edit)
-    {
-        juce::Array<te::ClipTrack*> tracks;
-
-        for (auto* track : te::getClipTracks (edit))
-            if (! isSectionTrack (*track))
-                tracks.add (track);
-
-        return tracks;
-    }
-
-    juce::Array<te::Clip*> getSectionClips (const te::Edit& edit)
-    {
-        if (auto* arranger = edit.getArrangerTrack())
-            return arranger->getClips();
-
-        return {};
-    }
 
     juce::Array<te::AutomatableParameter*> getAutomatedParameters (const te::Edit& edit)
     {
@@ -50,7 +26,7 @@ namespace
 
     void splitContentAt (te::Edit& edit, te::BeatPosition beat)
     {
-        for (auto* track : getContentTracks (edit))
+        for (auto* track : te::getClipTracks (edit))
             splitClips (juce::Array<te::Clip*> (track->getClips()), beat); // a copy: splitting adds clips to the list
     }
 
@@ -132,24 +108,15 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
     // stops at the first clip before the time, which misses clips when a split has left the list unsorted.)
     splitContentAt (edit, at);
 
-    for (auto* track : getContentTracks (edit))
+    for (auto* track : te::getClipTracks (edit))
         for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
             if (clip->getPosition().getStart() >= time - tinyTime)
                 clip->setStart (clip->getPosition().getStart() + timeLength, false, true);
 
-    for (auto* section : getSectionClips (edit))
-    {
-        const auto range = section->getEditTimeRange();
-
-        if (range.getStart() >= time - tinyTime)
-            section->setStart (range.getStart() + timeLength, false, true);
-        else if (range.getEnd() > time + tinyTime)
-            section->setEnd (range.getEnd() + timeLength, true); // the time is inside it
-    }
-
     for (auto* parameter : getAutomatedParameters (edit))
         parameter->getCurve().insertSpace (*parameter, time, timeLength);
 
+    insertSectionTime (edit, fromTracktion (at), fromTracktion (length));
     insertLaneTime (edit, fromTracktion (at), fromTracktion (length));
 
     if (! tempoFirst)
@@ -164,7 +131,7 @@ void removeTime (te::Edit& edit, te::BeatRange range)
     if (length <= tinyTime)
         return;
 
-    for (auto* track : getContentTracks (edit))
+    for (auto* track : te::getClipTracks (edit))
     {
         track->deleteRegion (time, nullptr); // trims and splits the clips that reach into it
 
@@ -178,30 +145,10 @@ void removeTime (te::Edit& edit, te::BeatRange range)
                 clip->setStart (clip->getPosition().getStart() - length, false, true);
     }
 
-    // Sections inside the range go; those that reach into it get shorter; those after it move back.
-    for (auto* section : juce::Array<te::Clip*> (getSectionClips (edit)))
-    {
-        const auto r = section->getEditTimeRange();
-        const auto start = r.getStart(), end = r.getEnd();
-
-        if (end <= time.getStart() + tinyTime)
-            continue; // before the range
-
-        if (start >= time.getEnd() - tinyTime)
-            section->setPosition ({ { start - length, end - length }, {} });
-        else if (start >= time.getStart() - tinyTime && end <= time.getEnd() + tinyTime)
-            section->removeFromParent();
-        else if (start < time.getStart() && end > time.getEnd())
-            section->setPosition ({ { start, end - length }, {} });
-        else if (start < time.getStart())
-            section->setPosition ({ { start, time.getStart() }, {} }); // its end was in the range
-        else
-            section->setPosition ({ { time.getStart(), end - length }, {} }); // its start was in the range
-    }
-
     for (auto* parameter : getAutomatedParameters (edit))
         parameter->getCurve().removeRegionAndCloseGap (*parameter, time, &edit.getUndoManager());
 
+    removeSectionTime (edit, fromTracktion (range));
     removeLaneTime (edit, fromTracktion (range));
 
     // Tempo and key changes last, as Tracktion's deleteRegionOfTracks() does.
@@ -267,6 +214,7 @@ void moveTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
     for (const auto& point : points)
         point.parameter->getCurve().addPoint (tempo.toTime (newPosition (point.beat)), point.value, point.curve, &undoManager);
 
+    moveSectionTime (edit, fromTracktion (range), fromTracktion (destination));
     moveLaneTime (edit, fromTracktion (range), fromTracktion (destination));
 }
 
@@ -297,9 +245,11 @@ void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
 
     addEdgePoints (edit, { start, end, destination });
     const auto points = getPointsIn (edit, range);
+    const auto sections = copySections (edit, fromTracktion (range));
     const auto chords = copyLaneChords (edit, fromTracktion (range));
 
     insertTime (edit, destination, length);
+    pasteSections (edit, sections, fromTracktion (destination));
     pasteLaneChords (edit, chords, fromTracktion (destination));
 
     for (const auto& source : sources)
@@ -309,16 +259,8 @@ void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
         if (track == nullptr)
             continue;
 
-        // A section is copied plainly; clips can be aliases.
-        te::Clip* copy = nullptr;
-
-        if (isSectionTrack (*track))
-            copy = te::duplicateClip (*source.clip).get();
-        else if (const auto copies = copyClips ({ source.clip.get() }, asAliases); ! copies.isEmpty())
-            copy = copies.getFirst();
-
-        if (copy != nullptr)
-            moveClip (*copy, destination + source.offset, *track);
+        if (const auto copies = copyClips ({ source.clip.get() }, asAliases); ! copies.isEmpty())
+            moveClip (*copies.getFirst(), destination + source.offset, *track);
     }
 
     auto& undoManager = edit.getUndoManager();

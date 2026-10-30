@@ -192,7 +192,7 @@ TEST_CASE ("A clip grows into the empty space after it only: never over the next
         REQUIRE (phazite::insertMidiClip (*other, { beats (8.0), beats (12.0) }, nullptr) != nullptr);
         phazite::SectionInfo drop;
         drop.name = "Drop";
-        REQUIRE (phazite::insertSection (*n.edit, beats (8.0), drop) != nullptr);
+        REQUIRE (phazite::insertSection (*n.edit, phazite::BeatPosition::fromBeats (8.0), drop).isValid());
         n.add (60, 9.0, 0.5);
         CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (12.0));
     }

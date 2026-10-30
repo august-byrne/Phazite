@@ -143,9 +143,9 @@ void deleteSelection (Selection& selection, const RangeSelection& range, bool cl
     }
 
     // Sections go with what is in them, and the rest of the song closes up.
-    if (const auto sections = getSelectedSections (selection); ! sections.isEmpty())
+    if (const auto sections = getSelectedSections (selection); ! sections.empty())
     {
-        deleteSections (sections);
+        deleteSections (*edit, getIDs (sections));
         return;
     }
 
@@ -193,9 +193,9 @@ void duplicateSelection (Selection& selection, RangeSelection& range, bool asAli
     }
 
     // Sections, with what is in them, and clips go right after themselves.
-    if (const auto sections = getSelectedSections (selection); ! sections.isEmpty())
+    if (const auto sections = getSelectedSections (selection); ! sections.empty())
     {
-        duplicateSections (sections, asAliases, &selection);
+        duplicateSections (*edit, getIDs (sections), asAliases, &selection);
         return;
     }
 
@@ -312,7 +312,7 @@ juce::String describeSelection (const Selection& selection, const RangeSelection
         return verb + " Range";
 
     if (const auto sections = getSelectedSections (selection).size(); sections > 0)
-        return describe (sections, "Section");
+        return describe ((int) sections, "Section");
 
     if (const auto clips = getSelectedClips (selection).size(); clips > 0)
         return describe (clips, "Clip");

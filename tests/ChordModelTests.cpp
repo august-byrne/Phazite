@@ -320,9 +320,9 @@ TEST_CASE ("Parts made from the chords go where the selection says: a time range
     CHECK (phazite::getChordPartRange (song.context) == beats (4.0, 20.0));
     CHECK (phazite::canMakeChordPart (song.context));
 
-    auto* section = phazite::insertSection (*song.edit, te::BeatPosition::fromBeats (8.0),
-                                            { .name = "Verse", .length = te::BeatDuration::fromBeats (8.0) });
-    REQUIRE (section != nullptr);
+    const auto section = phazite::insertSection (*song.edit, phazite::BeatPosition::fromBeats (8.0),
+                                                 { .name = "Verse", .length = phazite::BeatDuration::fromBeats (8.0) });
+    REQUIRE (section.isValid());
     phazite::getSelection (song.context).selectOnly (section);
     CHECK (phazite::getSelectedSectionsRange (song.context) == beats (8.0, 16.0));
     CHECK (phazite::getChordPartRange (song.context) == beats (8.0, 16.0));

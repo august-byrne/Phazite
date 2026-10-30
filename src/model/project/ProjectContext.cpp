@@ -67,7 +67,7 @@ namespace
                 if (schema::isTrackViewElement (element))
                     return add (pending.view);
 
-                if (element.hasType (te::IDs::ARRANGERCLIP))
+                if (element.hasType (schema::SECTIONS))
                     return add (pending.sections);
 
                 if (element.hasType (schema::CHORDLANE))
@@ -108,7 +108,7 @@ namespace
                 add (pending.automation);
             else if (schema::isTrackViewElement (child))
                 add (pending.view);
-            else if (child.hasType (te::IDs::ARRANGERCLIP))
+            else if (child.hasType (schema::SECTIONS))
                 add (pending.sections);
             else if (child.hasType (schema::CHORDLANE))
                 add (pending.chords);

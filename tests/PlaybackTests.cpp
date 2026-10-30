@@ -224,10 +224,12 @@ TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, s
 
     // Loop Section: from the first selected section's start to the last one's end.
     CHECK_FALSE (song.registry.invoke ("section.loop"));
-    auto* verse = phazite::insertSection (*song.edit, beats (8.0), { .name = "Verse", .length = te::BeatDuration::fromBeats (8.0) });
-    auto* chorus = phazite::insertSection (*song.edit, beats (16.0), { .name = "Chorus", .length = te::BeatDuration::fromBeats (8.0) });
-    REQUIRE (verse != nullptr);
-    REQUIRE (chorus != nullptr);
+    const auto verse = phazite::insertSection (*song.edit, phazite::BeatPosition::fromBeats (8.0),
+                                               { .name = "Verse", .length = phazite::BeatDuration::fromBeats (8.0) });
+    const auto chorus = phazite::insertSection (*song.edit, phazite::BeatPosition::fromBeats (16.0),
+                                                { .name = "Chorus", .length = phazite::BeatDuration::fromBeats (8.0) });
+    REQUIRE (verse.isValid());
+    REQUIRE (chorus.isValid());
     song.selection.selectOnly (verse);
     song.selection.addToSelection (chorus);
     REQUIRE (song.registry.invoke ("section.loop"));
@@ -303,9 +305,9 @@ TEST_CASE ("The song ends with the bar its last clip ends in, and its sections d
     CHECK (songEnd() == "0.000");                // without clips it ends where it starts,
     CHECK (song.getSongLoop() == "0.000-2.000"); // though it loops its first bar
 
-    // An outline runs on past what is in it so far: Tracktion's length counts its sections; the song's end doesn't.
+    // An outline runs on past what is in it so far: its sections end with its last bar; the song's end doesn't.
     REQUIRE (phazite::applyOutline (*song.edit, "rock")); // 96 bars
-    CHECK (song.edit->getLength().inSeconds() == doctest::Approx (192.0));
+    CHECK (phazite::getSectionsEnd (*song.edit).inBeats() == doctest::Approx (384.0));
     CHECK (songEnd() == "0.000");
     CHECK (song.getSongLoop() == "0.000-2.000");
 
@@ -367,14 +369,17 @@ TEST_CASE ("The loop's functions")
     CHECK (song.getLoop() == "0.000-4.000");
 
     // Around sections, from the earliest start to the latest end; without sections, the loop stays.
-    auto* first = phazite::insertSection (*song.edit, beats (0.0), { .name = "A", .length = te::BeatDuration::fromBeats (4.0) });
-    auto* third = phazite::insertSection (*song.edit, beats (8.0), { .name = "C", .length = te::BeatDuration::fromBeats (4.0) });
-    REQUIRE (first != nullptr);
-    REQUIRE (third != nullptr);
-    phazite::loopSections ({ third, first });
+    const auto first = phazite::getSection (
+        *song.edit, phazite::insertSection (*song.edit, {}, { .name = "A", .length = phazite::BeatDuration::fromBeats (4.0) }));
+    const auto third =
+        phazite::getSection (*song.edit, phazite::insertSection (*song.edit, phazite::BeatPosition::fromBeats (8.0),
+                                                                 { .name = "C", .length = phazite::BeatDuration::fromBeats (4.0) }));
+    REQUIRE (first.has_value());
+    REQUIRE (third.has_value());
+    phazite::loopSections (*song.edit, { *third, *first });
     CHECK (song.getLoop() == "0.000-6.000");
     CHECK_FALSE (phazite::isLoopingSong (*song.edit));
-    phazite::loopSections ({});
+    phazite::loopSections (*song.edit, {});
     CHECK (song.getLoop() == "0.000-6.000");
 }
 

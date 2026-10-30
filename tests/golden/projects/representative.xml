@@ -80,6 +80,30 @@
                gridSnap="1"
                gridStep="1/2 beat"
                gridTriplets="1"/>
+    <SECTIONS>
+      <SECTION energy="0.25"
+               id="1011"
+               length="8"
+               name="Intro"
+               role="intro"
+               start="0"
+               tip="Set the mood."/>
+      <SECTION colour="fff0e442"
+               energy="0.9"
+               id="1012"
+               length="16"
+               name="Drop"
+               role="drop"
+               start="8"
+               tip="Everything at once."/>
+      <SECTION energy="0.1"
+               id="1013"
+               length="8"
+               name="Outro"
+               role="outro"
+               start="24"
+               tip="Let it fade."/>
+    </SECTIONS>
   </PHAZITE>
   <PITCHSEQUENCE>
     <PITCH pitch="60"
@@ -96,35 +120,7 @@
              startBeat="0"/>
   </TEMPOSEQUENCE>
   <ARRANGERTRACK id="1006"
-                 name="Arranger">
-    <ARRANGERCLIP colour="ff999999"
-                  id="1011"
-                  length="4"
-                  name="Intro"
-                  offset="0"
-                  phaziteEnergy="0.25"
-                  phaziteRole="intro"
-                  phaziteTip="Set the mood."
-                  start="0"/>
-    <ARRANGERCLIP colour="fff0e442"
-                  id="1012"
-                  length="8"
-                  name="Drop"
-                  offset="0"
-                  phaziteEnergy="0.9"
-                  phaziteRole="drop"
-                  phaziteTip="Everything at once."
-                  start="4"/>
-    <ARRANGERCLIP colour="ff999999"
-                  id="1013"
-                  length="4"
-                  name="Outro"
-                  offset="0"
-                  phaziteEnergy="0.1"
-                  phaziteRole="outro"
-                  phaziteTip="Let it fade."
-                  start="12"/>
-  </ARRANGERTRACK>
+                 name="Arranger"/>
   <CHORDTRACK id="1008"
               name="Chord"/>
   <MARKERTRACK id="1002"

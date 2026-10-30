@@ -98,9 +98,6 @@ juce::Array<te::Clip*> getSelectedClips (const Selection& selection)
     if (edit == nullptr)
         return {};
 
-    // Sections are arranger clips, with edits of their own (Sections.h).
-    clips.removeIf ([] (te::Clip* clip) { return dynamic_cast<te::ArrangerClip*> (clip) != nullptr; });
-
     const auto tracks = getPlaylistTracks (*edit);
     std::stable_sort (clips.begin(), clips.end(),
                       [&tracks] (te::Clip* a, te::Clip* b)

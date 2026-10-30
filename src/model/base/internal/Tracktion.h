@@ -50,9 +50,10 @@ te::EditItemID toTracktion (ItemID<Kind> id)
     return te::EditItemID::fromRawID (id.getRaw());
 }
 
-te::EditItemID toTracktion (NoteID) = delete; // a note's ID is Phazite's, not one of Tracktion's (model/notes/internal/Notes.h)
+te::EditItemID toTracktion (NoteID) = delete;    // a note's ID is Phazite's, not one of Tracktion's (model/notes/internal/Notes.h)
+te::EditItemID toTracktion (SectionID) = delete; // a section is Phazite's own, not one of Tracktion's items (Sections.h)
 
-// An item's ID: a track's, a clip's, a section's (an arranger clip's) or a device's.
+// An item's ID: a track's, a clip's or a device's. A section's is in Phazite's own state (model/arrangement/internal/Sections.h).
 inline TrackID getTrackID (const te::Track& track)
 {
     return TrackID::fromRaw (track.itemID.getRawID());
@@ -61,11 +62,6 @@ inline TrackID getTrackID (const te::Track& track)
 inline ClipID getClipID (const te::Clip& clip)
 {
     return ClipID::fromRaw (clip.itemID.getRawID());
-}
-
-inline SectionID getSectionID (const te::Clip& section)
-{
-    return SectionID::fromRaw (section.itemID.getRawID());
 }
 
 inline DeviceID getDeviceID (const te::Plugin& device)

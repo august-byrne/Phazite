@@ -30,8 +30,8 @@ public:
     te::Edit* getEdit() const noexcept { return edit.get(); } // none once it is deleted
 
     //==============================================================================
-    // Tracks (folders too), clips, sections (Tracktion's arranger clips) and devices (plug-ins, containers), as Tracktion's
-    // objects: what the model's commands act on. Anything else is never selected.
+    // Tracks (folders too), clips and devices (plug-ins, containers), as Tracktion's objects: what the model's commands act
+    // on. Anything else of Tracktion's is never selected.
     bool isSelected (const te::Selectable*) const;
     void selectOnly (te::Selectable*);
     void addToSelection (te::Selectable*);
@@ -42,6 +42,14 @@ public:
     void deselect (te::Selectable& item) { deselect (&item); }
     void deselectAll();
     int getNumObjectsSelected() const; // of every kind still there, notes and points included
+
+    //==============================================================================
+    // Sections, which the project keeps itself (model/arrangement/internal/Sections.h), by their IDs: with tracks and
+    // clips, and without devices, as tracks and clips are.
+    bool isSelected (SectionID) const;
+    void selectOnly (SectionID);
+    void addToSelection (SectionID);
+    void deselect (SectionID);
 
     // Those of a type still there, in the order they were selected.
     template <typename Type>
@@ -83,14 +91,17 @@ public:
 private:
     te::SafeSelectable<te::Edit> edit;
     std::vector<te::EditItemID> items;
+    std::vector<SectionID> sections;
     std::vector<ClipID> noteClips;
     std::vector<NoteRef> notes;
     ParameterRef pointsParameter;
     std::vector<int> points;
 
     te::Selectable* find (te::EditItemID) const; // a track, a clip or a device of the Edit, or nullptr
-    void clearItems();                           // without telling
-    bool clearNotesAndPoints();                  // without telling; whether there were any
+    bool isThere (SectionID) const;
+    bool holdsDevices() const;
+    void clearItems();          // tracks, clips, devices and sections, without telling
+    bool clearNotesAndPoints(); // without telling; whether there were any
     void changed() { sendChangeMessage(); }
 
     JUCE_DECLARE_NON_COPYABLE (Selection)

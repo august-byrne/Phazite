@@ -323,7 +323,7 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
         INFO (error.toStdString());
         REQUIRE (project != nullptr);
         CHECK (phazite::getAppliedOutline (project->getEdit()) == juce::String ("pop"));
-        CHECK_FALSE (phazite::getSections (project->getEdit()).isEmpty());
+        CHECK_FALSE (phazite::getSections (project->getEdit()).empty());
     }
 
     // It is opened from its save: Tracktion put what was added in order while loading, and nothing of it is an undo step
@@ -568,10 +568,11 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (isUnsavedChange ([t] { t->state.setProperty (schema::phaziteKeyScale, "lydian", nullptr); }));
     CHECK (isUnsavedChange ([f] { f->state.setProperty (schema::phaziteBus, true, nullptr); }));
 
-    auto* section = phazite::insertSection (reopened, {}, { .name = "Verse", .length = te::BeatDuration::fromBeats (16.0) });
-    REQUIRE (section != nullptr);
-    CHECK (isUnsavedChange ([section] { section->state.setProperty (schema::phaziteRole, "chorus", nullptr); }));
-    CHECK (isUnsavedChange ([section] { section->state.setProperty (schema::phaziteEnergy, 0.9f, nullptr); }));
+    REQUIRE (phazite::insertSection (reopened, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) }).isValid());
+    auto section = phazite::findPhaziteState (reopened).getChildWithName (schema::SECTIONS).getChild (0);
+    REQUIRE (section.isValid());
+    CHECK (isUnsavedChange ([&section] { section.setProperty (schema::sectionRole, "chorus", nullptr); }));
+    CHECK (isUnsavedChange ([&section] { section.setProperty (schema::sectionEnergy, 0.9f, nullptr); }));
 }
 
 TEST_CASE ("Saving stores plug-ins' own settings, without an undo step")

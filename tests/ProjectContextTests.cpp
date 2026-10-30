@@ -104,24 +104,24 @@ TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
     // Clips by theirs, left to right; a section is no clip.
     auto* later = phazite::insertMidiClip (*tracks[0], { te::BeatPosition::fromBeats (8.0), te::BeatPosition::fromBeats (12.0) }, nullptr);
     auto* earlier = phazite::insertMidiClip (*tracks[0], { te::BeatPosition::fromBeats (0.0), te::BeatPosition::fromBeats (4.0) }, nullptr);
-    auto* section = phazite::insertSection (*edit, {}, { .name = "Verse", .length = te::BeatDuration::fromBeats (16.0) });
+    const auto section = phazite::insertSection (*edit, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
     REQUIRE (later != nullptr);
     REQUIRE (earlier != nullptr);
-    REQUIRE (section != nullptr);
+    REQUIRE (section.isValid());
     selection.selectOnly (phazite::getClipID (*later));
     selection.add (phazite::getClipID (*earlier));
     CHECK (selection.getClips() == std::vector<phazite::ClipID> { phazite::getClipID (*earlier), phazite::getClipID (*later) });
     CHECK (selection.isSelected (phazite::getClipID (*later)));
     CHECK_FALSE (selection.isSelected (second));
-    CHECK_FALSE (selection.isSelected (phazite::ClipID::fromRaw (phazite::getSectionID (*section).getRaw())));
+    CHECK_FALSE (selection.isSelected (phazite::ClipID::fromRaw (section.getRaw())));
 
-    selection.selectOnly (phazite::getSectionID (*section));
-    CHECK (selection.getSections() == std::vector<phazite::SectionID> { phazite::getSectionID (*section) });
+    selection.selectOnly (section);
+    CHECK (selection.getSections() == std::vector<phazite::SectionID> { section });
     CHECK (selection.getClips().empty());
 
     // An ID of nothing, or of something gone, does nothing.
     selection.selectOnly (phazite::TrackID());
-    CHECK (selection.isSelected (phazite::getSectionID (*section)));
+    CHECK (selection.isSelected (section));
     selection.clear();
     CHECK (selection.getSections().empty());
     setEdit (context, nullptr);
@@ -198,11 +198,11 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     clip->getSequence().addNote (60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
     CHECK (hear() == "clips");
 
-    // A section; and the tempo, which moves the clips and sections in time.
-    REQUIRE (phazite::insertSection (*edit, {}, { .name = "Verse", .length = te::BeatDuration::fromBeats (16.0) }) != nullptr);
+    // A section; and the tempo, which moves the clips in time (Tracktion keeps them in seconds; sections are in beats).
+    REQUIRE (phazite::insertSection (*edit, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) }).isValid());
     CHECK (juce::String (hear()).contains ("sections"));
     edit->tempoSequence.getTempo (0)->setBpm (100.0);
-    CHECK (hear() == "clips sections tempo");
+    CHECK (hear() == "clips tempo");
 
     // What Tracktion writes as it plays is no change to the song; view state, such as how tall a track shows, is a group of
     // its own. Where a device's window was shows in no view: a window moved doesn't make the mixer show its devices again.

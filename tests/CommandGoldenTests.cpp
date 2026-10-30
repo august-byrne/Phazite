@@ -12,6 +12,7 @@
 #include "app/AppCommands.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
@@ -119,19 +120,15 @@ juce::String describeNotes (const std::vector<phazite::NoteData>& notes)
     return juce::String ((int) notes.size()) + (notes.size() == 1 ? " note (" : " notes (") + described.joinIntoString (", ") + ")";
 }
 
-// What is selected, in the order it was selected, and the time range: "selected: track One, track Two", or
-// "selected: nothing".
+// What is selected: tracks and clips in the order they were selected, then sections in the song's order, then notes;
+// and the time range: "selected: track One, track Two", or "selected: nothing".
 juce::String describeSelected (const phazite::Selection& selection, const phazite::RangeSelection& range)
 {
     juce::StringArray items;
 
     for (auto* selected : selection.getItemsOfType<te::Selectable>())
     {
-        if (auto* section = dynamic_cast<te::ArrangerClip*> (selected))
-        {
-            items.add ("section " + section->getName());
-        }
-        else if (auto* clip = dynamic_cast<te::Clip*> (selected))
+        if (auto* clip = dynamic_cast<te::Clip*> (selected))
         {
             auto* clipTrack = clip->getTrack();
             items.add ("clip on " + (clipTrack != nullptr ? clipTrack->getName() : juce::String ("no track")) + " at "
@@ -146,6 +143,9 @@ juce::String describeSelected (const phazite::Selection& selection, const phazit
             items.add ("other: " + selected->getSelectableDescription());
         }
     }
+
+    for (const auto& section : phazite::getSelectedSections (selection))
+        items.add ("section " + section.name);
 
     if (const auto notes = phazite::getNoteData (phazite::getSelectedNotes (selection)); ! notes.empty())
         items.add (describeNotes (notes));

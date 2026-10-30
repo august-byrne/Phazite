@@ -7,100 +7,194 @@
 #include "model/commands/internal/Undo.h"
 
 #include <algorithm>
-#include <vector>
+#include <cmath>
 
 namespace phazite
 {
 namespace
 {
-    const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
+    const auto tiny = BeatDuration::fromBeats (1.0e-6);
 
-    te::BeatRange getRange (const te::Clip& section)
+    juce::UndoManager* getUndo (te::Edit& edit)
     {
-        return { section.getStartBeat(), section.getEndBeat() };
+        return &edit.getUndoManager();
+    }
+
+    juce::ValueTree findSectionsState (const te::Edit& edit)
+    {
+        return findPhaziteState (edit).getChildWithName (schema::SECTIONS);
+    }
+
+    // The SECTIONS element, added if the song has none yet.
+    juce::ValueTree getSectionsState (te::Edit& edit)
+    {
+        auto phazite = getPhaziteState (edit);
+        auto sections = phazite.getChildWithName (schema::SECTIONS);
+
+        if (! sections.isValid())
+        {
+            sections = juce::ValueTree (schema::SECTIONS);
+            phazite.appendChild (sections, getUndo (edit));
+        }
+
+        return sections;
+    }
+
+    SectionID getID (const juce::ValueTree& state)
+    {
+        return SectionID::fromRaw (te::EditItemID::fromVar (state[schema::sectionID]).getRawID());
+    }
+
+    // A new ID from the Edit's, which no track, clip or other section of it has, even after an undo.
+    SectionID giveNewID (te::Edit& edit, juce::ValueTree& state)
+    {
+        const auto id = edit.createNewItemID();
+        state.setProperty (schema::sectionID, id.toVar(), nullptr);
+        return SectionID::fromRaw (id.getRawID());
+    }
+
+    BeatRange getRange (const juce::ValueTree& state)
+    {
+        const auto start = BeatPosition::fromBeats (state[schema::sectionStart]);
+        return { start, start + BeatDuration::fromBeats (state[schema::sectionLength]) };
+    }
+
+    void setRange (juce::ValueTree& state, BeatRange range, juce::UndoManager* undo)
+    {
+        state.setProperty (schema::sectionStart, range.getStart().inBeats(), undo);
+        state.setProperty (schema::sectionLength, range.getLength().inBeats(), undo);
+    }
+
+    // The sections' elements, in song order.
+    std::vector<juce::ValueTree> getSectionStates (const te::Edit& edit)
+    {
+        std::vector<juce::ValueTree> states;
+
+        for (const auto& state : findSectionsState (edit))
+            if (state.hasType (schema::SECTION))
+                states.push_back (state);
+
+        std::stable_sort (states.begin(), states.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+                          { return getRange (a).getStart() < getRange (b).getStart(); });
+        return states;
+    }
+
+    juce::ValueTree findSectionState (const te::Edit& edit, SectionID id)
+    {
+        if (id.isValid())
+            for (const auto& state : findSectionsState (edit))
+                if (state.hasType (schema::SECTION) && getID (state) == id)
+                    return state;
+
+        return {};
+    }
+
+    Section makeSection (const juce::ValueTree& state)
+    {
+        Section section;
+        section.id = getID (state);
+        section.range = getRange (state);
+        section.name = state[schema::sectionName].toString();
+        section.role = state[schema::sectionRole].toString();
+        section.tip = state[schema::sectionTip].toString();
+        section.energy = juce::jlimit (0.0f, 1.0f, (float) static_cast<double> (state.getProperty (schema::sectionEnergy, 0.5)));
+        section.colour = state.hasProperty (schema::sectionColour) ? juce::Colour::fromString (state[schema::sectionColour].toString())
+                                                                   : getRoleColour (section.role);
+        return section;
     }
 
     // The section that starts at a beat, other than one to leave out.
-    te::ArrangerClip* findSectionStartingAt (const te::Edit& edit, te::BeatPosition beat, const te::Clip* except)
+    SectionID findSectionStartingAt (const te::Edit& edit, BeatPosition beat, SectionID except)
     {
-        for (auto* section : getSections (edit))
-            if (section != except && std::abs ((section->getStartBeat() - beat).inBeats()) < 1.0e-4)
-                return section;
+        for (const auto& section : getSections (edit))
+            if (section.id != except && std::abs ((section.range.getStart() - beat).inBeats()) < 1.0e-4)
+                return section.id;
 
-        return nullptr;
+        return {};
     }
 
-    // Sections, the last first, held so that one deleted by an edit of another is skipped.
-    std::vector<te::SafeSelectable<te::ArrangerClip>> toSafeLatestFirst (const juce::Array<te::ArrangerClip*>& sections)
+    bool contains (const std::vector<SectionID>& ids, SectionID id)
     {
-        std::vector<te::SafeSelectable<te::ArrangerClip>> safe;
+        return std::find (ids.begin(), ids.end(), id) != ids.end();
+    }
 
-        for (int i = sections.size(); --i >= 0;)
-            safe.emplace_back (sections[i]);
+    // Where a bar starts, in beats.
+    BeatPosition getBarStart (const te::Edit& edit, int bar)
+    {
+        return fromTracktion (edit.tempoSequence.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 }));
+    }
 
-        return safe;
+    int getBar (const te::Edit& edit, BeatPosition beat)
+    {
+        const auto& tempo = edit.tempoSequence;
+        return tempo.toBarsAndBeats (tempo.toTime (toTracktion (beat))).bars;
     }
 } // namespace
 
 //==============================================================================
-juce::Array<te::ArrangerClip*> getSections (const te::Edit& edit)
+std::vector<Section> getSections (const te::Edit& edit)
 {
-    juce::Array<te::ArrangerClip*> sections;
+    std::vector<Section> sections;
 
-    if (auto* arranger = edit.getArrangerTrack())
-        for (auto* clip : arranger->getClips())
-            if (auto* section = dynamic_cast<te::ArrangerClip*> (clip))
-                sections.add (section);
+    for (const auto& state : getSectionStates (edit))
+        sections.push_back (makeSection (state));
 
-    std::stable_sort (sections.begin(), sections.end(),
-                      [] (te::ArrangerClip* a, te::ArrangerClip* b) { return a->getPosition().getStart() < b->getPosition().getStart(); });
     return sections;
 }
 
-te::ArrangerClip* getSectionAt (const te::Edit& edit, te::BeatPosition beat)
+std::optional<Section> getSection (const te::Edit& edit, SectionID id)
 {
-    for (auto* section : getSections (edit))
-        if (beat >= section->getStartBeat() && beat < section->getEndBeat())
-            return section;
+    if (const auto state = findSectionState (edit, id); state.isValid())
+        return makeSection (state);
 
-    return nullptr;
+    return std::nullopt;
 }
 
-juce::Array<te::ArrangerClip*> getSelectedSections (const Selection& selection)
+std::optional<Section> getSectionAt (const te::Edit& edit, BeatPosition beat)
 {
-    juce::Array<te::ArrangerClip*> selected;
+    for (const auto& section : getSections (edit))
+        if (section.range.contains (beat))
+            return section;
+
+    return std::nullopt;
+}
+
+BeatPosition getSectionsEnd (const te::Edit& edit)
+{
+    BeatPosition end;
+
+    for (const auto& state : findSectionsState (edit))
+        if (state.hasType (schema::SECTION))
+            end = std::max (end, getRange (state).getEnd());
+
+    return end;
+}
+
+std::vector<Section> getSelectedSections (const Selection& selection)
+{
+    std::vector<Section> selected;
 
     if (auto* edit = selection.getEdit())
-        for (auto* section : getSections (*edit))
-            if (selection.isSelected (section))
-                selected.add (section);
+        for (const auto& section : getSections (*edit))
+            if (selection.isSelected (section.id))
+                selected.push_back (section);
 
     return selected;
 }
 
 bool hasSelectedSections (const Selection& selection)
 {
-    return ! getSelectedSections (selection).isEmpty();
+    return ! getSelectedSections (selection).empty();
 }
 
-juce::String getSectionRole (const te::Clip& section)
+std::vector<SectionID> getIDs (const std::vector<Section>& sections)
 {
-    return section.state[schema::phaziteRole].toString();
-}
+    std::vector<SectionID> ids;
 
-juce::String getSectionTip (const te::Clip& section)
-{
-    return section.state[schema::phaziteTip].toString();
-}
+    for (const auto& section : sections)
+        ids.push_back (section.id);
 
-float getSectionEnergy (const te::Clip& section)
-{
-    return juce::jlimit (0.0f, 1.0f, (float) static_cast<double> (section.state.getProperty (schema::phaziteEnergy, 0.5)));
-}
-
-juce::Colour getSectionColour (const te::Clip& section)
-{
-    return section.state.hasProperty (te::IDs::colour) ? section.getColour() : getRoleColour (getSectionRole (section));
+    return ids;
 }
 
 juce::Colour getRoleColour (const juce::String& role)
@@ -132,26 +226,34 @@ juce::Colour getRoleColour (const juce::String& role)
     return skyBlue;
 }
 
-te::ArrangerClip* insertSection (te::Edit& edit, te::BeatPosition start, const SectionInfo& info)
+SectionID insertSection (te::Edit& edit, BeatPosition start, const SectionInfo& info)
 {
-    edit.ensureArrangerTrack();
-    auto* arranger = edit.getArrangerTrack();
+    juce::ValueTree state (schema::SECTION);
+    const auto id = giveNewID (edit, state);
+    setRange (state, { start, start + info.length }, nullptr);
+    state.setProperty (schema::sectionName, info.name, nullptr);
 
-    if (arranger == nullptr)
-        return nullptr;
+    if (info.role.isNotEmpty())
+        state.setProperty (schema::sectionRole, info.role, nullptr);
 
-    const auto time = edit.tempoSequence.toTime (te::BeatRange (start, start + info.length));
-    auto* section = dynamic_cast<te::ArrangerClip*> (arranger->insertNewClip (te::TrackItem::Type::arranger, info.name, time, nullptr));
+    if (info.tip.isNotEmpty())
+        state.setProperty (schema::sectionTip, info.tip, nullptr);
 
-    if (section == nullptr)
-        return nullptr;
+    state.setProperty (schema::sectionEnergy, juce::jlimit (0.0f, 1.0f, info.energy), nullptr);
 
-    auto* undoManager = &edit.getUndoManager();
-    section->setColour (info.colour.value_or (getRoleColour (info.role)));
-    section->state.setProperty (schema::phaziteRole, info.role, undoManager);
-    section->state.setProperty (schema::phaziteTip, info.tip, undoManager);
-    section->state.setProperty (schema::phaziteEnergy, juce::jlimit (0.0f, 1.0f, info.energy), undoManager);
-    return section;
+    if (info.colour.has_value())
+        state.setProperty (schema::sectionColour, info.colour->toString(), nullptr);
+
+    getSectionsState (edit).appendChild (state, getUndo (edit));
+    return id;
+}
+
+void removeSections (te::Edit& edit)
+{
+    auto sections = findSectionsState (edit);
+
+    for (const auto& state : getSectionStates (edit))
+        sections.removeChild (state, getUndo (edit));
 }
 
 juce::String getNewSectionName (const te::Edit& edit)
@@ -159,160 +261,178 @@ juce::String getNewSectionName (const te::Edit& edit)
     return "Section " + juce::String (getSections (edit).size() + 1);
 }
 
-te::ArrangerClip* appendSection (te::Edit& edit, Selection* selection)
+SectionID appendSection (te::Edit& edit, Selection* selection)
 {
-    const auto sections = getSections (edit);
-    const auto start = sections.isEmpty() ? te::BeatPosition() : sections.getLast()->getEndBeat();
-    const auto& tempo = edit.tempoSequence;
-    const auto bar = tempo.toBarsAndBeats (tempo.toTime (start)).bars;
-    const auto end = tempo.toBeats (te::tempo::BarsAndBeats { bar + barsPerNewSection, {}, 0 });
-    auto* section = insertSection (edit, start, { getNewSectionName (edit), end - start });
+    const auto start = getSectionsEnd (edit);
+    const auto end = getBarStart (edit, getBar (edit, start) + barsPerNewSection);
+    const auto id = insertSection (edit, start, { getNewSectionName (edit), end - start });
 
-    if (section != nullptr && selection != nullptr)
-        selection->selectOnly (section);
+    if (selection != nullptr)
+        selection->selectOnly (id);
 
-    return section;
+    return id;
 }
 
-te::ArrangerClip* addSectionAt (te::Edit& edit, te::BeatPosition beat, Selection* selection)
+SectionID addSectionAt (te::Edit& edit, BeatPosition beat, Selection* selection)
 {
     // From the start of the bar (or the end of the section before, if that ends later), for barsPerNewSection bars or
     // up to the next section: sections never overlap, which the section edits rely on.
-    const auto& tempo = edit.tempoSequence;
-    const auto bar = std::max (0, tempo.toBarsAndBeats (tempo.toTime (beat)).bars);
-    auto start = tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 });
-    auto end = tempo.toBeats (te::tempo::BarsAndBeats { bar + barsPerNewSection, {}, 0 });
+    const auto bar = std::max (0, getBar (edit, beat));
+    auto start = getBarStart (edit, bar);
+    auto end = getBarStart (edit, bar + barsPerNewSection);
     const auto sections = getSections (edit);
 
-    for (auto* other : sections)
-        if (other->getStartBeat() <= beat && other->getEndBeat() > start)
-            start = other->getEndBeat();
+    for (const auto& other : sections)
+        if (other.range.getStart() <= beat && other.range.getEnd() > start)
+            start = other.range.getEnd();
 
-    for (auto* other : sections)
-        if (other->getStartBeat() > beat)
-            end = std::min (end, other->getStartBeat());
+    for (const auto& other : sections)
+        if (other.range.getStart() > beat)
+            end = std::min (end, other.range.getStart());
 
     if (end <= start)
-        return nullptr;
-
-    const UndoStep step (edit, "Add Section");
-    auto* section = insertSection (edit, start, { getNewSectionName (edit), end - start });
-
-    if (section != nullptr && selection != nullptr)
-        selection->selectOnly (section);
-
-    return section;
-}
-
-void renameSection (te::ArrangerClip& section, const juce::String& name)
-{
-    const auto trimmed = name.trim();
-
-    if (trimmed.isEmpty() || trimmed == section.getName())
-        return;
-
-    const UndoStep step (section.edit, "Rename Section");
-    section.setName (trimmed);
-}
-
-void setSectionColour (te::ArrangerClip& section, juce::Colour colour)
-{
-    const UndoStep step (section.edit, "Change Section Color");
-    section.setColour (colour);
-}
-
-te::TimeRange getSectionsTimeRange (const juce::Array<te::ArrangerClip*>& sections)
-{
-    if (sections.isEmpty())
         return {};
 
-    auto range = sections.getFirst()->getEditTimeRange();
+    const UndoStep step (edit, "Add Section");
+    const auto id = insertSection (edit, start, { getNewSectionName (edit), end - start });
 
-    for (auto* section : sections)
-        range = range.getUnionWith (section->getEditTimeRange());
+    if (selection != nullptr)
+        selection->selectOnly (id);
+
+    return id;
+}
+
+void renameSection (te::Edit& edit, SectionID id, const juce::String& name)
+{
+    auto state = findSectionState (edit, id);
+    const auto trimmed = name.trim();
+
+    if (! state.isValid() || trimmed.isEmpty() || trimmed == state[schema::sectionName].toString())
+        return;
+
+    const UndoStep step (edit, "Rename Section");
+    state.setProperty (schema::sectionName, trimmed, getUndo (edit));
+}
+
+void setSectionColour (te::Edit& edit, SectionID id, juce::Colour colour)
+{
+    if (auto state = findSectionState (edit, id); state.isValid())
+    {
+        const UndoStep step (edit, "Change Section Color");
+        state.setProperty (schema::sectionColour, colour.toString(), getUndo (edit));
+    }
+}
+
+BeatRange getSectionsRange (const std::vector<Section>& sections)
+{
+    if (sections.empty())
+        return {};
+
+    auto range = sections.front().range;
+
+    for (const auto& section : sections)
+        range = { std::min (range.getStart(), section.range.getStart()), std::max (range.getEnd(), section.range.getEnd()) };
 
     return range;
 }
 
 //==============================================================================
-void moveSection (te::ArrangerClip& section, te::BeatPosition destination)
+void moveSection (te::Edit& edit, SectionID id, BeatPosition destination)
 {
-    const UndoStep step (section.edit, "Move Section");
-    moveTime (section.edit, getRange (section), destination);
+    if (const auto section = getSection (edit, id))
+    {
+        const UndoStep step (edit, "Move Section");
+        moveTime (edit, toTracktion (section->range), toTracktion (destination));
+    }
 }
 
-te::ArrangerClip* copySection (te::ArrangerClip& section, te::BeatPosition destination, bool asAliases)
+SectionID copySection (te::Edit& edit, SectionID id, BeatPosition destination, bool asAliases)
 {
-    auto& edit = section.edit;
+    const auto section = getSection (edit, id);
+
+    if (! section.has_value())
+        return {};
+
     const UndoStep step (edit, asAliases ? "Copy Section as Aliases" : "Copy Section");
-    copyTime (edit, getRange (section), destination, asAliases);
-    return findSectionStartingAt (edit, destination, &section);
+    copyTime (edit, toTracktion (section->range), toTracktion (destination), asAliases);
+    return findSectionStartingAt (edit, destination, id);
 }
 
-te::ArrangerClip* duplicateSection (te::ArrangerClip& section, bool asAliases)
+SectionID duplicateSection (te::Edit& edit, SectionID id, bool asAliases)
 {
-    return copySection (section, section.getEndBeat(), asAliases);
+    const auto section = getSection (edit, id);
+    return section.has_value() ? copySection (edit, id, section->range.getEnd(), asAliases) : SectionID();
 }
 
-void deleteSection (te::ArrangerClip& section)
+void deleteSection (te::Edit& edit, SectionID id)
 {
-    removeTime (section.edit, getRange (section));
+    if (const auto section = getSection (edit, id))
+        removeTime (edit, toTracktion (section->range));
 }
 
-void deleteSections (const juce::Array<te::ArrangerClip*>& sections)
+void deleteSections (te::Edit& edit, const std::vector<SectionID>& ids)
 {
-    for (const auto& section : toSafeLatestFirst (sections))
-        if (auto* s = section.get())
-            deleteSection (*s);
+    const auto sections = getSections (edit);
+
+    for (auto section = sections.rbegin(); section != sections.rend(); ++section)
+        if (contains (ids, section->id))
+            deleteSection (edit, section->id); // found again: one deleted with another is gone
 }
 
-juce::Array<te::ArrangerClip*> duplicateSections (const juce::Array<te::ArrangerClip*>& sections, bool asAliases, Selection* selection)
+std::vector<SectionID> duplicateSections (te::Edit& edit, const std::vector<SectionID>& ids, bool asAliases, Selection* selection)
 {
-    juce::Array<te::ArrangerClip*> copies;
+    std::vector<SectionID> copies;
 
-    if (sections.isEmpty())
+    if (ids.empty())
         return copies;
 
     if (selection != nullptr)
         selection->deselectAll();
 
-    for (const auto& section : toSafeLatestFirst (sections))
-    {
-        if (auto* s = section.get())
-        {
-            if (auto* copy = duplicateSection (*s, asAliases))
-            {
-                copies.add (copy);
+    const auto sections = getSections (edit);
 
-                if (selection != nullptr)
-                    selection->addToSelection (copy);
-            }
+    for (auto section = sections.rbegin(); section != sections.rend(); ++section)
+    {
+        if (! contains (ids, section->id))
+            continue;
+
+        if (const auto copy = duplicateSection (edit, section->id, asAliases); copy.isValid())
+        {
+            copies.push_back (copy);
+
+            if (selection != nullptr)
+                selection->addToSelection (copy);
         }
     }
 
     return copies;
 }
 
-void resizeSection (te::ArrangerClip& section, te::BeatDuration newLength, bool moveRest)
+void resizeSection (te::Edit& edit, SectionID id, BeatDuration newLength, bool moveRest)
 {
-    auto& edit = section.edit;
-    const UndoStep step (edit, "Resize Section");
-    const auto range = getRange (section);
-    newLength = std::max (newLength, te::BeatDuration::fromBeats (1.0));
+    auto state = findSectionState (edit, id);
 
-    if (std::abs ((newLength - range.getLength()).inBeats()) < tinyBeats.inBeats())
+    if (! state.isValid())
+        return;
+
+    const UndoStep step (edit, "Resize Section");
+    const auto range = getRange (state);
+    newLength = std::max (newLength, BeatDuration::fromBeats (1.0));
+
+    if (std::abs ((newLength - range.getLength()).inBeats()) < tiny.inBeats())
         return;
 
     if (moveRest)
     {
         if (newLength > range.getLength())
         {
-            insertTime (edit, range.getEnd(), newLength - range.getLength()); // moves the sections after it, not it
-            section.setEnd (edit.tempoSequence.toTime (range.getStart() + newLength), true);
+            insertTime (edit, toTracktion (range.getEnd()),
+                        toTracktion (newLength - range.getLength())); // moves the sections after it, not it
+            setRange (state, range.withEnd (range.getStart() + newLength), getUndo (edit));
         }
         else
         {
-            removeTime (edit, { range.getStart() + newLength, range.getEnd() }); // shortens it
+            removeTime (edit, toTracktion (BeatRange (range.getStart() + newLength, range.getEnd()))); // shortens it
         }
 
         return;
@@ -321,26 +441,121 @@ void resizeSection (te::ArrangerClip& section, te::BeatDuration newLength, bool 
     // The section alone, up to the next one at most.
     auto end = range.getStart() + newLength;
 
-    for (auto* other : getSections (edit))
-        if (other != &section && other->getStartBeat() >= range.getEnd() - tinyBeats)
-            end = std::min (end, other->getStartBeat());
+    for (const auto& other : getSections (edit))
+        if (other.id != id && other.range.getStart() >= range.getEnd() - tiny)
+            end = std::min (end, other.range.getStart());
 
-    if (end > range.getStart() + tinyBeats)
-        section.setEnd (edit.tempoSequence.toTime (end), true);
+    if (end > range.getStart() + tiny)
+        setRange (state, range.withEnd (end), getUndo (edit));
 }
 
-juce::Array<te::BeatPosition> getSectionBoundaries (const te::Edit& edit)
+std::vector<BeatPosition> getSectionBoundaries (const te::Edit& edit)
 {
-    juce::Array<te::BeatPosition> boundaries;
+    std::vector<BeatPosition> boundaries;
     const auto sections = getSections (edit);
 
-    for (auto* section : sections)
-        boundaries.add (section->getStartBeat());
+    for (const auto& section : sections)
+        boundaries.push_back (section.range.getStart());
 
-    if (! sections.isEmpty())
-        boundaries.add (sections.getLast()->getEndBeat());
+    if (! sections.empty())
+        boundaries.push_back (sections.back().range.getEnd());
 
     return boundaries;
+}
+
+//==============================================================================
+void insertSectionTime (te::Edit& edit, BeatPosition at, BeatDuration length)
+{
+    if (length <= BeatDuration())
+        return;
+
+    for (auto state : getSectionStates (edit))
+    {
+        const auto range = getRange (state);
+
+        if (range.getStart() >= at - tiny)
+            setRange (state, range.movedBy (length), getUndo (edit));
+        else if (range.getEnd() > at + tiny)
+            setRange (state, range.withEnd (range.getEnd() + length), getUndo (edit)); // the time is inside it
+    }
+}
+
+void removeSectionTime (te::Edit& edit, BeatRange range)
+{
+    if (range.isEmpty())
+        return;
+
+    const auto start = range.getStart(), end = range.getEnd();
+    const auto length = range.getLength();
+    auto sections = findSectionsState (edit);
+
+    for (auto state : getSectionStates (edit))
+    {
+        const auto r = getRange (state);
+
+        if (r.getEnd() <= start + tiny)
+            continue; // before the range
+
+        if (r.getStart() >= end - tiny)
+            setRange (state, r.movedBy (-length), getUndo (edit));
+        else if (r.getStart() >= start - tiny && r.getEnd() <= end + tiny)
+            sections.removeChild (state, getUndo (edit));
+        else if (r.getStart() < start && r.getEnd() > end)
+            setRange (state, r.withEnd (r.getEnd() - length), getUndo (edit));
+        else if (r.getStart() < start)
+            setRange (state, r.withEnd (start), getUndo (edit)); // its end was in the range
+        else
+            setRange (state, { start, r.getEnd() - length }, getUndo (edit)); // its start was in the range
+    }
+}
+
+void moveSectionTime (te::Edit& edit, BeatRange range, BeatPosition destination)
+{
+    const auto start = range.getStart(), end = range.getEnd();
+    const auto length = range.getLength();
+    const auto later = destination >= end - tiny;
+
+    if (range.isEmpty() || (destination > start + tiny && destination < end - tiny))
+        return;
+
+    const auto changedStart = later ? start : destination;
+    const auto changedEnd = later ? destination : end;
+    const auto rangeShift = later ? destination - end : destination - start;
+    const auto otherShift = later ? -length : length;
+
+    for (auto state : getSectionStates (edit))
+    {
+        const auto r = getRange (state);
+
+        if (r.getStart() >= changedStart - tiny && r.getStart() < changedEnd - tiny)
+        {
+            const auto inRange = r.getStart() >= start - tiny && r.getStart() < end - tiny;
+            setRange (state, r.movedBy (inRange ? rangeShift : otherShift), getUndo (edit));
+        }
+    }
+}
+
+SectionsCopy copySections (const te::Edit& edit, BeatRange range)
+{
+    SectionsCopy copy;
+    copy.rangeStart = range.getStart();
+
+    for (const auto& state : getSectionStates (edit))
+        if (const auto r = getRange (state); r.getStart() >= range.getStart() - tiny && r.getEnd() <= range.getEnd() + tiny)
+            copy.sections.push_back (state.createCopy());
+
+    return copy;
+}
+
+void pasteSections (te::Edit& edit, const SectionsCopy& copy, BeatPosition destination)
+{
+    for (const auto& section : copy.sections)
+    {
+        auto pasted = section.createCopy();
+        giveNewID (edit, pasted);
+        setRange (pasted, getRange (section).movedBy (destination - copy.rangeStart), nullptr);
+        getSectionsState (edit).appendChild (pasted, getUndo (edit));
+    }
 }
 
 //==============================================================================

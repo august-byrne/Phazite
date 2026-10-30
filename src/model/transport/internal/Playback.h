@@ -11,10 +11,12 @@
 
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
 class CommandRegistry;
+struct Section;
 
 // Where the song ends: at the end of the bar its last clip ends in, as a song in FL Studio ends with the last bar that
 // has something in it, or at its start if it has no clips. Every clip on the song's tracks counts, muted or not, in
@@ -51,8 +53,8 @@ bool isLoopingSong (const te::Edit&);
 // Loops the time range selected in the playlist, or the song when none is.
 void loopSelection (te::Edit&, const RangeSelection&);
 
-// Loops around the sections, from the earliest start to the latest end, in their Edit. Nothing without sections.
-void loopSections (const juce::Array<te::ArrangerClip*>&);
+// Loops around the sections, from the earliest start to the latest end. Nothing without sections.
+void loopSections (te::Edit&, const std::vector<Section>&);
 
 //==============================================================================
 // Where playback starts: where the playhead was last put (a click in a ruler, Home or End), or the song's start when a

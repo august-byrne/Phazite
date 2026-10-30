@@ -203,9 +203,9 @@ TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, a
         CHECK (phazite::getLaneChords (context).back().range.getEnd() == beat (16.0));
 
         // A selected section is where it goes first.
-        auto* section = phazite::insertSection (*edit, te::BeatPosition::fromBeats (16.0),
-                                                { .name = "Verse", .length = te::BeatDuration::fromBeats (8.0) });
-        REQUIRE (section != nullptr);
+        const auto section = phazite::insertSection (*edit, phazite::BeatPosition::fromBeats (16.0),
+                                                     { .name = "Verse", .length = phazite::BeatDuration::fromBeats (8.0) });
+        REQUIRE (section.isValid());
         getSelection (context).selectOnly (section);
         CHECK (panel.getTargets().front() == phazite::ui::ProgressionsPanel::Target::selectedSections);
         panel.setTarget (phazite::ui::ProgressionsPanel::Target::selectedSections);

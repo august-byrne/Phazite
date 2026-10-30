@@ -95,11 +95,11 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     REQUIRE (outline.has_value());
     phazite::applyOutline (edit, *outline);
     const phazite::SectionInfo outro { .name = "Outro",
-                                       .length = te::BeatDuration::fromBeats (8.0),
+                                       .length = phazite::BeatDuration::fromBeats (8.0),
                                        .role = "outro",
                                        .tip = "Let it fade.",
                                        .energy = 0.1f };
-    REQUIRE (phazite::insertSection (edit, beats (24.0), outro) != nullptr);
+    REQUIRE (phazite::insertSection (edit, phazite::BeatPosition::fromBeats (24.0), outro).isValid());
 
     // Drums: a beat, shown in drum mode with the snare's row first and a row hidden; the track pinned and muted.
     auto* beat = phazite::insertMidiClip (*drums, { beats (0.0), beats (4.0) }, nullptr);
