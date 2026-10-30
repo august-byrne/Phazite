@@ -8,6 +8,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mirror/internal/Mirror.h"
@@ -114,14 +115,23 @@ namespace
         chain.addChild (device, index, &edit.getUndoManager());
     }
 
-    // Takes a device out of the song, and Tracktion's with it (in the caller's undo step).
+    // Takes a device out of the song, and Tracktion's with it (in the caller's undo step), with what it holds of its state
+    // stored first, so that an undo brings it back as it was.
     void removeDeviceState (te::Plugin& device)
     {
         if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
         {
+            storeDeviceState (device);
             state.getParent().removeChild (state, &device.edit.getUndoManager());
             mirror::reconcileDevices (device.edit);
         }
+    }
+
+    // Sets a property without an undo step, only if its value is another (as a store does: DeviceStates.h).
+    void store (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value)
+    {
+        if (const auto* stored = state.getPropertyPointer (property); stored == nullptr || *stored != value)
+            state.setProperty (property, value, nullptr);
     }
 
     // Adds a device to the song and makes it in Tracktion, which can't make a device from the song yet (T1, step 5).
@@ -330,6 +340,16 @@ void setMix (te::Plugin& device, float mix)
     if (const auto levels = findMixLevels (device))
     {
         const auto wet = juce::jlimit (0.0f, 1.0f, mix);
+
+        // A plug-in's, in the song (a container's is still Tracktion's: T1, step 5).
+        if (auto state = findDeviceState (device.edit, getDeviceID (device)); isPluginState (state))
+        {
+            if (wet < 1.0f)
+                state.setProperty (schema::pluginMix, wet, &device.edit.getUndoManager());
+            else
+                state.removeProperty (schema::pluginMix, &device.edit.getUndoManager());
+        }
+
         setDeviceValue (*levels->wet, wet);
         setDeviceValue (*levels->dry, 1.0f - wet);
     }
@@ -695,7 +715,12 @@ DeviceID getDeviceID (const juce::ValueTree& deviceState)
     return DeviceID::fromRaw ((std::uint64_t) (juce::int64) deviceState[schema::deviceID]);
 }
 
-juce::ValueTree makeDeviceState (const te::Plugin& device)
+bool isPluginState (const juce::ValueTree& deviceState)
+{
+    return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == schema::deviceIsPlugin;
+}
+
+juce::ValueTree makeDeviceState (te::Plugin& device)
 {
     juce::ValueTree state (isContainer (device) ? schema::CONTAINER : schema::DEVICE);
     state.setProperty (schema::deviceID, (juce::int64) device.itemID.getRawID(), nullptr);
@@ -707,6 +732,22 @@ juce::ValueTree makeDeviceState (const te::Plugin& device)
 
     if (! device.isEnabled())
         state.setProperty (schema::deviceOff, true, nullptr);
+
+    // A plug-in: which it is, and what it was made with (a preset's settings, its mix), as its state has them. A save stores
+    // what it holds then (DeviceStates.h).
+    if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (&device))
+    {
+        setPluginIdentity (state, plugin->desc);
+
+        if (const auto settings = device.state[te::IDs::state].toString(); settings.isNotEmpty())
+            state.setProperty (schema::pluginState, settings, nullptr);
+
+        if (device.state.hasProperty (te::IDs::programNum))
+            state.setProperty (schema::pluginProgram, (int) device.state[te::IDs::programNum], nullptr);
+
+        if (const auto mix = getMix (device); mix < 1.0f)
+            state.setProperty (schema::pluginMix, mix, nullptr);
+    }
 
     // One of Phazite's own: its values set by hand and its files, as its state has them.
     if (auto* own = dynamic_cast<const DevicePlugin*> (&device))
@@ -729,6 +770,42 @@ juce::ValueTree makeDeviceState (const te::Plugin& device)
     }
 
     return state;
+}
+
+void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription& description)
+{
+    store (device, schema::pluginFormat, description.pluginFormatName);
+    store (device, schema::pluginName, description.name);
+    store (device, schema::pluginMaker, description.manufacturerName);
+    store (device, schema::pluginIdentifier, description.fileOrIdentifier);
+    store (device, schema::pluginUid, description.uniqueId);
+}
+
+std::optional<juce::PluginDescription> findKnownPlugin (te::Engine& engine, const juce::PluginDescription& wanted)
+{
+    const auto types = engine.getPluginManager().knownPluginList.getTypes();
+
+    for (const auto& type : types)
+        if (wanted.fileOrIdentifier.isNotEmpty() && type.fileOrIdentifier == wanted.fileOrIdentifier && type.name == wanted.name)
+            return type;
+
+    for (const auto& type : types)
+        if (type.name == wanted.name && type.manufacturerName == wanted.manufacturerName
+            && type.pluginFormatName == wanted.pluginFormatName)
+            return type;
+
+    return {};
+}
+
+juce::PluginDescription getPluginDescription (te::Engine& engine, const juce::ValueTree& device)
+{
+    juce::PluginDescription description;
+    description.pluginFormatName = device[schema::pluginFormat].toString();
+    description.name = device[schema::pluginName].toString();
+    description.manufacturerName = device[schema::pluginMaker].toString();
+    description.fileOrIdentifier = device[schema::pluginIdentifier].toString();
+    description.uniqueId = (int) device[schema::pluginUid];
+    return findKnownPlugin (engine, description).value_or (description);
 }
 
 int getDevicePlace (const te::PluginList& list, int deviceIndex)

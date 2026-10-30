@@ -10,6 +10,8 @@
 // reset the playing plug-in. These store the same without the undo manager, and only what differs from what is there, as
 // the undo manager would: Tracktion's own, called after them, finds it all stored and records nothing.
 // Call them instead of Tracktion's, and before what of Tracktion's stores devices' states itself (Edit::copyTrack()).
+// A plug-in's are stored in its element in the song too (Schema.h: DEVICE; docs/tracktion-migration.md, T1 step 5c),
+// which the model also stores before it takes the plug-in away, so that an undo brings it back as it was.
 #pragma once
 
 #include "model/base/internal/Tracktion.h"
@@ -29,4 +31,11 @@ void storeDeviceStates (te::RackType&);
 // Every device's and modulator's state in an Edit, with the version that saves it, by whom and its ID, as a save writes
 // them (Edit::flushState()).
 void storeDeviceStates (te::Edit&);
+
+// Tracktion's forms of what the song keeps of a plug-in, for the mirror, which makes a plug-in from the song
+// (model/mirror/internal/Mirror.h): its channel layout (ExternalPlugin's layout property) from the song's (Schema.h:
+// pluginInputs, pluginOutputs), empty for none; and its values set by hand under automation (the parameters property of
+// AutomatableEditItem) from the song's (VALUE), empty for none.
+juce::MemoryBlock makeTracktionLayout (const juce::ValueTree& device);
+juce::MemoryBlock makeTracktionValues (const juce::ValueTree& device);
 } // namespace phazite

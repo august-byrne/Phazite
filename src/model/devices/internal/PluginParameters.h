@@ -3,8 +3,9 @@
 // plug-in's list, "0", "1" and on, and a project names them so wherever it refers to one: its automation curve, what
 // modulates it, its value set by hand under automation, and its automation lane in the playlist. An update of the plug-in
 // that adds, removes or reorders parameters would move all of those to other parameters. So the project also saves the
-// plug-in's own ID for each parameter it refers to (schema::phaziteParameterIDs), which stays the same through updates,
-// and a plug-in that opens finds each of them again where its update put it.
+// plug-in's own ID for each parameter it refers to (Schema.h: pluginParameterIDs, on its element in the song, or
+// phaziteParameterIDs, on its PLUGIN while it is in a container), which stays the same through updates, and a plug-in
+// that opens finds each of them again where its update put it.
 #pragma once
 
 #include "model/base/internal/Tracktion.h"

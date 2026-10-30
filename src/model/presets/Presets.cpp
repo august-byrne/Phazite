@@ -84,19 +84,12 @@ namespace
     // A plug-in's description, as scanning found it: by its identifier, else by its name, maker and format.
     std::optional<juce::PluginDescription> findPlugin (te::Engine& engine, const juce::var& identity)
     {
-        const auto identifier = identity[keys::identifier].toString(), name = identity[keys::name].toString();
-        const auto manufacturer = identity[keys::manufacturer].toString(), format = identity[keys::format].toString();
-        const auto types = engine.getPluginManager().knownPluginList.getTypes();
-
-        for (const auto& type : types)
-            if (identifier.isNotEmpty() && type.fileOrIdentifier == identifier && type.name == name)
-                return type;
-
-        for (const auto& type : types)
-            if (type.name == name && type.manufacturerName == manufacturer && type.pluginFormatName == format)
-                return type;
-
-        return {};
+        juce::PluginDescription wanted;
+        wanted.fileOrIdentifier = identity[keys::identifier].toString();
+        wanted.name = identity[keys::name].toString();
+        wanted.manufacturerName = identity[keys::manufacturer].toString();
+        wanted.pluginFormatName = identity[keys::format].toString();
+        return findKnownPlugin (engine, wanted);
     }
 
     bool isSamePlugin (const te::ExternalPlugin& plugin, const juce::var& identity)
@@ -808,13 +801,22 @@ namespace
 
             plugin->restorePluginStateFromValueTree (settings);
 
-            // What a save would write, so that the project holds it at once.
-            for (const auto& property : { te::IDs::state, te::IDs::programNum })
+            // What a save would write, so that the project holds it at once: in the plug-in's state, and in the song's
+            // element of it (Schema.h: pluginState, pluginProgram), but for a plug-in in a container.
+            auto device = findDeviceState (edit, getDeviceID (*plugin));
+
+            for (const auto& [property, inSong] :
+                 { std::pair { te::IDs::state, schema::pluginState }, std::pair { te::IDs::programNum, schema::pluginProgram } })
             {
                 if (settings.hasProperty (property))
                     plugin->state.setProperty (property, settings[property], nullptr);
                 else
                     plugin->state.removeProperty (property, nullptr);
+
+                if (device.isValid() && settings[property].toString().isNotEmpty())
+                    device.setProperty (inSong, settings[property], nullptr);
+                else if (device.isValid())
+                    device.removeProperty (inSong, nullptr);
             }
 
             return true;

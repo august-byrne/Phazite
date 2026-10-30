@@ -4,6 +4,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -33,16 +34,11 @@ namespace
     }
 
     // One of Phazite's own devices made as the song has it: its type and ID, its values set by hand and its files as its
-    // state keeps them, and whether it is on. Nothing for another device, which the model makes while step 5 lasts.
+    // state keeps them, and whether it is on.
     te::Plugin::Ptr makeOwnDevice (te::Edit& edit, const juce::ValueTree& state)
     {
-        const auto type = state[schema::deviceType].toString();
-
-        if (! state.hasType (schema::DEVICE) || ! isOwnType (type))
-            return {};
-
         juce::ValueTree plugin (te::IDs::PLUGIN);
-        plugin.setProperty (te::IDs::type, type, nullptr);
+        plugin.setProperty (te::IDs::type, state[schema::deviceType].toString(), nullptr);
         toTracktion (getDeviceID (state)).writeID (plugin, nullptr);
 
         for (const auto& part : { state.getChildWithName (schema::VALUES), state.getChildWithName (schema::SOUNDS) })
@@ -53,6 +49,65 @@ namespace
             plugin.setProperty (te::IDs::enabled, false, nullptr);
 
         return edit.getPluginCache().createNewPlugin (plugin);
+    }
+
+    // A plug-in made as the song has it: which plug-in it is (one Tracktion can't load if it isn't installed), its ID,
+    // whether it is on, its own state, program and channel layout, its values set by hand under automation, and its mix.
+    te::Plugin::Ptr makePlugin (te::Edit& edit, const juce::ValueTree& state)
+    {
+        auto plugin = te::ExternalPlugin::create (edit.engine, getPluginDescription (edit.engine, state));
+        toTracktion (getDeviceID (state)).writeID (plugin, nullptr);
+
+        if ((bool) state[schema::deviceOff])
+            plugin.setProperty (te::IDs::enabled, false, nullptr);
+
+        if (const auto settings = state[schema::pluginState].toString(); settings.isNotEmpty())
+            plugin.setProperty (te::IDs::state, settings, nullptr);
+
+        if (state.hasProperty (schema::pluginProgram))
+            plugin.setProperty (te::IDs::programNum, (int) state[schema::pluginProgram], nullptr);
+
+        if (const auto layout = makeTracktionLayout (state); layout.getSize() > 0)
+            plugin.setProperty (te::IDs::layout, layout, nullptr);
+
+        if (const auto values = makeTracktionValues (state); values.getSize() > 0)
+            plugin.setProperty (te::IDs::parameters, values, nullptr);
+
+        if (state.hasProperty (schema::pluginMix))
+        {
+            const auto mix = (float) state[schema::pluginMix];
+            plugin.setProperty (te::IDs::wet, mix, nullptr);
+            plugin.setProperty (te::IDs::dry, 1.0f - mix, nullptr);
+        }
+
+        return edit.getPluginCache().createNewPlugin (plugin);
+    }
+
+    // A device the song has and Tracktion hasn't, made as the song has it. Nothing for a container, which the model makes as
+    // it adds one while step 5 lasts, nor for one of Tracktion's own, which only tests make.
+    te::Plugin::Ptr makeDevice (te::Edit& edit, const juce::ValueTree& state)
+    {
+        if (isPluginState (state))
+            return makePlugin (edit, state);
+
+        if (state.hasType (schema::DEVICE) && isOwnType (state[schema::deviceType].toString()))
+            return makeOwnDevice (edit, state);
+
+        return {};
+    }
+
+    // A plug-in plays the song's mix, as the dry and wet levels Tracktion gives it, set by hand (setMix() in Mixer.h).
+    void reconcilePlugin (te::ExternalPlugin& plugin, const juce::ValueTree& state)
+    {
+        const auto mix = (float) state.getProperty (schema::pluginMix, 1.0f);
+        const auto play = [] (te::AutomatableParameter* level, float wanted)
+        {
+            if (level != nullptr && ! juce::exactlyEqual (level->getCurrentExplicitValue(), wanted))
+                level->setParameter (wanted, juce::sendNotification);
+        };
+
+        play (plugin.wetGain.get(), mix);
+        play (plugin.dryGain.get(), 1.0f - mix);
     }
 
     // One of Phazite's own devices plays the song's values set by hand (a value the song hasn't is the parameter's
@@ -88,8 +143,8 @@ namespace
     }
 
     // A chain's devices in Tracktion as the song has them: those it hasn't go (a container with what it holds, its rack
-    // type kept: Containers.h), those it has go in its order (made, for one of Phazite's own), switched on or off, and
-    // Phazite's own with their values and files.
+    // type kept: Containers.h), those it has go in its order (made, but for a container), switched on or off, Phazite's
+    // own with their values and files, and plug-ins with their mixes.
     void reconcileChain (te::Edit& edit, te::PluginList& list, const juce::ValueTree& chain)
     {
         auto* undo = &edit.getUndoManager();
@@ -123,8 +178,7 @@ namespace
 
             if (device == nullptr)
             {
-                // A plug-in or a container is made by the model as it adds it, while step 5 lasts.
-                if (const auto made = makeOwnDevice (edit, states[i]))
+                if (const auto made = makeDevice (edit, states[i]))
                     list.insertPlugin (made, getDevicePlace (list, (int) i), nullptr);
 
                 continue;
@@ -141,6 +195,8 @@ namespace
 
             if (auto* own = dynamic_cast<DevicePlugin*> (device))
                 reconcileOwnDevice (*own, states[i]);
+            else if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (device); plugin != nullptr && isPluginState (states[i]))
+                reconcilePlugin (*plugin, states[i]);
         }
     }
 } // namespace

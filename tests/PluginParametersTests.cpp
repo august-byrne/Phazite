@@ -12,6 +12,8 @@
 #include "model/modulation/internal/Modulation.h"
 #include "model/project/internal/Project.h"
 
+#include <map>
+
 namespace
 {
 using phazite::test::TestPlugin;
@@ -70,17 +72,54 @@ std::unique_ptr<te::Edit> open (const juce::ValueTree& saved)
     REQUIRE (edit != nullptr);
     return edit;
 }
+
+// The stand-in's element in a saved song (Schema.h: DEVICE).
+juce::ValueTree findStandInState (const juce::ValueTree& tree)
+{
+    if (phazite::isPluginState (tree))
+        return tree;
+
+    for (const auto& child : tree)
+        if (const auto found = findStandInState (child); found.isValid())
+            return found;
+
+    return {};
+}
+
+// What the song keeps of the stand-in's own IDs of its parameters.
+juce::String getStoredIDs (const te::ExternalPlugin& plugin)
+{
+    return phazite::findDeviceState (plugin.edit, phazite::getDeviceID (plugin))[phazite::schema::pluginParameterIDs].toString();
+}
+
+// The values set by hand under automation or modulation that the song keeps for the stand-in, by the parameters' IDs.
+std::map<juce::String, float> getValuesSetByHand (const juce::ValueTree& device)
+{
+    std::map<juce::String, float> values;
+
+    for (const auto& child : device)
+        if (child.hasType (phazite::schema::VALUE))
+            values[child[phazite::schema::valueParameter].toString()] = (float) child[phazite::schema::valueSetByHand];
+
+    return values;
+}
 } // namespace
 
 TEST_CASE ("A project saves a plug-in's own IDs of the parameters it refers to")
 {
+    namespace schema = phazite::schema;
     TestPlugin testPlugin;
     const auto saved = makeSavedSong();
-    const auto plugin = saved.getChildWithName (te::IDs::TRACK).getChildWithProperty (te::IDs::type, te::ExternalPlugin::xmlTypeName);
+    const auto plugin = findStandInState (saved);
     REQUIRE (plugin.isValid());
 
     // Gain, by its place "0", is the plug-in's "1"; Tone, "1", its "0". Nothing for the Drive of later versions.
-    CHECK (plugin[phazite::schema::phaziteParameterIDs].toString() == "0=1 1=0");
+    CHECK (plugin[schema::pluginParameterIDs].toString() == "0=1 1=0");
+
+    // Gain's value set by hand under its automation, with the plug-in's settings.
+    const auto values = getValuesSetByHand (plugin);
+    REQUIRE (values.count (TestPlugin::gainID) == 1);
+    CHECK (values.at (TestPlugin::gainID) == doctest::Approx (0.3f));
 }
 
 TEST_CASE ("What a project refers to follows a plug-in's parameters that its update moved")
@@ -119,8 +158,11 @@ TEST_CASE ("What a project refers to follows a plug-in's parameters that its upd
     REQUIRE (lanes.size() == 1);
     CHECK (lanes[0].parameter == phazite::getParameterRef (*gain));
 
-    // Saved again, by their new places.
-    CHECK (plugin->state[phazite::schema::phaziteParameterIDs].toString() == "0=0 1=1");
+    // Saved again, by their new places; the song's value set by hand follows Gain too.
+    CHECK (getStoredIDs (*plugin) == "0=0 1=1");
+    const auto values = getValuesSetByHand (phazite::findDeviceState (*edit, phazite::getDeviceID (*plugin)));
+    REQUIRE (values.count ("1") == 1);
+    CHECK (values.at ("1") == doctest::Approx (0.3f));
 }
 
 TEST_CASE ("What a project refers to lets go of a parameter that a plug-in's update removed")
@@ -144,7 +186,10 @@ TEST_CASE ("What a project refers to lets go of a parameter that a plug-in's upd
     CHECK (phazite::getModulations (*tone).size() == 1);
     CHECK (phazite::getLanes (track).empty());
     CHECK_FALSE (plugin->state.getChildWithName (te::IDs::AUTOMATIONCURVE).isValid());
-    CHECK (plugin->state[phazite::schema::phaziteParameterIDs].toString() == "0=0");
+    CHECK (getStoredIDs (*plugin) == "0=0");
+
+    for (const auto& [id, value] : getValuesSetByHand (phazite::findDeviceState (*edit, phazite::getDeviceID (*plugin))))
+        CHECK (value != doctest::Approx (0.3f)); // none is Gain's
 }
 
 TEST_CASE ("What a project refers to follows the parameters of a plug-in in a container too")
@@ -199,5 +244,5 @@ TEST_CASE ("A project opened with the plug-in it was saved with keeps what it re
     CHECK (gain->getCurrentExplicitValue() == doctest::Approx (0.3f));
     CHECK (phazite::getModulations (*tone).size() == 1);
     CHECK (phazite::getLanes (track).size() == 1);
-    CHECK (plugin->state[phazite::schema::phaziteParameterIDs].toString() == "0=1 1=0");
+    CHECK (getStoredIDs (*plugin) == "0=1 1=0");
 }

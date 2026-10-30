@@ -246,10 +246,11 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
         if (device->getSidechainSourceID().isValid())
             device->setSidechainSourceID ({});
 
+        storeDeviceState (*device); // the song's element too, which an undo brings back
+
         if (auto state = findDeviceState (edit, getDeviceID (*device)); state.isValid())
             state.getParent().removeChild (state, &edit.getUndoManager());
 
-        storeDeviceState (*device);
         rack->addPlugin (device, { 0.5f, 0.5f }, false);
     }
 

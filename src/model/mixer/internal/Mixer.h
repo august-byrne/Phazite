@@ -10,6 +10,7 @@
 #include "model/mixer/internal/Buses.h"
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace phazite
@@ -68,12 +69,23 @@ bool isDeviceOn (const te::Plugin&);
 // (model/mirror/internal/Mirror.h: reconcileDevices()): the element that holds a track's chain (its TRACK), or the
 // master's (MASTER) for nullptr, invalid for an Edit that isn't a song's; a chain's devices' elements, in order; a device's
 // element, invalid for one in a container (whose devices are still Tracktion's) or one that isn't the song's; the ID an
-// element names; and the element of a plug-in that the model has just made.
+// element names; whether it is a plug-in's; and the element of a device that the model has just made, with what its state
+// holds (a plug-in's settings, as a preset made it).
 juce::ValueTree findChainState (const te::Edit&, const te::Track*);
 std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
 juce::ValueTree findDeviceState (const te::Edit&, DeviceID);
 DeviceID getDeviceID (const juce::ValueTree& deviceState);
-juce::ValueTree makeDeviceState (const te::Plugin&);
+bool isPluginState (const juce::ValueTree& deviceState);
+juce::ValueTree makeDeviceState (te::Plugin&);
+
+// Which plug-in a device is, on its element in the song (Schema.h: pluginFormat to pluginUid), as its description says,
+// written outside the undo history where it differs. The plug-in scanning found that a description names: by its
+// identifier and name, else by its name, maker and format, as a preset finds it. And the description of the plug-in an
+// element names: the one scanning found, or else one made of what the element says, which Tracktion keeps as a plug-in it
+// can't load.
+void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription&);
+std::optional<juce::PluginDescription> findKnownPlugin (te::Engine&, const juce::PluginDescription&);
+juce::PluginDescription getPluginDescription (te::Engine&, const juce::ValueTree& device);
 
 // After a track was copied (a folder with its tracks), the devices' elements in the copy of its element name the copy's
 // devices, which are where the original's are in its list.
@@ -81,8 +93,9 @@ void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy);
 
 // Sets a device's parameter to a value set by hand, as it snaps to its range and steps: the song's, for one of Phazite's own
 // devices in a chain (Schema.h: VALUES), and Tracktion's parameter, which plays it. And one of a device's files or tables
-// (Schema.h: SOUNDS; empty for none), the song's and its PLUGIN's. In the caller's undo step. A plug-in's parameter, a
-// device's in a container, a modulator's or a macro's, are Tracktion's alone while step 5 lasts.
+// (Schema.h: SOUNDS; empty for none), the song's and its PLUGIN's. In the caller's undo step. A plug-in's parameter is
+// the plug-in's own, which its state holds (stored as the project saves: DeviceStates.h); a device's in a container, a
+// modulator's or a macro's are Tracktion's alone while steps 5 and 6 last.
 void setDeviceValue (te::AutomatableParameter&, float value);
 void setDeviceSound (te::Plugin&, const juce::Identifier& property, const juce::String& value);
 
@@ -104,8 +117,8 @@ DeviceSlot makeDeviceSlot (te::Plugin&);
 
 // An effect's mix: how much of what it puts out is its effect, from 0 (only the sound that comes into it, "dry") to 1
 // (only the effect, "wet"), as FL Studio's mixer slots and REAPER's effect chains have for every effect. It crossfades
-// the dry and wet levels Tracktion gives each plug-in (and its reverb), linearly. A device without them, such as an
-// instrument, has no mix.
+// the dry and wet levels Tracktion gives each plug-in (and its reverb), linearly; a plug-in's is the song's (Schema.h:
+// pluginMix). A device without them, such as an instrument, has no mix.
 bool hasMix (te::Plugin&);
 float getMix (te::Plugin&); // 1 for a device without a mix
 void setMix (te::Plugin&, float mix);

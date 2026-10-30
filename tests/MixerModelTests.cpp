@@ -8,6 +8,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mirror/internal/Mirror.h"
@@ -306,6 +307,68 @@ TEST_CASE ("The values set by hand of Phazite's own devices are the song's, and 
     edit.getUndoManager().clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);
     CHECK_FALSE (edit.getUndoManager().canUndo());
+}
+
+TEST_CASE ("A plug-in is the song's: which it is, its mix, its settings as the project stores them; the mirror makes it from the song")
+{
+    namespace schema = phazite::schema;
+    using phazite::test::TestPlugin;
+    TestPlugin testPlugin;
+    Song song;
+    auto& context = song.context;
+    auto& edit = *song.edit;
+    const auto a = idOf (*song.a);
+    phazite::addEffect (context, a, song.find ("PhaziteTestEffect"));
+    const auto effects = phazite::getEffects (context, a);
+    REQUIRE (effects.size() == 1);
+    const auto id = effects[0].id;
+    const auto element = phazite::findDeviceState (edit, id);
+
+    // Which plug-in it is, as scanning found it.
+    CHECK (element[schema::deviceType].toString() == "plugin");
+    CHECK (element[schema::pluginFormat].toString() == "Test");
+    CHECK (element[schema::pluginName].toString() == "Test Effect");
+    CHECK (element[schema::pluginMaker].toString() == "Phazite Tests");
+    CHECK (element[schema::pluginIdentifier].toString() == "PhaziteTestEffect");
+    CHECK ((int) element[schema::pluginUid] == TestPlugin::getDescription().uniqueId);
+
+    // Its mix is the song's; an undo takes it back.
+    auto mix = phazite::getMix (context, id);
+    mix.setValue (0.25f);
+    CHECK ((float) element[schema::pluginMix] == doctest::Approx (0.25f));
+    phazite::undo (edit);
+    CHECK_FALSE (element.hasProperty (schema::pluginMix));
+    phazite::redo (edit);
+
+    // Its settings, as its window sets them, go into the song as the project stores them, with its channels.
+    const auto played = [&song] { return dynamic_cast<te::ExternalPlugin*> (phazite::getDevices (*song.a).getFirst()); };
+    REQUIRE (played() != nullptr);
+    TestPlugin::setGain (*played(), 0.3f);
+    phazite::storeDeviceStates (edit);
+    const auto stored = element[schema::pluginState].toString();
+    CHECK (stored.isNotEmpty());
+    CHECK (element[schema::pluginInputs].toString() == "L R");
+    CHECK (element[schema::pluginOutputs].toString() == "L R");
+
+    // A plug-in Tracktion lost is made again from the song: with its ID, the settings the song stored and its mix.
+    TestPlugin::setGain (*played(), 0.9f);
+    played()->deleteFromParent();
+    CHECK (phazite::getDevices (*song.a).isEmpty());
+    phazite::mirror::reconcileDevices (edit);
+    REQUIRE (played() != nullptr);
+    CHECK (phazite::getDeviceID (*played()) == id);
+    CHECK (TestPlugin::getGain (*played()) == doctest::Approx (0.3f));
+    CHECK (played()->wetGain->getCurrentValue() == doctest::Approx (0.25f));
+    CHECK (played()->dryGain->getCurrentValue() == doctest::Approx (0.75f));
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileDevices (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+
+    // Taken away, it keeps in the song what it held then, for an undo to bring back.
+    TestPlugin::setGain (*played(), 0.6f);
+    phazite::removeDevice (context, id);
+    CHECK (element[schema::pluginState].toString() != stored);
 }
 
 TEST_CASE ("A device's channel, its handle for an editor, and whether its controls open in a window of their own")
