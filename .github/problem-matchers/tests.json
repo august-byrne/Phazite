@@ -23,6 +23,16 @@
       ]
     },
     {
+      "owner": "doctest-values",
+      "severity": "warning",
+      "pattern": [
+        {
+          "regexp": "^\\s+((?:values|logged): .+)$",
+          "message": 1
+        }
+      ]
+    },
+    {
       "owner": "sanitizers",
       "pattern": [
         {

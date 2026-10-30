@@ -208,6 +208,12 @@ TEST_CASE ("What comes into an armed track's input while recording becomes a cli
     const auto rate = 48000.0;
     const auto clicks = findClicks (renderTrack (*studio.track, 2.2, rate), rate);
     REQUIRE (clicks.size() >= 3);
+    juce::String found; // all of them, in a failure's report
+
+    for (auto click : clicks)
+        found << juce::String (click) << " ";
+
+    CAPTURE (found);
 
     for (size_t beat = 0; beat < clicks.size(); ++beat)
     {
