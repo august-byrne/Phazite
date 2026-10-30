@@ -238,14 +238,19 @@ void Playlist::rebuildClips()
     // The clips on the rows as they are now. The components of those still there show them as they are now; those of clips
     // that went go, and so do their waveforms. layOutClips() makes the components of clips that come into view.
     shownClips.clear();
+    shownSubRows.clear();
     clipIndex.clear();
 
     for (const auto& row : rows)
     {
-        for (auto& clip : getClips (context, row.track.id))
+        auto clips = getClips (context, row.track.id);
+        const auto subRows = getClipSubRows (clips);
+
+        for (size_t i = 0; i < clips.size(); ++i)
         {
-            clipIndex.emplace (clip.id, shownClips.size());
-            shownClips.push_back (std::move (clip));
+            clipIndex.emplace (clips[i].id, shownClips.size());
+            shownClips.push_back (std::move (clips[i]));
+            shownSubRows.push_back (subRows[i]);
         }
     }
 
@@ -345,7 +350,14 @@ juce::Rectangle<int> Playlist::getClipBounds (const ClipInfo& clip) const
     const auto& timeline = getView();
     const auto left = juce::roundToInt (timeline.beatToX (clip.range.getStart()));
     const auto right = juce::roundToInt (timeline.beatToX (clip.range.getEnd()));
-    return { left, getRowTop (r) + 1, std::max (2, right - left), std::max (1, r.height - 3) };
+
+    // Clips that overlap share the row out, one under another, a pixel apart.
+    const auto found = clipIndex.find (clip.id);
+    const auto subRow = found != clipIndex.end() ? shownSubRows[found->second] : ClipSubRow();
+    const auto height = std::max (1, r.height - 3);
+    const auto top = height * subRow.index / subRow.count;
+    const auto bottom = height * (subRow.index + 1) / subRow.count - (subRow.index + 1 < subRow.count ? 1 : 0);
+    return { left, getRowTop (r) + 1 + top, std::max (2, right - left), std::max (1, bottom - top) };
 }
 
 const ClipInfo* Playlist::getClipAt (juce::Point<int> position) const

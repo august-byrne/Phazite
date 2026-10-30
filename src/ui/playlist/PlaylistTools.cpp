@@ -126,18 +126,24 @@ std::optional<CrossfadeSpot> Playlist::findCrossfadeAt (juce::Point<int> positio
     if (row < 0)
         return {};
 
-    // Only the lower third of a row, so the upper part still trims.
-    const auto& r = rows[(size_t) row];
-
-    if (position.y < getRowTop (r) + r.height * 2 / 3)
-        return {};
-
     // Clips a pixel apart count as touching.
     const auto pixel = BeatDuration::fromBeats (1.0 / getView().pixelsPerBeat);
 
-    for (const auto& spot : getCrossfadeSpots (context, r.track.id, pixel))
-        if (std::abs (getView().beatToX (spot.boundary) - position.x) <= 6.0)
+    for (const auto& spot : getCrossfadeSpots (context, rows[(size_t) row].track.id, pixel))
+    {
+        // Only where the two show side by side, in the same sub-row (clips that overlap show one under another), and in
+        // the lower third of it, so the upper part still trims.
+        const auto first = clipIndex.find (spot.first), second = clipIndex.find (spot.second);
+
+        if (first == clipIndex.end() || second == clipIndex.end() || shownSubRows[first->second] != shownSubRows[second->second])
+            continue;
+
+        const auto bounds = getClipBounds (shownClips[first->second]);
+
+        if (position.y >= bounds.getY() + bounds.getHeight() * 2 / 3 && position.y <= bounds.getBottom()
+            && std::abs (getView().beatToX (spot.boundary) - position.x) <= 6.0)
             return spot;
+    }
 
     return {};
 }

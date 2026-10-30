@@ -282,6 +282,7 @@ void Playlist::showProject()
     clipComponents.clear();
     waveforms.clear();
     shownClips.clear();
+    shownSubRows.clear();
     clipIndex.clear();
     rows.clear();
     rowOf.clear();

@@ -92,6 +92,16 @@ struct PlaylistScreen
         return *clip;
     }
 
+    // Where a clip shows, in the lanes; nothing while it has no component (out of view).
+    juce::Rectangle<int> boundsOf (const te::Clip& clip)
+    {
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (playlist))
+            if (component->getClip() == phazite::getClipID (clip))
+                return lanes->getLocalArea (component, component->getLocalBounds());
+
+        return {};
+    }
+
     std::unique_ptr<te::Edit> edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
@@ -529,7 +539,7 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
         for (int c = 0; c < 30; ++c)
             screen.addClip (track, c * 8.0 + 4.0, 4.0);
 
-    // Two that overlap on the first track: the second is the one clicked where they meet, so it shows over the first.
+    // Two that overlap on the first track, one under the other: the second, made later, below.
     auto& first = screen.addClip (0, 0.0, 2.0);
     auto& second = screen.addClip (0, 1.0, 2.0);
     phazite::test::dispatchPendingMessages();
@@ -576,7 +586,8 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
     CHECK (screen.selection.isSelected (lastTrackClips.getFirst()));
 
     // Back at the top, scrolled along so that only the second of the two that overlap shows, and back: the first comes
-    // into view under the second, and stays there.
+    // into view before the second in their layer, as the playlist lists them (where clips crossfade, the later shows over
+    // the earlier), and stays there. A click in the lower half of the row finds the second.
     for (int notch = 0; notch < 60; ++notch)
         mouse.wheel (middle, 60.0f / 256.0f);
 
@@ -591,7 +602,7 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
     REQUIRE (firstShown->getParentComponent() == secondShown->getParentComponent());
     const auto* layer = firstShown->getParentComponent();
     CHECK (layer->getIndexOfChildComponent (firstShown) < layer->getIndexOfChildComponent (secondShown));
-    mouse.click (screen.at (1.5, 0));
+    mouse.click (screen.at (1.5, 0) + juce::Point<int> (0, phazite::ui::TrackHeight::standard / 4));
     CHECK (screen.selection.isSelected (&second));
 
     // Zoomed out, every clip of the tracks in view shows, the song's last ones too.
@@ -600,6 +611,58 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
 
     for (auto* clip : screen.tracks[0]->getClips())
         CHECK (componentOf (*clip) != nullptr);
+}
+
+TEST_CASE ("Clips that overlap on a track show one under another, and each is grabbed where it shows")
+{
+    // A two-bar clip and another a bar later on the first track, which play together: they used to show one over the other,
+    // where only the later one could be grabbed.
+    PlaylistScreen screen;
+    auto& first = screen.addClip (0, 0.0, 8.0);
+    auto& second = screen.addClip (0, 4.0, 8.0);
+    auto& alone = screen.addClip (1, 0.0, 8.0);
+    screen.edit->getUndoManager().clearUndoHistory();
+    phazite::test::dispatchPendingMessages();
+
+    // The first, made first, above the second, a pixel apart, together as tall as a clip alone on its track.
+    const auto top = screen.boundsOf (first), bottom = screen.boundsOf (second), whole = screen.boundsOf (alone);
+    REQUIRE_FALSE (top.isEmpty());
+    REQUIRE_FALSE (bottom.isEmpty());
+    CHECK (top.getY() == 1);
+    CHECK (bottom.getY() == top.getBottom() + 1);
+    CHECK (bottom.getBottom() == phazite::ui::TrackHeight::standard - 2);
+    CHECK (whole.getHeight() == phazite::ui::TrackHeight::standard - 3);
+
+    // Where they overlap, each is clicked in its own half.
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto x = screen.at (6.0, 0).x;
+    mouse.click ({ x, top.getCentreY() });
+    mouse.pause();
+    CHECK (screen.selection.isSelected (&first));
+    CHECK_FALSE (screen.selection.isSelected (&second));
+    mouse.click ({ x, bottom.getCentreY() });
+    mouse.pause();
+    CHECK (screen.selection.isSelected (&second));
+    CHECK_FALSE (screen.selection.isSelected (&first));
+
+    // The first, dragged from there, goes, and the second stays; still overlapping, each keeps its place.
+    mouse.press ({ x, top.getCentreY() });
+    mouse.dragTo ({ screen.at (8.0, 0).x, top.getCentreY() });
+    mouse.dragTo ({ screen.at (10.0, 0).x, top.getCentreY() });
+    mouse.release();
+    mouse.pause();
+    phazite::test::dispatchPendingMessages();
+    CHECK (first.getStartBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (second.getStartBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (screen.boundsOf (first).getY() == top.getY());
+    CHECK (screen.boundsOf (second).getY() == bottom.getY());
+
+    // Once they no longer overlap, each has the whole row again.
+    phazite::moveClip (screen.context, phazite::getClipID (second), phazite::BeatPosition::fromBeats (12.0),
+                       phazite::getTrackID (*screen.tracks[0]));
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.boundsOf (first).getHeight() == whole.getHeight());
+    CHECK (screen.boundsOf (second).getHeight() == whole.getHeight());
 }
 
 TEST_CASE ("Dragging along the top of the ruler loops part of the song, and the loop's edges and middle change it")

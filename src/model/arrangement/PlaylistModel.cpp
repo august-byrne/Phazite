@@ -14,6 +14,8 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 
+#include <numeric>
+
 namespace phazite
 {
 namespace
@@ -170,6 +172,20 @@ namespace
 
         return info;
     }
+
+    // Whether two audio clips, the second starting and ending later, overlap only where the first fades out and the
+    // second fades in: a crossfade. Their fades are parts of their lengths, so with a little leeway for rounding.
+    bool isCrossfade (const ClipInfo& first, const ClipInfo& second)
+    {
+        if (first.kind != ClipType::audio || second.kind != ClipType::audio || second.range.getStart() <= first.range.getStart()
+            || second.range.getEnd() <= first.range.getEnd())
+            return false;
+
+        const auto overlap = (first.range.getEnd() - second.range.getStart()).inBeats();
+        const auto leeway = 1.0e-6 + overlap * 1.0e-3;
+        return first.fadeOut * first.range.getLength().inBeats() + leeway >= overlap
+               && second.fadeIn * second.range.getLength().inBeats() + leeway >= overlap;
+    }
 } // namespace
 
 //==============================================================================
@@ -293,6 +309,87 @@ std::optional<ClipInfo> getClip (const ProjectContext& context, ClipID id)
 bool canHoldClips (const ProjectContext& context, TrackID id)
 {
     return dynamic_cast<te::ClipTrack*> (findTrack (context, id)) != nullptr;
+}
+
+std::vector<ClipSubRow> getClipSubRows (const std::vector<ClipInfo>& clips)
+{
+    const auto count = clips.size();
+    std::vector<ClipSubRow> subRows (count);
+
+    // The clips each one overlaps, which can't share its sub-row: those that start after it, up to its end.
+    std::vector<size_t> byStart (count);
+    std::iota (byStart.begin(), byStart.end(), size_t());
+    std::stable_sort (byStart.begin(), byStart.end(),
+                      [&clips] (size_t a, size_t b) { return clips[a].range.getStart() < clips[b].range.getStart(); });
+    std::vector<std::vector<size_t>> overlapping (count);
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        const auto& first = clips[byStart[i]];
+
+        for (auto j = i + 1; j < count && clips[byStart[j]].range.getStart() < first.range.getEnd(); ++j)
+        {
+            if (const auto& second = clips[byStart[j]]; first.range.overlaps (second.range) && ! isCrossfade (first, second))
+            {
+                overlapping[byStart[i]].push_back (byStart[j]);
+                overlapping[byStart[j]].push_back (byStart[i]);
+            }
+        }
+    }
+
+    // The oldest first, each in the highest sub-row that none of the clips it overlaps took before it.
+    std::vector<size_t> byAge (count);
+    std::iota (byAge.begin(), byAge.end(), size_t());
+    std::sort (byAge.begin(), byAge.end(), [&clips] (size_t a, size_t b) { return clips[a].id < clips[b].id; });
+    std::vector<int> index (count, -1);
+
+    for (const auto i : byAge)
+    {
+        std::vector<bool> taken;
+
+        for (const auto other : overlapping[i])
+        {
+            if (const auto otherIndex = index[other]; otherIndex >= 0)
+            {
+                taken.resize (std::max (taken.size(), (size_t) otherIndex + 1));
+                taken[(size_t) otherIndex] = true;
+            }
+        }
+
+        index[i] = (int) (std::find (taken.begin(), taken.end(), false) - taken.begin());
+    }
+
+    // Clips that overlap, directly or through others, share the row out into as many sub-rows as they take.
+    std::vector<bool> reached (count, false);
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (reached[i])
+            continue;
+
+        std::vector<size_t> group { i };
+        reached[i] = true;
+        auto taken = 0;
+
+        for (size_t member = 0; member < group.size(); ++member)
+        {
+            taken = std::max (taken, index[group[member]] + 1);
+
+            for (const auto other : overlapping[group[member]])
+            {
+                if (! reached[other])
+                {
+                    reached[other] = true;
+                    group.push_back (other);
+                }
+            }
+        }
+
+        for (const auto member : group)
+            subRows[member] = { index[member], taken };
+    }
+
+    return subRows;
 }
 
 float getFadeGain (FadeShape shape, float alpha)

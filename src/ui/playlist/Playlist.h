@@ -120,11 +120,13 @@ private:
     AutomationShape paintShape = AutomationShape::sine;  // what the Paint tool draws in a lane
     std::optional<std::vector<ParameterRef>> knownLanes; // the lanes shown when they were built last: none for a new project
 
-    // The clips on the rows, row by row as the model lists them (a later one shows over an earlier one it overlaps), which
-    // the tools find and select, and where each is in that list. Only the clips in view have components, made as they come
-    // into view: a song can hold thousands of clips (docs/performance-audit.md, section 8). An audio clip's waveform stays
-    // until the clip leaves the rows, so that it doesn't load again each time the clip scrolls back into view.
+    // The clips on the rows, row by row as the model lists them, which the tools find and select, and where each is in that
+    // list. Clips that overlap show one under another in their row (getClipSubRows()); where two crossfade, a later one
+    // shows over an earlier one. Only the clips in view have components, made as they come into view: a song can hold
+    // thousands of clips (docs/performance-audit.md, section 8). An audio clip's waveform stays until the clip leaves the
+    // rows, so that it doesn't load again each time the clip scrolls back into view.
     std::vector<ClipInfo> shownClips;
+    std::vector<ClipSubRow> shownSubRows; // shownSubRows[i] is shownClips[i]'s
     std::unordered_map<ClipID, size_t> clipIndex;
     std::unordered_map<ClipID, std::unique_ptr<ClipComponent>> clipComponents;
     std::unordered_map<ClipID, std::unique_ptr<ClipWaveform>> waveforms;
@@ -180,7 +182,7 @@ private:
     int getZOrderFor (const juce::Component& layer, size_t index) const; // after the clips before it in the list
     void updateClips();                                                  // their colors and whether they are selected
     void showLookOf (ClipComponent&) const;
-    juce::Rectangle<int> getClipBounds (const ClipInfo&) const; // in the lanes
+    juce::Rectangle<int> getClipBounds (const ClipInfo&) const; // in the lanes, in its sub-row
     const ClipInfo* getClipAt (juce::Point<int>) const;         // the one shown on top there, or nullptr
     void clipClicked (ClipID, const juce::ModifierKeys&);
     void showClipMenu();

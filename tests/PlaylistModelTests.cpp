@@ -29,6 +29,16 @@ phazite::TrackID idOf (const te::Track& track)
     return phazite::getTrackID (track);
 }
 
+// A clip as the playlist is told of it, made in the order of its ID.
+phazite::ClipInfo clipAt (std::uint64_t id, double start, double length, phazite::ClipType kind = phazite::ClipType::midi)
+{
+    phazite::ClipInfo clip;
+    clip.id = phazite::ClipID::fromRaw (id);
+    clip.kind = kind;
+    clip.range = { beat (start), beats (length) };
+    return clip;
+}
+
 // An open project at 120 BPM (a beat is half a second) with tracks A and B, A with a MIDI clip from beat 4 to 8 that
 // holds two notes.
 struct Song
@@ -255,12 +265,44 @@ TEST_CASE ("Audio clips by ID are faded, crossfaded and slipped")
     CHECK (right->range.getStart().inBeats() == doctest::Approx (3.0));
     CHECK (left->fadeOut == doctest::Approx (0.4)); // 2 of its 5 beats
     CHECK (right->fadeIn == doctest::Approx (0.4));
+    CHECK (phazite::getClipSubRows (phazite::getClips (context, idOf (*song.b))) == std::vector<phazite::ClipSubRow> (2)); // the whole row
 
     // Slipped: what plays inside moves a beat earlier, and the clip stays where it is.
     CHECK (phazite::getSlipOffset (context, first) == doctest::Approx (0.0));
     phazite::slipClip (context, first, 0.0, beat (1.0), beat (0.0));
     CHECK (phazite::getSlipOffset (context, first) == doctest::Approx (0.5)); // seconds
     CHECK (phazite::getClip (context, first)->range.getStart().inBeats() == doctest::Approx (0.0));
+}
+
+TEST_CASE ("Clips that overlap on a track take sub-rows of its row, those made first above, and crossfaded clips share one")
+{
+    using phazite::ClipSubRow;
+    const auto subRowsOf = [] (const std::vector<phazite::ClipInfo>& clips) { return phazite::getClipSubRows (clips); };
+
+    // A two-bar sample every bar, as FL Studio users stagger them on rows: every other one in the lower sub-row. The one
+    // after them only touches the last, so it has the whole row.
+    CHECK (subRowsOf ({ clipAt (1, 0.0, 8.0), clipAt (2, 4.0, 8.0), clipAt (3, 8.0, 8.0), clipAt (4, 12.0, 8.0), clipAt (5, 20.0, 4.0) })
+           == std::vector<ClipSubRow> { { 0, 2 }, { 1, 2 }, { 0, 2 }, { 1, 2 }, { 0, 1 } });
+
+    // The one made first is above, wherever it is: a newer clip dragged over it never moves it.
+    CHECK (subRowsOf ({ clipAt (2, 0.0, 6.0), clipAt (1, 4.0, 4.0) }) == std::vector<ClipSubRow> { { 1, 2 }, { 0, 2 } });
+
+    // One over two in different sub-rows takes a third, and the clips it joins share the row out in three.
+    CHECK (subRowsOf ({ clipAt (1, 0.0, 4.0), clipAt (2, 2.0, 4.0), clipAt (3, 3.0, 2.0), clipAt (4, 8.0, 4.0) })
+           == std::vector<ClipSubRow> { { 0, 3 }, { 1, 3 }, { 2, 3 }, { 0, 1 } });
+
+    // Two audio clips that overlap only where the first fades out and the second fades in crossfade: they share the row.
+    // With a fade shorter than the overlap, each plays whole over the other for a while, so they don't.
+    auto first = clipAt (1, 0.0, 5.0, phazite::ClipType::audio), second = clipAt (2, 3.0, 5.0, phazite::ClipType::audio);
+    first.fadeOut = 0.4; // 2 of its 5 beats
+    second.fadeIn = 0.4;
+    CHECK (subRowsOf ({ first, second }) == std::vector<ClipSubRow> { { 0, 1 }, { 0, 1 } });
+    second.fadeIn = 0.2;
+    CHECK (subRowsOf ({ first, second }) == std::vector<ClipSubRow> { { 0, 2 }, { 1, 2 } });
+
+    // MIDI clips have no fades: overlapping, they take sub-rows.
+    CHECK (subRowsOf ({ clipAt (1, 0.0, 5.0), clipAt (2, 3.0, 5.0) }) == std::vector<ClipSubRow> { { 0, 2 }, { 1, 2 } });
+    CHECK (subRowsOf ({}).empty());
 }
 
 TEST_CASE ("The playlist's sections, play start and time line by plain values")
