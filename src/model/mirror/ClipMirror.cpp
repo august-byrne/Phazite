@@ -236,6 +236,50 @@ namespace
     {
         return dynamic_cast<te::ClipTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (clipState.getParent()))));
     }
+
+    // A track's elements in the order Tracktion keeps them (ClipOwner's sortClips()): the rest first, then its automation,
+    // its clips by where they start, its devices, its output and its LFOs. Put so in the change's step: Tracktion would
+    // sort clips added or moved a moment later, as an undo step of its own (an Edit built from the song would have one
+    // as the project opens).
+    void putInOrder (te::ClipTrack& track)
+    {
+        struct Order
+        {
+            static int getPriority (const juce::ValueTree& element)
+            {
+                if (element.hasType (te::IDs::AUTOMATIONTRACK))
+                    return 0;
+
+                if (te::Clip::isClipState (element))
+                    return 1;
+
+                if (element.hasType (te::IDs::PLUGIN))
+                    return 2;
+
+                if (element.hasType (te::IDs::OUTPUTDEVICES))
+                    return 3;
+
+                return element.hasType (te::IDs::LFOS) ? 4 : -1;
+            }
+
+            int compareElements (const juce::ValueTree& first, const juce::ValueTree& second) const noexcept
+            {
+                if (const auto priority = getPriority (first) - getPriority (second); priority != 0)
+                    return priority;
+
+                if (te::Clip::isClipState (first) && te::Clip::isClipState (second))
+                {
+                    const auto a = (double) first[te::IDs::start], b = (double) second[te::IDs::start];
+                    return a < b ? -1 : (b < a ? 1 : 0);
+                }
+
+                return 0;
+            }
+        };
+
+        Order order;
+        track.state.sort (order, &track.edit.getUndoManager(), true);
+    }
 } // namespace
 
 void reconcileClips (te::Edit& edit)
@@ -263,6 +307,9 @@ void reconcileClips (te::Edit& edit)
 
     for (auto& clip : gone)
         clip->removeFromParent();
+
+    for (auto* track : te::getAudioTracks (edit))
+        putInOrder (*track);
 }
 
 void reconcileClip (te::Edit& edit, ClipID id)
@@ -270,7 +317,10 @@ void reconcileClip (te::Edit& edit, ClipID id)
     if (const auto clipState = findClipState (edit, id); clipState.isValid())
     {
         if (auto* track = findTrackOf (edit, clipState))
+        {
             reconcileClip (edit, clipState, *track);
+            putInOrder (*track);
+        }
     }
     else if (auto* clip = te::findClipForID (edit, toTracktion (id)))
     {

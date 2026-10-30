@@ -77,16 +77,6 @@ namespace
         for (auto* inside : track.getAllSubTracks (false))
             copyContainersOf (*inside, modulators, devices);
     }
-
-    // The IDs of the rack types that containers in a saved state play.
-    void findPlayedRacks (const juce::ValueTree& state, juce::Array<te::EditItemID>& played)
-    {
-        if (state.hasType (te::IDs::PLUGIN) && state[te::IDs::type].toString() == te::RackInstance::xmlTypeName)
-            played.addIfNotAlreadyThere (te::EditItemID::fromProperty (state, te::IDs::rackType));
-
-        for (const auto& child : state)
-            findPlayedRacks (child, played);
-    }
 } // namespace
 
 //==============================================================================
@@ -328,17 +318,6 @@ te::RackType::Ptr addContainerRack (te::Edit& edit, const juce::ValueTree& rackS
         rack->getMacroParameterListForWriting().remapOnTempoChange = true;
 
     return rack;
-}
-
-void dropUnusedContainerRacks (juce::ValueTree& editState)
-{
-    auto racks = editState.getChildWithName (te::IDs::RACKS);
-    juce::Array<te::EditItemID> played;
-    findPlayedRacks (editState, played);
-
-    for (int i = racks.getNumChildren(); --i >= 0;)
-        if (const auto rack = racks.getChild (i); rack.hasType (te::IDs::RACK) && ! played.contains (te::EditItemID::fromID (rack)))
-            racks.removeChild (i, nullptr);
 }
 
 //==============================================================================

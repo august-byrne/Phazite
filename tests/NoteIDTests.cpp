@@ -14,6 +14,7 @@
 #include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace
 {
@@ -213,10 +214,24 @@ TEST_CASE ("Notes' IDs are saved with the project and the same when it opens aga
     CHECK (allDifferent (saved));
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // The file holds them, and they are the same when it opens again.
+    // The file holds them, on the song's notes, and they are the same when it opens again.
     const auto xml = phazite::test::readXml (project->getFile());
     REQUIRE (xml != nullptr);
-    CHECK (xml->toString().contains (phazite::schema::phaziteNoteID.toString() + "=\""));
+    const std::function<const juce::XmlElement*(const juce::XmlElement&)> findNote = [&findNote] (const juce::XmlElement& element)
+    {
+        if (element.hasTagName (phazite::schema::NOTE.toString()))
+            return &element;
+
+        for (const auto* child : element.getChildIterator())
+            if (const auto* found = findNote (*child))
+                return found;
+
+        return static_cast<const juce::XmlElement*> (nullptr);
+    };
+
+    const auto* note = findNote (*xml);
+    REQUIRE (note != nullptr);
+    CHECK (note->hasAttribute (phazite::schema::noteID.toString()));
     const auto file = project->getFile();
     project = nullptr;
 

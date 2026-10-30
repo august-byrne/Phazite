@@ -83,9 +83,9 @@ TEST_CASE ("A new project creates its folder, subfolders and file")
 
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // With Phazite's state, in memory and in the file.
+    // With the song, in memory and as the file, which holds it alone.
     CHECK (phazite::findPhaziteState (project->getEdit()).isValid());
-    CHECK (phazite::test::readXml (project->getFile())->getChildByName ("PHAZITE") != nullptr);
+    CHECK (phazite::test::readXml (project->getFile())->hasTagName ("PHAZITE"));
 
     // A second project with the same name would overwrite the first, so it is refused.
     juce::String error;
@@ -106,13 +106,12 @@ TEST_CASE ("A project saves and reopens with Phazite's own data")
     CHECK_FALSE (project->hasUnsavedChanges());
 
     const auto file = project->getFile();
-    const auto id = project->getEdit().getProjectItemRef();
     project = nullptr;
 
     auto reopened = openProject (file);
     CHECK (te::getAudioTracks (reopened->getEdit()).size() == 3);
     CHECK (reopened->getPhaziteState()["outline"].toString() == juce::String ("Electronic"));
-    CHECK (reopened->getEdit().getProjectItemRef() == id); // so its temporary folder stays the same
+    CHECK (reopened->getEdit().getTempDirectory (false) == reopened->getCacheFolder()); // where its frozen files are
 }
 
 TEST_CASE ("The song numbers its items itself, each new one past every ID it holds, never one twice, and saves where it got to")

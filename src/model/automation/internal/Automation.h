@@ -203,11 +203,6 @@ private:
 // Whether any of the Edit's tracks writes automation (a mode other than read).
 bool isWritingAutomation (const te::Edit&);
 
-// Whether a property of a device's state (a PLUGIN) is the stored value of a parameter with automation, or one a
-// modulator moves, which Tracktion writes as they play: no change to the song. The value set by hand is one, as an undo
-// step (Edit::hasChangedSinceSaved()).
-bool isAutomatedValue (const juce::ValueTree&, const juce::Identifier& property);
-
 // Whether a property of a device's state is where one of its parameters keeps its value: a knob turned, a fader moved.
 // Controls read values as they show them, so views needn't hear of these (model/project/ProjectContext.h).
 bool isParameterValue (const juce::ValueTree&, const juce::Identifier& property);

@@ -133,9 +133,11 @@ TEST_CASE ("Storing an Edit's devices' states stores all that Tracktion's save w
         CHECK (plugin->windowState->lastWindowBounds->getPosition() == juce::Point<int> (120, 80));
     }
 
-    // Tracktion's own save then finds nothing more to store: it changes nothing, and records nothing.
-    const auto stored = edit.state.createCopy();
+    // Tracktion's own save then finds nothing more to store: it changes nothing, and records nothing. (It writes its file's
+    // version, author and ID on the Edit's root, which Phazite's file, the song alone, hasn't.)
+    auto stored = edit.state.createCopy();
     edit.flushState();
+    stored.copyPropertiesFrom (edit.state, nullptr);
     CHECK (edit.state.isEquivalentTo (stored));
     CHECK_FALSE (edit.getUndoManager().canUndo());
 }

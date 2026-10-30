@@ -9,7 +9,7 @@
 // keeps them: Tracktion's plug-in cache keeps a container that was removed, to bring the same object back when the
 // removal is undone, and that object plays the rack type object it was made with, while a rack type removed and added
 // again by undo and redo would be another object. So rack types are added without undo steps and never removed in a
-// session; those no container plays are dropped when a project opens (dropUnusedContainerRacks()).
+// session; an Edit built from the song as a project opens has only those its containers play.
 #pragma once
 
 #include "model/base/internal/Selection.h"
@@ -68,9 +68,6 @@ void deleteContainer (te::RackInstance&);
 // a preset, or another container's, with new IDs). Not an undo step.
 te::RackType::Ptr addContainerRack (te::Edit&);
 te::RackType::Ptr addContainerRack (te::Edit&, const juce::ValueTree& rackState);
-
-// Drops the rack types no container plays from a saved project's state, before an Edit is made from it.
-void dropUnusedContainerRacks (juce::ValueTree& editState);
 
 // Inside a container: adding a device (at a place among its devices, or -1 for the end: instruments can't go in), and
 // moving one to another place, in the song, which the mirror follows, wiring the row again. Each joins the caller's step.

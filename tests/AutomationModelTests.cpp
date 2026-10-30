@@ -16,6 +16,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -723,8 +724,8 @@ TEST_CASE ("Lanes and the values automation plays are no unsaved changes")
     phazite::test::settle();
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // A parameter without automation is.
-    volume->state.setProperty (te::IDs::pan, 0.5f, nullptr);
+    // A value set by hand is: the song's (Schema.h: channelPan), not what Tracktion's fader keeps of it.
+    phazite::setChannelPan (*track, 0.5f);
     CHECK (project->hasUnsavedChanges());
 }
 

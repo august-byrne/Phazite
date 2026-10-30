@@ -154,7 +154,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     REQUIRE (pad != nullptr);
     phazite::setTrackName (*pad, "Pad");
 
-    // Tone: imported audio with fades of a shape and a color of its own, on a track panned left. (No digits in the
+    // Tone: imported audio with fades of a shape of their own, on a track panned left. (No digits in the
     // file's name: Phazite would read a tempo in them and stretch the clip.)
     auto* tone = phazite::insertTrack (edit, pad, nullptr);
     REQUIRE (tone != nullptr);
@@ -165,7 +165,6 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     phazite::setClipFade (*audio, true, te::TimeDuration::fromSeconds (0.25));
     phazite::setClipFade (*audio, false, te::TimeDuration::fromSeconds (0.5));
     phazite::setFadeShape ({ audio }, te::AudioFadeCurve::convex);
-    audio->setColour (phazite::getTrackColours()[4].colour);
     phazite::setChannelPan (*tone, -0.5f);
 
     // Folders: Keys and Pad in a collapsed folder, and Tone in a bus at -3 dB.

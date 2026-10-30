@@ -23,7 +23,7 @@ std::unique_ptr<te::Edit> createEditFromSong (te::Engine&, const juce::ValueTree
 
 //==============================================================================
 // The project folder:
-//   <name>.phazite   the project file: Tracktion's Edit, with Phazite's own data inside
+//   <name>.phazite   the project file: the song (Schema.h), from which an Edit is built as the project opens
 //   Audio/           recordings and imported audio
 //   Generated/       sounds made by Phazite's generators
 //   Renders/         exports: the song, and its stems
@@ -70,8 +70,7 @@ public:
     juce::File getBackupsFolder() const { return getFolder().getChildFile ("Backups"); }
     juce::File getCacheFolder() const { return getCacheFolder (file); }
 
-    // Phazite's own data in the project file, next to the engine's (phazite::getPhaziteState(), model/base/internal/Schema.h),
-    // which every project has.
+    // The song, which the project file holds (phazite::getPhaziteState(), model/base/internal/Schema.h).
     juce::ValueTree getPhaziteState();
 
     // Whether the project holds anything it didn't hold when it was opened (with Phazite's parts added) or last saved,
@@ -97,7 +96,7 @@ public:
     bool takeAutosaveFailure();
 
     // Saves the project as it is now, unsaved changes included, as a new project <parentFolder>/<name>
-    // with copies of its Audio, Generated and Renders folders and an ID of its own. This project and
+    // with copies of its Audio, Generated and Renders folders. This project and
     // its file stay as they are. Returns the new project file, or sets error and returns an empty
     // File (if that folder exists, for example).
     juce::File saveCopyAs (const juce::File& parentFolder, const juce::String& name, juce::String& error);
@@ -120,13 +119,12 @@ private:
     std::unique_ptr<BackgroundWriter> autosaveWriter;
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
 
-    // The project as it was when it was opened, with Phazite's parts added, or last saved. Tracktion sends notifications
-    // that change nothing: after a tempo update, which opening or making an Edit causes too, each MIDI clip notifies its
-    // mute switch so that editors redraw, and aliases copy their notes to each other again; and JUCE notifies a value
-    // written again as another type. So while the project has no unsaved changes, a notification only sets
-    // mayHaveChanged, and hasUnsavedChanges() and autosave() compare the project with this copy, once. Never listen to it
-    // or change it. Only the elements of the Edit's state that notified are compared (the tracks, the tempo...), unless the
-    // state itself did, such as when a track was added (docs/performance-audit.md, U3).
+    // The song as it was when the project was opened, with Phazite's parts added, or last saved. JUCE notifies a value
+    // written again as another type, which changes nothing. So while the project has no unsaved changes, a notification
+    // only sets mayHaveChanged, and hasUnsavedChanges() and autosave() compare the song with this copy, once. Never listen
+    // to it or change it. Only the elements of the song that notified are compared (the tracks, the tempo map...), unless
+    // the song itself did (docs/performance-audit.md, U3). What Tracktion writes into the rest of the Edit's state (the
+    // mirror, the playhead, its inputs) isn't saved, so it is no change.
     juce::ValueTree savedState;
     bool mayHaveChanged = false;
     juce::Array<juce::ValueTree> elementsToCompare;
@@ -144,18 +142,16 @@ private:
     void markChanged (const juce::ValueTree&, const juce::Identifier& property = {});
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
 
-    // Tracktion writes these while it plays, without anyone changing the song, so they don't count as changes: the
-    // playhead position, and the Edit's input-device states (the inputs it knows, and which track live input goes to).
-    // Nor do the loop (where it is, whether it is on, and whether it follows the song), the metronome's switch and where
-    // playback starts, which are about playing the song rather than the song (design question 18); nor does the song's
-    // next ID (Schema.h: nextID), which the item it numbers comes with; nor do view settings,
+    // These don't count as changes: the loop (where it is, whether it is on, and whether it follows the song), the
+    // metronome's switch and where playback starts, which are about playing the song rather than the song (design question
+    // 18); nor does the song's next ID (Schema.h: nextID), which the item it numbers comes with; nor do view settings,
     // which are saved but aren't the song (decision 4: schema::isTrackViewProperty(), isGridProperty(), PIANOROLL, and
-    // isDeviceViewProperty(), where a device's window was, since step 2.12). A property
-    // (isUncountedProperty()), or an element with everything in it (isUncountedElement()): notifications and the
-    // comparison with savedState leave out the same. Never leave out lastSignificantChange: Tracktion's time stamp is how
-    // a change it notices outside the Edit's values (a plug-in's own settings) reaches autosave. Tracktion renews it when
-    // the undo history changes, a track's mute or solo changes, or a plug-in reports a change; view settings are written
-    // without the undo manager, so they leave it alone.
+    // isDeviceViewProperty(), where a device's window was, since step 2.12). A property (isUncountedProperty()), or an
+    // element with everything in it (isUncountedElement()): notifications and the comparison with savedState leave out the
+    // same. A change of Tracktion's time stamp (lastSignificantChange) is one:
+    // it is how a change Tracktion notices outside the song (a plug-in's own settings, which a save stores in the song)
+    // reaches autosave. Tracktion renews it when its undo history changes, a track's mute or solo changes, or a plug-in
+    // reports a change; view settings are written without the undo manager, so they leave it alone.
     static bool isUncountedProperty (const juce::ValueTree&, const juce::Identifier& property);
     static bool isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element);
     static bool isCounted (const juce::ValueTree&, const juce::Identifier& property);

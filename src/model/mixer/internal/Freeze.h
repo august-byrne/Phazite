@@ -38,16 +38,9 @@ bool isFrozenDevice (const te::Plugin&);
 juce::Array<te::AudioTrack*> getFrozenTracks (const te::Edit&);
 
 //==============================================================================
-// Opening a project's frozen tracks. Tracktion looks for a frozen track's file in its own temporary folder while it makes
-// the Edit, before the Edit can be told about the project's Cache folder, and unfreezes the track if it isn't there. So
-// takeFrozenTracks() turns off the frozen switch of the tracks whose file is in the Cache folder before the Edit is made
-// (and unfreezes those whose file isn't: they open unfrozen), and restoreFrozenTracks() turns it on again once the Edit's
-// temporary folder is the Cache folder. Neither is a change.
-juce::Array<te::EditItemID> takeFrozenTracks (juce::ValueTree& state, const juce::File& cacheFolder);
-void restoreFrozenTracks (te::Edit&, const juce::Array<te::EditItemID>&);
-
 // As a project opens: the song's tracks whose frozen files aren't in the Edit's temporary folder (Cache) any more play
-// live, without an undo step.
+// live, without an undo step. (The Edit is built from the song, so Tracktion, which would unfreeze a track whose file
+// isn't in its own temporary folder as it makes the Edit, finds no frozen track then: the mirror freezes them after.)
 void forgetMissingFrozenFiles (te::Edit&);
 
 // Deletes from an Edit's temporary folder what nothing in the Edit uses: renders of clips that have changed since

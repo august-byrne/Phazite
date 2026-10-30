@@ -43,7 +43,7 @@ float playNext (DrumSampler& sampler)
 TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops sounds on them")
 {
     phazite::test::TemporaryFolder project, elsewhere;
-    auto edit = phazite::createSongEdit (phazite::test::getEngine(), project.folder.getChildFile ("Song.tracktionedit"));
+    auto edit = phazite::createSongEdit (phazite::test::getEngine(), project.folder.getChildFile ("Song.phazite"));
     const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();

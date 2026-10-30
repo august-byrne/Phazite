@@ -1,432 +1,185 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The project the command script leaves (every model command run where it does something), saved: tests/CommandGoldenTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
-<EDIT appVersion="(varies)"
-      creationTime="(varies)"
-      modifiedBy=""
-      projectID="(varies)">
-  <AUXBUSNAMES>
-    <NAME bus="0"
-          name="Return 1"/>
-  </AUXBUSNAMES>
-  <CLICKTRACK level="0.6"/>
-  <MASTERPLUGINS>
-    <PLUGIN enabled="1"
-            id="1010"
-            remapOnTempoChange="1"
-            type="phaziteLoudnessMeter"/>
-  </MASTERPLUGINS>
-  <MASTERVOLUME>
-    <PLUGIN enabled="1"
-            id="1001"
-            type="volume"
-            volume="0.6376281">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-  </MASTERVOLUME>
-  <PHAZITE loop="1"
-           loopFollowsSong="1"
-           nextID="1070"
-           outline="rock"
-           playStart="2">
-    <MASTER fader="1001"/>
-    <SECTIONS>
-      <SECTION energy="0.45"
-               id="1040"
-               length="32"
-               name="Intro"
-               role="intro"
-               start="0"
-               tip="Open with the main riff or a drum fill, to set the tempo and the sound."/>
-      <SECTION energy="0.5"
-               id="1041"
-               length="64"
-               name="Verse"
-               role="verse"
-               start="32"
-               tip="Riff and rhythm section, with room for the vocal to tell the story."/>
-      <SECTION energy="0.85"
-               id="1042"
-               length="32"
-               name="Chorus"
-               role="chorus"
-               start="96"
-               tip="Open up: bigger chords, crash cymbals and the line everyone sings."/>
-      <SECTION energy="0.55"
-               id="1043"
-               length="64"
-               name="Verse"
-               role="verse"
-               start="128"
-               tip="The same groove with something new: another guitar part, or heavier drums."/>
-      <SECTION energy="0.9"
-               id="1044"
-               length="32"
-               name="Chorus"
-               role="chorus"
-               start="192"
-               tip="The chorus again, at least as big as the first."/>
-      <SECTION energy="0.8"
-               id="1045"
-               length="32"
-               name="Solo"
-               role="solo"
-               start="224"
-               tip="Let the lead guitar, or another instrument, take over the melody."/>
-      <SECTION energy="0.6"
-               id="1046"
-               length="32"
-               name="Bridge"
-               role="bridge"
-               start="256"
-               tip="A change of chords or feel that builds the tension for the last chorus."/>
-      <SECTION energy="1"
-               id="1047"
-               length="64"
-               name="Chorus"
-               role="chorus"
-               start="288"
-               tip="The last chorus, twice through: everything in, maybe up a key."/>
-      <SECTION energy="0.45"
-               id="1048"
-               length="32"
-               name="Outro"
-               role="outro"
-               start="352"
-               tip="End on the riff, on one big final chord, or with a fade."/>
-    </SECTIONS>
-    <TEMPOMAP>
-      <TEMPO beat="0"
-             bpm="120"/>
-      <TIMESIGNATURE beat="0"
-                     denominator="4"
-                     numerator="4"/>
-    </TEMPOMAP>
-    <TRACKS>
-      <TRACK bus="1"
-             colour="ffe69f00"
-             fader="1018"
-             id="1017"
-             kind="folder"
-             mute="0"
-             name="Group">
-        <TRACK collapsed="0"
-               fader="1004"
-               height="80"
-               id="1003"
-               kind="track"
-               mute="0"
-               name="One"
-               pinned="1"
-               solo="0">
-          <CLIP id="1049"
-                kind="midi"
-                length="2"
-                mute="0"
-                name="One"
-                start="0">
-            <NOTE id="1050"
-                  length="0.25"
-                  pitch="60"
-                  start="0"
-                  velocity="100"/>
-            <NOTE id="1056"
-                  length="0.25"
-                  pitch="60"
-                  start="0.25"
-                  velocity="100"/>
-            <NOTE id="1057"
-                  length="0.25"
-                  pitch="60"
-                  start="0.5"
-                  velocity="100"/>
-            <NOTE id="1058"
-                  length="0.25"
-                  pitch="60"
-                  start="0.75"
-                  velocity="100"/>
-            <NOTE id="1051"
-                  length="0.25"
-                  pitch="64"
-                  start="1"
-                  velocity="100"/>
-            <NOTE id="1059"
-                  length="0.25"
-                  pitch="64"
-                  start="1.25"
-                  velocity="100"/>
-          </CLIP>
-          <CLIP id="1054"
-                kind="midi"
-                length="2"
-                mute="0"
-                name="One"
-                start="4">
-            <NOTE id="1050"
-                  length="0.5"
-                  pitch="60"
-                  start="0"
-                  velocity="100"/>
-            <NOTE id="1051"
-                  length="0.5"
-                  pitch="64"
-                  start="1"
-                  velocity="100"/>
-          </CLIP>
-          <CLIP id="1055"
-                kind="midi"
-                length="2"
-                mute="0"
-                name="One"
-                offset="2"
-                start="2">
-            <NOTE id="1050"
-                  length="0.5"
-                  pitch="60"
-                  start="0"
-                  velocity="100"/>
-            <NOTE id="1051"
-                  length="0.5"
-                  pitch="64"
-                  start="1"
-                  velocity="100"/>
-          </CLIP>
-        </TRACK>
-        <TRACK collapsed="0"
-               colour="ff56b4e9"
-               fader="1012"
-               height="80"
-               id="1011"
-               kind="track"
-               name="Two"/>
-      </TRACK>
-      <TRACK colour="ff009e73"
-             fader="1021"
-             id="1020"
-             kind="return"
-             name="Return 1"/>
-    </TRACKS>
-  </PHAZITE>
-  <PITCHSEQUENCE>
-    <PITCH pitch="60"
-           startBeat="0"/>
-  </PITCHSEQUENCE>
-  <RACKS/>
-  <SCENES/>
-  <TEMPOSEQUENCE>
-    <TEMPO bpm="120"
-           curve="1"
-           startBeat="0"/>
-    <TIMESIG denominator="4"
-             numerator="4"
-             startBeat="0"/>
-  </TEMPOSEQUENCE>
-  <ARRANGERTRACK id="1006"
-                 name="Arranger"/>
-  <CHORDTRACK id="1008"
-              name="Chord"/>
-  <MARKERTRACK id="1002"
-               name="Marker"/>
-  <TEMPOTRACK id="1007"
-              name="Global">
-    <MODIFIERS/>
-  </TEMPOTRACK>
-  <MASTERTRACK id="1009"
-               name="Master">
-    <MODIFIERS/>
-  </MASTERTRACK>
-  <FOLDERTRACK colour="ffe69f00"
-               id="1017"
-               mute="0"
-               name="Group">
-    <MODIFIERS/>
-    <PLUGIN enabled="1"
-            id="1018"
-            type="volume">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1019"
-            type="level"/>
-    <TRACK id="1003"
+<PHAZITE loop="1"
+         loopFollowsSong="1"
+         nextID="1070"
+         outline="rock"
+         playStart="2">
+  <MASTER fader="1001"/>
+  <SECTIONS>
+    <SECTION energy="0.45"
+             id="1040"
+             length="32"
+             name="Intro"
+             role="intro"
+             start="0"
+             tip="Open with the main riff or a drum fill, to set the tempo and the sound."/>
+    <SECTION energy="0.5"
+             id="1041"
+             length="64"
+             name="Verse"
+             role="verse"
+             start="32"
+             tip="Riff and rhythm section, with room for the vocal to tell the story."/>
+    <SECTION energy="0.85"
+             id="1042"
+             length="32"
+             name="Chorus"
+             role="chorus"
+             start="96"
+             tip="Open up: bigger chords, crash cymbals and the line everyone sings."/>
+    <SECTION energy="0.55"
+             id="1043"
+             length="64"
+             name="Verse"
+             role="verse"
+             start="128"
+             tip="The same groove with something new: another guitar part, or heavier drums."/>
+    <SECTION energy="0.9"
+             id="1044"
+             length="32"
+             name="Chorus"
+             role="chorus"
+             start="192"
+             tip="The chorus again, at least as big as the first."/>
+    <SECTION energy="0.8"
+             id="1045"
+             length="32"
+             name="Solo"
+             role="solo"
+             start="224"
+             tip="Let the lead guitar, or another instrument, take over the melody."/>
+    <SECTION energy="0.6"
+             id="1046"
+             length="32"
+             name="Bridge"
+             role="bridge"
+             start="256"
+             tip="A change of chords or feel that builds the tension for the last chorus."/>
+    <SECTION energy="1"
+             id="1047"
+             length="64"
+             name="Chorus"
+             role="chorus"
+             start="288"
+             tip="The last chorus, twice through: everything in, maybe up a key."/>
+    <SECTION energy="0.45"
+             id="1048"
+             length="32"
+             name="Outro"
+             role="outro"
+             start="352"
+             tip="End on the riff, on one big final chord, or with a fade."/>
+  </SECTIONS>
+  <TEMPOMAP>
+    <TEMPO beat="0"
+           bpm="120"/>
+    <TIMESIGNATURE beat="0"
+                   denominator="4"
+                   numerator="4"/>
+  </TEMPOMAP>
+  <TRACKS>
+    <TRACK bus="1"
+           colour="ffe69f00"
+           fader="1018"
+           id="1017"
+           kind="folder"
            mute="0"
-           name="One"
-           solo="0">
-      <MIDICLIP colour="ff00ff00"
-                currentTake="0"
-                id="1049"
-                length="1"
-                mute="0"
-                name="One"
-                offset="0"
-                speed="1"
+           name="Group">
+      <TRACK collapsed="0"
+             fader="1004"
+             height="80"
+             id="1003"
+             kind="track"
+             mute="0"
+             name="One"
+             pinned="1"
+             solo="0">
+        <CLIP id="1049"
+              kind="midi"
+              length="2"
+              mute="0"
+              name="One"
+              start="0">
+          <NOTE id="1050"
+                length="0.25"
+                pitch="60"
                 start="0"
-                sync="0">
-        <AUTOMATIONCURVES/>
-        <GROOVE/>
-        <QUANTISATION/>
-        <SEQUENCE channelNumber="1"
-                  ver="1">
-          <NOTE b="0"
-                c="0"
-                l="0.25"
-                m="0"
-                p="60"
-                phaziteNoteID="1050"
-                v="100"/>
-          <NOTE b="0.25"
-                c="0"
-                l="0.25"
-                m="0"
-                p="60"
-                phaziteNoteID="1056"
-                v="100"/>
-          <NOTE b="0.5"
-                c="0"
-                l="0.25"
-                m="0"
-                p="60"
-                phaziteNoteID="1057"
-                v="100"/>
-          <NOTE b="0.75"
-                c="0"
-                l="0.25"
-                m="0"
-                p="60"
-                phaziteNoteID="1058"
-                v="100"/>
-          <NOTE b="1"
-                c="0"
-                l="0.25"
-                m="0"
-                p="64"
-                phaziteNoteID="1051"
-                v="100"/>
-          <NOTE b="1.25"
-                c="0"
-                l="0.25"
-                m="0"
-                p="64"
-                phaziteNoteID="1059"
-                v="100"/>
-        </SEQUENCE>
-      </MIDICLIP>
-      <MIDICLIP colour="ff00ff00"
-                currentTake="0"
-                id="1055"
-                length="1"
-                name="One"
-                offset="1"
-                speed="1"
+                velocity="100"/>
+          <NOTE id="1056"
+                length="0.25"
+                pitch="60"
+                start="0.25"
+                velocity="100"/>
+          <NOTE id="1057"
+                length="0.25"
+                pitch="60"
+                start="0.5"
+                velocity="100"/>
+          <NOTE id="1058"
+                length="0.25"
+                pitch="60"
+                start="0.75"
+                velocity="100"/>
+          <NOTE id="1051"
+                length="0.25"
+                pitch="64"
                 start="1"
-                sync="0">
-        <AUTOMATIONCURVES/>
-        <GROOVE/>
-        <QUANTISATION/>
-        <SEQUENCE channelNumber="1"
-                  ver="1">
-          <NOTE b="0"
-                c="0"
-                l="0.5"
-                p="60"
-                phaziteNoteID="1050"
-                v="100"/>
-          <NOTE b="1"
-                c="0"
-                l="0.5"
-                p="64"
-                phaziteNoteID="1051"
-                v="100"/>
-        </SEQUENCE>
-      </MIDICLIP>
-      <MIDICLIP colour="ff00ff00"
-                currentTake="0"
-                id="1054"
-                length="1"
-                name="One"
-                offset="0"
-                speed="1"
-                start="2"
-                sync="0">
-        <AUTOMATIONCURVES/>
-        <GROOVE/>
-        <QUANTISATION/>
-        <SEQUENCE channelNumber="1"
-                  ver="1">
-          <NOTE b="0"
-                c="0"
-                l="0.5"
-                p="60"
-                phaziteNoteID="1050"
-                v="100"/>
-          <NOTE b="1"
-                c="0"
-                l="0.5"
-                p="64"
-                phaziteNoteID="1051"
-                v="100"/>
-        </SEQUENCE>
-      </MIDICLIP>
-      <CLIPSLOTS/>
-      <MODIFIERS/>
-      <OUTPUTDEVICES>
-        <DEVICE name="(default audio output)"/>
-      </OUTPUTDEVICES>
-      <PLUGIN enabled="1"
-              id="1004"
-              remapOnTempoChange="1"
-              type="volume">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN enabled="1"
-              id="1005"
-              type="level"/>
+                velocity="100"/>
+          <NOTE id="1059"
+                length="0.25"
+                pitch="64"
+                start="1.25"
+                velocity="100"/>
+        </CLIP>
+        <CLIP id="1054"
+              kind="midi"
+              length="2"
+              mute="0"
+              name="One"
+              start="4">
+          <NOTE id="1050"
+                length="0.5"
+                pitch="60"
+                start="0"
+                velocity="100"/>
+          <NOTE id="1051"
+                length="0.5"
+                pitch="64"
+                start="1"
+                velocity="100"/>
+        </CLIP>
+        <CLIP id="1055"
+              kind="midi"
+              length="2"
+              mute="0"
+              name="One"
+              offset="2"
+              start="2">
+          <NOTE id="1050"
+                length="0.5"
+                pitch="60"
+                start="0"
+                velocity="100"/>
+          <NOTE id="1051"
+                length="0.5"
+                pitch="64"
+                start="1"
+                velocity="100"/>
+        </CLIP>
+      </TRACK>
+      <TRACK collapsed="0"
+             colour="ff56b4e9"
+             fader="1012"
+             height="80"
+             id="1011"
+             kind="track"
+             name="Two"/>
     </TRACK>
-    <TRACK colour="ff56b4e9"
-           id="1011"
-           name="Two">
-      <CLIPSLOTS/>
-      <MODIFIERS/>
-      <OUTPUTDEVICES>
-        <DEVICE name="(default audio output)"/>
-      </OUTPUTDEVICES>
-      <PLUGIN enabled="1"
-              id="1012"
-              type="volume">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN enabled="1"
-              id="1013"
-              type="level"/>
-    </TRACK>
-  </FOLDERTRACK>
-  <TRACK colour="ff009e73"
-         id="1020"
-         name="Return 1"
-         soloIsolate="1">
-    <CLIPSLOTS/>
-    <MODIFIERS/>
-    <OUTPUTDEVICES>
-      <DEVICE name="(default audio output)"/>
-    </OUTPUTDEVICES>
-    <PLUGIN busNum="0"
-            enabled="1"
-            id="1023"
-            remapOnTempoChange="1"
-            type="auxreturn"/>
-    <PLUGIN enabled="1"
-            id="1021"
-            type="volume">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1022"
-            type="level"/>
-  </TRACK>
-  <TRACKCOMPS/>
-  <TRANSPORT loopPoint1="0"
-             loopPoint2="4"
-             looping="1"
-             position="1"
-             start="1"/>
-  <VIDEO/>
-</EDIT>
+    <TRACK colour="ff009e73"
+           fader="1021"
+           id="1020"
+           kind="return"
+           name="Return 1"/>
+  </TRACKS>
+</PHAZITE>

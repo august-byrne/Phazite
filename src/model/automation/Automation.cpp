@@ -1269,25 +1269,6 @@ bool isWritingAutomation (const te::Edit& edit)
                         [] (const juce::ValueTree& state) { return readAutomationMode (state) != AutomationMode::read; });
 }
 
-bool isAutomatedValue (const juce::ValueTree& tree, const juce::Identifier& property)
-{
-    if (! tree.hasType (te::IDs::PLUGIN))
-        return false;
-
-    const auto parameters = getParametersStoredIn (tree, property);
-
-    // Its own curve, or what else moves it as the song plays: a modulator, assigned to it in its device's state.
-    for (const auto& child : tree)
-        if (child.hasType (te::IDs::AUTOMATIONCURVE) && parameters.contains (child[te::IDs::paramID].toString()))
-            return true;
-
-    for (const auto& assignment : tree.getChildWithName (te::IDs::MODIFIERASSIGNMENTS))
-        if (parameters.contains (assignment[te::IDs::paramID].toString()))
-            return true;
-
-    return false;
-}
-
 bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)
 {
     if (! tree.hasType (te::IDs::PLUGIN))

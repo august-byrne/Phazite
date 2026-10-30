@@ -62,13 +62,13 @@ juce::ValueTree makeSavedSong()
     phazite::setModulation (*lfo, *tone, 0.5f);
 
     phazite::storeDeviceStates (*edit);
-    return edit->state.createCopy();
+    return phazite::getPhaziteState (*edit).createCopy();
 }
 
 // The song opened again as a project opens, with the stand-in in the version set.
 std::unique_ptr<te::Edit> open (const juce::ValueTree& saved)
 {
-    auto edit = phazite::createEditFromState (phazite::test::getEngine(), saved, {});
+    auto edit = phazite::createEditFromSong (phazite::test::getEngine(), saved.createCopy());
     REQUIRE (edit != nullptr);
     return edit;
 }
@@ -210,7 +210,7 @@ TEST_CASE ("What a project refers to follows the parameters of a plug-in in a co
         phazite::addPoint (*gain, { phazite::BeatPosition::fromBeats (4.0), 0.8f });
         phazite::showLane (track, phazite::getParameterRef (*gain));
         phazite::storeDeviceStates (*edit);
-        saved = edit->state.createCopy();
+        saved = phazite::getPhaziteState (*edit).createCopy();
     }
 
     testPlugin.setVersion (2);

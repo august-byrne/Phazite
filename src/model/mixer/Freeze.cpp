@@ -291,63 +291,6 @@ juce::Array<te::AudioTrack*> getFrozenTracks (const te::Edit& edit)
 }
 
 //==============================================================================
-juce::Array<te::EditItemID> takeFrozenTracks (juce::ValueTree& state, const juce::File& cacheFolder)
-{
-    juce::Array<te::EditItemID> taken;
-    juce::Array<juce::ValueTree> tracks;
-
-    const std::function<void (const juce::ValueTree&)> findTracks = [&] (const juce::ValueTree& parent)
-    {
-        for (const auto& child : parent)
-        {
-            if (child.hasType (te::IDs::TRACK))
-                tracks.add (child);
-
-            if (te::TrackList::isTrack (child))
-                findTracks (child); // a folder's tracks
-        }
-    };
-
-    findTracks (state);
-
-    for (auto track : tracks)
-    {
-        if (! (bool) track.getProperty (te::IDs::frozenIndividually, false))
-            continue;
-
-        const auto id = te::EditItemID::fromID (track);
-        const auto file = cacheFolder.getChildFile ("trackFreeze_0_" + id.toString() + ".freeze"); // as TemporaryFileManager names it
-
-        track.setProperty (te::IDs::frozenIndividually, false, nullptr);
-
-        if (cacheFolder != juce::File() && file.existsAsFile())
-        {
-            taken.add (id);
-            continue;
-        }
-
-        // Its file is gone: it opens unfrozen, without its freeze point.
-        for (int i = track.getNumChildren(); --i >= 0;)
-        {
-            auto child = track.getChild (i);
-
-            if (child.hasType (te::IDs::PLUGIN) && child[te::IDs::type].toString() == te::FreezePointPlugin::xmlTypeName)
-                track.removeChild (i, nullptr);
-            else if (child.hasType (te::IDs::PLUGIN))
-                child.setProperty (te::IDs::frozen, false, nullptr);
-        }
-    }
-
-    return taken;
-}
-
-void restoreFrozenTracks (te::Edit& edit, const juce::Array<te::EditItemID>& taken)
-{
-    for (const auto& id : taken)
-        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, id)))
-            setFrozenSwitch (*track, true);
-}
-
 void forgetMissingFrozenFiles (te::Edit& edit)
 {
     for (auto state : getTrackStates (edit))

@@ -58,9 +58,9 @@ void reconcileCurve (te::Edit&, const ParameterRef&);
 void reconcileDevices (te::Edit&);
 
 // The state Tracktion makes an Edit built from a song alone from (createEditFromSong(), model/project/internal/Project.h):
-// the song in it from the start, so that what Tracktion makes as it makes the Edit takes none of the song's IDs, and the
-// master's fader, which Tracktion makes with the Edit, by the song's ID (Schema.h: channelFader). The rest the reconcile
-// functions make.
+// the song in it from the start, with its count of IDs where Tracktion counts from, so that what Tracktion makes as it
+// makes the Edit takes none of the song's IDs, and the master's fader, which Tracktion makes with the Edit, by the song's
+// ID (Schema.h: channelFader). The rest the reconcile functions make.
 juce::ValueTree makeEditState (const juce::ValueTree& song);
 
 // The modulation (model/modulation/internal/Modulation.h): each track's and the master's modulators in Tracktion's

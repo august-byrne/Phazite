@@ -8,6 +8,7 @@
 #include "devices/drums/DrumSampler.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/engine/internal/EngineSetup.h"
@@ -273,7 +274,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
 {
     auto& engine = phazite::test::getEngine();
     phazite::test::TemporaryFolder project, elsewhere;
-    const auto projectFile = project.folder.getChildFile ("Song.tracktionedit");
+    const auto projectFile = project.folder.getChildFile ("Song.phazite");
     const auto sample = elsewhere.folder.getChildFile ("My Kick.wav");
     writeWav (sample, 0.2);
 
@@ -313,11 +314,15 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
         phazite::redo (*edit);
         CHECK (sampler.hasOwnSound (0));
 
-        te::EditFileOperations (*edit).save (false, true, false);
+        // Saved as a project saves it: the song alone.
+        phazite::storeDeviceStates (*edit);
+        REQUIRE (phazite::getPhaziteState (*edit).createXml()->writeTo (projectFile));
     }
 
-    // Opened again, the pad plays its file.
-    auto edit = phazite::loadEdit (engine, projectFile);
+    // Opened again from the file, the pad plays its file.
+    const auto saved = juce::XmlDocument::parse (projectFile);
+    REQUIRE (saved != nullptr);
+    auto edit = phazite::createEditFromSong (engine, juce::ValueTree::fromXml (*saved), projectFile);
     REQUIRE (edit != nullptr);
     auto* drums = dynamic_cast<phazite::DrumSamplerPlugin*> (phazite::getInstrument (*te::getAudioTracks (*edit)[0]));
     REQUIRE (drums != nullptr);

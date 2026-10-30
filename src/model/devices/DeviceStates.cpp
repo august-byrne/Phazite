@@ -240,11 +240,6 @@ void storeDeviceStates (te::RackType& rack)
 
 void storeDeviceStates (te::Edit& edit)
 {
-    auto& storage = edit.engine.getPropertyStorage();
-    store (edit.state, te::IDs::appVersion, storage.getApplicationVersion());
-    store (edit.state, te::IDs::modifiedBy, storage.getUserName()); // Phazite's name, not the user's (EngineSetup.h)
-    store (edit.state, te::IDs::projectID, edit.getProjectItemRef().toString());
-
     for (auto* device : te::getAllPlugins (edit, true))
         storeDeviceState (*device);
 

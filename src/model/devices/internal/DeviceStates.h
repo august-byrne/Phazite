@@ -28,8 +28,7 @@ void storeDeviceStates (te::Track&);
 // A container's rack's devices' states (RackType::flushStateToValueTree()).
 void storeDeviceStates (te::RackType&);
 
-// Every device's and modulator's state in an Edit, with the version that saves it, by whom and its ID, as a save writes
-// them (Edit::flushState()).
+// Every device's and modulator's state in an Edit, as a save writes them (Edit::flushState()).
 void storeDeviceStates (te::Edit&);
 
 // Tracktion's forms of what the song keeps of a plug-in, for the mirror, which makes a plug-in from the song

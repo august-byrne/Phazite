@@ -1,1058 +1,441 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- A project with one of each kind of track and every piece of Phazite's data, saved, reopened and saved again: addRepresentativeContent in tests/GoldenProjectTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
-<EDIT appVersion="(varies)"
-      creationTime="(varies)"
-      modifiedBy=""
-      projectID="(varies)">
-  <AUXBUSNAMES>
-    <NAME bus="0"
-          name="Reverb"/>
-  </AUXBUSNAMES>
-  <CLICKTRACK level="0.6"/>
-  <MASTERPLUGINS>
-    <PLUGIN enabled="1"
-            id="1049"
-            remapOnTempoChange="1"
-            type="phaziteReverb">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1010"
-            remapOnTempoChange="1"
-            type="phaziteLoudnessMeter">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-  </MASTERPLUGINS>
-  <MASTERVOLUME>
-    <PLUGIN enabled="1"
-            id="1001"
-            type="volume"
-            volume="0.6376281">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-  </MASTERVOLUME>
-  <PHAZITE gridAdaptive="1"
-           gridOffset="1"
-           gridSnap="0"
-           gridStep="1/4 beat"
-           gridTriplets="0"
-           loop="1"
-           loopEnd="12"
-           loopFollowsSong="0"
-           loopStart="4"
-           nextID="1087"
-           outline="golden">
-    <AUTOMATION>
-      <CURVE device="1020"
-             parameter="volume">
-        <POINT beat="0"
-               value="0.7408182"/>
-        <POINT beat="8"
-               value="0.5488116"/>
-      </CURVE>
-    </AUTOMATION>
-    <CHORDLANE>
-      <CHORD degree="1"
+<PHAZITE gridAdaptive="1"
+         gridOffset="1"
+         gridSnap="0"
+         gridStep="1/4 beat"
+         gridTriplets="0"
+         loop="1"
+         loopEnd="12"
+         loopFollowsSong="0"
+         loopStart="4"
+         nextID="1087"
+         outline="golden">
+  <AUTOMATION>
+    <CURVE device="1020"
+           parameter="volume">
+      <POINT beat="0"
+             value="0.7408182"/>
+      <POINT beat="8"
+             value="0.5488116"/>
+    </CURVE>
+  </AUTOMATION>
+  <CHORDLANE>
+    <CHORD degree="1"
+           length="8"
+           start="0"
+           type="minor"/>
+    <CHORD degree="6"
+           length="4"
+           start="8"
+           type="major"/>
+    <CHORD degree="7"
+           inversion="1"
+           length="4"
+           start="12"
+           type="major"/>
+    <CHORD degree="2"
+           length="4"
+           start="16"
+           type="halfDiminishedSeventh"/>
+    <CHORD accidental="-1"
+           degree="2"
+           inversion="2"
+           length="4"
+           start="20"
+           type="majorSeventh"/>
+    <CHORD degree="1"
+           length="8"
+           start="24"
+           type="suspendedFourth"/>
+    <CHORDKEY keyRoot="2"
+              keyScale="minor"
+              start="0"/>
+    <CHORDKEY keyRoot="5"
+              keyScale="major"
+              start="24"/>
+  </CHORDLANE>
+  <LASTKEY keyRoot="2"
+           keyScale="minor"/>
+  <MASTER fader="1001">
+    <DEVICE id="1049"
+            type="phaziteReverb"/>
+  </MASTER>
+  <PIANOROLL gridAdaptive="0"
+             gridOffset="0"
+             gridSnap="1"
+             gridStep="1/2 beat"
+             gridTriplets="1"/>
+  <SECTIONS>
+    <SECTION energy="0.25"
+             id="1011"
              length="8"
+             name="Intro"
+             role="intro"
              start="0"
-             type="minor"/>
-      <CHORD degree="6"
-             length="4"
+             tip="Set the mood."/>
+    <SECTION colour="fff0e442"
+             energy="0.9"
+             id="1012"
+             length="16"
+             name="Drop"
+             role="drop"
              start="8"
-             type="major"/>
-      <CHORD degree="7"
-             inversion="1"
-             length="4"
-             start="12"
-             type="major"/>
-      <CHORD degree="2"
-             length="4"
-             start="16"
-             type="halfDiminishedSeventh"/>
-      <CHORD accidental="-1"
-             degree="2"
-             inversion="2"
-             length="4"
-             start="20"
-             type="majorSeventh"/>
-      <CHORD degree="1"
+             tip="Everything at once."/>
+    <SECTION energy="0.1"
+             id="1013"
              length="8"
+             name="Outro"
+             role="outro"
              start="24"
-             type="suspendedFourth"/>
-      <CHORDKEY keyRoot="2"
-                keyScale="minor"
-                start="0"/>
-      <CHORDKEY keyRoot="5"
-                keyScale="major"
-                start="24"/>
-    </CHORDLANE>
-    <LASTKEY keyRoot="2"
-             keyScale="minor"/>
-    <MASTER fader="1001">
-      <DEVICE id="1049"
-              type="phaziteReverb"/>
-    </MASTER>
-    <PIANOROLL gridAdaptive="0"
-               gridOffset="0"
-               gridSnap="1"
-               gridStep="1/2 beat"
-               gridTriplets="1"/>
-    <SECTIONS>
-      <SECTION energy="0.25"
-               id="1011"
-               length="8"
-               name="Intro"
-               role="intro"
-               start="0"
-               tip="Set the mood."/>
-      <SECTION colour="fff0e442"
-               energy="0.9"
-               id="1012"
-               length="16"
-               name="Drop"
-               role="drop"
-               start="8"
-               tip="Everything at once."/>
-      <SECTION energy="0.1"
-               id="1013"
-               length="8"
-               name="Outro"
-               role="outro"
-               start="24"
-               tip="Let it fade."/>
-    </SECTIONS>
-    <TEMPOMAP>
-      <TEMPO beat="0"
-             bpm="120"/>
-      <TIMESIGNATURE beat="0"
-                     denominator="4"
-                     numerator="4"/>
-    </TEMPOMAP>
-    <TRACKS>
-      <TRACK drumHidden="49"
-             drumMode="1"
-             drumOrder="38,36,37,39,42,46,41,45,48,49,51"
-             fader="1004"
-             id="1003"
-             kind="track"
-             mute="1"
-             name="Drums"
-             pinned="1">
-        <CLIP id="1014"
-              kind="midi"
-              length="4"
-              name="Drums"
-              start="0">
-          <NOTE id="1015"
-                length="0.25"
-                pitch="36"
-                start="0"
-                velocity="110"/>
-          <NOTE id="1016"
-                length="0.25"
-                pitch="36"
-                start="2"
-                velocity="110"/>
-          <NOTE id="1017"
-                length="0.25"
-                pitch="38"
-                start="1"
-                velocity="110"/>
-          <NOTE id="1018"
-                length="0.25"
-                pitch="38"
-                start="3"
-                velocity="110"/>
-        </CLIP>
-      </TRACK>
-      <TRACK bus="1"
-             collapsed="1"
-             colour="ff56b4e9"
-             fader="1037"
-             id="1036"
-             kind="folder"
-             name="Group">
-        <TRACK colour="ff56b4e9"
-               fader="1020"
-               height="96"
-               id="1019"
-               keyRoot="2"
-               keyScale="minor"
-               kind="track"
-               name="Keys">
-          <CLIP id="1024"
-                kind="midi"
-                length="8"
-                link="1027"
-                name="Keys"
-                start="0">
-            <NOTE id="1025"
-                  length="2"
-                  pitch="62"
-                  start="0"
-                  velocity="90"/>
-            <NOTE id="1026"
-                  length="1.5"
-                  mute="1"
-                  pitch="65"
-                  start="2"
-                  velocity="70"/>
-          </CLIP>
-          <CLIP id="1028"
-                kind="midi"
-                length="8"
-                link="1027"
-                name="Keys"
-                start="8">
-            <NOTE id="1025"
-                  length="2"
-                  pitch="62"
-                  start="0"
-                  velocity="90"/>
-            <NOTE id="1026"
-                  length="1.5"
-                  mute="1"
-                  pitch="65"
-                  start="2"
-                  velocity="70"/>
-          </CLIP>
-          <DEVICE id="1022"
-                  type="phaziteSynth"/>
-          <DEVICE id="1023"
-                  type="phaziteReverb">
-            <VALUES mix="0.25"/>
-          </DEVICE>
-          <SEND id="1048"
-                level="-6"
-                preFader="1"
-                to="1043"/>
-        </TRACK>
-        <TRACK colour="ff009e73"
-               fader="1030"
-               id="1029"
-               keyRoot="2"
-               keyScale="minor"
-               kind="track"
-               name="Pad"/>
-      </TRACK>
-      <TRACK bus="1"
-             colour="fff0e442"
-             fader="1040"
-             id="1039"
-             kind="folder"
-             name="Bus"
-             volume="-3">
-        <TRACK colour="fff0e442"
-               fader="1033"
-               id="1032"
-               keyRoot="2"
-               keyScale="minor"
-               kind="track"
-               name="Tone"
-               pan="-0.5">
-          <CLIP fadeIn="0.25"
-                fadeInShape="convex"
-                fadeOut="0.5"
-                fadeOutShape="convex"
-                file="Audio/Tone.wav"
-                fileEnd="2"
-                fileStart="0"
-                id="1035"
-                kind="audio"
-                name="Tone"
-                start="4"/>
-          <SEND id="1047"
-                level="-6"
-                to="1043"/>
-        </TRACK>
-      </TRACK>
-      <TRACK colour="ff0072b2"
-             fader="1044"
-             id="1043"
+             tip="Let it fade."/>
+  </SECTIONS>
+  <TEMPOMAP>
+    <TEMPO beat="0"
+           bpm="120"/>
+    <TIMESIGNATURE beat="0"
+                   denominator="4"
+                   numerator="4"/>
+  </TEMPOMAP>
+  <TRACKS>
+    <TRACK drumHidden="49"
+           drumMode="1"
+           drumOrder="38,36,37,39,42,46,41,45,48,49,51"
+           fader="1004"
+           id="1003"
+           kind="track"
+           mute="1"
+           name="Drums"
+           pinned="1">
+      <CLIP id="1014"
+            kind="midi"
+            length="4"
+            name="Drums"
+            start="0">
+        <NOTE id="1015"
+              length="0.25"
+              pitch="36"
+              start="0"
+              velocity="110"/>
+        <NOTE id="1016"
+              length="0.25"
+              pitch="36"
+              start="2"
+              velocity="110"/>
+        <NOTE id="1017"
+              length="0.25"
+              pitch="38"
+              start="1"
+              velocity="110"/>
+        <NOTE id="1018"
+              length="0.25"
+              pitch="38"
+              start="3"
+              velocity="110"/>
+      </CLIP>
+    </TRACK>
+    <TRACK bus="1"
+           collapsed="1"
+           colour="ff56b4e9"
+           fader="1037"
+           id="1036"
+           kind="folder"
+           name="Group">
+      <TRACK colour="ff56b4e9"
+             fader="1020"
+             height="96"
+             id="1019"
              keyRoot="2"
              keyScale="minor"
-             kind="return"
-             name="Reverb">
-        <DEVICE id="1042"
+             kind="track"
+             name="Keys">
+        <CLIP id="1024"
+              kind="midi"
+              length="8"
+              link="1027"
+              name="Keys"
+              start="0">
+          <NOTE id="1025"
+                length="2"
+                pitch="62"
+                start="0"
+                velocity="90"/>
+          <NOTE id="1026"
+                length="1.5"
+                mute="1"
+                pitch="65"
+                start="2"
+                velocity="70"/>
+        </CLIP>
+        <CLIP id="1028"
+              kind="midi"
+              length="8"
+              link="1027"
+              name="Keys"
+              start="8">
+          <NOTE id="1025"
+                length="2"
+                pitch="62"
+                start="0"
+                velocity="90"/>
+          <NOTE id="1026"
+                length="1.5"
+                mute="1"
+                pitch="65"
+                start="2"
+                velocity="70"/>
+        </CLIP>
+        <DEVICE id="1022"
+                type="phaziteSynth"/>
+        <DEVICE id="1023"
                 type="phaziteReverb">
-          <VALUES mix="1"/>
+          <VALUES mix="0.25"/>
         </DEVICE>
+        <SEND id="1048"
+              level="-6"
+              preFader="1"
+              to="1043"/>
       </TRACK>
-      <TRACK colour="ff0072b2"
-             fader="1051"
-             id="1050"
+      <TRACK colour="ff009e73"
+             fader="1030"
+             id="1029"
              keyRoot="2"
              keyScale="minor"
              kind="track"
-             name="Bass">
-        <CLIP id="1054"
-              kind="midi"
-              length="32"
-              name="Bass"
-              part="bassRootFifth"
-              start="0">
-          <NOTE id="1055"
-                length="0.9"
-                pitch="38"
-                start="0"
-                velocity="100"/>
-          <NOTE id="1056"
-                length="0.9"
-                pitch="45"
-                start="1"
-                velocity="88"/>
-          <NOTE id="1057"
-                length="0.9"
-                pitch="38"
-                start="2"
-                velocity="100"/>
-          <NOTE id="1058"
-                length="0.9"
-                pitch="45"
-                start="3"
-                velocity="88"/>
-          <NOTE id="1059"
-                length="0.9"
-                pitch="38"
-                start="4"
-                velocity="100"/>
-          <NOTE id="1060"
-                length="0.9"
-                pitch="45"
-                start="5"
-                velocity="88"/>
-          <NOTE id="1061"
-                length="0.9"
-                pitch="38"
-                start="6"
-                velocity="100"/>
-          <NOTE id="1062"
-                length="0.9"
-                pitch="45"
-                start="7"
-                velocity="88"/>
-          <NOTE id="1063"
-                length="0.9"
-                pitch="46"
-                start="8"
-                velocity="100"/>
-          <NOTE id="1064"
-                length="0.9"
-                pitch="53"
-                start="9"
-                velocity="88"/>
-          <NOTE id="1065"
-                length="0.9"
-                pitch="46"
-                start="10"
-                velocity="100"/>
-          <NOTE id="1066"
-                length="0.9"
-                pitch="53"
-                start="11"
-                velocity="88"/>
-          <NOTE id="1067"
-                length="0.9"
-                pitch="40"
-                start="12"
-                velocity="100"/>
-          <NOTE id="1068"
-                length="0.9"
-                pitch="43"
-                start="13"
-                velocity="88"/>
-          <NOTE id="1069"
-                length="0.9"
-                pitch="40"
-                start="14"
-                velocity="100"/>
-          <NOTE id="1070"
-                length="0.9"
-                pitch="43"
-                start="15"
-                velocity="88"/>
-          <NOTE id="1071"
-                length="0.9"
-                pitch="40"
-                start="16"
-                velocity="100"/>
-          <NOTE id="1072"
-                length="0.9"
-                pitch="46"
-                start="17"
-                velocity="88"/>
-          <NOTE id="1073"
-                length="0.9"
-                pitch="40"
-                start="18"
-                velocity="100"/>
-          <NOTE id="1074"
-                length="0.9"
-                pitch="46"
-                start="19"
-                velocity="88"/>
-          <NOTE id="1075"
-                length="0.9"
-                pitch="46"
-                start="20"
-                velocity="100"/>
-          <NOTE id="1076"
-                length="0.9"
-                pitch="58"
-                start="21"
-                velocity="88"/>
-          <NOTE id="1077"
-                length="0.9"
-                pitch="46"
-                start="22"
-                velocity="100"/>
-          <NOTE id="1078"
-                length="0.9"
-                pitch="58"
-                start="23"
-                velocity="88"/>
-          <NOTE id="1079"
-                length="0.9"
-                pitch="41"
-                start="24"
-                velocity="100"/>
-          <NOTE id="1080"
-                length="0.9"
-                pitch="48"
-                start="25"
-                velocity="88"/>
-          <NOTE id="1081"
-                length="0.9"
-                pitch="41"
-                start="26"
-                velocity="100"/>
-          <NOTE id="1082"
-                length="0.9"
-                pitch="48"
-                start="27"
-                velocity="88"/>
-          <NOTE id="1083"
-                length="0.9"
-                pitch="41"
-                start="28"
-                velocity="100"/>
-          <NOTE id="1084"
-                length="0.9"
-                pitch="48"
-                start="29"
-                velocity="88"/>
-          <NOTE id="1085"
-                length="0.9"
-                pitch="41"
-                start="30"
-                velocity="100"/>
-          <NOTE id="1086"
-                length="0.9"
-                pitch="48"
-                start="31"
-                velocity="88"/>
-        </CLIP>
-        <DEVICE id="1053"
-                type="phaziteSynth">
-          <VALUES attack="2"
-                  cutoff="600"
-                  decay="250"
-                  filterDecay="180"
-                  filterEnvelope="18"
-                  filterSustain="0.15"
-                  level="-10"
-                  release="120"
-                  resonance="0.2"
-                  subLevel="0.5"
-                  sustain="0.7"
-                  voiceMode="1"/>
-        </DEVICE>
+             name="Pad"/>
+    </TRACK>
+    <TRACK bus="1"
+           colour="fff0e442"
+           fader="1040"
+           id="1039"
+           kind="folder"
+           name="Bus"
+           volume="-3">
+      <TRACK colour="fff0e442"
+             fader="1033"
+             id="1032"
+             keyRoot="2"
+             keyScale="minor"
+             kind="track"
+             name="Tone"
+             pan="-0.5">
+        <CLIP fadeIn="0.25"
+              fadeInShape="convex"
+              fadeOut="0.5"
+              fadeOutShape="convex"
+              file="Audio/Tone.wav"
+              fileEnd="2"
+              fileStart="0"
+              id="1035"
+              kind="audio"
+              name="Tone"
+              start="4"/>
+        <SEND id="1047"
+              level="-6"
+              to="1043"/>
       </TRACK>
-    </TRACKS>
-  </PHAZITE>
-  <PITCHSEQUENCE>
-    <PITCH pitch="60"
-           startBeat="0"/>
-  </PITCHSEQUENCE>
-  <RACKS/>
-  <SCENES/>
-  <TEMPOSEQUENCE>
-    <TEMPO bpm="120"
-           curve="1"
-           startBeat="0"/>
-    <TIMESIG denominator="4"
-             numerator="4"
-             startBeat="0"/>
-  </TEMPOSEQUENCE>
-  <ARRANGERTRACK id="1006"
-                 name="Arranger"/>
-  <CHORDTRACK id="1008"
-              name="Chord"/>
-  <MARKERTRACK id="1002"
-               name="Marker"/>
-  <TEMPOTRACK id="1007"
-              name="Global">
-    <MODIFIERS/>
-  </TEMPOTRACK>
-  <MASTERTRACK id="1009"
-               name="Master">
-    <MODIFIERS/>
-  </MASTERTRACK>
-  <TRACK id="1003"
-         mute="1"
-         name="Drums">
-    <MIDICLIP colour="ff55ff00"
-              currentTake="0"
-              id="1014"
-              length="2"
-              name="Drums"
-              offset="0"
-              speed="1"
-              start="0"
-              sync="0">
-      <AUTOMATIONCURVES/>
-      <GROOVE/>
-      <QUANTISATION/>
-      <SEQUENCE channelNumber="1"
-                ver="1">
-        <NOTE b="0"
-              c="0"
-              l="0.25"
-              p="36"
-              phaziteNoteID="1015"
-              v="110"/>
-        <NOTE b="2"
-              c="0"
-              l="0.25"
-              p="36"
-              phaziteNoteID="1016"
-              v="110"/>
-        <NOTE b="1"
-              c="0"
-              l="0.25"
-              p="38"
-              phaziteNoteID="1017"
-              v="110"/>
-        <NOTE b="3"
-              c="0"
-              l="0.25"
-              p="38"
-              phaziteNoteID="1018"
-              v="110"/>
-      </SEQUENCE>
-    </MIDICLIP>
-    <CLIPSLOTS/>
-    <MODIFIERS/>
-    <OUTPUTDEVICES>
-      <DEVICE name="(default audio output)"/>
-    </OUTPUTDEVICES>
-    <PLUGIN enabled="1"
-            id="1004"
-            remapOnTempoChange="1"
-            type="volume">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1005"
-            type="level">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-  </TRACK>
-  <FOLDERTRACK colour="ff56b4e9"
-               id="1036"
-               name="Group">
-    <MODIFIERS/>
-    <PLUGIN enabled="1"
-            id="1037"
-            type="volume">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1038"
-            type="level">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <TRACK colour="ff56b4e9"
-           id="1019"
-           name="Keys">
-      <MIDICLIP colour="ff00a3ff"
-                currentTake="0"
-                id="1024"
-                length="4"
-                name="Keys"
-                offset="0"
-                speed="1"
-                start="0"
-                sync="0">
-        <AUTOMATIONCURVES/>
-        <GROOVE/>
-        <QUANTISATION/>
-        <SEQUENCE channelNumber="1"
-                  ver="1">
-          <NOTE b="0"
-                c="0"
-                l="2"
-                p="62"
-                phaziteNoteID="1025"
-                v="90"/>
-          <NOTE b="2"
-                c="0"
-                l="1.5"
-                m="1"
-                p="65"
-                phaziteNoteID="1026"
-                v="70"/>
-        </SEQUENCE>
-      </MIDICLIP>
-      <MIDICLIP colour="ff00a3ff"
-                currentTake="0"
-                id="1028"
-                length="4"
-                name="Keys"
-                offset="0"
-                speed="1"
-                start="4"
-                sync="0">
-        <AUTOMATIONCURVES/>
-        <GROOVE/>
-        <QUANTISATION/>
-        <SEQUENCE channelNumber="1"
-                  ver="1">
-          <NOTE b="0"
-                c="0"
-                l="2"
-                p="62"
-                phaziteNoteID="1025"
-                v="90"/>
-          <NOTE b="2"
-                c="0"
-                l="1.5"
-                m="1"
-                p="65"
-                phaziteNoteID="1026"
-                v="70"/>
-        </SEQUENCE>
-      </MIDICLIP>
-      <CLIPSLOTS/>
-      <MODIFIERS/>
-      <OUTPUTDEVICES>
-        <DEVICE name="(default audio output)"/>
-      </OUTPUTDEVICES>
-      <PLUGIN enabled="1"
-              id="1022"
-              remapOnTempoChange="1"
-              type="phaziteSynth">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN enabled="1"
-              id="1023"
-              mix="0.25"
-              remapOnTempoChange="1"
+    </TRACK>
+    <TRACK colour="ff0072b2"
+           fader="1044"
+           id="1043"
+           keyRoot="2"
+           keyScale="minor"
+           kind="return"
+           name="Reverb">
+      <DEVICE id="1042"
               type="phaziteReverb">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN auxSendSliderPos="0.5488116"
-              busNum="0"
-              enabled="1"
-              id="1048"
-              quickParamName="send level"
-              remapOnTempoChange="1"
-              type="auxsend">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN enabled="1"
-              id="1020"
-              type="volume">
-        <AUTOMATIONCURVE paramID="volume">
-          <POINT c="0"
-                 t="0"
-                 v="0.7408182"/>
-          <POINT c="0"
-                 t="4"
-                 v="0.5488116"/>
-        </AUTOMATIONCURVE>
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN enabled="1"
-              id="1021"
-              type="level">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
+        <VALUES mix="1"/>
+      </DEVICE>
     </TRACK>
-    <TRACK colour="ff009e73"
-           id="1029"
-           name="Pad">
-      <CLIPSLOTS/>
-      <MODIFIERS/>
-      <OUTPUTDEVICES>
-        <DEVICE name="(default audio output)"/>
-      </OUTPUTDEVICES>
-      <PLUGIN enabled="1"
-              id="1030"
-              type="volume">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN enabled="1"
-              id="1031"
-              type="level">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-    </TRACK>
-  </FOLDERTRACK>
-  <FOLDERTRACK colour="fff0e442"
-               id="1039"
-               name="Bus">
-    <MODIFIERS/>
-    <PLUGIN enabled="1"
-            id="1040"
-            type="volume"
-            volume="0.6376281">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1041"
-            type="level">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <TRACK colour="fff0e442"
-           id="1032"
-           name="Tone">
-      <AUDIOCLIP colour="ff0072b2"
-                 elastiqueMode="0"
-                 fadeIn="0.25"
-                 fadeInType="2"
-                 fadeOut="0.5"
-                 fadeOutType="2"
-                 id="1035"
-                 length="2"
-                 name="Tone"
-                 offset="0"
-                 pan="0"
-                 proxyAllowed="1"
-                 resamplingQuality="lagrange"
-                 source="Audio/Tone.wav"
-                 start="2"
-                 sync="0">
-        <AUTOMATIONCURVES/>
-        <LOOPINFO bpm="0"
-                  denominator="4"
-                  inMarker="0"
-                  numBeats="4"
-                  numerator="4"
-                  oneShot="0"
-                  outMarker="-1"
-                  rootNote="-1"/>
-      </AUDIOCLIP>
-      <CLIPSLOTS/>
-      <MODIFIERS/>
-      <OUTPUTDEVICES>
-        <DEVICE name="(default audio output)"/>
-      </OUTPUTDEVICES>
-      <PLUGIN enabled="1"
-              id="1033"
-              pan="-0.5"
-              type="volume">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN auxSendSliderPos="0.5488116"
-              busNum="0"
-              enabled="1"
-              id="1047"
-              quickParamName="send level"
-              remapOnTempoChange="1"
-              type="auxsend">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-      <PLUGIN enabled="1"
-              id="1034"
-              type="level">
-        <MODIFIERASSIGNMENTS/>
-      </PLUGIN>
-    </TRACK>
-  </FOLDERTRACK>
-  <TRACK colour="ff0072b2"
-         id="1043"
-         name="Reverb"
-         soloIsolate="1">
-    <CLIPSLOTS/>
-    <MODIFIERS/>
-    <OUTPUTDEVICES>
-      <DEVICE name="(default audio output)"/>
-    </OUTPUTDEVICES>
-    <PLUGIN busNum="0"
-            enabled="1"
-            id="1046"
-            remapOnTempoChange="1"
-            type="auxreturn">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1042"
-            mix="1"
-            remapOnTempoChange="1"
-            type="phaziteReverb">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1044"
-            type="volume">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1045"
-            type="level">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-  </TRACK>
-  <TRACK colour="ff0072b2"
-         id="1050"
-         name="Bass">
-    <MIDICLIP colour="ff00a3ff"
-              currentTake="0"
-              id="1054"
-              length="16"
-              name="Bass"
-              offset="0"
-              speed="1"
+    <TRACK colour="ff0072b2"
+           fader="1051"
+           id="1050"
+           keyRoot="2"
+           keyScale="minor"
+           kind="track"
+           name="Bass">
+      <CLIP id="1054"
+            kind="midi"
+            length="32"
+            name="Bass"
+            part="bassRootFifth"
+            start="0">
+        <NOTE id="1055"
+              length="0.9"
+              pitch="38"
               start="0"
-              sync="0">
-      <AUTOMATIONCURVES/>
-      <GROOVE/>
-      <QUANTISATION/>
-      <SEQUENCE channelNumber="1"
-                ver="1">
-        <NOTE b="0"
-              c="0"
-              l="0.9"
-              p="38"
-              phaziteNoteID="1055"
-              v="100"/>
-        <NOTE b="1"
-              c="0"
-              l="0.9"
-              p="45"
-              phaziteNoteID="1056"
-              v="88"/>
-        <NOTE b="2"
-              c="0"
-              l="0.9"
-              p="38"
-              phaziteNoteID="1057"
-              v="100"/>
-        <NOTE b="3"
-              c="0"
-              l="0.9"
-              p="45"
-              phaziteNoteID="1058"
-              v="88"/>
-        <NOTE b="4"
-              c="0"
-              l="0.9"
-              p="38"
-              phaziteNoteID="1059"
-              v="100"/>
-        <NOTE b="5"
-              c="0"
-              l="0.9"
-              p="45"
-              phaziteNoteID="1060"
-              v="88"/>
-        <NOTE b="6"
-              c="0"
-              l="0.9"
-              p="38"
-              phaziteNoteID="1061"
-              v="100"/>
-        <NOTE b="7"
-              c="0"
-              l="0.9"
-              p="45"
-              phaziteNoteID="1062"
-              v="88"/>
-        <NOTE b="8"
-              c="0"
-              l="0.9"
-              p="46"
-              phaziteNoteID="1063"
-              v="100"/>
-        <NOTE b="9"
-              c="0"
-              l="0.9"
-              p="53"
-              phaziteNoteID="1064"
-              v="88"/>
-        <NOTE b="10"
-              c="0"
-              l="0.9"
-              p="46"
-              phaziteNoteID="1065"
-              v="100"/>
-        <NOTE b="11"
-              c="0"
-              l="0.9"
-              p="53"
-              phaziteNoteID="1066"
-              v="88"/>
-        <NOTE b="12"
-              c="0"
-              l="0.9"
-              p="40"
-              phaziteNoteID="1067"
-              v="100"/>
-        <NOTE b="13"
-              c="0"
-              l="0.9"
-              p="43"
-              phaziteNoteID="1068"
-              v="88"/>
-        <NOTE b="14"
-              c="0"
-              l="0.9"
-              p="40"
-              phaziteNoteID="1069"
-              v="100"/>
-        <NOTE b="15"
-              c="0"
-              l="0.9"
-              p="43"
-              phaziteNoteID="1070"
-              v="88"/>
-        <NOTE b="16"
-              c="0"
-              l="0.9"
-              p="40"
-              phaziteNoteID="1071"
-              v="100"/>
-        <NOTE b="17"
-              c="0"
-              l="0.9"
-              p="46"
-              phaziteNoteID="1072"
-              v="88"/>
-        <NOTE b="18"
-              c="0"
-              l="0.9"
-              p="40"
-              phaziteNoteID="1073"
-              v="100"/>
-        <NOTE b="19"
-              c="0"
-              l="0.9"
-              p="46"
-              phaziteNoteID="1074"
-              v="88"/>
-        <NOTE b="20"
-              c="0"
-              l="0.9"
-              p="46"
-              phaziteNoteID="1075"
-              v="100"/>
-        <NOTE b="21"
-              c="0"
-              l="0.9"
-              p="58"
-              phaziteNoteID="1076"
-              v="88"/>
-        <NOTE b="22"
-              c="0"
-              l="0.9"
-              p="46"
-              phaziteNoteID="1077"
-              v="100"/>
-        <NOTE b="23"
-              c="0"
-              l="0.9"
-              p="58"
-              phaziteNoteID="1078"
-              v="88"/>
-        <NOTE b="24"
-              c="0"
-              l="0.9"
-              p="41"
-              phaziteNoteID="1079"
-              v="100"/>
-        <NOTE b="25"
-              c="0"
-              l="0.9"
-              p="48"
-              phaziteNoteID="1080"
-              v="88"/>
-        <NOTE b="26"
-              c="0"
-              l="0.9"
-              p="41"
-              phaziteNoteID="1081"
-              v="100"/>
-        <NOTE b="27"
-              c="0"
-              l="0.9"
-              p="48"
-              phaziteNoteID="1082"
-              v="88"/>
-        <NOTE b="28"
-              c="0"
-              l="0.9"
-              p="41"
-              phaziteNoteID="1083"
-              v="100"/>
-        <NOTE b="29"
-              c="0"
-              l="0.9"
-              p="48"
-              phaziteNoteID="1084"
-              v="88"/>
-        <NOTE b="30"
-              c="0"
-              l="0.9"
-              p="41"
-              phaziteNoteID="1085"
-              v="100"/>
-        <NOTE b="31"
-              c="0"
-              l="0.9"
-              p="48"
-              phaziteNoteID="1086"
-              v="88"/>
-      </SEQUENCE>
-    </MIDICLIP>
-    <CLIPSLOTS/>
-    <MODIFIERS/>
-    <OUTPUTDEVICES>
-      <DEVICE name="(default audio output)"/>
-    </OUTPUTDEVICES>
-    <PLUGIN attack="2"
-            cutoff="600"
-            decay="250"
-            enabled="1"
-            filterDecay="180"
-            filterEnvelope="18"
-            filterSustain="0.15"
-            id="1053"
-            level="-10"
-            release="120"
-            remapOnTempoChange="1"
-            resonance="0.2"
-            subLevel="0.5"
-            sustain="0.7"
-            type="phaziteSynth"
-            voiceMode="1">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1051"
-            type="volume">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-    <PLUGIN enabled="1"
-            id="1052"
-            type="level">
-      <MODIFIERASSIGNMENTS/>
-    </PLUGIN>
-  </TRACK>
-  <TRACKCOMPS/>
-  <TRANSPORT loopPoint1="2"
-             loopPoint2="6"
-             looping="1"
-             position="0"/>
-  <VIDEO/>
-</EDIT>
+              velocity="100"/>
+        <NOTE id="1056"
+              length="0.9"
+              pitch="45"
+              start="1"
+              velocity="88"/>
+        <NOTE id="1057"
+              length="0.9"
+              pitch="38"
+              start="2"
+              velocity="100"/>
+        <NOTE id="1058"
+              length="0.9"
+              pitch="45"
+              start="3"
+              velocity="88"/>
+        <NOTE id="1059"
+              length="0.9"
+              pitch="38"
+              start="4"
+              velocity="100"/>
+        <NOTE id="1060"
+              length="0.9"
+              pitch="45"
+              start="5"
+              velocity="88"/>
+        <NOTE id="1061"
+              length="0.9"
+              pitch="38"
+              start="6"
+              velocity="100"/>
+        <NOTE id="1062"
+              length="0.9"
+              pitch="45"
+              start="7"
+              velocity="88"/>
+        <NOTE id="1063"
+              length="0.9"
+              pitch="46"
+              start="8"
+              velocity="100"/>
+        <NOTE id="1064"
+              length="0.9"
+              pitch="53"
+              start="9"
+              velocity="88"/>
+        <NOTE id="1065"
+              length="0.9"
+              pitch="46"
+              start="10"
+              velocity="100"/>
+        <NOTE id="1066"
+              length="0.9"
+              pitch="53"
+              start="11"
+              velocity="88"/>
+        <NOTE id="1067"
+              length="0.9"
+              pitch="40"
+              start="12"
+              velocity="100"/>
+        <NOTE id="1068"
+              length="0.9"
+              pitch="43"
+              start="13"
+              velocity="88"/>
+        <NOTE id="1069"
+              length="0.9"
+              pitch="40"
+              start="14"
+              velocity="100"/>
+        <NOTE id="1070"
+              length="0.9"
+              pitch="43"
+              start="15"
+              velocity="88"/>
+        <NOTE id="1071"
+              length="0.9"
+              pitch="40"
+              start="16"
+              velocity="100"/>
+        <NOTE id="1072"
+              length="0.9"
+              pitch="46"
+              start="17"
+              velocity="88"/>
+        <NOTE id="1073"
+              length="0.9"
+              pitch="40"
+              start="18"
+              velocity="100"/>
+        <NOTE id="1074"
+              length="0.9"
+              pitch="46"
+              start="19"
+              velocity="88"/>
+        <NOTE id="1075"
+              length="0.9"
+              pitch="46"
+              start="20"
+              velocity="100"/>
+        <NOTE id="1076"
+              length="0.9"
+              pitch="58"
+              start="21"
+              velocity="88"/>
+        <NOTE id="1077"
+              length="0.9"
+              pitch="46"
+              start="22"
+              velocity="100"/>
+        <NOTE id="1078"
+              length="0.9"
+              pitch="58"
+              start="23"
+              velocity="88"/>
+        <NOTE id="1079"
+              length="0.9"
+              pitch="41"
+              start="24"
+              velocity="100"/>
+        <NOTE id="1080"
+              length="0.9"
+              pitch="48"
+              start="25"
+              velocity="88"/>
+        <NOTE id="1081"
+              length="0.9"
+              pitch="41"
+              start="26"
+              velocity="100"/>
+        <NOTE id="1082"
+              length="0.9"
+              pitch="48"
+              start="27"
+              velocity="88"/>
+        <NOTE id="1083"
+              length="0.9"
+              pitch="41"
+              start="28"
+              velocity="100"/>
+        <NOTE id="1084"
+              length="0.9"
+              pitch="48"
+              start="29"
+              velocity="88"/>
+        <NOTE id="1085"
+              length="0.9"
+              pitch="41"
+              start="30"
+              velocity="100"/>
+        <NOTE id="1086"
+              length="0.9"
+              pitch="48"
+              start="31"
+              velocity="88"/>
+      </CLIP>
+      <DEVICE id="1053"
+              type="phaziteSynth">
+        <VALUES attack="2"
+                cutoff="600"
+                decay="250"
+                filterDecay="180"
+                filterEnvelope="18"
+                filterSustain="0.15"
+                level="-10"
+                release="120"
+                resonance="0.2"
+                subLevel="0.5"
+                sustain="0.7"
+                voiceMode="1"/>
+      </DEVICE>
+    </TRACK>
+  </TRACKS>
+</PHAZITE>

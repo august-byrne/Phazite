@@ -104,9 +104,26 @@ namespace
                         [&device] (const juce::ValueTree& curve) { return curve[schema::curveDevice].toString() == device; });
     }
 
+    // What the song's modulators and macros modulate of the device (Schema.h: MODULATES), renamed: on the song's tracks,
+    // folders and the tracks in them, the master, and their containers.
+    void renameModulations (const juce::ValueTree& element, const juce::String& device, const Rename& rename)
+    {
+        for (const auto& child : element)
+        {
+            if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
+                renameChildren (
+                    child, schema::modulatesParameter, rename, [&device] (const juce::ValueTree& modulates)
+                    { return modulates.hasType (schema::MODULATES) && modulates[schema::modulatesDevice].toString() == device; });
+            else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK) || child.hasType (schema::MASTER)
+                     || child.hasType (schema::CONTAINER))
+                renameModulations (child, device, rename);
+        }
+    }
+
     // Everything in the project that names one of the plug-in's parameters, renamed: its automation curves (the song's,
-    // and Tracktion's), what modulates them (modulators and macros are assigned in the state of what they move), its values
-    // set by hand (in the song's element of it too), its quick control, and its automation lanes.
+    // and Tracktion's), what modulates them (the song's modulators and macros, and Tracktion's, assigned in the state of
+    // what they move), its values set by hand (in the song's element of it too), its quick control, and its automation
+    // lanes.
     void renameReferences (te::ExternalPlugin& plugin, const Rename& rename)
     {
         auto& state = plugin.state;
@@ -129,6 +146,7 @@ namespace
         const auto device = state[te::IDs::id].toString();
         renameLanes (findPhaziteState (plugin.edit), device, rename);
         renameCurves (findPhaziteState (plugin.edit), device, rename);
+        renameModulations (findPhaziteState (plugin.edit), device, rename);
     }
 
     // What the plug-in's element in the song holds of its own IDs (Schema.h: pluginParameterIDs): each Tracktion ID with

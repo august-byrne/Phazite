@@ -18,13 +18,12 @@ namespace phazite
 {
 namespace
 {
-    // The ID saved in a project file. The Edit names its temporary folder (freeze files, comp renders)
-    // after it, so a project keeps its ID from one session to the next. te::loadEditFromFile replaces
-    // the saved ID with the one it is given, so this reads it first.
-    te::ProjectItemID readSavedID (const juce::File& file)
+    // The song a project file holds (Schema.h: PHAZITE, the file's one element), or an invalid tree for a file that holds
+    // none.
+    juce::ValueTree readSong (const juce::File& file)
     {
-        if (const auto root = juce::XmlDocument (file).getDocumentElement (true)) // the outer element only
-            return te::ProjectItemID (root->getStringAttribute (te::IDs::projectID));
+        if (const auto xml = juce::XmlDocument::parse (file); xml != nullptr && xml->hasTagName (schema::PHAZITE.toString()))
+            return juce::ValueTree::fromXml (*xml);
 
         return {};
     }
@@ -71,11 +70,11 @@ namespace
         countIDs (edit);
     }
 
-    // Writes a project into a file, through a temporary file that takes its place once it is whole. (Tracktion's save
-    // also writes MIDI-learn mappings and control surfaces' settings, which Phazite doesn't use.)
-    bool writeProjectFile (const juce::ValueTree& state, const juce::File& file)
+    // Writes a song into a project file, through a temporary file that takes its place once it is whole: the song alone
+    // (docs/tracktion-migration.md, T1), from which the mirror builds Tracktion's Edit again as the project opens.
+    bool writeProjectFile (const juce::ValueTree& song, const juce::File& file)
     {
-        const auto xml = state.createXml();
+        const auto xml = song.createXml();
         juce::TemporaryFile temporary (file);
         return xml != nullptr && xml->writeTo (temporary.getFile()) && temporary.overwriteTargetFileWithTemporary();
     }
@@ -134,6 +133,9 @@ std::unique_ptr<te::Edit> createEditFromSong (te::Engine& engine, const juce::Va
                                               const juce::File& cacheFolder)
 {
     JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! song.hasType (schema::PHAZITE))
+        return {};
 
     auto edit = createEditFromState (engine, mirror::makeEditState (song), file, cacheFolder);
 
@@ -198,10 +200,9 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
     const auto autosaveFile = getAutosaveFile (projectFile);
     const bool useAutosave = restoreAutosave && autosaveFile.existsAsFile();
 
-    // Loads on this, the message thread: Tracktion's EditLoader would use a background thread.
+    // The song, which the mirror builds Tracktion's Edit from, on this, the message thread.
     const auto sourceFile = useAutosave ? autosaveFile : projectFile;
-    const auto state = te::loadEditFromFile (engine, sourceFile, readSavedID (sourceFile));
-    auto edit = createEditFromState (engine, state, projectFile, getCacheFolder (projectFile));
+    auto edit = createEditFromSong (engine, readSong (sourceFile), projectFile, getCacheFolder (projectFile));
 
     if (edit == nullptr)
     {
@@ -209,7 +210,6 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
         return {};
     }
 
-    addPhaziteParts (*edit);
     std::unique_ptr<Project> project (new Project (std::move (edit), projectFile));
 
     if (useAutosave)
@@ -324,7 +324,7 @@ juce::Result Project::save()
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
         storeForSaving (*edit);
 
-        if (! writeProjectFile (edit->state, file))
+        if (! writeProjectFile (phazite::getPhaziteState (*edit), file))
             return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ".");
 
         edit->resetChangedStatus(); // Tracktion's flag, which the undo history and plug-ins' own changes set
@@ -353,7 +353,7 @@ juce::Result Project::autosave()
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*edit);
 
-        if (! writeProjectFile (edit->state, target))
+        if (! writeProjectFile (phazite::getPhaziteState (*edit), target))
             return juce::Result::fail ("Phazite couldn't write the autosave " + target.getFullPathName() + ".");
     }
 
@@ -382,7 +382,7 @@ void Project::autosaveInBackground()
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*edit);
-        autosaveWriter->write (edit->state.createCopy(), target);
+        autosaveWriter->write (phazite::getPhaziteState (*edit).createCopy(), target);
     }
 
     changedSinceAutosave = false;
@@ -414,11 +414,7 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
     const juce::ScopedValueSetter<bool> writing (isWriting, true);
     storeForSaving (*edit);
 
-    // The copy is a project of its own, so it gets an ID of its own.
-    auto state = edit->state.createCopy();
-    state.setProperty (te::IDs::projectID, te::ProjectItemID::createNewID (te::ProjectID {}).toString(), nullptr);
-
-    if (! writeProjectFile (state, newFile))
+    if (! writeProjectFile (phazite::getPhaziteState (*edit), newFile))
     {
         newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
         error = "Phazite couldn't write the project file " + newFile.getFullPathName() + ".";
@@ -518,7 +514,7 @@ void Project::backUpProjectFile()
 
 void Project::rememberSavedState()
 {
-    savedState = edit->state.createCopy();
+    savedState = phazite::getPhaziteState (*edit).createCopy();
     mayHaveChanged = compareAll = false;
     elementsToCompare.clearQuick();
 }
@@ -528,16 +524,17 @@ void Project::compareWithSavedState()
     if (! mayHaveChanged)
         return;
 
-    // The elements that notified, each with its copy at the same place in savedState: the Edit's own elements keep their
-    // places unless one was added or removed, which notifies the state itself.
-    const auto isSame = [this] (const juce::ValueTree& element)
+    // The elements that notified, each with its copy at the same place in savedState: the song's own elements keep their
+    // places unless one was added or removed, which notifies the song itself.
+    const auto song = phazite::getPhaziteState (*edit);
+    const auto isSame = [this, &song] (const juce::ValueTree& element)
     {
-        const auto index = edit->state.indexOf (element);
+        const auto index = song.indexOf (element);
         return index >= 0 && index < savedState.getNumChildren() && holdTheSameProject (element, savedState.getChild (index));
     };
 
-    const auto same = compareAll ? holdTheSameProject (edit->state, savedState)
-                                 : std::all_of (elementsToCompare.begin(), elementsToCompare.end(), isSame);
+    const auto same =
+        compareAll ? holdTheSameProject (song, savedState) : std::all_of (elementsToCompare.begin(), elementsToCompare.end(), isSame);
 
     mayHaveChanged = compareAll = false;
     elementsToCompare.clearQuick();
@@ -551,7 +548,20 @@ void Project::compareWithSavedState()
 
 void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (isWriting || ! isCounted (tree, property))
+    if (isWriting)
+        return;
+
+    // A plug-in's own change, which Tracktion tells by its time stamp, and which a save stores in the song.
+    if (tree == edit->state && property == te::IDs::lastSignificantChange)
+    {
+        changedSinceSave = changedSinceAutosave = true;
+        return;
+    }
+
+    // Only the song is saved: what Tracktion writes into the rest of the Edit's state (the mirror, the playhead) isn't.
+    const auto song = findPhaziteState (*edit);
+
+    if (! (tree == song || tree.isAChildOf (song)) || ! isCounted (tree, property))
         return;
 
     if (changedSinceSave)
@@ -560,14 +570,14 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
         return;
     }
 
-    // Perhaps nothing changed: compared with savedState when asked, the element of the Edit's state it is in.
+    // Perhaps nothing changed: compared with savedState when asked, the element of the song it is in.
     mayHaveChanged = true;
     auto element = tree;
 
-    while (element.getParent().isValid() && element.getParent() != edit->state)
+    while (element.getParent().isValid() && element.getParent() != song)
         element = element.getParent();
 
-    if (element == edit->state || element.getParent() != edit->state)
+    if (element == song || element.getParent() != song)
         compareAll = true;
     else
         elementsToCompare.addIfNotAlreadyThere (element);
@@ -581,23 +591,18 @@ void Project::markChildChanged (const juce::ValueTree& parent, const juce::Value
 
 bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    return (tree.hasType (te::IDs::TRANSPORT)
-            && (property == te::IDs::position || property == te::IDs::start || property == te::IDs::loopPoint1
-                || property == te::IDs::loopPoint2 || property == te::IDs::looping || property == te::IDs::recordPunchInOut))
-           || (tree.hasType (te::IDs::CLICKTRACK) && (property == te::IDs::active || property == te::IDs::emphasiseBars))
-           || (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
-           || ((tree.hasType (schema::DEVICE) || tree.hasType (te::IDs::PLUGIN)) && schema::isDeviceViewProperty (property))
+    return (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
+           || (tree.hasType (schema::DEVICE) && schema::isDeviceViewProperty (property))
            || (tree.hasType (schema::PHAZITE)
                && (schema::isGridProperty (property) || property == schema::nextID || property == schema::loopFollowsSong
                    || property == schema::punch || property == schema::lastInput || property == schema::loop
                    || property == schema::loopStart || property == schema::loopEnd || property == schema::playStart
-                   || property == schema::metronome))
-           || isAutomatedValue (tree, property); // Tracktion writes it as the automation plays
+                   || property == schema::metronome));
 }
 
 bool Project::isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)
 {
-    return element.hasType (te::IDs::INPUTDEVICES) || (parent.hasType (schema::PHAZITE) && element.hasType (schema::PIANOROLL))
+    return (parent.hasType (schema::PHAZITE) && element.hasType (schema::PIANOROLL))
            || ((parent.hasType (schema::TRACK) || parent.hasType (schema::MASTER)) && schema::isTrackViewElement (element));
 }
 

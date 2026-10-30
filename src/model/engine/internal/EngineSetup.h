@@ -125,14 +125,10 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions);
 // The UIBehaviour of an Engine that createEngine() made.
 UIBehaviour& getUIBehaviour (te::Engine&);
 
-// Loads a saved Edit on the message thread, as Phazite's rules require (Tracktion's EditLoader builds
-// Edits on a background thread). Returns nullptr if the file can't be loaded.
-std::unique_ptr<te::Edit> loadEdit (te::Engine&, const juce::File&);
-
-// Creates an Edit for editing from a saved state, that saves to a file. It keeps the state's saved ID, or makes a new
-// one, and the values parameters were set to by hand (model/automation/internal/Automation.h: restoreValuesSetByHand()).
-// cacheFolder, if given, becomes the Edit's temporary folder, where its frozen tracks' files are, so that they open
-// frozen (model/mixer/internal/Freeze.h).
+// Creates an Edit for editing from the state the mirror makes it from (model/mirror/internal/Mirror.h: makeEditState()),
+// on the message thread, with no track of Tracktion's own; its files' paths start from file, and cacheFolder, if given,
+// becomes its temporary folder, where its frozen tracks' files are (model/mixer/internal/Freeze.h). For
+// createEditFromSong() (model/project/internal/Project.h), which then builds the rest.
 std::unique_ptr<te::Edit> createEditFromState (te::Engine&, const juce::ValueTree& state, const juce::File& file,
                                                const juce::File& cacheFolder = {});
 } // namespace phazite

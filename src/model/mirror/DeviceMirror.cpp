@@ -490,7 +490,10 @@ namespace
 
 juce::ValueTree makeEditState (const juce::ValueTree& song)
 {
+    // Tracktion numbers what it makes from the largest ID it finds in its state, under its name for an ID; the song's next
+    // (findNextID()) is past IDs Tracktion doesn't see there (its faders', its alias groups').
     juce::ValueTree state (te::IDs::EDIT);
+    state.setProperty (te::IDs::id, (juce::int64) findNextID (song) - 1, nullptr);
 
     if (const auto fader = te::EditItemID::fromVar (song.getChildWithName (schema::MASTER)[schema::channelFader]); fader.isValid())
     {
@@ -543,5 +546,9 @@ void reconcileDevices (te::Edit& edit)
                 playLive (*track);
         }
     }
+
+    // What a return's bus name or a container's rack type added to the Edit goes before its tracks, as Tracktion would put
+    // it a moment later, as an undo step of its own (reconcileTracks() says why).
+    te::TrackList::sortTracksByType (edit.state, &edit.getUndoManager());
 }
 } // namespace phazite::mirror

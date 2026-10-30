@@ -701,7 +701,10 @@ juce::ValueTree findPhaziteState (const te::Edit&);
 // larger of the two: Tracktion's and the song's never meet.
 std::uint64_t makeID (te::Edit&);
 
-// Brings the song's next ID past every ID the song holds (those Tracktion gave what it made and the song took in: a
-// device made in Tracktion first, a recording's clips), and Tracktion's next past that. As a project opens and saves.
+// The ID a song gives next: past its count (nextID) and every ID it holds, those Tracktion gave what it made and the song
+// took in too (a device made in Tracktion first, a recording's clips, a copied track's).
+std::uint64_t findNextID (const juce::ValueTree& song);
+
+// Brings the song's count there (findNextID()), and Tracktion's next past that. As a project opens and saves.
 void countIDs (te::Edit&);
 } // namespace phazite

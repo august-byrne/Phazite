@@ -4,11 +4,8 @@
 #include "internal/LoudnessMeterPlugin.h"
 #include "internal/PluginScanner.h"
 #include "internal/PreviewLoop.h"
-#include "model/automation/internal/Automation.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/PluginParameters.h"
-#include "model/mixer/internal/Containers.h"
-#include "model/mixer/internal/Freeze.h"
 
 // ThreadSanitizer builds (linux-tsan preset): GCC defines __SANITIZE_THREAD__, Clang has a feature check.
 #if defined(__SANITIZE_THREAD__)
@@ -345,47 +342,27 @@ UIBehaviour& getUIBehaviour (te::Engine& engine)
     return static_cast<UIBehaviour&> (engine.getUIBehaviour());
 }
 
-std::unique_ptr<te::Edit> loadEdit (te::Engine& engine, const juce::File& file)
-{
-    JUCE_ASSERT_MESSAGE_THREAD
-
-    if (! file.existsAsFile())
-        return {};
-
-    return createEditFromState (engine, te::loadEditFromFile (engine, file, te::ProjectItemID {}), file);
-}
-
 std::unique_ptr<te::Edit> createEditFromState (te::Engine& engine, const juce::ValueTree& state, const juce::File& file,
                                                const juce::File& cacheFolder)
 {
+    JUCE_ASSERT_MESSAGE_THREAD
+
     if (! state.isValid())
         return {};
 
-    auto id = te::ProjectItemID::fromProperty (state, te::IDs::projectID);
-
-    if (! id.isValid())
-        id = te::ProjectItemID::createNewID (te::ProjectID {});
-
-    // The values set by hand of parameters that automation set to others as the project was saved, and only the rack
-    // types its containers play (model/mixer/internal/Containers.h); and the frozen tracks, which Tracktion would unfreeze
-    // as it makes the Edit, not knowing about the Cache folder yet (model/mixer/internal/Freeze.h).
-    auto editState = state;
-    restoreValuesSetByHand (editState);
-    dropUnusedContainerRacks (editState);
-    const auto frozenTracks = takeFrozenTracks (editState, cacheFolder);
-
-    auto edit = te::Edit::createEdit (
-        { engine, state, id, te::Edit::forEditing, nullptr, te::Edit::getDefaultNumUndoLevels(), [file] { return file; }, {} });
+    // An ID of its own each time (the project's is Phazite's: the Cache folder below is its temporary folder).
+    const auto id = te::ProjectItemID::createNewID (te::ProjectID {});
+    te::Edit::Options options { engine, state, id };
+    options.editFileRetriever = [file] { return file; };
+    options.numAudioTracks = 0;
+    auto edit = te::Edit::createEdit (std::move (options));
 
     // While low latency is on, without delay compensation (setLowLatency()).
     if (edit != nullptr)
         edit->setLatencyCompensationEnabled (! isLowLatency (engine));
 
     if (edit != nullptr && cacheFolder != juce::File())
-    {
         edit->setTempDirectory (cacheFolder);
-        restoreFrozenTracks (*edit, frozenTracks);
-    }
 
     return edit;
 }

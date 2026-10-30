@@ -22,7 +22,7 @@ namespace
         return largest;
     }
 
-    std::uint64_t getNextID (const juce::ValueTree& song)
+    std::uint64_t readNextID (const juce::ValueTree& song)
     {
         return (std::uint64_t) (juce::int64) song.getProperty (schema::nextID, (juce::int64) 0);
     }
@@ -41,7 +41,7 @@ juce::ValueTree findPhaziteState (const te::Edit& edit)
 std::uint64_t makeID (te::Edit& edit)
 {
     auto song = getPhaziteState (edit);
-    const auto next = getNextID (song);
+    const auto next = readNextID (song);
     auto id = edit.createNewItemID().getRawID();
 
     // Tracktion's behind the song's (a project whose last items went before it was saved): brought past it, so that
@@ -53,12 +53,17 @@ std::uint64_t makeID (te::Edit& edit)
     return id;
 }
 
+std::uint64_t findNextID (const juce::ValueTree& song)
+{
+    return std::max (readNextID (song), findLargestID (song) + 1);
+}
+
 void countIDs (te::Edit& edit)
 {
     auto song = getPhaziteState (edit);
-    const auto next = std::max (getNextID (song), findLargestID (song) + 1);
+    const auto next = findNextID (song);
 
-    if (next != getNextID (song))
+    if (next != readNextID (song))
         song.setProperty (schema::nextID, (juce::int64) next, nullptr);
 
     // Tracktion's next is past every ID in its state (it counts from the largest it finds, and the song's come from it), so

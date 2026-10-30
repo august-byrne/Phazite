@@ -674,7 +674,7 @@ after edit.selectAll:
   edit.deselectAll: on "Deselect All"
   edit.cut: on "Cut 3 Clips"
   edit.copy: on "Copy 3 Clips"
-  selected: clip on One at 0.000, clip on One at 4.000, clip on One at 2.000
+  selected: clip on One at 0.000, clip on One at 2.000, clip on One at 4.000
 after select One:
   edit.delete: on "Delete Track"
   edit.deleteAndCloseGap: off "Delete and Close Gap"

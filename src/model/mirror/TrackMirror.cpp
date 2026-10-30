@@ -228,6 +228,11 @@ void reconcileTracks (te::Edit& edit)
         if (te::findTrackForID (edit, track->itemID) == track.get())
             edit.deleteTrack (track.get());
 
+    // The Edit's elements in the order Tracktion keeps them (the rest, then its global tracks, the master and the song's),
+    // in the change's step: Tracktion would sort them a moment after a track is added, as an undo step of its own (an Edit
+    // built from the song would have one as the project opens).
+    te::TrackList::sortTracksByType (edit.state, &edit.getUndoManager());
+
     if (auto* master = edit.getMasterTrack())
         setAutomationMode (*master, findPhaziteState (edit).getChildWithName (schema::MASTER));
 }
