@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 
 namespace phazite
 {
@@ -58,11 +59,9 @@ void setFactoryWavetable (te::Plugin& plugin, int osc, int index)
     if (! hasWavetableFile (plugin, osc) && synth->getTableName (osc) == name)
         return;
 
-    auto& edit = plugin.edit;
-    auto* undoManager = &edit.getUndoManager();
-    const UndoStep step (edit, getStepName (name, osc));
-    plugin.state.removeProperty (schema::getOscillatorWavetableFile (osc), undoManager);
-    plugin.state.setProperty (schema::getOscillatorWavetable (osc), name, undoManager);
+    const UndoStep step (plugin.edit, getStepName (name, osc));
+    setDeviceSound (plugin, schema::getOscillatorWavetableFile (osc), {});
+    setDeviceSound (plugin, schema::getOscillatorWavetable (osc), name);
 }
 
 bool setWavetableFile (te::Plugin& plugin, int osc, const juce::File& file)
@@ -73,7 +72,7 @@ bool setWavetableFile (te::Plugin& plugin, int osc, const juce::File& file)
     auto& edit = plugin.edit;
     const auto copy = copyIntoProject (edit, file);
     const UndoStep step (edit, getStepName (copy.getFileNameWithoutExtension(), osc));
-    plugin.state.setProperty (schema::getOscillatorWavetableFile (osc), getProjectPath (edit, copy), &edit.getUndoManager());
+    setDeviceSound (plugin, schema::getOscillatorWavetableFile (osc), getProjectPath (edit, copy));
     return true;
 }
 } // namespace phazite

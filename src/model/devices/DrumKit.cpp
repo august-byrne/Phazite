@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 
 namespace phazite
 {
@@ -43,7 +44,7 @@ bool setPadSound (te::Plugin& plugin, int pad, const juce::File& file)
     auto& edit = plugin.edit;
     const auto copy = copyIntoProject (edit, file);
     const UndoStep step (edit, "Put " + copy.getFileNameWithoutExtension() + " on Pad " + juce::String (pad + 1));
-    plugin.state.setProperty (schema::getPadSound (pad), getProjectPath (edit, copy), &edit.getUndoManager());
+    setDeviceSound (plugin, schema::getPadSound (pad), getProjectPath (edit, copy));
     return true;
 }
 
@@ -53,6 +54,6 @@ void clearPadSound (te::Plugin& plugin, int pad)
         return;
 
     const UndoStep step (plugin.edit, "Reset Pad " + juce::String (pad + 1));
-    plugin.state.removeProperty (schema::getPadSound (pad), &plugin.edit.getUndoManager());
+    setDeviceSound (plugin, schema::getPadSound (pad), {});
 }
 } // namespace phazite

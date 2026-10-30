@@ -40,7 +40,7 @@ te::LFOModifier& getLfo (const phazite::ModulatorAccess& modulator)
 
 void set (te::AutomatableParameter& parameter, float value)
 {
-    parameter.setParameter (value, juce::sendNotification);
+    phazite::setDeviceValue (parameter, value);
 }
 
 // The test gain, moved by a tenth of its range by a square LFO at 10 Hz from 0 to 1, its cycle running free from its

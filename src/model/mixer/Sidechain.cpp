@@ -77,7 +77,7 @@ namespace
         const auto set = [device] (std::string_view id, float value)
         {
             if (auto* parameter = device->findParameter (id))
-                parameter->setParameter (value, juce::sendNotification);
+                setDeviceValue (*parameter, value);
         };
 
         set ("threshold", -30.0f);

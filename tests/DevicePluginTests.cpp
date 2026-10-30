@@ -58,11 +58,11 @@ TEST_CASE ("A device's parameters are automatable, and stored in its state under
     CHECK (device.findParameter ("mode") == parameters[1]);
     CHECK (device.findParameter ("volume") == nullptr);
 
-    parameters[0]->setParameter (-6.0f, juce::sendNotification);
+    phazite::setDeviceValue (*parameters[0], -6.0f);
     CHECK ((float) device.state["gain"] == doctest::Approx (-6.0f));
 
     // Restoring a state takes the values it has, and the defaults of those it hasn't.
-    parameters[1]->setParameter (1.0f, juce::sendNotification);
+    phazite::setDeviceValue (*parameters[1], 1.0f);
     juce::ValueTree preset (te::IDs::PLUGIN);
     preset.setProperty ("gain", -12.0f, nullptr);
     device.restorePluginStateFromValueTree (preset);
@@ -97,7 +97,7 @@ TEST_CASE ("An effect gets its parameters' values and stereo audio, and reports 
     CHECK_FALSE (device.isSynth());
     CHECK_FALSE (device.takesMidiInput());
 
-    device.findParameter ("gain")->setParameter (-6.0206f, juce::sendNotification);
+    phazite::setDeviceValue (*device.findParameter ("gain"), -6.0206f);
     juce::AudioBuffer<float> buffer (2, 256);
 
     for (int channel = 0; channel < 2; ++channel)
@@ -110,7 +110,7 @@ TEST_CASE ("An effect gets its parameters' values and stereo audio, and reports 
     CHECK (gain.lastValues[0] == doctest::Approx (-6.0206f));
 
     // A choice reaches the DSP as a whole number, however it was set.
-    device.findParameter ("mode")->setParameter (0.7f, juce::sendNotification);
+    phazite::setDeviceValue (*device.findParameter ("mode"), 0.7f);
 
     // A mono channel is played in stereo, a stretch at a time, and gets the average back.
     juce::AudioBuffer<float> mono (1, 1300);
@@ -186,7 +186,7 @@ TEST_CASE ("An effect's mix blends its sound with what came in, lined up with it
 
     const auto play = [&device] (float value, float mix, int length)
     {
-        device.findParameter ("mix")->setParameter (mix, juce::sendNotification);
+        phazite::setDeviceValue (*device.findParameter ("mix"), mix);
         juce::AudioBuffer<float> buffer (2, length);
 
         for (int channel = 0; channel < 2; ++channel)
@@ -251,7 +251,7 @@ TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a sav
             for (const auto& parameter : info.parameters)
             {
                 const auto value = parameter.defaultValue < parameter.maximum ? parameter.maximum : parameter.minimum;
-                device->findParameter (parameter.id)->setParameter (value, juce::sendNotification);
+                phazite::setDeviceValue (*device->findParameter (parameter.id), value);
                 values.push_back (value);
             }
 
@@ -320,7 +320,7 @@ TEST_CASE ("A device sleeps once what comes in and what it plays have been silen
     auto& tone = dynamic_cast<TestTone&> (instrument.getProcessor());
     effect.baseClassInitialise ({ 0_tp, testRate, testBlock });
     instrument.baseClassInitialise ({ 0_tp, testRate, testBlock });
-    effect.findParameter ("gain")->setParameter (-6.0206f, juce::sendNotification);
+    phazite::setDeviceValue (*effect.findParameter ("gain"), -6.0206f);
     juce::AudioBuffer<float> buffer (2, testBlock);
 
     // A quarter of a second of silence (24 blocks), then each sleeps.
@@ -377,7 +377,7 @@ TEST_CASE ("A continuous parameter that moves between blocks glides there over t
     CHECK (gain.processed == 1); // a block that changes nothing plays whole
 
     // From 0 dB to -6 dB: a step of the way each 32 samples, there by the block's end.
-    device.findParameter ("gain")->setParameter (-6.0206f, juce::sendNotification);
+    phazite::setDeviceValue (*device.findParameter ("gain"), -6.0206f);
     play();
     CHECK (gain.processed == 1 + testBlock / 32);
     CHECK (buffer.getSample (0, 0) == doctest::Approx (juce::Decibels::decibelsToGain (-6.0206f / 16.0f)).epsilon (0.001));
@@ -389,7 +389,7 @@ TEST_CASE ("A continuous parameter that moves between blocks glides there over t
     // Settled: the next block plays whole again. A choice that changes jumps, with no glide.
     play();
     CHECK (gain.processed == 2 + testBlock / 32);
-    device.findParameter ("mode")->setParameter (1.0f, juce::sendNotification);
+    phazite::setDeviceValue (*device.findParameter ("mode"), 1.0f);
     play();
     CHECK (gain.processed == 3 + testBlock / 32);
     CHECK (buffer.getSample (0, 0) == doctest::Approx (-0.5f).epsilon (0.001));

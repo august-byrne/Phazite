@@ -454,7 +454,7 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
         REQUIRE (phazite::setInstrument (track, instrument) != nullptr);
 
         if (release > 0.0f)
-            instrument->getAutomatableParameterByID ("release")->setParameter (release, juce::sendNotification);
+            phazite::setDeviceValue (*instrument->getAutomatableParameterByID ("release"), release);
 
         auto* clip = phazite::test::addMidiClip (track, { beats (0.0), beats (8.0) }, "Note");
         phazite::test::addMidiNote (*clip, note, beats (0.0), te::BeatDuration::fromBeats (length), 110);

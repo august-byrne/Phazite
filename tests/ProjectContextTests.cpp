@@ -217,7 +217,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
 
     // Nor is a parameter's value, which a knob's drag sets at each move: controls read it as they show it. A device
     // switched off is a change.
-    delay->getAutomatableParameterByID ("feedback")->setParameter (0.7f, juce::sendNotification);
+    phazite::setDeviceValue (*delay->getAutomatableParameterByID ("feedback"), 0.7f);
     track->getVolumePlugin()->volParam->setParameter (0.5f, juce::sendNotification);
     CHECK (hear().empty());
     phazite::setDeviceOn (*delay, false);

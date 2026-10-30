@@ -213,7 +213,7 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
     CHECK (valueOf (compressor, "attack") == doctest::Approx (10.0f));
 
     // A compressor already set its own way keeps its settings.
-    compressor.getAutomatableParameterByID ("ratio")->setParameter (2.0f, juce::sendNotification);
+    phazite::setDeviceValue (*compressor.getAutomatableParameterByID ("ratio"), 2.0f);
     phazite::setSidechainSource (compressor, song.kick);
     CHECK (valueOf (compressor, "ratio") == doctest::Approx (2.0f));
     CHECK (valueOf (compressor, "threshold") == doctest::Approx (-18.0f));

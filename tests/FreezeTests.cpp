@@ -95,7 +95,7 @@ struct Song
     {
         auto* parameter = dynamic_cast<phazite::DevicePlugin&> (plugin).findParameter (id);
         REQUIRE (parameter != nullptr);
-        parameter->setParameter (value, juce::sendNotificationSync);
+        phazite::setDeviceValue (*parameter, value);
     }
 
     phazite::TrackID id() const { return phazite::getTrackID (*bass); }

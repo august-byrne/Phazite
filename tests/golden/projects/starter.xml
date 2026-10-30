@@ -475,7 +475,18 @@
                 velocity="100"/>
         </CLIP>
         <DEVICE id="1068"
-                type="phaziteSynth"/>
+                type="phaziteSynth">
+          <VALUES cutoff="700"
+                  decay="400"
+                  filterDecay="250"
+                  filterEnvelope="30"
+                  filterSustain="0.1"
+                  level="-12"
+                  osc2Detune="10"
+                  release="250"
+                  resonance="0.25"
+                  sustain="0.4"/>
+        </DEVICE>
       </TRACK>
     </TRACKS>
   </PHAZITE>

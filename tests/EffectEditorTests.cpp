@@ -287,7 +287,7 @@ TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its
     // The buzz at first, at C3; a track as the carrier, while none feeds its sidechain, says so.
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getCarrierText() == juce::String ("Buzz C3"));
-    song.plugin->getAutomatableParameterByID ("carrier")->setParameter (3.0f, juce::sendNotification);
+    phazite::setDeviceValue (*song.plugin->getAutomatableParameterByID ("carrier"), 3.0f);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getCarrierText() == juce::String ("Track: pick one with Sidechain, above"));
 

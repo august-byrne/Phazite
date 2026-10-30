@@ -79,6 +79,17 @@ juce::ValueTree makeDeviceState (const te::Plugin&);
 // devices, which are where the original's are in its list.
 void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy);
 
+// Sets a device's parameter to a value set by hand, as it snaps to its range and steps: the song's, for one of Phazite's own
+// devices in a chain (Schema.h: VALUES), and Tracktion's parameter, which plays it. And one of a device's files or tables
+// (Schema.h: SOUNDS; empty for none), the song's and its PLUGIN's. In the caller's undo step. A plug-in's parameter, a
+// device's in a container, a modulator's or a macro's, are Tracktion's alone while step 5 lasts.
+void setDeviceValue (te::AutomatableParameter&, float value);
+void setDeviceSound (te::Plugin&, const juce::Identifier& property, const juce::String& value);
+
+// Where in a channel's plug-ins a device goes, before the device at a place among its devices, or else after the last
+// device (or after a return's input), so before the sends, the fader and the meters.
+int getDevicePlace (const te::PluginList&, int deviceIndex);
+
 // Where a device's own window was last (docs/design.md, section 9): view state, written without an undo step, which the
 // project saves, so that the window opens there again. A save stores it too (model/devices/internal/DeviceStates.h),
 // and finds it written already.

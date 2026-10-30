@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
@@ -123,24 +124,6 @@ namespace
         }
     }
 
-    // Where in a channel's plug-ins a device goes: before the device at that place among its devices, or else
-    // after the last device (or after a return's input), so before the sends, the fader and the meters.
-    int getInsertIndex (const te::PluginList& list, int deviceIndex)
-    {
-        const auto devices = getDevicesIn (list);
-
-        if (juce::isPositiveAndBelow (deviceIndex, devices.size()))
-            return list.indexOf (devices[deviceIndex]);
-
-        auto index = 0;
-
-        for (int i = 0; i < list.size(); ++i)
-            if (isDevice (*list[i]) || dynamic_cast<te::AuxReturnPlugin*> (list[i]) != nullptr)
-                index = i + 1;
-
-        return index;
-    }
-
     // Adds a device to the song and makes it in Tracktion, which can't make a device from the song yet (T1, step 5).
     te::Plugin* insertInto (te::PluginList& list, const te::Plugin::Ptr& plugin, int deviceIndex)
     {
@@ -148,7 +131,7 @@ namespace
             return nullptr;
 
         const auto index = isInstrument (*plugin) ? 0 : deviceIndex; // instruments come first
-        list.insertPlugin (plugin, getInsertIndex (list, index), nullptr);
+        list.insertPlugin (plugin, getDevicePlace (list, index), nullptr);
 
         if (! list.contains (plugin.get()))
             return nullptr;
@@ -340,15 +323,15 @@ void setMix (te::Plugin& device, float mix)
 {
     if (const auto own = findOwnMix (device))
     {
-        own->setParameter (juce::jlimit (0.0f, 1.0f, mix), juce::sendNotification);
+        setDeviceValue (*own, juce::jlimit (0.0f, 1.0f, mix));
         return;
     }
 
     if (const auto levels = findMixLevels (device))
     {
         const auto wet = juce::jlimit (0.0f, 1.0f, mix);
-        levels->wet->setParameter (wet, juce::sendNotification);
-        levels->dry->setParameter (1.0f - wet, juce::sendNotification);
+        setDeviceValue (*levels->wet, wet);
+        setDeviceValue (*levels->dry, 1.0f - wet);
     }
 }
 
@@ -725,7 +708,77 @@ juce::ValueTree makeDeviceState (const te::Plugin& device)
     if (! device.isEnabled())
         state.setProperty (schema::deviceOff, true, nullptr);
 
+    // One of Phazite's own: its values set by hand and its files, as its state has them.
+    if (auto* own = dynamic_cast<const DevicePlugin*> (&device))
+    {
+        juce::ValueTree values (schema::VALUES), sounds (schema::SOUNDS);
+
+        for (const auto& description : own->getDeviceInfo().parameters)
+            if (const juce::Identifier id (juce::String (description.id.data(), description.id.size())); device.state.hasProperty (id))
+                values.setProperty (id, device.state[id], nullptr);
+
+        for (const auto& property : getSoundProperties (own->getDeviceInfo()))
+            if (device.state.hasProperty (property))
+                sounds.setProperty (property, device.state[property], nullptr);
+
+        if (values.getNumProperties() > 0)
+            state.appendChild (values, nullptr);
+
+        if (sounds.getNumProperties() > 0)
+            state.appendChild (sounds, nullptr);
+    }
+
     return state;
+}
+
+int getDevicePlace (const te::PluginList& list, int deviceIndex)
+{
+    const auto devices = getDevicesIn (list);
+
+    if (juce::isPositiveAndBelow (deviceIndex, devices.size()))
+        return list.indexOf (devices[deviceIndex]);
+
+    auto index = 0;
+
+    for (int i = 0; i < list.size(); ++i)
+        if (isDevice (*list[i]) || dynamic_cast<te::AuxReturnPlugin*> (list[i]) != nullptr)
+            index = i + 1;
+
+    return index;
+}
+
+void setDeviceValue (te::AutomatableParameter& parameter, float value)
+{
+    const auto stored = parameter.snapToState (parameter.getValueRange().clipValue (value));
+
+    if (auto* own = dynamic_cast<DevicePlugin*> (parameter.getPlugin()))
+    {
+        if (auto state = findDeviceState (own->edit, getDeviceID (*own)); state.isValid())
+        {
+            auto* undo = &own->edit.getUndoManager();
+            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (parameter.paramID), stored, undo);
+        }
+    }
+
+    parameter.setParameter (stored, juce::sendNotification);
+}
+
+void setDeviceSound (te::Plugin& device, const juce::Identifier& property, const juce::String& value)
+{
+    auto* undo = &device.edit.getUndoManager();
+
+    if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
+    {
+        if (value.isNotEmpty())
+            state.getOrCreateChildWithName (schema::SOUNDS, undo).setProperty (property, value, undo);
+        else if (auto sounds = state.getChildWithName (schema::SOUNDS); sounds.isValid())
+            sounds.removeProperty (property, undo);
+    }
+
+    if (value.isNotEmpty())
+        device.state.setProperty (property, value, undo);
+    else
+        device.state.removeProperty (property, undo);
 }
 
 void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy)

@@ -81,28 +81,6 @@ namespace
         return error == std::errc() ? juce::String (text.data(), (size_t) (end - text.data())).getDoubleValue() : (double) value;
     }
 
-    // What of a device's state names a sound file or a table, besides its parameters: a drum sampler's pads', a wavetable
-    // synth's oscillators' (Schema.h).
-    std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo& info)
-    {
-        std::vector<juce::Identifier> properties;
-
-        if (toString (info.typeID) == devices::DrumSampler::typeID)
-            for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-                properties.push_back (schema::getPadSound (pad));
-
-        if (toString (info.typeID) == devices::WavetableSynth::typeID)
-        {
-            for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
-            {
-                properties.push_back (schema::getOscillatorWavetable (osc));
-                properties.push_back (schema::getOscillatorWavetableFile (osc));
-            }
-        }
-
-        return properties;
-    }
-
     // A plug-in's description, as scanning found it: by its identifier, else by its name, maker and format.
     std::optional<juce::PluginDescription> findPlugin (te::Engine& engine, const juce::var& identity)
     {
@@ -865,7 +843,7 @@ namespace
             {
                 const auto value = values.hasProperty (id) ? (float) values[id] : parameter.defaultValue;
                 found->setParameter (found->getCurrentValue(), juce::sendNotification);
-                found->setParameter (devices::constrain (parameter, value), juce::sendNotification);
+                setDeviceValue (*found, devices::constrain (parameter, value));
             }
         }
 
@@ -880,9 +858,9 @@ namespace
 
         for (const auto& property : getSoundProperties (info))
             if (sounds.hasProperty (property))
-                device.state.setProperty (property, sounds[property], &device.edit.getUndoManager());
+                setDeviceSound (device, property, sounds[property].toString());
             else if (! saved[keys::sounds].hasProperty (property))
-                device.state.removeProperty (property, &device.edit.getUndoManager()); // its own sound again
+                setDeviceSound (device, property, {}); // its own sound again
 
         return true;
     }

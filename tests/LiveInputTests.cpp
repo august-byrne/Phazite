@@ -307,7 +307,7 @@ TEST_CASE ("Low latency leaves what renders play as the song has it")
 
     auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
     phazite::insertMasterDevice (*edit, limiter);
-    limiter->getAutomatableParameterByID ("gain")->setParameter (12.0f, juce::sendNotification);
+    phazite::setDeviceValue (*limiter->getAutomatableParameterByID ("gain"), 12.0f);
 
     const auto render = [&edit]
     {

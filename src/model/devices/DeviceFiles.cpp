@@ -39,6 +39,26 @@ namespace
     }
 } // namespace
 
+std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo& info)
+{
+    std::vector<juce::Identifier> properties;
+
+    if (info.typeID == std::string_view (devices::DrumSampler::typeID))
+        for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+            properties.push_back (schema::getPadSound (pad));
+
+    if (info.typeID == std::string_view (devices::WavetableSynth::typeID))
+    {
+        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
+        {
+            properties.push_back (schema::getOscillatorWavetable (osc));
+            properties.push_back (schema::getOscillatorWavetableFile (osc));
+        }
+    }
+
+    return properties;
+}
+
 juce::String getProjectPath (const te::Edit& edit, const juce::File& file)
 {
     const auto folder = getProjectFolder (edit);

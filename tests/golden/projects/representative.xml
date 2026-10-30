@@ -215,7 +215,9 @@
           <DEVICE id="1022"
                   type="phaziteSynth"/>
           <DEVICE id="1023"
-                  type="phaziteReverb"/>
+                  type="phaziteReverb">
+            <VALUES mix="0.25"/>
+          </DEVICE>
         </TRACK>
         <TRACK colour="ff009e73"
                id="1029"
@@ -255,7 +257,9 @@
              kind="return"
              name="Reverb">
         <DEVICE id="1044"
-                type="phaziteReverb"/>
+                type="phaziteReverb">
+          <VALUES mix="1"/>
+        </DEVICE>
       </TRACK>
       <TRACK colour="ff0072b2"
              id="1052"
@@ -431,7 +435,20 @@
                 velocity="88"/>
         </CLIP>
         <DEVICE id="1055"
-                type="phaziteSynth"/>
+                type="phaziteSynth">
+          <VALUES attack="2"
+                  cutoff="600"
+                  decay="250"
+                  filterDecay="180"
+                  filterEnvelope="18"
+                  filterSustain="0.15"
+                  level="-10"
+                  release="120"
+                  resonance="0.2"
+                  subLevel="0.5"
+                  sustain="0.7"
+                  voiceMode="1"/>
+        </DEVICE>
       </TRACK>
     </TRACKS>
   </PHAZITE>

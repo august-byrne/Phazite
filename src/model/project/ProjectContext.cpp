@@ -172,7 +172,8 @@ namespace
         {
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
             // makes one at each move (docs/performance-audit.md, U1). Nor is where a device's window was, which no view shows.
-            if (isParameterValue (tree, property) || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property)))
+            if (isParameterValue (tree, property) || tree.hasType (schema::VALUES)
+                || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property)))
                 return;
 
             // How tall a track shows, and the like, is view state (Schema.h), not the song.
@@ -182,7 +183,12 @@ namespace
                 mark (tree);
         }
 
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override { mark (child); }
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
+        {
+            // A device's first value set by hand, as its other values, is no change that views show.
+            if (! child.hasType (schema::VALUES))
+                mark (child);
+        }
         void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markRemoved (parent, child); }
         void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override
         {

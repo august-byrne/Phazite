@@ -498,7 +498,7 @@ void setDeviceValue (const te::Plugin::Ptr& plugin, const char* id, float value)
 {
     auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
     REQUIRE (device != nullptr);
-    device->findParameter (id)->setParameter (value, juce::sendNotification);
+    phazite::setDeviceValue (*device->findParameter (id), value);
 }
 
 // Chords a sixteenth long, one after another for two bars, so that the busiest blocks (one chord's ends with the next's
@@ -602,10 +602,8 @@ TEST_SUITE ("realtime-audit")
 
         for (int band = 0; band < Equalizer::numBands; ++band)
         {
-            device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::on)]->setParameter (1.0f,
-                                                                                                                  juce::sendNotification);
-            device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::gain)]->setParameter (3.0f,
-                                                                                                                    juce::sendNotification);
+            phazite::setDeviceValue (*device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::on)], 1.0f);
+            phazite::setDeviceValue (*device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::gain)], 3.0f);
         }
 
         auto* gain = device->findParameter ("band3Gain");
@@ -642,8 +640,7 @@ TEST_SUITE ("realtime-audit")
 
         for (const auto type : phazite::allModulatorTypes)
         {
-            device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::on)]->setParameter (1.0f,
-                                                                                                                  juce::sendNotification);
+            phazite::setDeviceValue (*device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::on)], 1.0f);
             const auto modulator = phazite::addModulator (track, type);
             REQUIRE (modulator.has_value());
             phazite::setModulation (*modulator, *device->getAutomatableParameters()[Equalizer::getParameterIndex (band, Equalizer::gain)],
@@ -673,7 +670,7 @@ TEST_SUITE ("realtime-audit")
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
         REQUIRE (device != nullptr);
         REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
-        device->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::on)]->setParameter (1.0f, juce::sendNotification);
+        phazite::setDeviceValue (*device->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::on)], 1.0f);
 
         // Over all of the playback measured: the band's gain swept, a cycle a beat, and the volume faded.
         const auto song = phazite::BeatRange (phazite::BeatPosition(), phazite::BeatPosition::fromBeats (32.0));
@@ -708,7 +705,7 @@ TEST_SUITE ("realtime-audit")
         phazite::setMix (*container, 0.5f);
 
         // Its first macro turns a band of the EQ; the track's LFO moves the compressor's threshold.
-        eq->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::on)]->setParameter (1.0f, juce::sendNotification);
+        phazite::setDeviceValue (*eq->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::on)], 1.0f);
         const auto macro = phazite::getContainerMacros (*container)[0];
         phazite::setModulation ({ nullptr, macro }, *eq->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::gain)],
                                 0.5f);
@@ -737,8 +734,8 @@ TEST_SUITE ("realtime-audit")
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
         REQUIRE (device != nullptr);
         REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
-        device->findParameter ("threshold")->setParameter (-40.0f, juce::sendNotification);
-        device->findParameter ("mix")->setParameter (0.7f, juce::sendNotification);
+        phazite::setDeviceValue (*device->findParameter ("threshold"), -40.0f);
+        phazite::setDeviceValue (*device->findParameter ("mix"), 0.7f);
         phazite::setSidechainSource (*device, &source);
         REQUIRE (phazite::getSidechainSource (*device) == &source);
 
@@ -766,8 +763,8 @@ TEST_SUITE ("realtime-audit")
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
         REQUIRE (device != nullptr);
         REQUIRE (phazite::insertDevice (voice, plugin) != nullptr);
-        device->findParameter ("carrier")->setParameter ((float) Vocoder::Carrier::track, juce::sendNotification);
-        device->findParameter ("bands")->setParameter (5.0f, juce::sendNotification);
+        phazite::setDeviceValue (*device->findParameter ("carrier"), (float) Vocoder::Carrier::track);
+        phazite::setDeviceValue (*device->findParameter ("bands"), 5.0f);
         phazite::setSidechainSource (*device, &carrier);
         REQUIRE (phazite::getSidechainSource (*device) == &carrier);
 
@@ -787,7 +784,7 @@ TEST_SUITE ("realtime-audit")
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
         REQUIRE (device != nullptr);
         REQUIRE (phazite::insertMasterDevice (*edit, plugin) != nullptr);
-        device->findParameter ("gain")->setParameter (12.0f, juce::sendNotification);
+        phazite::setDeviceValue (*device->findParameter ("gain"), 12.0f);
 
         auto& limiter = dynamic_cast<Limiter&> (device->getProcessor());
         limiter.getReductionMeter().take();
@@ -809,9 +806,9 @@ TEST_SUITE ("realtime-audit")
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
         REQUIRE (device != nullptr);
         REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
-        device->findParameter ("noiseLevel")->setParameter (0.2f, juce::sendNotification);
-        device->findParameter ("lfoDepth")->setParameter (0.5f, juce::sendNotification);
-        device->findParameter ("release")->setParameter (400.0f, juce::sendNotification);
+        phazite::setDeviceValue (*device->findParameter ("noiseLevel"), 0.2f);
+        phazite::setDeviceValue (*device->findParameter ("lfoDepth"), 0.5f);
+        phazite::setDeviceValue (*device->findParameter ("release"), 400.0f);
 
         // More notes than voices, so some are stolen.
         auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Notes");
@@ -835,8 +832,8 @@ TEST_SUITE ("realtime-audit")
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
         REQUIRE (device != nullptr);
         REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
-        device->findParameter ("unisonVoices")->setParameter (6.0f, juce::sendNotification); // seven
-        device->findParameter ("unisonDetune")->setParameter (40.0f, juce::sendNotification);
+        phazite::setDeviceValue (*device->findParameter ("unisonVoices"), 6.0f); // seven
+        phazite::setDeviceValue (*device->findParameter ("unisonDetune"), 40.0f);
 
         // Chords a sixteenth long, one after another, so that the busiest blocks (one chord's ends with the next's starts)
         // come from the first beat, within the warm-up: Tracktion's MIDI arrays grow on the busiest block (finding 4).
@@ -865,8 +862,7 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
         phazite::setFactoryWavetable (*plugin, 1, phazite::devices::findFactoryWavetable ("Vowels"));
 
-        const auto set = [device] (const char* id, float value)
-        { device->findParameter (id)->setParameter (value, juce::sendNotification); };
+        const auto set = [device] (const char* id, float value) { phazite::setDeviceValue (*device->findParameter (id), value); };
         set ("unisonVoices", 7.0f); // eight
         set ("unisonPosition", 0.5f);
         set ("osc1Warp", (float) WavetableSynth::Warp::sync);
@@ -1130,7 +1126,7 @@ TEST_SUITE ("realtime-audit")
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
         REQUIRE (device != nullptr);
         REQUIRE (phazite::addReturnWithEffect (track, plugin) != nullptr);
-        device->findParameter ("decay")->setParameter (8.0f, juce::sendNotification);
+        phazite::setDeviceValue (*device->findParameter ("decay"), 8.0f);
 
         const auto m = playAndMeasure (*edit);
         report ("Phazite's reverb on a return, with an 8-second decay", m);

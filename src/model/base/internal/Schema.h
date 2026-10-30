@@ -209,6 +209,13 @@ inline const juce::Identifier deviceType { "type" };
 inline constexpr const char* deviceIsPlugin = "plugin";
 inline const juce::Identifier deviceOff { "off" };
 
+// Children of one of Phazite's own devices' DEVICE (T1, step 5b): VALUES, its parameters' values as they were set by hand
+// (not as automation or a modulator moves them), each a property named by the parameter's ID in the device's description,
+// none for one that was never set (at its default); and SOUNDS, the files and tables it plays, as properties named as on
+// its PLUGIN (getPadSound(), getOscillatorWavetable(), getOscillatorWavetableFile()).
+inline const juce::Identifier VALUES { "VALUES" };
+inline const juce::Identifier SOUNDS { "SOUNDS" };
+
 // Child of TRACK and of MASTER, among its devices: a container of effects (model/mixer/internal/Containers.h), with its ID
 // and deviceOff, as a device has them. What it holds is still Tracktion's while step 5 lasts.
 inline const juce::Identifier CONTAINER { "CONTAINER" };

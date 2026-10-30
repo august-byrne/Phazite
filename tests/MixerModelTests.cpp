@@ -4,6 +4,8 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/EngineSetup.h"
@@ -255,6 +257,51 @@ TEST_CASE ("A channel's devices are the song's, in order and on or off, which Tr
     CHECK (played() == "Delay, Synth, EQ (off), Compressor");
     phazite::mirror::reconcileDevices (edit);
     CHECK (played() == "Synth, EQ (off), Compressor");
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileDevices (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+}
+
+TEST_CASE ("The values set by hand of Phazite's own devices are the song's, and the mirror makes such a device from the song")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto& context = song.context;
+    auto& edit = *song.edit;
+    const auto a = idOf (*song.a);
+    phazite::chooseInstrument (context, a, song.find ("phaziteSynth"));
+    const auto synth = phazite::getInstrument (context, a)->id;
+    auto cutoff = phazite::getParameter (context, { synth, "cutoff" });
+    REQUIRE (cutoff.exists());
+
+    // A value set by hand goes into the song, and Tracktion's parameter plays it; an undo takes both back.
+    const auto values = [&edit, synth] { return phazite::findDeviceState (edit, synth).getChildWithName (schema::VALUES); };
+    const auto played = [&edit, synth] { return phazite::findParameter (edit, { synth, "cutoff" })->getCurrentValue(); };
+    const auto before = played();
+    cutoff.setValue (2000.0f);
+    CHECK ((float) values()[juce::Identifier ("cutoff")] == doctest::Approx (2000.0f));
+    CHECK (played() == doctest::Approx (2000.0f));
+    phazite::undo (edit);
+    CHECK_FALSE (values().hasProperty ("cutoff"));
+    CHECK (played() == doctest::Approx (before));
+    phazite::redo (edit);
+    CHECK (played() == doctest::Approx (2000.0f));
+
+    // One way: a value set on Tracktion's side alone is none of the song's, and the mirror puts the song's back.
+    phazite::findParameter (edit, { synth, "cutoff" })->setParameter (500.0f, juce::sendNotification);
+    phazite::mirror::reconcileDevices (edit);
+    CHECK (played() == doctest::Approx (2000.0f));
+
+    // A device of Phazite's own that Tracktion lost is made again from the song: in its place, with its ID and its values.
+    phazite::addEffect (context, a, song.find ("phaziteEq"));
+    phazite::getDevices (*song.a).getFirst()->deleteFromParent();
+    CHECK (phazite::getDevices (*song.a).size() == 1);
+    phazite::mirror::reconcileDevices (edit);
+    const auto devices = phazite::getDevices (*song.a);
+    REQUIRE (devices.size() == 2);
+    CHECK (phazite::getDeviceID (*devices.getFirst()) == synth);
+    CHECK (played() == doctest::Approx (2000.0f));
 
     edit.getUndoManager().clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);

@@ -119,8 +119,8 @@ TEST_CASE ("Every device's editor rests while nothing it shows moves, and shows 
             REQUIRE (shown != info->parameters.end());
             const auto parameter = plugin->getAutomatableParameterByID (juce::String (shown->id.data(), shown->id.size()));
             REQUIRE (parameter != nullptr);
-            parameter->setParameter (juce::approximatelyEqual (shown->defaultValue, shown->maximum) ? shown->minimum : shown->maximum,
-                                     juce::sendNotificationSync);
+            phazite::setDeviceValue (*parameter,
+                                     juce::approximatelyEqual (shown->defaultValue, shown->maximum) ? shown->minimum : shown->maximum);
             tick (1);
             CHECK_FALSE (window.takeRepaintedArea().isEmpty());
         }

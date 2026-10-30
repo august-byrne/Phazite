@@ -3,6 +3,7 @@
 #include "internal/DevicePlugin.h"
 #include "internal/ParameterHandle.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 
 namespace phazite
 {
@@ -330,13 +331,13 @@ void ParameterHandle::setValue (float value)
 
     if (isInGesture())
     {
-        parameter->setParameter (value, juce::sendNotification);
+        setDeviceValue (*parameter, value);
         return;
     }
 
     storeValueWithoutUndo (*parameter);
     const UndoStep step (parameter->getEdit(), impl->undoName.isNotEmpty() ? impl->undoName : "Change " + parameter->getParameterName());
-    parameter->setParameter (value, juce::sendNotification);
+    setDeviceValue (*parameter, value);
 }
 
 void ParameterHandle::makeAndSet (float value)
@@ -361,7 +362,7 @@ void ParameterHandle::makeAndSet (float value)
     if (isInGesture())
         parameter->parameterChangeGestureBegin();
 
-    parameter->setParameter (value, juce::sendNotification);
+    setDeviceValue (*parameter, value);
 }
 
 void ParameterHandle::endGesture()

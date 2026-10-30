@@ -4,10 +4,17 @@
 // (model/arrangement/internal/Import.h), named by its path within the project's folder.
 #pragma once
 
+#include "devices/core/DeviceInfo.h"
 #include "model/base/internal/Tracktion.h"
+
+#include <vector>
 
 namespace phazite
 {
+// What of one of Phazite's own devices' states names a sound file or a table, besides its parameters: a drum sampler's
+// pads', a wavetable synth's oscillators' (Schema.h). None for other devices.
+std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo&);
+
 // The path a device keeps for a file: within the project's folder, written the same on every system, or the file's full
 // path for one outside it (or while the project has no file). And the file a kept path names, or none.
 juce::String getProjectPath (const te::Edit&, const juce::File&);

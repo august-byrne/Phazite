@@ -583,7 +583,7 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     for (int i = 0; i < changes; ++i)
     {
         phazite::test::dispatchPendingMessages();
-        cutoff->setParameter (1000.0f + 100.0f * (float) i, juce::sendNotification);
+        phazite::setDeviceValue (*cutoff, 1000.0f + 100.0f * (float) i);
         total += millisecondsOf ([] { phazite::test::dispatchPendingMessages(); });
     }
 
