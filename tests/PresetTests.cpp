@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Presets (src/model/presets/PresetModel.h; roadmap step 2.4): what a device's, a container's and a track's preset hold
-// and leave out, reading what a file holds, and putting presets into another project with new IDs as one undo step. Its
-// "done when": a container saved as a preset loads into another project with its macros working. And a plug-in's preset
-// loaded into the same plug-in, as a plug-in window's Load Preset does (step 2.12).
+// and leave out, in Phazite's own names with nothing of Tracktion's (roadmap A5, 2026-10-30), reading what a file holds,
+// and putting presets into another project as one undo step. Its "done when": a container saved as a preset loads into
+// another project with its macros working. And a device's preset loaded into a device of its kind, as a plug-in window's
+// Load Preset does (step 2.12) and a device's Presets menu does.
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
@@ -28,6 +30,7 @@ using phazite::DeviceID;
 using phazite::ModulatorType;
 using phazite::ParameterRef;
 using phazite::TrackID;
+namespace keys = phazite::schema::preset;
 
 TrackID idOf (const te::Track& track)
 {
@@ -85,16 +88,6 @@ std::vector<juce::String> namesOf (const std::vector<phazite::DeviceSlot>& slots
     return names;
 }
 
-// Every element of a type in a state, at any depth.
-int count (const juce::ValueTree& state, const juce::Identifier& type)
-{
-    auto found = state.hasType (type) ? 1 : 0;
-
-    for (const auto& child : state)
-        found += count (child, type);
-
-    return found;
-}
 } // namespace
 
 TEST_CASE ("A container saved as a preset loads into another project with its macros working")
@@ -181,19 +174,26 @@ TEST_CASE ("A device's preset holds its settings and mix, not its automation, ou
     phazite::setDeviceOn (context, compressor, false);
 
     const auto preset = phazite::makeDevicePreset (*te::findPluginForID (song.edit(), phazite::toTracktion (compressor)));
-    CHECK (preset.hasType (phazite::schema::PHAZITEPRESET));
-    CHECK (preset[phazite::schema::presetKind].toString() == juce::String ("device"));
-    CHECK (preset[phazite::schema::presetDevice].toString() == juce::String ("Compressor"));
-    CHECK_FALSE (preset.hasProperty (phazite::schema::presetInstrument));
+    CHECK (preset[keys::kind].toString() == juce::String ("device"));
 
-    const auto saved = preset.getChildWithName (te::IDs::PLUGIN);
-    REQUIRE (saved.isValid());
-    CHECK ((float) saved["threshold"] == doctest::Approx (-24.0f));
-    CHECK ((float) saved["mix"] == doctest::Approx (0.5f));
-    CHECK (count (saved, te::IDs::AUTOMATIONCURVE) == 0);
-    CHECK (saved.getChildWithName (te::IDs::MODIFIERASSIGNMENTS).getNumChildren() == 0);
-    CHECK_FALSE (saved.hasProperty (te::IDs::sidechainSourceID));
-    CHECK_FALSE (saved.hasProperty (te::IDs::enabled));
+    // Phazite's own names: its type, its name, and every parameter by its ID, as set by hand.
+    const auto saved = preset[keys::device];
+    REQUIRE (saved.isObject());
+    CHECK (saved[keys::type].toString() == juce::String ("phaziteCompressor"));
+    CHECK (saved[keys::name].toString() == juce::String ("Compressor"));
+    CHECK_FALSE ((bool) saved[keys::instrument]);
+    const auto* parameters = saved[keys::parameters].getDynamicObject();
+    REQUIRE (parameters != nullptr);
+    CHECK (parameters->getProperties().size() == (int) phazite::devices::Compressor::info.parameters.size());
+    CHECK ((float) parameters->getProperty ("threshold") == doctest::Approx (-24.0f));
+    CHECK ((float) parameters->getProperty ("mix") == doctest::Approx (0.5f));
+    CHECK ((float) parameters->getProperty ("ratio") == doctest::Approx (4.0f)); // its default, written too
+
+    // Nothing that ties it to its project, and nothing of Tracktion's.
+    CHECK (saved.getDynamicObject()->getProperties().size() == 4); // type, name, instrument and parameters
+    const auto text = juce::JSON::toString (preset);
+    for (const auto* tracktionName : { "PLUGIN", "AUTOMATIONCURVE", "MODIFIERASSIGNMENTS", "sidechainSourceID", "enabled" })
+        CHECK_FALSE (text.contains (tracktionName));
 
     // Loaded below the tracks: an effect goes on the master, on.
     const auto file = temp.folder.getChildFile ("Squash" + juce::String (phazite::presetExtension));
@@ -347,7 +347,7 @@ TEST_CASE ("A drum sampler's preset brings its sounds into the project that take
 
     // The preset names the sound by its full path, the project's copy of it.
     const auto preset = phazite::readPreset (file);
-    const auto path = preset.getChildWithName (te::IDs::PLUGIN)[phazite::schema::getPadSound (0)].toString();
+    const auto path = preset[keys::device][keys::sounds][phazite::schema::getPadSound (0)].toString();
     CHECK (juce::File::isAbsolutePath (path));
     CHECK (juce::File (path).existsAsFile());
 
@@ -370,17 +370,17 @@ TEST_CASE ("What a preset file holds is read from its first element; other files
     CHECK_FALSE (phazite::isPresetFile (temp.folder.getChildFile ("A.wav")));
     CHECK_FALSE (phazite::readPresetInfo (file).has_value()); // not there
 
-    juce::ValueTree preset (phazite::schema::PHAZITEPRESET);
-    preset.setProperty (phazite::schema::presetKind, "track", nullptr);
+    const juce::var preset (new juce::DynamicObject());
+    preset.getDynamicObject()->setProperty (keys::kind, "track");
     REQUIRE (phazite::writePreset (preset, file));
     REQUIRE (phazite::readPresetInfo (file).has_value());
     CHECK (phazite::readPresetInfo (file)->kind == phazite::PresetKind::track);
 
     // One of a kind there is none of.
-    preset.setProperty (phazite::schema::presetKind, "song", nullptr);
+    preset.getDynamicObject()->setProperty (keys::kind, "song");
     REQUIRE (phazite::writePreset (preset, file));
     CHECK_FALSE (phazite::readPresetInfo (file).has_value());
-    CHECK_FALSE (phazite::readPreset (file).isValid());
+    CHECK_FALSE (phazite::readPreset (file).isObject());
 
     // A file that isn't one at all, and a preset that loads nothing.
     REQUIRE (file.replaceWithText ("not a preset"));
@@ -390,7 +390,7 @@ TEST_CASE ("What a preset file holds is read from its first element; other files
     CHECK_FALSE (phazite::loadPreset (song.context, file, song.track (0)));
 }
 
-TEST_CASE ("A plug-in's preset loads into the same plug-in, in place of its settings and mix")
+TEST_CASE ("A device's preset loads into a device of its kind, in place of its settings and mix, as one undo step")
 {
     phazite::test::TestPlugin testPlugin;
     phazite::test::TemporaryFolder temp;
@@ -431,8 +431,7 @@ TEST_CASE ("A plug-in's preset loads into the same plug-in, in place of its sett
     CHECK (phazite::getMix (*loud) == doctest::Approx (0.1f));
     CHECK_FALSE (edit.getUndoManager().canUndo());
 
-    // Not into a device of another kind, nor one of Phazite's own (whose window has no Plug-in menu), nor a container's or a
-    // track's preset: none is an undo step.
+    // Not into a device of another kind, nor a container's or a track's preset: none is an undo step.
     const auto eq = song.addEffect (song.track (0), "phaziteEq");
     const auto eqFile = temp.folder.getChildFile ("Bright" + juce::String (phazite::presetExtension));
     REQUIRE (phazite::saveDevicePreset (song.context, eq, eqFile));
@@ -447,8 +446,16 @@ TEST_CASE ("A plug-in's preset loads into the same plug-in, in place of its sett
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), trackFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), containerFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getEffects (song.context, song.track (0)).back().id, containerFile));
-    CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getContainerDevices (song.context, container)[0].id, eqFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, {}, file));
     CHECK_FALSE (edit.getUndoManager().canUndo());
     CHECK (TestPlugin::getGain (*loud) == doctest::Approx (0.9f));
+
+    // One of Phazite's own takes a preset of its type: the EQ in the container, as its Presets menu loads one.
+    const auto inside = phazite::getContainerDevices (song.context, container)[0].id;
+    phazite::getParameter (song.context, { inside, "band4Gain" }).setValue (-9.0f);
+    REQUIRE (phazite::loadPresetInto (song.context, inside, eqFile));
+    CHECK (song.find ({ inside, "band4Gain" })->getCurrentValue() == doctest::Approx (0.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Load Preset Bright"));
+    phazite::undo (edit);
+    CHECK (song.find ({ inside, "band4Gain" })->getCurrentValue() == doctest::Approx (-9.0f));
 }

@@ -58,12 +58,19 @@ public:
     // The user's folders, favorites and recent items are kept in the settings. The factory library is Phazite Sounds'
     // folder (SoundPack::getFolder()), whether it is installed yet or not; tests give none. The user's presets go in the
     // presets folder, in a folder for each device ("EQ"), containers and tracks; tests give one of their own, or none.
-    Library (EngineContext&, Settings&, juce::File factorySounds = {}, juce::File presets = {});
+    // Phazite's own presets are in the factory presets' folder, a folder for each device with one for each kind of sound
+    // in it ("Synth/Bass"), which nothing writes to.
+    Library (EngineContext&, Settings&, juce::File factorySounds = {}, juce::File presets = {}, juce::File factoryPresets = {});
     ~Library() override;
 
     // Documents/Phazite/Presets.
     static juce::File getDefaultPresetsFolder();
     juce::File getPresetsFolder() const { return presetsFolder; }
+
+    // The presets that come with Phazite, next to the app ("presets", which the build copies there from
+    // resources/presets).
+    static juce::File getDefaultFactoryPresetsFolder();
+    juce::File getFactoryPresetsFolder() const { return factoryPresetsFolder; }
 
     // Indexes the presets again, after one was saved, and tells onIndexChanged.
     void notePresetSaved() { reindex(); }
@@ -128,7 +135,7 @@ private:
 
     EngineContext& engine;
     Settings& settings;
-    const juce::File factorySounds, presetsFolder;
+    const juce::File factorySounds, presetsFolder, factoryPresetsFolder;
     juce::StringArray audioExtensions; // of the formats the engine reads, as ".wav"
     std::unique_ptr<Indexer> indexer;
     mutable juce::CriticalSection indexLock;
@@ -142,6 +149,6 @@ private:
     void handleAsyncUpdate() override;
 
     std::vector<LibraryItem> getItems (const juce::StringArray& keys) const;
-    juce::Array<juce::File> getRoots() const; // the factory library, the user's folders and presets
+    juce::Array<juce::File> getRoots() const; // the factory library, the user's folders, and the presets
 };
 } // namespace phazite

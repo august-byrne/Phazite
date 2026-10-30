@@ -20,7 +20,7 @@ using namespace strip;
 namespace
 {
     constexpr int columnWidth = 200; // the channel's name and its modulators
-    constexpr int powerWidth = 36, windowButtonWidth = 28, sidechainWidth = 104;
+    constexpr int powerWidth = 36, windowButtonWidth = 28, sidechainWidth = 104, presetsWidth = 64;
     constexpr int keyKnobColumns = 4, maxKeyKnobs = 8; // a plug-in's key knobs
     constexpr int labelHeight = 18;                    // a knob's name under it
     constexpr int addButtonWidth = 110;                // "+ Effect", "Choose instrument"
@@ -255,6 +255,21 @@ struct DevicesView::Panel : public juce::Component
             addAndMakeVisible (*sidechainButton);
         }
 
+        // Its presets, Phazite's and the user's, to load into it, and Save Preset... (a container's preset loads as a new one).
+        if (! device.isContainer)
+        {
+            presetsButton = std::make_unique<juce::TextButton> ("Presets");
+            presetsButton->setTitle ("Presets");
+            presetsButton->setTooltip ("Phazite's presets for it, by kind of sound, and yours: the one you pick takes the place of its "
+                                       "settings. And Save Preset...");
+            presetsButton->onClick = [this]
+            {
+                if (view.onShowPresets != nullptr)
+                    view.onShowPresets (shown.id, shown.name, *presetsButton);
+            };
+            addChildComponent (*presetsButton);
+        }
+
         if (device.opensWindow)
         {
             windowButton = std::make_unique<IconButton> ("Open its window", Icon::detach);
@@ -366,7 +381,8 @@ struct DevicesView::Panel : public juce::Component
         }
 
         // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
-        for (auto* control : std::initializer_list<juce::Component*> { &power, &bodyView, windowButton.get(), sidechainButton.get() })
+        for (auto* control :
+             std::initializer_list<juce::Component*> { &power, &bodyView, windowButton.get(), sidechainButton.get(), presetsButton.get() })
             if (control != nullptr)
                 control->setEnabled (! device.frozen);
 
@@ -546,6 +562,9 @@ struct DevicesView::Panel : public juce::Component
         auto area = getLocalBounds();
         mixLabel.setVisible (isFoldedEffect() && ! mixKnob.isEmpty());
 
+        if (presetsButton != nullptr)
+            presetsButton->setVisible (! isFoldedEffect());
+
         // Folded, an effect's header's parts one under another, as narrow as the card: the chevron and the switch with its
         // window's button, its name on two lines, its sidechain, and its mix, named.
         if (isFoldedEffect())
@@ -598,6 +617,9 @@ struct DevicesView::Panel : public juce::Component
         if (! mixKnob.isEmpty())
             mixKnob.getFirst()->setBounds (header.removeFromRight (header.getHeight()));
 
+        if (presetsButton != nullptr)
+            presetsButton->setBounds (header.removeFromRight (presetsWidth).withTrimmedRight (Space::xs));
+
         if (sidechainButton != nullptr)
             sidechainButton->setBounds (
                 header.removeFromRight (std::min (sidechainWidth, header.getWidth() / 2)).withTrimmedRight (Space::xs));
@@ -641,6 +663,7 @@ struct DevicesView::Panel : public juce::Component
     std::unique_ptr<IconButton> foldButton;           // an effect's
     std::unique_ptr<IconButton> windowButton;         // a plug-in's, or one of Phazite's own that pops out
     std::unique_ptr<SidechainButton> sidechainButton; // a device's that has a sidechain
+    std::unique_ptr<juce::TextButton> presetsButton;  // a device's, not a container's: shown while the card is open
     std::unique_ptr<juce::Component> body;
     juce::Viewport bodyView;
 };

@@ -255,6 +255,24 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
     return dynamic_cast<te::RackInstance*> (insertOnChannel (edit, track, container, index));
 }
 
+te::Plugin::Ptr createContainer (te::Edit& edit, const te::Plugin::Array& devices, const juce::String& name)
+{
+    const auto rack = addContainerRack (edit);
+
+    if (rack == nullptr)
+        return {};
+
+    rack->rackName = name.isNotEmpty() ? name : makeContainerName (edit);
+
+    for (const auto& device : devices)
+        if (device != nullptr && ! isInstrument (*device))
+            rack->addPlugin (device, { 0.5f, 0.5f }, false);
+
+    wireContainer (*rack);
+    addContainerMacros (*rack);
+    return edit.getPluginCache().createNewPlugin (te::RackInstance::create (*rack));
+}
+
 void ungroupContainer (te::RackInstance& container)
 {
     const te::RackType::Ptr rack = container.type;

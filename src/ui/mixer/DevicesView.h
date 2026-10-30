@@ -62,6 +62,10 @@ public:
     bool isOpen (DeviceID) const;
     void setOpen (DeviceID, bool);
 
+    // A device's Presets button, in its header while its card is open (an instrument's always), was clicked: shows its
+    // presets' menu over the button (the app's browser does: Browser::showDevicePresetMenu()).
+    std::function<void (DeviceID, const juce::String& deviceName, juce::Component& target)> onShowPresets;
+
     void paint (juce::Graphics&) override;
     void resized() override;
 

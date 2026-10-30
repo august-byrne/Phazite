@@ -657,3 +657,44 @@ TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, al
     ticker->tickNow();
     CHECK (meter->getValue() == doctest::Approx (9.0f).epsilon (0.05));
 }
+
+TEST_CASE ("An open card's Presets button asks for its device's presets; a folded card has none, nor has a container")
+{
+    Screen screen;
+    auto& view = screen.view;
+    const auto effects = screen.effects (0);
+    REQUIRE (effects.size() == 3);
+
+    std::vector<std::pair<DeviceID, juce::String>> asked;
+    view.onShowPresets = [&asked] (DeviceID device, const juce::String& name, juce::Component&) { asked.emplace_back (device, name); };
+
+    // Folded, the EQ shows no Presets button; open, it does, along its header.
+    view.setOpen (effects[1], false);
+    auto* eq = view.findPanel (effects[0]);
+    REQUIRE (eq != nullptr);
+    auto* folded = phazite::test::findComponentWithTitle (*eq, "Presets");
+    CHECK ((folded == nullptr || ! folded->isShowing()));
+
+    view.setOpen (effects[0], true);
+    eq = view.findPanel (effects[0]);
+    auto* presets = phazite::test::findComponentWithTitle (*eq, "Presets");
+    REQUIRE (presets != nullptr);
+    CHECK (presets->isShowing());
+    CHECK (presets->getY() < 30);
+    phazite::test::Mouse mouse (*presets);
+    mouse.click (presets->getLocalBounds().getCentre());
+    REQUIRE (asked.size() == 1);
+    CHECK (asked[0].first == effects[0]);
+    CHECK (asked[0].second == juce::String ("EQ"));
+    phazite::test::checkChildrenApart (*eq);
+
+    // A container's presets load as new containers, from the browser: its card has no Presets button.
+    const auto container = phazite::groupIntoContainer (screen.context, { effects[1] });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr; }));
+    view.setOpen (container, true);
+    auto* containerCard = view.findPanel (container);
+    REQUIRE (containerCard != nullptr);
+
+    for (auto* child : containerCard->getChildren())
+        CHECK (child->getTitle() != juce::String ("Presets"));
+}

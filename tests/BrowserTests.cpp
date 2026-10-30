@@ -98,7 +98,7 @@ TEST_CASE ("The browser shows its places, plays a sound when clicked, and Enter 
     // Phazite's sounds are open at first.
     CHECK (screen.getRows()
            == juce::StringArray { "Favorites", "Recent", "Sounds by Type", "Phazite Sounds", "Drums", "Loops", "Instruments", "Effects",
-                                  "Presets", "Add Folder..." });
+                                  "Phazite Presets", "Presets", "Add Folder..." });
 
     // Sounds by Type lists every kick, from every library.
     phazite::test::Mouse mouse (screen.browser.getTree());
@@ -394,4 +394,56 @@ TEST_CASE ("A dragged item says what it is, and remembers being placed")
     auto* relative = new juce::DynamicObject();
     relative->setProperty ("file", "Kick.wav");
     CHECK_FALSE (phazite::ui::getDraggedFile (juce::var (relative)).has_value());
+}
+
+TEST_CASE ("A device's presets menu lists Phazite's for it by kind of sound, then the user's, and loads the one chosen")
+{
+    // Phazite's presets, in a folder of their own, and the user's: an EQ's in each, and a compressor's that doesn't belong.
+    phazite::test::TemporaryFolder temp;
+    const auto factory = temp.folder.getChildFile ("Factory"), own = temp.folder.getChildFile ("Presets");
+    const auto writePreset = [] (const juce::File& file, const juce::String& type, const juce::String& name, float lowShelf)
+    {
+        const auto text = "{ \"kind\": \"device\", \"device\": { \"type\": \"" + type + "\", \"name\": \"" + name
+                          + "\", \"instrument\": false, \"parameters\": { \"band2Gain\": " + juce::String (lowShelf) + " } } }";
+        REQUIRE (file.getParentDirectory().createDirectory());
+        REQUIRE (file.replaceWithText (text));
+    };
+
+    writePreset (factory.getChildFile ("EQ/Mixing/Warm Lows.phazitepreset"), "phaziteEq", "EQ", 4.0f);
+    writePreset (factory.getChildFile ("EQ/Mastering/Gentle Tilt.phazitepreset"), "phaziteEq", "EQ", 1.0f);
+    writePreset (own.getChildFile ("EQ/Mine.phazitepreset"), "phaziteEq", "EQ", -2.0f);
+    writePreset (own.getChildFile ("EQ/Squash.phazitepreset"), "phaziteCompressor", "Compressor", 0.0f);
+
+    phazite::Settings settings;
+    phazite::Library library { phazite::test::getEngineContext(), settings, {}, own, factory };
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 10000));
+
+    juce::File loaded;
+    const auto menu = phazite::ui::makeDevicePresetMenu (library, "EQ", "EQ", [&loaded] (const juce::File& file) { loaded = file; });
+
+    // Phazite's kinds of sound first, each a submenu; then the user's own, the compressor's left out.
+    juce::StringArray top, mixing;
+    juce::PopupMenu::Item* warm = nullptr;
+
+    for (juce::PopupMenu::MenuItemIterator item (menu); item.next();)
+    {
+        top.add (item.getItem().isSectionHeader ? "[" + item.getItem().text + "]" : item.getItem().text);
+
+        if (item.getItem().text == "Mixing" && item.getItem().subMenu != nullptr)
+            for (juce::PopupMenu::MenuItemIterator inside (*item.getItem().subMenu); inside.next();)
+            {
+                mixing.add (inside.getItem().text);
+                warm = &inside.getItem();
+            }
+    }
+
+    CHECK (top == juce::StringArray { "Mastering", "Mixing", "[Your Presets]", "Mine" });
+    CHECK (mixing == juce::StringArray { "Warm Lows" });
+    REQUIRE (warm != nullptr);
+    REQUIRE (warm->action != nullptr);
+    warm->action();
+    CHECK (loaded == factory.getChildFile ("EQ/Mixing/Warm Lows.phazitepreset"));
+
+    // None for a device without presets.
+    CHECK (phazite::ui::makeDevicePresetMenu (library, "Reverb", "Reverb", [] (const juce::File&) {}).getNumItems() == 0);
 }

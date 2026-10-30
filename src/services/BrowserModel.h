@@ -27,7 +27,8 @@ struct BrowserPlace
         effects,
         folder, // one of the user's
         addFolder,
-        presets // the user's presets, listed after the effects
+        presets,       // the user's presets, listed after the effects and Phazite's presets
+        factoryPresets // the presets that come with Phazite
     };
 
     Kind kind = Kind::favorites;

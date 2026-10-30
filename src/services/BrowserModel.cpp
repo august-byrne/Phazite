@@ -32,6 +32,9 @@ juce::String BrowserPlace::getTooltip() const
             return "Instruments turn a track's notes into sound";
         case Kind::effects:
             return "Effects change the sound of a track";
+        case Kind::factoryPresets:
+            return "Phazite's presets for its instruments and effects, by device and by kind of sound: drag one onto a track, "
+                   "or pick one from a device's Presets menu";
         case Kind::presets:
             return "Your presets: devices', containers' and tracks' settings, saved to use again, in " + folder.getFullPathName();
         case Kind::folder:
@@ -64,6 +67,7 @@ std::vector<BrowserPlace> BrowserModel::getPlaces() const
                                        { Kind::sounds, "Phazite Sounds", library.getFactorySounds() },
                                        { Kind::instruments, "Instruments", {} },
                                        { Kind::effects, "Effects", {} },
+                                       { Kind::factoryPresets, "Phazite Presets", library.getFactoryPresetsFolder() },
                                        { Kind::presets, "Presets", library.getPresetsFolder() } };
 
     for (const auto& folder : library.getUserFolders())
@@ -120,6 +124,12 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place) const
             contents.items =
                 library.listDevices (place.kind == Kind::instruments ? LibraryItem::Kind::instrument : LibraryItem::Kind::effect);
             hint = "Your plug-ins show here once Options > Scan for Plug-ins has found them";
+            break;
+        case Kind::factoryPresets:
+            if (place.folder.isDirectory())
+                contents.items = library.listFolder (place.folder);
+
+            hint = "None here";
             break;
         case Kind::presets:
             if (place.folder.isDirectory())

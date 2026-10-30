@@ -293,21 +293,55 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
 inline const juce::Identifier phaziteParameterIDs { "phaziteParameterIDs" };
 
 //==============================================================================
-// Presets (model/presets/PresetModel.h): files of their own (".phazitepreset"), outside any project, that hold a device,
-// a container or a track as a project holds them (Tracktion's elements with Phazite's names above).
+// Presets (model/presets/PresetModel.h): files of their own (".phazitepreset"), outside any project, in JSON, in Phazite's
+// own names: devices by the type and parameter IDs of their descriptions (src/devices/), plug-ins by who they are and the
+// settings they give themselves, and containers, modulators and macros as Phazite names them. The model makes Tracktion's
+// objects from them as a preset loads (roadmap A5, 2026-10-30); nothing of Tracktion's is in them. No format version
+// (section 18 of docs/design.md: none while Phazite is pre-alpha).
+//
+//   { "kind": "device", "device": DEVICE }            an instrument or an effect
+//   { "kind": "container", "container": CONTAINER }   a container of effects
+//   { "kind": "track", "track": TRACK }               a track's devices, modulators and mix
+//
+//   DEVICE, one of Phazite's own: { "type": its type ID, "name", "instrument": true or false,
+//       "parameters": { parameter ID: value, ... }, every one of them, its mix too,
+//       "sounds": { what names a file or a table (getPadSound(), getOscillatorWavetable(), getOscillatorWavetableFile()):
+//                   a file's full path, or a factory table's name } }
+//     or a plug-in: { "plugin": { "format", "name", "manufacturer", "identifier", "uid" }, "name", "instrument",
+//       "state": its own settings, in base 64, "program": its program, "mix": 0 to 1 }
+//   CONTAINER: { "name", "mix": 0 to 1, "devices": [ DEVICE, ... ], "macros": [ MACRO, ... ] }
+//   MACRO: { "name", "value": 0 to 1, "modulates": [ TARGET, ... ] }
+//   TRACK: { "name", "colour": its ARGB in hex, "volume": in decibels, "pan": -1 to 1, "drumMode", "drumOrder",
+//            "drumHidden" (its drum rows' view state, as the project keeps them), "instrument": DEVICE,
+//            "effects": [ DEVICE or { "container": CONTAINER }, ... ], "modulators": [ MODULATOR, ... ],
+//            "macros": [ MACRO, ... ] }
+//   MODULATOR: { "type": one of modulatorTypeNames, "parameters": { parameter ID: value, ... },
+//                "steps": [ value, ... ] (a step sequencer's), "modulates": [ TARGET, ... ] }
+//   TARGET: what a modulator or a macro modulates, by an amount from -1 to 1: { "parameter": ID, "amount", and where:
+//           a container's macro's, "device": its index among the container's devices; a track's, "instrument": true,
+//           or "effect": its index among the track's effects (with "inside": its index in that container, for a device
+//           in one), or "mixer": true with "parameter" "volume" or "pan" }
+namespace preset
+{
+    inline const juce::Identifier kind { "kind" }, device { "device" }, container { "container" }, track { "track" };
+    inline const juce::Identifier type { "type" }, name { "name" }, instrument { "instrument" }, parameters { "parameters" },
+        sounds { "sounds" };
+    inline const juce::Identifier plugin { "plugin" }, format { "format" }, manufacturer { "manufacturer" }, identifier { "identifier" },
+        uid { "uid" }, state { "state" }, program { "program" }, mix { "mix" };
+    inline const juce::Identifier devices { "devices" }, macros { "macros" }, value { "value" }, modulates { "modulates" };
+    inline const juce::Identifier parameter { "parameter" }, amount { "amount" }, effect { "effect" }, inside { "inside" },
+        mixer { "mixer" };
+    inline const juce::Identifier colour { "colour" }, volume { "volume" }, pan { "pan" }, drumMode { "drumMode" },
+        drumOrder { "drumOrder" }, drumHidden { "drumHidden" }, effects { "effects" }, modulators { "modulators" }, steps { "steps" };
 
-// The element at a preset file's root. Its children: a device preset's PLUGIN; a container preset's PLUGIN (a rack) and
-// the RACK it plays; a track preset's TRACK, with the RACKs its containers play.
-inline const juce::Identifier PHAZITEPRESET { "PHAZITEPRESET" };
+    // What "kind" says.
+    inline constexpr const char* deviceKind = "device";
+    inline constexpr const char* containerKind = "container";
+    inline constexpr const char* trackKind = "track";
 
-// On PHAZITEPRESET: "device", "container" or "track".
-inline const juce::Identifier presetKind { "kind" };
-
-// On PHAZITEPRESET: a device preset's device as the browser names it ("EQ", or a plug-in's name).
-inline const juce::Identifier presetDevice { "device" };
-
-// On PHAZITEPRESET. bool, default false: a device preset's device is an instrument.
-inline const juce::Identifier presetInstrument { "instrument" };
+    // What a modulator's "type" says, in ModulatorType's order (model/modulation/ModulationValues.h), macros left out.
+    inline constexpr const char* modulatorTypeNames[] = { "lfo", "envelopeFollower", "steps", "random", "breakpoints", "noteFollower" };
+} // namespace preset
 } // namespace phazite::schema
 
 namespace phazite

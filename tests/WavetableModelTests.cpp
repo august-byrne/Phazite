@@ -5,6 +5,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "devices/wavetable/FactoryWavetables.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/WavetablePlugin.h"
@@ -12,6 +13,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/presets/PresetModel.h"
+#include "model/presets/internal/Presets.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -237,10 +239,12 @@ TEST_CASE ("A preset of the wavetable synth brings its sound file into the proje
         REQUIRE (phazite::saveDevicePreset (first.context, phazite::getDeviceID (*first.synth), presetFile));
     }
 
-    // The preset holds the file by its full path, to copy in.
-    const auto preset = juce::parseXML (presetFile);
-    REQUIRE (preset != nullptr);
-    CHECK (juce::File::isAbsolutePath (preset->getChildByName ("PLUGIN")->getStringAttribute ("osc1WavetableFile")));
+    // The preset holds the file by its full path, to copy in, and the factory table by its name.
+    const auto preset = phazite::readPreset (presetFile);
+    REQUIRE (preset.isObject());
+    const auto sounds = preset[phazite::schema::preset::device][phazite::schema::preset::sounds];
+    CHECK (juce::File::isAbsolutePath (sounds["osc1WavetableFile"].toString()));
+    CHECK (sounds["osc2Wavetable"].toString() == juce::String ("Comb"));
 
     Song second (temp.folder, "Second");
     const auto track = phazite::getTrackID (*te::getAudioTracks (second.edit())[0]);

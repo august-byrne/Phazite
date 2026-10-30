@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Presets (docs/design.md, section 9; roadmap step 2.4), by IDs and plain values: a device's settings, a container's
 // devices and macros, or a track's devices, modulators and mix, in a file of their own (".phazitepreset") that any
-// project can take in. Each function takes the open project's context, and gives nothing, or does nothing, for an ID of
-// something that is gone. The Tracktion side is internal/Presets.h.
+// project can take in, written in Phazite's own names (Schema.h: schema::preset), nothing of Tracktion's (roadmap A5,
+// 2026-10-30). Phazite's own presets, which come with it, are such files too. Each function takes the open project's
+// context, and gives nothing, or does nothing, for an ID of something that is gone. The Tracktion side is
+// internal/Presets.h.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -42,8 +44,9 @@ juce::String getPresetFolderName (const ProjectContext&, DeviceID);
 inline constexpr const char* trackPresetsFolder = "Tracks";
 
 // Writes a preset of a device (a container is one) or of a track into a file, replacing what it held, and returns
-// whether it did. A device's holds its settings and its mix: not its automation, what modulates it from outside, its
-// sidechain's source or whether it is on. A container's holds its devices and its macros with what they modulate in it.
+// whether it did. A device's holds its settings and its mix (every parameter of one of Phazite's own, by its ID; a plug-in's
+// own settings): not its automation, what modulates it from outside, its sidechain's source or whether it is on. A
+// container's holds its devices and its macros with what they modulate in it.
 // A track's holds its name, color, volume and pan, its devices and containers, and its modulators and macros with what
 // they modulate on it: not its clips, automation, sends or what goes into it. The sound files a device plays (a drum
 // sampler's pads', a wavetable synth's tables) go by their paths, for another project to copy in.
@@ -57,9 +60,9 @@ bool saveTrackPreset (const ProjectContext&, TrackID, const juce::File&);
 // the end. Returns whether anything went in.
 bool loadPreset (ProjectContext&, const juce::File&, TrackID);
 
-// Puts a device preset's settings and mix into a plug-in (a device with a window of its own: MixerModel.h's
-// DeviceSlot::opensWindow) of the preset's kind, the same plug-in, in place of its own, as one undo step named after the
-// preset ("Load Preset Warm Pad"): a plug-in window's Load Preset (step 2.12). Returns whether it did: not for a preset of
-// another device, nor of a container or a track.
+// Puts a device preset's settings and mix into a device of the preset's kind, in place of its own, as one undo step named
+// after the preset ("Load Preset Warm Pad"): one of Phazite's own of the same type (its parameters, and its sounds,
+// copied into the project), or the same plug-in. A plug-in window's Load Preset (step 2.12) and a device's Presets menu
+// in the Devices view. Returns whether it did: not for a preset of another device, nor of a container or a track.
 bool loadPresetInto (ProjectContext&, DeviceID, const juce::File&);
 } // namespace phazite

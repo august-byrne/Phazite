@@ -43,6 +43,11 @@ te::Track* getTrackOfContainerDevice (const te::Plugin&);
 bool canGroupIntoContainer (const juce::Array<te::Plugin*>&);
 te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>&);
 
+// A new container of devices made for it, as a preset's are (model/presets/internal/Presets.h), on no channel yet: its rack
+// type with the devices in their order (not an instrument), wired, and its eight macros; named, or with a new container's
+// name. Put it on a channel as any device (Mixer.h: placeDevice(), insertDevice()). Joins the caller's step.
+te::Plugin::Ptr createContainer (te::Edit&, const te::Plugin::Array& devices, const juce::String& name);
+
 // Puts a container's devices back on its channel in its place, in their order, and removes the container with its
 // macros and what they modulated. Joins the caller's step.
 void ungroupContainer (te::RackInstance&);

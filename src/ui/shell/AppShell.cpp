@@ -124,6 +124,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     // Enter or a double-click in the browser, and the plug-in picker.
     browser.onPlace = [this] (const LibraryItem& item) { return placeItem (item); };
     browser.onShowSoundPack = [this] { commands.invoke ("help.phaziteSounds"); };
+    devices.onShowPresets = [this] (DeviceID device, const juce::String& name, juce::Component& target)
+    { browser.showDevicePresetMenu (device, name, target); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &titleBar, &topBar, &browser, &browserDivider, &centre, &inspectorDivider,
                                                              &inspector, &statusBar, &browserButtons, &inspectorButtons })

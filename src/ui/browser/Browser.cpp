@@ -308,6 +308,7 @@ struct Browser::PlaceNode : public Node
             case BrowserPlace::Kind::types:
             case BrowserPlace::Kind::sounds:
             case BrowserPlace::Kind::folder:
+            case BrowserPlace::Kind::factoryPresets:
             case BrowserPlace::Kind::presets: // a folder of the user's presets
                 break;
         }
@@ -849,6 +850,80 @@ void Browser::choosePresetFile (const juce::String& folder, const juce::String& 
                               if (safeThis != nullptr && onChosen (file))
                                   safeThis->presetSaved (file);
                           });
+}
+
+void Browser::showDevicePresetMenu (DeviceID device, const juce::String& name, juce::Component& target)
+{
+    const auto folder = getPresetFolderName (projectContext, device);
+
+    if (folder.isEmpty())
+        return;
+
+    auto& context = const_cast<ProjectContext&> (projectContext); // loading into the device changes the open project
+    const juce::Component::SafePointer<Browser> safeThis (this);
+    auto menu = makeDevicePresetMenu (library, folder, name,
+                                      [&context, device] (const juce::File& file) { loadPresetInto (context, device, file); });
+
+    if (menu.getNumItems() == 0)
+        menu.addItem ("No presets for " + name + " yet", false, false, nullptr);
+
+    menu.addSeparator();
+    menu.addItem ("Save Preset...",
+                  [safeThis, device, folder, name]
+                  {
+                      if (safeThis != nullptr)
+                          safeThis->choosePresetFile (
+                              folder, name, [safeThis, device] (const juce::File& file)
+                              { return safeThis != nullptr && saveDevicePreset (safeThis->projectContext, device, file); });
+                  });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+}
+
+namespace
+{
+    // The presets for a device in a folder and the folders in it, each a submenu.
+    juce::PopupMenu makePresetFolderMenu (const Library& library, const juce::File& folder, const juce::String& deviceName,
+                                          const std::function<void (const juce::File&)>& load)
+    {
+        juce::PopupMenu menu;
+
+        for (const auto& item : library.listFolder (folder))
+        {
+            if (item.kind == LibraryItem::Kind::folder)
+            {
+                if (auto inside = makePresetFolderMenu (library, item.file, deviceName, load); inside.getNumItems() > 0)
+                    menu.addSubMenu (item.name, inside);
+            }
+            else if (item.preset.has_value() && item.preset->kind == PresetKind::device && item.preset->device == deviceName)
+            {
+                menu.addItem (item.name, [load, file = item.file] { load (file); });
+            }
+        }
+
+        return menu;
+    }
+} // namespace
+
+juce::PopupMenu makeDevicePresetMenu (const Library& library, const juce::String& folderName, const juce::String& deviceName,
+                                      std::function<void (const juce::File&)> load)
+{
+    juce::PopupMenu menu;
+    const auto factory = makePresetFolderMenu (library, library.getFactoryPresetsFolder().getChildFile (folderName), deviceName, load);
+    const auto own = makePresetFolderMenu (library, library.getPresetsFolder().getChildFile (folderName), deviceName, load);
+
+    // Phazite's by kind of sound, each a submenu, as their folders are; then the user's.
+    for (juce::PopupMenu::MenuItemIterator item (factory); item.next();)
+        menu.addItem (item.getItem());
+
+    if (own.getNumItems() > 0)
+    {
+        menu.addSectionHeader ("Your Presets");
+
+        for (juce::PopupMenu::MenuItemIterator item (own); item.next();)
+            menu.addItem (item.getItem());
+    }
+
+    return menu;
 }
 
 void askWhereToSavePreset (std::unique_ptr<juce::FileChooser>& chooser, const juce::File& folder, const juce::String& name,

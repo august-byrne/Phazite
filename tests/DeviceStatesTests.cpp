@@ -7,6 +7,7 @@
 #include "TestPlugin.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceStates.h"
 #include "model/mixer/internal/Containers.h"
@@ -186,7 +187,9 @@ TEST_CASE ("Duplicates, containers and presets take devices' states as they are,
     // A preset of the plug-in, or of its track, holds its settings as they are now; making one is no undo step.
     TestPlugin::setGain (*findPlugin(), 0.4f);
     const auto devicePreset = phazite::makeDevicePreset (*findPlugin());
-    CHECK (getStoredGain (devicePreset.getChildWithName (te::IDs::PLUGIN)) == doctest::Approx (0.4f));
+    juce::ValueTree saved (te::IDs::PLUGIN);
+    saved.setProperty (te::IDs::state, devicePreset[phazite::schema::preset::device][phazite::schema::preset::state], nullptr);
+    CHECK (getStoredGain (saved) == doctest::Approx (0.4f));
     TestPlugin::setGain (*findPlugin(), 0.3f);
     phazite::makeTrackPreset (devices.track);
     CHECK (getStoredGain (findPlugin()->state) == doctest::Approx (0.3f));

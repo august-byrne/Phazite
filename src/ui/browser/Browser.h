@@ -45,6 +45,11 @@ public:
     // track dropped here is; shows it in Presets. Returns the file, or none if nothing was saved.
     juce::File saveTrackPreset (TrackID);
 
+    // A device's presets, as its Presets button in the Devices view shows them: Phazite's for it, by kind of sound, then
+    // the user's; the one chosen loads into the device as one undo step (PresetModel.h: loadPresetInto()). And Save
+    // Preset..., in a dialog that starts in its folder of the user's presets.
+    void showDevicePresetMenu (DeviceID, const juce::String& deviceName, juce::Component& target);
+
     // A track dragged out of the playlist.
     bool isInterestedInDragSource (const SourceDetails&) override;
     void itemDragEnter (const SourceDetails&) override;
@@ -153,6 +158,12 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the sound pack's download went on
     void timerCallback() override;
 };
+
+// A menu of the presets for a device, by its folder's name among the presets (PresetModel.h: getPresetFolderName()) and
+// its name as its presets give it: Phazite's, from the factory presets' folder, by kind of sound; then the user's, from
+// theirs, with the folders in it as submenus. Choosing one calls load with its file. Empty if there are none.
+juce::PopupMenu makeDevicePresetMenu (const Library&, const juce::String& folderName, const juce::String& deviceName,
+                                      std::function<void (const juce::File&)> load);
 
 // Asks where to save a preset, in a dialog that starts in a folder of the user's presets (made if it isn't there), with
 // the name of what the preset holds. Calls save with the file chosen, with the presets' extension, unless the dialog is

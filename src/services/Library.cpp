@@ -313,11 +313,12 @@ struct Library::Indexer : public juce::Thread
 };
 
 //==============================================================================
-Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File presets)
+Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File presets, juce::File factoryPresets)
     : engine (e),
       settings (s),
       factorySounds (std::move (factory)),
       presetsFolder (std::move (presets)),
+      factoryPresetsFolder (std::move (factoryPresets)),
       audioExtensions (engine.getAudioFileExtensions()) // which the index can check on its own thread
 {
     reindex();
@@ -347,6 +348,11 @@ bool Library::isPreset (const juce::File& file)
 juce::File Library::getDefaultPresetsFolder()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (appName).getChildFile ("Presets");
+}
+
+juce::File Library::getDefaultFactoryPresetsFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("presets");
 }
 
 juce::Array<juce::File> Library::getUserFolders() const
@@ -393,6 +399,9 @@ juce::Array<juce::File> Library::getRoots() const
 
     if (presetsFolder.isDirectory())
         roots.add (presetsFolder);
+
+    if (factoryPresetsFolder.isDirectory())
+        roots.add (factoryPresetsFolder);
 
     return roots;
 }
