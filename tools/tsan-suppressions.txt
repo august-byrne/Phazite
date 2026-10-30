@@ -25,3 +25,8 @@ race:tracktion::engine::TransportControl::getPosition
 # writing to the job: JUCE clears the job's running flag before its other fields. Both sides are Tracktion's and JUCE's
 # code, and this function only deletes finished jobs.
 race:tracktion::engine::RenderManager::handleAsyncUpdate
+
+# Finding 25: building a playback graph on the message thread writes each modulator's sample rate
+# (Modifier::baseClassInitialise), which the audio thread reads unsynchronised for the graph still playing, in the LFO's
+# timer (LFOModifier::LFOModifierTimer::updateStreamTime). Phazite's code doesn't call this function.
+race:tracktion::engine::Modifier::getSampleRate

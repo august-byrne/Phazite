@@ -189,9 +189,14 @@ Steady playback is clean everywhere. Every scenario allocates something in its f
 - **Why it is harmless to Phazite:** the app plays through the computer's own devices; only the tests use the hosted one.
 - **Action:** not suppressed. A suppression would have to name the reader, `HostedAudioDeviceType::processBlock`, which is on every stack of the tests' audio thread, so it would hide every race there. Instead the tests never open the device again while a thread plays through it (`tests/RealTimePlayback.h`): the device opens both its inputs, and arming a track opens it again only when an input that the track needs is closed. `AudioRecorder::update()` had also opened it again to name inputs that were open already, which the app never needs, as it opens no input by itself. The hosted device reports every input open whatever is asked of it, so opening and closing the inputs that armed tracks need is checked by hand, with an audio interface. Report upstream.
 
+**25. A modulator's sample rate written while the graph plays** (measured by ThreadSanitizer in CI, 2026-10-29).
+- **What:** building a playback graph on the message thread initialises each modulator's node, which writes the modulator's sample rate, a plain `double` (`Modifier::baseClassInitialise`), while the audio thread reads it for the graph still playing, in the LFO's timer (`LFOModifier::LFOModifierTimer::updateStreamTime`, through `Modifier::getSampleRate()`), without synchronisation. It showed in one of four `linux-tsan` runs of the same code.
+- **Why it is harmless:** the value written is the device's rate, which hasn't changed (a new rate restarts the device first), and an aligned 8-byte value, which x86-64 and ARM64 read and write whole.
+- **Action:** `tools/tsan-suppressions.txt` suppresses races in `Modifier::getSampleRate()`, which Phazite's own code doesn't call. Report upstream.
+
 ## Reporting upstream
 
-Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19, 20, 21, 23 and 24. Posting is the owner's call.
+Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19, 20, 21, 23, 24 and 25. Posting is the owner's call.
 
 ## Next
 
