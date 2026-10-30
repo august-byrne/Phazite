@@ -21,7 +21,7 @@
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
   </MASTERVOLUME>
-  <PHAZITE>
+  <PHAZITE loop="1">
     <MASTER/>
     <TEMPOMAP>
       <TEMPO beat="0"
@@ -1105,7 +1105,6 @@
   <TRANSPORT loopPoint1="0"
              loopPoint2="8"
              looping="1"
-             position="0"
-             start="0"/>
+             position="0"/>
   <VIDEO/>
 </EDIT>

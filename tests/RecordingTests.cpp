@@ -101,7 +101,6 @@ TEST_CASE ("What is played while recording becomes a clip on live MIDI's track, 
     auto edit = phazite::createSongEdit (engine); // 120 BPM: a beat is half a second
     auto* track = te::getAudioTracks (*edit)[0];
     addInstrument (*track);
-    edit->getTransport().looping = false;
     phazite::setCountInOn (*edit, false);
 
     const RealTimePlayback playback (engine);
@@ -338,7 +337,6 @@ TEST_CASE ("Capture while the song plays keeps the notes where they were played"
     auto edit = phazite::createSongEdit (engine); // 120 BPM: a beat is half a second
     auto* track = te::getAudioTracks (*edit)[0];
     addInstrument (*track);
-    edit->getTransport().looping = false;
 
     const RealTimePlayback playback (engine);
     phazite::routeLiveMidiInput (*edit);

@@ -263,7 +263,6 @@ Measurement recordAndMeasure (te::Edit& edit)
     }
 
     phazite::setCountInOn (edit, false);
-    edit.getTransport().looping = false;
     phazite::routeLiveMidiInput (edit);
     phazite::test::dispatchMessagesUntil ([] { return false; }, 200); // Tracktion rebuilds its graph with the input armed
 
@@ -377,7 +376,6 @@ Measurement recordAudioAndMeasure (te::Edit& edit, te::AudioTrack& track)
     deviceManager.dispatchPendingUpdates();
 
     phazite::setCountInOn (edit, false);
-    edit.getTransport().looping = false;
     phazite::AudioRecorder recorder (edit);
     recorder.setArmed (track, true);
     phazite::test::dispatchMessagesUntil ([] { return false; }, 300); // Tracktion makes its inputs as the track needs them

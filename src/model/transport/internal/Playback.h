@@ -2,7 +2,9 @@
 // Where playback loops (docs/design.md, section 6). As in FL Studio's song mode, the loop is the whole song
 // unless something else is looped on purpose: from the song's start to the end of the bar its last clip ends
 // in, so the loop grows as clips go later. A time range selected in the playlist, or a section, can be looped
-// instead. Tracktion keeps the loop in the transport, without undo steps.
+// instead. The song keeps the loop, in beats, and where playback starts (Schema.h: loop, playStart), without undo steps,
+// which Tracktion's transport mirrors (model/mirror/internal/Mirror.h: reconcileTransport()), so that both stay on their
+// beats as the tempo changes.
 #pragma once
 
 #include "model/arrangement/internal/Selection.h"
@@ -40,9 +42,9 @@ void loopRange (te::Edit&, te::TimeRange);
 std::optional<std::pair<double, double>> getLoopBeatRange (const te::Edit&);
 void loopBeatRange (te::Edit&, double startBeat, double endBeat);
 
-// Puts the loop around the song again if it follows the song and the song's end has moved. Not during a recording, for
-// which the song's loop is set aside (Recording.h).
-void updateSongLoop (te::Edit&);
+// What the loop goes around while it is on: the song's loop range while the loop follows the song, or else the range
+// looped on purpose, in song beats.
+BeatRange getLoopBeats (const te::Edit&);
 
 // What the loop commands do. Looping is on or off; turning it on puts the loop around the song again if it follows
 // the song. The song is looping when looping is on and the loop follows it.
@@ -59,7 +61,7 @@ void loopSections (te::Edit&, const std::vector<Section>&);
 //==============================================================================
 // Where playback starts: where the playhead was last put (a click in a ruler, Home or End), or the song's start when a
 // project opens. Stopping goes back there, as in FL Studio and Ableton Live, so that a part can be heard again and
-// again while it is tweaked; pausing leaves the playhead where it is. It is Tracktion's transport start position.
+// again while it is tweaked; pausing leaves the playhead where it is. The song keeps it in beats.
 te::TimePosition getPlayStart (const te::Edit&);
 
 // Puts the playhead somewhere, as a click in a ruler does: playback starts there from now on (and goes on from there,

@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Metronome.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 
 namespace phazite
 {
 bool isMetronomeOn (const te::Edit& edit)
 {
-    return edit.clickTrackEnabled.get();
+    return findPhaziteState (edit).getProperty (schema::metronome, false);
 }
 
 void setMetronomeOn (te::Edit& edit, bool on)
 {
-    // Tracktion writes these without an undo manager. The bars' first beats are louder, as in most DAWs.
+    // Written only while it is on, without an undo manager; Tracktion's click track follows.
     if (on)
-        edit.clickTrackEmphasiseBars = true;
+        getPhaziteState (edit).setProperty (schema::metronome, true, nullptr);
+    else if (auto state = findPhaziteState (edit); state.isValid())
+        state.removeProperty (schema::metronome, nullptr);
 
-    edit.clickTrackEnabled = on;
+    mirror::reconcileTransport (edit);
 }
 
 void toggleMetronome (te::Edit& edit)

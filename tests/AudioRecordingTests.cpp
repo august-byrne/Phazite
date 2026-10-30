@@ -38,7 +38,6 @@ struct Studio
         edit->getUndoManager().clearUndoHistory();
         phazite::setCountInOn (*edit, false);
         phazite::setMetronomeOn (*edit, true);
-        edit->getTransport().looping = false;
         track = te::getAudioTracks (*edit)[0];
         phazite::findTrackState (*track).setProperty (phazite::schema::trackInput, "1", nullptr);
         phazite::findTrackState (*track).setProperty (phazite::schema::trackMonitoring, phazite::schema::monitorNever, nullptr);

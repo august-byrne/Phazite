@@ -52,4 +52,11 @@ void reconcileCurve (te::Edit&, const ParameterRef&);
 // puts the document's back but not those, when a step changed them (a bounce mutes the track it rendered); and after a
 // write mode changed. Begins no undo step, so the redo history stays.
 void reconcileTrackSwitches (te::Edit&);
+
+// The transport's state that the song keeps (model/transport/internal/Playback.h, Metronome.h), which Tracktion keeps
+// outside its undo history: its transport loops, around the song or the range looped, starts playback where the song
+// says, each in seconds from its beats as the tempo map has them now, and its click track clicks. After each change to
+// them, to the tempo map, to the song's end, and after an undo or a redo, which can change the tempo map; begins no undo
+// step. Not while Tracktion records, which loops as the take needs (model/transport/internal/Recording.h).
+void reconcileTransport (te::Edit&);
 } // namespace phazite::mirror

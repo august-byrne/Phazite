@@ -62,7 +62,8 @@ namespace
         JUCE_DECLARE_NON_COPYABLE (StoredValueChanges)
     };
 
-    // Tracktion's switches that its undo history leaves out follow the song's too (docs/tracktion-migration.md, T1).
+    // What Tracktion keeps outside its undo history follows the song's too: its tracks' switches, and its transport, whose
+    // seconds an undone tempo change moves (docs/tracktion-migration.md, T1).
     template <typename UndoOrRedo>
     void undoOrRedo (te::Edit& edit, UndoOrRedo&& undoOrRedoIt)
     {
@@ -70,6 +71,7 @@ namespace
         undoOrRedoIt();
         changes.play (edit);
         mirror::reconcileTrackSwitches (edit);
+        mirror::reconcileTransport (edit);
 
         // A parameter plays a value by writing it into its device's state through the undo manager, which records it when
         // the undo took the stored one away (a knob turned for the first time goes back to its default). Taken back at

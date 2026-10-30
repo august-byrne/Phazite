@@ -11,10 +11,14 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/StarterProject.h"
+#include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -190,6 +194,54 @@ TEST_CASE ("A ruler reads and sets the loop in beats")
 
     phazite::toggleLoop (*song.edit);
     CHECK_FALSE (phazite::getLoopBeatRange (*song.edit).has_value());
+}
+
+TEST_CASE ("The loop, where playback starts and the metronome are the song's, which Tracktion mirrors on their beats")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto& edit = *song.edit;
+    auto& transport = edit.getTransport();
+    edit.getUndoManager().clearUndoHistory();
+
+    // Beats 4 to 12 looped and playback starting at beat 6: at 120 BPM, 2 to 6 seconds and 3. None is an undo step.
+    phazite::loopBeatRange (edit, 4.0, 12.0);
+    phazite::movePlayhead (edit, seconds (3.0));
+    phazite::setMetronomeOn (edit, true);
+    const auto state = phazite::findPhaziteState (edit);
+    CHECK ((bool) state[schema::loop]);
+    CHECK ((double) state[schema::loopStart] == doctest::Approx (4.0));
+    CHECK ((double) state[schema::loopEnd] == doctest::Approx (12.0));
+    CHECK ((double) state[schema::playStart] == doctest::Approx (6.0));
+    CHECK ((bool) state[schema::metronome]);
+    CHECK (song.getLoop() == "2.000-6.000");
+    CHECK (song.isLooping());
+    CHECK (transport.startPosition.get().inSeconds() == doctest::Approx (3.0));
+    CHECK (edit.clickTrackEnabled.get());
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+
+    // They keep their beats when the tempo changes, when the change is undone, and when the time signature changes (a beat
+    // is an eighth note in 6/8: a quarter of a second at 120 BPM).
+    phazite::setTempo (edit, 60.0);
+    CHECK (song.getLoop() == "4.000-12.000");
+    CHECK (transport.startPosition.get().inSeconds() == doctest::Approx (6.0));
+    phazite::undo (edit);
+    CHECK (song.getLoop() == "2.000-6.000");
+    CHECK (transport.startPosition.get().inSeconds() == doctest::Approx (3.0));
+    phazite::setTimeSignature (edit, { 6, 8 });
+    CHECK (song.getLoop() == "1.000-3.000");
+    CHECK (phazite::getPlayStart (edit).inSeconds() == doctest::Approx (1.5));
+
+    // One way: what Tracktion's transport holds is none of the song's, and the mirror puts it back.
+    transport.setLoopRange ({ seconds (0.0), seconds (1.0) });
+    transport.looping = false;
+    edit.clickTrackEnabled = false;
+    CHECK (phazite::isLoopOn (edit));
+    CHECK (phazite::isMetronomeOn (edit));
+    phazite::mirror::reconcileTransport (edit);
+    CHECK (song.getLoop() == "1.000-3.000");
+    CHECK (song.isLooping());
+    CHECK (edit.clickTrackEnabled.get());
 }
 
 TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, sections or the song")

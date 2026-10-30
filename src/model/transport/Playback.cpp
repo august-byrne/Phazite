@@ -6,6 +6,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/mirror/internal/Mirror.h"
 
 namespace phazite
 {
@@ -18,9 +19,27 @@ namespace
             getPhaziteState (edit).setProperty (schema::loopFollowsSong, follows, nullptr);
     }
 
-    bool isNear (te::TimePosition a, te::TimePosition b)
+    // The song's switches, each written only while it is on.
+    void setSwitch (te::Edit& edit, const juce::Identifier& property, bool on)
     {
-        return std::abs ((a - b).inSeconds()) < 1.0e-6;
+        if (on)
+            getPhaziteState (edit).setProperty (property, true, nullptr);
+        else if (auto state = findPhaziteState (edit); state.isValid())
+            state.removeProperty (property, nullptr);
+    }
+
+    // Loops a range of the song on purpose.
+    void loopBeats (te::Edit& edit, BeatRange range)
+    {
+        if (range.isEmpty())
+            return;
+
+        setLoopFollowsSong (edit, false);
+        auto state = getPhaziteState (edit);
+        state.setProperty (schema::loopStart, std::max (0.0, range.getStart().inBeats()), nullptr);
+        state.setProperty (schema::loopEnd, range.getEnd().inBeats(), nullptr);
+        setSwitch (edit, schema::loop, true);
+        mirror::reconcileTransport (edit);
     }
 
     // Stops playback. A recording that stops with it is kept as one undo step, "Record" (Recording.h).
@@ -36,14 +55,10 @@ namespace
                 adoptRecordedMidi (edit); // what Tracktion recorded becomes the song's
             }
 
-            // A punched take turned the loop off (Recording.h): it is on again, around its range.
-            if (edit.recordingPunchInOut)
-            {
-                edit.recordingPunchInOut = false;
-                transport.looping = true;
-            }
-
-            updateSongLoop (edit); // which the recording set aside
+            // A punched take turned Tracktion's loop off, and a take around the song's loop ran on past its end
+            // (Recording.h): the song's loop again.
+            edit.recordingPunchInOut = false;
+            mirror::reconcileTransport (edit);
             return;
         }
 
@@ -84,64 +99,56 @@ bool doesLoopFollowSong (const te::Edit& edit)
 void loopSong (te::Edit& edit)
 {
     setLoopFollowsSong (edit, true);
-    edit.getTransport().looping = true;
-    updateSongLoop (edit);
+
+    if (auto state = findPhaziteState (edit); state.isValid())
+    {
+        state.removeProperty (schema::loopStart, nullptr);
+        state.removeProperty (schema::loopEnd, nullptr);
+    }
+
+    setSwitch (edit, schema::loop, true);
+    mirror::reconcileTransport (edit);
 }
 
 void loopRange (te::Edit& edit, te::TimeRange range)
 {
-    if (range.getLength() <= te::TimeDuration())
-        return;
+    loopBeats (edit, fromTracktion (edit.tempoSequence.toBeats (range)));
+}
 
-    setLoopFollowsSong (edit, false);
-    auto& transport = edit.getTransport();
-    transport.setLoopRange (range);
-    transport.looping = true;
+BeatRange getLoopBeats (const te::Edit& edit)
+{
+    const auto state = findPhaziteState (edit);
+
+    if (doesLoopFollowSong (edit) || ! state.hasProperty (schema::loopStart) || ! state.hasProperty (schema::loopEnd))
+        return fromTracktion (edit.tempoSequence.toBeats (getSongLoopRange (edit)));
+
+    return { BeatPosition::fromBeats (state[schema::loopStart]), BeatPosition::fromBeats (state[schema::loopEnd]) };
 }
 
 std::optional<std::pair<double, double>> getLoopBeatRange (const te::Edit& edit)
 {
-    const auto& transport = edit.getTransport();
-
-    if (! transport.looping.get())
+    if (! isLoopOn (edit))
         return {};
 
-    const auto beats = edit.tempoSequence.toBeats (transport.getLoopRange());
+    const auto beats = getLoopBeats (edit);
     return std::pair { beats.getStart().inBeats(), beats.getEnd().inBeats() };
 }
 
 void loopBeatRange (te::Edit& edit, double startBeat, double endBeat)
 {
-    if (endBeat <= startBeat)
-        return;
-
-    const auto toTime = [&edit] (double beat) { return edit.tempoSequence.toTime (te::BeatPosition::fromBeats (std::max (0.0, beat))); };
-    loopRange (edit, { toTime (startBeat), toTime (endBeat) });
-}
-
-void updateSongLoop (te::Edit& edit)
-{
-    // Not during a recording, which runs on past the song's end (Recording.h).
-    if (! doesLoopFollowSong (edit) || edit.getTransport().isRecording())
-        return;
-
-    auto& transport = edit.getTransport();
-    const auto song = getSongLoopRange (edit);
-
-    if (const auto loop = transport.getLoopRange(); ! isNear (loop.getStart(), song.getStart()) || ! isNear (loop.getEnd(), song.getEnd()))
-        transport.setLoopRange (song);
+    if (endBeat > startBeat)
+        loopBeats (edit, { BeatPosition::fromBeats (std::max (0.0, startBeat)), BeatPosition::fromBeats (endBeat) });
 }
 
 bool isLoopOn (const te::Edit& edit)
 {
-    return edit.getTransport().looping.get();
+    return findPhaziteState (edit).getProperty (schema::loop, false);
 }
 
 void toggleLoop (te::Edit& edit)
 {
-    auto& transport = edit.getTransport();
-    transport.looping = ! transport.looping.get();
-    updateSongLoop (edit);
+    setSwitch (edit, schema::loop, ! isLoopOn (edit));
+    mirror::reconcileTransport (edit);
 }
 
 bool isLoopingSong (const te::Edit& edit)
@@ -154,25 +161,31 @@ void loopSelection (te::Edit& edit, const RangeSelection& range)
     if (range.isEmpty())
         loopSong (edit);
     else
-        loopRange (edit, edit.tempoSequence.toTime (range.getRange()));
+        loopBeats (edit, fromTracktion (range.getRange()));
 }
 
 void loopSections (te::Edit& edit, const std::vector<Section>& sections)
 {
     if (! sections.empty())
-        loopRange (edit, edit.tempoSequence.toTime (toTracktion (getSectionsRange (sections))));
+        loopBeats (edit, getSectionsRange (sections));
 }
 
 te::TimePosition getPlayStart (const te::Edit& edit)
 {
-    return edit.getTransport().startPosition.get();
+    const auto beat = (double) findPhaziteState (edit).getProperty (schema::playStart, 0.0);
+    return edit.tempoSequence.toTime (toTracktion (BeatPosition::fromBeats (beat)));
 }
 
 void movePlayhead (te::Edit& edit, te::TimePosition position)
 {
-    auto& transport = edit.getTransport();
-    transport.startPosition = position;
-    transport.setPosition (position);
+    // The song's start isn't written: a project that never played from elsewhere has nothing new to save.
+    if (const auto beat = edit.tempoSequence.toBeats (position).inBeats(); beat > 0.0)
+        getPhaziteState (edit).setProperty (schema::playStart, beat, nullptr);
+    else if (auto state = findPhaziteState (edit); state.isValid())
+        state.removeProperty (schema::playStart, nullptr);
+
+    mirror::reconcileTransport (edit);
+    edit.getTransport().setPosition (position);
 }
 
 void goToStart (te::Edit& edit)
@@ -209,7 +222,7 @@ void stopAndReturn (te::Edit& edit)
 {
     stopPlaying (edit);
     auto& transport = edit.getTransport();
-    const auto start = transport.startPosition.get();
+    const auto start = getPlayStart (edit);
     const auto alreadyThere = transport.getPosition() == start;
     transport.setPosition (start);
 
@@ -249,7 +262,7 @@ SongFollower::~SongFollower()
 void SongFollower::handleAsyncUpdate()
 {
     songEnd = getSongLoopRange (edit).getEnd();
-    updateSongLoop (edit);
+    mirror::reconcileTransport (edit); // the song's loop around it
 }
 
 void SongFollower::timerCallback()
@@ -262,10 +275,10 @@ void SongFollower::timerCallback()
         wasRecording = recording;
 
         if (! recording)
-            updateSongLoop (edit);
+            mirror::reconcileTransport (edit);
     }
 
-    if (! transport.isPlaying() || transport.looping.get() || transport.isRecording())
+    if (! transport.isPlaying() || isLoopOn (edit) || transport.isRecording())
     {
         lastPosition.reset();
         return;

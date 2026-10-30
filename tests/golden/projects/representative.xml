@@ -36,7 +36,10 @@
            gridSnap="0"
            gridStep="1/4 beat"
            gridTriplets="0"
+           loop="1"
+           loopEnd="12"
            loopFollowsSong="0"
+           loopStart="4"
            outline="golden">
     <AUTOMATION>
       <CURVE device="1020"
@@ -1013,7 +1016,6 @@
   <TRANSPORT loopPoint1="2"
              loopPoint2="6"
              looping="1"
-             position="0"
-             start="0"/>
+             position="0"/>
   <VIDEO/>
 </EDIT>

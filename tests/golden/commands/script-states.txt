@@ -729,15 +729,19 @@ after edit.undo:
   edit.undo: on "Undo Duplicate Range"
   edit.redo: on "Redo Delete Range"
   edit.undoOrRedo: on "Redo Delete Range"
+  loop 0.000-12.000 beats
 after edit.redo:
   edit.undo: on "Undo Delete Range"
   edit.redo: off "Redo"
   edit.undoOrRedo: on "Undo Delete Range"
+  loop 0.000-8.000 beats
 after edit.undoOrRedo:
   edit.undo: on "Undo Duplicate Range"
   edit.redo: on "Redo Delete Range"
   edit.undoOrRedo: on "Redo Delete Range"
+  loop 0.000-12.000 beats
 after edit.undoOrRedo:
   edit.undo: on "Undo Delete Range"
   edit.redo: off "Redo"
   edit.undoOrRedo: on "Undo Delete Range"
+  loop 0.000-8.000 beats

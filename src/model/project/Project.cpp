@@ -38,9 +38,9 @@ namespace
     }
 
     // What every project has, added before the project watches for changes: Phazite's state with its tempo map and its track
-    // list, which Tracktion's tempo sequence, tracks, clips and automation mirror (without the curves of devices gone, which
-    // no undo can bring back now), and the master's loudness meter. It isn't the user's change, so it is neither an undo
-    // step nor an unsaved change.
+    // list, which Tracktion's tempo sequence, tracks, clips, automation and transport mirror (without the curves of devices
+    // gone, which no undo can bring back now), and the master's loudness meter. It isn't the user's change, so it is neither
+    // an undo step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
@@ -52,6 +52,7 @@ namespace
         mirror::reconcileClips (edit);
         forgetCurvesOfGoneDevices (edit);
         mirror::reconcileAutomation (edit);
+        mirror::reconcileTransport (edit);
         ensureLoudnessMeter (edit);
         edit.getUndoManager().clearUndoHistory();
 
@@ -571,7 +572,8 @@ bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Iden
            || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property))
            || (tree.hasType (schema::PHAZITE)
                && (schema::isGridProperty (property) || property == schema::loopFollowsSong || property == schema::punch
-                   || property == schema::lastInput))
+                   || property == schema::lastInput || property == schema::loop || property == schema::loopStart
+                   || property == schema::loopEnd || property == schema::playStart || property == schema::metronome))
            || isAutomatedValue (tree, property); // Tracktion writes it as the automation plays
 }
 

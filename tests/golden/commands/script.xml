@@ -23,8 +23,10 @@
       <MODIFIERASSIGNMENTS/>
     </PLUGIN>
   </MASTERVOLUME>
-  <PHAZITE loopFollowsSong="1"
-           outline="rock">
+  <PHAZITE loop="1"
+           loopFollowsSong="1"
+           outline="rock"
+           playStart="2">
     <MASTER/>
     <SECTIONS>
       <SECTION energy="0.45"

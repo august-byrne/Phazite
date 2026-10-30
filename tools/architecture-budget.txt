@@ -33,13 +33,13 @@ tracktion-chords              73
 tracktion-commands            43
 tracktion-devices            174
 tracktion-engine             175
-tracktion-mirror             107
+tracktion-mirror             111
 tracktion-mixer              638
 tracktion-modulation         108
 tracktion-notes              155
 tracktion-presets             86
 tracktion-project            157
-tracktion-transport          282
+tracktion-transport          280
 tracktion-other                0
 tracktion-services             0
 tracktion-app                 46

@@ -83,7 +83,6 @@
   <TRACKCOMPS/>
   <TRANSPORT loopPoint1="0"
              loopPoint2="2"
-             position="0"
-             start="0"/>
+             position="0"/>
   <VIDEO/>
 </EDIT>

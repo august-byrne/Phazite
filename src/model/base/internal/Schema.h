@@ -25,6 +25,18 @@ inline const juce::Identifier PHAZITE { "PHAZITE" };
 // purpose. Written only when it changes. state
 inline const juce::Identifier loopFollowsSong { "loopFollowsSong" };
 
+// The transport's state that the song keeps (model/transport/internal/Playback.h, Metronome.h; docs/tracktion-migration.md,
+// T1 step 7), which Tracktion's transport and click track mirror. None is an undo step. On PHAZITE:
+// - loop: bool, default false: playback loops, around the song while the loop follows it, or else around the range
+//   looped on purpose, loopStart to loopEnd (double, in beats from the song's start; none while the loop follows the song);
+// - playStart: double, in beats, default 0: where playback starts, the song's start again as a project opens;
+// - metronome: bool, default false: the metronome clicks while the song plays. state
+inline const juce::Identifier loop { "loop" };
+inline const juce::Identifier loopStart { "loopStart" };
+inline const juce::Identifier loopEnd { "loopEnd" };
+inline const juce::Identifier playStart { "playStart" };
+inline const juce::Identifier metronome { "metronome" };
+
 // On PHAZITE. The id of the song outline applied last (Outline::id), or none. song
 inline const juce::Identifier outline { "outline" };
 
