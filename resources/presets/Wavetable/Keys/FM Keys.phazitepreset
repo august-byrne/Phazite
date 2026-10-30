@@ -1,0 +1,45 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.08,
+      "osc2On": 1,
+      "osc2Position": 0,
+      "osc2Pitch": 36,
+      "osc2Level": 0,
+      "filterOn": 0,
+      "env1Attack": 1,
+      "env1Decay": 3000,
+      "env1Sustain": 0.15,
+      "env1Release": 450,
+      "env2Attack": 0,
+      "env2Decay": 900,
+      "env2Sustain": 0.05,
+      "env2Release": 400,
+      "env3Attack": 0,
+      "env3Decay": 80,
+      "env3Release": 50,
+      "lfo1Rate": 3.5,
+      "lfo1Retrigger": 0,
+      "mod1Target": 1,
+      "mod1Amount": 0.22,
+      "mod2Source": 2,
+      "mod2Target": 8,
+      "mod2Amount": 0.2,
+      "mod3Source": 5,
+      "mod3Target": 1,
+      "mod3Amount": 0.12,
+      "mod4Source": 3,
+      "mod4Target": 15,
+      "mod4Amount": 0.25,
+      "velocity": 0.75,
+      "level": -8
+    },
+    "sounds": {
+      "osc1Wavetable": "FM"
+    }
+  }
+}

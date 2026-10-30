@@ -1,0 +1,30 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.75,
+      "filterType": 2,
+      "cutoff": 2000,
+      "resonance": 0.3,
+      "filterSlope": 0,
+      "env1Attack": 1,
+      "env1Sustain": 1,
+      "env1Release": 150,
+      "lfo1Shape": 5,
+      "lfo1Sync": 1,
+      "lfo1Division": 2,
+      "mod1Source": 3,
+      "mod1Target": 9,
+      "mod1Amount": 0.5,
+      "mod2Source": 3,
+      "mod2Target": 1,
+      "mod2Amount": 0.25
+    },
+    "sounds": {
+      "osc1Wavetable": "Digital"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.6,
+      "cutoff": 7000,
+      "keyTracking": 0,
+      "env1Attack": 0.5,
+      "env1Decay": 400,
+      "env1Sustain": 0,
+      "env1Release": 100,
+      "env2Attack": 0,
+      "env2Decay": 180,
+      "env2Sustain": 0,
+      "env2Release": 100,
+      "mod1Target": 9,
+      "mod1Amount": 1,
+      "mod2Source": 1,
+      "mod2Target": 1,
+      "mod2Amount": -0.4,
+      "level": -8
+    },
+    "sounds": {
+      "osc1Wavetable": "Sync"
+    }
+  }
+}

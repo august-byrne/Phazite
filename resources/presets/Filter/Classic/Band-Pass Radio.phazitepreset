@@ -1,0 +1,14 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteFilter",
+    "name": "Filter",
+    "instrument": false,
+    "parameters": {
+      "filterType": 2,
+      "cutoff": 1400.0,
+      "filterSlope": 0,
+      "drive": 6.0
+    }
+  }
+}

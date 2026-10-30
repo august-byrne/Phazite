@@ -1,0 +1,15 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteMaximizer",
+    "name": "Maximizer",
+    "instrument": false,
+    "parameters": {
+      "gain": 6.0,
+      "lowFrequency": 150.0,
+      "lowSqueeze": 0.5,
+      "lowLevel": 3.0,
+      "release": 120.0
+    }
+  }
+}

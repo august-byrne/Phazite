@@ -1,0 +1,26 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Level": 0.6,
+      "osc2On": 1,
+      "osc2Pitch": 12,
+      "osc2Level": 0.3,
+      "unisonVoices": 7,
+      "unisonDetune": 35,
+      "unisonSpread": 1,
+      "unisonPosition": 0.12,
+      "cutoff": 7500,
+      "filterSlope": 0,
+      "env1Attack": 5,
+      "env1Decay": 500,
+      "env1Sustain": 0.85,
+      "env1Release": 400,
+      "mod1Amount": 0.1,
+      "level": -8
+    }
+  }
+}

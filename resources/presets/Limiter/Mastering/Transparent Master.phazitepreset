@@ -1,0 +1,12 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteLimiter",
+    "name": "Limiter",
+    "instrument": false,
+    "parameters": {
+      "gain": 3.0,
+      "release": 250.0
+    }
+  }
+}

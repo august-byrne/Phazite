@@ -1,0 +1,15 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteFlanger",
+    "name": "Flanger",
+    "instrument": false,
+    "parameters": {
+      "depth": 0.9,
+      "division": 13,
+      "feedback": -0.7,
+      "stereo": 0.25,
+      "safeBass": 120.0
+    }
+  }
+}

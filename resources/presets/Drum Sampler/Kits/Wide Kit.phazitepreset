@@ -1,0 +1,24 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteDrums",
+    "name": "Drum Sampler",
+    "instrument": true,
+    "parameters": {
+      "pad2Pan": -0.15,
+      "pad4Pan": 0.2,
+      "pad5Pan": -0.2,
+      "pad6Pan": 0.5,
+      "pad7Pan": -0.35,
+      "pad8Pan": 0.35,
+      "pad9Pan": -0.35,
+      "pad10Pan": 0.1,
+      "pad11Pan": -0.35,
+      "pad12Pan": -0.1,
+      "pad13Pan": -0.3,
+      "pad14Pan": -0.45,
+      "pad15Pan": -0.45,
+      "pad16Pan": 0.45
+    }
+  }
+}

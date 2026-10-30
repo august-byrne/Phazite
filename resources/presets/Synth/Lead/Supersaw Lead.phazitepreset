@@ -1,0 +1,26 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteSynth",
+    "name": "Synth",
+    "instrument": true,
+    "parameters": {
+      "osc2Pitch": 12,
+      "osc2Detune": 0,
+      "oscMix": 0.3,
+      "unisonVoices": 6,
+      "unisonDetune": 32,
+      "unisonSpread": 0.95,
+      "cutoff": 7000,
+      "resonance": 0.1,
+      "filterEnvelope": 12,
+      "filterDecay": 600,
+      "filterSustain": 0.5,
+      "attack": 4,
+      "decay": 400,
+      "sustain": 0.85,
+      "release": 380,
+      "level": -8
+    }
+  }
+}

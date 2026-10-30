@@ -1,0 +1,22 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteEq",
+    "name": "EQ",
+    "instrument": false,
+    "parameters": {
+      "band1On": 1,
+      "band1Frequency": 400.0,
+      "band1Q": 1.0,
+      "band1Slope": 2,
+      "band4Frequency": 1500.0,
+      "band4Gain": 4.0,
+      "band4Q": 1.2,
+      "band8On": 1,
+      "band8Frequency": 3200.0,
+      "band8Q": 1.0,
+      "band8Slope": 2,
+      "output": 2.0
+    }
+  }
+}

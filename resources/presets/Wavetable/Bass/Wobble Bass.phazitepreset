@@ -1,0 +1,32 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.75,
+      "osc1Level": 0.6,
+      "osc2On": 1,
+      "osc2Position": 0.6,
+      "osc2Pitch": -12,
+      "osc2Level": 0.4,
+      "subLevel": 0.35,
+      "cutoff": 450,
+      "resonance": 0.35,
+      "drive": 8,
+      "keyTracking": 0.3,
+      "env1Sustain": 1,
+      "env1Release": 120,
+      "lfo1Sync": 1,
+      "mod1Source": 3,
+      "mod1Amount": 0.28,
+      "voiceMode": 1,
+      "glide": 30
+    },
+    "sounds": {
+      "osc1Wavetable": "Saw Build",
+      "osc2Wavetable": "Square Build"
+    }
+  }
+}

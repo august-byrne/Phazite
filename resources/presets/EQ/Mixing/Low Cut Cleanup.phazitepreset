@@ -1,0 +1,12 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteEq",
+    "name": "EQ",
+    "instrument": false,
+    "parameters": {
+      "band1On": 1,
+      "band1Frequency": 100.0
+    }
+  }
+}

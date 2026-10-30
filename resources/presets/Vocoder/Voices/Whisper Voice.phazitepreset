@@ -1,0 +1,17 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteVocoder",
+    "name": "Vocoder",
+    "instrument": false,
+    "parameters": {
+      "carrier": 1,
+      "bands": 4,
+      "release": 40.0,
+      "unvoiced": 0.3,
+      "brightness": 0.3,
+      "stereo": 0.3,
+      "output": -10.0
+    }
+  }
+}

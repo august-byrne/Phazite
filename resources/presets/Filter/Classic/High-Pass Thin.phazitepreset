@@ -1,0 +1,13 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteFilter",
+    "name": "Filter",
+    "instrument": false,
+    "parameters": {
+      "filterType": 1,
+      "cutoff": 500.0,
+      "resonance": 0.2
+    }
+  }
+}

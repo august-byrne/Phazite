@@ -1,0 +1,42 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteDrums",
+    "name": "Drum Sampler",
+    "instrument": true,
+    "parameters": {
+      "pad1Level": 1.5,
+      "pad1Tune": -2,
+      "pad2Level": 1,
+      "pad2Tune": -3,
+      "pad3Level": -5,
+      "pad4Level": -1,
+      "pad4Pan": 0.1,
+      "pad5Level": -4,
+      "pad6Level": -3,
+      "pad6Tune": -2,
+      "pad7Level": -1,
+      "pad7Tune": 1,
+      "pad7Length": 90,
+      "pad8Level": -3,
+      "pad8Tune": -2,
+      "pad9Level": -3,
+      "pad9Tune": 1,
+      "pad10Level": -3,
+      "pad10Tune": -2,
+      "pad11Level": -2,
+      "pad11Tune": -1,
+      "pad11Length": 350,
+      "pad12Level": -3,
+      "pad12Tune": -2,
+      "pad13Level": -3,
+      "pad13Tune": -2,
+      "pad14Level": -8,
+      "pad15Level": -3,
+      "pad15Tune": -2,
+      "pad16Level": -1,
+      "pad16Tune": -1,
+      "output": -1.5
+    }
+  }
+}

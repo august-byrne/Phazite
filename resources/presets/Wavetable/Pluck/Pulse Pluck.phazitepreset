@@ -1,0 +1,34 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.2,
+      "osc1Level": 0.55,
+      "osc2On": 1,
+      "osc2Position": 0.6,
+      "osc2Fine": 9,
+      "osc2Level": 0.4,
+      "cutoff": 800,
+      "resonance": 0.25,
+      "env1Attack": 1,
+      "env1Decay": 400,
+      "env1Sustain": 0.1,
+      "env2Attack": 0,
+      "env2Decay": 350,
+      "env2Sustain": 0,
+      "mod1Target": 1,
+      "mod1Amount": 0.5,
+      "mod2Source": 1,
+      "mod2Target": 12,
+      "mod2Amount": 0.3,
+      "level": -9
+    },
+    "sounds": {
+      "osc1Wavetable": "Pulse Width",
+      "osc2Wavetable": "Pulse Width"
+    }
+  }
+}

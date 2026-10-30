@@ -1,0 +1,31 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.3333,
+      "osc1Level": 0.3,
+      "filterType": 4,
+      "cutoff": 261.63,
+      "resonance": 0.85,
+      "keyTracking": 1,
+      "env1Attack": 0.5,
+      "env1Decay": 1100,
+      "env1Sustain": 0,
+      "env1Release": 350,
+      "env3Attack": 0,
+      "env3Decay": 40,
+      "env3Release": 50,
+      "mod1Source": 2,
+      "mod1Target": 11,
+      "mod1Amount": 0.7,
+      "mod2Source": 5,
+      "mod2Target": 13,
+      "mod2Amount": 0.1,
+      "velocity": 0.7,
+      "level": -9
+    }
+  }
+}

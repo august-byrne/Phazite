@@ -1,0 +1,11 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteStereoExpander",
+    "name": "Stereo Expander",
+    "instrument": false,
+    "parameters": {
+      "width": 0.0
+    }
+  }
+}

@@ -731,6 +731,13 @@ add_custom_command(TARGET Phazite POST_BUILD
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts" "$<TARGET_FILE_DIR:Phazite>/fonts"
     VERBATIM)
 
+# Phazite's own presets for its devices, data files that the browser and the devices' Presets menus list (presets/<device>/<kind>),
+# go next to the app, as the fonts do. services/Library.h finds them there.
+add_custom_command(TARGET Phazite POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/presets" "$<TARGET_FILE_DIR:Phazite>/presets"
+    VERBATIM)
+
 # The icons are compiled in, so their licence, which asks to go with every copy, goes next to the app.
 add_custom_command(TARGET Phazite POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -810,6 +817,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
         tests/ExportTests.cpp
+        tests/FactoryPresetTests.cpp
         tests/FreezeTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h

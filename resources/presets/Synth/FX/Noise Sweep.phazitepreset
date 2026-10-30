@@ -1,0 +1,27 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteSynth",
+    "name": "Synth",
+    "instrument": true,
+    "parameters": {
+      "osc2Detune": 12,
+      "noiseLevel": 0.6,
+      "unisonVoices": 2,
+      "unisonDetune": 20,
+      "cutoff": 1000,
+      "resonance": 0.5,
+      "filterSlope": 1,
+      "filterEnvelope": 0,
+      "keyTracking": 0,
+      "attack": 1500,
+      "sustain": 1,
+      "release": 2000,
+      "lfoTarget": 1,
+      "lfoRate": 0.12,
+      "lfoDepth": 1,
+      "velocity": 0.2,
+      "level": -10
+    }
+  }
+}

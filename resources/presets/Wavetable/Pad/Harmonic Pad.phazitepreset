@@ -1,0 +1,38 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.15,
+      "osc1Level": 0.55,
+      "osc2On": 1,
+      "osc2Position": 0.2,
+      "osc2Fine": 8,
+      "osc2Level": 0.45,
+      "unisonVoices": 2,
+      "unisonDetune": 12,
+      "filterOn": 0,
+      "env1Attack": 1500,
+      "env1Decay": 2000,
+      "env1Sustain": 0.85,
+      "env1Release": 2500,
+      "env2Attack": 2500,
+      "env2Decay": 3000,
+      "env2Sustain": 0.5,
+      "env2Release": 2500,
+      "mod1Target": 1,
+      "mod1Amount": 0.55,
+      "mod2Source": 1,
+      "mod2Target": 5,
+      "mod2Amount": 0.4,
+      "velocity": 0.3,
+      "level": -9
+    },
+    "sounds": {
+      "osc1Wavetable": "Saw Build",
+      "osc2Wavetable": "Square Build"
+    }
+  }
+}

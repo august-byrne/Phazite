@@ -1,0 +1,49 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.4,
+      "osc1Level": 0.55,
+      "osc2On": 1,
+      "osc2Position": 0.5,
+      "osc2Fine": 7,
+      "osc2Level": 0.45,
+      "unisonVoices": 3,
+      "unisonDetune": 15,
+      "unisonSpread": 0.9,
+      "unisonPosition": 0.2,
+      "cutoff": 1800,
+      "resonance": 0.15,
+      "filterSlope": 0,
+      "keyTracking": 0.3,
+      "env1Attack": 1200,
+      "env1Decay": 2000,
+      "env1Sustain": 0.9,
+      "env1Release": 3000,
+      "env2Attack": 3000,
+      "env2Decay": 4000,
+      "env2Sustain": 0.6,
+      "env2Release": 3000,
+      "lfo1Rate": 0.13,
+      "lfo1Retrigger": 0,
+      "lfo2Sync": 1,
+      "lfo2Division": 15,
+      "mod1Amount": 0.15,
+      "mod2Source": 4,
+      "mod2Target": 1,
+      "mod2Amount": 0.35,
+      "mod3Source": 3,
+      "mod3Target": 5,
+      "mod3Amount": 0.25,
+      "velocity": 0.3,
+      "level": -9
+    },
+    "sounds": {
+      "osc1Wavetable": "Spectra",
+      "osc2Wavetable": "Vowels"
+    }
+  }
+}

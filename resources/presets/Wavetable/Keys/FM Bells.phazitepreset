@@ -1,0 +1,42 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.05,
+      "osc1Level": 0.6,
+      "osc2On": 1,
+      "osc2Position": 0,
+      "osc2Pitch": 17,
+      "osc2Fine": 58,
+      "osc2Level": 0,
+      "filterOn": 0,
+      "env1Attack": 0.5,
+      "env1Decay": 3500,
+      "env1Sustain": 0,
+      "env1Release": 1500,
+      "env2Attack": 0,
+      "env2Decay": 1500,
+      "env2Sustain": 0,
+      "env2Release": 1000,
+      "env3Attack": 0,
+      "env3Decay": 700,
+      "env3Release": 500,
+      "mod1Target": 1,
+      "mod1Amount": 0.45,
+      "mod2Source": 2,
+      "mod2Target": 8,
+      "mod2Amount": 0.35,
+      "mod3Source": 5,
+      "mod3Target": 1,
+      "mod3Amount": 0.15,
+      "velocity": 0.7,
+      "level": -8
+    },
+    "sounds": {
+      "osc1Wavetable": "FM Hollow"
+    }
+  }
+}

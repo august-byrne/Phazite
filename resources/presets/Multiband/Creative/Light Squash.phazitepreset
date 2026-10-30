@@ -1,0 +1,14 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteMultiband",
+    "name": "Multiband",
+    "instrument": false,
+    "parameters": {
+      "depth": 0.3,
+      "lowGain": 3.0,
+      "midGain": 2.0,
+      "highGain": 3.0
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteCompressor",
+    "name": "Compressor",
+    "instrument": false,
+    "parameters": {
+      "threshold": -14.0,
+      "ratio": 2.0,
+      "attack": 30.0,
+      "release": 200.0,
+      "knee": 12.0,
+      "makeup": 1.5,
+      "keyLowCut": 90.0
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteVocoder",
+    "name": "Vocoder",
+    "instrument": false,
+    "parameters": {
+      "pitch": -5.0,
+      "bands": 3,
+      "unvoiced": 0.6,
+      "brightness": 0.2,
+      "output": -4.0
+    }
+  }
+}

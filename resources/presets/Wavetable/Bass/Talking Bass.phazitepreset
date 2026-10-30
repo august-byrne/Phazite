@@ -1,0 +1,32 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "instrument": true,
+    "parameters": {
+      "osc1Position": 0.6,
+      "subLevel": 0.4,
+      "subShape": 1,
+      "cutoff": 3000,
+      "resonance": 0.15,
+      "drive": 4,
+      "keyTracking": 0.3,
+      "env1Sustain": 1,
+      "env1Release": 100,
+      "lfo1Shape": 1,
+      "lfo1Sync": 1,
+      "mod1Source": 3,
+      "mod1Target": 1,
+      "mod1Amount": 0.35,
+      "mod2Source": 1,
+      "mod2Target": 12,
+      "mod2Amount": 0.12,
+      "voiceMode": 1,
+      "glide": 40
+    },
+    "sounds": {
+      "osc1Wavetable": "Vowels"
+    }
+  }
+}

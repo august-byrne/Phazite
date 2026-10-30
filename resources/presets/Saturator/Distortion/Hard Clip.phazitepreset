@@ -1,0 +1,13 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteSaturator",
+    "name": "Saturator",
+    "instrument": false,
+    "parameters": {
+      "drive": 12.0,
+      "shape": 3,
+      "output": 3.0
+    }
+  }
+}

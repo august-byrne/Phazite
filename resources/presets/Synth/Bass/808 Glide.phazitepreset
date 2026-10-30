@@ -1,0 +1,27 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phaziteSynth",
+    "name": "Synth",
+    "instrument": true,
+    "parameters": {
+      "osc1Wave": 0,
+      "osc2Wave": 1,
+      "osc2Detune": 0,
+      "oscMix": 0.2,
+      "cutoff": 900,
+      "resonance": 0,
+      "filterEnvelope": 12,
+      "filterAttack": 0,
+      "filterDecay": 120,
+      "filterSustain": 0,
+      "decay": 1600,
+      "sustain": 0.3,
+      "release": 220,
+      "voiceMode": 1,
+      "glide": 80,
+      "bendRange": 12,
+      "velocity": 0.3
+    }
+  }
+}

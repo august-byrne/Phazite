@@ -1,0 +1,15 @@
+{
+  "kind": "device",
+  "device": {
+    "type": "phazitePhaser",
+    "name": "Phaser",
+    "instrument": false,
+    "parameters": {
+      "notches": 3,
+      "frequency": 900.0,
+      "depth": 0.8,
+      "feedback": 0.4,
+      "spacing": 0.6
+    }
+  }
+}
