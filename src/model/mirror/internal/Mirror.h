@@ -48,9 +48,10 @@ void reconcileAutomation (te::Edit&);
 void reconcileCurve (te::Edit&, const ParameterRef&);
 
 // The devices (model/mixer/internal/Mixer.h): each track's and the master's devices in Tracktion are the song's, in its
-// order, each switched on or off as the song says; Tracktion's devices that the song hasn't on that track go (a container
-// with what it holds, its rack type kept: model/mixer/internal/Containers.h). While step 5 lasts, the model makes a
-// device in Tracktion as it adds it to the song, and a container's devices are Tracktion's.
+// order, each set as the song says, and its containers' devices in their rack types; Tracktion's devices that the song
+// hasn't on that track go (a container with what it still holds, its rack type kept: model/mixer/internal/Containers.h),
+// and those it has and Tracktion hasn't are made. Each channel's fader plays the song's volume and pan. While step 5
+// lasts, the model makes a device in Tracktion as it adds it to the song.
 void reconcileDevices (te::Edit&);
 
 // Only the switches Tracktion keeps outside its undo history (the tracks' mute, solo and solo isolation), and the write

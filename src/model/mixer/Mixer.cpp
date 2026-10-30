@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Mixer.h"
+#include "MixerModel.h"
 #include "internal/Containers.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -132,6 +133,49 @@ namespace
     {
         if (const auto* stored = state.getPropertyPointer (property); stored == nullptr || *stored != value)
             state.setProperty (property, value, nullptr);
+    }
+
+    // A channel's fader: a track's, a return's or a bus's volume, a plain folder's VCA, or the master track's the master's
+    // volume. And the channel's element in the song: its TRACK, or MASTER.
+    te::Plugin* findFader (te::Track& track)
+    {
+        return track.isMasterTrack() ? track.edit.getMasterVolumePlugin().get() : getVolumeDevice (track);
+    }
+
+    juce::ValueTree findChannelState (const te::Track& track)
+    {
+        return track.isMasterTrack() ? findChainState (track.edit, nullptr) : findTrackState (track);
+    }
+
+    // A value of a channel's in the song, to a ten-thousandth (a volume comes back from a fader's position a little off),
+    // none where it is the one it has without.
+    void setChannelValue (juce::ValueTree state, const juce::Identifier& property, float value, float none, juce::UndoManager* undo)
+    {
+        if (const auto rounded = std::round ((double) value * 1.0e4) / 1.0e4; std::abs (rounded - (double) none) < 1.0e-4)
+            state.removeProperty (property, undo);
+        else
+            state.setProperty (property, rounded, undo);
+    }
+
+    // A channel's volume or pan as its fader's parameter is set, in the song (Schema.h: channelVolume, channelPan); nothing
+    // for another device's parameter.
+    void storeFaderValue (te::Plugin& device, const juce::String& parameterID, float value)
+    {
+        auto& edit = device.edit;
+        auto* track = &device == edit.getMasterVolumePlugin().get() ? edit.getMasterTrack() : device.getOwnerTrack();
+
+        if (track == nullptr || findFader (*track) != &device)
+            return;
+
+        // As Tracktion names them: a track's volume and pan, the master's, and a VCA's level.
+        auto state = findChannelState (*track);
+        auto* undo = &edit.getUndoManager();
+
+        if (parameterID == "volume" || parameterID == "master volume" || parameterID == "vca")
+            setChannelValue (state, schema::channelVolume, faderPositionToDecibels (value),
+                             track->isMasterTrack() ? defaultMasterVolume : 0.0f, undo);
+        else if (parameterID == "pan" || parameterID == "master pan")
+            setChannelValue (state, schema::channelPan, value, 0.0f, undo);
     }
 
     // Adds a device to the song and makes it in Tracktion, which can't make a device from the song yet (T1, step 5).
@@ -852,8 +896,38 @@ void setDeviceValue (te::AutomatableParameter& parameter, float value)
             state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (parameter.paramID), stored, undo);
         }
     }
+    else if (auto* fader = parameter.getPlugin())
+    {
+        storeFaderValue (*fader, parameter.paramID, stored);
+    }
 
     parameter.setParameter (stored, juce::sendNotification);
+}
+
+void setChannelVolume (te::Track& channel, float decibels)
+{
+    if (auto* fader = findFader (channel))
+        for (const auto* id : { "volume", "master volume", "vca" })
+            if (auto parameter = fader->getAutomatableParameterByID (id))
+                setDeviceValue (*parameter, decibelsToFaderPosition (decibels));
+}
+
+void setChannelPan (te::Track& channel, float pan)
+{
+    if (auto* fader = findFader (channel))
+        for (const auto* id : { "pan", "master pan" })
+            if (auto parameter = fader->getAutomatableParameterByID (id))
+                setDeviceValue (*parameter, juce::jlimit (-1.0f, 1.0f, pan));
+}
+
+float getChannelVolume (const te::Track& channel)
+{
+    return (float) findChannelState (channel).getProperty (schema::channelVolume, channel.isMasterTrack() ? defaultMasterVolume : 0.0f);
+}
+
+float getChannelPan (const te::Track& channel)
+{
+    return (float) findChannelState (channel).getProperty (schema::channelPan, 0.0f);
 }
 
 void setDeviceSound (te::Plugin& device, const juce::Identifier& property, const juce::String& value)

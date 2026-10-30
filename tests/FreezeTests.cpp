@@ -48,7 +48,7 @@ struct Song
         expander = phazite::insertDevice (*bass, edit.getPluginCache().createNewPlugin (phazite::devices::StereoExpander::typeID, {}));
         REQUIRE (expander != nullptr);
         setParameter (*expander, "gain", 6.0f);
-        bass->getVolumePlugin()->setVolumeDb (-6.0f);
+        phazite::setChannelVolume (*bass, -6.0f);
 
         reverb = phazite::addReturnTrack (edit, "Reverb", nullptr);
         REQUIRE (reverb != nullptr);
@@ -193,7 +193,7 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     song.freeze();
 
     // Its fader, name, mute switch and send: still frozen.
-    song.bass->getVolumePlugin()->setVolumeDb (-3.0f);
+    phazite::setChannelVolume (*song.bass, -3.0f);
     phazite::renameTrack (*song.bass, "Bass Line");
     phazite::setTrackMuted (*song.bass, true);
     phazite::setTrackMuted (*song.bass, false);

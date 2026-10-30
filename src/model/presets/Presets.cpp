@@ -358,23 +358,17 @@ namespace
     // A track's volume and pan as a preset keeps them: in decibels, and from -1 to 1.
     void describeMix (const juce::var& preset, te::AudioTrack& track)
     {
-        if (auto* volume = track.getVolumePlugin())
-        {
-            set (preset, keys::volume, te::volumeFaderPositionToDB (volume->volParam->getCurrentBaseValue()));
-            set (preset, keys::pan, volume->panParam->getCurrentBaseValue());
-        }
+        set (preset, keys::volume, getChannelVolume (track));
+        set (preset, keys::pan, getChannelPan (track));
     }
 
     void applyMix (te::AudioTrack& track, const juce::var& preset)
     {
-        if (auto* volume = track.getVolumePlugin())
-        {
-            if (preset.hasProperty (keys::volume))
-                volume->volParam->setParameter (te::decibelsToVolumeFaderPosition ((float) preset[keys::volume]), juce::sendNotification);
+        if (preset.hasProperty (keys::volume))
+            setChannelVolume (track, (float) preset[keys::volume]);
 
-            if (preset.hasProperty (keys::pan))
-                volume->panParam->setParameter (juce::jlimit (-1.0f, 1.0f, (float) preset[keys::pan]), juce::sendNotification);
-        }
+        if (preset.hasProperty (keys::pan))
+            setChannelPan (track, (float) preset[keys::pan]);
     }
 
     std::optional<ModulatorType> findModulatorType (const juce::String& name)

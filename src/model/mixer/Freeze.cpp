@@ -677,14 +677,8 @@ namespace
             setTrackName (*bounced, name);
             setTrackColours ({ bounced }, getTrackColour (track, getPlaylistTracks (edit).indexOf (&track)));
 
-            if (auto* from = track.getVolumePlugin(); from != nullptr)
-            {
-                if (auto* to = bounced->getVolumePlugin(); to != nullptr)
-                {
-                    to->setVolumeDb (from->getVolumeDb());
-                    to->setPan (from->getPan());
-                }
-            }
+            setChannelVolume (*bounced, getChannelVolume (track));
+            setChannelPan (*bounced, getChannelPan (track));
 
             for (auto* send : getSends (track))
                 if (auto* copy = addSend (*bounced, send->getBusNumber(), isPreFader (*send)))

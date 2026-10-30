@@ -4,6 +4,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/LevelSource.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -43,7 +44,7 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     phazite::undo (*edit);
 
     // A change made elsewhere shows on the slider.
-    volume->setVolumeDb (-3.0f);
+    phazite::setChannelVolume (*track, -3.0f);
     attachment.update();
     CHECK (phazite::faderPositionToDecibels ((float) slider.getValue()) == doctest::Approx (-3.0f).epsilon (0.01));
 

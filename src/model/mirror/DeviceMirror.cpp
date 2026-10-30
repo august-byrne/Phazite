@@ -6,6 +6,7 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 
@@ -250,6 +251,29 @@ namespace
         return edit.getPluginCache().createNewPlugin (container);
     }
 
+    // A channel's fader plays the song's volume and pan, set by hand (setChannelVolume() in Mixer.h): a track's, a return's,
+    // a bus's or the master's VolumeAndPanPlugin, or a plain folder's VCA. Positions are compared as near as they come back
+    // from decibels.
+    void reconcileFader (te::Plugin* fader, const juce::ValueTree& state, float noVolume)
+    {
+        const auto position = decibelsToFaderPosition ((float) state.getProperty (schema::channelVolume, noVolume));
+        const auto play = [] (te::AutomatableParameter* parameter, float wanted)
+        {
+            if (parameter != nullptr && std::abs (parameter->getCurrentExplicitValue() - wanted) > 1.0e-5f)
+                parameter->setParameter (wanted, juce::sendNotification);
+        };
+
+        if (auto* volume = dynamic_cast<te::VolumeAndPanPlugin*> (fader))
+        {
+            play (volume->volParam.get(), position);
+            play (volume->panParam.get(), (float) state.getProperty (schema::channelPan, 0.0f));
+        }
+        else if (auto* vca = dynamic_cast<te::VCAPlugin*> (fader))
+        {
+            play (vca->volParam.get(), position);
+        }
+    }
+
     // A chain's devices in Tracktion as the song has them. First, what the song has on the channel comes out of Tracktion's
     // containers (one ungrouped), and its containers are made or follow it, taking in what the song has them hold from the
     // channel (devices grouped); then what it hasn't on the channel goes (a container with what it still holds, its rack
@@ -331,10 +355,18 @@ namespace
 void reconcileDevices (te::Edit& edit)
 {
     for (const auto& state : getTrackStates (edit))
+    {
         if (auto* track = te::findTrackForID (edit, toTracktion (getTrackID (state))))
+        {
             reconcileChain (edit, track->pluginList, state);
+            reconcileFader (getVolumeDevice (*track), state, 0.0f);
+        }
+    }
 
     if (const auto master = findChainState (edit, nullptr); master.isValid())
+    {
         reconcileChain (edit, edit.getMasterPluginList(), master);
+        reconcileFader (edit.getMasterVolumePlugin().get(), master, defaultMasterVolume);
+    }
 }
 } // namespace phazite::mirror

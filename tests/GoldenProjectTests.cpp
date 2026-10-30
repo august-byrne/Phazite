@@ -166,9 +166,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     phazite::setClipFade (*audio, false, te::TimeDuration::fromSeconds (0.5));
     phazite::setFadeShape ({ audio }, te::AudioFadeCurve::convex);
     audio->setColour (phazite::getTrackColours()[4].colour);
-    auto* toneVolume = tone->getVolumePlugin();
-    REQUIRE (toneVolume != nullptr);
-    toneVolume->setPan (-0.5f);
+    phazite::setChannelPan (*tone, -0.5f);
 
     // Folders: Keys and Pad in a collapsed folder, and Tone in a bus at -3 dB.
     auto* group = phazite::groupIntoFolder ({ keys, pad }, nullptr);
@@ -180,9 +178,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     REQUIRE (bus != nullptr);
     phazite::setTrackName (*bus, "Bus");
     phazite::setMixedAsBus (*bus, true);
-    auto* busVolume = dynamic_cast<te::VolumeAndPanPlugin*> (phazite::getVolumeDevice (*bus));
-    REQUIRE (busVolume != nullptr);
-    busVolume->setVolumeDb (-3.0f);
+    phazite::setChannelVolume (*bus, -3.0f);
 
     // Returns: a reverb return that Tone sends to after its fader and Keys before its fader; and a reverb on the master.
     auto* reverbReturn = phazite::addReturnWithEffect (*tone, createBuiltInDevice (edit, phazite::devices::Reverb::typeID));

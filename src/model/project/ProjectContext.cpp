@@ -171,9 +171,12 @@ namespace
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
-            // makes one at each move (docs/performance-audit.md, U1). Nor is where a device's window was, which no view shows.
+            // makes one at each move (docs/performance-audit.md, U1); a channel's volume and pan neither. Nor is where a
+            // device's window was, which no view shows.
             if (isParameterValue (tree, property) || tree.hasType (schema::VALUES)
-                || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property)))
+                || (tree.hasType (te::IDs::PLUGIN) && schema::isDeviceViewProperty (property))
+                || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
+                    && (property == schema::channelVolume || property == schema::channelPan)))
                 return;
 
             // How tall a track shows, and the like, is view state (Schema.h), not the song.

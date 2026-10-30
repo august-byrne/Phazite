@@ -137,6 +137,12 @@ inline constexpr const char* automationWrite = "write";
 // On a folder's TRACK. true, or none: the folder was made a bus with the bus switch, so it stays one without effects.
 inline const juce::Identifier folderBus { "bus" };
 
+// On TRACK, and on MASTER (T1, step 5e): the channel's volume, in decibels (-100 for silence), as its fader sets it (a
+// track's, a return's or a bus's; a plain folder's VCA), none for 0 dB, or for the master's -3 dB, a new song's level; and
+// its pan, from -1 (left) to 1 (right), none for the centre, which a plain folder keeps for when it is a bus again.
+inline const juce::Identifier channelVolume { "volume" };
+inline const juce::Identifier channelPan { "pan" };
+
 // A key, on a TRACK (song), on LASTKEY (state) and on CHORDKEY (song): the root, int 0..11 (0 is C), none = no key; and the
 // scale: "major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor".
 inline const juce::Identifier keyRoot { "keyRoot" };
@@ -172,7 +178,7 @@ inline const juce::Identifier drumOrder { "drumOrder" };
 inline const juce::Identifier drumHidden { "drumHidden" };
 
 // Child of PHAZITE, which every project has: the master channel's own element, with its write mode
-// (trackAutomationMode) and its automation lanes (LANE, view).
+// (trackAutomationMode), its volume and pan (channelVolume, channelPan), its devices, and its automation lanes (LANE, view).
 inline const juce::Identifier MASTER { "MASTER" };
 
 // Child of TRACK and of MASTER, one for each automation lane the playlist shows under the track, in their order

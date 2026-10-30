@@ -371,6 +371,52 @@ TEST_CASE ("A plug-in is the song's: which it is, its mix, its settings as the p
     CHECK (element[schema::pluginState].toString() != stored);
 }
 
+TEST_CASE ("A channel's volume and pan are the song's, which its fader plays one way; the master's starts at -3 dB")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto& context = song.context;
+    auto& edit = *song.edit;
+    const auto a = idOf (*song.a);
+    const auto track = phazite::findTrackState (*song.a);
+    const auto master = phazite::findChainState (edit, nullptr);
+    const auto played = [&context, a] { return phazite::faderPositionToDecibels (phazite::getVolume (context, a).getValue()); };
+
+    // Nothing in the song for a new track's 0 dB at the centre, nor for a new song's master at -3 dB, which it plays.
+    CHECK_FALSE (track.hasProperty (schema::channelVolume));
+    CHECK_FALSE (track.hasProperty (schema::channelPan));
+    CHECK_FALSE (master.hasProperty (schema::channelVolume));
+    CHECK (phazite::getChannelVolume (*edit.getMasterTrack()) == doctest::Approx (-3.0f));
+    CHECK (phazite::faderPositionToDecibels (phazite::getMasterVolume (context).getValue()) == doctest::Approx (-3.0f).epsilon (0.01));
+
+    // Set by the faders' handles, as the strips set them: the song's, which Tracktion plays; each an undo step.
+    phazite::getVolume (context, a).setValue (phazite::decibelsToFaderPosition (-6.0f));
+    phazite::getPan (context, a).setValue (-0.5f);
+    phazite::getMasterVolume (context).setValue (phazite::decibelsToFaderPosition (0.0f));
+    CHECK ((double) track[schema::channelVolume] == doctest::Approx (-6.0));
+    CHECK ((double) track[schema::channelPan] == doctest::Approx (-0.5));
+    CHECK (std::abs ((double) master[schema::channelVolume]) < 1.0e-4);
+    CHECK (played() == doctest::Approx (-6.0f).epsilon (0.01));
+
+    phazite::undo (edit);
+    phazite::undo (edit);
+    phazite::undo (edit);
+    CHECK_FALSE (track.hasProperty (schema::channelVolume));
+    CHECK_FALSE (master.hasProperty (schema::channelVolume));
+    CHECK (std::abs (played()) < 0.01f);
+    phazite::redo (edit);
+    CHECK (played() == doctest::Approx (-6.0f).epsilon (0.01));
+
+    // One way: a fader moved on Tracktion's side alone plays the song's again.
+    song.a->getVolumePlugin()->setVolumeDb (-20.0f);
+    phazite::mirror::reconcileDevices (edit);
+    CHECK (played() == doctest::Approx (-6.0f).epsilon (0.01));
+
+    edit.getUndoManager().clearUndoHistory();
+    phazite::mirror::reconcileDevices (edit);
+    CHECK_FALSE (edit.getUndoManager().canUndo());
+}
+
 TEST_CASE ("A device's channel, its handle for an editor, and whether its controls open in a window of their own")
 {
     phazite::test::TestPlugin testPlugin;

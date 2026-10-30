@@ -94,9 +94,9 @@ void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::Track& copy, c
 
 // Sets a device's parameter to a value set by hand, as it snaps to its range and steps: the song's, for one of Phazite's own
 // devices in a chain (Schema.h: VALUES), and Tracktion's parameter, which plays it. And one of a device's files or tables
-// (Schema.h: SOUNDS; empty for none), the song's and its PLUGIN's. In the caller's undo step. A plug-in's parameter is
-// the plug-in's own, which its state holds (stored as the project saves: DeviceStates.h); a modulator's or a macro's are
-// Tracktion's alone while step 6 lasts.
+// (Schema.h: SOUNDS; empty for none), the song's and its PLUGIN's. In the caller's undo step. A channel's fader's volume and
+// pan are the song's too (setChannelVolume()). A plug-in's parameter is the plug-in's own, which its state holds (stored as
+// the project saves: DeviceStates.h); a send's, a modulator's or a macro's are Tracktion's alone while T1 lasts.
 void setDeviceValue (te::AutomatableParameter&, float value);
 void setDeviceSound (te::Plugin&, const juce::Identifier& property, const juce::String& value);
 
@@ -158,6 +158,16 @@ void setMixedAsBus (te::FolderTrack&, bool);
 te::Plugin* getVolumeDevice (te::Track&);
 juce::String getVolumeParameterID (te::Track&);
 te::LevelMeasurer* getLevelMeasurer (te::Track&); // nullptr for a plain folder, which has no sound of its own
+
+// A channel's volume, in decibels, and its pan, from -1 to 1 (Schema.h: channelVolume, channelPan; T1 step 5e): the
+// song's, which its fader plays (a plain folder's VCA has no pan); the master track's are the master's, whose volume is
+// -3 dB until it is set, as a new song's. Set in the caller's undo step; setDeviceValue() sets them too, given the fader's
+// parameters.
+inline constexpr float defaultMasterVolume = -3.0f;
+void setChannelVolume (te::Track&, float decibels);
+void setChannelPan (te::Track&, float pan);
+float getChannelVolume (const te::Track&);
+float getChannelPan (const te::Track&);
 
 // The bus a channel's sound goes into: the nearest folder it is in that is a bus; nullptr for the master.
 te::FolderTrack* getOutputBus (const te::Track&);

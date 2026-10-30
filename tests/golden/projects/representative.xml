@@ -230,13 +230,15 @@
              colour="fff0e442"
              id="1040"
              kind="folder"
-             name="Bus">
+             name="Bus"
+             volume="-3">
         <TRACK colour="fff0e442"
                id="1032"
                keyRoot="2"
                keyScale="minor"
                kind="track"
-               name="Tone">
+               name="Tone"
+               pan="-0.5">
           <CLIP fadeIn="0.25"
                 fadeInShape="convex"
                 fadeOut="0.5"

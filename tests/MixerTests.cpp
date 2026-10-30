@@ -117,7 +117,7 @@ TEST_CASE ("A new folder is a bus; a plain one becomes a bus with its first devi
     phazite::setMixedAsBus (*folder, false);
     CHECK_FALSE (phazite::isBus (*folder));
     REQUIRE (folder->getVCAPlugin() != nullptr);
-    folder->getVCAPlugin()->setVolumeDb (-3.0f);
+    phazite::setChannelVolume (*folder, -3.0f);
     CHECK (phazite::getLevelMeasurer (*folder) == nullptr); // a plain folder has no sound of its own
 
     auto* compressor = phazite::insertDevice (*folder, mix.create (Compressor::typeID));

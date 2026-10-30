@@ -5,6 +5,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 
 namespace
@@ -164,7 +165,7 @@ TEST_CASE ("An undo that puts back what devices play keeps what it undid to redo
             const phazite::UndoStep step (*edit, "Add and Turn");
             auto* added = phazite::insertPlainTrack (*edit, track);
             REQUIRE (added != nullptr);
-            added->getVolumePlugin()->setVolumeDb (-6.0f);
+            phazite::setChannelVolume (*added, -6.0f);
         }
 
         phazite::undo (*edit);
@@ -182,7 +183,7 @@ TEST_CASE ("An undo that puts back what devices play keeps what it undid to redo
 
         {
             const phazite::UndoStep step (*edit, "Turn");
-            track->getVolumePlugin()->setVolumeDb (-6.0f);
+            phazite::setChannelVolume (*track, -6.0f);
         }
 
         phazite::undo (*edit);
