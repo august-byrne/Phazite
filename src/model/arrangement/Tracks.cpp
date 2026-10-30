@@ -159,10 +159,15 @@ namespace
     }
 
     // Each track's element in a copy of a track's, given the ID its copy in Tracktion has: the copy's tracks are in the
-    // same order as the original's.
+    // same order as the original's. Its clips get IDs of their own, as copyClipState() gives a clip's copy, with the
+    // same notes, in the same alias group.
     void giveCopiedIDs (juce::ValueTree& copied, const te::Track& copy)
     {
         copied.setProperty (schema::trackID, (juce::int64) copy.itemID.getRawID(), nullptr);
+
+        for (auto child : copied)
+            if (child.hasType (schema::CLIP))
+                child.setProperty (schema::clipID, (juce::int64) copy.edit.createNewItemID().getRawID(), nullptr);
 
         if (auto* folder = dynamic_cast<const te::FolderTrack*> (&copy))
         {
@@ -764,8 +769,9 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
         storeDeviceStates (*track);
         const auto original = findTrackState (*track);
 
-        // Tracktion copies what the track holds that is still Tracktion's (its clips and devices), giving the copy, and the
-        // tracks in it, IDs of their own; the song's track list gets the same copy, with those IDs, right after it.
+        // Tracktion copies what the track holds that is still Tracktion's (its devices), giving the copy, and the tracks in
+        // it, IDs of their own; the song's track list gets the same copy, with those IDs, right after it. The song's clips
+        // in the copy, with IDs of their own, replace the clips Tracktion copied as the clips are placed again.
         if (auto copy = track->edit.copyTrack (track, getInsertPointAfter (*track)); copy != nullptr && original.isValid())
         {
             auto copied = original.createCopy();
@@ -780,7 +786,10 @@ juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, 
     }
 
     if (! tracks.isEmpty())
+    {
         mirror::reconcileTracks (tracks.getFirst()->edit);
+        mirror::reconcileClips (tracks.getFirst()->edit);
+    }
 
     if (selection != nullptr)
     {

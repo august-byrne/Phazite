@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
+#include "model/notes/NotesModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -594,6 +597,30 @@ TEST_CASE ("Deleting and duplicating tracks directly")
 
     phazite::deleteTracks ({}, &tracks.selection); // nothing to delete
     CHECK (tracks.getOrder() == juce::String ("A A C C"));
+}
+
+TEST_CASE ("A duplicated track's clips are its own, the song's, and the original keeps its")
+{
+    Tracks tracks (1);
+    auto& context = tracks.context;
+    const auto original = phazite::getTrackID (*tracks["A"]);
+    const auto clip = phazite::addMidiClipAt (context, original, phazite::BeatPosition());
+    REQUIRE (clip.isValid());
+    phazite::addNote (context, clip, 60, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (1.0), 100);
+
+    const auto copies = phazite::duplicateTracks ({ tracks["A"] }, nullptr);
+    REQUIRE (copies.size() == 1);
+    const auto copy = phazite::getTrackID (*copies.getFirst());
+    phazite::mirror::reconcileClips (tracks["A"]->edit); // as anything that places the song's clips again would
+
+    // Each has its clip, the copy's with an ID of its own, which plays its own copy of the note.
+    const auto originalClips = phazite::getClips (context, original), copiedClips = phazite::getClips (context, copy);
+    REQUIRE (originalClips.size() == 1);
+    REQUIRE (copiedClips.size() == 1);
+    CHECK (originalClips[0].id == clip);
+    CHECK (copiedClips[0].id != clip);
+    CHECK (phazite::getNotes (context, { copiedClips[0].id }).size() == 1);
+    CHECK (phazite::getNotes (context, { clip }).size() == 1);
 }
 
 TEST_CASE ("The selected tracks, or all of them")
