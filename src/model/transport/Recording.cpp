@@ -56,9 +56,18 @@ void startRecording (te::Edit& edit)
         transport.setLoopRange ({ transport.isPlaying() ? transport.getPosition() : getPlayStart (edit), te::Edit::getMaximumEditEnd() });
     }
 
-    // With no input of Tracktion's armed: audio is Phazite's to record (AudioRecorder.h), and Tracktion records what is
-    // played on MIDI.
+    // With no input of Tracktion's armed: audio is Phazite's to record (AudioRecorder.h), its recordings ready before
+    // playback starts and dropped if recording doesn't (Tracktion refuses a loop shorter than two seconds), and Tracktion
+    // records what is played on MIDI.
+    auto* recorder = AudioRecorder::findFor (edit);
+
+    if (recorder != nullptr)
+        recorder->prepareRecordings();
+
     transport.record (false, true);
+
+    if (recorder != nullptr && ! transport.isRecording())
+        recorder->discardRecordings();
 }
 
 void stopRecording (te::Edit& edit)

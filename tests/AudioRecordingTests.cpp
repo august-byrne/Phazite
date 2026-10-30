@@ -112,6 +112,23 @@ std::vector<juce::int64> findClicks (const std::vector<float>& song, double rate
 
     return clicks;
 }
+
+// Keeps the message thread busy, as a slow computer's can be, between Tracktion starting to play for a recording and
+// saying that recording started: blocks go by meanwhile.
+struct SlowToHear : te::TransportControl::Listener
+{
+    explicit SlowToHear (te::TransportControl& t)
+        : transport (t)
+    {
+        transport.addListener (this);
+    }
+
+    ~SlowToHear() override { transport.removeListener (this); }
+
+    void startVideo() override { std::this_thread::sleep_for (std::chrono::milliseconds (50)); } // once it plays
+
+    te::TransportControl& transport;
+};
 } // namespace
 
 TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is one undo step, and is heard while armed")
@@ -186,8 +203,8 @@ TEST_CASE ("What comes into an armed track's input while recording becomes a cli
     CHECK (file.getParentDirectory().getFullPathName() == studio.temp.folder.getChildFile ("Audio").getFullPathName());
     CHECK (file.getFileName() == juce::String ("Track 1 Take 1.wav"));
 
-    // Each click a beat apart, a block (256 frames at 48 kHz) after its beat: the time the output took to come back in,
-    // which this device doesn't report.
+    // Each click on its beat: the device's output comes back into its input a block (256 frames at 48 kHz) later, and
+    // Tracktion's clock puts each block that comes in where the song played the block before.
     const auto rate = 48000.0;
     const auto clicks = findClicks (renderTrack (*studio.track, 2.2, rate), rate);
     REQUIRE (clicks.size() >= 3);
@@ -195,7 +212,7 @@ TEST_CASE ("What comes into an armed track's input while recording becomes a cli
     for (size_t beat = 0; beat < clicks.size(); ++beat)
     {
         CAPTURE (beat);
-        CHECK (clicks[beat] == (juce::int64) (beat * 24000) + 256);
+        CHECK (clicks[beat] == (juce::int64) (beat * 24000));
     }
 
     // Undone, it is gone (its file stays, for redo).
@@ -203,20 +220,62 @@ TEST_CASE ("What comes into an armed track's input while recording becomes a cli
     CHECK (studio.track->getClips().isEmpty());
 }
 
-TEST_CASE ("The audio settings' correction moves what an input records earlier, onto its beats")
+TEST_CASE ("A take has all of its start however long the message thread takes to hear that recording started")
 {
     Studio studio;
     const RealTimePlayback playback (phazite::test::getEngine(), RealTimePlayback::Input::loopback);
     studio.recorder = std::make_unique<phazite::AudioRecorder> (*studio.edit);
     studio.arm();
-    phazite::setRecordingCorrection (phazite::test::getEngine(), 256.0 / 48.0); // the loop back's block, in milliseconds
+    const SlowToHear slow (studio.edit->getTransport()); // some 9 blocks
+    studio.record (1200);
+
+    const auto clips = studio.track->getClips();
+    REQUIRE (clips.size() == 1);
+    CHECK (clips.getFirst()->getPosition().getStart().inSeconds() == doctest::Approx (0.0).epsilon (0.001));
+    const auto clicks = findClicks (renderTrack (*studio.track, 1.2, 48000.0), 48000.0);
+    REQUIRE (clicks.size() >= 2);
+    CHECK (clicks[0] == 0); // the first beat's, on its beat, as in the test above
+    CHECK (clicks[1] == 24000);
+}
+
+TEST_CASE ("A take started while the song plays lands as one started from a stop does")
+{
+    Studio studio;
+    const RealTimePlayback playback (phazite::test::getEngine(), RealTimePlayback::Input::loopback);
+    studio.recorder = std::make_unique<phazite::AudioRecorder> (*studio.edit);
+    studio.arm();
+    phazite::playOrStop (*studio.edit);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&studio] { return studio.edit->getTransport().isPlaying(); }));
+    RealTimePlayback::wait (300); // into the first beat
+    studio.record (1200);
+
+    const auto clips = studio.track->getClips();
+    REQUIRE (clips.size() == 1);
+    CHECK (clips.getFirst()->getPosition().getStart().inSeconds() > 0.1);
+    CHECK (clips.getFirst()->getPosition().getStart().inSeconds() < 0.5);
+
+    // The second and third beats' clicks, on their beats.
+    const auto clicks = findClicks (renderTrack (*studio.track, 1.2, 48000.0), 48000.0);
+    REQUIRE (clicks.size() >= 2);
+    CHECK (clicks[0] == 24000);
+    CHECK (clicks[1] == 48000);
+}
+
+TEST_CASE ("The audio settings' correction moves what an input records earlier")
+{
+    Studio studio;
+    const RealTimePlayback playback (phazite::test::getEngine(), RealTimePlayback::Input::loopback);
+    studio.recorder = std::make_unique<phazite::AudioRecorder> (*studio.edit);
+    studio.arm();
+    phazite::setRecordingCorrection (phazite::test::getEngine(), 256.0 / 48.0); // a block, in milliseconds
     studio.record (1200);
     phazite::setRecordingCorrection (phazite::test::getEngine(), 0.0);
 
+    // The second and third beats' clicks a block early (the first beat's starts before the take, which cuts it).
     const auto clicks = findClicks (renderTrack (*studio.track, 1.2, 48000.0), 48000.0);
     REQUIRE (clicks.size() >= 2);
-    CHECK (clicks[0] == 0);
-    CHECK (clicks[1] == 24000);
+    CHECK (clicks[clicks.size() - 2] == 24000 - 256);
+    CHECK (clicks.back() == 48000 - 256);
 }
 
 TEST_CASE ("Recording round a looped range makes takes of one clip, the last whole one playing, and another is one undo step")

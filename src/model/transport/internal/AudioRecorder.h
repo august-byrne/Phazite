@@ -5,11 +5,12 @@
 // Tracktion lists the audio device's inputs, carries them to the tracks that hear them, and plays the transport with its
 // count-in, loop and punch; but its own audio recording locks and allocates on the audio thread at every block, and its
 // takes need a Tracktion project (docs/realtime-audit.md, finding 13). So Phazite records itself: each armed track's input
-// is copied, block by block, into a buffer of its own that no lock or allocation touches (Tracktion's input consumer, on
-// the audio thread), which a thread of Phazite's writes into a WAV file in the project's Audio folder; when recording
-// stops, the clips are made from those files, each placed where in the song its input came in (as Tracktion's own recording
-// finds it, from the device's clock) moved earlier by the delays the audio device reports for its input and output, kept
-// between where Tracktion's recording started and stopped, in the stop's undo step ("Record").
+// is copied, block by block from the first the song plays, into a buffer of its own that no lock or allocation touches
+// (Tracktion's input consumer, on the audio thread, in place before recording starts playback), which a thread of
+// Phazite's writes into a WAV file in the project's Audio folder; when recording stops, the clips are made from those
+// files, each placed where in the song its input came in (as Tracktion's own recording finds it, from the device's
+// clock) moved earlier by the delays the audio device reports for its input and output, kept between where Tracktion's
+// recording started and stopped, in the stop's undo step ("Record").
 //
 // It keeps the inputs as the tracks need them: the audio device's inputs open while a track is armed or always hears its
 // input (and closed otherwise, so that no microphone is open for nothing), each of Tracktion's inputs a channel alone or
@@ -47,8 +48,15 @@ public:
     // Whether Record would record audio: a track is armed, with an input the audio device has.
     bool canRecord() const;
 
-    // Whether audio is being recorded now.
+    // Whether audio is being recorded now, or is about to be.
     bool isRecording() const noexcept { return ! recordings.empty(); }
+
+    // Before recording starts (startRecording(), Recording.h): a recording of each armed track's input, which takes in
+    // what comes in from the first block the song plays. Tracktion starts playing before it says that recording started,
+    // and the message thread can take blocks to hear it: recordings made only then would lose the start of their takes.
+    // Recording starting starts them; if it doesn't start, discardRecordings() drops them.
+    void prepareRecordings();
+    void discardRecordings();
 
     // Brings the inputs in line with the tracks now, as it does by itself when they change.
     void update();
@@ -78,7 +86,7 @@ private:
     int regroupings = 0;              // asked of Tracktion in a row: it gets no more than a few tries
     bool updating = false;
 
-    void startRecordings (te::SyncPoint, std::optional<te::TimeRange> punch);
+    void startRecordings (te::SyncPoint, std::optional<te::TimeRange> punch); // those prepared
     void finishRecordings (te::SyncPoint stopped, bool discard);
     void removeConsumers();
     void makeClips (Recording&, te::SyncPoint stopped); // in the stop's undo step

@@ -63,7 +63,7 @@ The first column covers the warm-up after playback starts (about 0.5 s); the sec
 | An audio clip | 6 allocations, 3 frees (fewer if the file cache hits) | 0 |
 | Two tracks in a folder bus with Phazite's compressor | 13 allocations, 6 frees (a file cache miss logs in Debug builds) | 0 |
 | One empty track with two audio inputs enabled | 8 allocations, 4 frees | 0 |
-| An audio input recorded onto an armed track, heard as it comes in (step 3.4, measured 2026-10-29) | 6 allocations, 3 frees (the input's first buffers, finding 1, and the meters', finding 2) | 0 |
+| An audio input recorded onto an armed track, heard as it comes in (step 3.4, measured 2026-10-29) | 5 allocations, 2 frees (the input's first buffers, finding 1, and the meters', finding 2) | 0 |
 | A loop at 120 BPM stretched to 100 BPM, played from Phazite's render (a loop dropped from the browser; step 2.18) | 13 allocations, 9 frees (from a file cache miss) | 0 |
 | An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from Phazite's render (as the audio clip editor sets them, steps 2.6 and 2.18) | 3 allocations | 0 |
 | A loop at 120 BPM previewed at 100 BPM, stretched by Phazite into memory as it starts (the browser's preview, since 2026-10-28) | 9 allocations (the meters' and the device's, findings 2 and 3; SoundTouch's 21 allocations and 14 frees before) | 0 |
@@ -133,7 +133,7 @@ Steady playback is clean everywhere. Every scenario allocates something in its f
 
 **13. Recording** (source; Phazite's audio recording measured, step 3.4).
 - **What:** Tracktion's MIDI and audio recording paths lock, allocate and start timers on the audio thread. Its audio recording also writes each block under a lock, adds silence in buffers it allocates, and needs a Tracktion project for its takes.
-- **Action:** MIDI recording is Tracktion's (step 1.7), and its guarded scenario allocates nothing in steady playback. Audio recording is Phazite's own since step 3.4 (2026-10-29, `model/transport/internal/AudioRecorder.h`): Tracktion hands each armed track's input to a consumer of Phazite's, which copies it into a buffer of its own (a `juce::AbstractFifo`) with no lock or allocation, and a thread of Phazite's writes it into the file. The one lock left is the input's list of consumers, which the audio thread takes at each block and the message thread only as recording starts and stops. The guarded scenario records a tone onto an armed track that hears it, and allocates nothing once recording runs.
+- **Action:** MIDI recording is Tracktion's (step 1.7), and its guarded scenario allocates nothing in steady playback. Audio recording is Phazite's own since step 3.4 (2026-10-29, `model/transport/internal/AudioRecorder.h`): Tracktion hands each armed track's input to a consumer of Phazite's, which copies it into a buffer of its own (a `juce::AbstractFifo`) with no lock or allocation, and a thread of Phazite's writes it into the file. The one lock left is the input's list of consumers, which the audio thread takes at each block and the message thread only as recording starts and stops. The consumers are in place before recording starts playback, because Tracktion says that recording started only once it plays: added then, they lost a take's first blocks whenever the message thread was slow to hear it, as in the slower `linux-tsan` build (2026-10-29). The guarded scenario records a tone onto an armed track that hears it, and allocates nothing once recording runs.
 
 **14. The click track** (source): reads message-thread values on the audio thread without synchronisation. That's a data race rather than a lock. ThreadSanitizer in CI should show it. Report upstream.
 
@@ -184,9 +184,14 @@ Steady playback is clean everywhere. Every scenario allocates something in its f
 - **Why it is rare:** the message must be handled in the moment between those writes, on another thread; if the job still runs then, a timer tries again later. It happens once per render, not during playback.
 - **Action:** `tools/tsan-suppressions.txt` suppresses races in `RenderManager::handleAsyncUpdate()`, which only deletes finished jobs; Phazite's code runs on neither side. The fix belongs in Tracktion (delete a job once the pool has let go of it) or JUCE (clear the running flag last). Report upstream.
 
+**24. The hosted audio device opened again while a thread plays through it** (measured by ThreadSanitizer in CI, 2026-10-29).
+- **What:** Tracktion's hosted audio device keeps the callback it is started with in a plain pointer, which `HostedAudioDevice::start()` sets on the message thread whenever JUCE opens the device again, and which `processBlock()` reads on the thread that plays through the device, without synchronisation. The computer's own devices stop handing blocks to the callback before they change it. The audio recording tests (step 3.4) showed it five times: arming a track opened the device again while `RealTimePlayback`'s thread played through it.
+- **Why it is harmless to Phazite:** the app plays through the computer's own devices; only the tests use the hosted one.
+- **Action:** not suppressed. A suppression would have to name the reader, `HostedAudioDeviceType::processBlock`, which is on every stack of the tests' audio thread, so it would hide every race there. Instead the tests never open the device again while a thread plays through it (`tests/RealTimePlayback.h`): the device opens both its inputs, and arming a track opens it again only when an input that the track needs is closed. `AudioRecorder::update()` had also opened it again to name inputs that were open already, which the app never needs, as it opens no input by itself. The hosted device reports every input open whatever is asked of it, so opening and closing the inputs that armed tracks need is checked by hand, with an audio interface. Report upstream.
+
 ## Reporting upstream
 
-Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19, 20, 21 and 23. Posting is the owner's call.
+Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19, 20, 21, 23 and 24. Posting is the owner's call.
 
 ## Next
 

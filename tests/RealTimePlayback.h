@@ -14,7 +14,9 @@ namespace phazite::test
 {
 // Plays an Edit through Tracktion's hosted audio device for as long as it lives, on a thread that acts as the audio
 // thread and processes a block every block's length, so that what is played or moved meanwhile is recorded as the app
-// records it.
+// records it. Nothing may open the device again meanwhile: unlike the computer's own devices, the hosted one hands the
+// thread's blocks to the callback it was started with, which it sets and reads unsynchronised (docs/realtime-audit.md,
+// finding 24). Its inputs are all open, so arming a track to record needn't open it again.
 class RealTimePlayback
 {
 public:

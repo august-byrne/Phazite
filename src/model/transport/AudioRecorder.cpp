@@ -113,8 +113,7 @@ struct AudioRecorder::Recording : public te::InputDeviceInstance::Consumer
     }
 
     // Audio thread: the input's block, its track's channels copied into the buffer if there is room (lost otherwise, and
-    // said so), once the song plays; and the first time, where in the song (as if nothing looped) the block came in, as
-    // Tracktion's own recording finds it, from the device's clock.
+    // said so), once the song plays; and at the second, where in the song (as if nothing looped) the first frame came in.
     void acceptInputBuffer (choc::buffer::ChannelArrayView<float> block) override
     {
         if (! capturing.load (std::memory_order_acquire) || ! playback.isPlaying())
@@ -122,9 +121,14 @@ struct AudioRecorder::Recording : public te::InputDeviceInstance::Consumer
 
         const auto frames = (int) block.getNumFrames();
 
-        if (! hasStart.load (std::memory_order_relaxed))
+        // As Tracktion's own recording finds it, from the device's clock, which puts a block that comes in where the song
+        // played the block before; but taken at the second block. In the first block of playing from a stop, Tracktion
+        // syncs its playhead to where it starts only after the inputs come in, so the clock maps that block a block late:
+        // later than the blocks after it, and than a recording started while the song plays.
+        if (! hasStart.load (std::memory_order_relaxed) && copied > 0)
         {
-            startTime = playback.globalStreamTimeToEditTimeUnlooped (devices.getCurrentStreamTime()).inSeconds();
+            startTime =
+                playback.globalStreamTimeToEditTimeUnlooped (devices.getCurrentStreamTime()).inSeconds() - (double) copied / sampleRate;
             hasStart.store (true, std::memory_order_release);
         }
 
@@ -154,6 +158,7 @@ struct AudioRecorder::Recording : public te::InputDeviceInstance::Consumer
         }
 
         fifo.finishedWrite (size1 + size2);
+        copied += frames;
     }
 
     // The recorder's thread, then the message thread at the end: what has come in, into the file.
@@ -193,6 +198,7 @@ struct AudioRecorder::Recording : public te::InputDeviceInstance::Consumer
     juce::AbstractFifo fifo;
     std::unique_ptr<juce::AudioFormatWriter> writer;
     juce::int64 written = 0;
+    juce::int64 copied = 0; // into the buffer, by the audio thread
     std::atomic<bool> capturing { false }, overflowed { false };
     std::atomic<bool> hasStart { false };
     double startTime = 0.0; // where in the song, as if nothing looped, the first frame copied came in, once hasStart is set
@@ -346,7 +352,9 @@ void AudioRecorder::update()
     }
 
     // The audio device's inputs: those the tracks need opened, and those opened for them before and no longer needed
-    // closed again; the ones the user opened in the audio settings stay.
+    // closed again; the ones the user opened in the audio settings stay. Only a change opens the device again: then its
+    // channels are named, or JUCE would put back its default ones (none: Phazite opens no microphone by itself) whenever
+    // it opened again.
     if (auto* device = devices.deviceManager.getCurrentAudioDevice(); device != nullptr && numInputs > 0)
     {
         auto setup = devices.deviceManager.getAudioDeviceSetup();
@@ -360,7 +368,7 @@ void AudioRecorder::update()
                 channels.clearBit (channel);
         }
 
-        if (channels != setup.inputChannels || (setup.useDefaultInputChannels && ! wanted.isZero()))
+        if (channels != setup.inputChannels)
         {
             for (int channel = 0; channel < numInputs; ++channel)
                 openedForTracks.setBit (channel, wanted[channel] && (openedForTracks[channel] || ! setup.inputChannels[channel]));
@@ -421,6 +429,7 @@ void AudioRecorder::update()
 //==============================================================================
 void AudioRecorder::recordingStarted (te::SyncPoint start, std::optional<te::TimeRange> punch)
 {
+    prepareRecordings(); // prepared already when Phazite started recording; otherwise from now, missing what played before
     startRecordings (start, punch);
 }
 
@@ -429,13 +438,17 @@ void AudioRecorder::recordingStopped (te::SyncPoint stopped, bool discard)
     finishRecordings (stopped, discard);
 }
 
-void AudioRecorder::startRecordings (te::SyncPoint start, std::optional<te::TimeRange> punch)
+void AudioRecorder::prepareRecordings()
 {
+    if (isRecording())
+        return;
+
+    edit.getTransport().ensureContextAllocated(); // as recording would: the inputs that the recordings take in
     auto* playback = edit.getCurrentPlaybackContext();
     auto& devices = edit.engine.getDeviceManager();
     const auto rate = devices.getSampleRate();
 
-    if (playback == nullptr || rate <= 0.0 || isRecording())
+    if (playback == nullptr || rate <= 0.0)
         return;
 
     for (auto* track : getArmedTracks())
@@ -478,8 +491,16 @@ void AudioRecorder::startRecordings (te::SyncPoint start, std::optional<te::Time
             break;
         }
     }
+}
 
-    if (recordings.empty())
+void AudioRecorder::discardRecordings()
+{
+    finishRecordings ({}, true);
+}
+
+void AudioRecorder::startRecordings (te::SyncPoint start, std::optional<te::TimeRange> punch)
+{
+    if (recordings.empty() || started.has_value())
         return;
 
     started = start;
