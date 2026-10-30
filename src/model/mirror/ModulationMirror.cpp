@@ -35,13 +35,7 @@ namespace
     {
         if (const auto on = ! (bool) state[schema::deviceOff]; (modifier.enabledParam->getCurrentExplicitValue() >= 0.5f) != on)
         {
-            // Stored first without an undo step, as a control's first change is (model/devices/ParameterHandle.cpp): undoing
-            // the first switch would otherwise take the property away, and phazite::undo() would write it back as a step
-            // of its own.
-            if (! modifier.state.hasProperty (te::IDs::enabled))
-                modifier.state.setProperty (te::IDs::enabled, 1.0f, nullptr);
-
-            modifier.enabledParam->setParameter (on ? 1.0f : 0.0f, juce::sendNotification);
+            setValueSetByHand (*modifier.enabledParam, on ? 1.0f : 0.0f);
         }
 
         const auto values = state.getChildWithName (schema::VALUES);
@@ -52,7 +46,7 @@ namespace
 
             if (auto parameter = modifier.getAutomatableParameterByID (id.toString());
                 parameter != nullptr && ! juce::exactlyEqual (parameter->getCurrentExplicitValue(), (float) values[id]))
-                parameter->setParameter ((float) values[id], juce::sendNotification);
+                setValueSetByHand (*parameter, (float) values[id]);
         }
 
         if (auto* sequencer = dynamic_cast<te::StepModifier*> (&modifier))
@@ -174,7 +168,7 @@ namespace
                 macro->macroName = name;
 
             if (! juce::exactlyEqual (macro->getCurrentExplicitValue(), value))
-                macro->setParameter (value, juce::sendNotification);
+                setValueSetByHand (*macro, value);
         }
     }
 

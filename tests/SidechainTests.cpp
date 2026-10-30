@@ -109,7 +109,7 @@ TEST_CASE ("Picking a sidechain's source is one undo step, and deleting the sour
 {
     Song song;
     auto& ducker = song.add (*song.bass, TestSidechain::typeID);
-    auto& undoManager = song.edit->getUndoManager();
+    auto& undoManager = phazite::getSongUndoManager (*song.edit);
     CHECK (phazite::getSidechainSource (ducker) == nullptr);
 
     phazite::setSidechainSource (ducker, song.kick);
@@ -231,14 +231,14 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
 
     // On the bass, from the kick: quick, slow to let go, deep; the key whole, as the kick plays no drum sampler.
     auto& compressor = addCompressor (*song.bass);
-    song.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
     phazite::setSidechainSource (compressor, song.kick);
     CHECK (valueOf (compressor, "threshold") == doctest::Approx (-30.0f));
     CHECK (valueOf (compressor, "ratio") == doctest::Approx (8.0f));
     CHECK (valueOf (compressor, "attack") == doctest::Approx (1.0f));
     CHECK (valueOf (compressor, "release") == doctest::Approx (150.0f));
     CHECK (valueOf (compressor, "keyHighCut") == doctest::Approx (20000.0f));
-    CHECK (song.edit->getUndoManager().getUndoDescription() == juce::String ("Sidechain from Kick"));
+    CHECK (phazite::getSongUndoManager (*song.edit).getUndoDescription() == juce::String ("Sidechain from Kick"));
 
     // One step: undo puts back both the source and the settings.
     phazite::undo (*song.edit);
@@ -263,13 +263,13 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
 TEST_CASE ("Duck Under puts a compressor on a track, ducking under another, as one undo step")
 {
     Song song;
-    song.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
     auto* compressor = phazite::duckUnder (*song.bass, *song.kick);
     REQUIRE (compressor != nullptr);
     CHECK (compressor->getOwnerTrack() == song.bass);
     CHECK (phazite::getSidechainSource (*compressor) == song.kick);
     CHECK (compressor->getAutomatableParameterByID ("ratio")->getCurrentValue() == doctest::Approx (8.0f));
-    CHECK (song.edit->getUndoManager().getUndoDescription() == juce::String ("Duck Bass Under Kick"));
+    CHECK (phazite::getSongUndoManager (*song.edit).getUndoDescription() == juce::String ("Duck Bass Under Kick"));
 
     phazite::undo (*song.edit);
     CHECK (song.bass->pluginList.getPluginsOfType<phazite::DevicePlugin>().isEmpty());

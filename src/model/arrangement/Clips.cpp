@@ -28,7 +28,7 @@ namespace
 
     juce::UndoManager* getUndo (te::Edit& edit)
     {
-        return &edit.getUndoManager();
+        return &getSongUndoManager (edit);
     }
 
     // The latest a clip can end: where its audio does, for an audio clip that doesn't loop (Tracktion's longest takes no

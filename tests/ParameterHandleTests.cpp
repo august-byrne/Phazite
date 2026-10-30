@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "devices/reverb/Reverb.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
@@ -63,7 +64,7 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto reverb = addReverb (*edit);
     phazite::test::settle();
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     auto handle = phazite::makeParameterHandle (reverb.get(), "size"); // its steps are called "Change Size"
 
@@ -130,7 +131,7 @@ TEST_CASE ("A gesture begun during another for the same project joins it: a drag
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto reverb = addReverb (*edit);
     phazite::test::settle();
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     auto size = phazite::makeParameterHandle (reverb.get(), "size", "Move Both");
     auto damping = phazite::makeParameterHandle (reverb.get(), "damping");

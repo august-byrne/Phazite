@@ -8,6 +8,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -115,11 +116,11 @@ TEST_CASE ("The playlist's rows are its tracks top to bottom, without those in c
     CHECK (phazite::getTrackRow (context, idOf (*song.b))->depth == 1);
 
     // Heights are view state: no undo steps.
-    song.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
     CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->savedHeight.has_value());
     phazite::setSavedTrackHeight (context, idOf (*song.a), 120);
     CHECK (phazite::getTrackRow (context, idOf (*song.a))->savedHeight.value_or (0) == 120);
-    CHECK_FALSE (song.edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*song.edit).canUndo());
 
     // A track with an instrument takes a double-click's MIDI clip.
     CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->hasInstrument);
@@ -140,7 +141,7 @@ TEST_CASE ("Tracks by ID are renamed, colored, moved and added, each as one undo
 {
     Song song;
     auto& context = song.context;
-    auto& undo = song.edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*song.edit);
     undo.clearUndoHistory();
 
     phazite::renameTrack (context, idOf (*song.a), "Lead");
@@ -331,7 +332,7 @@ TEST_CASE ("Sections by ID are added, renamed, colored, moved, copied and resize
 {
     Song song;
     auto& context = song.context;
-    auto& undo = song.edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*song.edit);
     const auto startsOf = [&context]
     {
         std::vector<double> starts;

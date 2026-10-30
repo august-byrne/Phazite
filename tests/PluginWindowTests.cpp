@@ -6,6 +6,7 @@
 #include "UiTestHelpers.h"
 #include "app/PluginWindow.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
@@ -37,7 +38,7 @@ struct Studio
         plugin = dynamic_cast<te::ExternalPlugin*> (phazite::insertDevice (*te::getAudioTracks (edit)[0], TestPlugin::create (edit)));
         REQUIRE (plugin != nullptr);
         setEdit (context, &edit);
-        edit.getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (edit).clearUndoHistory();
 
         phazite::ui::setPluginKeys (&keys);
         phazite::setPluginWindowServices (&services);
@@ -111,7 +112,7 @@ TEST_CASE ("A plug-in window's menu loads the presets saved for its plug-in into
     REQUIRE (phazite::saveDevicePreset (studio.context, phazite::getEffects (studio.context, track).back().id,
                                         studio.presetFile ("Test Effect/Not This One")));
     TestPlugin::setGain (*studio.plugin, 0.5f);
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
 
     menu = menuBar->getMenuForIndex (0, "Plug-in");
     CHECK (item (menu, { "Load Preset" }).isEnabled);

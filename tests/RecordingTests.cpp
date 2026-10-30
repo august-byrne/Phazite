@@ -7,6 +7,7 @@
 #include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
@@ -109,7 +110,7 @@ TEST_CASE ("What is played while recording becomes a clip on live MIDI's track, 
     RealTimePlayback::wait (200); // for Tracktion to rebuild its playback graph with the input armed
     REQUIRE (phazite::getLiveMidiTrack (*edit) == track);
     REQUIRE (phazite::canRecord (*edit));
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     phazite::startRecording (*edit);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&edit] { return phazite::isRecording (*edit); }));
@@ -135,7 +136,7 @@ TEST_CASE ("What is played while recording becomes a clip on live MIDI's track, 
     CHECK (note.getNoteNumber() == 60);
     CHECK (phazite::getNoteStart (*clip, note).inBeats() == doctest::Approx (0.5).epsilon (0.4)); // timing as played, roughly
     CHECK (note.getLengthBeats().inBeats() == doctest::Approx (0.5).epsilon (0.4));
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Record"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Record"));
 
     phazite::undo (*edit);
     CHECK (track->getClips().isEmpty());
@@ -225,7 +226,7 @@ void forgetWhatWasPlayed (te::Edit& edit)
     if (phazite::capture (edit, nullptr) != nullptr)
         phazite::undo (edit);
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
 }
 
 std::vector<double> getNoteBeats (te::MidiClip& clip)
@@ -300,7 +301,7 @@ TEST_CASE ("Capture while stopped, in a song without clips, sets the tempo from 
     for (size_t i = 0; i < beats.size(); ++i)
         CHECK (beats[i] == doctest::Approx ((double) i).epsilon (0.03));
 
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Capture"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Capture"));
     phazite::undo (*edit);
     CHECK (track->getClips().isEmpty());
     CHECK (phazite::getTempo (*edit) == doctest::Approx (120.0)); // the tempo with it

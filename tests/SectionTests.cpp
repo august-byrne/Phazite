@@ -51,7 +51,7 @@ struct Song
         if (const auto* outline = phazite::findOutline ("electronic"))
             phazite::applyOutline (*edit, *outline);
 
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { selection.deselectAll(); }
@@ -170,7 +170,7 @@ TEST_CASE ("Applying the electronic outline creates its seven sections at the pr
 
     const auto* outline = phazite::findOutline ("electronic");
     REQUIRE (outline != nullptr);
-    edit->getUndoManager().beginNewTransaction ("Apply Outline");
+    phazite::getSongUndoManager (*edit).beginNewTransaction ("Apply Outline");
     phazite::applyOutline (*edit, *outline);
 
     const auto sections = phazite::getSections (*edit);
@@ -201,7 +201,7 @@ TEST_CASE ("Applying the electronic outline creates its seven sections at the pr
     CHECK (phazite::getAppliedOutline (*edit) == juce::String ("electronic"));
 
     // Another outline replaces them, and undo brings them back.
-    edit->getUndoManager().beginNewTransaction ("Apply Outline");
+    phazite::getSongUndoManager (*edit).beginNewTransaction ("Apply Outline");
     phazite::applyOutline (*edit, *phazite::findOutline ("pop"));
     CHECK (phazite::getSections (*edit).size() == 10);
 
@@ -261,7 +261,7 @@ TEST_CASE ("Moving the Drop moves everything in it")
     song.addClip (0, 96, 160, "Riff"); // the first Drop, exactly
     song.addClip (1, 80, 112, "Fill"); // from the Build-up into the Drop
     song.addClip (0, 160, 176, "Pad"); // in the Breakdown
-    song.edit->getUndoManager().beginNewTransaction ("Move Section");
+    phazite::getSongUndoManager (*song.edit).beginNewTransaction ("Move Section");
 
     // Before the first Build-up.
     phazite::moveSection (*song.edit, song.id (2), at (64));
@@ -418,7 +418,7 @@ TEST_CASE ("The section commands")
 {
     Song song;
     song.addClip (0, 96, 160, "Riff");
-    auto& undoManager = song.edit->getUndoManager();
+    auto& undoManager = phazite::getSongUndoManager (*song.edit);
 
     song.selection.selectOnly (song.id (2));
     CHECK (phazite::getSelectedClips (song.selection).isEmpty()); // a section isn't a clip
@@ -560,7 +560,7 @@ TEST_CASE ("Each role has its palette colour")
 TEST_CASE ("Section edits made with the mouse are undo steps of their own, and new sections don't overlap")
 {
     Song song;
-    auto& undo = song.edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*song.edit);
 
     // Moving, copying and resizing, each named for Undo.
     phazite::moveSection (*song.edit, song.id (2), at (0.0));

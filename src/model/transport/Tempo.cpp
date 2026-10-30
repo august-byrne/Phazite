@@ -71,7 +71,7 @@ namespace
 
         void keepSpeed (juce::ValueTree clipState, double scale)
         {
-            auto* um = &edit.getUndoManager();
+            auto* um = &getSongUndoManager (edit);
 
             for (auto child : clipState)
             {
@@ -161,7 +161,7 @@ void insertTempoMapTime (te::Edit& edit, BeatPosition at, BeatDuration length)
 {
     for (auto entry : findTempoMap (edit))
         if (const auto beat = (double) entry[schema::mapBeat]; beat > 0.0 && beat >= at.inBeats())
-            entry.setProperty (schema::mapBeat, beat + length.inBeats(), &edit.getUndoManager());
+            entry.setProperty (schema::mapBeat, beat + length.inBeats(), &getSongUndoManager (edit));
 
     mirror::reconcileTempoMap (edit);
 }
@@ -179,9 +179,9 @@ void removeTempoMapTime (te::Edit& edit, BeatRange range)
             continue;
 
         if (beat < range.getEnd().inBeats())
-            map.removeChild (i, &edit.getUndoManager());
+            map.removeChild (i, &getSongUndoManager (edit));
         else
-            entry.setProperty (schema::mapBeat, beat - range.getLength().inBeats(), &edit.getUndoManager());
+            entry.setProperty (schema::mapBeat, beat - range.getLength().inBeats(), &getSongUndoManager (edit));
     }
 
     mirror::reconcileTempoMap (edit);
@@ -202,7 +202,7 @@ void setTempo (te::Edit& edit, double bpm)
 
     const UndoStep step (edit, "Change Tempo");
     const PatternsKeepTheirSpeed keepPatterns (edit); // unless they follow it
-    getFirstOfMap (edit, schema::TEMPO).setProperty (schema::bpm, rounded, &edit.getUndoManager());
+    getFirstOfMap (edit, schema::TEMPO).setProperty (schema::bpm, rounded, &getSongUndoManager (edit));
     mirror::reconcileTempoMap (edit); // which places the clips and the automation again, a clip that follows it stretched again
 }
 
@@ -258,9 +258,9 @@ void togglePatternsFollowTempo (te::Edit& edit)
     auto state = getPhaziteState (edit);
 
     if (doPatternsFollowTempo (edit))
-        state.setProperty (schema::patternsKeepTheirSpeed, true, &edit.getUndoManager());
+        state.setProperty (schema::patternsKeepTheirSpeed, true, &getSongUndoManager (edit));
     else
-        state.removeProperty (schema::patternsKeepTheirSpeed, &edit.getUndoManager());
+        state.removeProperty (schema::patternsKeepTheirSpeed, &getSongUndoManager (edit));
 }
 
 TimeSignature getTimeSignature (const te::Edit& edit)
@@ -282,8 +282,8 @@ void setTimeSignature (te::Edit& edit, TimeSignature timeSignature)
 
     const UndoStep step (edit, "Change Time Signature");
     auto first = getFirstOfMap (edit, schema::TIMESIGNATURE);
-    first.setProperty (schema::numerator, timeSignature.numerator, &edit.getUndoManager());
-    first.setProperty (schema::denominator, timeSignature.denominator, &edit.getUndoManager());
+    first.setProperty (schema::numerator, timeSignature.numerator, &getSongUndoManager (edit));
+    first.setProperty (schema::denominator, timeSignature.denominator, &getSongUndoManager (edit));
     mirror::reconcileTempoMap (edit);
 }
 

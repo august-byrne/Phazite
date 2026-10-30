@@ -820,8 +820,6 @@ namespace
 
         const auto values = saved[keys::parameters];
 
-        // Each value stored first without an undo step, as controls do (ParameterHandle.cpp), so that undoing the change
-        // puts the value back rather than taking it away.
         for (const auto& parameter : info.parameters)
         {
             const juce::Identifier id (toString (parameter.id));
@@ -829,7 +827,6 @@ namespace
             if (auto* found = findParameter (&device, id.toString()))
             {
                 const auto value = values.hasProperty (id) ? (float) values[id] : parameter.defaultValue;
-                found->setParameter (found->getCurrentValue(), juce::sendNotification);
                 setDeviceValue (*found, devices::constrain (parameter, value));
             }
         }
@@ -884,7 +881,7 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
     settings.setProperty (te::IDs::programNum, (int) saved[keys::program], nullptr);
     const UndoStep step (*edit, "Load Preset " + file.getFileNameWithoutExtension());
 
-    if (! edit->getUndoManager().perform (new PluginSettingsAction (*plugin, settings)))
+    if (! getSongUndoManager (*edit).perform (new PluginSettingsAction (*plugin, settings)))
         return false;
 
     applyMix (*plugin, saved);

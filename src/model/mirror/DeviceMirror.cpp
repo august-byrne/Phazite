@@ -137,7 +137,7 @@ namespace
         const auto play = [] (te::AutomatableParameter* level, float wanted)
         {
             if (level != nullptr && ! juce::exactlyEqual (level->getCurrentExplicitValue(), wanted))
-                level->setParameter (wanted, juce::sendNotification);
+                setValueSetByHand (*level, wanted);
         };
 
         play (wet, mix);
@@ -158,7 +158,7 @@ namespace
 
             if (auto* parameter = device.findParameter (description.id);
                 parameter != nullptr && ! juce::exactlyEqual (parameter->getCurrentExplicitValue(), wanted))
-                parameter->setParameter (wanted, juce::sendNotification);
+                setValueSetByHand (*parameter, wanted);
         }
 
         auto* undo = &device.edit.getUndoManager();
@@ -273,7 +273,7 @@ namespace
     void play (te::AutomatableParameter* parameter, float wanted)
     {
         if (parameter != nullptr && std::abs (parameter->getCurrentExplicitValue() - wanted) > 1.0e-5f)
-            parameter->setParameter (wanted, juce::sendNotification);
+            setValueSetByHand (*parameter, wanted);
     }
 
     // A channel's fader plays the song's volume and pan, set by hand (setChannelVolume() in Mixer.h): a track's, a return's,

@@ -48,7 +48,7 @@ struct Song
             phazite::addEffect (context, idOf (*a), find (effect));
 
         phazite::addEffect (context, idOf (*b), find ("phaziteEq"));
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }
@@ -311,9 +311,9 @@ TEST_CASE ("A container is the song's, with its name, mix and devices, which Tra
     REQUIRE (macros.size() == 1);
     CHECK (macros[0].name == juce::String ("Space"));
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 }
 
 TEST_CASE ("A container's macros modulate its devices; its track's modulators reach them too")

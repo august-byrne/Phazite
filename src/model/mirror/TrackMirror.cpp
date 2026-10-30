@@ -247,4 +247,14 @@ void reconcileTrackSwitches (te::Edit& edit)
     if (auto* master = edit.getMasterTrack())
         setAutomationMode (*master, findPhaziteState (edit).getChildWithName (schema::MASTER));
 }
+
+void reconcileAll (te::Edit& edit)
+{
+    reconcileTracks (edit);
+    reconcileTempoMap (edit);
+    reconcileClips (edit);
+    reconcileDevices (edit);
+    reconcileAutomation (edit);
+    reconcileTransport (edit);
+}
 } // namespace phazite::mirror

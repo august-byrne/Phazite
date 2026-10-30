@@ -49,7 +49,7 @@ struct Song
         REQUIRE (project != nullptr);
         phazite::ensureTracks (edit(), 2);
         setEdit (context, &edit());
-        edit().getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (edit()).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }
@@ -414,12 +414,12 @@ TEST_CASE ("A device's preset loads into a device of its kind, in place of its s
     phazite::setMix (*quiet, 0.6f);
     TestPlugin::setGain (*loud, 0.9f);
     phazite::setMix (*loud, 0.1f);
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
 
     // Saving the preset stores the plug-in's settings in the project, but is no undo step.
     const auto file = temp.folder.getChildFile ("Quiet" + juce::String (phazite::presetExtension));
     REQUIRE (phazite::saveDevicePreset (song.context, phazite::getDeviceID (*quiet), file));
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // Loaded into the loud one: its settings and mix, as one undo step named after the preset.
     REQUIRE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), file));
@@ -431,7 +431,7 @@ TEST_CASE ("A device's preset loads into a device of its kind, in place of its s
     phazite::undo (edit);
     CHECK (TestPlugin::getGain (*loud) == doctest::Approx (0.9f));
     CHECK (phazite::getMix (*loud) == doctest::Approx (0.1f));
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // Not into a device of another kind, nor a container's or a track's preset: none is an undo step.
     const auto eq = song.addEffect (song.track (0), "phaziteEq");
@@ -442,14 +442,14 @@ TEST_CASE ("A device's preset loads into a device of its kind, in place of its s
     const auto container = phazite::groupIntoContainer (song.context, { eq });
     const auto containerFile = temp.folder.getChildFile ("Chain" + juce::String (phazite::presetExtension));
     REQUIRE (phazite::saveDevicePreset (song.context, container, containerFile));
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
 
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), eqFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), trackFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getDeviceID (*loud), containerFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, phazite::getEffects (song.context, song.track (0)).back().id, containerFile));
     CHECK_FALSE (phazite::loadPresetInto (song.context, {}, file));
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
     CHECK (TestPlugin::getGain (*loud) == doctest::Approx (0.9f));
 
     // One of Phazite's own takes a preset of its type: the EQ in the container, as its Presets menu loads one.
@@ -476,7 +476,7 @@ TEST_CASE ("A preset loaded into one of Phazite's devices sets every parameter: 
     const auto file = temp.folder.getChildFile ("Lift" + juce::String (phazite::presetExtension));
     REQUIRE (file.replaceWithText (R"({ "kind": "device", "device": { "type": "phaziteEq", "name": "EQ", "instrument": false,
                                         "parameters": { "band1Gain": 3.0 } } })"));
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
 
     // Loaded: as a new EQ would be with the preset, every parameter.
     REQUIRE (phazite::loadPresetInto (song.context, eq, file));

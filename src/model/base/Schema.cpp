@@ -26,6 +26,17 @@ namespace
     {
         return (std::uint64_t) (juce::int64) song.getProperty (schema::nextID, (juce::int64) 0);
     }
+
+    // The song's undo history, as long as Tracktion keeps an Edit's: 30 steps at least.
+    struct SongUndo final : juce::ReferenceCountedObject
+    {
+        SongUndo() { undoManager.setMaxNumberOfStoredUnits (30000, 30); }
+
+        juce::UndoManager undoManager;
+    };
+
+    // Where the Edit's state holds it, on its root, which is never saved (a project file is the song alone).
+    const juce::Identifier songUndo { "phaziteSongUndo" };
 } // namespace
 
 juce::ValueTree getPhaziteState (te::Edit& edit)
@@ -36,6 +47,18 @@ juce::ValueTree getPhaziteState (te::Edit& edit)
 juce::ValueTree findPhaziteState (const te::Edit& edit)
 {
     return edit.state.getChildWithName (schema::PHAZITE);
+}
+
+juce::UndoManager& getSongUndoManager (const te::Edit& edit)
+{
+    auto root = edit.state;
+
+    if (auto* held = dynamic_cast<SongUndo*> (root[songUndo].getObject()))
+        return held->undoManager;
+
+    auto* made = new SongUndo();
+    root.setProperty (songUndo, juce::var (made), nullptr);
+    return made->undoManager;
 }
 
 std::uint64_t makeID (te::Edit& edit)

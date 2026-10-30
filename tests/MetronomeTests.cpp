@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The metronome and the count-in (src/model/transport/internal/Metronome.h).
 #include "TestHelpers.h"
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/project/internal/Project.h"
@@ -13,7 +14,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
     selection.setEdit (edit.get());
     phazite::CommandRegistry registry;
     phazite::addMetronomeCommands (registry, selection);
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     const auto* metronome = registry.find ("transport.metronome");
     REQUIRE (metronome != nullptr);
@@ -23,7 +24,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
     CHECK (phazite::isMetronomeOn (*edit));
     CHECK (metronome->isTicked());
     CHECK (edit->clickTrackEmphasiseBars.get()); // each bar's first beat louder
-    CHECK_FALSE (edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
 
     REQUIRE (registry.invoke ("transport.metronome"));
     CHECK_FALSE (phazite::isMetronomeOn (*edit));
@@ -41,7 +42,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
 
     REQUIRE (registry.invoke ("transport.countIn"));
     CHECK_FALSE (phazite::isCountInOn (*other));
-    CHECK_FALSE (edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
     selection.setEdit (nullptr);
 }
 

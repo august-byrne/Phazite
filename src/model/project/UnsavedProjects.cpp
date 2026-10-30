@@ -3,6 +3,7 @@
 #include "internal/Project.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
 
 #include <algorithm>
@@ -165,7 +166,8 @@ int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
         paths.add (file.getFullPathName());
 
     const auto added = importFiles (edit, paths, nullptr, te::BeatPosition());
-    edit.getUndoManager().clearUndoHistory(); // the project was just opened: restoring it is no undo step
+    getSongUndoManager (edit).clearUndoHistory(); // the project was just opened: restoring it is no undo step
+    edit.getUndoManager().clearUndoHistory();
     return added.size();
 }
 } // namespace phazite

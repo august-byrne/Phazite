@@ -293,7 +293,7 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (*te::getAudioTracks (edit)[0], kick, beats (0.0)));
     REQUIRE (clip != nullptr);
     REQUIRE (clip->getAudioFile().getFile().isAChildOf (project->getAudioFolder()));
-    REQUIRE (edit.getUndoManager().canUndo());
+    REQUIRE (phazite::getSongUndoManager (edit).canUndo());
     REQUIRE (project->autosave().wasOk());
     REQUIRE (phazite::Project::getAutosaveFile (oldFile).existsAsFile());
 
@@ -309,7 +309,7 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     CHECK (project->getFile() == newFile);
     CHECK (newFile.existsAsFile());
     CHECK_FALSE (project->hasUnsavedChanges());
-    CHECK (edit.getUndoManager().canUndo());
+    CHECK (phazite::getSongUndoManager (edit).canUndo());
 
     // The clip plays the new folder's copy of its audio. The old folder stays, for its owner to delete once the project
     // has closed, without the autosave, whose changes are saved now.
@@ -383,10 +383,10 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
     // It is opened from its save: Tracktion put what was added in order while loading, and nothing of it is an undo step
     // or, once Tracktion's updates arrive, an unsaved change.
     CHECK (project->getFile().existsAsFile());
-    CHECK_FALSE (project->getEdit().getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (project->getEdit()).canUndo());
     phazite::test::settle();
     CHECK_FALSE (project->hasUnsavedChanges());
-    CHECK_FALSE (project->getEdit().getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (project->getEdit()).canUndo());
 }
 
 TEST_CASE ("A project with MIDI clips and an alias opens without unsaved changes")
@@ -565,7 +565,7 @@ TEST_CASE ("A write mode, the master's too, is an unsaved change without an undo
     phazite::setAutomationMode (master, phazite::AutomationMode::latch);
     phazite::test::settle();
     CHECK (project->hasUnsavedChanges());
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
     CHECK (phazite::isWritingAutomation (edit));
 }
 
@@ -590,11 +590,11 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     // Without undo steps, so that the view settings below can be seen to make none. Tracktion marks the Edit changed when
     // its undo history changes (once the message about it arrives), so the project is saved after that; the save stores
     // the plug-in's settings, but is no undo step.
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::test::settle();
     REQUIRE (project->save().wasOk());
     REQUIRE_FALSE (project->hasUnsavedChanges());
-    REQUIRE_FALSE (edit.getUndoManager().canUndo());
+    REQUIRE_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // Every view setting: tracks' heights (one shown so short that it collapses), a collapsed folder, a pinned track, drum
     // mode and rows, both editors' grids, which gives the piano roll's its element, and where a device's window was (as the
@@ -616,7 +616,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
 
     // No unsaved change, nothing to undo, and nothing for autosave to write.
     CHECK_FALSE (project->hasUnsavedChanges());
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
     REQUIRE (project->autosave().wasOk());
     CHECK_FALSE (phazite::Project::getAutosaveFile (project->getFile()).exists());
 
@@ -630,7 +630,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     // Saved and opened again, they are all there. The save stores where the window was too, and finds it written.
     const auto trackID = track->itemID, otherID = other->itemID, folderID = folder->itemID, pluginID = plugin->itemID;
     REQUIRE (project->save().wasOk());
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
     const auto file = project->getFile();
     project = nullptr;
     project = openProject (file);
@@ -696,11 +696,11 @@ TEST_CASE ("Saving stores plug-ins' own settings, without an undo step")
     // Saved without undo steps. (Tracktion moves the new track into its place among the project's elements once the
     // message loop runs, through the undo manager, and marks the Edit changed when its undo history changes.)
     phazite::test::settle();
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::test::settle();
     REQUIRE (project->save().wasOk());
     REQUIRE_FALSE (project->hasUnsavedChanges());
-    REQUIRE_FALSE (edit.getUndoManager().canUndo());
+    REQUIRE_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // Its gain turned in its window: Tracktion notices within half a second, and it is an unsaved change. Saved, it is in
     // the project, with nothing to undo and nothing unsaved.
@@ -708,7 +708,7 @@ TEST_CASE ("Saving stores plug-ins' own settings, without an undo step")
     phazite::test::settle (1000);
     CHECK (project->hasUnsavedChanges());
     REQUIRE (project->save().wasOk());
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // Nor do autosave and saving a copy add an undo step.
@@ -719,7 +719,7 @@ TEST_CASE ("Saving stores plug-ins' own settings, without an undo step")
     juce::String error;
     const auto copy = project->saveCopyAs (temp.folder, "Copy", error);
     REQUIRE (copy.existsAsFile());
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // Opened again, the project plays the gain it was saved with, and the copy the one it had then.
     const auto file = project->getFile();

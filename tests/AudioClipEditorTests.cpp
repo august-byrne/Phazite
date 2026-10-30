@@ -10,6 +10,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -43,7 +44,7 @@ struct EditorScreen
         REQUIRE (imported.size() == 1);
         vocal = imported[0];
         context.getSongSelection().clear();
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
 
         phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
         phazite::ui::addTimelineCommands (registry, [this] { return &editor; });

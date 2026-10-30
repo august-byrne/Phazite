@@ -47,7 +47,7 @@ struct Notes
         selection.setNoteClips ({ phazite::getClipID (*clip) });
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addNoteCommands (registry, selection, [] { return 0.25; });
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Notes() { selection.deselectAll(); }
@@ -205,11 +205,11 @@ TEST_CASE ("Duplicating notes past their clip grows it only up to the next clip,
     REQUIRE (next != nullptr);
     auto& a = n.add (60, 6.0, 1.0);
     auto& b = n.add (64, 7.0, 0.5);
-    n.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*n.edit).clearUndoHistory();
     n.select ({ &a, &b });
 
     REQUIRE (n.registry.invoke ("edit.duplicate"));
-    CHECK (n.edit->getUndoManager().getUndoDescription() == juce::String ("Duplicate 2 Notes"));
+    CHECK (phazite::getSongUndoManager (*n.edit).getUndoDescription() == juce::String ("Duplicate 2 Notes"));
 
     const auto copies = phazite::getSelectedNotes (n.selection);
     REQUIRE (copies.size() == 2);
@@ -305,7 +305,7 @@ TEST_CASE ("A track has no key until one is chosen, and new tracks get the key c
     REQUIRE (track != nullptr);
     CHECK_FALSE (phazite::getTrackKey (*track).has_value());
 
-    edit->getUndoManager().beginNewTransaction();
+    phazite::getSongUndoManager (*edit).beginNewTransaction();
     phazite::setTrackKey (*track, phazite::Key { 9, phazite::Scale::minor });
     const auto key = phazite::getTrackKey (*track);
     REQUIRE (key.has_value());
@@ -320,10 +320,10 @@ TEST_CASE ("A track has no key until one is chosen, and new tracks get the key c
     CHECK (phazite::getTrackKey (*added)->scale == phazite::Scale::minor);
 
     // Turning it off is an undo step.
-    edit->getUndoManager().beginNewTransaction();
+    phazite::getSongUndoManager (*edit).beginNewTransaction();
     phazite::setTrackKey (*track, std::nullopt);
     CHECK_FALSE (phazite::getTrackKey (*track).has_value());
-    edit->getUndoManager().undo();
+    phazite::undo (*edit);
     CHECK (phazite::getTrackKey (*track).has_value());
 }
 
@@ -351,13 +351,13 @@ TEST_CASE ("Chord stamps and drum rows")
     CHECK (phazite::getNoteNumbersPlayed ({ n.clip }) == std::vector<int> { 70 });
 
     // The track keeps the rows' order and the hidden rows, as view settings.
-    n.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*n.edit).clearUndoHistory();
     phazite::setDrumRowOrder (track, { 70, 36 });
     CHECK (phazite::getDrumRowOrder (track) == std::vector<int> { 70, 36 });
     phazite::hideDrumRow (track, 37);
     phazite::hideDrumRow (track, 37);
     CHECK (phazite::getHiddenDrumRows (track) == std::vector<int> { 37 }); // once
-    CHECK_FALSE (n.edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*n.edit).canUndo());
 
     phazite::showAllDrumRows (track);
     CHECK (phazite::getHiddenDrumRows (track).empty());
@@ -368,7 +368,7 @@ TEST_CASE ("The note commands act on the selected notes, and take the arrow keys
     Notes n;
     auto& a = n.add (60, 4.0, 1.0);
     auto& b = n.add (64, 5.0, 1.0);
-    auto& undoManager = n.edit->getUndoManager();
+    auto& undoManager = phazite::getSongUndoManager (*n.edit);
 
     CHECK_FALSE (n.registry.find ("note.transposeUp")->isEnabled());
     n.select ({ &a, &b });
@@ -487,7 +487,7 @@ TEST_CASE ("The piano roll's key menu, Alt and the wheel, and an applied transfo
     REQUIRE (clip != nullptr);
     auto* note = phazite::addNote (*clip, 60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100);
     REQUIRE (note != nullptr);
-    auto& undo = edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*edit);
     undo.clearUndoHistory();
 
     phazite::chooseTrackKey (*track, phazite::Key { 9, phazite::Scale::minor });

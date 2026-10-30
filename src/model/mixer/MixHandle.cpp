@@ -12,17 +12,6 @@ struct MixHandle::Impl
     std::unique_ptr<Gesture> gesture;
 };
 
-namespace
-{
-    // As ParameterHandle does, the levels are stored first, without an undo step, so that undoing the first change plays
-    // the mix there was.
-    void storeMixWithoutUndo (te::Plugin& device)
-    {
-        for (auto* parameter : getMixParameters (device))
-            parameter->setParameter (parameter->getCurrentValue(), juce::sendNotification);
-    }
-} // namespace
-
 MixHandle makeMixHandle (te::Plugin& device)
 {
     auto impl = std::make_unique<MixHandle::Impl>();
@@ -73,7 +62,6 @@ void MixHandle::beginGesture()
     if (device == nullptr || impl->gesture != nullptr)
         return;
 
-    storeMixWithoutUndo (*device);
     impl->gesture = std::make_unique<Gesture> (device->edit, "Change Mix");
 }
 
@@ -90,7 +78,6 @@ void MixHandle::setValue (float mix)
         return;
     }
 
-    storeMixWithoutUndo (*device);
     const UndoStep step (device->edit, "Change Mix");
     setMix (*device, mix);
 }

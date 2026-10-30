@@ -271,7 +271,7 @@ int ProjectContext::getSongVersion() const noexcept
 juce::UndoManager* ProjectContext::getUndoManager() const noexcept
 {
     auto* edit = getEdit (*this);
-    return edit != nullptr ? &edit->getUndoManager() : nullptr;
+    return edit != nullptr ? &getSongUndoManager (*edit) : nullptr;
 }
 
 SongSelection& ProjectContext::getSongSelection() noexcept

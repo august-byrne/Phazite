@@ -5,6 +5,7 @@
 // a mixer channel.
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/Preview.h"
@@ -44,7 +45,7 @@ struct Song
             phazite::addEffect (context, track(), find (type));
 
         phazite::addContainerCommands (registry, getSelection (context));
-        edit().getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (edit()).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }

@@ -193,7 +193,7 @@ void setSidechainSource (te::Plugin& plugin, te::AudioTrack* source)
         return;
 
     const UndoStep step (plugin.edit, source != nullptr ? "Sidechain from " + getTrackName (*source) : juce::String ("Turn Sidechain Off"));
-    auto* undo = &plugin.edit.getUndoManager();
+    auto* undo = &getSongUndoManager (plugin.edit);
 
     if (source != nullptr)
         state.setProperty (schema::deviceSidechain, (juce::int64) getTrackID (*source).getRaw(), undo);
@@ -243,7 +243,7 @@ void forgetSidechainSources (const juce::Array<te::Track*>& tracks)
     for (const auto& chain : chains)
         for (auto device : getDeviceStates (chain))
             if (going.contains ((juce::int64) device[schema::deviceSidechain]))
-                device.removeProperty (schema::deviceSidechain, &edit.getUndoManager());
+                device.removeProperty (schema::deviceSidechain, &getSongUndoManager (edit));
 
     mirror::reconcileDevices (edit);
 }

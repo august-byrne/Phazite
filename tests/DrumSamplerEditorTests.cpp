@@ -5,6 +5,7 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -110,7 +111,7 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     const auto device = phazite::makeDeviceHandle (*plugin);
     auto* sampler = device.getProcessor<DrumSampler>();

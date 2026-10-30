@@ -53,12 +53,12 @@ TEST_CASE ("The tempo changes as one undo step, within Tracktion's limits, and c
     auto* track = te::getAudioTracks (*edit)[0];
     auto* clip = phazite::insertMidiClip (*track, { te::BeatPosition::fromBeats (8.0), te::BeatPosition::fromBeats (12.0) }, nullptr);
     REQUIRE (clip != nullptr);
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
     CHECK (phazite::getTempo (*edit) == doctest::Approx (120.0));
 
     phazite::setTempo (*edit, 90.004);
     CHECK (phazite::getTempo (*edit) == doctest::Approx (90.0));
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Change Tempo"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Tempo"));
     CHECK (clip->getStartBeat().inBeats() == doctest::Approx (8.0));
     CHECK (clip->getPosition().getStart().inSeconds() == doctest::Approx (8.0 * 60.0 / 90.0));
 
@@ -72,20 +72,20 @@ TEST_CASE ("The tempo changes as one undo step, within Tracktion's limits, and c
     CHECK (phazite::getTempo (*edit) == doctest::Approx (90.0));
 
     // The same tempo again changes nothing.
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
     phazite::setTempo (*edit, 90.0);
-    CHECK_FALSE (edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
 }
 
 TEST_CASE ("The time signature changes as one undo step, to one Phazite takes")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
     CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 4, 4 });
 
     phazite::setTimeSignature (*edit, { 6, 8 });
     CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 6, 8 });
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Change Time Signature"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Time Signature"));
 
     // Not 0 beats, nor a beat of a third of a note.
     for (const auto invalid : { phazite::TimeSignature { 0, 4 }, phazite::TimeSignature { 4, 3 }, phazite::TimeSignature { 33, 4 } })
@@ -135,9 +135,9 @@ TEST_CASE ("The tempo map is Phazite's own, which Tracktion's tempo sequence mir
     phazite::mirror::reconcileTempoMap (edit);
     CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (96.5));
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::mirror::reconcileTempoMap (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 }
 
 TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite renders, and leaves the others at their speed")
@@ -155,10 +155,10 @@ TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite r
     CHECK (phazite::getClipTempo (*loop) == doctest::Approx (120.0));
     CHECK_FALSE (phazite::isRendered (*loop)); // at its own tempo it plays its file
     CHECK (phazite::getClipTempo (*sound) == doctest::Approx (0.0));
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     phazite::setTempo (*edit, 100.0);
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Change Tempo"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Tempo"));
 
     // The loop keeps its beats: eight of them, stretched from its file's four seconds, played from a render.
     CHECK (loop->getStartBeat().inBeats() == doctest::Approx (0.0));
@@ -359,7 +359,7 @@ TEST_CASE ("Patterns follow the tempo, their notes on their beats, unless the so
     for (int i = 0; i < 4; ++i)
         phazite::test::addMidiNote (*clip, 60, te::BeatPosition::fromBeats (i), te::BeatDuration::fromBeats (0.5), 100);
 
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
     const auto noteBeat = [&clip] (int i) { return clip->getSequence().getNotes()[i]->getStartBeat().inBeats(); };
 
     // Following, they play twice as slowly at half the tempo.

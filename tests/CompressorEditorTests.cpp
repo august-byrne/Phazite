@@ -6,6 +6,7 @@
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -34,7 +35,7 @@ struct Song
         compressor = edit->getPluginCache().createNewPlugin (Compressor::typeID, {});
         REQUIRE (phazite::insertDevice (*tracks[1], compressor) != nullptr);
         phazite::test::settle();
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     float valueOf (const char* id) const { return compressor->getAutomatableParameterByID (id)->getCurrentValue(); }

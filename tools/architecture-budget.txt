@@ -28,13 +28,13 @@ cmake-sources                  0
 # Tracktion's side on purpose (T1's mirror) raises one, saying why.
 tracktion-arrangement        900
 tracktion-automation         179
-tracktion-base                68
+tracktion-base                70
 tracktion-chords              73
-tracktion-commands            43
-tracktion-devices            171
+tracktion-commands            31
+tracktion-devices            170
 tracktion-engine             166
-tracktion-mirror             240
-tracktion-mixer              652
+tracktion-mirror             242
+tracktion-mixer              651
 tracktion-modulation         122
 tracktion-notes              155
 tracktion-presets             83

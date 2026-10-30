@@ -89,18 +89,6 @@ struct ParameterHandle::Impl
     }
 };
 
-namespace
-{
-    // Tracktion stores a parameter's value only once it first changes, so undoing that first change would remove the
-    // value again, and phazite::undo() would put it back as a step of its own, which would cost the redo history. So
-    // the value is stored first, without an undo step: with the value unchanged, setParameter() only writes it, past
-    // the undo manager.
-    void storeValueWithoutUndo (te::AutomatableParameter& parameter)
-    {
-        parameter.setParameter (parameter.getCurrentValue(), juce::sendNotification);
-    }
-} // namespace
-
 ParameterHandle makeParameterHandle (te::Plugin* plugin, const juce::String& parameterID, const juce::String& undoName)
 {
     if (plugin == nullptr)
@@ -304,8 +292,6 @@ void ParameterHandle::beginGesture()
         return;
     }
 
-    storeValueWithoutUndo (*parameter);
-
     // Within another change's gesture (a drag that moves two parameters), it joins that gesture's step.
     if (Gesture::isInProgress (parameter->getEdit()))
         impl->joined = true;
@@ -335,7 +321,6 @@ void ParameterHandle::setValue (float value)
         return;
     }
 
-    storeValueWithoutUndo (*parameter);
     const UndoStep step (parameter->getEdit(), impl->undoName.isNotEmpty() ? impl->undoName : "Change " + parameter->getParameterName());
     setDeviceValue (*parameter, value);
 }

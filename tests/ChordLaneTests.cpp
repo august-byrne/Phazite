@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/chords/ChordModel.h"
 #include "model/chords/Progressions.h"
 #include "model/commands/internal/Undo.h"
@@ -259,7 +260,7 @@ TEST_CASE ("The inspector shows whether a part made from the chords follows them
         REQUIRE (clip != nullptr);
         {
             const phazite::UndoStep step (*edit, "Change Velocity");
-            clip->getSequence().getNotes().getFirst()->setVelocity (50, &edit->getUndoManager());
+            clip->getSequence().getNotes().getFirst()->setVelocity (50, &phazite::getSongUndoManager (*edit));
         }
         phazite::test::dispatchPendingMessages();
         CHECK_FALSE (toggle->getToggleState());

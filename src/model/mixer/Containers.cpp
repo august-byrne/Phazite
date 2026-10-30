@@ -203,7 +203,7 @@ te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>& effects)
 
     // The song's container, in the first one's place, with a new ID and name; the devices' elements go into it, with what
     // they hold of their states (which an undo brings back), and the mirror puts Tracktion's devices in its rack type.
-    auto* undo = &edit.getUndoManager();
+    auto* undo = &getSongUndoManager (edit);
     const auto id = DeviceID::fromRaw (makeID (edit));
     juce::ValueTree container (schema::CONTAINER);
     container.setProperty (schema::deviceID, (juce::int64) id.getRaw(), nullptr);
@@ -268,7 +268,7 @@ void ungroupContainer (te::RackInstance& container)
 
     // Its devices' elements go back in its place, in their order, and it goes with its macros and what they modulated; the
     // mirror moves Tracktion's devices out of its rack type, and takes away what its macros modulated.
-    auto* undo = &edit.getUndoManager();
+    auto* undo = &getSongUndoManager (edit);
     auto chain = state.getParent();
     auto index = chain.indexOf (state);
 
@@ -286,7 +286,7 @@ void setContainerName (te::Plugin& container, const juce::String& name)
 {
     if (auto state = findDeviceState (container.edit, getDeviceID (container)); state.hasType (schema::CONTAINER))
     {
-        state.setProperty (schema::containerName, name, &container.edit.getUndoManager());
+        state.setProperty (schema::containerName, name, &getSongUndoManager (container.edit));
         mirror::reconcileDevices (container.edit);
     }
 }
@@ -334,7 +334,7 @@ te::Plugin* insertIntoContainer (te::RackInstance& container, const te::Plugin::
 
     const auto devices = getDeviceStates (state);
     const auto at = juce::isPositiveAndBelow (index, (int) devices.size()) ? state.indexOf (devices[(size_t) index]) : -1;
-    state.addChild (makeDeviceState (*device), at, &container.edit.getUndoManager());
+    state.addChild (makeDeviceState (*device), at, &getSongUndoManager (container.edit));
     mirror::reconcileDevices (container.edit);
     return device.get();
 }
@@ -350,7 +350,7 @@ void moveInContainer (te::Plugin& device, int newIndex)
     // To the place of the device that is there now: after it when moving later, before it when moving earlier.
     const auto devices = getDeviceStates (container);
     const auto& target = devices[(size_t) juce::jlimit (0, (int) devices.size() - 1, newIndex)];
-    container.moveChild (container.indexOf (state), container.indexOf (target), &device.edit.getUndoManager());
+    container.moveChild (container.indexOf (state), container.indexOf (target), &getSongUndoManager (device.edit));
     mirror::reconcileDevices (device.edit);
 }
 

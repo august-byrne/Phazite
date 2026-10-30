@@ -54,7 +54,7 @@ struct Song
         setEdit (context, edit.get());
         clip = phazite::insertMidiClip (*te::getAudioTracks (*edit)[0], { beats (0.0), beats (4.0) }, nullptr);
         REQUIRE (clip != nullptr);
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }

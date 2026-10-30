@@ -107,4 +107,24 @@ void reconcileAutomation (te::Edit& edit)
             if (parameter->getCurve().getNumPoints() > 0 && ! findCurveState (edit, getParameterRef (*parameter)).isValid())
                 reconcileCurveOf (*parameter, {});
 }
+
+namespace
+{
+    int settingValues = 0; // how deep setValueSetByHand() calls are (message thread only)
+} // namespace
+
+void setValueSetByHand (te::AutomatableParameter& parameter, float value)
+{
+    const juce::ScopedValueSetter<int> setting (settingValues, settingValues + 1);
+    parameter.setParameter (value, juce::sendNotification);
+
+    // Tracktion moved a curve's one point to the value: the song's curve plays again.
+    if (parameter.getCurve().getNumPoints() > 0)
+        reconcileCurveOf (parameter, findCurveState (parameter.getEdit(), getParameterRef (parameter)));
+}
+
+bool isSettingValues()
+{
+    return settingValues > 0;
+}
 } // namespace phazite::mirror

@@ -4,6 +4,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/notes/NotesModel.h"
@@ -53,7 +54,7 @@ struct Song
         c = phazite::addNote (context, clip, 60, beat (4.0), beats (1.0), 100);
         e = phazite::addNote (context, clip, 64, beat (6.0), beats (1.0), 90);
         g = phazite::addNote (context, otherClip, 67, beat (1.0), beats (0.5), 80);
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }
@@ -129,7 +130,7 @@ TEST_CASE ("The piano roll's edits of notes by ID join the step they are in")
 {
     Song song;
     auto& context = song.context;
-    auto& undo = song.edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*song.edit);
 
     {
         const phazite::UndoStep step (*song.edit, "Edit Notes");
@@ -178,7 +179,7 @@ TEST_CASE ("A track's key and drum rows by ID")
 {
     Song song;
     auto& context = song.context;
-    auto& undo = song.edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*song.edit);
     const auto a = idOf (*song.a);
 
     CHECK_FALSE (phazite::getTrackKey (context, a).has_value());

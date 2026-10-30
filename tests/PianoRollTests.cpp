@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
@@ -29,7 +30,7 @@ struct PianoRollScreen
     {
         phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
 
         phazite::ui::addTimelineCommands (registry, [this] { return &pianoRoll; });
         pianoRoll.addCommands (registry);
@@ -174,7 +175,7 @@ TEST_CASE ("Selecting a track shows its clip nearest the playhead, or lets the f
     CHECK (screen.pianoRoll.getClips() == std::vector { phazite::getClipID (*started) });
 
     // One undo step takes back the clip with its note.
-    screen.edit->getUndoManager().undo();
+    phazite::undo (*screen.edit);
     CHECK (screen.tracks[1]->getClips().isEmpty());
 }
 
@@ -226,7 +227,7 @@ TEST_CASE ("A note drawn past its clip, where the next clip on the track starts,
     CHECK (next.getStartBeat().inBeats() == doctest::Approx (4.0));
     CHECK (next.getSequence().getNumNotes() == 0);
 
-    screen.edit->getUndoManager().undo(); // one step
+    phazite::undo (*screen.edit); // one step
     CHECK (first.getSequence().getNumNotes() == 0);
 }
 

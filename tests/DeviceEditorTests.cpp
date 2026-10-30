@@ -6,6 +6,7 @@
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
 #include "devices/eq/Equalizer.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -63,7 +64,7 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto eq = addDevice (*edit, Equalizer::typeID);
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     phazite::ui::DeviceKnobs knobs ((phazite::makeDeviceHandle (*eq)));
     REQUIRE (knobs.getNumKnobs() == 50);

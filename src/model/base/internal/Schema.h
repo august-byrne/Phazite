@@ -707,4 +707,10 @@ std::uint64_t findNextID (const juce::ValueTree& song);
 
 // Brings the song's count there (findNextID()), and Tracktion's next past that. As a project opens and saves.
 void countIDs (te::Edit&);
+
+// The song's undo history (T1, step 11): every change to the song is an undo step in it (model/commands/internal/Undo.h),
+// which phazite::undo() and redo() take back and forth, the mirror bringing Tracktion's Edit in line after. Tracktion's
+// own (te::Edit::getUndoManager()) records what the mirror tells Tracktion to do, which nothing takes back. The Edit holds
+// it for as long as it lives (on its state's root, which nothing saves).
+juce::UndoManager& getSongUndoManager (const te::Edit&);
 } // namespace phazite

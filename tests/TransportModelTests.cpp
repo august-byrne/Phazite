@@ -2,6 +2,7 @@
 // The transport and the tempo as the top bar reaches them, by plain values (src/model/transport/TransportModel.h), and
 // the engine as the UI reaches it (src/model/engine/EngineContext.h).
 #include "TestHelpers.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
@@ -16,7 +17,7 @@ TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each c
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    auto& undo = edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*edit);
 
     CHECK_FALSE (phazite::getTempoHandle (context).isValid()); // no project open
     CHECK (phazite::getTempoHandle (context).getValue() == doctest::Approx (120.0));
@@ -72,7 +73,7 @@ TEST_CASE ("The transport's switches and the time signature by the project's con
     CHECK (phazite::getTimeSignature (context) == phazite::TimeSignature { 4, 4 });
     phazite::setTimeSignature (context, { 6, 8 });
     CHECK (phazite::getTimeSignature (context) == phazite::TimeSignature { 6, 8 });
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Change Time Signature"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Time Signature"));
     setEdit (context, nullptr);
 }
 

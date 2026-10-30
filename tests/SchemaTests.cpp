@@ -6,7 +6,7 @@
 TEST_CASE ("Reading Phazite's state doesn't add it")
 {
     auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine()); // Tracktion's, not a song's (Project.h: createSongEdit())
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
     const auto numChildren = edit->state.getNumChildren();
 
     // A new Edit has none. Finding it adds nothing (adding counts as an unsaved change): the result is invalid, and
@@ -25,5 +25,5 @@ TEST_CASE ("Reading Phazite's state doesn't add it")
     CHECK (phazite::getPhaziteState (*edit) == state);
     CHECK (phazite::findPhaziteState (*edit) == state);
     CHECK (edit->state.getNumChildren() == numChildren + 1);
-    CHECK_FALSE (edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
 }

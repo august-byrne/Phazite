@@ -10,6 +10,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
@@ -52,7 +53,7 @@ struct Song
 
         phazite::addAutomationPoint (context, other, { beats (0.0), 0.3f });
         phazite::addAutomationPoint (context, other, { beats (16.0), 0.3f });
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }

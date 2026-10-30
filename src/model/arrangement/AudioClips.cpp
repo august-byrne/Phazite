@@ -17,7 +17,7 @@ namespace
 
     juce::UndoManager* getUndo (te::Edit& edit)
     {
-        return &edit.getUndoManager();
+        return &getSongUndoManager (edit);
     }
 
     // What a clip's sound is made from, and how (Schema.h).

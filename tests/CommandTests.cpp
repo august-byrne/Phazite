@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -21,8 +22,9 @@ phazite::Command makeCommand (const juce::String& id, const juce::String& name, 
 // A change to the Edit that goes through its undo manager.
 phazite::Command makeEditChange (const juce::String& id, const juce::String& name, te::Edit& edit, int value)
 {
-    auto command = makeCommand (id, name, [&edit, value] { edit.state.setProperty ("testValue", value, &edit.getUndoManager()); });
-    command.undoTarget = [&edit] { return &edit.getUndoManager(); };
+    auto command =
+        makeCommand (id, name, [&edit, value] { edit.state.setProperty ("testValue", value, &phazite::getSongUndoManager (edit)); });
+    command.undoTarget = [&edit] { return &phazite::getSongUndoManager (edit); };
     return command;
 }
 
@@ -30,7 +32,7 @@ phazite::Command makeEditChange (const juce::String& id, const juce::String& nam
 void setValueInOwnStep (te::Edit& edit, int value)
 {
     const phazite::UndoStep step (edit, "Set Value");
-    edit.state.setProperty ("testValue", value, &edit.getUndoManager());
+    edit.state.setProperty ("testValue", value, &phazite::getSongUndoManager (edit));
 }
 } // namespace
 
@@ -88,7 +90,7 @@ TEST_CASE ("The command palette's search ranks names, synonyms and categories")
 TEST_CASE ("A command that changes an Edit is one named undo step")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto& undo = edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*edit);
 
     // Before the registry, whose undo commands keep a reference to it.
     phazite::Selection selection { phazite::test::getEngine() };
@@ -148,7 +150,7 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
 TEST_CASE ("A model function that begins its own undo step is part of the step of the command that runs it")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto& undo = edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*edit);
     undo.clearUndoHistory();
 
     phazite::CommandRegistry registry;
@@ -158,7 +160,7 @@ TEST_CASE ("A model function that begins its own undo step is part of the step o
                                     setValueInOwnStep (*edit, 1);
                                     setValueInOwnStep (*edit, 2);
                                 });
-    command.undoTarget = [&edit] { return &edit->getUndoManager(); };
+    command.undoTarget = [&edit] { return &phazite::getSongUndoManager (*edit); };
     registry.add (std::move (command));
 
     // Run by the command, both changes are the command's one step.

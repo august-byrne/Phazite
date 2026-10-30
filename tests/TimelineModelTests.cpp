@@ -4,7 +4,9 @@
 #include "TestHelpers.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/SongGesture.h"
+#include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -110,7 +112,7 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
     }
 
     setEdit (context, edit.get());
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     {
         phazite::SongGesture gesture (context, "Rename Twice");
@@ -119,8 +121,8 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
         phazite::setTrackName (*track, "Twice");
     }
 
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Rename Twice"));
-    edit->getUndoManager().undo();
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Rename Twice"));
+    phazite::undo (*edit);
     CHECK (track->getName() == name);
 
     // Rolled back, it leaves the song as it was, and nothing to redo.

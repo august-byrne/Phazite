@@ -7,6 +7,7 @@
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -96,7 +97,7 @@ struct Screen
                         } });
 
         context.getSongSelection().selectOnly (track (0));
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
         phazite::test::dispatchPendingMessages();
     }
 

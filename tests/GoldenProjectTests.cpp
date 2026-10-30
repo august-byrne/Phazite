@@ -409,7 +409,7 @@ TEST_SUITE ("golden")
 
         // The first start shows no unsaved changes, and nothing to undo.
         CHECK_FALSE (project->hasUnsavedChanges());
-        CHECK_FALSE (project->getEdit().getUndoManager().canUndo());
+        CHECK_FALSE (phazite::getSongUndoManager (project->getEdit()).canUndo());
 
         saveReopenAndSaveAgain (std::move (project), "starter",
                                 "The starter project (addStarterContent), saved, reopened and saved again: tests/GoldenProjectTests.cpp");

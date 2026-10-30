@@ -7,6 +7,7 @@
 #include "UiTestHelpers.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -33,7 +34,7 @@ struct Screen
                                         project->getEdit().getPluginCache().createNewPlugin (WavetableSynth::typeID, {}));
         REQUIRE (synth != nullptr);
         phazite::test::settle();
-        project->getEdit().getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (project->getEdit()).clearUndoHistory();
 
         editor = std::make_unique<WavetableEditor> (phazite::makeDeviceHandle (*synth));
         window = std::make_unique<phazite::test::TestWindow> (*editor, editor->getWidth(), editor->getHeight());

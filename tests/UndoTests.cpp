@@ -4,6 +4,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
@@ -13,21 +14,21 @@ namespace
 std::unique_ptr<te::Edit> createEdit()
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
     return edit;
 }
 
 // A change that goes through the Edit's undo manager.
 void change (te::Edit& edit, const char* property, int value)
 {
-    edit.state.setProperty (property, value, &edit.getUndoManager());
+    edit.state.setProperty (property, value, &phazite::getSongUndoManager (edit));
 }
 } // namespace
 
 TEST_CASE ("An undo step begun inside another for the same Edit joins it")
 {
     auto edit = createEdit();
-    auto& undo = edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*edit);
 
     SUBCASE ("Inside another for the same Edit: one step, named after the outer one")
     {
@@ -96,7 +97,7 @@ TEST_CASE ("An undo step begun inside another for the same Edit joins it")
 
         CHECK (undo.getUndoDescription() == juce::String ("Outer"));
         CHECK (undo.getNumActionsInCurrentTransaction() == 2);
-        CHECK (other->getUndoManager().getUndoDescription() == juce::String ("Inner"));
+        CHECK (phazite::getSongUndoManager (*other).getUndoDescription() == juce::String ("Inner"));
 
         phazite::undo (*other);
         CHECK_FALSE (other->state.hasProperty ("b"));
@@ -146,7 +147,7 @@ TEST_CASE ("Undo and redo say what they would undo")
     CHECK (phazite::describeUndoOrRedo (nullptr) == juce::String ("Undo"));
 
     // An unnamed step, such as the one Tracktion begins after a pause: the bare verb.
-    edit->getUndoManager().beginNewTransaction();
+    phazite::getSongUndoManager (*edit).beginNewTransaction();
     change (*edit, "testValue", 2);
     CHECK (phazite::canUndo (*edit));
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo"));
@@ -197,7 +198,7 @@ TEST_CASE ("An undo that puts back what devices play keeps what it undid to redo
 TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back leaves nothing to undo or redo")
 {
     auto edit = createEdit();
-    auto& undo = edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*edit);
     phazite::test::settle(); // Tracktion's listener for undo steps is in place once messages are delivered
 
     {

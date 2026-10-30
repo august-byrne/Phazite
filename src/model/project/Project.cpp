@@ -56,6 +56,7 @@ namespace
         mirror::reconcileAutomation (edit);
         mirror::reconcileTransport (edit);
         ensureLoudnessMeter (edit);
+        getSongUndoManager (edit).clearUndoHistory();
         edit.getUndoManager().clearUndoHistory();
 
         if (! wasChanged)

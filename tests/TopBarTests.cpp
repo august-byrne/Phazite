@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
@@ -26,7 +27,7 @@ struct TopBarScreen
     {
         setEdit (context, edit.get());
         phazite::addMetronomeCommands (registry, getSelection (context));
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
 
         // The bar shows the project at its next update.
         REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return getTempoField().isEnabled(); }));
@@ -68,7 +69,7 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
     auto* other = phazite::insertTrack (*screen.edit, &track, nullptr);
     REQUIRE (other != nullptr);
     REQUIRE (phazite::insertMidiClip (*other, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, nullptr) != nullptr);
-    screen.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*screen.edit).clearUndoHistory();
 
     // Nothing shows until the tempo is dragged.
     auto* window = screen.topBar.getTopLevelComponent();
@@ -101,7 +102,7 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
     samplesMouse.click (samples->getLocalBounds().getCentre());
     CHECK (samples->getToggleState());
     CHECK (samples->getDescription() == juce::String ("All 2 follow the tempo"));
-    CHECK (screen.edit->getUndoManager().getUndoDescription() == juce::String ("Samples Follow Tempo"));
+    CHECK (phazite::getSongUndoManager (*screen.edit).getUndoDescription() == juce::String ("Samples Follow Tempo"));
 
     // Patterns: now they keep their speed.
     phazite::test::Mouse patternsMouse (*patterns);
@@ -126,11 +127,11 @@ TEST_CASE ("The top bar's tempo field shows the song's tempo, and a drag on it i
     mouse.dragTo (centre.translated (0, -20));
     mouse.release();
     CHECK (phazite::getTempo (*screen.edit) == doctest::Approx (130.0));
-    CHECK (screen.edit->getUndoManager().getUndoDescription() == juce::String ("Change Tempo"));
+    CHECK (phazite::getSongUndoManager (*screen.edit).getUndoDescription() == juce::String ("Change Tempo"));
 
     phazite::undo (*screen.edit);
     CHECK (phazite::getTempo (*screen.edit) == doctest::Approx (120.0)); // the whole drag
-    CHECK_FALSE (screen.edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*screen.edit).canUndo());
 
     // A change made elsewhere shows there.
     phazite::setTempo (*screen.edit, 95.5);

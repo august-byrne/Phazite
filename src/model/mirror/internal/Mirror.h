@@ -70,10 +70,21 @@ juce::ValueTree makeEditState (const juce::ValueTree& song);
 void reconcileModulation (te::Edit&);
 
 // Only the switches Tracktion keeps outside its undo history (the tracks' mute, solo and solo isolation), and the write
-// modes, which Phazite sets outside it: after an undo or a redo (phazite::undo(), model/commands/internal/Undo.h), which
-// puts the document's back but not those, when a step changed them (a bounce mutes the track it rendered); and after a
-// write mode changed. Begins no undo step, so the redo history stays.
+// modes, which Phazite sets outside it: after a write mode changed.
 void reconcileTrackSwitches (te::Edit&);
+
+// A parameter's value set by hand as the song has it, which Tracktion plays where nothing else moves it (a curve, a
+// modulator): how the mirror sets one. Tracktion moves a curve's one point to the value as it is set, as for a control
+// turned, which the song takes in then (model/automation/internal/Automation.h: adoptMovedPoint()); set by the mirror, it
+// is no change of the song's (isSettingValues()), and the song's curve plays again after.
+void setValueSetByHand (te::AutomatableParameter&, float value);
+bool isSettingValues();
+
+// Everything (T1, step 11): after the song's history took a step back or forth (phazite::undo() and redo(),
+// model/commands/internal/Undo.h), which changes the song alone, Tracktion's Edit is brought in line with it, part by part:
+// the tracks, the tempo map, the clips, the devices with the modulation and the frozen tracks, the automation and the
+// transport. Records nothing in the song's history, so its redo history stays.
+void reconcileAll (te::Edit&);
 
 // The transport's state that the song keeps (model/transport/internal/Playback.h, Metronome.h), which Tracktion keeps
 // outside its undo history: its transport loops, around the song or the range looped, starts playback where the song

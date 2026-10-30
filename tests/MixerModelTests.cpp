@@ -259,9 +259,9 @@ TEST_CASE ("A channel's devices are the song's, in order and on or off, which Tr
     phazite::mirror::reconcileDevices (edit);
     CHECK (played() == "Synth, EQ (off), Compressor");
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 }
 
 TEST_CASE ("The values set by hand of Phazite's own devices are the song's, and the mirror makes such a device from the song")
@@ -304,9 +304,9 @@ TEST_CASE ("The values set by hand of Phazite's own devices are the song's, and 
     CHECK (phazite::getDeviceID (*devices.getFirst()) == synth);
     CHECK (played() == doctest::Approx (2000.0f));
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 }
 
 TEST_CASE ("A plug-in is the song's: which it is, its mix, its settings as the project stores them; the mirror makes it from the song")
@@ -361,9 +361,9 @@ TEST_CASE ("A plug-in is the song's: which it is, its mix, its settings as the p
     CHECK (played()->wetGain->getCurrentValue() == doctest::Approx (0.25f));
     CHECK (played()->dryGain->getCurrentValue() == doctest::Approx (0.75f));
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // Taken away, it keeps in the song what it held then, for an undo to bring back.
     TestPlugin::setGain (*played(), 0.6f);
@@ -412,9 +412,9 @@ TEST_CASE ("A channel's volume and pan are the song's, which its fader plays one
     phazite::mirror::reconcileDevices (edit);
     CHECK (played() == doctest::Approx (-6.0f).epsilon (0.01));
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 }
 
 TEST_CASE ("A send is the song's, to a return by its track, which Tracktion's sends mirror one way")
@@ -464,9 +464,9 @@ TEST_CASE ("A send is the song's, to a return by its track, which Tracktion's se
     CHECK (phazite::getSends (*song.a).getFirst()->getGainDb() == doctest::Approx (-12.0f).epsilon (0.01));
     CHECK (phazite::getSendTargets (context, a)[0].send.has_value());
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // Removed, the song's goes, and Tracktion's with it.
     phazite::removeSend (context, phazite::getSends (context, a)[0].id);

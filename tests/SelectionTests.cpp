@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
@@ -48,7 +49,7 @@ struct Song
                                         { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
         REQUIRE (intro.isValid());
         REQUIRE (verse.isValid());
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { selection.deselectAll(); }

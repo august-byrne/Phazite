@@ -457,7 +457,7 @@ TEST_CASE ("New return tracks are numbered in turn")
 TEST_CASE ("The device menus' choices are undo steps named after the device")
 {
     Mix mix;
-    auto& undo = mix.edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*mix.edit);
     const auto types = phazite::getDeviceTypes (phazite::test::getEngine());
     const auto find = [&types] (const char* type)
     {
@@ -488,7 +488,7 @@ TEST_CASE ("The device menus' choices are undo steps named after the device")
 TEST_CASE ("The mixer strip's edits are undo steps of their own, and a mix drag is one")
 {
     Mix mix;
-    auto& undo = mix.edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*mix.edit);
     auto* eq = phazite::insertDevice (*mix.a, mix.create ("phaziteEq"));
     auto* compressor = phazite::insertDevice (*mix.a, mix.create ("phaziteCompressor"));
     REQUIRE (eq != nullptr);

@@ -7,6 +7,7 @@
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -31,7 +32,7 @@ struct Song
         plugin = edit->getPluginCache().createNewPlugin (typeID, {});
         phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
         phazite::test::settle();
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { plugin = nullptr; }

@@ -663,7 +663,7 @@ namespace
                 == nullptr)
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");
 
-            setTrackMuted (track, true, &edit.getUndoManager());
+            setTrackMuted (track, true, &getSongUndoManager (edit));
             setCollapsed (track, true);
             getSelection (context).selectOnly (bounced);
             return juce::Result::ok();

@@ -106,7 +106,7 @@ namespace
 
     juce::UndoManager* getUndoManager (te::MidiClip& clip)
     {
-        return &clip.edit.getUndoManager();
+        return &getSongUndoManager (clip.edit);
     }
 
     // Where a clip's notes count from in the song (its content start), and where it is, as the song has them.
@@ -848,7 +848,7 @@ std::optional<Key> getTrackKey (const te::Track& track)
 
 void setTrackKey (te::Track& track, const std::optional<Key>& key)
 {
-    writeKey (findTrackState (track), key, &track.edit.getUndoManager());
+    writeKey (findTrackState (track), key, &getSongUndoManager (track.edit));
 
     // What new tracks get; not an edit to undo.
     if (key.has_value())

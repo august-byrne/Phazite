@@ -28,7 +28,7 @@ struct ClipEdit
     {
         phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
         selection.setEdit (edit.get());
         phazite::addSelectionCommands (registry, selection, range);
     }
@@ -194,7 +194,7 @@ TEST_CASE ("Delete and duplicate act on the selected clips")
     // Duplicates go right after the selection: here, 8 beats later.
     CHECK (phazite::getCurrentName (*e.registry.find ("edit.duplicate")) == juce::String ("Duplicate 2 Clips"));
     REQUIRE (e.registry.invoke ("edit.duplicate"));
-    CHECK (e.edit->getUndoManager().getUndoDescription() == juce::String ("Duplicate 2 Clips"));
+    CHECK (phazite::getSongUndoManager (*e.edit).getUndoDescription() == juce::String ("Duplicate 2 Clips"));
 
     const auto copies = phazite::getSelectedClips (e.selection);
     REQUIRE (copies.size() == 2);
@@ -341,7 +341,7 @@ TEST_CASE ("Duplicate copies a time range right after it, and the range moves to
     CHECK (duplicate->isEnabled());
     CHECK (phazite::getCurrentName (*duplicate) == juce::String ("Duplicate Range"));
     REQUIRE (e.registry.invoke ("edit.duplicate"));
-    CHECK (e.edit->getUndoManager().getUndoDescription() == juce::String ("Duplicate Range"));
+    CHECK (phazite::getSongUndoManager (*e.edit).getUndoDescription() == juce::String ("Duplicate Range"));
 
     // The part inside the range goes right after it, in place of what was there; the clip it came from stays whole.
     CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
@@ -528,14 +528,14 @@ TEST_CASE ("A double-click's MIDI clip lasts a bar of the time signature there, 
 {
     ClipEdit e;
     phazite::setTimeSignature (*e.edit, { 3, 4 });
-    e.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*e.edit).clearUndoHistory();
 
     auto* clip = phazite::addMidiClipAt (*e.tracks[0], beats (6.0), &e.selection);
     REQUIRE (clip != nullptr);
     CHECK (clip->getStartBeat().inBeats() == doctest::Approx (6.0));
     CHECK (clip->getEndBeat().inBeats() == doctest::Approx (9.0));
     CHECK (phazite::getSelectedClips (e.selection) == juce::Array<te::Clip*> { clip });
-    CHECK (e.edit->getUndoManager().getUndoDescription() == juce::String ("Add MIDI Clip"));
+    CHECK (phazite::getSongUndoManager (*e.edit).getUndoDescription() == juce::String ("Add MIDI Clip"));
 
     phazite::undo (*e.edit);
     CHECK (e.tracks[0]->getClips().isEmpty());

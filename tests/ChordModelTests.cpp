@@ -293,7 +293,7 @@ TEST_CASE ("Parts made from the chords: a new track with the synth, notes that f
     REQUIRE (clip != nullptr);
     {
         const phazite::UndoStep step (*song.edit, "Change Velocity");
-        clip->getSequence().getNotes().getFirst()->setVelocity (60, &song.edit->getUndoManager());
+        clip->getSequence().getNotes().getFirst()->setVelocity (60, &phazite::getSongUndoManager (*song.edit));
     }
     CHECK_FALSE (phazite::followsChords (song.context, *part));
     phazite::changeLaneChord (song.context, beat (0.0), { 2, 0, ChordType::minor, 0 });

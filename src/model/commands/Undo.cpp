@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Undo.h"
+#include "model/base/internal/Schema.h"
 #include "model/mirror/internal/Mirror.h"
 
 #include <algorithm>
@@ -9,78 +10,16 @@ namespace phazite
 {
 namespace
 {
-    // Every parameter of an Edit: Tracktion's list leaves out the master track's modulators, which it doesn't visit.
-    juce::Array<te::AutomatableParameter*> getAllParameters (te::Edit& edit)
-    {
-        auto parameters = edit.getAllAutomatableParams (true);
-
-        if (auto master = edit.getMasterTrack())
-            if (auto* modulators = master->getModifierList())
-                for (auto* modulator : modulators->getModifiers())
-                    parameters.addArray (modulator->getAutomatableParameters());
-
-        return parameters;
-    }
-
-    // AutomatableParameter::valueTreePropertyChanged() updates a parameter's CachedValue when undo changes it, but not
-    // its currentValue, which the audio thread reads: this tells which stored values an undo or redo changes, so that
-    // their parameters play them. Parameters with a curve of their own follow it instead.
-    class StoredValueChanges : private te::AutomatableParameter::Listener
-    {
-    public:
-        explicit StoredValueChanges (te::Edit& edit)
-        {
-            for (auto* parameter : getAllParameters (edit))
-            {
-                before.add (parameter);
-                parameter->addListener (this);
-            }
-        }
-
-        ~StoredValueChanges() override
-        {
-            for (auto* parameter : before)
-                parameter->removeListener (this);
-        }
-
-        // Those still in the Edit, and those of devices and modulators the undo or redo brought back too: it puts back what
-        // they stored after making them. Not those of devices it took away, which play nowhere.
-        void play (te::Edit& edit)
-        {
-            for (auto* parameter : getAllParameters (edit))
-                if ((changed.contains (parameter) || ! before.contains (parameter)) && parameter->getCurve().getNumPoints() == 0)
-                    parameter->updateFromAttachedValue();
-        }
-
-    private:
-        juce::ReferenceCountedArray<te::AutomatableParameter> before; // kept while an undo deletes some
-        juce::Array<te::AutomatableParameter*> changed;
-
-        void curveHasChanged (te::AutomatableParameter&) override {}
-        void currentValueChanged (te::AutomatableParameter& parameter) override { changed.addIfNotAlreadyThere (&parameter); }
-
-        JUCE_DECLARE_NON_COPYABLE (StoredValueChanges)
-    };
-
-    // What Tracktion keeps outside its undo history follows the song's too: its tracks' switches, and its transport, whose
-    // seconds an undone tempo change moves (docs/tracktion-migration.md, T1).
+    // The song's history takes a step back or forth, and the mirror brings Tracktion's Edit in line with it
+    // (docs/tracktion-migration.md, T1 step 11): what plays follows the song, values set by hand included.
     template <typename UndoOrRedo>
     void undoOrRedo (te::Edit& edit, UndoOrRedo&& undoOrRedoIt)
     {
-        StoredValueChanges changes (edit);
         undoOrRedoIt();
-        changes.play (edit);
-        mirror::reconcileTrackSwitches (edit);
-        mirror::reconcileTransport (edit);
-
-        // A parameter plays a value by writing it into its device's state through the undo manager, which records it when
-        // the undo took the stored one away (a knob turned for the first time goes back to its default). Taken back at
-        // once, which gives back what there is to redo: JUCE puts that aside when anything is done after an undo.
-        if (auto& undoManager = edit.getUndoManager(); undoManager.getNumActionsInCurrentTransaction() > 0)
-            undoManager.undoCurrentTransactionOnly();
+        mirror::reconcileAll (edit);
     }
 
-    // The undo managers of the Edits with a gesture in progress (message thread only).
+    // The song's histories with a gesture in progress (message thread only).
     std::vector<juce::UndoManager*>& getOpenGestures()
     {
         static std::vector<juce::UndoManager*> open;
@@ -102,22 +41,22 @@ namespace
 
 void undo (te::Edit& edit)
 {
-    undoOrRedo (edit, [&edit] { edit.undo(); });
+    undoOrRedo (edit, [&edit] { getSongUndoManager (edit).undo(); });
 }
 
 void redo (te::Edit& edit)
 {
-    undoOrRedo (edit, [&edit] { edit.redo(); });
+    undoOrRedo (edit, [&edit] { getSongUndoManager (edit).redo(); });
 }
 
 bool canUndo (te::Edit& edit)
 {
-    return edit.getUndoManager().canUndo();
+    return getSongUndoManager (edit).canUndo();
 }
 
 bool canRedo (te::Edit& edit)
 {
-    return edit.getUndoManager().canRedo();
+    return getSongUndoManager (edit).canRedo();
 }
 
 void undoOrRedo (te::Edit& edit)
@@ -133,7 +72,7 @@ juce::String describeUndo (te::Edit* edit)
     if (edit == nullptr)
         return "Undo";
 
-    auto& undoManager = edit->getUndoManager();
+    auto& undoManager = getSongUndoManager (*edit);
     return withStep ("Undo", undoManager.canUndo(), undoManager.getUndoDescription());
 }
 
@@ -142,7 +81,7 @@ juce::String describeRedo (te::Edit* edit)
     if (edit == nullptr)
         return "Redo";
 
-    auto& undoManager = edit->getUndoManager();
+    auto& undoManager = getSongUndoManager (*edit);
     return withStep ("Redo", undoManager.canRedo(), undoManager.getRedoDescription());
 }
 
@@ -153,7 +92,7 @@ juce::String describeUndoOrRedo (te::Edit* edit)
 
 //==============================================================================
 UndoStep::UndoStep (te::Edit& edit, const juce::String& name)
-    : UndoStep (edit.getUndoManager(), name)
+    : UndoStep (getSongUndoManager (edit), name)
 {
 }
 
@@ -161,7 +100,7 @@ UndoStep::UndoStep (juce::UndoManager& manager, const juce::String& name)
     : undoManager (manager),
       outer (current)
 {
-    // Within a gesture, or another step for the same Edit, it joins that one.
+    // Within a gesture, or another step for the same song, it joins that one.
     auto joinsOuterStep = isInGesture (undoManager);
 
     for (auto* step = outer; step != nullptr && ! joinsOuterStep; step = step->outer)
@@ -182,11 +121,12 @@ UndoStep::~UndoStep()
 //==============================================================================
 Gesture::Gesture (te::Edit& e, const juce::String& name)
     : edit (e),
-      inhibitor (std::make_unique<te::Edit::UndoTransactionInhibitor> (e))
+      open (true)
 {
-    jassert (! isInGesture (edit.getUndoManager())); // one at a time for an Edit
-    edit.getUndoManager().beginNewTransaction (name);
-    getOpenGestures().push_back (&edit.getUndoManager());
+    auto& undoManager = getSongUndoManager (edit);
+    jassert (! isInGesture (undoManager)); // one at a time for a song
+    undoManager.beginNewTransaction (name);
+    getOpenGestures().push_back (&undoManager);
 }
 
 Gesture::~Gesture()
@@ -196,34 +136,33 @@ Gesture::~Gesture()
 
 void Gesture::commit()
 {
-    if (inhibitor == nullptr)
+    if (! open)
         return;
 
-    auto& open = getOpenGestures();
-    open.erase (std::remove (open.begin(), open.end(), &edit.getUndoManager()), open.end());
-    inhibitor.reset();
+    auto& gestures = getOpenGestures();
+    gestures.erase (std::remove (gestures.begin(), gestures.end(), &getSongUndoManager (edit)), gestures.end());
+    open = false;
 }
 
 bool Gesture::isInProgress (te::Edit& edit)
 {
-    return isInGesture (edit.getUndoManager());
+    return isInGesture (getSongUndoManager (edit));
 }
 
 void Gesture::rollBack()
 {
-    if (inhibitor == nullptr)
+    if (! open)
         return;
 
-    undoOrRedo (edit, [this] { edit.getUndoManager().undoCurrentTransactionOnly(); });
+    undoOrRedo (edit, [this] { getSongUndoManager (edit).undoCurrentTransactionOnly(); });
     commit();
 }
 
 //==============================================================================
 RecordingStep::RecordingStep (te::Edit& edit, const juce::String& name)
-    : inhibitor (edit)
 {
-    if (! isInGesture (edit.getUndoManager()))
-        edit.getUndoManager().beginNewTransaction (name);
+    if (auto& undoManager = getSongUndoManager (edit); ! isInGesture (undoManager))
+        undoManager.beginNewTransaction (name);
 }
 
 //==============================================================================
@@ -250,7 +189,7 @@ std::function<juce::UndoManager*()> undoTargetOf (const Selection& selection)
     return [&selection]() -> juce::UndoManager*
     {
         auto* edit = selection.getEdit();
-        return edit != nullptr ? &edit->getUndoManager() : nullptr;
+        return edit != nullptr ? &getSongUndoManager (*edit) : nullptr;
     };
 }
 } // namespace phazite

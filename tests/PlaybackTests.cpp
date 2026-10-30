@@ -202,7 +202,7 @@ TEST_CASE ("The loop, where playback starts and the metronome are the song's, wh
     Song song;
     auto& edit = *song.edit;
     auto& transport = edit.getTransport();
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
 
     // Beats 4 to 12 looped and playback starting at beat 6: at 120 BPM, 2 to 6 seconds and 3. None is an undo step.
     phazite::loopBeatRange (edit, 4.0, 12.0);
@@ -218,7 +218,7 @@ TEST_CASE ("The loop, where playback starts and the metronome are the song's, wh
     CHECK (song.isLooping());
     CHECK (transport.startPosition.get().inSeconds() == doctest::Approx (3.0));
     CHECK (edit.clickTrackEnabled.get());
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // They keep their beats when the tempo changes, when the change is undone, and when the time signature changes (a beat
     // is an eighth note in 6/8: a quarter of a second at 120 BPM).

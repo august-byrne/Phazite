@@ -5,6 +5,7 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -122,7 +123,7 @@ TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonan
     const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     const auto device = phazite::makeDeviceHandle (*plugin);
     phazite::ui::SynthEditor editor (device);

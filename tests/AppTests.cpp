@@ -108,7 +108,7 @@ TEST_CASE ("The first start makes My First Song, which its first save names and 
     // It is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (getEdit (session.getContext())->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*getEdit (session.getContext())).canUndo());
 }
 
 TEST_CASE ("A new project starts as the new-project window chooses, with the computer keyboard on its synth")
@@ -156,7 +156,7 @@ TEST_CASE ("A new project starts as the new-project window chooses, with the com
     // What it starts with is in its first save: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
 
     // Without instruments, a key or an outline: an empty song at 120 BPM in 4/4.
     phazite::NewProjectSettings plain;
@@ -300,7 +300,7 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     CHECK (session.getExportFolder() == temp.folder.getChildFile ("Exports")); // not the untitled project's own folder
 
     auto& edit = *getEdit (session.getContext());
-    session.getProject()->getPhaziteState().setProperty (phazite::schema::outline, "pop", &edit.getUndoManager());
+    session.getProject()->getPhaziteState().setProperty (phazite::schema::outline, "pop", &phazite::getSongUndoManager (edit));
     REQUIRE (session.getProject()->hasUnsavedChanges());
 
     // Save asks, from Documents/Phazite/Projects. Cancelled, the project stays untitled, its changes unsaved.
@@ -318,13 +318,13 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     CHECK (file.existsAsFile());
     CHECK_FALSE (session.isUntitled());
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK (edit.getUndoManager().canUndo());
+    CHECK (phazite::getSongUndoManager (edit).canUndo());
     CHECK (recent.getProjects() == juce::Array<juce::File> { file });
     CHECK (session.getExportFolder() == file.getSiblingFile ("Renders"));
     CHECK (errors.isEmpty());
 
     // Later saves don't ask.
-    session.getProject()->getPhaziteState().setProperty (phazite::schema::outline, "rock", &edit.getUndoManager());
+    session.getProject()->getPhaziteState().setProperty (phazite::schema::outline, "rock", &phazite::getSongUndoManager (edit));
     REQUIRE (registry.invoke ("project.save"));
     CHECK (suggested.size() == 2);
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
@@ -469,7 +469,7 @@ TEST_CASE ("An untitled song's recordings survive a crash before its first autos
     CHECK (played == juce::Array<juce::File> { take });
     CHECK (notices == juce::StringArray { "Recordings recovered" });
     CHECK (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 }
 
 TEST_CASE ("The run marker tells a start after Phazite didn't close properly")

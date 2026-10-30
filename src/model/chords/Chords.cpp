@@ -22,7 +22,7 @@ namespace
 
     juce::UndoManager* getUndo (te::Edit& edit)
     {
-        return &edit.getUndoManager();
+        return &getSongUndoManager (edit);
     }
 
     juce::ValueTree findLaneState (const te::Edit& edit)

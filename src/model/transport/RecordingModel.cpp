@@ -86,9 +86,9 @@ void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inp
     const UndoStep step (track->edit, "Change Input");
 
     if (inputID.isEmpty())
-        findTrackState (*track).removeProperty (schema::trackInput, &track->edit.getUndoManager());
+        findTrackState (*track).removeProperty (schema::trackInput, &getSongUndoManager (track->edit));
     else
-        findTrackState (*track).setProperty (schema::trackInput, inputID, &track->edit.getUndoManager());
+        findTrackState (*track).setProperty (schema::trackInput, inputID, &getSongUndoManager (track->edit));
 
     // The input chosen last comes first in the next track's list: remembered, not an undo step.
     if (inputID.isNotEmpty())
@@ -112,7 +112,7 @@ void setInputMonitoring (ProjectContext& context, TrackID id, InputMonitoring mo
         return;
 
     const UndoStep step (track->edit, "Change Input Monitoring");
-    auto* undoManager = &track->edit.getUndoManager();
+    auto* undoManager = &getSongUndoManager (track->edit);
 
     if (monitoring == InputMonitoring::whileArmed)
         findTrackState (*track).removeProperty (schema::trackMonitoring, undoManager);

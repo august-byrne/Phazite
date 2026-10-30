@@ -117,7 +117,7 @@ void applyOutline (te::Edit& edit, const Outline& outline)
         bar += section.bars;
     }
 
-    getPhaziteState (edit).setProperty (schema::outline, outline.id, &edit.getUndoManager());
+    getPhaziteState (edit).setProperty (schema::outline, outline.id, &getSongUndoManager (edit));
 }
 
 bool applyOutline (te::Edit& edit, const juce::String& outlineID)

@@ -5,6 +5,7 @@
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
@@ -34,7 +35,7 @@ struct Song
             if (each.description.fileOrIdentifier == juce::String ("phaziteCompressor"))
                 phazite::addEffect (context, phazite::getTrackID (*a), each);
 
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }

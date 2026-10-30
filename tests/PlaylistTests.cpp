@@ -9,6 +9,7 @@
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -40,7 +41,7 @@ struct PlaylistScreen
     {
         phazite::ensureTracks (*edit, 3);
         tracks = te::getAudioTracks (*edit);
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
 
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
         playlist.addCommands (registry);
@@ -212,7 +213,7 @@ TEST_CASE ("A clip dragged along its track takes the automation under it, Ctrl c
          { std::pair (0.0, 0.5f), std::pair (5.0, 0.5f), std::pair (6.0, 0.9f), std::pair (7.0, 0.5f), std::pair (16.0, 0.5f) })
         phazite::addAutomationPoint (screen.context, volume, { phazite::BeatPosition::fromBeats (beat), value });
 
-    screen.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*screen.edit).clearUndoHistory();
     phazite::test::dispatchPendingMessages();
 
     const auto valueAt = [&screen, &volume] (double beat)
@@ -299,7 +300,7 @@ TEST_CASE ("The row after the last track, and a double-click under it, add track
     CHECK (te::getAudioTracks (*screen.edit).size() == 5);
 
     // Each is an undo step.
-    screen.edit->getUndoManager().undo();
+    phazite::undo (*screen.edit);
     CHECK (te::getAudioTracks (*screen.edit).size() == 4);
 }
 
@@ -466,7 +467,7 @@ TEST_CASE ("With FL Studio's keymap, Ctrl+B repeats a selected time range, and t
     REQUIRE (starts.size() == 2);
     CHECK (starts[1] == doctest::Approx (8.0));
     CHECK (screen.getClipStarts (1).empty());
-    CHECK (screen.edit->getUndoManager().getUndoDescription() == juce::String ("Duplicate Range"));
+    CHECK (phazite::getSongUndoManager (*screen.edit).getUndoDescription() == juce::String ("Duplicate Range"));
     CHECK (screen.range.getRange().getStart().inBeats() == doctest::Approx (8.0));
     CHECK (screen.range.getRange().getEnd().inBeats() == doctest::Approx (16.0));
     const auto loop = screen.edit->tempoSequence.toBeats (transport.getLoopRange());
@@ -623,7 +624,7 @@ TEST_CASE ("Clips that overlap on a track show one under another, and each is gr
     auto& first = screen.addClip (0, 0.0, 8.0);
     auto& second = screen.addClip (0, 4.0, 8.0);
     auto& alone = screen.addClip (1, 0.0, 8.0);
-    screen.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*screen.edit).clearUndoHistory();
     phazite::test::dispatchPendingMessages();
 
     // The first, made first, above the second, a pixel apart, together as tall as a clip alone on its track.
@@ -726,7 +727,7 @@ TEST_CASE ("The sections strip adds, selects, resizes, moves and copies sections
 {
     PlaylistScreen screen;
     auto& context = screen.context;
-    auto& undo = screen.edit->getUndoManager();
+    auto& undo = phazite::getSongUndoManager (*screen.edit);
     screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (64.0) });
 
     auto* strip = phazite::test::findComponentWithTitle (screen.playlist, "Sections");
@@ -882,12 +883,12 @@ TEST_CASE ("A track without an instrument has an arm switch: with an input, a cl
     // With an input, a click arms the track; its header says what it records, and the click is no undo step.
     phazite::setTrackInput (screen.context, phazite::getTrackID (*screen.tracks[0]), "1");
     phazite::test::dispatchPendingMessages();
-    screen.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*screen.edit).clearUndoHistory();
     phazite::test::Mouse mouse (*arm);
     mouse.click (arm->getLocalBounds().getCentre());
     CHECK (phazite::isArmed (screen.context, phazite::getTrackID (*screen.tracks[0])));
     CHECK (arm->getToggleState());
-    CHECK_FALSE (screen.edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*screen.edit).canUndo());
     const auto labels = phazite::test::findAll<juce::Label> (screen.playlist);
     CHECK (
         std::any_of (labels.begin(), labels.end(), [] (juce::Label* label) { return label->isVisible() && label->getText() == "In 1"; }));

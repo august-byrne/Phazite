@@ -2,6 +2,7 @@
 // What the playlist's and the piano roll's tools share while the mouse is down (src/ui/timeline/TimelineGesture.h).
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -17,7 +18,7 @@ TEST_CASE ("A gesture's changes are one undo step, the first one's, however many
     const auto name = track->getName();
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     setEdit (context, edit.get());
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     {
         phazite::ui::TimelineGesture gesture;
@@ -27,10 +28,10 @@ TEST_CASE ("A gesture's changes are one undo step, the first one's, however many
         phazite::setTrackName (*track, "Moved");
     }
 
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Add Note"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Add Note"));
     phazite::undo (*edit);
     CHECK (track->getName() == name);
-    CHECK_FALSE (edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
 }
 
 TEST_CASE ("A gesture does each thing once, and finds where it began after the content scrolled")

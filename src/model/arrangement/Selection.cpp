@@ -6,6 +6,7 @@
 #include "internal/Sections.h"
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -112,7 +113,7 @@ namespace
 
 void RangeSelection::setInUndoStep (te::Edit& edit, te::BeatRange newRange, const juce::Array<te::Track*>& newTracks)
 {
-    edit.getUndoManager().perform (new SetRange (*this, edit, newRange, newTracks)); // the undo manager owns it
+    getSongUndoManager (edit).perform (new SetRange (*this, edit, newRange, newTracks)); // the undo manager owns it
 }
 
 //==============================================================================

@@ -22,7 +22,7 @@ namespace
 {
     juce::UndoManager* getUndo (te::Edit& edit)
     {
-        return &edit.getUndoManager();
+        return &getSongUndoManager (edit);
     }
 
     void collectTrackStates (const juce::ValueTree& parent, std::vector<juce::ValueTree>& states)

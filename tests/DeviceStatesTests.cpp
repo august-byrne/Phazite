@@ -52,6 +52,7 @@ void automate (te::AutomatableParameter& parameter)
     else
         parameter.getCurve().addPoint (te::TimePosition(), value, 0.0f, nullptr);
 
+    phazite::getSongUndoManager (parameter.getEdit()).clearUndoHistory();
     parameter.getEdit().getUndoManager().clearUndoHistory();
     parameter.updateToFollowCurve (te::TimePosition());
     REQUIRE_FALSE (juce::exactlyEqual (parameter.getCurrentValue(), parameter.getCurrentExplicitValue()));
@@ -74,6 +75,7 @@ struct Devices
         REQUIRE (modulator.has_value());
         lfo = modulator->modifier.get();
         phazite::test::settle();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
         edit->getUndoManager().clearUndoHistory();
 
         TestPlugin::setGain (*plugin, 0.25f);
@@ -106,7 +108,7 @@ TEST_CASE ("Storing an Edit's devices' states stores all that Tracktion's save w
     Devices devices;
     auto& edit = *devices.edit;
     phazite::storeDeviceStates (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // The plug-ins' own settings and channel layout, where the window was, and the values set by hand of the parameters
     // that automation moves.
@@ -145,7 +147,7 @@ TEST_CASE ("Storing an Edit's devices' states stores all that Tracktion's save w
 TEST_CASE ("Storing a device's, a container's or a track's devices' states leaves Tracktion's own nothing to store")
 {
     Devices devices;
-    auto& undoManager = devices.edit->getUndoManager();
+    auto& undoManager = devices.edit->getUndoManager(); // Tracktion's own, which its own stores write into
 
     phazite::storeDeviceState (*devices.plugin);
     devices.plugin->flushPluginStateToValueTree();
@@ -172,7 +174,7 @@ TEST_CASE ("Duplicates, containers and presets take devices' states as they are,
 {
     Devices devices;
     auto& edit = *devices.edit;
-    auto& undoManager = edit.getUndoManager();
+    auto& undoManager = phazite::getSongUndoManager (edit);
     const auto pluginID = devices.plugin->itemID;
     const auto findPlugin = [&edit, pluginID]
     {

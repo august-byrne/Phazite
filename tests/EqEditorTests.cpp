@@ -5,6 +5,7 @@
 #include "UiTestHelpers.h"
 #include "devices/core/Spectrum.h"
 #include "devices/eq/Equalizer.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -102,7 +103,7 @@ TEST_CASE ("Dragging an EQ band's dot moves its frequency and gain as one undo s
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto eq = addEq (*edit);
     phazite::test::settle();
-    edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*edit).clearUndoHistory();
 
     phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (*eq)));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());

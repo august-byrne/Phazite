@@ -6,6 +6,7 @@
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -45,7 +46,7 @@ struct Mix
         compressor = phazite::insertDevice (*bass, edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
         REQUIRE (compressor != nullptr);
 
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
         setEdit (context, edit.get());
     }
 
@@ -97,7 +98,7 @@ TEST_CASE ("A send knob for every return: no send until its first turn, which ma
     level.beginGesture();
     level.endGesture();
     CHECK (phazite::getSends (*mix.keys).isEmpty());
-    CHECK_FALSE (mix.edit->getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (*mix.edit).canUndo());
 
     // The first turn makes the send, after the fader, at the level turned to: one step.
     level.beginGesture();

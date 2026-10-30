@@ -202,7 +202,7 @@ namespace
         juce::ValueTree state;
         mutable bool changed = false;
 
-        juce::UndoManager* getUndo() const { return &edit.getUndoManager(); }
+        juce::UndoManager* getUndo() const { return &getSongUndoManager (edit); }
 
         void reconcile() const
         {
@@ -1104,10 +1104,11 @@ void adoptRecordedAutomation (te::Edit& edit)
 void adoptMovedPoint (te::AutomatableParameter& parameter)
 {
     // Tracktion moves a curve's one point to its parameter's value as the value changes, unless it records it
-    // (AutomatableParameter::setParameterValue()), in the step of the change; an undo or a redo puts back both.
+    // (AutomatableParameter::setParameterValue()), in the step of the change; but not as the mirror sets a value from the song
+    // (mirror::setValueSetByHand(), after an undo or a redo), which plays the song's curve again.
     const auto& moved = parameter.getCurve();
 
-    if (moved.getNumPoints() != 1 || parameter.isCurrentlyRecording() || parameter.getEdit().getUndoManager().isPerformingUndoRedo())
+    if (moved.getNumPoints() != 1 || parameter.isCurrentlyRecording() || mirror::isSettingValues())
         return;
 
     if (SongCurve curve (parameter); curve.getNumPoints() == 1 && ! juce::exactlyEqual (curve.getPointValue (0), moved.getPointValue (0)))
@@ -1235,7 +1236,7 @@ void copyLanesAndCurves (const te::Track& original, te::Track& copy, const te::E
         {
             auto copiedState = curve.createCopy();
             copiedState.setProperty (schema::curveDevice, toTracktion (copiedRef.device).toString(), nullptr);
-            automation.appendChild (copiedState, &edit.getUndoManager());
+            automation.appendChild (copiedState, &getSongUndoManager (edit));
             mirror::reconcileCurve (edit, copiedRef);
         }
     }

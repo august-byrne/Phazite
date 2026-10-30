@@ -8,6 +8,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/SongGesture.h"
 #include "model/commands/internal/Undo.h"
@@ -41,7 +42,7 @@ struct Song
         const auto imported = phazite::importFiles (context, { file.getFullPathName() }, phazite::getTrackID (*b), beat (0.0));
         REQUIRE (imported.size() == 1);
         audio = imported[0];
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }
@@ -146,7 +147,7 @@ TEST_CASE ("A reversed clip plays the same part of its audio, backwards, where i
     // The clip plays the file from half a second in, for two and a half seconds.
     phazite::trimClipStart (context, song.audio, beat (1.0));
     phazite::trimClipEnd (context, song.audio, beat (6.0));
-    song.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
 
     phazite::setClipReversed (context, song.audio, true);
     CHECK (song.get().reversed);
@@ -181,7 +182,7 @@ TEST_CASE ("A clip that follows the tempo keeps its start and its audio, and its
     Song song;
     auto& context = song.context;
     phazite::trimClipStart (context, song.audio, beat (2.0)); // it plays the file from a second in
-    song.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
 
     // From the song's tempo, so nothing changes yet.
     phazite::setClipFollowsTempo (context, song.audio, true);

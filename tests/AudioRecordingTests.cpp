@@ -36,7 +36,7 @@ struct Studio
         REQUIRE (file.create());
         edit->editFileRetriever = [file] { return file; };
         phazite::setTempo (*edit, bpm);
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
         phazite::setCountInOn (*edit, false);
         phazite::setMetronomeOn (*edit, true);
         track = te::getAudioTracks (*edit)[0];
@@ -158,14 +158,14 @@ TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is on
     phazite::setTrackInput (context, track, "1+2");
     CHECK (phazite::getTrackInput (context, track) == juce::String ("1+2"));
     CHECK (phazite::getLastInput (context) == juce::String ("1+2"));
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Change Input"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Input"));
     phazite::setArmed (context, track, true);
     CHECK (phazite::isArmed (context, track));
     CHECK (phazite::getArmedTracks (context) == std::vector { track });
     CHECK (phazite::getInputMonitoring (context, track) == phazite::InputMonitoring::whileArmed);
     phazite::setInputMonitoring (context, track, phazite::InputMonitoring::never);
     CHECK (phazite::getInputMonitoring (context, track) == phazite::InputMonitoring::never);
-    CHECK (edit->getUndoManager().getUndoDescription() == juce::String ("Change Input Monitoring"));
+    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Input Monitoring"));
 
     // Undoing the input leaves the track without one, and disarmed; arming is no undo step and isn't saved.
     phazite::undo (*edit);
@@ -196,7 +196,7 @@ TEST_CASE ("What comes into an armed track's input while recording becomes a cli
     phazite::movePlayhead (*studio.edit, te::TimePosition::fromSeconds (0.25));
     studio.record (2200);
     CHECK_FALSE (phazite::isRecording (*studio.edit));
-    CHECK (studio.edit->getUndoManager().getUndoDescription() == juce::String ("Record"));
+    CHECK (phazite::getSongUndoManager (*studio.edit).getUndoDescription() == juce::String ("Record"));
 
     const auto clips = studio.track->getClips();
     REQUIRE (clips.size() == 1);
@@ -320,7 +320,7 @@ TEST_CASE ("Recording round a looped range makes takes of one clip, the last who
     phazite::setClipTake (context, id, 1);
     CHECK (phazite::getClipTakes (context, id).playing == 1);
     CHECK (clip->getPosition().getOffset().inSeconds() == doctest::Approx (offset - bar).epsilon (0.0001));
-    CHECK (studio.edit->getUndoManager().getUndoDescription() == juce::String ("Choose Take"));
+    CHECK (phazite::getSongUndoManager (*studio.edit).getUndoDescription() == juce::String ("Choose Take"));
     phazite::undo (*studio.edit);
     CHECK (phazite::getClipTakes (context, id).playing == 2);
     setEdit (context, nullptr);
@@ -340,7 +340,7 @@ TEST_CASE ("Punched in, only what falls in the looped range is kept, in place of
     const RealTimePlayback playback (phazite::test::getEngine(), RealTimePlayback::Input::loopback);
     studio.recorder = std::make_unique<phazite::AudioRecorder> (*studio.edit);
     studio.arm();
-    studio.edit->getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (*studio.edit).clearUndoHistory();
 
     studio.record (4800);
     CHECK (phazite::isLoopOn (*studio.edit)); // back on after the take

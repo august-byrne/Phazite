@@ -42,7 +42,7 @@ struct Song
         setEdit (context, edit.get());
         phazite::chooseInstrument (context, idOf (*a), find ("phaziteSynth"));
         phazite::addEffect (context, idOf (*a), find ("phaziteCompressor"));
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }
@@ -177,9 +177,9 @@ TEST_CASE ("Modulators and macros are the song's, with what they modulate, which
     CHECK (phazite::getModulations (context, song.cutoff())[0].modulator == lfo);
     CHECK (phazite::getModulatorParameter (context, lfo, "rate").getValue() == doctest::Approx (4.0f));
 
-    edit.getUndoManager().clearUndoHistory();
+    phazite::getSongUndoManager (edit).clearUndoHistory();
     phazite::mirror::reconcileModulation (edit);
-    CHECK_FALSE (edit.getUndoManager().canUndo());
+    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
 
     // Removed, it goes from both, with what it modulates.
     phazite::removeModulator (context, lfo);

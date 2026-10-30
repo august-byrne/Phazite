@@ -67,8 +67,8 @@ public:
     // paints, and reads it again when this differs.
     int getSongVersion() const noexcept;
 
-    // The open project's undo manager, for the commands that change it (Command::undoTarget): none while no project is
-    // open.
+    // The open project's song's undo history, for the commands that change it (Command::undoTarget): none while no project
+    // is open.
     juce::UndoManager* getUndoManager() const noexcept;
 
     SongSelection& getSongSelection() noexcept;

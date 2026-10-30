@@ -5,6 +5,7 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
@@ -29,7 +30,7 @@ struct Screen
     {
         phazite::ensureTracks (*edit, 2);
         setEdit (context, edit.get());
-        edit->getUndoManager().clearUndoHistory();
+        phazite::getSongUndoManager (*edit).clearUndoHistory();
         phazite::test::dispatchPendingMessages();
     }
 

@@ -685,10 +685,10 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
                 if (auto* clip = place (loopStart, loopStart + length, frameOf (passStart) / rate))
                 {
                     auto clipState = findClipState (*clip);
-                    clipState.setProperty (schema::clipTakes, (int) takes.size(), &edit.getUndoManager());
+                    clipState.setProperty (schema::clipTakes, (int) takes.size(), &getSongUndoManager (edit));
                     clipState.setProperty (schema::clipTake, (int) (std::find (takes.begin(), takes.end(), playing) - takes.begin()) + 1,
-                                           &edit.getUndoManager());
-                    clipState.setProperty (schema::clipTakeLength, length, &edit.getUndoManager());
+                                           &getSongUndoManager (edit));
+                    clipState.setProperty (schema::clipTakeLength, length, &getSongUndoManager (edit));
                 }
 
                 return;
