@@ -28,8 +28,10 @@ public:
         loopback
     };
 
-    explicit RealTimePlayback (te::Engine& e, Input input = Input::silence)
-        : engine (e)
+    // With captureSeconds, it can keep that much of what it plays (startCapture()).
+    explicit RealTimePlayback (te::Engine& e, Input input = Input::silence, double captureSeconds = 0.0)
+        : engine (e),
+          captured (2, (int) (captureSeconds * sampleRate))
     {
         auto& deviceManager = engine.getDeviceManager();
         auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
@@ -68,6 +70,18 @@ public:
                         buffer.clear(); // otherwise what it played last comes back in
                     midi.clear();
                     audioIO.processBlock (buffer, midi);
+
+                    if (capturing.load (std::memory_order_acquire))
+                    {
+                        const auto at = capturedSamples.load (std::memory_order_relaxed);
+                        const auto length = std::min (blockSize, captured.getNumSamples() - at);
+
+                        for (int channel = 0; channel < captured.getNumChannels() && length > 0; ++channel)
+                            captured.copyFrom (channel, at, buffer, channel, 0, length);
+
+                        capturedSamples.store (at + length, std::memory_order_release);
+                    }
+
                     std::this_thread::sleep_until (nextBlock);
                 }
             });
@@ -96,13 +110,36 @@ public:
         dispatchMessagesUntil ([] { return false; }, milliseconds);
     }
 
-private:
+    // Keeps what it plays from the next block on, in stereo, until stopCapture() or the captureSeconds it was made with,
+    // which returns it. Message thread.
+    void startCapture()
+    {
+        capturedSamples.store (0, std::memory_order_relaxed);
+        capturing.store (true, std::memory_order_release);
+    }
+
+    juce::AudioBuffer<float> stopCapture()
+    {
+        capturing.store (false, std::memory_order_release);
+        const auto length = capturedSamples.load (std::memory_order_acquire); // what the audio thread wrote and won't touch again
+        juce::AudioBuffer<float> audio (captured.getNumChannels(), length);
+
+        for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+            audio.copyFrom (channel, 0, captured, channel, 0, length);
+
+        return audio;
+    }
+
     static constexpr double sampleRate = 48000.0;
+
+private:
     static constexpr int blockSize = 256;
     static constexpr int settleMilliseconds = 200;
 
     te::Engine& engine;
-    std::atomic<bool> stopping { false };
+    juce::AudioBuffer<float> captured; // made at once, so the audio thread never allocates
+    std::atomic<int> capturedSamples { 0 };
+    std::atomic<bool> capturing { false }, stopping { false };
     std::thread audioThread;
 };
 } // namespace phazite::test

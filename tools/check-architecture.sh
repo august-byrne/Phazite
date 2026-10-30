@@ -47,6 +47,11 @@
 #                             case (next to the including file, else from src/)
 #   cmake-sources             source paths in CMakeLists.txt that name no file exactly, and C/C++ files in src/
 #                             or tests/ that it doesn't list
+#   tracktion-AREA            te:: and tracktion:: names in each area of the model (src/model/AREA, one rule
+#                             for each of tracktion_areas), which the migration off Tracktion only lowers
+#                             (docs/tracktion-migration.md); tracktion-other counts them in a model area that
+#                             isn't listed yet, and tracktion-services, tracktion-app and tracktion-tests in
+#                             src/services, src/app and tests/
 # Comments and the text of string and character literals don't count. A C/C++ file in src/ outside the five
 # layers fails the check whatever the budgets.
 # Exit codes: 0 = every count equals its budget (and every raise checked says why); 1 = a count differs from
@@ -65,6 +70,8 @@ tracktion_preludes='src/model/base/internal/Tracktion.h'
 undo_functions='beginNewTransaction|UndoStep'
 # The undo code: the model files that may call beginNewTransaction.
 undo_implementation='src/model/commands/Undo.cpp'
+# The model's areas whose Tracktion names are counted, each as a rule of its own (tracktion-AREA).
+tracktion_areas='arrangement automation base chords commands devices engine mixer modulation notes presets project transport'
 
 budget_file=tools/architecture-budget.txt
 awk=${AWK:-awk}
@@ -126,6 +133,12 @@ function setup(    i, n, s, parts) {
     ruleNames = "upward-includes model-window-includes model-window-references model-tracktion-includes"
     ruleNames = ruleNames " model-undo-steps model-include-loops devices-tracktion ui-tracktion-includes ui-tracktion-references"
     ruleNames = ruleNames " ui-tracktion-aliases ui-undo-steps flat-files unresolved-includes cmake-sources"
+    n = split(areas, parts, " ")
+    for (i = 1; i <= n; i++) {
+        ruleNames = ruleNames " tracktion-" parts[i]
+        what["tracktion-" parts[i]] = "te:: and tracktion:: names in src/model/" parts[i]
+    }
+    ruleNames = ruleNames " tracktion-other tracktion-services tracktion-app tracktion-tests"
     nrules = split(ruleNames, rules, " ")
     for (i = 1; i <= nrules; i++) known[rules[i]] = 1
 
@@ -192,6 +205,15 @@ function setup(    i, n, s, parts) {
     instead["unresolved-includes"] = "give the path from src/ (or a same-folder bare name) with its exact case."
     what["cmake-sources"] = "CMakeLists.txt paths naming no file exactly, and C/C++ files under src/ or tests/ it doesn" q "t list"
     instead["cmake-sources"] = "list the file in its target" q "s target_sources, spelled as git ls-files prints it."
+    for (i = 1; i <= nrules; i++)
+        if (index(rules[i], "tracktion-") == 1)
+            instead[rules[i]] = "the migration off Tracktion (docs/tracktion-migration.md) only takes these away: use the model" q "s functions by IDs, beats and plain values; a phase that moves code to Tracktion" q "s side on purpose raises the budget, saying why."
+    what["tracktion-other"] = "te:: and tracktion:: names in a model area that tools/check-architecture.sh doesn" q "t list in tracktion_areas"
+    instead["tracktion-other"] = "add the area to tracktion_areas in tools/check-architecture.sh, and its budget to " BUDGETS "."
+    what["tracktion-services"] = "te:: and tracktion:: names in src/services"
+    what["tracktion-app"] = "te:: and tracktion:: names in src/app"
+    what["tracktion-tests"] = "te:: and tracktion:: names in tests/"
+    instead["tracktion-tests"] = "build the song through the model (tests/TestSong.h), by IDs, beats and plain values, rather than with Tracktion" q "s objects."
 }
 
 { sub(CR "$", "") }
@@ -317,6 +339,20 @@ function addFile(path) {
 
 # ---- Counting ----
 
+# The rule that counts a file's Tracktion names (tracktion-AREA), if one does.
+function tracktionRuleOf(path,    area) {
+    if (index(path, "src/model/") == 1) {
+        area = substr(path, 11)
+        if (index(area, "/") == 0) return "tracktion-other"
+        sub("/.*$", "", area)
+        return (("tracktion-" area) in known) ? "tracktion-" area : "tracktion-other"
+    }
+    if (index(path, "src/services/") == 1) return "tracktion-services"
+    if (index(path, "src/app/") == 1) return "tracktion-app"
+    if (index(path, "tests/") == 1) return "tracktion-tests"
+    return ""
+}
+
 function layerOf(path) {
     if (index(path, "src/model/") == 1) return "model"
     if (index(path, "src/services/") == 1) return "services"
@@ -338,10 +374,12 @@ function treeLine(line,    path, lineno, text, s) {
         rawend = ""
         curLayer = layerOf(path)
         curCxx = (path ~ CXX)
+        curTracktion = tracktionRuleOf(path)
     }
     if (!curCxx) return
     s = strip(text)
     if (s ~ reInclude) takeInclude(path, lineno, text, s)
+    if (curTracktion != "" && index(s, "::")) hitLine(curTracktion, path, lineno, text, count(s, reTracktionName))
     if (curLayer == "model" || curLayer == "services" || curLayer == "devices") {
         if (index(s, "juce::")) hitLine("model-window-references", path, lineno, text, count(s, reWindowClass))
         if (curLayer == "devices") {
@@ -872,16 +910,19 @@ src/model/a/Fixture.h:6:/* #include <juce_gui_extra/juce_gui_extra.h>
 src/model/a/Fixture.h:7:   juce::KeyPress k; */ juce::Component* c; juce::Colour col; juce::ComponentPeer* p;
 src/model/a/Fixture.h:8:auto s = "juce::KeyPress"; auto e = juce::KeyPress::escapeKey;
 src/model/a/Fixture.h:9:edit.getUndoManager().beginNewTransaction ("Add");
+src/model/a/Fixture.h:10:te::Edit* e; tracktion::engine::Clip* c; // te::Track
 src/model/a/internal/Side.h:1:#include "model/Tracktion.h"
 src/model/Tracktion.h:1:#include <tracktion_engine/tracktion_engine.h>
 src/model/Undo.cpp:1:um.beginNewTransaction (name);
 src/model/b/One.h:1:#include "Two.h"
 src/model/b/Two.h:1:#include "One.h"
 src/model/b/Two.cpp:1:#include "Two.h"
+src/model/b/Two.cpp:2:auto* t = te::findTrackForID (e, id);
 src/model/b/Three.cpp:1:#include "One.h"
 src/services/Fixture.cpp:1:#include <juce_gui_extra/juce_gui_extra.h>
 src/services/Fixture.cpp:2:#include "app/MainWindow.h"
 src/services/Fixture.cpp:3:#include <tracktion_graph/tracktion_graph.h>
+src/services/Fixture.cpp:4:te::Engine* engine;
 src/ui/Fixture.cpp:1:#include <tracktion_engine/tracktion_engine.h> // te::Edit
 src/ui/Fixture.cpp:2:#include "app/MainWindow.h"
 src/ui/Fixture.cpp:3:#include "model/Tracktion.h"
@@ -913,6 +954,7 @@ src/ui/Fixture.txt:1:te::NotCxx
 tests/Fixture.cpp:1:#include "TestHelpers.h"
 tests/Fixture.cpp:2:#include "model/b/one.h"
 tests/Fixture.cpp:3:#include "model/b/One.h"
+tests/Fixture.cpp:4:std::unique_ptr<te::Edit> edit; // te::Track
 tests/TestHelpers.h:1:// test helpers
 tools/x/Tool.cpp:1:#include "Missing.h"
 FIXTURE
@@ -950,6 +992,11 @@ fixture_expectations() {
 @expect flat-files 5
 @expect unresolved-includes 5
 @expect cmake-sources 3
+@expect tracktion-a 2
+@expect tracktion-other 1
+@expect tracktion-services 1
+@expect tracktion-app 1
+@expect tracktion-tests 1
 @expect no-layer 1
 EXPECT
 }
@@ -960,7 +1007,7 @@ run_awk() {
     shift
     LC_ALL=C "$awk" -v mode="$run_mode" -v q="'" -v preludes="$tracktion_preludes" \
         -v undo_functions="$undo_functions" -v undo_implementation="$undo_implementation" -v gha="$gha" \
-        "$@" "$prog"
+        -v areas="$tracktion_areas" "$@" "$prog"
 }
 
 # Exits with 2 if the awk program counts the examples wrong or gets the budget logic wrong. src/ui/Absent.cpp is
@@ -977,7 +1024,7 @@ self_test() {
         printf '\n'
         fixture_expectations
     } | run_awk self-test -v preludes=src/model/Tracktion.h -v undo_implementation=src/model/Undo.cpp \
-        -v undo_functions=beginNewTransaction)
+        -v undo_functions=beginNewTransaction -v areas=a)
     [ $? -eq 0 ] && return 0
     printf '%s\n' "tools/check-architecture.sh: this awk ($awk) counts the built-in examples wrong:" "$st_report" >&2
     exit 2

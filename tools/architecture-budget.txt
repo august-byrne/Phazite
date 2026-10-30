@@ -22,3 +22,24 @@ ui-undo-steps                  0
 flat-files                     0
 unresolved-includes            0
 cmake-sources                  0
+
+# Tracktion's names (te:: and tracktion::) in each area of the model, in src/services, src/app and tests/: the migration
+# off Tracktion (docs/tracktion-migration.md) lowers them, area by area, and new code adds none. A phase that moves code to
+# Tracktion's side on purpose (T1's mirror) raises one, saying why.
+tracktion-arrangement        768
+tracktion-automation         165
+tracktion-base                65
+tracktion-chords              74
+tracktion-commands            43
+tracktion-devices            177
+tracktion-engine             175
+tracktion-mixer              641
+tracktion-modulation         108
+tracktion-notes              149
+tracktion-presets             86
+tracktion-project            157
+tracktion-transport          279
+tracktion-other                0
+tracktion-services             0
+tracktion-app                 46
+tracktion-tests             1174

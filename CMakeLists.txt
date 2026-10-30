@@ -827,6 +827,9 @@ if(PHAZITE_BUILD_TESTS)
         tests/FreezeTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
+        tests/GoldenMetronomeTests.cpp
+        tests/GoldenMixerTests.cpp
+        tests/GoldenModulationTests.cpp
         tests/GoldenProjectTests.cpp
         tests/GoldenRenderTests.cpp
         tests/GuideTests.cpp
@@ -865,6 +868,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/ProjectTests.cpp
         tests/RealTimePlayback.h
         tests/RealtimeAuditTests.cpp
+        tests/RenderHarness.cpp
+        tests/RenderHarness.h
         tests/RecordingTests.cpp
         tests/RoutingTests.cpp
         tests/ReverbEditorTests.cpp
@@ -886,6 +891,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestPlugin.cpp
         tests/TestPlugin.h
         tests/TempoTests.cpp
+        tests/TestSong.cpp
+        tests/TestSong.h
         tests/TimelineGestureTests.cpp
         tests/TimelineModelTests.cpp
         tests/TimelineTests.cpp

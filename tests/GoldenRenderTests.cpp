@@ -1,309 +1,77 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden renders (tests/golden/renders): a short mix with a bus, a send to a reverb return, volume automation and pan, the
-// starter project, and chords on the wavetable synth are rendered offline, and the RMS and peak level of each 100 ms block
-// of the result are compared with a committed fingerprint, so that a change to how Phazite plays a project fails a test.
-// Levels may be toleranceDb apart, and a level below floorDb counts as floorDb: that absorbs the differences between
-// compilers' maths libraries, and where a reverb's tail is cut off. A fingerprint doesn't notice a change of phase only,
-// or of frequency at the same level. Golden renders never use anything random (Phazite's devices seed their noise and
-// random phases). GoldenFiles.h says how to regenerate the golden files.
-#include "GoldenFiles.h"
-#include "TestHelpers.h"
-#include "UiTestHelpers.h"
+// Golden renders (tests/golden/renders): songs made through the model (TestSong.h), each showing what plays in a song, are
+// rendered offline through the reference engine and the candidate (RenderHarness.h; docs/tracktion-migration.md, T0), and
+// the levels of each 100 ms block are compared with a committed fingerprint, so that a change to how Phazite plays a song
+// fails a test. Each render is checked first, so that a broken one never becomes the golden file. GoldenFiles.h says how to
+// regenerate them.
+#include "RenderHarness.h"
+#include "TestSong.h"
+#include "devices/drums/DrumSampler.h"
+#include "devices/filter/FilterEffect.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/synth/Synth.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
-#include "model/arrangement/internal/Import.h"
-#include "model/arrangement/internal/Tracks.h"
-#include "model/devices/internal/DevicePlugin.h"
-#include "model/devices/internal/Wavetables.h"
-#include "model/mixer/internal/Mixer.h"
-#include "model/project/internal/Project.h"
-#include "model/project/internal/StarterProject.h"
+#include "model/arrangement/AudioClipModel.h"
+#include "model/mixer/MixerModel.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
-#include <memory>
-#include <optional>
-#include <utility>
-#include <vector>
 
-using namespace tracktion::literals;
+using phazite::test::Fingerprint;
+using phazite::test::TestSong;
 
 namespace
 {
-constexpr float toleranceDb = 0.05f; // how far a level may be from the golden one
-constexpr float floorDb = -70.0f;    // a lower level counts as this: the fingerprints don't compare what is quieter
-constexpr int renderSampleRate = 44100;
-constexpr int fingerprintBlockSamples = 4410; // 100 ms
-constexpr int renderChannels = 2;
-constexpr int fingerprintBlocks = 40;    // 4 seconds
-constexpr int maxListedDifferences = 20; // the most lines a comparison lists
+using phazite::test::describeLevels;
+using phazite::test::floorDb;
+using phazite::test::formatLevel;
+using phazite::test::getPower;
+using phazite::test::isBetween;
+using phazite::test::isLouder;
 
-constexpr const char* aboutTheMix = "Golden render (tests/GoldenRenderTests.cpp): two tones through a bus, a send to a reverb return, "
-                                    "volume automation and pan. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
-constexpr const char* aboutTheStarter = "Golden render (tests/GoldenRenderTests.cpp): the starter project, a beat on Phazite's drum "
-                                        "sampler and an arpeggio on its synth. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
-constexpr int starterSeconds = 8; // its 4 bars at 120 BPM
-constexpr const char* aboutTheWavetable = "Golden render (tests/GoldenRenderTests.cpp): two chords on Phazite's wavetable synth, its "
-                                          "two oscillators in unison, an envelope sweeping each note's table. Regenerate with "
-                                          "PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
-
-te::BeatPosition beats (double b)
+phazite::BeatPosition beat (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
-//==============================================================================
-// The RMS and peak level of a block, in dBFS, on each side (left, right).
-struct BlockLevels
+phazite::test::GoldenRender golden (const char* name, const char* about, double seconds,
+                                    std::function<bool (const Fingerprint&, const juce::AudioBuffer<float>&)> check)
 {
-    std::array<float, renderChannels> rms {}, peak {};
-};
-
-// A render's fingerprint: the levels of each block, in order.
-using Fingerprint = std::vector<BlockLevels>;
-
-Fingerprint getFingerprint (const juce::AudioBuffer<float>& audio)
-{
-    Fingerprint fingerprint;
-
-    for (int start = 0; start + fingerprintBlockSamples <= audio.getNumSamples(); start += fingerprintBlockSamples)
-    {
-        BlockLevels levels;
-
-        for (int channel = 0; channel < renderChannels; ++channel)
-        {
-            levels.rms[(size_t) channel] =
-                juce::Decibels::gainToDecibels (audio.getRMSLevel (channel, start, fingerprintBlockSamples), -100.0f);
-            levels.peak[(size_t) channel] =
-                juce::Decibels::gainToDecibels (audio.getMagnitude (channel, start, fingerprintBlockSamples), -100.0f);
-        }
-
-        fingerprint.push_back (levels);
-    }
-
-    return fingerprint;
-}
-
-// A fingerprint as long as the render's, with the same levels in every block and on both sides.
-Fingerprint makeFingerprint (float rms, float peak)
-{
-    BlockLevels levels;
-    levels.rms.fill (rms);
-    levels.peak.fill (peak);
-    return Fingerprint ((size_t) fingerprintBlocks, levels);
-}
-
-// A level as golden files write it: in dBFS, with two decimals.
-juce::String formatLevel (double level)
-{
-    return juce::String (level, 2);
-}
-
-juce::String formatLevels (const std::array<float, renderChannels>& levels)
-{
-    juce::StringArray texts;
-
-    for (const auto level : levels)
-        texts.add (formatLevel (level));
-
-    return "[" + texts.joinIntoString (", ") + "]";
-}
-
-// A fingerprint as its golden file holds it: JSON, with one block on each line.
-juce::String writeFingerprint (const Fingerprint& fingerprint, const char* about = aboutTheMix)
-{
-    juce::String text;
-    text << "{\n"
-         << "  \"about\": \"" << juce::JSON::escapeString (about) << "\",\n"
-         << "  \"sampleRate\": " << renderSampleRate << ",\n"
-         << "  \"blockSamples\": " << fingerprintBlockSamples << ",\n"
-         << "  \"channels\": " << renderChannels << ",\n"
-         << "  \"blocks\": [\n";
-
-    for (size_t i = 0; i < fingerprint.size(); ++i)
-    {
-        const auto start = (double) i * fingerprintBlockSamples / renderSampleRate;
-        text << "    { \"start\": " << juce::String (start, 1) << ", \"rms\": " << formatLevels (fingerprint[i].rms)
-             << ", \"peak\": " << formatLevels (fingerprint[i].peak) << " }" << (i + 1 < fingerprint.size() ? "," : "") << "\n";
-    }
-
-    text << "  ]\n"
-         << "}\n";
-    return text;
-}
-
-//==============================================================================
-juce::String getChannelName (int channel)
-{
-    if (channel == 0)
-        return "left";
-
-    if (channel == 1)
-        return "right";
-
-    return "channel " + juce::String (channel + 1);
-}
-
-// A level of a block of a parsed fingerprint (property is "rms" or "peak"), or nothing if the block has none there.
-std::optional<double> findLevel (const juce::var& block, const char* property, int channel)
-{
-    if (const auto* levels = block[property].getArray(); levels != nullptr && juce::isPositiveAndBelow (channel, levels->size()))
-        if (const auto& level = levels->getReference (channel); level.isDouble() || level.isInt())
-            return (double) level;
-
-    return std::nullopt;
-}
-
-// The differences between the texts of two fingerprints, the golden one and Phazite's, at most maxListedDifferences lines:
-//   sampleRate: expected 44100, got 48000
-//   1.20-1.30 s, left RMS: expected -14.20 dBFS, got -13.10 dBFS
-// Two levels are the same if they are at most toleranceDb apart, a level below floorDb counting as floorDb. Fingerprints
-// that differ in their sample rate, block size, channels or number of blocks aren't compared block by block.
-juce::StringArray compareFingerprints (const juce::String& expectedText, const juce::String& actualText)
-{
-    const auto expected = juce::JSON::parse (expectedText);
-    const auto actual = juce::JSON::parse (actualText);
-
-    if (! expected.isObject())
-        return { "the golden file isn't a JSON object" };
-
-    if (! actual.isObject())
-        return { "Phazite's fingerprint isn't a JSON object" };
-
-    juce::StringArray differences;
-
-    for (const auto* property : { "sampleRate", "blockSamples", "channels" })
-        if (expected[property] != actual[property])
-            differences.add (juce::String (property) + ": expected " + expected[property].toString() + ", got "
-                             + actual[property].toString());
-
-    const auto* expectedBlocks = expected["blocks"].getArray();
-    const auto* actualBlocks = actual["blocks"].getArray();
-    const auto numExpected = expectedBlocks != nullptr ? expectedBlocks->size() : 0;
-    const auto numActual = actualBlocks != nullptr ? actualBlocks->size() : 0;
-
-    if (numExpected != numActual)
-        differences.add ("blocks: expected " + juce::String (numExpected) + ", got " + juce::String (numActual));
-
-    if (! differences.isEmpty())
-        return differences;
-
-    const auto blockSeconds = (double) expected["blockSamples"] / (double) expected["sampleRate"];
-    const auto channels = (int) expected["channels"];
-    const auto describe = [] (std::optional<double> level)
-    { return level.has_value() ? formatLevel (*level) + " dBFS" : juce::String ("nothing"); };
-
-    for (int block = 0; block < numExpected; ++block)
-    {
-        const auto& expectedBlock = expectedBlocks->getReference (block);
-        const auto& actualBlock = actualBlocks->getReference (block);
-        const auto when = juce::String (block * blockSeconds, 2) + "-" + juce::String ((block + 1) * blockSeconds, 2) + " s";
-
-        for (const auto& [property, measure] : { std::pair { "rms", "RMS" }, std::pair { "peak", "peak" } })
-        {
-            for (int channel = 0; channel < channels; ++channel)
-            {
-                const auto expectedLevel = findLevel (expectedBlock, property, channel);
-                const auto actualLevel = findLevel (actualBlock, property, channel);
-
-                if (! expectedLevel.has_value() || ! actualLevel.has_value()
-                    || std::abs (std::max (*actualLevel, (double) floorDb) - std::max (*expectedLevel, (double) floorDb)) > toleranceDb)
-                    differences.add (when + ", " + getChannelName (channel) + " " + measure + ": expected " + describe (expectedLevel)
-                                     + ", got " + describe (actualLevel));
-            }
-        }
-    }
-
-    phazite::test::limitDifferences (differences, maxListedDifferences);
-    return differences;
+    return { name,
+             juce::String ("Golden render (tests/GoldenRenderTests.cpp): ") + about
+                 + " Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
+             seconds, std::move (check) };
 }
 
 //==============================================================================
 // The mix, at 120 BPM (a beat is 0.5 s): Low, a 220 Hz tone from 0 to 2 s whose volume falls from 0 to -12 dB, and
 // High, a quieter 660 Hz tone from 1 to 2.5 s, panned halfway left, with a send after its fader to a reverb return; both
 // in a bus at -3 dB. (No digits in the files' names: Phazite would read a tempo in them and stretch the clips.)
-void addMix (te::Edit& edit, const juce::File& scratch)
+void addMix (TestSong& song)
 {
-    edit.tempoSequence.getTempos()[0]->setBpm (120.0);
+    song.setTempo (120.0);
+    const auto low = song.firstTrack;
+    song.rename (low, "Low");
+    const auto high = song.addTrack ("High");
 
-    auto* low = te::getAudioTracks (edit)[0];
-    REQUIRE (low != nullptr);
-    low->setName ("Low");
-    auto* high = phazite::insertTrack (edit, low, nullptr);
-    REQUIRE (high != nullptr);
-    high->setName ("High");
+    const auto sounds = song.getSoundsFolder();
+    song.addAudioClip (low, phazite::test::writeSound (sounds.getChildFile ("Low Tone.wav"), 2.0, 220.0, 0.5f), 0.0);
+    song.addAudioClip (high, phazite::test::writeSound (sounds.getChildFile ("High Tone.wav"), 1.5, 660.0, 0.25f), 2.0);
 
-    const auto lowTone = phazite::test::writeSound (scratch.getChildFile ("Low Tone.wav"), 2.0, 220.0, 0.5f);
-    const auto highTone = phazite::test::writeSound (scratch.getChildFile ("High Tone.wav"), 1.5, 660.0, 0.25f);
-    REQUIRE (phazite::importFile (*low, lowTone, beats (0.0)) != nullptr);
-    REQUIRE (phazite::importFile (*high, highTone, beats (2.0)) != nullptr);
+    song.addAutomation (song.getVolumeParameter (low), { { beat (0.0), phazite::decibelsToFaderPosition (0.0f) },
+                                                         { beat (4.0), phazite::decibelsToFaderPosition (-12.0f) } });
+    song.setPan (high, -0.5f);
 
-    auto* lowVolume = low->getVolumePlugin();
-    REQUIRE (lowVolume != nullptr);
-    auto& lowCurve = lowVolume->volParam->getCurve();
-    lowCurve.addPoint (0_tp, te::decibelsToVolumeFaderPosition (0.0f), 0.0f, nullptr);
-    lowCurve.addPoint (2_tp, te::decibelsToVolumeFaderPosition (-12.0f), 0.0f, nullptr);
-
-    auto* highVolume = high->getVolumePlugin();
-    REQUIRE (highVolume != nullptr);
-    highVolume->setPan (-0.5f);
-
-    auto* bus = phazite::groupIntoFolder ({ low, high }, nullptr);
-    REQUIRE (bus != nullptr);
-    bus->setName ("Bus");
-    phazite::setMixedAsBus (*bus, true);
-    auto* busVolume = dynamic_cast<te::VolumeAndPanPlugin*> (phazite::getVolumeDevice (*bus));
-    REQUIRE (busVolume != nullptr);
-    busVolume->setVolumeDb (-3.0f);
-
-    REQUIRE (phazite::addReturnWithEffect (*high, phazite::test::createBuiltInDevice (edit, phazite::devices::Reverb::typeID)) != nullptr);
+    const auto bus = song.addBus ("Bus", { low, high });
+    song.setVolume (bus, -3.0f);
+    song.addReturn (high, phazite::devices::Reverb::typeID);
 }
 
-// Renders the first seconds of an Edit to a WAV file, always in the same way: at 44.1 kHz, in blocks of 512 samples,
-// as 32-bit floats without dither, in stereo, with the master's devices. Tracktion runs the render with the
-// UIBehaviour's runTaskWithProgressBar(), which Phazite's runs to the end on this thread.
-void renderSong (te::Edit& edit, const juce::File& file, int seconds)
+// Low alone in the middle, High panned left, the reverb's tail after both, and the tail fading.
+bool soundsLikeTheMix (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
 {
-    te::Renderer::Parameters params (edit);
-    params.destFile = file;
-    params.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
-    params.bitDepth = 32;
-    params.sampleRateForAudio = renderSampleRate;
-    params.blockSizeForAudio = 512;
-    params.time = te::TimeRange (0_tp, te::TimePosition::fromSeconds (seconds));
-    params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
-    params.useMasterPlugins = true;
-    params.canRenderInMono = false;
-    params.ditheringEnabled = false;
-
-    REQUIRE (te::Renderer::renderToFile ("Golden render", params) == params.destFile);
-}
-
-// The audio of a render, which must be stereo and as many 100 ms blocks long as given.
-juce::AudioBuffer<float> readRender (te::Engine& engine, const juce::File& file, int blocks)
-{
-    const std::unique_ptr<juce::AudioFormatReader> reader (engine.getAudioFileFormatManager().readFormatManager.createReaderFor (file));
-    REQUIRE (reader != nullptr);
-    REQUIRE (reader->numChannels == (unsigned int) renderChannels);
-    REQUIRE (reader->lengthInSamples == (juce::int64) blocks * fingerprintBlockSamples);
-
-    juce::AudioBuffer<float> audio (renderChannels, blocks * fingerprintBlockSamples);
-    REQUIRE (reader->read (&audio, 0, audio.getNumSamples(), 0, true, true));
-    return audio;
-}
-
-juce::String describeLevels (const std::array<float, renderChannels>& levels)
-{
-    return "left " + formatLevel (levels[0]) + " dBFS, right " + formatLevel (levels[1]) + " dBFS";
-}
-
-// Checks that a render sounds like the mix before it is compared with the golden file, so that a broken render (silent,
-// or with its pan, send or reverb not working) fails here and never becomes the golden file. Returns whether it does.
-bool checkSoundsLikeTheMix (const Fingerprint& fingerprint)
-{
-    REQUIRE (fingerprint.size() == (size_t) fingerprintBlocks);
+    REQUIRE (fingerprint.size() == 40);
 
     // 0.5-0.6 s: Low alone, in the middle.
     const auto& lowAlone = fingerprint[5].rms;
@@ -340,10 +108,12 @@ bool checkSoundsLikeTheMix (const Fingerprint& fingerprint)
     return lowInTheMiddle && highOnTheLeft && hasTail && tailFades;
 }
 
-// Checks that the starter project's render sounds like it before it is compared with its golden file: something in
-// every block of its 8 seconds, the same on each side (the drums and the synth are in the middle), and the kick loud on
-// the first beat. Returns whether it does.
-bool checkSoundsLikeTheStarter (const Fingerprint& fingerprint)
+//==============================================================================
+constexpr int starterSeconds = 8; // its 4 bars at 120 BPM
+
+// Something in every block of its 8 seconds, the same on each side (the drums and the synth are in the middle), and the
+// kick loud on the first beat.
+bool soundsLikeTheStarter (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
 {
     REQUIRE (fingerprint.size() == (size_t) starterSeconds * 10);
     auto everywhere = true, inTheMiddle = true;
@@ -365,51 +135,43 @@ bool checkSoundsLikeTheStarter (const Fingerprint& fingerprint)
     return everywhere && inTheMiddle && kick;
 }
 
+//==============================================================================
 // The wavetable song, at 120 BPM: Phazite's wavetable synth with its first oscillator on Saw Build, low in the table, and
 // its second on Vowels an octave down, each in unison four times over and spread across the stereo field, its third
 // envelope lifting the first oscillator up its table at each note's start, through its filter: a chord from 0 to 1.5 s,
 // another from 1.5 to 3 s, then the release.
-void addWavetableSong (te::Edit& edit)
+void addWavetableSong (TestSong& song)
 {
     using phazite::devices::WavetableSynth;
-    edit.tempoSequence.getTempos()[0]->setBpm (120.0);
-    auto* track = te::getAudioTracks (edit)[0];
-    REQUIRE (track != nullptr);
-    const auto plugin = edit.getPluginCache().createNewPlugin (WavetableSynth::typeID, {});
-    REQUIRE (phazite::setInstrument (*track, plugin) != nullptr);
-    phazite::setFactoryWavetable (*plugin, 0, phazite::devices::findFactoryWavetable ("Saw Build"));
-    phazite::setFactoryWavetable (*plugin, 1, phazite::devices::findFactoryWavetable ("Vowels"));
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    const auto synth = song.setInstrument (track, WavetableSynth::typeID);
 
-    auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
-    REQUIRE (device != nullptr);
-    const auto set = [device] (const char* id, float value) { device->findParameter (id)->setParameter (value, juce::sendNotification); };
-    set ("osc1Position", 0.2f);
-    set ("osc2On", 1.0f);
-    set ("osc2Pitch", -12.0f);
-    set ("osc2Position", 0.5f);
-    set ("osc2Level", 0.5f);
-    set ("unisonVoices", 3.0f); // four
-    set ("unisonDetune", 15.0f);
-    set ("mod2Source", (float) WavetableSynth::ModSource::envelope3);
-    set ("mod2Target", (float) WavetableSynth::ModTarget::osc1Position);
-    set ("mod2Amount", 0.6f);
+    const auto device = phazite::getDeviceHandle (song.context, synth);
+    device.setFactoryWavetable (0, phazite::devices::findFactoryWavetable ("Saw Build"));
+    device.setFactoryWavetable (1, phazite::devices::findFactoryWavetable ("Vowels"));
 
-    auto clip = track->insertMIDIClip ("Chords", edit.tempoSequence.toTime ({ beats (0.0), beats (6.0) }), nullptr);
-    REQUIRE (clip != nullptr);
+    song.setParameter (synth, "osc1Position", 0.2f);
+    song.setParameter (synth, "osc2On", 1.0f);
+    song.setParameter (synth, "osc2Pitch", -12.0f);
+    song.setParameter (synth, "osc2Position", 0.5f);
+    song.setParameter (synth, "osc2Level", 0.5f);
+    song.setParameter (synth, "unisonVoices", 3.0f); // four
+    song.setParameter (synth, "unisonDetune", 15.0f);
+    song.setParameter (synth, "mod2Source", (float) WavetableSynth::ModSource::envelope3);
+    song.setParameter (synth, "mod2Target", (float) WavetableSynth::ModTarget::osc1Position);
+    song.setParameter (synth, "mod2Amount", 0.6f);
 
-    for (const auto note : { 48, 51, 55, 58 })
-        clip->getSequence().addNote (note, beats (0.0), te::BeatDuration::fromBeats (3.0), 100, 0, nullptr);
-
-    for (const auto note : { 44, 48, 51, 55 })
-        clip->getSequence().addNote (note, beats (3.0), te::BeatDuration::fromBeats (3.0), 100, 0, nullptr);
+    const auto clip = song.addMidiClip (track, 0.0, 6.0);
+    song.addChord (clip, { 48, 51, 55, 58 }, 0.0, 3.0);
+    song.addChord (clip, { 44, 48, 51, 55 }, 3.0, 3.0);
 }
 
-// Checks that a render sounds like the wavetable song before it is compared with its golden file: something on each side
-// while the chords play, wider than the middle somewhere (its unison spreads it), and quiet once they have rung out.
-// Returns whether it does.
-bool checkSoundsLikeTheWavetable (const Fingerprint& fingerprint)
+// Something on each side while the chords play, wider than the middle somewhere (its unison spreads it), and quiet once
+// they have rung out.
+bool soundsLikeTheWavetable (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
 {
-    REQUIRE (fingerprint.size() == (size_t) fingerprintBlocks);
+    REQUIRE (fingerprint.size() == 40);
     auto playing = true, wide = false;
 
     for (size_t block = 1; block < 29; ++block)
@@ -428,16 +190,332 @@ bool checkSoundsLikeTheWavetable (const Fingerprint& fingerprint)
     return playing && wide && quiet;
 }
 
-// Keeps a render that doesn't sound as it should, or doesn't match its golden file, as
-// <temp>/PhaziteGoldenActual/renders/<name>.wav, to listen to.
-void keepRender (const juce::File& file, const juce::String& name)
+// A sine that starts loud and dies away (by 60 dB a second), for a clip played backwards: written as writeSound() writes
+// tones, in mono.
+juce::File writeDecay (const juce::File& file, double seconds, double frequency)
 {
-    const auto copy = phazite::test::getActualFolder().getChildFile ("renders").getChildFile (name + ".wav");
+    constexpr double sampleRate = 44100.0;
+    juce::AudioBuffer<float> buffer (1, (int) (seconds * sampleRate));
 
-    if (copy.getParentDirectory().createDirectory().wasOk() && file.copyFileTo (copy))
-        MESSAGE (("The render is in " + copy.getFullPathName()).toStdString());
-    else
-        MESSAGE (("The render couldn't be copied to " + copy.getFullPathName()).toStdString());
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+    {
+        const auto t = i / sampleRate;
+        buffer.setSample (0, i, (float) (0.5 * std::pow (10.0, -3.0 * t) * std::sin (juce::MathConstants<double>::twoPi * frequency * t)));
+    }
+
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+    auto writer = juce::WavAudioFormat().createWriterFor (
+        stream, juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels (1).withBitsPerSample (24));
+    REQUIRE (writer != nullptr);
+    writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+    return file;
+}
+
+//==============================================================================
+// Phazite's synth as it is made: three chords of two beats each at 120 BPM, C, F and G major, then their release.
+void addSynthSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::Synth::typeID);
+    const auto clip = song.addMidiClip (track, 0.0, 6.0);
+    song.addChord (clip, { 48, 52, 55 }, 0.0, 2.0);
+    song.addChord (clip, { 53, 57, 60 }, 2.0, 2.0);
+    song.addChord (clip, { 55, 59, 62 }, 4.0, 2.0);
+}
+
+bool soundsLikeChords (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    auto playing = true;
+
+    for (size_t block = 1; block < 29; ++block)
+        playing = isBetween (fingerprint, block, -40.0f, 0.0f, "the chords play") && playing;
+
+    return isLouder (fingerprint, 15, 39, 20.0f, "their release has rung out") && playing;
+}
+
+// Phazite's drum sampler as it is made, with its kit, for two bars at 120 BPM: a kick on the first and third beats, a snare
+// on the second and fourth, and a closed hi-hat, quieter, on every half beat.
+void addDrumSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::DrumSampler::typeID);
+    const auto clip = song.addMidiClip (track, 0.0, 8.0);
+
+    for (int beatNumber = 0; beatNumber < 8; ++beatNumber)
+        song.addNote (clip, beatNumber % 2 == 0 ? 36 : 38, beatNumber, 0.25);
+
+    for (int half = 0; half < 16; ++half)
+        song.addNote (clip, 42, half * 0.5, 0.25, 80);
+}
+
+// Each beat's hit is louder than the end of the beat before it, and the first kick is loud.
+bool soundsLikeTheDrums (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    auto hits = true;
+
+    for (size_t beatNumber = 1; beatNumber < 8; ++beatNumber)
+        hits = isLouder (fingerprint, beatNumber * 5, beatNumber * 5 - 1, 3.0f, "each beat's hit") && hits;
+
+    const auto kick = fingerprint.front().peak[0] > -18.0f;
+    CHECK_MESSAGE (
+        kick, ("0.00-0.10 s: the kick should peak above -18 dBFS; it peaks at " + formatLevel (fingerprint.front().peak[0])).toStdString());
+    return hits && kick;
+}
+
+//==============================================================================
+// A tone played plain from 0 to 1 s, then again from 2 to 3 s turned down 6 dB by its clip's gain, at 120 BPM.
+void addClipGainSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto tone = phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 1.0, 440.0, 0.25f);
+    song.addAudioClip (song.firstTrack, tone, 0.0);
+    const auto quieter = song.addAudioClip (song.firstTrack, tone, 4.0);
+    phazite::setClipGain (song.context, quieter, -6.0f);
+}
+
+bool soundsLikeClipGain (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    const auto plain = getPower (fingerprint[5]);
+    auto ok = isBetween (fingerprint, 5, -30.0f, -6.0f, "the tone plays");
+    ok = isBetween (fingerprint, 25, plain - 6.5f, plain - 5.5f, "the second clip is 6 dB quieter") && ok;
+    ok = isBetween (fingerprint, 15, -100.0f, floorDb, "nothing plays between the clips") && ok;
+    return isBetween (fingerprint, 35, -100.0f, floorDb, "nothing plays after them") && ok;
+}
+
+// Four tones of 0.9 s, one each second at 120 BPM, each fading in over its first 0.3 s and out over its last 0.3 s, with
+// linear, convex, concave and S-curve fades.
+void addFadesSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto tone = phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 0.9, 330.0, 0.25f);
+    int i = 0;
+
+    for (const auto* shape : { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" })
+    {
+        const auto start = 2.0 * i++;
+        const auto clip = song.addAudioClip (song.firstTrack, tone, start);
+        phazite::fadeClipTo (song.context, clip, true, beat (start + 0.6));
+        phazite::fadeClipTo (song.context, clip, false, beat (start + 1.2));
+        song.select (clip);
+        song.run (shape);
+    }
+}
+
+bool soundsLikeFades (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    auto ok = true;
+
+    for (size_t clip = 0; clip < 4; ++clip)
+    {
+        const auto start = clip * 10;
+        ok = isLouder (fingerprint, start + 4, start, 6.0f, "each clip fades in") && ok;
+        ok = isLouder (fingerprint, start + 4, start + 8, 3.0f, "each clip fades out") && ok;
+    }
+
+    return ok;
+}
+
+// A loop of clicks played at 120 BPM, which its name says, in a song at 90 BPM: it follows the song's tempo, a click on
+// every beat, 0.667 s apart.
+void addStretchedSong (TestSong& song)
+{
+    song.setTempo (90.0);
+    const auto clicks = phazite::test::writeClicks (song.getSoundsFolder(), 8, 120.0);
+    const auto clip = song.addAudioClip (song.firstTrack, clicks, 0.0);
+    const auto info = phazite::getAudioClip (song.context, clip);
+    REQUIRE (info.has_value());
+    CHECK (info->followsTempo);
+    song.waitForClipRenders();
+}
+
+bool soundsLikeClicksAt90 (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    auto ok = true;
+
+    for (int click = 1; click < 6; ++click)
+    {
+        const auto onset = (size_t) (click * 20 / 3); // the block of the click on the beat, 2/3 s each
+        const auto between = (size_t) ((click * 20 - 10) / 3);
+        ok = isLouder (fingerprint, onset, between, 15.0f, "each beat's click, 0.667 s apart") && ok;
+    }
+
+    return ok;
+}
+
+// A 220 Hz tone pitched up an octave by its clip, at 120 BPM: it plays at 440 Hz, as long as it was.
+void addPitchedSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto tone = phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Low Tone.wav"), 3.0, 220.0, 0.25f);
+    const auto clip = song.addAudioClip (song.firstTrack, tone, 0.0);
+    phazite::setClipPitch (song.context, clip, 12.0f);
+    song.waitForClipRenders();
+}
+
+bool soundsLikeAnOctaveUp (const Fingerprint& fingerprint, const juce::AudioBuffer<float>& audio)
+{
+    const auto frequency = phazite::test::estimateFrequency (audio, 0, phazite::test::renderSampleRate, 1.0, 1.0);
+    const auto octaveUp = std::abs (frequency - 440.0) < 5.0;
+    CHECK_MESSAGE (octaveUp, ("1-2 s: the tone should be at 440 Hz; it is at " + juce::String (frequency, 1) + " Hz").toStdString());
+    auto ok = isBetween (fingerprint, 15, -30.0f, -6.0f, "the tone plays");
+    return isBetween (fingerprint, 35, -100.0f, floorDb, "it lasts as long as it did") && ok && octaveUp;
+}
+
+// A tone that dies away, played backwards by its clip at 120 BPM: it swells instead.
+void addReversedSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto decay = writeDecay (song.getSoundsFolder().getChildFile ("Decay.wav"), 3.0, 330.0);
+    const auto clip = song.addAudioClip (song.firstTrack, decay, 0.0);
+    phazite::setClipReversed (song.context, clip, true);
+    song.waitForClipRenders();
+}
+
+bool soundsLikeASwell (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    return isLouder (fingerprint, 28, 5, 20.0f, "it swells");
+}
+
+//==============================================================================
+// A chord on the synth from 0 to 0.5 s and a higher note from 0.5 to 1 s at 120 BPM, and an alias of their clip from 2 to
+// 3 s; the higher note is added to the original after the alias was made, and plays in both.
+void addAliasSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::Synth::typeID);
+    const auto clip = song.addMidiClip (track, 0.0, 2.0);
+    song.addChord (clip, { 60, 64, 67 }, 0.0, 1.0);
+    song.copyClip (clip, 4.0, true);
+    song.addNote (clip, 72, 1.0, 1.0);
+}
+
+bool soundsLikeAnAlias (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    auto ok = true;
+
+    for (size_t block = 0; block < 10; ++block)
+    {
+        const auto original = getPower (fingerprint[block]);
+        ok = isBetween (fingerprint, block + 20, original - 1.0f, original + 1.0f, "the alias plays what its original does") && ok;
+    }
+
+    return ok;
+}
+
+//==============================================================================
+// A tone at 120 BPM whose volume is automated through each kind of line: from 0 dB down to -24 dB at 1 s bending one
+// way, back up to 0 dB at 2 s bending the other, holding there until 3 s and jumping down to -12 dB.
+void addAutomationSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addAudioClip (track, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 4.0, 440.0, 0.25f), 0.0);
+
+    const auto db = [] (float decibels) { return phazite::decibelsToFaderPosition (decibels); };
+    song.addAutomation (song.getVolumeParameter (track), { { beat (0.0), db (0.0f), 0.5f },
+                                                           { beat (2.0), db (-24.0f), -0.5f },
+                                                           { beat (4.0), db (0.0f), 1.0f },
+                                                           { beat (6.0), db (-12.0f) },
+                                                           { beat (8.0), db (-12.0f) } });
+}
+
+bool soundsLikeTheAutomation (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    auto ok = isLouder (fingerprint, 0, 9, 15.0f, "the volume falls to -24 dB at 1 s");
+    ok = isLouder (fingerprint, 19, 11, 10.0f, "it comes back up to 0 dB at 2 s") && ok;
+
+    const auto held = getPower (fingerprint[22]);
+    ok = isBetween (fingerprint, 28, held - 0.5f, held + 0.5f, "it holds at 0 dB until 3 s") && ok;
+    return isBetween (fingerprint, 33, held - 12.5f, held - 11.5f, "then it jumps down to -12 dB") && ok;
+}
+
+// A tone at 120 BPM whose pan is automated from left to right over 4 s.
+void addPanAutomationSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addAudioClip (track, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 4.0, 440.0, 0.25f), 0.0);
+    song.addAutomation (song.getPanParameter (track), { { beat (0.0), -1.0f }, { beat (8.0), 1.0f } });
+}
+
+bool soundsLikeAPanSweep (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    const auto left = fingerprint[1].rms[0] > fingerprint[1].rms[1] + 6.0f;
+    const auto middle = std::abs (fingerprint[20].rms[0] - fingerprint[20].rms[1]) < 1.0f;
+    const auto right = fingerprint[38].rms[1] > fingerprint[38].rms[0] + 6.0f;
+    CHECK_MESSAGE (left, ("0.1-0.2 s: panned left; the RMS is " + describeLevels (fingerprint[1].rms)).toStdString());
+    CHECK_MESSAGE (middle, ("2.0-2.1 s: in the middle; the RMS is " + describeLevels (fingerprint[20].rms)).toStdString());
+    CHECK_MESSAGE (right, ("3.8-3.9 s: panned right; the RMS is " + describeLevels (fingerprint[38].rms)).toStdString());
+    return left && middle && right;
+}
+
+// A high chord on the synth at 120 BPM through Phazite's filter, its cutoff automated to stay at 100 Hz for 2 s, then go up to
+// 10 kHz by 3 s (a line in hertz, so most of the way it is above the chord): the chord comes up as the filter opens.
+void addDeviceAutomationSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::Synth::typeID);
+    const auto filter = song.addEffect (track, phazite::devices::FilterEffect::typeID);
+    song.addAutomation ({ filter, "cutoff" }, { { beat (0.0), 100.0f }, { beat (4.0), 100.0f }, { beat (6.0), 10000.0f } });
+    const auto clip = song.addMidiClip (track, 0.0, 8.0);
+    song.addChord (clip, { 72, 76, 79 }, 0.0, 8.0);
+}
+
+bool soundsLikeAnOpeningFilter (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    return isLouder (fingerprint, 30, 10, 20.0f, "the chord comes up as the filter opens");
+}
+
+//==============================================================================
+// At 90 BPM in 3/4: a short note on every beat on the synth, a beat lasting 0.667 s.
+void addTempoSong (TestSong& song)
+{
+    song.setTempo (90.0);
+    song.setTimeSignature (3, 4);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::Synth::typeID);
+    const auto clip = song.addMidiClip (track, 0.0, 6.0);
+
+    for (int beatNumber = 0; beatNumber < 6; ++beatNumber)
+        song.addNote (clip, 60, beatNumber, 0.25);
+}
+
+bool soundsLikeBeatsAt90 (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    auto ok = true;
+
+    for (int note = 1; note < 6; ++note)
+    {
+        const auto onset = (size_t) std::ceil (note * 20.0 / 3.0); // the first whole block after the note starts
+        ok = isLouder (fingerprint, onset, onset - 2, 3.0f, "a note on each beat, 0.667 s apart") && ok;
+    }
+
+    return ok;
+}
+
+// A song made by a function, rendered as a golden render (checkGoldenRender()).
+void renders (void (*make) (TestSong&), const phazite::test::GoldenRender& render)
+{
+    TestSong song;
+    make (song);
+    phazite::test::settle();
+    phazite::test::checkGoldenRender (song.context, render);
+}
+
+//==============================================================================
+// A fingerprint as long as a 4-second render's, with the same levels in every block and on both sides.
+Fingerprint makeFingerprint (float rms, float peak)
+{
+    phazite::test::BlockLevels levels;
+    levels.rms.fill (rms);
+    levels.peak.fill (peak);
+    return Fingerprint (40, levels);
 }
 } // namespace
 
@@ -446,8 +524,11 @@ TEST_SUITE ("golden")
 {
     TEST_CASE ("Golden files: render fingerprints match within a tolerance, above a floor")
     {
+        using phazite::test::compareFingerprints;
+        using phazite::test::writeFingerprint;
+
         const auto golden = makeFingerprint (-20.0f, -17.0f);
-        const auto goldenText = writeFingerprint (golden);
+        const auto goldenText = writeFingerprint (golden, "about");
 
         // One block on each line, with two decimals; a fingerprint matches itself.
         CHECK (goldenText.contains ("\n    { \"start\": 1.2, \"rms\": [-20.00, -20.00], \"peak\": [-17.00, -17.00] },\n"));
@@ -456,11 +537,11 @@ TEST_SUITE ("golden")
         // Within the tolerance: a level 0.04 dB louder.
         auto louder = golden;
         louder[12].rms[0] = -19.96f;
-        CHECK (compareFingerprints (goldenText, writeFingerprint (louder)).isEmpty());
+        CHECK (compareFingerprints (goldenText, writeFingerprint (louder, "about")).isEmpty());
 
         // Beyond it: 0.1 dB louder is a difference, listed with its block, side and levels.
         louder[12].rms[0] = -19.9f;
-        const auto differences = compareFingerprints (goldenText, writeFingerprint (louder));
+        const auto differences = compareFingerprints (goldenText, writeFingerprint (louder, "about"));
         REQUIRE (differences.size() == 1);
         CHECK (differences[0] == juce::String ("1.20-1.30 s, left RMS: expected -20.00 dBFS, got -19.90 dBFS"));
 
@@ -469,118 +550,127 @@ TEST_SUITE ("golden")
         auto quieter = golden;
         quiet[30].peak.fill (-80.0f);
         quieter[30].peak.fill (-95.0f);
-        CHECK (compareFingerprints (writeFingerprint (quiet), writeFingerprint (quieter)).isEmpty());
+        CHECK (compareFingerprints (writeFingerprint (quiet, "about"), writeFingerprint (quieter, "about")).isEmpty());
 
         // A render of another length differs in its number of blocks, which aren't compared one by one.
         auto shorter = golden;
         shorter.pop_back();
-        const auto lengthChange = compareFingerprints (goldenText, writeFingerprint (shorter));
+        const auto lengthChange = compareFingerprints (goldenText, writeFingerprint (shorter, "about"));
         REQUIRE (lengthChange.size() == 1);
         CHECK (lengthChange[0] == juce::String ("blocks: expected 40, got 39"));
 
+        // Another rate or block size isn't compared block by block either.
+        const auto otherRate = compareFingerprints (goldenText, writeFingerprint (golden, "about", 48000, 4800));
+        REQUIRE (otherRate.size() == 2);
+        CHECK (otherRate[0] == juce::String ("sampleRate: expected 44100, got 48000"));
+
         // A render that differs everywhere lists only the first differences.
-        CHECK (compareFingerprints (goldenText, writeFingerprint (makeFingerprint (-10.0f, -7.0f))).size() == maxListedDifferences);
+        CHECK (compareFingerprints (goldenText, writeFingerprint (makeFingerprint (-10.0f, -7.0f), "about")).size()
+               == phazite::test::maxListedDifferences);
     }
 
     TEST_CASE ("Golden render: two tones through a bus, a send to a reverb return, automation and pan")
     {
-        phazite::test::TemporaryFolder temp;
-        juce::String error;
-        const auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Mix", error);
-        REQUIRE_MESSAGE (project != nullptr, error.toStdString());
-
-        auto& edit = project->getEdit();
-        addMix (edit, temp.folder.getChildFile ("Sounds"));
+        TestSong song;
+        addMix (song);
         phazite::test::settle();
-
-        // In the temporary folder (never in the repository), and deleted at the end.
-        const juce::TemporaryFile wav (".wav");
-        renderSong (edit, wav.getFile(), 4);
-        const auto fingerprint = getFingerprint (readRender (edit.engine, wav.getFile(), fingerprintBlocks));
-
-        const auto soundsLikeTheMix = checkSoundsLikeTheMix (fingerprint);
-
-        if (! soundsLikeTheMix)
-            keepRender (wav.getFile(), "mix");
-
-        REQUIRE (soundsLikeTheMix); // a broken render never becomes the golden file
-
-        auto differs = false;
-        phazite::test::checkGoldenText ("renders/mix.json", writeFingerprint (fingerprint),
-                                        [&differs] (const juce::String& expectedText, const juce::String& actualText)
-                                        {
-                                            const auto found = compareFingerprints (expectedText, actualText);
-                                            differs = ! found.isEmpty();
-                                            return found;
-                                        });
-
-        if (differs)
-            keepRender (wav.getFile(), "mix");
+        phazite::test::checkGoldenRender (
+            song.context,
+            golden ("mix", "two tones through a bus, a send to a reverb return, volume automation and pan.", 4.0, soundsLikeTheMix));
     }
 
     TEST_CASE ("Golden render: the starter project, a beat on Phazite's drum sampler and an arpeggio on its synth")
     {
-        phazite::test::TemporaryFolder temp;
-        juce::String error;
-        const auto project =
-            phazite::Project::create (phazite::test::getEngine(), temp.folder, "Starter", error, phazite::addStarterContent);
-        REQUIRE_MESSAGE (project != nullptr, error.toStdString());
-        auto& edit = project->getEdit();
+        TestSong song (TestSong::Start::starter);
         phazite::test::settle();
-
-        const juce::TemporaryFile wav (".wav");
-        renderSong (edit, wav.getFile(), starterSeconds);
-        const auto fingerprint = getFingerprint (readRender (edit.engine, wav.getFile(), starterSeconds * 10));
-        const auto soundsLikeIt = checkSoundsLikeTheStarter (fingerprint);
-
-        if (! soundsLikeIt)
-            keepRender (wav.getFile(), "starter");
-
-        REQUIRE (soundsLikeIt);
-
-        auto differs = false;
-        phazite::test::checkGoldenText ("renders/starter.json", writeFingerprint (fingerprint, aboutTheStarter),
-                                        [&differs] (const juce::String& expectedText, const juce::String& actualText)
-                                        {
-                                            const auto found = compareFingerprints (expectedText, actualText);
-                                            differs = ! found.isEmpty();
-                                            return found;
-                                        });
-
-        if (differs)
-            keepRender (wav.getFile(), "starter");
+        phazite::test::checkGoldenRender (song.context, golden ("starter",
+                                                                "the starter project, a beat on Phazite's drum sampler and an "
+                                                                "arpeggio on its synth.",
+                                                                starterSeconds, soundsLikeTheStarter));
     }
 
     TEST_CASE ("Golden render: two chords on Phazite's wavetable synth, in unison, an envelope sweeping each note's table")
     {
-        phazite::test::TemporaryFolder temp;
-        juce::String error;
-        const auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Wavetable", error);
-        REQUIRE_MESSAGE (project != nullptr, error.toStdString());
-        auto& edit = project->getEdit();
-        addWavetableSong (edit);
+        TestSong song;
+        addWavetableSong (song);
         phazite::test::settle();
+        phazite::test::checkGoldenRender (song.context, golden ("wavetable",
+                                                                "two chords on Phazite's wavetable synth, its two oscillators in "
+                                                                "unison, an envelope sweeping each note's table.",
+                                                                4.0, soundsLikeTheWavetable));
+    }
 
-        const juce::TemporaryFile wav (".wav");
-        renderSong (edit, wav.getFile(), fingerprintBlocks / 10);
-        const auto fingerprint = getFingerprint (readRender (edit.engine, wav.getFile(), fingerprintBlocks));
-        const auto soundsLikeIt = checkSoundsLikeTheWavetable (fingerprint);
+    TEST_CASE ("Golden render: three chords on Phazite's synth as it is made")
+    {
+        renders (addSynthSong,
+                 golden ("synth", "three chords on Phazite's synth as it is made, then their release.", 4.0, soundsLikeChords));
+    }
 
-        if (! soundsLikeIt)
-            keepRender (wav.getFile(), "wavetable");
+    TEST_CASE ("Golden render: two bars of a beat on Phazite's drum sampler with its kit")
+    {
+        renders (addDrumSong,
+                 golden ("drums", "two bars of kick, snare and hi-hat on Phazite's drum sampler with its kit.", 4.0, soundsLikeTheDrums));
+    }
 
-        REQUIRE (soundsLikeIt);
+    TEST_CASE ("Golden render: a tone played plain, then 6 dB quieter by its clip's gain")
+    {
+        renders (addClipGainSong,
+                 golden ("audio-gain", "a tone in an audio clip, then in another turned down 6 dB by its gain.", 4.0, soundsLikeClipGain));
+    }
 
-        auto differs = false;
-        phazite::test::checkGoldenText ("renders/wavetable.json", writeFingerprint (fingerprint, aboutTheWavetable),
-                                        [&differs] (const juce::String& expectedText, const juce::String& actualText)
-                                        {
-                                            const auto found = compareFingerprints (expectedText, actualText);
-                                            differs = ! found.isEmpty();
-                                            return found;
-                                        });
+    TEST_CASE ("Golden render: audio clips fading in and out, linear, convex, concave and S-curve")
+    {
+        renders (addFadesSong,
+                 golden ("audio-fades", "four audio clips fading in and out over 0.3 s: linear, convex, concave and S-curve fades.", 4.0,
+                         soundsLikeFades));
+    }
 
-        if (differs)
-            keepRender (wav.getFile(), "wavetable");
+    TEST_CASE ("Golden render: a loop of clicks made at 120 BPM follows a song at 90 BPM")
+    {
+        renders (addStretchedSong,
+                 golden ("audio-stretched", "a loop of clicks made at 120 BPM in a song at 90 BPM, stretched to follow its tempo.", 4.0,
+                         soundsLikeClicksAt90));
+    }
+
+    TEST_CASE ("Golden render: a tone pitched up an octave by its clip, as long as it was")
+    {
+        renders (addPitchedSong,
+                 golden ("audio-pitched", "a 220 Hz tone pitched up an octave by its audio clip.", 4.0, soundsLikeAnOctaveUp));
+    }
+
+    TEST_CASE ("Golden render: a tone that dies away, played backwards by its clip")
+    {
+        renders (addReversedSong,
+                 golden ("audio-reversed", "a tone that dies away, played backwards by its audio clip.", 4.0, soundsLikeASwell));
+    }
+
+    TEST_CASE ("Golden render: an alias plays what its original does, a note added later too")
+    {
+        renders (addAliasSong,
+                 golden ("aliases", "a chord and a note on Phazite's synth, and an alias of their clip.", 4.0, soundsLikeAnAlias));
+    }
+
+    TEST_CASE ("Golden render: volume automation through bent lines, a hold and a jump")
+    {
+        renders (addAutomationSong, golden ("automation-volume", "a tone whose volume automation bends down and up, holds, then jumps.",
+                                            4.0, soundsLikeTheAutomation));
+    }
+
+    TEST_CASE ("Golden render: pan automation from left to right")
+    {
+        renders (addPanAutomationSong,
+                 golden ("automation-pan", "a tone whose pan automation sweeps from left to right.", 4.0, soundsLikeAPanSweep));
+    }
+
+    TEST_CASE ("Golden render: a device's parameter automated, a filter opening on a chord")
+    {
+        renders (addDeviceAutomationSong,
+                 golden ("automation-device", "a chord on Phazite's synth through its filter, whose cutoff automation opens it.", 4.0,
+                         soundsLikeAnOpeningFilter));
+    }
+
+    TEST_CASE ("Golden render: notes on the beats of a song at 90 BPM in 3/4")
+    {
+        renders (addTempoSong, golden ("tempo", "a short note on every beat of a song at 90 BPM in 3/4.", 4.0, soundsLikeBeatsAt90));
     }
 }

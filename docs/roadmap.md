@@ -56,7 +56,7 @@ Done before this plan (progress since then is under [Status](#status)):
 | A3. Phazite's types at the UI boundary | The UI knows nothing about Tracktion | One view at a time; the playlist and the mixer before step 2.1 (done 2026-10-16) |
 | A4. A UI a designer can work on | A designer changes how Phazite looks without editing C++ | When the designer joins; any time after A1 |
 | A5. Engine parts replaced one at a time | Replace a part of Tracktion only where Phazite gains something | Only after a dated decision for each part ([design section 23](design.md#23-tracktion-engine-what-it-gives-and-what-we-build)) |
-| A6. Off Tracktion Engine | Phazite owns its project, its sound, its plug-in hosting, its inputs and its renders, and Tracktion goes | Planned 2026-10-30 ([tracktion-migration.md](tracktion-migration.md), phases T0 to T6); each phase after the owner's go-ahead |
+| A6. Off Tracktion Engine | Phazite owns its project, its sound, its plug-in hosting, its inputs and its renders, and Tracktion goes | Planned 2026-10-30 ([tracktion-migration.md](tracktion-migration.md), phases T0 to T6); each phase after the owner's go-ahead: T0 done 2026-10-30, T1 under way |
 
 **A0. Safety net and limits (M)**
 - **Golden tests**, which bring forward the render comparisons under [Cross-cutting work](#cross-cutting-work):
