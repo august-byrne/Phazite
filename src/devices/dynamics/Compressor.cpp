@@ -13,6 +13,7 @@ namespace
 {
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
+        { .id = "inputGain", .name = "Input Gain", .minimum = -24.0f, .maximum = 24.0f, .unit = Unit::decibels },
         { .id = "threshold", .name = "Threshold", .minimum = -60.0f, .maximum = 0.0f, .defaultValue = -18.0f, .unit = Unit::decibels },
         { .id = "ratio", .name = "Ratio", .minimum = 1.0f, .maximum = 20.0f, .defaultValue = 4.0f, .unit = Unit::ratio, .midpoint = 4.0f },
         { .id = "attack",
@@ -48,7 +49,7 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    constexpr double makeupSeconds = 0.02;   // how long a change of the makeup gain takes, about
+    constexpr double makeupSeconds = 0.02;   // how long a change of the input or makeup gain takes, about
     constexpr float highCutOff = 19999.0f;   // the key's high cut at its top: off
     constexpr double keyFadeSeconds = 0.005; // between the key and the sound, as Listen turns on or off
 
@@ -129,6 +130,8 @@ void Compressor::process (const ProcessContext& block)
     }
 
     const auto thresholdDecibels = values[threshold], kneeDecibels = values[knee], targetMakeup = values[makeup];
+    const auto targetInput = values[inputGain];
+    const auto hearsItself = heard == block.channels; // the input gain drives the detector too, unless a sidechain feeds it
     const auto slope = getSlope (values[ratio]);
     const auto lowCut = dsp::makeFilter (dsp::FilterShape::highPass, values[keyLowCut], sampleRate, 0.70710678);
     const auto cutsHigh = values[keyHighCut] < highCutOff;
@@ -140,6 +143,7 @@ void Compressor::process (const ProcessContext& block)
     if (isFirstBlock)
     {
         makeupDecibels = targetMakeup;
+        inputDecibels = targetInput;
         isFirstBlock = false;
     }
 
@@ -150,6 +154,17 @@ void Compressor::process (const ProcessContext& block)
 
     for (int i = 0; i < block.numSamples; ++i)
     {
+        // The input gain, gliding to where it is set.
+        inputDecibels += (targetInput - inputDecibels) * makeupSmoothing;
+
+        if (! juce::exactlyEqual (inputDecibels, lastInputDecibels))
+        {
+            lastInputDecibels = inputDecibels;
+            lastInput = dsp::decibelsToGain (inputDecibels);
+        }
+
+        const auto keyGain = hearsItself ? lastInput : 1.0f;
+
         // The key, through its cuts.
         auto peak = 0.0f;
         std::array<float, 2> key {};
@@ -157,7 +172,7 @@ void Compressor::process (const ProcessContext& block)
         for (int channel = 0; channel < numHeard; ++channel)
         {
             auto& cut = highCuts[(size_t) channel];
-            auto x = lowCuts[(size_t) channel].process (heard[channel][i], lowCut);
+            auto x = lowCuts[(size_t) channel].process (heard[channel][i] * keyGain, lowCut);
 
             if (cutsHigh)
                 x = cut[1].process (cut[0].process (x, highCut[0]), highCut[1]);
@@ -182,7 +197,7 @@ void Compressor::process (const ProcessContext& block)
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
-            const auto turnedDown = block.channels[channel][i] * lastGain;
+            const auto turnedDown = block.channels[channel][i] * lastInput * lastGain;
             block.channels[channel][i] = turnedDown + keyShare * (key[(size_t) std::min (channel, numHeard - 1)] - turnedDown);
         }
 

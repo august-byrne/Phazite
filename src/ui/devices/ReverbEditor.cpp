@@ -30,7 +30,8 @@ public:
     {
         setTitle ("Reverb decay");
         setDescription ("How the tail fades: time across, pitch up, each pitch lit until it has faded. Drag the wedge's end for the "
-                        "decay, the gap at its start for the pre-delay, its top corner for the damping, and its floor for the low cut.");
+                        "decay, the gap at its start for the pre-delay, its top corner for the damping, its floor for the low cut and its "
+                        "ceiling for the high cut.");
 
         for (const auto& parameter : Reverb::info.parameters)
         {
@@ -119,6 +120,7 @@ public:
     }
 
     float getLowCutY() const { return yFor (std::max (lowestPitch, (double) values[Reverb::lowCut])); }
+    float getHighCutY() const { return yFor (std::min (highestPitch, (double) values[Reverb::highCut])); }
 
     void paint (juce::Graphics& g) override
     {
@@ -135,7 +137,7 @@ public:
         {
             const auto pitch = getPitch ((float) row + 0.5f);
 
-            if (pitch < values[Reverb::lowCut])
+            if (pitch < values[Reverb::lowCut] || pitch > values[Reverb::highCut])
                 continue;
 
             const auto end = xFor (getPredelaySeconds() + Reverb::getDecayAt (values, pitch, getSampleRate()));
@@ -162,10 +164,12 @@ public:
             g.fillRect (juce::Rectangle<float> (x, area.getY(), 2.0f, area.getHeight()));
         }
 
-        // The edges that drag: the decay's end, the pre-delay's gap, the damping's corner and the low cut's floor.
+        // The edges that drag: the decay's end, the pre-delay's gap, the damping's corner, the low cut's floor and the high
+        // cut's ceiling.
         g.setColour (p.text.withAlpha (GraphTint::marker));
         g.drawVerticalLine (juce::roundToInt (start), area.getY(), area.getBottom());
         g.drawHorizontalLine (juce::roundToInt (getLowCutY()), area.getX(), area.getRight());
+        g.drawHorizontalLine (juce::roundToInt (getHighCutY()), area.getX(), area.getRight());
 
         for (const auto handle : { getDecayHandle(), getDampingHandle() })
         {
@@ -192,7 +196,8 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        // The handle nearest, within reach: the decay's end, the damping's corner, the pre-delay's gap, or the low cut's floor.
+        // The handle nearest, within reach: the decay's end, the damping's corner, the pre-delay's gap, the low cut's floor or
+        // the high cut's ceiling.
         dragged = -1;
         const auto at = e.position;
 
@@ -204,6 +209,8 @@ public:
             dragged = Reverb::predelay;
         else if (std::abs (at.y - getLowCutY()) < grabDistance)
             dragged = Reverb::lowCut;
+        else if (std::abs (at.y - getHighCutY()) < grabDistance)
+            dragged = Reverb::highCut;
         else if (at.x > getPredelayHandle().x)
             dragged = Reverb::decay; // anywhere else in the tail: its length
 
@@ -282,7 +289,7 @@ ReverbEditor::ReverbEditor (const DeviceHandle& handle)
     graph = &shown;
 
     const auto space = makeControlsPart ("Space", { "decay", "size" }, 2, ParameterControls::Size::large);
-    const auto tone = makeControlsPart ("Tone", { "predelay", "damping", "lowCut", "width" }, 4);
+    const auto tone = makeControlsPart ("Tone", { "predelay", "damping", "lowCut", "highCut", "width" }, 5);
     setParts ({ { { "Decay", &shown, 300, 196, 110, true } }, { space, tone } });
 }
 

@@ -28,6 +28,7 @@ public:
 
     enum Parameter
     {
+        inputGain,
         threshold,
         ratio,
         attack,
@@ -70,8 +71,9 @@ public:
 private:
     double sampleRate = 44100.0;
     float makeupSmoothing = 0.001f; // of the way to the makeup gain, per sample
-    float makeupDecibels = 0.0f;
-    float lastGainDecibels = 0.0f, lastGain = 1.0f; // the gain last worked out
+    float makeupDecibels = 0.0f, inputDecibels = 0.0f;
+    float lastInputDecibels = 0.0f, lastInput = 1.0f; // the input gain last worked out
+    float lastGainDecibels = 0.0f, lastGain = 1.0f;   // the gain last worked out
     bool isFirstBlock = true;
     static constexpr double listenMilliseconds = 500.0;
     float keyShare = 0.0f, keyStep = 0.01f; // how much of the key it plays, from 0 to 1, and its step per sample

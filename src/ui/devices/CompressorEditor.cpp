@@ -242,7 +242,8 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle)
 
     const auto main = makeControlsPart ("Squeeze", { "threshold", "ratio" }, 2, ParameterControls::Size::large);
     const auto timing = makeControlsPart ("Timing", { "attack", "release" }, 2);
-    const auto shape = makeControlsPart ("Shape", { "knee", "makeup" }, 2);
+    const auto shape =
+        makeControlsPart ("Gain and Knee", { "inputGain", "knee", "makeup" }, 3, ParameterControls::Size::compact, { "In", "Knee", "Out" });
     auto& cuts = makeControls ({ "keyLowCut", "keyHighCut" }, 2, ParameterControls::Size::compact, "Key", { "Low Cut", "High Cut" });
     auto& shownKey = keep (std::make_unique<KeyPart> (cuts));
     keyPart = &shownKey;

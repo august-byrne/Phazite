@@ -14,7 +14,7 @@ namespace
 
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
-        { .id = "drive", .name = "Drive", .maximum = 36.0f, .defaultValue = 6.0f, .unit = Unit::decibels },
+        { .id = "drive", .name = "Drive", .minimum = -24.0f, .maximum = 36.0f, .defaultValue = 6.0f, .unit = Unit::decibels },
         { .id = "shape",
           .name = "Shape",
           .maximum = (float) std::size (shapes) - 1.0f,

@@ -77,8 +77,8 @@ TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the c
     phazite::ui::LimiterEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
 
-    // A knob for each parameter but its mix, which is in its header.
-    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Limiter::info.parameters.size() - 1);
+    // A knob for each parameter: it has no mix, which would let peaks past its ceiling.
+    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Limiter::info.parameters.size());
     CHECK (editor.findControl ("mix") == nullptr);
     phazite::test::checkChildrenApart (editor);
     phazite::test::checkChildrenApart (editor.getDisplay());

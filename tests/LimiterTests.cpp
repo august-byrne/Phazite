@@ -114,7 +114,9 @@ TEST_CASE ("The limiter's description holds together, and it reports its look-ah
 {
     REQUIRE (devices::isValid (Limiter::info));
     CHECK (devices::findParameter (Limiter::info, "ceiling") == Limiter::ceiling);
-    CHECK (devices::findParameter (Limiter::info, "mix") == Limiter::mix);
+
+    // No mix: below 100 % it would let peaks past the ceiling (2026-10-30).
+    CHECK (devices::findParameter (Limiter::info, devices::mixParameterID) < 0);
 
     Limiter limiter;
     limiter.prepare (testRate, testBlockSize);

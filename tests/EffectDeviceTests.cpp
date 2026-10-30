@@ -148,8 +148,14 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
     // The synth's unison plays one voice at first.
     CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].defaultValue == doctest::Approx (0.0f));
 
-    // The stereo expander changes nothing until turned, and has no mix.
+    // The stereo expander changes nothing until turned, and has no mix; nor has the maximizer, whose mix below 100 % would
+    // let peaks past its ceiling (2026-10-30).
     CHECK (devices::findParameter (devices::StereoExpander::info, devices::mixParameterID) < 0);
+    CHECK (devices::findParameter (devices::Maximizer::info, devices::mixParameterID) < 0);
+
+    // The delay's parameters are named as its editor names them: the note value, and the time in milliseconds.
+    CHECK (devices::Delay::info.parameters[(size_t) devices::findParameter (devices::Delay::info, "time")].name == "Note");
+    CHECK (devices::Delay::info.parameters[(size_t) devices::findParameter (devices::Delay::info, "milliseconds")].name == "Time");
 }
 
 TEST_CASE ("The delay: echoes on the beat at the song's tempo, fewer each time, and bouncing in ping-pong")
@@ -217,6 +223,15 @@ TEST_CASE ("The saturator: curves that round peaks off, harmonics when driven, a
     CHECK (getPeak (loud.left, 12000, 24000) < 1.1f);
     CHECK (getAmplitudeAt (loud.left, 12000, 24000, 1320.0) > 0.05f);
     CHECK (saturator.getLatencySamples() >= 0);
+
+    // Its drive goes below 0 dB too, for a gentle bend on a loud sound: a loud sine 18 dB down into the soft curve, without
+    // auto gain, keeps almost all of its shape (its third harmonic 40 dB under it) and comes out 18 dB quieter.
+    set (values, devices::Saturator::info, "drive", -18.0f);
+    saturator.reset();
+    const auto gentle = play (saturator, values, 24000, sine (440.0, 0.5f));
+    CHECK (getAmplitudeAt (gentle.left, 12000, 24000, 1320.0) < 0.01f * getAmplitudeAt (gentle.left, 12000, 24000, 440.0));
+    CHECK (toDecibels (getRms (gentle.left, 12000, 24000))
+           == doctest::Approx (toDecibels (0.5f / std::sqrt (2.0f)) - 18.0f).epsilon (0.03));
 }
 
 TEST_CASE ("The filter: open at first, and low-pass, high-pass and band-pass shapes that fall as steeply as their slope")

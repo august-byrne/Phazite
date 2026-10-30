@@ -27,8 +27,7 @@ public:
     {
         gain,
         ceiling,
-        release,
-        mix // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
+        release // no mix: below 100 % it would let peaks past the ceiling
     };
 
     static const DeviceInfo info;

@@ -150,7 +150,7 @@ TEST_CASE ("The delay's editor drags its first echo for the time and feedback, a
     mouse.release();
     CHECK (song.valueOf ("time") > timeBefore);
     CHECK (song.valueOf ("feedback") > 0.35f);
-    CHECK (song.describeUndo() == juce::String ("Undo Change Time"));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Note")); // the time as a note value, while synced
     phazite::undo (*song.edit);
     CHECK (song.valueOf ("time") == doctest::Approx (timeBefore));
     CHECK (song.valueOf ("feedback") == doctest::Approx (0.35f));

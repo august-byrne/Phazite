@@ -158,6 +158,30 @@ TEST_CASE ("The reverb fades by 60 dB over its decay time")
     }
 }
 
+TEST_CASE ("The reverb's high cut takes the treble off its tail, from its start, and changes nothing at its top")
+{
+    auto values = getDefaults();
+
+    // How much treble is in the tail's first third of a second, in decibels.
+    const auto treble = [&values] (float highCut)
+    {
+        values[Reverb::highCut] = highCut;
+        const auto tail = play (values, (int) testRate / 2, impulse);
+        return 10.0
+               * std::log10 (
+                   energyOf (filtered (tail.left, phazite::devices::dsp::FilterShape::highPass, 8000.0), 0, tail.left.size() / 3));
+    };
+
+    CHECK (treble (2000.0f) < treble (20000.0f) - 20.0);
+
+    // At its top, off: the same tail, sample for sample, as a reverb without one.
+    values[Reverb::highCut] = Reverb::info.parameters[Reverb::highCut].maximum;
+    const auto off = play (values, 4800, impulse);
+    values[Reverb::highCut] = Reverb::info.parameters[Reverb::highCut].defaultValue;
+    const auto byDefault = play (values, 4800, impulse);
+    CHECK (off.left == byDefault.left);
+}
+
 TEST_CASE ("The reverb's damping makes the treble fade sooner")
 {
     auto values = getDefaults();

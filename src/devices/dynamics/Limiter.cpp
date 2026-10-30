@@ -22,7 +22,6 @@ namespace
           .defaultValue = 100.0f,
           .unit = Unit::milliseconds,
           .midpoint = 50.0f },
-        { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
     constexpr double gainSeconds = 0.02; // how long a change of the gain takes, about

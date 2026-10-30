@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's compressor (src/devices/dynamics/Compressor.h): its curve, as it reports it and as it plays, its attack and
-// release times, makeup gain, sidechain, stereo link, low cut and meters.
+// release times, input and makeup gains, sidechain, stereo link, low cut and meters.
 #include "TestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 
@@ -108,6 +108,7 @@ TEST_CASE ("The compressor's description holds together")
 {
     REQUIRE (devices::isValid (Compressor::info));
     CHECK (Compressor::info.parameters.size() == (size_t) Compressor::mix + 1);
+    CHECK (devices::findParameter (Compressor::info, "inputGain") == 0); // first, as the sound goes
     CHECK (devices::findParameter (Compressor::info, "threshold") == Compressor::threshold);
     CHECK (devices::findParameter (Compressor::info, "keyLowCut") == Compressor::keyLowCut);
     CHECK (devices::findParameter (Compressor::info, "keyHighCut") == Compressor::keyHighCut);
@@ -206,6 +207,28 @@ TEST_CASE ("The compressor's makeup gain moves smoothly")
     played = play (compressor, values, 9600, [] (int t, int) { return steady (t, -46.0f); });
     CHECK (gainAt (played[0], 0, -46.0f) < 6.1f);
     CHECK (gainAt (played[0], 9599, -46.0f) == doctest::Approx (12.0f).epsilon (0.001));
+}
+
+TEST_CASE ("The compressor's input gain drives the sound into it, and into its detector unless a sidechain feeds it")
+{
+    // 10 dB under the threshold: untouched at 0 dB in; 16 dB more goes 6 dB over, which 4:1 turns down by 4.5 dB.
+    auto values = getTestValues();
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    auto played = play (compressor, values, 12000, [] (int t, int) { return steady (t, -36.0f); });
+    CHECK (std::abs (gainAt (played[0], 11999, -36.0f)) < 0.001f);
+
+    values[Compressor::inputGain] = 16.0f;
+    played = play (compressor, values, 24000, [] (int t, int) { return steady (t, -36.0f); });
+    CHECK (gainAt (played[0], 0, -36.0f) < 1.0f); // it glides there, as the makeup does
+    CHECK (gainAt (played[0], 23999, -36.0f) == doctest::Approx (16.0f - 4.5f).epsilon (0.001));
+
+    // With a sidechain, the sound goes in louder, and the key, which says how far down, is as it was.
+    values[Compressor::inputGain] = 6.0f;
+    Compressor ducking;
+    ducking.prepare (testRate, testBlockSize);
+    played = play (ducking, values, 12000, [] (int t, int) { return steady (t, -46.0f); }, [] (int t, int) { return steady (t, -6.0f); });
+    CHECK (gainAt (played[0], 11999, -46.0f) == doctest::Approx (6.0f - 15.0f).epsilon (0.001));
 }
 
 TEST_CASE ("The compressor listens to its sidechain when one feeds it, and to both channels alike")

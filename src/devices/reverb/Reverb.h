@@ -31,6 +31,7 @@ public:
         predelay,
         damping,
         lowCut,
+        highCut,
         width,
         mix // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
     };
@@ -69,7 +70,7 @@ private:
     std::array<std::array<Allpass, numDiffusers>, 2> diffusers;
     std::array<dsp::DelayLine, numLines> lines;
     std::array<float, numLines> damped {}, phases {}, phaseSteps {};
-    std::array<dsp::Filter, 2> lowCuts {};
+    std::array<dsp::Filter, 2> lowCuts {}, highCuts {};
 
     // Smoothed toward the parameters, so that turning a knob glides.
     float shownSize = -1.0f, shownPredelay = 0.0f;

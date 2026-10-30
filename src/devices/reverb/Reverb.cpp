@@ -43,6 +43,13 @@ namespace
           .defaultValue = 100.0f,
           .unit = Unit::hertz,
           .midpoint = 141.0f },
+        { .id = "highCut",
+          .name = "High Cut",
+          .minimum = 1000.0f,
+          .maximum = 20000.0f,
+          .defaultValue = 20000.0f,
+          .unit = Unit::hertz,
+          .midpoint = 4472.0f },
         { .id = "width", .name = "Width", .defaultValue = 1.0f, .unit = Unit::percent },
         { .id = mixParameterID, .name = "Mix", .defaultValue = 0.25f, .unit = Unit::percent },
     };
@@ -55,6 +62,8 @@ namespace
     constexpr double modulationMilliseconds = 0.12;
     constexpr double modulationHertz[Reverb::numLines] = { 0.31, 0.47, 0.53, 0.67, 0.79, 0.89, 1.01, 1.13 };
     constexpr std::uint32_t modulationSeed = 0x5eed1234u;
+
+    constexpr float highCutOff = 19999.0f; // the high cut at its top: off
 
     // The allpass filters before the network, from Dattorro's plate (1997): their lengths in milliseconds, and gains.
     constexpr double diffuserMilliseconds[] = { 4.77, 3.59, 12.73, 9.30 };
@@ -138,6 +147,9 @@ void Reverb::reset()
     for (auto& filter : lowCuts)
         filter.reset();
 
+    for (auto& filter : highCuts)
+        filter.reset();
+
     damped.fill (0.0f);
 
     // The same starting points every time, so that a render comes out the same.
@@ -167,6 +179,8 @@ void Reverb::process (const ProcessContext& block)
     const auto targetPredelay = (float) (values[predelay] * 0.001 * sampleRate);
     const auto dampingCoefficient = (float) (1.0 - std::exp (-juce::MathConstants<double>::twoPi * values[damping] / sampleRate));
     const auto cut = dsp::makeFilter (dsp::FilterShape::highPass, values[lowCut], sampleRate, 0.70710678);
+    const auto cutsHigh = values[highCut] < highCutOff;
+    const auto highCutFilter = dsp::makeFilter (dsp::FilterShape::lowPass, values[highCut], sampleRate, 0.70710678);
     const auto modulationDepth = (float) (modulationMilliseconds * 0.001 * sampleRate);
     const auto spread = values[width];
     tailSeconds.store (decaySeconds + values[predelay] * 0.001f, std::memory_order_relaxed);
@@ -241,10 +255,16 @@ void Reverb::process (const ProcessContext& block)
             right += rightSigns[line] * out[line];
         }
 
-        // Out: as wide as the width, without rumble.
+        // Out: as wide as the width, without rumble, and without the treble above the high cut.
         const auto mid = 0.5f * (left + right), sideways = 0.5f * (left - right) * spread;
         left = lowCuts[0].process ((mid + sideways) * outputGain, cut);
         right = lowCuts[1].process ((mid - sideways) * outputGain, cut);
+
+        if (cutsHigh)
+        {
+            left = highCuts[0].process (left, highCutFilter);
+            right = highCuts[1].process (right, highCutFilter);
+        }
 
         block.channels[0][i] = left;
 

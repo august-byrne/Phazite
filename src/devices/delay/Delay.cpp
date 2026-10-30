@@ -21,13 +21,13 @@ namespace
     constexpr ParameterInfo parameters[] = {
         { .id = "sync", .name = "Sync", .maximum = 1.0f, .defaultValue = 1.0f, .unit = Unit::toggle },
         { .id = "time",
-          .name = "Time",
+          .name = "Note",
           .maximum = (float) std::size (noteValues) - 1.0f,
           .defaultValue = 6.0f, // a dotted eighth
           .unit = Unit::choice,
           .choices = noteValues },
         { .id = "milliseconds",
-          .name = "Milliseconds",
+          .name = "Time",
           .minimum = 1.0f,
           .maximum = 2000.0f,
           .defaultValue = 375.0f,

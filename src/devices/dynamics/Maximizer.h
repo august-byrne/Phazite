@@ -33,8 +33,7 @@ public:
         midLevel,
         highLevel,
         ceiling,
-        release,
-        mix // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
+        release // no mix: below 100 % it would let peaks past the ceiling
     };
 
     static const DeviceInfo info;
@@ -70,7 +69,7 @@ private:
     std::array<dsp::ThreeBandSplit, 2> splits;
     std::array<dsp::LevelFollower, numBands> reductions; // in decibels
     Limiter limiter;
-    std::array<float, Limiter::mix + 1> limiterValues {}; // its parameters, as the maximizer sets them
+    std::array<float, Limiter::release + 1> limiterValues {}; // its parameters, as the maximizer sets them
     std::array<MeterValue, numBands> bandLevels { MeterValue { -120.0f }, MeterValue { -120.0f }, MeterValue { -120.0f } };
     std::array<MeterValue, numBands> bandReductions; // from 0
     FallingValue gainReduction { reductionFallPerSecond };

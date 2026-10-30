@@ -42,7 +42,6 @@ namespace
           .defaultValue = 100.0f,
           .unit = Unit::milliseconds,
           .midpoint = 100.0f },
-        { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
     // Each band's compressor: above the threshold, across a soft knee, at a ratio from 1:1 (no squeeze) to 10:1.
@@ -177,7 +176,6 @@ void Maximizer::process (const ProcessContext& block)
     limiterValues[Limiter::gain] = 0.0f;
     limiterValues[Limiter::ceiling] = values[ceiling];
     limiterValues[Limiter::release] = values[release];
-    limiterValues[Limiter::mix] = 1.0f;
 
     ProcessContext limited { block };
     limited.numChannels = numChannels;
