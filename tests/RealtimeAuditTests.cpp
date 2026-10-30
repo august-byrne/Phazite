@@ -11,6 +11,7 @@
 // docs/realtime-audit.md lists the findings and what Phazite does about each.
 
 #include "AudioThreadMonitor.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
@@ -505,15 +506,15 @@ void setDeviceValue (const te::Plugin::Ptr& plugin, const char* id, float value)
 // Chords a sixteenth long, one after another for two bars, so that the busiest blocks (one chord's ends with the next's
 // starts) come from the first beat, within the warm-up: Tracktion's MIDI arrays grow on the busiest block (finding 4).
 // One track of them at most: with more, the arrays the graph pools for them can carry MIDI for the first time later on.
-void addChords (te::Edit& edit, te::AudioTrack& track)
+void addChords (te::AudioTrack& track)
 {
-    auto clip = track.insertMIDIClip ("Chords", edit.tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+    auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Chords");
     REQUIRE (clip != nullptr);
 
     for (int i = 0; i < 32; ++i)
         for (const auto note : { 48, 52, 55, 59 })
-            clip->getSequence().addNote (note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25), te::BeatDuration::fromBeats (0.25),
-                                         100, 0, nullptr);
+            phazite::test::addMidiNote (*clip, note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25),
+                                        te::BeatDuration::fromBeats (0.25), 100);
 }
 } // namespace
 
@@ -817,12 +818,11 @@ TEST_SUITE ("realtime-audit")
         device->findParameter ("release")->setParameter (400.0f, juce::sendNotification);
 
         // More notes than voices, so some are stolen.
-        auto clip = track.insertMIDIClip ("Notes", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Notes");
         REQUIRE (clip != nullptr);
 
         for (int i = 0; i < 32; ++i)
-            clip->getSequence().addNote (36 + i, te::BeatPosition::fromBeats (i * 0.125), te::BeatDuration::fromBeats (1.0), 100, 0,
-                                         nullptr);
+            phazite::test::addMidiNote (*clip, 36 + i, te::BeatPosition::fromBeats (i * 0.125), te::BeatDuration::fromBeats (1.0), 100);
 
         const auto m = playAndMeasure (*edit);
         report ("MIDI into Phazite's synth, notes overlapping, with noise and its LFO", m);
@@ -844,13 +844,13 @@ TEST_SUITE ("realtime-audit")
 
         // Chords a sixteenth long, one after another, so that the busiest blocks (one chord's ends with the next's starts)
         // come from the first beat, within the warm-up: Tracktion's MIDI arrays grow on the busiest block (finding 4).
-        auto clip = track.insertMIDIClip ("Chords", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Chords");
         REQUIRE (clip != nullptr);
 
         for (int i = 0; i < 32; ++i)
             for (const auto note : { 48, 52, 55, 59 })
-                clip->getSequence().addNote (note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25), te::BeatDuration::fromBeats (0.25),
-                                             100, 0, nullptr);
+                phazite::test::addMidiNote (*clip, note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25),
+                                            te::BeatDuration::fromBeats (0.25), 100);
 
         const auto m = playAndMeasure (*edit);
         report ("Phazite's synth with seven unison voices, spread wide", m);
@@ -889,13 +889,13 @@ TEST_SUITE ("realtime-audit")
         set ("mod3Amount", 0.5f);
 
         // Chords a sixteenth long, as for the synth's unison.
-        auto clip = track.insertMIDIClip ("Chords", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Chords");
         REQUIRE (clip != nullptr);
 
         for (int i = 0; i < 32; ++i)
             for (const auto note : { 48, 52, 55, 59 })
-                clip->getSequence().addNote (note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25), te::BeatDuration::fromBeats (0.25),
-                                             100, 0, nullptr);
+                phazite::test::addMidiNote (*clip, note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25),
+                                            te::BeatDuration::fromBeats (0.25), 100);
 
         const auto m = playAndMeasure (*edit);
         report ("Phazite's wavetable synth, eight unison voices and warps, an envelope sweeping each note's table", m);
@@ -982,7 +982,7 @@ TEST_SUITE ("realtime-audit")
         setDeviceValue (synth, "filterType", (float) phazite::devices::dsp::FilterMode::combPlus);
         setDeviceValue (synth, "resonance", 0.8f);
         setDeviceValue (synth, "unisonVoices", 2.0f); // three
-        addChords (*edit, notes);
+        addChords (notes);
 
         // The filter's Comb - on a tone, swept by a lane and ringing. On a track of its own: after an instrument, a lane
         // would make Tracktion pass the notes on in pieces of blocks, moving their arrays around more (finding 4).
@@ -1017,7 +1017,7 @@ TEST_SUITE ("realtime-audit")
         setDeviceValue (wavetable, "resonance", 0.8f);
         setDeviceValue (wavetable, "unisonVoices", 3.0f); // four
         setDeviceValue (wavetable, "mod1Amount", 0.5f);   // its first slot: Envelope 2 opens the cutoff, here by four octaves
-        addChords (*edit, track);
+        addChords (track);
 
         const auto m = playAndMeasure (*edit);
         report ("Phazite's wavetable synth's comb, swept by an envelope at each note, chords a sixteenth apart", m);
@@ -1036,7 +1036,7 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::setInstrument (notes, synth) != nullptr);
         setDeviceValue (synth, "filterType", (float) phazite::devices::dsp::FilterMode::vowel);
         setDeviceValue (synth, "resonance", 0.8f);
-        addChords (*edit, notes);
+        addChords (notes);
 
         // The filter's phaser on a tone, swept by a lane, on a track of its own (finding 4).
         auto& tone = getTrack (*edit, 1);
@@ -1070,7 +1070,7 @@ TEST_SUITE ("realtime-audit")
         setDeviceValue (wavetable, "resonance", 0.8f);
         setDeviceValue (wavetable, "unisonVoices", 3.0f); // four
         setDeviceValue (wavetable, "mod1Amount", 0.5f);   // its first slot: Envelope 2 opens the cutoff, here by four octaves
-        addChords (*edit, track);
+        addChords (track);
 
         const auto m = playAndMeasure (*edit);
         report ("Phazite's wavetable synth's sample and hold, swept by an envelope at each note, chords a sixteenth apart", m);
@@ -1103,17 +1103,17 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
 
         // Kick and snare, closed hats on the eighths and an open hat the next one chokes.
-        auto clip = track.insertMIDIClip ("Beat", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Beat");
         REQUIRE (clip != nullptr);
 
         for (int eighth = 0; eighth < 16; ++eighth)
         {
             const auto at = te::BeatPosition::fromBeats (eighth * 0.5);
             const auto note = eighth % 4 == 3 ? 46 : 42;
-            clip->getSequence().addNote (note, at, te::BeatDuration::fromBeats (0.25), 90, 0, nullptr);
+            phazite::test::addMidiNote (*clip, note, at, te::BeatDuration::fromBeats (0.25), 90);
 
             if (eighth % 4 == 0)
-                clip->getSequence().addNote (eighth % 8 == 0 ? 36 : 38, at, te::BeatDuration::fromBeats (0.25), 110, 0, nullptr);
+                phazite::test::addMidiNote (*clip, eighth % 8 == 0 ? 36 : 38, at, te::BeatDuration::fromBeats (0.25), 110);
         }
 
         device->getSampler().audition (3, 1.0f); // the clap, as a click on its pad plays it
@@ -1153,12 +1153,11 @@ TEST_SUITE ("realtime-audit")
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::setInstrument (track, edit->getPluginCache().createNewPlugin (Synth::typeID, {})) != nullptr);
-        auto clip = track.insertMIDIClip ("Notes", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Notes");
         REQUIRE (clip != nullptr);
 
         for (int i = 0; i < 16; ++i)
-            clip->getSequence().addNote (60 + (i % 5), te::BeatPosition::fromBeats (i * 0.5), te::BeatDuration::fromBeats (0.4), 100, 0,
-                                         nullptr);
+            phazite::test::addMidiNote (*clip, 60 + (i % 5), te::BeatPosition::fromBeats (i * 0.5), te::BeatDuration::fromBeats (0.4), 100);
 
         REQUIRE (track.setFrozen (true, te::Track::individualFreeze).wasOk());
         REQUIRE (track.isFrozen (te::Track::individualFreeze));

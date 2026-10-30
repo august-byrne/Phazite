@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Tempo.h"
 #include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -42,8 +43,8 @@ namespace
     }
 
     // Keeps the song's patterns at their speed while the tempo changes, when the song says so (doPatternsFollowTempo()).
-    // Tracktion keeps a MIDI clip's notes on their beats, so this scales the beats of its notes, its length, its offset and
-    // its loop by how much the tempo changed, which leaves them at their times. Each clip still starts on its beat.
+    // The song keeps a MIDI clip's notes on their beats, so this scales the beats of its notes, its length and its offset by
+    // how much the tempo changed, which leaves them at their times. Each clip still starts on its beat.
     class PatternsKeepTheirSpeed
     {
     public:
@@ -60,39 +61,38 @@ namespace
             if (doPatternsFollowTempo (edit) || juce::approximatelyEqual (scale, 1.0))
                 return;
 
-            for (auto* track : te::getAudioTracks (edit))
-                for (auto* clip : track->getClips())
-                    if (auto* midi = dynamic_cast<te::MidiClip*> (clip))
-                        keepSpeed (*midi, scale);
+            for (const auto& clipState : getClipStates (edit))
+                keepSpeed (clipState, scale);
         }
 
     private:
         te::Edit& edit;
         const double tempoBefore;
 
-        void keepSpeed (te::MidiClip& clip, double scale)
+        void keepSpeed (juce::ValueTree clipState, double scale)
         {
             auto* um = &edit.getUndoManager();
-            const auto scaled = [scale] (auto beats) { return std::remove_cvref_t<decltype (beats)>::fromBeats (beats.inBeats() * scale); };
-            auto& sequence = clip.getSequence();
 
-            for (auto* note : sequence.getNotes())
-                note->setStartAndLength (scaled (note->getStartBeat()), scaled (note->getLengthBeats()), um);
+            for (auto child : clipState)
+            {
+                if (child.hasType (schema::NOTE))
+                {
+                    child.setProperty (schema::noteStart, (double) child[schema::noteStart] * scale, um);
+                    child.setProperty (schema::noteLength, (double) child[schema::noteLength] * scale, um);
+                }
+                else if (child.hasType (schema::CONTROL))
+                {
+                    child.setProperty (schema::controlBeat, (double) child[schema::controlBeat] * scale, um);
+                }
+            }
 
-            for (auto* event : sequence.getControllerEvents())
-                event->setBeatPosition (scaled (event->getBeatPosition()), um);
+            // The sysex events Tracktion records with the notes, which only its clip holds.
+            if (auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (edit, toTracktion (getClipID (clipState)))))
+                for (auto* event : clip->getSequence().getSysexEvents())
+                    event->setBeatPosition (te::BeatPosition::fromBeats (event->getBeatPosition().inBeats() * scale), um);
 
-            for (auto* event : sequence.getSysexEvents())
-                event->setBeatPosition (scaled (event->getBeatPosition()), um);
-
-            if (clip.isLooping())
-                clip.setLoopRangeBeats ({ scaled (clip.getLoopStartBeats()), scaled (clip.getLoopLengthBeats()) });
-
-            const auto& tempo = edit.tempoSequence;
-            const auto start = clip.getPosition().getStart();
-            clip.setPosition (
-                { { start, tempo.toTime (clip.getStartBeat() + scaled (clip.getLengthInBeats())) },
-                  te::TimeDuration::fromSeconds (scaled (clip.getOffsetInBeats()).inBeats() / tempo.getBeatsPerSecondAt (start)) });
+            const auto range = getClipRange (clipState);
+            setClipPlace (edit, clipState, range.getStart(), range.getLength() * scale, getClipOffset (clipState) * scale);
         }
     };
 } // namespace

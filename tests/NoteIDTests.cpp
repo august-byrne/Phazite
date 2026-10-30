@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -154,36 +155,27 @@ TEST_CASE ("A copy of a clip keeps its notes' IDs, an alias, a duplicate and the
     CHECK (phazite::findNote (*right, phazite::NoteID::fromRaw (ids[3])) != nullptr);
 }
 
-TEST_CASE ("Notes without IDs, or with another note's, get IDs of their own")
+TEST_CASE ("Each note of the song has an ID from the start, which Tracktion's note that plays it carries")
 {
-    // An Edit no project context holds: its notes have no IDs until they are assigned.
+    // An Edit no project context holds too: the song gives its notes their IDs.
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto* clip = phazite::insertMidiClip (*te::getAudioTracks (*edit)[0], { beats (0.0), beats (4.0) }, nullptr);
+    auto* clip = phazite::insertMidiClip (*phazite::ensureTracks (*edit, 1).getFirst(), { beats (0.0), beats (4.0) }, nullptr);
     REQUIRE (clip != nullptr);
     auto& first = addNote (*clip, 60, 0.0);
     addNote (*clip, 62, 1.0);
-    CHECK_FALSE (phazite::getNoteID (first).isValid());
-
-    phazite::assignNoteIDs (*edit);
-    const auto ids = idsOf (*clip);
-    CHECK (allDifferent (ids));
-
-    // A copy of a note's state in the same clip: the copy gets a new ID, and the original keeps its own.
-    clip->getSequence().state.appendChild (first.state.createCopy(), nullptr);
-    phazite::assignNoteIDs (*edit);
-    const auto after = idsOf (*clip);
-    REQUIRE (after.size() == 3);
-    CHECK (allDifferent (after));
-    CHECK (phazite::getNoteID (first).getRaw() == ids[0]);
-    CHECK (std::count (after.begin(), after.end(), ids[1]) == 1);
-
-    // The open project's context assigns them when it takes the Edit.
-    clip->getSequence().state.appendChild (juce::ValueTree (te::IDs::NOTE, { { "p", 70 }, { "b", 2.0 }, { "l", 1.0 }, { "v", 100 } }),
-                                           nullptr);
-    phazite::ProjectContext context (phazite::test::getEngineContext());
-    setEdit (context, edit.get());
+    CHECK (phazite::getNoteID (first).isValid());
     CHECK (allDifferent (idsOf (*clip)));
-    setEdit (context, nullptr);
+
+    // Tracktion's notes that play none of the song's (written into its clip from outside), or that carry another's ID, go
+    // as the clip is placed again.
+    auto& sequence = clip->getSequence();
+    sequence.state.appendChild (first.state.createCopy(), nullptr);
+    sequence.state.appendChild (juce::ValueTree (te::IDs::NOTE, { { "p", 70 }, { "b", 2.0 }, { "l", 1.0 }, { "v", 100 } }), nullptr);
+    REQUIRE (idsOf (*clip).size() == 4);
+    phazite::mirror::reconcileClip (*edit, phazite::getClipID (*clip));
+    CHECK (idsOf (*clip).size() == 2);
+    CHECK (allDifferent (idsOf (*clip)));
+    CHECK (phazite::getNoteID (first).isValid());
 }
 
 TEST_CASE ("Notes' IDs are saved with the project and the same when it opens again, with nothing to save")

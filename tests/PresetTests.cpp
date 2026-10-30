@@ -4,6 +4,7 @@
 // and putting presets into another project as one undo step. Its "done when": a container saved as a preset loads into
 // another project with its macros working. And a device's preset loaded into a device of its kind, as a plug-in window's
 // Load Preset does (step 2.12) and a device's Presets menu does.
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "devices/dynamics/Compressor.h"
@@ -269,7 +270,7 @@ TEST_CASE ("A track's preset makes a new track with its devices, mix and modulat
 
         // A clip and a send, which a track preset leaves out.
         phazite::addSendToNewReturn (context, track);
-        bass->insertMIDIClip ({ te::TimePosition(), te::TimePosition::fromSeconds (2.0) }, nullptr);
+        phazite::test::addMidiClip (*bass, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) });
 
         REQUIRE (phazite::saveTrackPreset (context, track, file));
     }

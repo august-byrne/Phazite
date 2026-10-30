@@ -386,7 +386,7 @@ TEST_CASE ("The chord lane and its parts are saved, and read back the same")
 
     auto* clip = song.findClip (*part);
     REQUIRE (clip != nullptr);
-    CHECK (clip->state[phazite::schema::phaziteChordPart].toString() == juce::String ("bassRootFifth"));
+    CHECK (phazite::findClipState (*clip)[phazite::schema::chordPart].toString() == juce::String ("bassRootFifth"));
 
     // A copy of the project's state, opened as another Edit, reads the same chords, and its part still follows them.
     const phazite::test::TemporaryFolder temp;

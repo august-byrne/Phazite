@@ -55,5 +55,8 @@ void reconcileTempoMap (te::Edit& edit)
         if (timeSig->denominator.get() != change.signature.denominator)
             timeSig->denominator = change.signature.denominator;
     }
+
+    // Where the clips are in seconds follows the tempo.
+    reconcileClips (edit);
 }
 } // namespace phazite::mirror

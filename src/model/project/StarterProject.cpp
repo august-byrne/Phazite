@@ -2,11 +2,13 @@
 #include "internal/StarterProject.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/engine/AppInfo.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
 
 using namespace tracktion::literals; // 0_tp (time position), 16_bp (beat position), ...
@@ -75,27 +77,29 @@ namespace
         setInstrument (track, synth);
     }
 
-    void addBeat (te::AudioTrack& track)
+    // A 4-bar MIDI clip at bar 1: 16 beats, 8 seconds at 120 BPM.
+    te::MidiClip* addFourBars (te::AudioTrack& track, const juce::String& name)
     {
         auto& edit = track.edit;
+        return placeClipState (edit, makeMidiClipState (edit, name, { BeatPosition(), BeatPosition::fromBeats (16.0) }), track);
+    }
 
-        if (auto clip = track.insertMIDIClip ("Beat", edit.tempoSequence.toTime (te::BeatRange (0_bp, 16_bp)), nullptr))
+    void addBeat (te::AudioTrack& track)
+    {
+        if (auto* clip = addFourBars (track, "Beat"))
             for (int bar = 0; bar < 4; ++bar)
                 for (const auto& hit : beat)
-                    clip->getSequence().addNote (hit.note, te::BeatPosition::fromBeats (bar * 4.0 + hit.step * 0.25),
-                                                 te::BeatDuration::fromBeats (0.25), hit.velocity, 0, nullptr);
+                    addNote (*clip, hit.note, te::BeatPosition::fromBeats (bar * 4.0 + hit.step * 0.25), te::BeatDuration::fromBeats (0.25),
+                             hit.velocity);
     }
 
     void addArpeggio (te::AudioTrack& track)
     {
-        auto& edit = track.edit;
-
-        // A 4-bar MIDI clip at bar 1: 16 beats, 8 seconds at 120 BPM.
-        if (auto clip = track.insertMIDIClip ("Arpeggio", edit.tempoSequence.toTime (te::BeatRange (0_bp, 16_bp)), nullptr))
+        if (auto* clip = addFourBars (track, "Arpeggio"))
             for (int bar = 0; bar < 4; ++bar)
                 for (int step = 0; step < 8; ++step)
-                    clip->getSequence().addNote (chordNotes[bar][arpOrder[step]], te::BeatPosition::fromBeats (bar * 4.0 + step * 0.5),
-                                                 te::BeatDuration::fromBeats (0.45), 100, 0, nullptr);
+                    addNote (*clip, chordNotes[bar][arpOrder[step]], te::BeatPosition::fromBeats (bar * 4.0 + step * 0.5),
+                             te::BeatDuration::fromBeats (0.45), 100);
     }
 } // namespace
 

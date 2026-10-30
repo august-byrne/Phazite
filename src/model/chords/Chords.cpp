@@ -175,15 +175,7 @@ namespace
 
     void setPartNotes (te::MidiClip& clip, const std::vector<NoteData>& notes)
     {
-        auto* undo = getUndo (clip.edit);
-        auto& sequence = clip.getSequence();
-        sequence.removeAllNotes (undo);
-
-        const auto contentStart = clip.getContentStartBeat();
-
-        for (const auto& note : notes)
-            sequence.addNote (note.pitch, te::BeatPosition::fromBeats ((toTracktion (note.start) - contentStart).inBeats()),
-                              toTracktion (note.length), note.velocity, 0, undo);
+        setClipNotes (clip, notes);
     }
 
     // The sound of each kind of part on Phazite's synth.
@@ -635,7 +627,7 @@ void pasteLaneChords (te::Edit& edit, const LaneCopy& copy, BeatPosition destina
 //==============================================================================
 std::optional<PartStyle> getChordPartStyle (const te::Clip& clip)
 {
-    return findPartStyle (clip.state[schema::phaziteChordPart].toString());
+    return findPartStyle (findClipState (clip)[schema::chordPart].toString());
 }
 
 std::vector<NoteData> makeChordPartNotes (const te::MidiClip& clip, PartStyle style)
@@ -656,11 +648,11 @@ void setChordPart (te::MidiClip& clip, std::optional<PartStyle> style)
 
     if (! style.has_value())
     {
-        clip.state.removeProperty (schema::phaziteChordPart, undo);
+        findClipState (clip).removeProperty (schema::chordPart, undo);
         return;
     }
 
-    clip.state.setProperty (schema::phaziteChordPart, getSavedPartStyleName (*style), undo);
+    findClipState (clip).setProperty (schema::chordPart, getSavedPartStyleName (*style), undo);
     setPartNotes (clip, makeChordPartNotes (clip, *style));
 }
 

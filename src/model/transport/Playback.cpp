@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Playback.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -32,6 +33,7 @@ namespace
             {
                 const UndoStep step (edit, "Record");
                 transport.stop (false, false);
+                adoptRecordedMidi (edit); // what Tracktion recorded becomes the song's
             }
 
             // A punched take turned the loop off (Recording.h): it is on again, around its range.

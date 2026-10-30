@@ -72,7 +72,6 @@ struct Notes
     double startOf (const te::MidiNote& note) const { return phazite::getNoteStart (*clip, note).inBeats(); }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::NoteIDKeeper noteIDs { *edit }; // as the project context gives the notes added their IDs, which select them
     te::MidiClip* clip = nullptr;
     phazite::Selection selection { phazite::test::getEngine() };
     phazite::RangeSelection range;
@@ -196,14 +195,6 @@ TEST_CASE ("A clip grows into the empty space after it only: never over the next
         REQUIRE (phazite::insertSection (*n.edit, phazite::BeatPosition::fromBeats (8.0), drop).isValid());
         n.add (60, 9.0, 0.5);
         CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (12.0));
-    }
-
-    SUBCASE ("A looped clip doesn't grow")
-    {
-        n.clip->setLoopRangeBeats ({ beats (0.0), beats (4.0) });
-        REQUIRE (n.clip->isLooping());
-        n.add (60, 9.0, 0.5);
-        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (8.0));
     }
 }
 

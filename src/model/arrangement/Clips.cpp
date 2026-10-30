@@ -4,8 +4,10 @@
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
@@ -20,6 +22,14 @@ namespace
 
     // Positions this close count as the same: rounding between beats and seconds leaves differences this small.
     const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
+
+    // How far inside a clip a cut must be, as Tracktion splits clips.
+    const auto splitMargin = te::TimeDuration::fromSeconds (0.001);
+
+    juce::UndoManager* getUndo (te::Edit& edit)
+    {
+        return &edit.getUndoManager();
+    }
 
     // The latest a clip can end: where its audio does, for an audio clip that doesn't loop (Tracktion's longest takes no
     // account of what was trimmed off its start), or else as late as Tracktion lets it.
@@ -54,17 +64,198 @@ namespace
         return stretches;
     }
 
-    // The clips in a range of a track, as deleteTimeRange() deletes them, without the automation there.
-    void deleteClipsIn (te::ClipTrack& track, te::TimeRange time, bool closeGap)
+    //==============================================================================
+    // The song's clips' elements.
+
+    juce::ValueTree findIn (const juce::ValueTree& trackState, ClipID id)
     {
+        for (const auto& child : trackState)
+            if (child.hasType (schema::CLIP) && getClipID (child) == id)
+                return child;
+
+        return {};
+    }
+
+    // The clips in a group, on the tracks under a parent (the track list, or a folder's element), but one.
+    void collectLinked (const juce::ValueTree& parent, const juce::String& link, const juce::ValueTree& except,
+                        std::vector<juce::ValueTree>& found)
+    {
+        for (const auto& child : parent)
+        {
+            if (child.hasType (schema::TRACK))
+                collectLinked (child, link, except, found);
+            else if (child.hasType (schema::CLIP) && child != except && child[schema::clipLink].toString() == link)
+                found.push_back (child);
+        }
+    }
+
+    void removeClipState (te::Edit& edit, juce::ValueTree clipState)
+    {
+        const auto id = getClipID (clipState);
+        clipState.getParent().removeChild (clipState, getUndo (edit));
+        mirror::reconcileClip (edit, id);
+    }
+
+    // Moves a clip's start to a beat, its end staying where it is, and its notes too.
+    void trimStartTo (te::Edit& edit, juce::ValueTree clipState, BeatPosition start)
+    {
+        const auto range = getClipRange (clipState);
+        const auto moved = start - range.getStart();
+        setClipPlace (edit, clipState, start, range.getLength() - moved, getClipOffset (clipState) + moved);
+    }
+
+    void trimEndTo (te::Edit& edit, juce::ValueTree clipState, BeatPosition end)
+    {
+        const auto range = getClipRange (clipState);
+        setClipPlace (edit, clipState, range.getStart(), end - range.getStart(), getClipOffset (clipState));
+    }
+
+    // Splits a clip of the song into two at a beat, if it is far enough inside it, as Tracktion splits clips: both halves
+    // play what they did, and stay in its alias group if it is in one. Returns the right-hand half's element.
+    juce::ValueTree splitClipState (te::Edit& edit, juce::ValueTree clipState, BeatPosition beat)
+    {
+        const auto& tempo = edit.tempoSequence;
+        const auto range = getClipRange (clipState);
+        const auto time = tempo.toTime (toTracktion (beat));
+
+        if (! tempo.toTime (toTracktion (range)).reduced (splitMargin).contains (time))
+            return {};
+
+        auto right = copyClipState (edit, clipState);
+        right.setProperty (schema::clipStart, beat.inBeats(), nullptr);
+        right.setProperty (schema::clipLength, (range.getEnd() - beat).inBeats(), nullptr);
+        right.setProperty (schema::clipOffset, (getClipOffset (clipState) + (beat - range.getStart())).inBeats(), nullptr);
+        clipState.getParent().appendChild (right, getUndo (edit));
+        trimEndTo (edit, clipState, beat);
+        mirror::reconcileClip (edit, getClipID (right));
+        return right;
+    }
+
+    // What lies in a range of a clip of the song goes, as Tracktion's deleteRegionOfClip() deletes it from one of its
+    // own: the whole clip, or its start or end, or its middle, splitting it in two.
+    void deleteRegionOf (te::Edit& edit, juce::ValueTree clipState, BeatRange region)
+    {
+        const auto range = getClipRange (clipState);
+
+        if (region.getStart() <= range.getStart() && range.getEnd() <= region.getEnd())
+        {
+            removeClipState (edit, clipState);
+        }
+        else if (range.getStart() < region.getStart() && range.getEnd() > region.getEnd())
+        {
+            if (const auto right = splitClipState (edit, clipState, region.getStart()); right.isValid())
+                trimStartTo (edit, right, region.getEnd());
+        }
+        else if (range.overlaps (region))
+        {
+            if (region.getEnd() < range.getEnd())
+                trimStartTo (edit, clipState, region.getEnd());
+            else if (range.getStart() < region.getStart())
+                trimEndTo (edit, clipState, region.getStart());
+        }
+    }
+
+    // Removes a clip from its track: the song's, or else Tracktion's own (an audio clip, until T1 step 3b).
+    void removeClip (te::Clip& clip)
+    {
+        if (const auto clipState = findClipState (clip); clipState.isValid())
+            removeClipState (clip.edit, clipState);
+        else
+            clip.removeFromParent();
+    }
+
+    // Moves a clip to start at a beat on its track, keeping its length.
+    void moveClipStart (te::Clip& clip, BeatPosition start)
+    {
+        if (auto clipState = findClipState (clip); clipState.isValid())
+            setClipPlace (clip.edit, clipState, start, getClipRange (clipState).getLength(), getClipOffset (clipState));
+        else
+            clip.setStart (clip.edit.tempoSequence.toTime (toTracktion (start)), false, true);
+    }
+
+    bool isClipMuted (te::Clip& clip)
+    {
+        if (const auto clipState = findClipState (clip); clipState.isValid())
+            return clipState[schema::clipMute];
+
+        return clip.isMuted();
+    }
+
+    void setClipMuted (te::Clip& clip, bool muted)
+    {
+        if (auto clipState = findClipState (clip); clipState.isValid())
+        {
+            clipState.setProperty (schema::clipMute, muted, getUndo (clip.edit));
+            mirror::reconcileClip (clip.edit, getClipID (clipState));
+        }
+        else
+        {
+            clip.setMuted (muted);
+        }
+    }
+
+    // The clips in a range of a track, as deleteTimeRange() deletes them, without the automation there.
+    void deleteClipsIn (te::ClipTrack& track, te::BeatRange range, bool closeGap)
+    {
+        auto& edit = track.edit;
+        const auto time = edit.tempoSequence.toTime (range);
+
         for (auto* clip : juce::Array<te::Clip*> (track.getClips())) // a copy: deleting changes the list
-            if (clip->getEditTimeRange().overlaps (time))
+        {
+            if (const auto clipState = findClipState (*clip); clipState.isValid())
+            {
+                if (getClipRange (clipState).overlaps (fromTracktion (range)))
+                    deleteRegionOf (edit, clipState, fromTracktion (range));
+            }
+            else if (clip->getEditTimeRange().overlaps (time))
+            {
                 te::deleteRegionOfClip (*clip, time);
+            }
+        }
 
         if (closeGap)
             for (auto* clip : juce::Array<te::Clip*> (track.getClips()))
                 if (clip->getPosition().getStart() >= time.getEnd())
-                    clip->setStart (clip->getPosition().getStart() - time.getLength(), false, true);
+                    moveClipStart (*clip, fromTracktion (clip->getStartBeat() - range.getLength()));
+    }
+
+    //==============================================================================
+    // What Tracktion made itself, taken into the song.
+
+    // One of Tracktion's notes, as a note of a song clip's element, with an ID, which Tracktion's note gets too.
+    void adoptNote (juce::ValueTree clipState, te::MidiNote& note, juce::int64 id, juce::UndoManager* undo)
+    {
+        juce::ValueTree noteState (schema::NOTE);
+        noteState.setProperty (schema::noteID, id, nullptr);
+        noteState.setProperty (schema::notePitch, note.getNoteNumber(), nullptr);
+        noteState.setProperty (schema::noteStart, note.getStartBeat().inBeats(), nullptr);
+        noteState.setProperty (schema::noteLength, note.getLengthBeats().inBeats(), nullptr);
+        noteState.setProperty (schema::noteVelocity, note.getVelocity(), nullptr);
+
+        if (note.isMute())
+            noteState.setProperty (schema::noteMute, true, nullptr);
+
+        clipState.appendChild (noteState, undo);
+        note.state.setProperty (schema::phaziteNoteID, id, undo);
+    }
+
+    // A new note's ID, from the Edit's (as Tracktion's items get theirs while T1 lasts): one no note has had before.
+    juce::int64 makeNoteID (te::Edit& edit)
+    {
+        return (juce::int64) edit.createNewItemID().getRawID();
+    }
+
+    // Where one of Tracktion's MIDI clips is, written into the song's element for it where that differs.
+    void adoptPlace (te::Edit& edit, juce::ValueTree clipState, const te::Clip& clip)
+    {
+        const auto range = fromTracktion (clip.getEditBeatRange());
+        const auto offset = range.getStart() - fromTracktion (clip.getContentStartBeat());
+        const auto isNear = [] (double a, double b) { return std::abs (a - b) < tinyBeats.inBeats(); };
+
+        if (! isNear (range.getStart().inBeats(), getClipRange (clipState).getStart().inBeats())
+            || ! isNear (range.getLength().inBeats(), getClipRange (clipState).getLength().inBeats())
+            || ! isNear (offset.inBeats(), getClipOffset (clipState).inBeats()))
+            setClipPlace (edit, clipState, range.getStart(), range.getLength(), offset);
     }
 
     // A copy of the part of a clip that lies in a range, where that part is. The copy is cut at the range's edges as
@@ -80,17 +271,320 @@ namespace
 
         if (const auto rest = splitClips ({ part }, range.getStart()); ! rest.isEmpty())
         {
-            part->removeFromParent(); // what lies before the range
+            removeClip (*part); // what lies before the range
             part = rest.getFirst();
         }
 
         for (auto* after : splitClips ({ part }, range.getEnd()))
-            after->removeFromParent();
+            removeClip (*after);
 
         return part;
     }
 } // namespace
 
+//==============================================================================
+juce::ValueTree findClipState (const te::Edit& edit, ClipID id)
+{
+    if (id.isValid())
+        for (const auto& trackState : getTrackStates (edit))
+            if (auto found = findIn (trackState, id); found.isValid())
+                return found;
+
+    return {};
+}
+
+juce::ValueTree findClipState (const te::Clip& clip)
+{
+    if (dynamic_cast<const te::MidiClip*> (&clip) == nullptr)
+        return {};
+
+    // On its track's element, most likely.
+    if (auto* track = clip.getTrack())
+        if (auto found = findIn (findTrackState (*track), getClipID (clip)); found.isValid())
+            return found;
+
+    return findClipState (clip.edit, getClipID (clip));
+}
+
+std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState)
+{
+    std::vector<juce::ValueTree> clips;
+
+    for (const auto& child : trackState)
+        if (child.hasType (schema::CLIP))
+            clips.push_back (child);
+
+    return clips;
+}
+
+std::vector<juce::ValueTree> getClipStates (const te::Edit& edit)
+{
+    std::vector<juce::ValueTree> clips;
+
+    for (const auto& trackState : getTrackStates (edit))
+        for (const auto& child : trackState)
+            if (child.hasType (schema::CLIP))
+                clips.push_back (child);
+
+    return clips;
+}
+
+ClipID getClipID (const juce::ValueTree& clipState)
+{
+    return ClipID::fromRaw ((std::uint64_t) (juce::int64) clipState[schema::clipID]);
+}
+
+BeatRange getClipRange (const juce::ValueTree& clipState)
+{
+    const auto start = BeatPosition::fromBeats (clipState[schema::clipStart]);
+    return { start, start + BeatDuration::fromBeats (clipState[schema::clipLength]) };
+}
+
+BeatDuration getClipOffset (const juce::ValueTree& clipState)
+{
+    return BeatDuration::fromBeats (clipState.getProperty (schema::clipOffset, 0.0));
+}
+
+BeatPosition getContentStart (const juce::ValueTree& clipState)
+{
+    return getClipRange (clipState).getStart() - getClipOffset (clipState);
+}
+
+std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState)
+{
+    std::vector<juce::ValueTree> aliases { clipState };
+
+    if (const auto link = clipState[schema::clipLink].toString(); link.isNotEmpty())
+    {
+        // Every clip of the song in the same group: the clip's track's element is in the track list.
+        auto list = clipState.getParent();
+
+        while (list.isValid() && ! list.hasType (schema::TRACKS))
+            list = list.getParent();
+
+        collectLinked (list, link, clipState, aliases);
+    }
+
+    return aliases;
+}
+
+juce::ValueTree copyClipState (te::Edit& edit, const juce::ValueTree& clipState)
+{
+    auto copy = clipState.createCopy();
+    copy.setProperty (schema::clipID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    return copy;
+}
+
+juce::ValueTree makeMidiClipState (te::Edit& edit, const juce::String& name, BeatRange range)
+{
+    const auto start = std::max (0.0, range.getStart().inBeats());
+    juce::ValueTree clipState (schema::CLIP);
+    clipState.setProperty (schema::clipID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    clipState.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
+    clipState.setProperty (schema::clipName, name, nullptr);
+    clipState.setProperty (schema::clipStart, start, nullptr);
+    clipState.setProperty (schema::clipLength, std::max (range.getLength().inBeats(), minimumClipLength.inBeats()), nullptr);
+    return clipState;
+}
+
+te::MidiClip* placeClipState (te::Edit& edit, juce::ValueTree clipState, te::ClipTrack& track)
+{
+    auto trackState = findTrackState (track);
+
+    if (! trackState.isValid())
+        return nullptr;
+
+    if (clipState.getParent() != trackState)
+    {
+        if (auto parent = clipState.getParent(); parent.isValid())
+            parent.removeChild (clipState, getUndo (edit));
+
+        trackState.appendChild (clipState, getUndo (edit));
+    }
+
+    mirror::reconcileClip (edit, getClipID (clipState));
+    return dynamic_cast<te::MidiClip*> (te::findClipForID (edit, toTracktion (getClipID (clipState))));
+}
+
+void setClipPlace (te::Edit& edit, juce::ValueTree clipState, BeatPosition start, BeatDuration length, BeatDuration offset)
+{
+    auto* undo = getUndo (edit);
+    clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), undo);
+    clipState.setProperty (schema::clipLength, std::max (length.inBeats(), minimumClipLength.inBeats()), undo);
+
+    if (offset.inBeats() > 0.0)
+        clipState.setProperty (schema::clipOffset, offset.inBeats(), undo);
+    else
+        clipState.removeProperty (schema::clipOffset, undo);
+
+    mirror::reconcileClip (edit, getClipID (clipState));
+}
+
+TracktionControl toTracktionControl (const juce::ValueTree& control)
+{
+    const auto kind = control[schema::controlKind].toString();
+    const auto value = (int) control[schema::controlValue];
+    const auto number = (int) control[schema::controlNumber];
+    TracktionControl event { te::BeatPosition::fromBeats ((double) control[schema::controlBeat]) };
+
+    if (kind == schema::controlIsPitchWheel)
+        event.type = te::MidiControllerEvent::pitchWheelType, event.value = value;
+    else if (kind == schema::controlIsChannelPressure)
+        event.type = te::MidiControllerEvent::channelPressureType, event.value = value << 7;
+    else if (kind == schema::controlIsAftertouch)
+        event.type = te::MidiControllerEvent::aftertouchType, event.value = value << 7, event.metadata = number;
+    else if (kind == schema::controlIsProgramChange)
+        event.type = te::MidiControllerEvent::programChangeType, event.value = value << 7;
+    else
+        event.type = number, event.value = value << 7;
+
+    return event;
+}
+
+juce::ValueTree makeControlState (const te::MidiControllerEvent& event)
+{
+    juce::ValueTree control (schema::CONTROL);
+    const auto type = event.getType();
+    auto value = event.getControllerValue() >> 7;
+    const char* kind = schema::controlIsController;
+
+    if (type == te::MidiControllerEvent::pitchWheelType)
+        kind = schema::controlIsPitchWheel, value = event.getControllerValue();
+    else if (type == te::MidiControllerEvent::channelPressureType)
+        kind = schema::controlIsChannelPressure;
+    else if (type == te::MidiControllerEvent::aftertouchType)
+        kind = schema::controlIsAftertouch, control.setProperty (schema::controlNumber, event.getMetadata(), nullptr);
+    else if (type == te::MidiControllerEvent::programChangeType)
+        kind = schema::controlIsProgramChange;
+    else if (juce::isPositiveAndBelow (type, 128))
+        control.setProperty (schema::controlNumber, type, nullptr);
+    else
+        return {};
+
+    control.setProperty (schema::controlKind, kind, nullptr);
+    control.setProperty (schema::controlBeat, event.getBeatPosition().inBeats(), nullptr);
+    control.setProperty (schema::controlValue, value, nullptr);
+    return control;
+}
+
+bool haveSameControls (const te::MidiClip& clip, const juce::ValueTree& clipState)
+{
+    const auto& events = clip.getSequence().getControllerEvents();
+    int i = 0;
+
+    for (const auto& child : clipState)
+    {
+        if (! child.hasType (schema::CONTROL))
+            continue;
+
+        const auto control = toTracktionControl (child);
+        const auto* event = events[i++];
+
+        if (event == nullptr || event->getBeatPosition() != control.beat || event->getType() != control.type
+            || event->getControllerValue() != control.value || event->getMetadata() != control.metadata)
+            return false;
+    }
+
+    return i == events.size();
+}
+
+juce::ValueTree adoptMidiClip (te::MidiClip& clip)
+{
+    auto& edit = clip.edit;
+    auto trackState = clip.getTrack() != nullptr ? findTrackState (*clip.getTrack()) : juce::ValueTree();
+
+    if (! trackState.isValid())
+        return {};
+
+    const auto range = fromTracktion (clip.getEditBeatRange());
+    auto clipState = makeMidiClipState (edit, clip.getName(), range);
+    clipState.setProperty (schema::clipID, (juce::int64) clip.itemID.getRawID(), nullptr);
+
+    if (const auto offset = range.getStart() - fromTracktion (clip.getContentStartBeat()); offset.inBeats() > 0.0)
+        clipState.setProperty (schema::clipOffset, offset.inBeats(), nullptr);
+
+    if (clip.isMuted())
+        clipState.setProperty (schema::clipMute, true, nullptr);
+
+    trackState.appendChild (clipState, getUndo (edit));
+
+    for (auto* note : juce::Array<te::MidiNote*> (clip.getSequence().getNotes()))
+        adoptNote (clipState, *note, makeNoteID (edit), getUndo (edit));
+
+    for (auto* event : clip.getSequence().getControllerEvents())
+        if (const auto control = makeControlState (*event); control.isValid())
+            clipState.appendChild (control, getUndo (edit));
+
+    mirror::reconcileClip (edit, getClipID (clipState));
+    return clipState;
+}
+
+void adoptRecordedMidi (te::Edit& edit)
+{
+    for (auto* track : te::getAudioTracks (edit))
+    {
+        for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
+        {
+            auto* midi = dynamic_cast<te::MidiClip*> (clip);
+
+            if (midi == nullptr)
+                continue;
+
+            auto clipState = findClipState (*midi);
+
+            if (! clipState.isValid())
+            {
+                adoptMidiClip (*midi);
+                continue;
+            }
+
+            // The notes Overdub added have none of the song's IDs.
+            juce::Array<te::MidiNote*> added;
+
+            for (auto* note : midi->getSequence().getNotes())
+                if ((juce::int64) note->state[schema::phaziteNoteID] <= 0)
+                    added.add (note);
+
+            adoptPlace (edit, clipState, *midi);
+            const auto sameControls = haveSameControls (*midi, clipState);
+
+            if (added.isEmpty() && sameControls)
+                continue;
+
+            const auto aliases = getAliasStates (clipState);
+
+            for (auto* note : added)
+            {
+                const auto id = makeNoteID (edit);
+                adoptNote (clipState, *note, id, getUndo (edit));
+
+                for (auto alias : aliases)
+                    if (alias != clipState)
+                        alias.appendChild (clipState.getChild (clipState.getNumChildren() - 1).createCopy(), getUndo (edit));
+            }
+
+            // The controller events it recorded with them: those of Tracktion's clip, all of them, in each alias.
+            if (! sameControls)
+            {
+                for (auto alias : aliases)
+                {
+                    for (int i = alias.getNumChildren(); --i >= 0;)
+                        if (alias.getChild (i).hasType (schema::CONTROL))
+                            alias.removeChild (i, getUndo (edit));
+
+                    for (auto* event : midi->getSequence().getControllerEvents())
+                        if (const auto control = makeControlState (*event); control.isValid())
+                            alias.appendChild (control, getUndo (edit));
+                }
+            }
+
+            for (const auto& alias : aliases)
+                mirror::reconcileClip (edit, getClipID (alias));
+        }
+    }
+}
+
+//==============================================================================
 juce::Array<te::Clip*> getSelectedClips (const Selection& selection)
 {
     auto clips = selection.getItemsOfType<te::Clip>();
@@ -116,7 +610,14 @@ bool hasSelectedClips (const Selection& selection)
 
 bool hasAliases (const juce::Array<te::Clip*>& clips)
 {
-    return std::any_of (clips.begin(), clips.end(), [] (te::Clip* clip) { return clip->isLinked(); });
+    return std::any_of (clips.begin(), clips.end(),
+                        [] (te::Clip* clip)
+                        {
+                            if (const auto clipState = findClipState (*clip); clipState.isValid())
+                                return clipState.hasProperty (schema::clipLink);
+
+                            return clip->isLinked();
+                        });
 }
 
 bool hasAudioClips (const juce::Array<te::Clip*>& clips)
@@ -142,49 +643,23 @@ bool hasFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type
     return any;
 }
 
-namespace
-{
-    // The song beat in a clip whose notes play while a clip linked to it plays at a song beat, if one does.
-    std::optional<double> getLinkedPlayBeat (const te::Clip& shown, te::BeatPosition beat)
-    {
-        if (! shown.isLinked())
-            return {};
-
-        auto& edit = shown.edit;
-        const auto time = edit.tempoSequence.toTime (beat);
-
-        for (auto* other : edit.findClipsInLinkGroup (shown.getLinkGroupID()))
-        {
-            if (other == &shown || ! other->getEditBeatRange().contains (beat))
-                continue;
-
-            // The place in their shared notes: from the start of the notes, and within its loop if it loops.
-            auto content = other->getContentBeatAtTime (time).inBeats();
-
-            if (other->isLooping() && other->getLoopLengthBeats() > te::BeatDuration())
-            {
-                const auto loopStart = other->getLoopStartBeats().inBeats(), loopLength = other->getLoopLengthBeats().inBeats();
-                const auto intoLoop = content - loopStart;
-                content = loopStart + intoLoop - loopLength * std::floor (intoLoop / loopLength);
-            }
-
-            return edit.tempoSequence.toBeats (shown.getTimeOfContentBeat (te::BeatPosition::fromBeats (content))).inBeats();
-        }
-
-        return {};
-    }
-} // namespace
-
 std::optional<double> getLinkedPlayBeat (const juce::Array<te::MidiClip*>& shown, double songBeat)
 {
-    const auto beat = te::BeatPosition::fromBeats (songBeat);
-
-    if (std::any_of (shown.begin(), shown.end(), [beat] (te::MidiClip* clip) { return clip->getEditBeatRange().contains (beat); }))
-        return {};
+    const auto beat = BeatPosition::fromBeats (songBeat);
+    std::vector<juce::ValueTree> states;
 
     for (auto* clip : shown)
-        if (const auto linkedBeat = getLinkedPlayBeat (*clip, beat))
-            return linkedBeat;
+        if (const auto clipState = findClipState (*clip); clipState.isValid())
+            states.push_back (clipState);
+
+    if (std::any_of (states.begin(), states.end(), [beat] (const juce::ValueTree& s) { return getClipRange (s).contains (beat); }))
+        return {};
+
+    // The place in their shared notes, from where those count, in a clip linked to one of these that plays there.
+    for (const auto& clipState : states)
+        for (const auto& other : getAliasStates (clipState))
+            if (other != clipState && getClipRange (other).contains (beat))
+                return (getContentStart (clipState) + (beat - getContentStart (other))).inBeats();
 
     return {};
 }
@@ -195,6 +670,27 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAl
 
     for (auto* clip : clips)
     {
+        if (auto clipState = findClipState (*clip); clipState.isValid())
+        {
+            auto& edit = clip->edit;
+
+            // Aliases share an alias group, which the original gets if it is in none; a copy that isn't an alias leaves
+            // the original's.
+            if (asAliases && ! clipState.hasProperty (schema::clipLink))
+                clipState.setProperty (schema::clipLink, (juce::int64) edit.createNewItemID().getRawID(), getUndo (edit));
+
+            auto copy = copyClipState (edit, clipState);
+
+            if (! asAliases)
+                copy.removeProperty (schema::clipLink, nullptr);
+
+            if (auto* track = clip->getClipTrack())
+                if (auto* made = placeClipState (edit, copy, *track))
+                    copies.add (made);
+
+            continue;
+        }
+
         // Linked clips share a link group; a copy that isn't an alias leaves its original's.
         if (asAliases && ! clip->isLinked())
             clip->setLinkGroupID (juce::Uuid().toString());
@@ -213,6 +709,13 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAl
 
 void moveClip (te::Clip& clip, te::BeatPosition start, te::ClipTrack& track)
 {
+    if (auto clipState = findClipState (clip); clipState.isValid())
+    {
+        clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), getUndo (clip.edit));
+        placeClipState (clip.edit, clipState, track);
+        return;
+    }
+
     const auto time = clip.edit.tempoSequence.toTime (te::BeatPosition::fromBeats (std::max (0.0, start.inBeats())));
 
     if (clip.getClipTrack() != &track)
@@ -223,6 +726,18 @@ void moveClip (te::Clip& clip, te::BeatPosition start, te::ClipTrack& track)
 
 void trimClipStart (te::Clip& clip, te::BeatPosition beat)
 {
+    if (const auto clipState = findClipState (clip); clipState.isValid())
+    {
+        const auto range = getClipRange (clipState);
+        const auto earliest = std::max (0.0, getContentStart (clipState).inBeats());
+        const auto latest = range.getEnd().inBeats() - minimumClipLength.inBeats();
+
+        if (latest >= earliest)
+            trimStartTo (clip.edit, clipState, BeatPosition::fromBeats (juce::jlimit (earliest, latest, beat.inBeats())));
+
+        return;
+    }
+
     const auto& tempo = clip.edit.tempoSequence;
     const auto earliest = std::max (te::TimePosition(), clip.getPosition().getStartOfSource());
     const auto latest = tempo.toTime (clip.getEndBeat() - minimumClipLength);
@@ -236,6 +751,16 @@ void trimClipStart (te::Clip& clip, te::BeatPosition beat)
 void trimClipEnd (te::Clip& clip, te::BeatPosition beat)
 {
     const auto& tempo = clip.edit.tempoSequence;
+
+    if (const auto clipState = findClipState (clip); clipState.isValid())
+    {
+        const auto start = getClipRange (clipState).getStart().inBeats();
+        const auto latest = tempo.toBeats (te::Edit::getMaximumEditEnd()).inBeats();
+        trimEndTo (clip.edit, clipState,
+                   BeatPosition::fromBeats (juce::jlimit (start + minimumClipLength.inBeats(), latest, beat.inBeats())));
+        return;
+    }
+
     const auto earliest = tempo.toTime (clip.getStartBeat() + minimumClipLength);
     const auto latest = getLatestEnd (clip);
 
@@ -284,12 +809,12 @@ void setFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type
 
 te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selection* selection)
 {
-    const auto clip = track.insertMIDIClip (getTrackName (track), track.edit.tempoSequence.toTime (range), nullptr);
+    auto* clip = placeClipState (track.edit, makeMidiClipState (track.edit, getTrackName (track), fromTracktion (range)), track);
 
     if (clip != nullptr && selection != nullptr)
-        selection->selectOnly (clip.get());
+        selection->selectOnly (clip);
 
-    return clip.get();
+    return clip;
 }
 
 te::MidiClip* insertBarLongMidiClip (te::ClipTrack& track, te::BeatPosition start, Selection* selection)
@@ -326,7 +851,19 @@ te::Clip* placeClip (te::ClipTrack& track, te::BeatPosition start, te::Clip* las
 
 void slipClip (te::Clip& clip, te::TimeDuration startOffset, te::TimeDuration distance)
 {
-    clip.setOffset (startOffset - distance); // Tracktion keeps the offset at 0 or more
+    // Tracktion keeps the offset at 0 or more, and so does the song.
+    const auto offset = std::max (te::TimeDuration(), startOffset - distance);
+
+    if (auto clipState = findClipState (clip); clipState.isValid())
+    {
+        const auto& tempo = clip.edit.tempoSequence;
+        const auto range = getClipRange (clipState);
+        const auto contentStart = tempo.toBeats (tempo.toTime (toTracktion (range.getStart())) - offset);
+        setClipPlace (clip.edit, clipState, range.getStart(), range.getLength(), range.getStart() - fromTracktion (contentStart));
+        return;
+    }
+
+    clip.setOffset (offset);
 }
 
 //==============================================================================
@@ -336,6 +873,15 @@ juce::Array<te::Clip*> splitClips (const juce::Array<te::Clip*>& clips, te::Beat
 
     for (auto* clip : clips)
     {
+        if (const auto clipState = findClipState (*clip); clipState.isValid())
+        {
+            if (const auto right = splitClipState (clip->edit, clipState, fromTracktion (beat)); right.isValid())
+                if (auto* part = te::findClipForID (clip->edit, toTracktion (getClipID (right))))
+                    parts.add (part);
+
+            continue;
+        }
+
         const auto time = clip->edit.tempoSequence.toTime (beat);
         const auto range = clip->getEditTimeRange();
 
@@ -399,6 +945,22 @@ void makeClipsUnique (const juce::Array<te::Clip*>& clips)
 {
     for (auto* clip : clips)
     {
+        if (auto clipState = findClipState (*clip); clipState.isValid())
+        {
+            const auto aliases = getAliasStates (clipState);
+
+            if (! clipState.hasProperty (schema::clipLink))
+                continue;
+
+            clipState.removeProperty (schema::clipLink, getUndo (clip->edit));
+
+            // The last one left in the group leaves it too.
+            if (auto last = aliases.size() == 2 ? aliases[1] : juce::ValueTree(); last.isValid())
+                last.removeProperty (schema::clipLink, getUndo (clip->edit));
+
+            continue;
+        }
+
         const auto group = clip->getLinkGroupID();
 
         if (group.isEmpty())
@@ -413,12 +975,12 @@ void makeClipsUnique (const juce::Array<te::Clip*>& clips)
 
 bool areAllClipsMuted (const juce::Array<te::Clip*>& clips)
 {
-    return areAllOn (clips, [] (te::Clip* clip) { return clip->isMuted(); });
+    return areAllOn (clips, [] (te::Clip* clip) { return isClipMuted (*clip); });
 }
 
 void toggleClipsMuted (const juce::Array<te::Clip*>& clips)
 {
-    toggleAll (clips, [] (te::Clip* clip) { return clip->isMuted(); }, [] (te::Clip* clip, bool on) { clip->setMuted (on); });
+    toggleAll (clips, [] (te::Clip* clip) { return isClipMuted (*clip); }, [] (te::Clip* clip, bool on) { setClipMuted (*clip, on); });
 }
 
 void nudgeClips (const juce::Array<te::Clip*>& clips, te::BeatDuration amount)
@@ -445,31 +1007,29 @@ void deleteClips (const juce::Array<te::Clip*>& clips, bool closeGap)
 
     for (auto* clip : sorted)
     {
-        const auto removed = clip->getPosition();
+        const auto removed = clip->getEditBeatRange();
         const auto under = getStretchesOf ({ clip });
         auto* track = clip->getClipTrack();
-        clip->removeFromParent();
+        removeClip (*clip);
 
         // Closing the gap takes the clip's time out of its track, its automation with it, and what comes after moves
         // back, automation and all; without, the automation stays where it is.
         if (closeGap && track != nullptr)
         {
             for (auto* other : juce::Array<te::Clip*> (track->getClips())) // a copy: moving clips can reorder the list
-                if (other->getPosition().getStart() >= removed.getStart())
-                    other->setStart (std::max (removed.getStart(), other->getPosition().getStart() - removed.getLength()), false, true);
+                if (other->getStartBeat() >= removed.getStart())
+                    moveClipStart (*other, fromTracktion (std::max (removed.getStart(), other->getStartBeat() - removed.getLength())));
 
             deleteAutomation (under, true);
         }
     }
 }
 
-void deleteTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te::Track*>& tracks, bool closeGap)
+void deleteTimeRange (te::Edit&, te::BeatRange range, const juce::Array<te::Track*>& tracks, bool closeGap)
 {
-    const auto time = edit.tempoSequence.toTime (range);
-
     for (auto* track : tracks)
         if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (track))
-            deleteClipsIn (*clipTrack, time, closeGap);
+            deleteClipsIn (*clipTrack, range, closeGap);
 
     // The automation there goes too, on folders as well, which hold no clips.
     deleteAutomation (getStretchesOf (tracks, range), closeGap);
@@ -477,10 +1037,10 @@ void deleteTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te:
 
 void clearClipsIn (te::ClipTrack& track, te::BeatRange range)
 {
-    deleteClipsIn (track, track.edit.tempoSequence.toTime (range), false);
+    deleteClipsIn (track, range, false);
 }
 
-te::BeatRange duplicateTimeRange (te::Edit& edit, te::BeatRange range, const juce::Array<te::Track*>& tracks)
+te::BeatRange duplicateTimeRange (te::Edit&, te::BeatRange range, const juce::Array<te::Track*>& tracks)
 {
     const auto length = range.getLength();
     const te::BeatRange copyRange (range.getEnd(), range.getEnd() + length);
@@ -500,11 +1060,9 @@ te::BeatRange duplicateTimeRange (te::Edit& edit, te::BeatRange range, const juc
 
     // Each part goes a range's length later, in place of what lies there. What is in the way goes first, so that no
     // part cuts another.
-    const auto& tempo = edit.tempoSequence;
-
     for (const auto& part : parts)
         if (auto* track = part->getClipTrack())
-            deleteClipsIn (*track, tempo.toTime (te::BeatRange (part->getStartBeat() + length, part->getEndBeat() + length)), false);
+            deleteClipsIn (*track, te::BeatRange (part->getStartBeat() + length, part->getEndBeat() + length), false);
 
     for (const auto& part : parts)
         if (auto* track = part->getClipTrack())

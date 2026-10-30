@@ -256,6 +256,7 @@ target_sources(phazite_core PRIVATE
     src/model/engine/internal/PluginScanner.h
     src/model/engine/internal/Preview.h
     src/model/engine/internal/PreviewLoop.h
+    src/model/mirror/ClipMirror.cpp
     src/model/mirror/TempoMirror.cpp
     src/model/mirror/TrackMirror.cpp
     src/model/mirror/internal/Mirror.h
@@ -890,6 +891,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/StretchTests.cpp
         tests/SynthEditorTests.cpp
         tests/SynthTests.cpp
+        tests/TestClips.h
         tests/TestDevices.h
         tests/TestPlugin.cpp
         tests/TestPlugin.h

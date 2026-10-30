@@ -146,7 +146,11 @@ namespace
         info.name = clip.getName();
         info.range = { fromTracktion (clip.getStartBeat()), fromTracktion (clip.getEndBeat()) };
         info.muted = clip.isMuted();
-        info.linked = clip.isLinked();
+        info.linked = hasAliases ({ &clip });
+
+        // The song's own place for one of its clips, without rounding through seconds.
+        if (const auto clipState = findClipState (clip); clipState.isValid())
+            info.range = getClipRange (clipState);
 
         if (auto* audio = dynamic_cast<te::AudioClipBase*> (&clip))
         {

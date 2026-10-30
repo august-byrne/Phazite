@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "HostedDevice.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
@@ -106,15 +107,15 @@ TEST_CASE ("The loop follows the song as clips are added, moved, trimmed and del
     CHECK (song.getLoop() == "0.000-4.000");
 
     // Placed past the end, as the owner did: the loop grows.
-    clip.setStart (seconds (6.0), false, true);
+    phazite::moveClip (clip, beats (12.0), *clip.getClipTrack());
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-10.000");
 
-    clip.setLength (te::TimeDuration::fromSeconds (1.0), true);
+    phazite::trimClipEnd (clip, clip.getStartBeat() + te::BeatDuration::fromBeats (2.0));
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-8.000");
 
-    clip.removeFromParent();
+    phazite::deleteClips ({ &clip }, false);
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-2.000");
 
@@ -318,7 +319,7 @@ TEST_CASE ("The song ends with the bar its last clip ends in, and its sections d
     CHECK (songEnd() == "4.000");
     CHECK (song.getSongLoop() == "0.000-4.000");
 
-    clip.setMuted (true); // a muted clip counts
+    phazite::toggleClipsMuted ({ &clip }); // a muted clip counts
     CHECK (songEnd() == "4.000");
 
     phazite::setTimeSignature (*song.edit, { 3, 4 }); // beat 4.5 is in the second bar of three beats
@@ -403,8 +404,8 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
         if (release > 0.0f)
             instrument->getAutomatableParameterByID ("release")->setParameter (release, juce::sendNotification);
 
-        auto clip = track.insertMIDIClip ("Note", edit->tempoSequence.toTime ({ beats (0.0), beats (8.0) }), nullptr);
-        clip->getSequence().addNote (note, beats (0.0), te::BeatDuration::fromBeats (length), 110, 0, nullptr);
+        auto* clip = phazite::test::addMidiClip (track, { beats (0.0), beats (8.0) }, "Note");
+        phazite::test::addMidiNote (*clip, note, beats (0.0), te::BeatDuration::fromBeats (length), 110);
         edit->getTransport().ensureContextAllocated();
         phazite::test::settle (300);
 

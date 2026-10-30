@@ -2,6 +2,7 @@
 // The song's tempo and time signature (src/model/transport/internal/Tempo.h), and what a change of tempo stretches:
 // samples that follow it, which Phazite renders (roadmap step 2.18), and patterns unless they keep their speed.
 #include "HostedDevice.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -356,7 +357,7 @@ TEST_CASE ("Patterns follow the tempo, their notes on their beats, unless the so
     REQUIRE (clip != nullptr);
 
     for (int i = 0; i < 4; ++i)
-        clip->getSequence().addNote (60, te::BeatPosition::fromBeats (i), te::BeatDuration::fromBeats (0.5), 100, 0, nullptr);
+        phazite::test::addMidiNote (*clip, 60, te::BeatPosition::fromBeats (i), te::BeatDuration::fromBeats (0.5), 100);
 
     edit->getUndoManager().clearUndoHistory();
     const auto noteBeat = [&clip] (int i) { return clip->getSequence().getNotes()[i]->getStartBeat().inBeats(); };

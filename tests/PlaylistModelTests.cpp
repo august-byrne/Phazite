@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist as the UI reaches it, by IDs and plain values (src/model/arrangement/PlaylistModel.h), and the time range
 // selected across tracks by IDs (src/model/arrangement/SongRange.h).
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/SongRange.h"
@@ -54,8 +55,8 @@ struct Song
 
         auto* midi = phazite::insertMidiClip (*a, { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
         REQUIRE (midi != nullptr);
-        midi->getSequence().addNote (60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
-        midi->getSequence().addNote (64, te::BeatPosition::fromBeats (2.0), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
+        phazite::test::addMidiNote (*midi, 60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100);
+        phazite::test::addMidiNote (*midi, 64, te::BeatPosition::fromBeats (2.0), te::BeatDuration::fromBeats (1.0), 100);
         clip = phazite::getClipID (*midi);
         setEdit (context, edit.get());
     }

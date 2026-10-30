@@ -33,32 +33,12 @@ te::Scale::ScaleType toTracktion (Scale);
 Scale toScale (te::Scale::ScaleType);
 
 //==============================================================================
-// Notes' IDs (schema::phaziteNoteID): each note's, which no other note of its clip has. A copy of a clip keeps them.
+// Notes' IDs (schema::noteID): each note's, which no other note of its clip has, and the same in its clip's aliases. A copy
+// of a clip keeps them. Tracktion's notes carry the ID of the song's note each plays (schema::phaziteNoteID).
 
-NoteID getNoteID (const te::MidiNote&); // none for a note that has no ID yet
+NoteID getNoteID (const te::MidiNote&); // none for a note of Tracktion's that plays none of the song's
 te::MidiNote* findNote (const te::MidiClip&, NoteID);
 NoteRef getNoteRef (const te::MidiClip&, const te::MidiNote&);
-
-// Gives every note of an Edit that has no ID, or one that another note of its clip has, an ID of its own, without an undo
-// step: when a project opens or is saved, and when the project context takes an Edit.
-void assignNoteIDs (te::Edit&);
-
-// While it lives, gives every note added to an Edit an ID, without an undo step, from above the highest the Edit had:
-// the open project's (ProjectContext). It first assigns those the Edit's notes lack (assignNoteIDs()).
-class NoteIDKeeper : private juce::ValueTree::Listener
-{
-public:
-    explicit NoteIDKeeper (te::Edit&);
-    ~NoteIDKeeper() override;
-
-private:
-    juce::ValueTree state;
-    juce::int64 next = 1;
-
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
-
-    JUCE_DECLARE_NON_COPYABLE (NoteIDKeeper)
-};
 
 //==============================================================================
 // The selected notes still there, of the clips the piano roll shows (Selection: getNotes()), as Tracktion's objects; and
@@ -72,7 +52,7 @@ void selectNotes (Selection&, const std::vector<ClipNote>&);
 
 // Adds a note at a song beat. If it ends after the clip, the clip grows to the end of that bar, but only into the empty
 // space after it: never past the start of the next clip on its track. A note beyond that stays in the clip without
-// playing, as outside a trimmed clip. A looped clip never grows.
+// playing, as outside a trimmed clip.
 te::MidiNote* addNote (te::MidiClip&, int pitch, te::BeatPosition start, te::BeatDuration, int velocity);
 
 // Moves a note to a song beat and a pitch. It can't start before its clip's content does; the clip grows to hold it,
@@ -103,6 +83,10 @@ void changeNoteVelocities (const std::vector<ClipNote>&, int change);
 // Copies the notes right after them, as FL Studio's Ctrl+B does, each into its original's clip, which grows as
 // addNote() says. Returns the copies.
 std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>&);
+
+// Puts these notes in a clip, and in its aliases, in place of all it holds, without growing it: the notes the chord lane
+// makes for a part. Each gets a new ID.
+void setClipNotes (te::MidiClip&, const std::vector<NoteData>&);
 
 // Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to the Edit's
 // clips they name. Returns the new notes.

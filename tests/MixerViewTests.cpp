@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer, as it lays out in the window (the inspector: InspectorTests.cpp).
+#include "TestClips.h"
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
@@ -80,7 +81,7 @@ TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks 
     CHECK (buttonsIn ("Effects") == juce::StringArray { "+ Effect" });
 
     // Notes, and nothing to play them: the strip asks for an instrument.
-    track->insertMIDIClip ({ te::TimePosition(), te::TimePosition::fromSeconds (2.0) }, nullptr);
+    phazite::test::addMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) });
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return buttonsIn ("Instrument") == juce::StringArray { "Choose instrument" }; }));
 
     // The instrument has its own slot, and effects go in theirs.

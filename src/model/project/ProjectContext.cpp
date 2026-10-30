@@ -80,7 +80,8 @@ namespace
                 if (element.hasType (schema::CHORDLANE))
                     return add (pending.chords);
 
-                if (te::Clip::isClipState (element))
+                // Tracktion's clips, and the song's own (T1, step 3), with their notes.
+                if (te::Clip::isClipState (element) || element.hasType (schema::CLIP))
                     return add (pending.clips);
 
                 // Devices, and containers' rack types (model/mixer/internal/Containers.h): their names and what they hold.
@@ -119,7 +120,7 @@ namespace
                 add (pending.sections);
             else if (child.hasType (schema::CHORDLANE))
                 add (pending.chords);
-            else if (te::Clip::isClipState (child))
+            else if (te::Clip::isClipState (child) || child.hasType (schema::CLIP))
                 add (pending.clips);
             else if (child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK))
                 add (pending.devices);
@@ -197,7 +198,6 @@ struct ProjectContext::Impl
     RangeSelection rangeSelection;
     std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
     juce::ListenerList<Listener> listeners;
-    std::unique_ptr<NoteIDKeeper> noteIDs;                    // gives the notes added to the open Edit their IDs
     std::unique_ptr<FreezeKeeper> freezes;                    // unfreezes a frozen track whose clips or frozen devices change
     std::unique_ptr<DeviceModulationKeeper> deviceModulation; // plays what modulates Phazite's devices in each
     std::unique_ptr<ClipRenders> clipRenders;                 // renders what the clips play stretched, pitched or reversed
@@ -221,7 +221,6 @@ ProjectContext::~ProjectContext()
     impl->clipRenders = nullptr;
     impl->deviceModulation = nullptr;
     impl->freezes = nullptr;
-    impl->noteIDs = nullptr;
 
     if (impl->focus != nullptr)
         impl->focus->setFocusedEdit (nullptr);
@@ -330,13 +329,12 @@ void setEdit (ProjectContext& context, te::Edit* edit)
 
     impl.songSelection->setNoteClips ({}); // the editors show the new project's clips, or none
     impl.rangeSelection.clear();
-    impl.selection.setEdit (edit);                                                     // nothing of the previous one selected
-    impl.automation = nullptr;                                                         // before the Edit it watches goes
-    impl.deviceModulation = nullptr;                                                   // likewise
-    impl.freezes = nullptr;                                                            // likewise
-    impl.recorder = nullptr;                                                           // likewise, any recording dropped
-    impl.clipRenders = nullptr;                                                        // likewise, its renders stopped
-    impl.noteIDs = edit != nullptr ? std::make_unique<NoteIDKeeper> (*edit) : nullptr; // before the watcher hears what it writes
+    impl.selection.setEdit (edit);   // nothing of the previous one selected
+    impl.automation = nullptr;       // before the Edit it watches goes
+    impl.deviceModulation = nullptr; // likewise
+    impl.freezes = nullptr;          // likewise
+    impl.recorder = nullptr;         // likewise, any recording dropped
+    impl.clipRenders = nullptr;      // likewise, its renders stopped
     impl.freezes = edit != nullptr ? std::make_unique<FreezeKeeper> (*edit) : nullptr;
     impl.deviceModulation = edit != nullptr ? std::make_unique<DeviceModulationKeeper> (*edit) : nullptr;
     impl.clipRenders = edit != nullptr ? std::make_unique<ClipRenders> (*edit) : nullptr;

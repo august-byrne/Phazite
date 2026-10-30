@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "devices/delay/Delay.h"
@@ -76,7 +77,7 @@ TEST_CASE ("A track's instrument plays its notes, and its effects come after it"
     CHECK_FALSE (phazite::needsInstrument (*mix.a)); // no notes yet
 
     // Notes without an instrument make no sound.
-    mix.a->insertMIDIClip ({ 0_tp, 2_tp }, nullptr);
+    phazite::test::addMidiClip (*mix.a, { 0_bp, 4_bp });
     CHECK (phazite::needsInstrument (*mix.a));
 
     // An effect doesn't play notes.

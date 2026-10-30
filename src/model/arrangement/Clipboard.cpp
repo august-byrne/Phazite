@@ -4,6 +4,7 @@
 #include "internal/Clips.h"
 #include "internal/Selection.h"
 #include "internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -34,6 +35,35 @@ namespace
         return edit.tempoSequence.toBeats (edit.getTransport().getPosition());
     }
 
+    // What Copy keeps of a clip: the song's element for it, or Tracktion's state for an audio clip (until T1 step 3b).
+    juce::ValueTree getStateToCopy (const te::Clip& clip)
+    {
+        if (const auto clipState = findClipState (clip); clipState.isValid())
+            return clipState;
+
+        return clip.state;
+    }
+
+    // A clip made from what Copy kept, where it was, on a track: a copy, in no alias group, with IDs of its own.
+    te::Clip* pasteClip (te::Edit& edit, const juce::ValueTree& kept, te::ClipTrack& track)
+    {
+        if (kept.hasType (schema::CLIP))
+        {
+            auto clipState = copyClipState (edit, kept);
+            clipState.removeProperty (schema::clipLink, nullptr);
+            return placeClipState (edit, clipState, track);
+        }
+
+        auto state = kept.createCopy();
+        te::EditItemID::remapIDs (state, nullptr, edit);
+        auto* clip = te::insertClipCopy (track, te::ClipCopy::fromClipboardState (state, false));
+
+        if (clip != nullptr)
+            clip->setLinkGroupID ({});
+
+        return clip;
+    }
+
     // Keeps the clips, each with its track's place from the first of them, and the time from the earliest start to the latest
     // end (or the range's, given one).
     void keepClips (Clipboard& clipboard, const te::Edit& edit, const juce::Array<te::Clip*>& clips, std::optional<te::BeatRange> range)
@@ -47,7 +77,7 @@ namespace
 
         for (auto* clip : clips)
             if (const auto index = tracks.indexOf (dynamic_cast<te::AudioTrack*> (clip->getTrack())); index >= 0)
-                clipboard.clips.push_back ({ clip->state.createCopy(), clip->getEditBeatRange(), index - first });
+                clipboard.clips.push_back ({ getStateToCopy (*clip).createCopy(), clip->getEditBeatRange(), index - first });
 
         if (range.has_value())
         {
@@ -176,25 +206,20 @@ namespace
             if (track == nullptr)
                 continue;
 
-            auto state = copied.state.createCopy();
-            te::EditItemID::remapIDs (state, nullptr, *edit);
-            auto* clip = te::insertClipCopy (*track, te::ClipCopy::fromClipboardState (state, false));
+            auto* clip = pasteClip (*edit, copied.state, *track);
 
             if (clip == nullptr)
                 continue;
-
-            clip->setLinkGroupID ({});
 
             if (isRange)
             {
                 if (const auto rest = splitClips ({ clip }, clipboard.range.getStart()); ! rest.isEmpty())
                 {
-                    clip->removeFromParent(); // what lay before the range
+                    deleteClips ({ clip }, false); // what lay before the range
                     clip = rest.getFirst();
                 }
 
-                for (auto* after : splitClips ({ clip }, clipboard.range.getEnd()))
-                    after->removeFromParent();
+                deleteClips (splitClips ({ clip }, clipboard.range.getEnd()), false);
             }
 
             moveClip (*clip, landingOf (copied).getStart(), *track);

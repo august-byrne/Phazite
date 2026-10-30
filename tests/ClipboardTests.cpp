@@ -99,7 +99,7 @@ TEST_CASE ("Copied clips paste at the playhead on the selected track, as copies,
     CHECK (copy->getStartBeat().inBeats() == doctest::Approx (8.0));
     CHECK (copy->getEndBeat().inBeats() == doctest::Approx (12.0));
     CHECK (copy->getSequence().getNumNotes() == 2);
-    CHECK_FALSE (copy->isLinked()); // a copy, not an alias
+    CHECK_FALSE (phazite::hasAliases ({ copy })); // a copy, not an alias
     CHECK (selection.isSelected (copy));
     CHECK_FALSE (selection.isSelected (song.clip));
 

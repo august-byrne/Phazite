@@ -81,6 +81,21 @@ namespace
         const auto& setting = tempo.getTempoAt (at - te::TimeDuration::fromSeconds (0.0001));
         return te::TimeDuration::fromSeconds (beats.inBeats() * setting.getApproxBeatLength().inSeconds());
     }
+
+    // Moves a clip later on its track (earlier if negative), keeping its length: one of the song's by beats, one of
+    // Tracktion's own (an audio clip, until T1 step 3b) by seconds.
+    void moveLater (te::Clip& clip, BeatDuration beats, te::TimeDuration time)
+    {
+        if (auto clipState = findClipState (clip); clipState.isValid())
+        {
+            const auto range = getClipRange (clipState);
+            setClipPlace (clip.edit, clipState, range.getStart() + beats, range.getLength(), getClipOffset (clipState));
+        }
+        else
+        {
+            clip.setStart (clip.getPosition().getStart() + time, false, true);
+        }
+    }
 } // namespace
 
 //==============================================================================
@@ -108,7 +123,7 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
     for (auto* track : te::getClipTracks (edit))
         for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
             if (clip->getPosition().getStart() >= time - tinyTime)
-                clip->setStart (clip->getPosition().getStart() + timeLength, false, true);
+                moveLater (*clip, fromTracktion (length), timeLength);
 
     for (auto* parameter : getAutomatedParameters (edit))
         parameter->getCurve().insertSpace (*parameter, time, timeLength);
@@ -130,16 +145,16 @@ void removeTime (te::Edit& edit, te::BeatRange range)
 
     for (auto* track : te::getClipTracks (edit))
     {
-        track->deleteRegion (time, nullptr); // trims and splits the clips that reach into it
+        clearClipsIn (*track, range); // trims and splits the clips that reach into it
 
         // Tiny pieces that rounding leaves behind go too, as Tracktion's deleteRegionOfTracks() does.
         for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
             if (clip->getPosition().getLength() < te::TimeDuration::fromSeconds (0.0001))
-                clip->removeFromParent();
+                deleteClips ({ clip }, false);
 
         for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
             if (clip->getPosition().getStart() > time.getCentre())
-                clip->setStart (clip->getPosition().getStart() - length, false, true);
+                moveLater (*clip, BeatDuration::fromBeats (-range.getLength().inBeats()), te::TimeDuration() - length);
     }
 
     for (auto* parameter : getAutomatedParameters (edit))

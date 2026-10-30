@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "HostedDevice.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/dynamics/Maximizer.h"
@@ -298,11 +299,10 @@ TEST_CASE ("Low latency leaves what renders play as the song has it")
     auto edit = phazite::createSongEdit (engine);
     auto& track = *te::getAudioTracks (*edit)[0];
     addInstrument (track);
-    auto clip =
-        track.insertMIDIClip ("Chord", edit->tempoSequence.toTime ({ te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }), nullptr);
+    auto clip = phazite::test::addMidiClip (track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, "Chord");
 
     for (int note : { 48, 55, 60, 64 })
-        clip->getSequence().addNote (note, te::BeatPosition(), te::BeatDuration::fromBeats (3.0), 120, 0, nullptr);
+        phazite::test::addMidiNote (*clip, note, te::BeatPosition(), te::BeatDuration::fromBeats (3.0), 120);
 
     auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
     edit->getMasterPluginList().insertPlugin (limiter, 0, nullptr);

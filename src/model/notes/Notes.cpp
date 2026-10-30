@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Notes.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
@@ -7,9 +8,11 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
+#include "model/mirror/internal/Mirror.h"
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -106,10 +109,141 @@ namespace
         return &clip.edit.getUndoManager();
     }
 
+    // Where a clip's notes count from in the song (its content start), and where it is, as the song has them.
+    te::BeatPosition getContentStartOf (const te::MidiClip& clip)
+    {
+        if (const auto clipState = findClipState (clip); clipState.isValid())
+            return toTracktion (getContentStart (clipState));
+
+        return clip.getContentStartBeat();
+    }
+
+    te::BeatPosition getStartOf (const te::MidiClip& clip)
+    {
+        if (const auto clipState = findClipState (clip); clipState.isValid())
+            return toTracktion (getClipRange (clipState).getStart());
+
+        return clip.getStartBeat();
+    }
+
     // A song beat as a position among the clip's notes, which count from its content's start.
     te::BeatPosition toClipBeat (const te::MidiClip& clip, te::BeatPosition songBeat)
     {
-        return te::BeatPosition::fromBeats ((songBeat - clip.getContentStartBeat()).inBeats());
+        return te::BeatPosition::fromBeats ((songBeat - getContentStartOf (clip)).inBeats());
+    }
+
+    //==============================================================================
+    // The song's notes: each a NOTE in its clip's element (Schema.h), and in each alias's, with the same ID.
+
+    juce::ValueTree findNoteState (const juce::ValueTree& clipState, NoteID id)
+    {
+        for (const auto& child : clipState)
+            if (child.hasType (schema::NOTE) && (juce::int64) child[schema::noteID] == (juce::int64) id.getRaw())
+                return child;
+
+        return {};
+    }
+
+    void reconcileAll (te::Edit& edit, const std::vector<juce::ValueTree>& clipStates)
+    {
+        for (const auto& clipState : clipStates)
+            mirror::reconcileClip (edit, getClipID (clipState));
+    }
+
+    // Changes the note with an ID in a clip, and in each of its aliases, which hold the same notes; and Tracktion's
+    // notes follow.
+    void changeNote (te::MidiClip& clip, NoteID id, const std::function<void (juce::ValueTree&, juce::UndoManager*)>& change)
+    {
+        const auto clipState = findClipState (clip);
+
+        if (! clipState.isValid())
+            return;
+
+        const auto aliases = getAliasStates (clipState);
+
+        for (const auto& alias : aliases)
+            if (auto note = findNoteState (alias, id); note.isValid())
+                change (note, getUndoManager (clip));
+
+        reconcileAll (clip.edit, aliases);
+    }
+
+    // A new note's ID, from the Edit's (as Tracktion's items get theirs while T1 lasts): one no note has had before.
+    juce::int64 makeNoteID (te::Edit& edit)
+    {
+        return (juce::int64) edit.createNewItemID().getRawID();
+    }
+
+    // Adds a note to a clip and to each of its aliases, with the ID wanted if no note of the clip has it, or else a new
+    // one; and Tracktion's notes follow. Returns its ID, or none if the clip isn't the song's.
+    NoteID addNoteState (te::MidiClip& clip, NoteID wanted, int pitch, te::BeatPosition start, te::BeatDuration length, int velocity,
+                         bool muted)
+    {
+        const auto clipState = findClipState (clip);
+
+        if (! clipState.isValid())
+            return {};
+
+        const auto id =
+            wanted.isValid() && ! findNoteState (clipState, wanted).isValid() ? (juce::int64) wanted.getRaw() : makeNoteID (clip.edit);
+
+        const auto aliases = getAliasStates (clipState);
+
+        for (auto alias : aliases)
+        {
+            juce::ValueTree note (schema::NOTE);
+            note.setProperty (schema::noteID, id, nullptr);
+            note.setProperty (schema::notePitch, pitch, nullptr);
+            note.setProperty (schema::noteStart, start.inBeats(), nullptr);
+            note.setProperty (schema::noteLength, length.inBeats(), nullptr);
+            note.setProperty (schema::noteVelocity, velocity, nullptr);
+
+            if (muted)
+                note.setProperty (schema::noteMute, true, nullptr);
+
+            alias.appendChild (note, getUndoManager (clip));
+        }
+
+        reconcileAll (clip.edit, aliases);
+        return NoteID::fromRaw ((std::uint64_t) id);
+    }
+
+    void removeNoteState (te::MidiClip& clip, NoteID id)
+    {
+        const auto clipState = findClipState (clip);
+
+        if (! clipState.isValid())
+            return;
+
+        const auto aliases = getAliasStates (clipState);
+
+        for (auto alias : aliases)
+            if (const auto note = findNoteState (alias, id); note.isValid())
+                alias.removeChild (note, getUndoManager (clip));
+
+        reconcileAll (clip.edit, aliases);
+    }
+
+    // The notes, each once: of a note in a clip and its copies in the clip's aliases, the first one, since an edit to it is
+    // made to each of them.
+    std::vector<ClipNote> withoutAliasCopies (const std::vector<ClipNote>& notes)
+    {
+        std::vector<ClipNote> unique;
+        std::set<std::pair<juce::String, juce::int64>> seen;
+
+        for (const auto& n : notes)
+        {
+            if (n.clip == nullptr || n.note == nullptr)
+                continue;
+
+            const auto group = findClipState (*n.clip)[schema::clipLink].toString();
+            const auto key = group.isNotEmpty() ? group : "clip " + juce::String ((juce::int64) getClipID (*n.clip).getRaw());
+
+            if (seen.insert ({ key, (juce::int64) getNoteID (*n.note).getRaw() }).second)
+                unique.push_back (n);
+        }
+
+        return unique;
     }
 
     // Where a clip can grow to without covering another clip on its track: the start of the first clip that reaches past
@@ -138,10 +272,17 @@ namespace
 
     // Makes the clip end at the end of the bar a song beat is in, if the clip ends before the beat, but only into the
     // empty space after it: never past the start of the next clip on its track, so that a note edit never makes one clip
-    // cover another. A looped clip doesn't grow: more of it would only repeat its loop.
+    // cover another.
     void growToHold (te::MidiClip& clip, te::BeatPosition end)
     {
-        if (clip.isLooping() || end <= clip.getEndBeat() + tinyBeats)
+        auto clipState = findClipState (clip);
+
+        if (! clipState.isValid())
+            return;
+
+        const auto range = getClipRange (clipState);
+
+        if (end <= toTracktion (range.getEnd()) + tinyBeats)
             return;
 
         const auto& tempo = clip.edit.tempoSequence;
@@ -152,7 +293,8 @@ namespace
             newEnd = std::min (newEnd, *roomEnd);
 
         if (newEnd > clip.getPosition().getEnd() + tinyTime)
-            clip.setEnd (newEnd, true);
+            setClipPlace (clip.edit, clipState, range.getStart(), fromTracktion (tempo.toBeats (newEnd)) - range.getStart(),
+                          getClipOffset (clipState));
     }
 
     int clampPitch (int pitch)
@@ -196,7 +338,7 @@ namespace
 //==============================================================================
 te::BeatPosition getNoteStart (const te::MidiClip& clip, const te::MidiNote& note)
 {
-    return clip.getContentStartBeat() + te::toDuration (note.getStartBeat());
+    return getContentStartOf (clip) + te::toDuration (note.getStartBeat());
 }
 
 NoteData getNoteData (const te::MidiClip& clip, const te::MidiNote& note)
@@ -246,61 +388,9 @@ BeatDuration getMinimumNoteLength()
 }
 
 //==============================================================================
-namespace
-{
-    juce::int64 readNoteID (const juce::ValueTree& note)
-    {
-        return std::max<juce::int64> (0, static_cast<juce::int64> (note[schema::phaziteNoteID]));
-    }
-
-    // The highest note ID in a tree, or 0.
-    juce::int64 findHighestNoteID (const juce::ValueTree& tree)
-    {
-        juce::int64 highest = 0;
-
-        for (const auto& child : tree)
-            highest = std::max (highest, child.hasType (te::IDs::NOTE) ? readNoteID (child) : findHighestNoteID (child));
-
-        return highest;
-    }
-
-    // Among a tree's notes (a sequence's children), gives each that has no ID, or one that a note before it has, the next
-    // ID above the highest among them, in their order; and the same in the trees below it. A clip and its aliases hold
-    // the same notes in the same order, so they get the same IDs, as Tracktion's copying of one alias to the others
-    // keeps them.
-    void assignMissingNoteIDs (const juce::ValueTree& tree)
-    {
-        std::vector<juce::int64> ids;
-
-        for (const auto& child : tree)
-        {
-            if (child.hasType (te::IDs::NOTE))
-                ids.push_back (readNoteID (child));
-            else
-                assignMissingNoteIDs (child);
-        }
-
-        if (ids.empty())
-            return;
-
-        std::sort (ids.begin(), ids.end());
-
-        if (ids.front() > 0 && std::adjacent_find (ids.begin(), ids.end()) == ids.end())
-            return; // as usual, each has one of its own
-
-        auto next = ids.back() + 1;
-        std::set<juce::int64> used;
-
-        for (auto child : tree)
-            if (child.hasType (te::IDs::NOTE))
-                if (const auto id = readNoteID (child); id == 0 || ! used.insert (id).second)
-                    child.setProperty (schema::phaziteNoteID, next++, nullptr);
-    }
-} // namespace
-
 NoteID getNoteID (const te::MidiNote& note)
 {
-    return NoteID::fromRaw ((std::uint64_t) readNoteID (note.state));
+    return NoteID::fromRaw ((std::uint64_t) std::max<juce::int64> (0, static_cast<juce::int64> (note.state[schema::phaziteNoteID])));
 }
 
 te::MidiNote* findNote (const te::MidiClip& clip, NoteID id)
@@ -316,45 +406,6 @@ te::MidiNote* findNote (const te::MidiClip& clip, NoteID id)
 NoteRef getNoteRef (const te::MidiClip& clip, const te::MidiNote& note)
 {
     return { getClipID (clip), getNoteID (note) };
-}
-
-void assignNoteIDs (te::Edit& edit)
-{
-    assignMissingNoteIDs (edit.state);
-}
-
-NoteIDKeeper::NoteIDKeeper (te::Edit& edit)
-    : state (edit.state)
-{
-    assignNoteIDs (edit);
-    next = findHighestNoteID (state) + 1;
-    state.addListener (this);
-}
-
-NoteIDKeeper::~NoteIDKeeper()
-{
-    state.removeListener (this);
-}
-
-void NoteIDKeeper::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
-{
-    // A note added with its ID (put back by an undo, or copied with its clip's other notes) keeps it.
-    if (child.hasType (te::IDs::NOTE))
-    {
-        if (const auto id = readNoteID (child); id > 0)
-            next = std::max (next, id + 1);
-        else
-            child.setProperty (schema::phaziteNoteID, next++, nullptr);
-
-        return;
-    }
-
-    // A clip, or a track, with its notes: those that have no ID yet are numbered in their clip (a MIDI file's, say).
-    if (child.getNumChildren() > 0)
-    {
-        assignMissingNoteIDs (child);
-        next = std::max (next, findHighestNoteID (child) + 1);
-    }
 }
 
 //==============================================================================
@@ -408,65 +459,93 @@ bool hasSelectedNotes (const Selection& selection)
 }
 
 //==============================================================================
+namespace
+{
+    // Adds a note at a song beat, as addNote() says, muted or not, with the ID wanted if no note of the clip has it.
+    te::MidiNote* addNoteTo (te::MidiClip& clip, NoteID wanted, int pitch, te::BeatPosition start, te::BeatDuration length, int velocity,
+                             bool muted)
+    {
+        start = std::max (start, getStartOf (clip));
+        length = std::max (length, toTracktion (getMinimumNoteLength()));
+        growToHold (clip, start + length);
+        const auto id =
+            addNoteState (clip, wanted, clampPitch (pitch), toClipBeat (clip, start), length, juce::jlimit (1, 127, velocity), muted);
+        return id.isValid() ? findNote (clip, id) : nullptr;
+    }
+} // namespace
+
 te::MidiNote* addNote (te::MidiClip& clip, int pitch, te::BeatPosition start, te::BeatDuration length, int velocity)
 {
-    start = std::max (start, clip.getStartBeat());
-    length = std::max (length, toTracktion (getMinimumNoteLength()));
-    growToHold (clip, start + length);
-    return clip.getSequence().addNote (clampPitch (pitch), toClipBeat (clip, start), length, juce::jlimit (1, 127, velocity), 0,
-                                       getUndoManager (clip));
+    return addNoteTo (clip, {}, pitch, start, length, velocity, false);
 }
 
 void moveNote (te::MidiClip& clip, te::MidiNote& note, te::BeatPosition start, int pitch)
 {
-    start = std::max (start, clip.getStartBeat());
+    start = std::max (start, getStartOf (clip));
     growToHold (clip, start + note.getLengthBeats());
-
-    auto* undoManager = getUndoManager (clip);
-    note.setStartAndLength (toClipBeat (clip, start), note.getLengthBeats(), undoManager);
-    note.setNoteNumber (clampPitch (pitch), undoManager);
+    const auto clipBeat = toClipBeat (clip, start);
+    changeNote (clip, getNoteID (note),
+                [clipBeat, pitch] (juce::ValueTree& n, juce::UndoManager* undo)
+                {
+                    n.setProperty (schema::noteStart, clipBeat.inBeats(), undo);
+                    n.setProperty (schema::notePitch, clampPitch (pitch), undo);
+                });
 }
 
 void setNoteLength (te::MidiClip& clip, te::MidiNote& note, te::BeatDuration length)
 {
     length = std::max (length, toTracktion (getMinimumNoteLength()));
     growToHold (clip, getNoteStart (clip, note) + length);
-    note.setStartAndLength (note.getStartBeat(), length, getUndoManager (clip));
+    changeNote (clip, getNoteID (note),
+                [length] (juce::ValueTree& n, juce::UndoManager* undo) { n.setProperty (schema::noteLength, length.inBeats(), undo); });
 }
 
 void deleteNotes (const std::vector<ClipNote>& notes)
 {
-    for (const auto& n : notes)
-        if (n.clip != nullptr && n.note != nullptr)
-            n.clip->getSequence().removeNote (*n.note, getUndoManager (*n.clip));
+    // Each by its ID, all found before any goes; a note's copies in its clip's aliases go with it.
+    std::vector<std::pair<te::MidiClip*, NoteID>> ids;
+
+    for (const auto& n : withoutAliasCopies (notes))
+        ids.emplace_back (n.clip, getNoteID (*n.note));
+
+    for (const auto& [clip, id] : ids)
+        removeNoteState (*clip, id);
 }
 
 void transposeNotes (const std::vector<ClipNote>& notes, int semitones)
 {
+    const auto unique = withoutAliasCopies (notes);
+
     // As far as the highest or lowest note can go, so that chords keep their shape.
-    for (const auto& n : notes)
+    for (const auto& n : unique)
         semitones = juce::jlimit (-n.note->getNoteNumber(), 127 - n.note->getNoteNumber(), semitones);
 
     if (semitones == 0)
         return;
 
-    for (const auto& n : notes)
-        n.note->setNoteNumber (n.note->getNoteNumber() + semitones, getUndoManager (*n.clip));
+    for (const auto& n : unique)
+    {
+        const auto pitch = n.note->getNoteNumber() + semitones;
+        changeNote (*n.clip, getNoteID (*n.note),
+                    [pitch] (juce::ValueTree& note, juce::UndoManager* undo) { note.setProperty (schema::notePitch, pitch, undo); });
+    }
 }
 
 void nudgeNotes (const std::vector<ClipNote>& notes, te::BeatDuration amount)
 {
-    // The note nearest its clip's start decides how far back they can go.
-    for (const auto& n : notes)
-        amount = std::max (amount, n.clip->getStartBeat() - getNoteStart (*n.clip, *n.note));
+    const auto unique = withoutAliasCopies (notes);
 
-    for (const auto& n : notes)
+    // The note nearest its clip's start decides how far back they can go.
+    for (const auto& n : unique)
+        amount = std::max (amount, getStartOf (*n.clip) - getNoteStart (*n.clip, *n.note));
+
+    for (const auto& n : unique)
         moveNote (*n.clip, *n.note, getNoteStart (*n.clip, *n.note) + amount, n.note->getNoteNumber());
 }
 
 void changeNoteLengths (const std::vector<ClipNote>& notes, te::BeatDuration change)
 {
-    for (const auto& n : notes)
+    for (const auto& n : withoutAliasCopies (notes))
         setNoteLength (*n.clip, *n.note, n.note->getLengthBeats() + change);
 }
 
@@ -478,14 +557,27 @@ bool areAllNotesMuted (const std::vector<ClipNote>& notes)
 void toggleNotesMuted (const std::vector<ClipNote>& notes)
 {
     toggleAll (
-        notes, [] (const ClipNote& n) { return n.note->isMute(); },
-        [] (const ClipNote& n, bool on) { n.note->setMute (on, getUndoManager (*n.clip)); });
+        withoutAliasCopies (notes), [] (const ClipNote& n) { return n.note->isMute(); },
+        [] (const ClipNote& n, bool on)
+        {
+            changeNote (*n.clip, getNoteID (*n.note),
+                        [on] (juce::ValueTree& note, juce::UndoManager* undo)
+                        {
+                            if (on)
+                                note.setProperty (schema::noteMute, true, undo);
+                            else
+                                note.removeProperty (schema::noteMute, undo);
+                        });
+        });
 }
 
 void setNoteVelocities (const std::vector<ClipNote>& notes, int velocity)
 {
-    for (const auto& n : notes)
-        n.note->setVelocity (juce::jlimit (1, 127, velocity), getUndoManager (*n.clip));
+    const auto clamped = juce::jlimit (1, 127, velocity);
+
+    for (const auto& n : withoutAliasCopies (notes))
+        changeNote (*n.clip, getNoteID (*n.note),
+                    [clamped] (juce::ValueTree& note, juce::UndoManager* undo) { note.setProperty (schema::noteVelocity, clamped, undo); });
 }
 
 void changeNoteVelocities (const std::vector<ClipNote>& notes, int change)
@@ -495,30 +587,73 @@ void changeNoteVelocities (const std::vector<ClipNote>& notes, int change)
 
     const UndoStep step (notes.front().clip->edit, "Change Velocity");
 
-    for (const auto& n : notes)
+    for (const auto& n : withoutAliasCopies (notes))
         setNoteVelocities ({ n }, n.note->getVelocity() + change);
 }
 
 std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>& notes)
 {
-    if (notes.empty())
+    const auto unique = withoutAliasCopies (notes);
+
+    if (unique.empty())
         return {};
 
     // The copies go right after the whole selection.
-    auto start = getNoteStart (*notes.front().clip, *notes.front().note), end = start;
+    auto start = getNoteStart (*unique.front().clip, *unique.front().note), end = start;
 
-    for (const auto& n : notes)
+    for (const auto& n : unique)
     {
         start = std::min (start, getNoteStart (*n.clip, *n.note));
         end = std::max (end, getNoteStart (*n.clip, *n.note) + n.note->getLengthBeats());
     }
 
-    auto copies = getNoteData (notes);
+    auto copies = getNoteData (unique);
 
     for (auto& copy : copies)
         copy.start = copy.start + fromTracktion (end - start);
 
-    return replaceNotes (notes.front().clip->edit, {}, copies);
+    return replaceNotes (unique.front().clip->edit, {}, copies);
+}
+
+void setClipNotes (te::MidiClip& clip, const std::vector<NoteData>& notes)
+{
+    const auto clipState = findClipState (clip);
+
+    if (! clipState.isValid())
+        return;
+
+    auto* undo = getUndoManager (clip);
+    const auto contentStart = getContentStartOf (clip);
+    const auto aliases = getAliasStates (clipState);
+    std::vector<juce::int64> ids;
+
+    for (size_t i = 0; i < notes.size(); ++i)
+        ids.push_back (makeNoteID (clip.edit));
+
+    for (auto alias : aliases)
+    {
+        for (int i = alias.getNumChildren(); --i >= 0;)
+            if (alias.getChild (i).hasType (schema::NOTE))
+                alias.removeChild (i, undo);
+
+        for (size_t i = 0; i < notes.size(); ++i)
+        {
+            const auto& data = notes[i];
+            juce::ValueTree note (schema::NOTE);
+            note.setProperty (schema::noteID, ids[i], nullptr);
+            note.setProperty (schema::notePitch, clampPitch (data.pitch), nullptr);
+            note.setProperty (schema::noteStart, (toTracktion (data.start) - contentStart).inBeats(), nullptr);
+            note.setProperty (schema::noteLength, data.length.inBeats(), nullptr);
+            note.setProperty (schema::noteVelocity, juce::jlimit (1, 127, data.velocity), nullptr);
+
+            if (data.muted)
+                note.setProperty (schema::noteMute, true, nullptr);
+
+            alias.appendChild (note, undo);
+        }
+    }
+
+    reconcileAll (clip.edit, aliases);
 }
 
 std::vector<ClipNote> replaceNotes (te::Edit& edit, const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements)
@@ -535,18 +670,11 @@ std::vector<ClipNote> replaceNotes (te::Edit& edit, const std::vector<ClipNote>&
         if (clip == nullptr)
             continue;
 
-        if (auto* note = addNote (*clip, data.pitch, toTracktion (data.start), toTracktion (data.length), data.velocity))
-        {
-            if (data.muted)
-                note->setMute (true, getUndoManager (*clip));
-
-            // A note that replaces one of the old ones (a quantized or transposed note, a chopped note's first piece) keeps
-            // that one's ID, if no other note of the clip has it now; a copy, whose original is still there, gets its own.
-            if (data.id.isValid() && findNote (*clip, data.id) == nullptr)
-                note->state.setProperty (schema::phaziteNoteID, (juce::int64) data.id.getRaw(), nullptr);
-
+        // A note that replaces one of the old ones (a quantized or transposed note, a chopped note's first piece) keeps
+        // that one's ID, if no other note of the clip has it now; a copy, whose original is still there, gets its own.
+        if (auto* note =
+                addNoteTo (*clip, data.id, data.pitch, toTracktion (data.start), toTracktion (data.length), data.velocity, data.muted))
             added.push_back ({ clip, note });
-        }
     }
 
     return added;
@@ -565,7 +693,7 @@ std::vector<ClipNote> replaceNotes (te::Edit& edit, const std::vector<ClipNote>&
 std::vector<ClipNote> replaceSelectedNotes (Selection& selection,
                                             const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform)
 {
-    const auto notes = getSelectedNotes (selection);
+    const auto notes = withoutAliasCopies (getSelectedNotes (selection));
 
     if (notes.empty())
         return {};

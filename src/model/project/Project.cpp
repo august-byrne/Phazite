@@ -8,7 +8,6 @@
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Freeze.h"
-#include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
@@ -39,8 +38,8 @@ namespace
     }
 
     // What every project has, added before the project watches for changes: Phazite's state with its tempo map and its track
-    // list, which Tracktion's tempo sequence and tracks mirror, the master's loudness meter, and an ID for each note. It
-    // isn't the user's change, so it is neither an undo step nor an unsaved change.
+    // list, which Tracktion's tempo sequence, tracks and clips mirror, and the master's loudness meter. It isn't the user's
+    // change, so it is neither an undo step nor an unsaved change.
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
@@ -49,8 +48,8 @@ namespace
         mirror::reconcileTempoMap (edit);
         getTrackList (edit);
         mirror::reconcileTracks (edit);
+        mirror::reconcileClips (edit);
         ensureLoudnessMeter (edit);
-        assignNoteIDs (edit);
         edit.getUndoManager().clearUndoHistory();
 
         if (! wasChanged)
@@ -58,12 +57,10 @@ namespace
     }
 
     // What a save writes that the Edit doesn't hold yet: the devices' states as they are now, outside the undo history
-    // (model/devices/internal/DeviceStates.h), and IDs for the notes that have none (those a new project's content added
-    // before it was open).
+    // (model/devices/internal/DeviceStates.h).
     void storeForSaving (te::Edit& edit)
     {
         storeDeviceStates (edit);
-        assignNoteIDs (edit);
     }
 
     // Writes a project into a file, through a temporary file that takes its place once it is whole. (Tracktion's save

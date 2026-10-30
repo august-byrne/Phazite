@@ -2,6 +2,7 @@
 // Sidechains (model/mixer/internal/Sidechain.h): which tracks a device can listen to, and why not the others, picking one as an
 // undo step (a compressor as it was made starting to duck in it), Duck Under, forgetting a deleted source, and the
 // source's sound reaching the device as the song plays.
+#include "TestClips.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "devices/drums/DrumSampler.h"
@@ -147,9 +148,9 @@ TEST_CASE ("A sidechain's source reaches the device as the song plays, muted or 
     te::Plugin::Ptr tone;
     phazite::test::createTestDevice (*song.edit, TestTone::typeID, tone);
     REQUIRE (phazite::setInstrument (*song.kick, tone) != nullptr);
-    auto clip = song.kick->insertMIDIClip ("Notes", song.edit->tempoSequence.toTime ({ 0_bp, 4_bp }), nullptr);
+    auto* clip = phazite::test::addMidiClip (*song.kick, { 0_bp, 4_bp }, "Notes");
     REQUIRE (clip != nullptr);
-    clip->getSequence().addNote (60, 0_bp, 4_bd, 64, 0, nullptr);
+    phazite::test::addMidiNote (*clip, 60, 0_bp, 4_bd, 64);
     auto& ducker = song.add (*song.bass, TestSidechain::typeID);
 
     const auto kickAlone = renderPeak (*song.edit); // the bass's sidechain hears nothing yet

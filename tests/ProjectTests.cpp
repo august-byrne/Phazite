@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "model/arrangement/Outlines.h"
@@ -433,7 +434,7 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    REQUIRE (clip->getSequence().addNote (67, beats (3.0), te::BeatDuration::fromBeats (0.5), 100, 0, nullptr) != nullptr);
+    REQUIRE (phazite::test::addMidiNote (*clip, 67, beats (3.0), te::BeatDuration::fromBeats (0.5), 100) != nullptr);
     CHECK (project->hasUnsavedChanges());
     phazite::test::settle(); // the alias copies the note
     REQUIRE (project->save().wasOk());

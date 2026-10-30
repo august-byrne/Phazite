@@ -1,14 +1,80 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes.
+// Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes. The song holds its
+// MIDI clips in Phazite's own record of it (schema::CLIP, on their tracks' elements; docs/tracktion-migration.md, T1 step
+// 3): where each is, in beats, its name, mute and alias group, and its notes (model/notes/internal/Notes.h). Tracktion's
+// MIDI clips mirror them (model/mirror/internal/Mirror.h), with the same IDs. Audio clips are still Tracktion's own until
+// step 3b: the edits here work on Tracktion's for them.
 #pragma once
 
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <optional>
+#include <vector>
 
 namespace phazite
 {
+//==============================================================================
+// The song's MIDI clips as Phazite's record holds them.
+
+// A clip's element: invalid for a clip that isn't the song's (gone, or an audio clip).
+juce::ValueTree findClipState (const te::Edit&, ClipID);
+juce::ValueTree findClipState (const te::Clip&);
+
+// The clips' elements on a track's element; and on every track of the song, track by track.
+std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState);
+std::vector<juce::ValueTree> getClipStates (const te::Edit&);
+
+ClipID getClipID (const juce::ValueTree& clipState);
+BeatRange getClipRange (const juce::ValueTree& clipState);
+BeatDuration getClipOffset (const juce::ValueTree& clipState);
+BeatPosition getContentStart (const juce::ValueTree& clipState); // where its notes count from: its start, less its offset
+
+// The clips of a clip's alias group, which hold the same notes (schema::clipLink), the clip itself first; only the clip
+// if it is in none.
+std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState);
+
+// A new MIDI clip's element, with an ID from the Edit's (as Tracktion's items get theirs while T1 lasts), on no track yet.
+juce::ValueTree makeMidiClipState (te::Edit&, const juce::String& name, BeatRange);
+
+// A copy of a clip's element, on no track yet, with an ID of its own and the same notes, with the same IDs, in the same alias
+// group.
+juce::ValueTree copyClipState (te::Edit&, const juce::ValueTree& clipState);
+
+// Puts a clip's element on a track's, or moves it there, and has Tracktion's clip follow (in the caller's undo step).
+// Returns Tracktion's clip.
+te::MidiClip* placeClipState (te::Edit&, juce::ValueTree clipState, te::ClipTrack&);
+
+// Where a clip is, in the caller's undo step, and has Tracktion's clip follow: its start, its length, and how far into
+// its notes it starts.
+void setClipPlace (te::Edit&, juce::ValueTree clipState, BeatPosition start, BeatDuration length, BeatDuration offset);
+
+// A controller event of a MIDI clip of the song's (schema::CONTROL) as Tracktion's MidiControllerEvent has it: its type (a
+// MIDI controller's number, or one of Tracktion's own types), its value (7 bits up, but for the pitch wheel's) and its
+// metadata (an aftertouch's note). And the song's element for one of Tracktion's: invalid for a kind the song doesn't keep.
+struct TracktionControl
+{
+    te::BeatPosition beat;
+    int type = 0, value = 0, metadata = 0;
+};
+
+TracktionControl toTracktionControl (const juce::ValueTree& control);
+juce::ValueTree makeControlState (const te::MidiControllerEvent&);
+
+// Whether Tracktion's clip holds the controller events of the song's element for it, in their order.
+bool haveSameControls (const te::MidiClip&, const juce::ValueTree& clipState);
+
+// Takes one of Tracktion's MIDI clips on one of the song's tracks into the song, which hasn't it yet (one Tracktion made
+// from a MIDI file): an element for it, with its notes, each with an ID of its own, and its controller events. Returns the
+// element.
+juce::ValueTree adoptMidiClip (te::MidiClip&);
+
+// Takes what one of Tracktion's MIDI recordings left on the song's tracks into the song, as it stops (in its undo step):
+// the clips it made, and the notes it added to the song's (Overdub merges them into the clip they overlap, and lengthens
+// it), which the clip's aliases get too.
+void adoptRecordedMidi (te::Edit&);
+
+//==============================================================================
 // The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).
 juce::Array<te::Clip*> getSelectedClips (const Selection&);
 bool hasSelectedClips (const Selection&);

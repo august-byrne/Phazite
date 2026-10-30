@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The open project as commands and panels find it (src/model/project/ProjectContext.h).
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
@@ -194,10 +195,10 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     CHECK (hear() == "tracks");
 
     // A clip, and its notes: no change to the track (Tracktion sorts the track's clips and parts after a clip is added).
-    auto* clip = track->insertMIDIClip ({ te::TimePosition(), te::TimePosition::fromSeconds (2.0) }, nullptr).get();
+    auto* clip = phazite::test::addMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) });
     REQUIRE (clip != nullptr);
     CHECK (hear() == "clips");
-    clip->getSequence().addNote (60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
+    phazite::test::addMidiNote (*clip, 60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100);
     CHECK (hear() == "clips");
 
     // A section; and the tempo, which moves the clips in time (Tracktion keeps them in seconds; sections are in beats).

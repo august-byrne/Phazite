@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
@@ -120,7 +121,7 @@ TEST_CASE ("Trimming a clip leaves its content in place")
 {
     ClipEdit e;
     auto& clip = e.addClip (0, 4.0, 4.0);
-    clip.getSequence().addNote (60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
+    phazite::test::addMidiNote (clip, 60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100);
 
     phazite::trimClipStart (clip, beats (5.0));
     CHECK (clip.getStartBeat().inBeats() == doctest::Approx (5.0));
@@ -147,19 +148,19 @@ TEST_CASE ("Copies of a clip are separate, and aliases stay linked")
     REQUIRE (copies.size() == 1);
     CHECK (copies[0] != &original);
     CHECK (copies[0]->getStartBeat().inBeats() == doctest::Approx (0.0)); // in the same place, to be moved
-    CHECK_FALSE (copies[0]->isLinked());
-    CHECK_FALSE (original.isLinked());
+    CHECK_FALSE (phazite::hasAliases ({ copies[0] }));
+    CHECK_FALSE (phazite::hasAliases ({ &original }));
 
     const auto aliases = phazite::copyClips ({ &original }, true);
     REQUIRE (aliases.size() == 1);
-    CHECK (original.isLinked());
+    CHECK (phazite::hasAliases ({ &original }));
     CHECK (aliases[0]->getLinkGroupID() == original.getLinkGroupID());
 
     // A copy of an alias is a separate clip again.
     const auto copyOfAlias = phazite::copyClips ({ aliases[0] }, false);
     REQUIRE (copyOfAlias.size() == 1);
-    CHECK_FALSE (copyOfAlias[0]->isLinked());
-    CHECK (aliases[0]->isLinked());
+    CHECK_FALSE (phazite::hasAliases ({ copyOfAlias[0] }));
+    CHECK (phazite::hasAliases ({ aliases[0] }));
 }
 
 TEST_CASE ("Fades stay within an audio clip")
@@ -271,8 +272,8 @@ TEST_CASE ("Make Unique turns aliases back into separate clips")
 
     e.selection.selectOnly (aliases[0]);
     REQUIRE (e.registry.invoke ("clip.makeUnique"));
-    CHECK_FALSE (aliases[0]->isLinked());
-    CHECK_FALSE (original.isLinked()); // left alone in its group, it is no one's alias either
+    CHECK_FALSE (phazite::hasAliases ({ aliases[0] }));
+    CHECK_FALSE (phazite::hasAliases ({ &original })); // left alone in its group, it is no one's alias either
     CHECK_FALSE (e.registry.find ("clip.makeUnique")->isEnabled());
 }
 
@@ -351,7 +352,7 @@ TEST_CASE ("Duplicate copies a time range right after it, and the range moves to
             copy = dynamic_cast<te::MidiClip*> (clip);
 
     REQUIRE (copy != nullptr);
-    CHECK_FALSE (copy->isLinked());
+    CHECK_FALSE (phazite::hasAliases ({ copy }));
     REQUIRE (copy->getSequence().getNotes().size() == 1);
     CHECK (phazite::getNoteStart (*copy, *copy->getSequence().getNotes().getFirst()).inBeats() == doctest::Approx (4.5));
     CHECK (phazite::getNoteStart (crossing, *crossing.getSequence().getNotes().getFirst()).inBeats() == doctest::Approx (2.5));
@@ -459,14 +460,14 @@ TEST_CASE ("Duplicated clips go right after them all")
     REQUIRE (copies.size() == 2);
     CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-4.00 6.00-10.00"));
     CHECK (describeClips (*e.tracks[1]) == juce::String ("2.00-6.00 8.00-12.00"));
-    CHECK_FALSE (copies.getFirst()->isLinked());
+    CHECK_FALSE (phazite::hasAliases ({ copies.getFirst() }));
     CHECK (e.selection.getNumObjectsSelected() == 0);
 
     // As aliases, with a selection manager: the copy is selected instead of what was.
     e.selection.selectOnly (e.tracks[1]);
     copies = phazite::duplicateClips ({ &a }, true, &e.selection);
     REQUIRE (copies.size() == 1);
-    CHECK (copies.getFirst()->isLinked());
+    CHECK (phazite::hasAliases ({ copies.getFirst() }));
     CHECK (copies.getFirst()->getStartBeat().inBeats() == doctest::Approx (4.0));
     CHECK (e.selection.isSelected (copies.getFirst()));
     CHECK_FALSE (e.selection.isSelected (e.tracks[1]));
@@ -584,11 +585,15 @@ TEST_CASE ("Where linked clips play, an editor showing one of them sees its note
     auto& original = e.addClip (0, 0.0, 4.0);
     const auto aliases = phazite::copyClips ({ &original, &original }, true);
     REQUIRE (aliases.size() == 2);
-    const auto seconds = [] (double b) { return te::TimePosition::fromSeconds (b / 2.0); }; // 120 BPM
-
     // One alias later in the song, whole; one that plays only beats 2 to 4 of the notes (a snippet), from beat 16.
-    aliases[0]->setPosition ({ { seconds (8.0), seconds (12.0) }, {} });
-    aliases[1]->setPosition ({ { seconds (16.0), seconds (18.0) }, te::TimeDuration::fromSeconds (1.0) });
+    const auto place = [&original] (te::Clip* clip, double start, double length, double offset)
+    {
+        phazite::setClipPlace (original.edit, phazite::findClipState (*clip), phazite::BeatPosition::fromBeats (start),
+                               phazite::BeatDuration::fromBeats (length), phazite::BeatDuration::fromBeats (offset));
+    };
+
+    place (aliases[0], 8.0, 4.0, 0.0);
+    place (aliases[1], 16.0, 2.0, 2.0);
     const juce::Array<te::MidiClip*> shown { &original };
 
     CHECK (phazite::getLinkedPlayBeat (shown, 9.5) == std::optional<double> (1.5));

@@ -119,10 +119,12 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
         case FileKind::midi:
         {
             auto clip = te::createClipFromFile (file, track, false);
+            auto* midi = dynamic_cast<te::MidiClip*> (clip.get());
 
-            if (clip == nullptr)
+            if (midi == nullptr)
                 return nullptr;
 
+            adoptMidiClip (*midi); // Tracktion made it, with its notes: the song takes it
             moveClip (*clip, start, track);
             return clip.get();
         }

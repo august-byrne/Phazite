@@ -15,7 +15,7 @@
 namespace phazite::mirror
 {
 // The tempo map (model/transport/internal/Tempo.h): Tracktion's tempo sequence gets the document's tempos and time
-// signatures, each at its beat.
+// signatures, each at its beat; and the clips are placed again for them (reconcileClips()).
 void reconcileTempoMap (te::Edit&);
 
 // The tracks (model/arrangement/internal/Tracks.h): Tracktion gets a track for each of the document's, with its ID, in
@@ -23,6 +23,16 @@ void reconcileTempoMap (te::Edit&);
 // and solo isolation (a return's) that it plays with; Tracktion's tracks that the document hasn't go, with what they hold.
 // Nothing for a song without a track list (an Edit that isn't a song's).
 void reconcileTracks (te::Edit&);
+
+// The MIDI clips (model/arrangement/internal/Clips.h): Tracktion gets a MIDI clip for each of the song's, with its ID, on
+// its track, where it is in seconds (from its beats, as the tempo map has them now), with its name, its mute and its
+// notes, each with its ID (schema::phaziteNoteID), in no alias group of Tracktion's (the song keeps its aliases' notes the
+// same itself, so Tracktion's copying between them never runs); Tracktion's MIDI clips on the song's tracks that the song
+// hasn't go. The tempo map's reconcile calls it, since where a clip is in seconds follows the tempo.
+void reconcileClips (te::Edit&);
+
+// The same for one clip, after a change to it alone (its notes, its place), or to its going.
+void reconcileClip (te::Edit&, ClipID);
 
 // Only the switches Tracktion keeps outside its undo history (the tracks' mute, solo and solo isolation): after an undo or
 // a redo (phazite::undo(), model/commands/internal/Undo.h), which puts the document's back but not those, when a step changed

@@ -89,7 +89,7 @@ TEST_CASE ("While a clip linked to the one shown plays, the piano roll's playhea
     auto& clip = screen.addClip (0, 0.0, 4.0);
     const auto aliases = phazite::copyClips ({ &clip }, true);
     REQUIRE (aliases.size() == 1);
-    aliases[0]->setPosition ({ { te::TimePosition::fromSeconds (4.0), te::TimePosition::fromSeconds (6.0) }, {} }); // beats 8 to 12
+    phazite::moveClip (*aliases[0], te::BeatPosition::fromBeats (8.0), *aliases[0]->getClipTrack()); // beats 8 to 12
     screen.select (clip);
 
     auto* playhead = phazite::test::findComponentWithTitle (screen.pianoRoll, "Playhead");

@@ -83,7 +83,7 @@ LaneCopy copyLaneChords (const te::Edit&, BeatRange);
 void pasteLaneChords (te::Edit&, const LaneCopy&, BeatPosition destination);
 
 //==============================================================================
-// Parts: MIDI clips whose notes the lane made (schema::phaziteChordPart).
+// Parts: MIDI clips whose notes the lane made (schema::chordPart).
 
 std::optional<PartStyle> getChordPartStyle (const te::Clip&);
 

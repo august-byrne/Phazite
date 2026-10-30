@@ -81,7 +81,6 @@ struct Song
     }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::NoteIDKeeper noteIDs { *edit }; // as the project context gives the notes added their IDs, which select them
     te::AudioTrack* a = nullptr;
     te::AudioTrack* b = nullptr;
     te::MidiClip* first = nullptr;
@@ -194,7 +193,7 @@ TEST_CASE ("Duplicate takes notes first, then the range, sections, clips and tra
     phazite::duplicateSelection (s.selection, s.range, true);
     const auto copies = phazite::getSelectedClips (s.selection);
     REQUIRE (copies.size() == 1);
-    CHECK (copies.getFirst()->isLinked());
+    CHECK (phazite::hasAliases ({ copies.getFirst() }));
     CHECK_FALSE (s.selection.isSelected (s.b));
 
     // Tracks last, and never as aliases.
@@ -362,7 +361,7 @@ TEST_CASE ("Phazite's selection holds items by their IDs: one kind at a time, an
 
     // A clip that is deleted is selected no more, without a word from it.
     selection.selectOnly (s.second);
-    s.second->removeFromParent();
+    phazite::deleteClips ({ s.second }, false);
     CHECK (selection.getItemsOfType<te::Clip>().isEmpty());
     CHECK (selection.getNumObjectsSelected() == 0);
 

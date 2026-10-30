@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "devices/synth/Synth.h"
 #include "model/engine/internal/EngineSetup.h"
@@ -18,10 +19,10 @@ std::unique_ptr<te::Edit> createEditWithSynth (te::Engine& engine, const juce::F
     auto synth = edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {});
     track->pluginList.insertPlugin (synth, 0, nullptr);
 
-    auto clip = track->insertMIDIClip ("Notes", edit->tempoSequence.toTime ({ 0_bp, 8_bp }), nullptr);
+    auto* clip = phazite::test::addMidiClip (*track, { 0_bp, 8_bp }, "Notes");
 
     for (int i = 0; i < 8; ++i)
-        clip->getSequence().addNote (60 + i, te::BeatPosition::fromBeats (i), te::BeatDuration::fromBeats (0.5), 100, 0, nullptr);
+        phazite::test::addMidiNote (*clip, 60 + i, te::BeatPosition::fromBeats (i), te::BeatDuration::fromBeats (0.5), 100);
 
     return edit;
 }

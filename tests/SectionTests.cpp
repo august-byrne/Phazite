@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/TrackColours.h"
@@ -57,9 +58,8 @@ struct Song
 
     te::MidiClip& addClip (int track, double start, double end, const juce::String& name)
     {
-        auto* clip = phazite::insertMidiClip (*tracks[track], { beats (start), beats (end) }, nullptr);
+        auto* clip = phazite::test::addMidiClip (*tracks[track], { beats (start), beats (end) }, name);
         REQUIRE (clip != nullptr);
-        clip->setName (name);
         return *clip;
     }
 
@@ -305,7 +305,7 @@ TEST_CASE ("Duplicating a section copies what is in it, as aliases if asked")
 {
     Song song;
     auto& riff = song.addClip (0, 96, 160, "Riff");
-    riff.getSequence().addNote (60, beats (0), te::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
+    phazite::test::addMidiNote (riff, 60, beats (0), te::BeatDuration::fromBeats (1.0), 100);
     song.addClip (0, 160, 176, "Pad");
 
     const auto copy = phazite::getSection (*song.edit, phazite::duplicateSection (*song.edit, song.id (2), true));
@@ -318,8 +318,8 @@ TEST_CASE ("Duplicating a section copies what is in it, as aliases if asked")
     auto* riffCopy = song.findClip (0, 160);
     REQUIRE (riffCopy != nullptr);
     CHECK (riffCopy->getName() == juce::String ("Riff"));
-    CHECK (riffCopy->isLinked());
-    CHECK (riff.isLinked());
+    CHECK (phazite::hasAliases ({ riffCopy }));
+    CHECK (phazite::hasAliases ({ &riff }));
     CHECK (song.findClip (0, 224) != nullptr); // the Pad
     CHECK (song.section (4).range.getStart().inBeats() == doctest::Approx (224.0));
 

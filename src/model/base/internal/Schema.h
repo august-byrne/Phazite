@@ -270,11 +270,84 @@ inline const juce::Identifier chordInversion { "inversion" };
 // keyRoot and keyScale. The first starts at 0; a lane without any is in C major.
 inline const juce::Identifier CHORDKEY { "CHORDKEY" };
 
-// On a MIDICLIP made from the chord lane: the part it is, "sustainedTriads", "sustainedSevenths", "spreadChords",
+//==============================================================================
+// The song's clips (model/arrangement/internal/Clips.h; docs/tracktion-migration.md, T1 step 3): its MIDI clips so far,
+// each on its track's element with its notes. Tracktion's MIDI clips mirror them (model/mirror/internal/Mirror.h), with
+// the same IDs while T1 lasts; audio clips are still Tracktion's own. song
+
+// Child of a TRACK that holds clips (trackIsTrack): a clip on it, in no particular order.
+inline const juce::Identifier CLIP { "CLIP" };
+
+// On CLIP. int64, more than 0: its ID (ClipID), which while T1 lasts is its Tracktion clip's.
+inline const juce::Identifier clipID { "id" };
+
+// On CLIP: what it holds: clipIsMidi, notes.
+inline const juce::Identifier clipKind { "kind" };
+inline constexpr const char* clipIsMidi = "midi";
+
+// On CLIP: its name.
+inline const juce::Identifier clipName { "name" };
+
+// On CLIP. double, 0 or more: where it starts, in beats from the song's start; and double, more than 0: how long it lasts,
+// in beats.
+inline const juce::Identifier clipStart { "start" };
+inline const juce::Identifier clipLength { "length" };
+
+// On CLIP. double, 0 or more, default 0: how far into its notes it starts, in beats. Its notes count from its content
+// start, that many beats before its start: trimming its start or slipping it moves that.
+inline const juce::Identifier clipOffset { "offset" };
+
+// On CLIP. bool, default false: it is muted.
+inline const juce::Identifier clipMute { "mute" };
+
+// On CLIP. int64, or none: the alias group it is in, which while T1 lasts has an ID from the Edit's. The clips of a group
+// hold the same notes, with the same IDs: an edit to one clip's notes is made to each (model/notes/internal/Notes.h), as FL
+// Studio's pattern clips play one pattern.
+inline const juce::Identifier clipLink { "link" };
+
+// On a MIDI CLIP made from the chord lane: the part it is, "sustainedTriads", "sustainedSevenths", "spreadChords",
 // "pulsingChords", "offbeatStabs", "bassRoots", "bassPulses", "bassRootFifth", "bassOctaves", "arpeggioUp",
 // "arpeggioDown" or "arpeggioUpDown" (getSavedPartStyleName()). While its notes are the ones the lane makes for it, they
-// change with the chords. song
-inline const juce::Identifier phaziteChordPart { "phaziteChordPart" };
+// change with the chords.
+inline const juce::Identifier chordPart { "part" };
+
+// Child of a MIDI CLIP: a note, in no particular order.
+inline const juce::Identifier NOTE { "NOTE" };
+
+// On NOTE. int64, 1 or more: its ID (NoteID, model/base/IDs.h), which no other note of its clip has, so that selections,
+// undo and scripts can name one note (decided 2026-10-14). A copy of a clip, an alias too, keeps its notes' IDs. While T1
+// lasts a new note's comes from the Edit's IDs, so that it is none a note had before.
+inline const juce::Identifier noteID { "id" };
+
+// On NOTE. int 0..127: its pitch, as a MIDI note number.
+inline const juce::Identifier notePitch { "pitch" };
+
+// On NOTE. double: where it starts, in beats from its clip's content start; and double, at least 1/64: how long it lasts,
+// in beats.
+inline const juce::Identifier noteStart { "start" };
+inline const juce::Identifier noteLength { "length" };
+
+// On NOTE. int 1..127: how hard it is played.
+inline const juce::Identifier noteVelocity { "velocity" };
+
+// On NOTE. bool, default false: it is muted.
+inline const juce::Identifier noteMute { "mute" };
+
+// Child of a MIDI CLIP: a controller event a recording took in with the notes, such as a sustain pedal or a bend, in MIDI's
+// own terms (no Tracktion numbers): its kind, controlIsController (a MIDI controller: controlNumber 0..127),
+// controlIsPitchWheel, controlIsChannelPressure, controlIsAftertouch (on the note controlNumber) or
+// controlIsProgramChange; where it is, in beats from its clip's content start; and its value, 0..127, or 0..16383 for the
+// pitch wheel.
+inline const juce::Identifier CONTROL { "CONTROL" };
+inline const juce::Identifier controlKind { "kind" };
+inline constexpr const char* controlIsController = "controller";
+inline constexpr const char* controlIsPitchWheel = "pitchWheel";
+inline constexpr const char* controlIsChannelPressure = "channelPressure";
+inline constexpr const char* controlIsAftertouch = "aftertouch";
+inline constexpr const char* controlIsProgramChange = "programChange";
+inline const juce::Identifier controlNumber { "number" };
+inline const juce::Identifier controlBeat { "beat" };
+inline const juce::Identifier controlValue { "value" };
 
 //==============================================================================
 // On audio clips (Tracktion's AUDIOCLIP) whose sound Phazite renders itself (model/arrangement/internal/AudioClips.h;
@@ -320,12 +393,8 @@ inline const juce::Identifier phaziteTake { "phaziteTake" };
 inline const juce::Identifier phaziteTakeLength { "phaziteTakeLength" };
 
 //==============================================================================
-// On notes: Tracktion's NOTEs, in a MIDI clip's SEQUENCE. song
-
-// int, 1 or more: the note's ID (NoteID, model/base/IDs.h), which no other note of its clip has, so that selections, undo
-// and scripts can name one note (decided 2026-10-14). A copy of a clip, an alias too, keeps its notes' IDs. Each note
-// gets one when it is added (model/notes/internal/Notes.h: NoteIDKeeper), and any that has none when a project opens or is saved
-// (assignNoteIDs()).
+// On Tracktion's NOTEs, in the SEQUENCE of a MIDI clip that mirrors one of the song's: the ID of the song's note it plays
+// (noteID), which the mirror writes, so that the model finds a note of Tracktion's as the song's while T1 lasts. song
 inline const juce::Identifier phaziteNoteID { "phaziteNoteID" };
 
 //==============================================================================
