@@ -1,12 +1,17 @@
 {
   "kind": "device",
   "device": {
-    "type": "phaziteStereoExpander",
     "name": "Stereo Expander",
     "instrument": false,
+    "type": "phaziteStereoExpander",
     "parameters": {
       "width": 1.5,
-      "bassMono": 1
+      "spread": 0.0,
+      "bassMono": 1,
+      "bassMonoFrequency": 120.0,
+      "invertLeft": 0,
+      "invertRight": 0,
+      "gain": 0.0
     }
   }
 }

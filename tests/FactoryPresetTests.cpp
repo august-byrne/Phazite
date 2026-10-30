@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The presets that come with Phazite (resources/presets; docs/design.md, section 9): each one a device's, in Phazite's own
-// format (model/base/internal/Schema.h: schema::preset), in its device's folder, naming only parameters the device has,
-// within their ranges, and tables it has; and each one playing: an instrument a chord and a bass note, an effect a beat
-// and a tone, coming out with sound, without anything that isn't a number, and without going far over full scale.
+// format (model/base/internal/Schema.h: schema::preset), in its device's folder, naming every parameter the device has
+// and no other, within their ranges, and tables it has, written as Save Preset writes them; and each one playing: an
+// instrument a chord and a bass note, an effect a beat and a tone, coming out with sound, without anything that isn't a
+// number, and without going far over full scale.
+#include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
@@ -243,6 +245,10 @@ TEST_CASE ("Phazite's presets: each a device's, in its folder, with parameters a
             CHECK (devices::constrain (parameter, (float) value) == doctest::Approx ((float) value));
         }
 
+        // And every parameter the device has, so that loading the preset sets the whole device, as a preset the user
+        // saves does.
+        CHECK (values->getProperties().size() == (int) info->parameters.size());
+
         // A wavetable synth's tables by their names; no sound files, which aren't in Phazite's repository.
         if (const auto* sounds = device[keys::sounds].getDynamicObject())
         {
@@ -295,5 +301,37 @@ TEST_CASE ("Phazite's presets play: sound comes out, only numbers, and never far
 
         if (! waitsForTrack)
             CHECK (played.rms > std::pow (10.0, -60.0 / 20.0));
+    }
+}
+
+TEST_SUITE ("golden")
+{
+    // Each preset file as Save Preset writes it for a device loaded from it: every parameter, in the device's order, with
+    // its tables. A preset written by hand, or by an earlier Phazite, shows each line that differs. Rewritten with
+    // PHAZITE_UPDATE_GOLDEN=1, as the golden files are (GoldenFiles.h); then read git diff resources/presets in full.
+    TEST_CASE ("Golden presets: Phazite's presets are written as Save Preset writes them")
+    {
+        auto edit = te::Edit::createSingleTrackEdit (phazite::test::getEngine());
+        auto* track = te::getAudioTracks (*edit)[0];
+        const auto update = phazite::test::isUpdatingGoldenFiles();
+
+        for (const auto& file : getPresetFiles())
+        {
+            CAPTURE (file.getRelativePathFrom (getFactoryPresets()).toStdString());
+            auto* device = phazite::addDeviceFromPreset (*edit, track, phazite::readPreset (file), nullptr);
+            REQUIRE (device != nullptr);
+
+            const auto saved = phazite::makeDevicePreset (*device);
+            const auto expected = file.loadFileAsString().replace ("\r\n", "\n");
+            const auto actual = juce::JSON::toString (saved, false) + "\n";
+            const auto differences = phazite::test::compareLines (expected, actual, 10);
+
+            if (update && ! differences.isEmpty())
+                REQUIRE (phazite::writePreset (saved, file));
+            else
+                CHECK_MESSAGE (differences.isEmpty(), differences.joinIntoString ("\n").toStdString());
+
+            device->deleteFromParent();
+        }
     }
 }

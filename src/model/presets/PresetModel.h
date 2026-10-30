@@ -61,8 +61,9 @@ bool saveTrackPreset (const ProjectContext&, TrackID, const juce::File&);
 bool loadPreset (ProjectContext&, const juce::File&, TrackID);
 
 // Puts a device preset's settings and mix into a device of the preset's kind, in place of its own, as one undo step named
-// after the preset ("Load Preset Warm Pad"): one of Phazite's own of the same type (its parameters, and its sounds,
-// copied into the project), or the same plug-in. A plug-in window's Load Preset (step 2.12) and a device's Presets menu
-// in the Devices view. Returns whether it did: not for a preset of another device, nor of a container or a track.
+// after the preset ("Load Preset Warm Pad"): one of Phazite's own of the same type (its parameters, each it doesn't name
+// at its default, and its sounds, copied into the project), or the same plug-in. A plug-in window's Load Preset (step
+// 2.12) and a device's Presets menu in the Devices view. Returns whether it did: not for a preset of another device, nor
+// of a container or a track.
 bool loadPresetInto (ProjectContext&, DeviceID, const juce::File&);
 } // namespace phazite

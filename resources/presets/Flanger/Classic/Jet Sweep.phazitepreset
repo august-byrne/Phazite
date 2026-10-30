@@ -1,14 +1,20 @@
 {
   "kind": "device",
   "device": {
-    "type": "phaziteFlanger",
     "name": "Flanger",
     "instrument": false,
+    "type": "phaziteFlanger",
     "parameters": {
       "delay": 5.0,
       "depth": 0.9,
+      "sync": 1,
+      "division": 14,
+      "rate": 0.25,
+      "shape": 1,
       "feedback": 0.7,
-      "stereo": 0.25
+      "stereo": 0.25,
+      "safeBass": 20.0,
+      "mix": 1.0
     }
   }
 }

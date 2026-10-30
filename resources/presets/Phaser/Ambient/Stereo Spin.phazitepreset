@@ -1,14 +1,22 @@
 {
   "kind": "device",
   "device": {
-    "type": "phazitePhaser",
     "name": "Phaser",
     "instrument": false,
+    "type": "phazitePhaser",
     "parameters": {
+      "notches": 1,
       "frequency": 1000.0,
       "depth": 0.7,
+      "sync": 1,
+      "division": 13,
+      "rate": 0.5,
+      "shape": 0,
       "feedback": 0.25,
-      "stereo": 1.0
+      "spacing": 0.5,
+      "stereo": 1.0,
+      "safeBass": 20.0,
+      "mix": 1.0
     }
   }
 }

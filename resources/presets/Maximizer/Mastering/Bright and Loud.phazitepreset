@@ -1,15 +1,20 @@
 {
   "kind": "device",
   "device": {
-    "type": "phaziteMaximizer",
     "name": "Maximizer",
     "instrument": false,
+    "type": "phaziteMaximizer",
     "parameters": {
       "gain": 7.0,
+      "lowFrequency": 120.0,
       "highFrequency": 4000.0,
+      "lowSqueeze": 0.3,
       "midSqueeze": 0.35,
       "highSqueeze": 0.45,
+      "lowLevel": 0.0,
+      "midLevel": 0.0,
       "highLevel": 2.5,
+      "ceiling": -1.0,
       "release": 80.0
     }
   }

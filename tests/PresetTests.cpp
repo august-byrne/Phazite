@@ -14,6 +14,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Devices.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -458,4 +459,55 @@ TEST_CASE ("A device's preset loads into a device of its kind, in place of its s
     CHECK (song.describeUndo() == juce::String ("Undo Load Preset Bright"));
     phazite::undo (edit);
     CHECK (song.find ({ inside, "band4Gain" })->getCurrentValue() == doctest::Approx (-9.0f));
+}
+
+TEST_CASE ("A preset loaded into one of Phazite's devices sets every parameter: those it names, and the rest to their defaults")
+{
+    phazite::test::TemporaryFolder temp;
+    Song song (temp.folder, "Starting points");
+    auto& edit = song.edit();
+    const auto eq = song.addEffect (song.track (0), "phaziteEq");
+
+    // The user's own settings, which a preset that names only one band's gain mustn't leave behind.
+    phazite::getParameter (song.context, { eq, "band2Gain" }).setValue (6.0f);
+    phazite::getParameter (song.context, { eq, "band4Gain" }).setValue (-9.0f);
+    phazite::getParameter (song.context, { eq, "output" }).setValue (-3.0f);
+    const auto file = temp.folder.getChildFile ("Lift" + juce::String (phazite::presetExtension));
+    REQUIRE (file.replaceWithText (R"({ "kind": "device", "device": { "type": "phaziteEq", "name": "EQ", "instrument": false,
+                                        "parameters": { "band1Gain": 3.0 } } })"));
+    edit.getUndoManager().clearUndoHistory();
+
+    // Loaded: as a new EQ would be with the preset, every parameter.
+    REQUIRE (phazite::loadPresetInto (song.context, eq, file));
+    const phazite::devices::DeviceInfo* info = nullptr;
+
+    for (const auto* own : phazite::getOwnDevices())
+        if (own->typeID == std::string_view ("phaziteEq"))
+            info = own;
+
+    REQUIRE (info != nullptr);
+
+    for (const auto& parameter : info->parameters)
+    {
+        const auto id = juce::String (parameter.id.data(), parameter.id.size());
+        CAPTURE (id.toStdString());
+        CHECK (song.find ({ eq, id })->getCurrentValue() == doctest::Approx (id == "band1Gain" ? 3.0f : parameter.defaultValue));
+    }
+
+    // One undo step puts the user's settings back.
+    CHECK (song.describeUndo() == juce::String ("Undo Load Preset Lift"));
+    phazite::undo (edit);
+    CHECK (song.find ({ eq, "band1Gain" })->getCurrentValue() == doctest::Approx (0.0f));
+    CHECK (song.find ({ eq, "band2Gain" })->getCurrentValue() == doctest::Approx (6.0f));
+    CHECK (song.find ({ eq, "band4Gain" })->getCurrentValue() == doctest::Approx (-9.0f));
+    CHECK (song.find ({ eq, "output" })->getCurrentValue() == doctest::Approx (-3.0f));
+
+    // Saved again, a preset names every parameter, choices and switches as whole numbers and the rest as written.
+    const auto saved = temp.folder.getChildFile ("Saved" + juce::String (phazite::presetExtension));
+    REQUIRE (phazite::saveDevicePreset (song.context, eq, saved));
+    const auto values = phazite::readPreset (saved)[phazite::schema::preset::device][phazite::schema::preset::parameters];
+    REQUIRE (values.getDynamicObject() != nullptr);
+    CHECK (values.getDynamicObject()->getProperties().size() == (int) info->parameters.size());
+    CHECK (saved.loadFileAsString().contains ("\"output\": -3.0"));
+    CHECK_FALSE (saved.loadFileAsString().contains ("00000"));
 }

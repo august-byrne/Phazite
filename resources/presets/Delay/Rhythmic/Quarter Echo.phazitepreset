@@ -1,12 +1,15 @@
 {
   "kind": "device",
   "device": {
-    "type": "phaziteDelay",
     "name": "Delay",
     "instrument": false,
+    "type": "phaziteDelay",
     "parameters": {
+      "sync": 1,
       "time": 8,
+      "milliseconds": 375.0,
       "feedback": 0.3,
+      "pingPong": 0,
       "lowCut": 150.0,
       "highCut": 6000.0,
       "mix": 0.2

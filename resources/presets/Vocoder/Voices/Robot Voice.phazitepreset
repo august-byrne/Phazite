@@ -1,15 +1,24 @@
 {
   "kind": "device",
   "device": {
-    "type": "phaziteVocoder",
     "name": "Vocoder",
     "instrument": false,
+    "type": "phaziteVocoder",
     "parameters": {
+      "carrier": 0,
       "pitch": -5.0,
       "bands": 3,
+      "lowFrequency": 100.0,
+      "highFrequency": 10000.0,
+      "bandWidth": 1.0,
+      "formant": 0.0,
+      "attack": 2.0,
+      "release": 20.0,
       "unvoiced": 0.6,
       "brightness": 0.2,
-      "output": -4.0
+      "stereo": 0.0,
+      "output": -4.0,
+      "mix": 1.0
     }
   }
 }

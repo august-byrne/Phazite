@@ -1,13 +1,16 @@
 {
   "kind": "device",
   "device": {
-    "type": "phaziteSaturator",
     "name": "Saturator",
     "instrument": false,
+    "type": "phaziteSaturator",
     "parameters": {
       "drive": -3.0,
       "shape": 1,
-      "tone": -0.15
+      "tone": -0.15,
+      "output": 0.0,
+      "autoGain": 1,
+      "mix": 1.0
     }
   }
 }

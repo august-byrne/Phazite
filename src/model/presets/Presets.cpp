@@ -17,6 +17,8 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <array>
+#include <charconv>
 #include <functional>
 #include <iterator>
 
@@ -65,6 +67,18 @@ namespace
                 return info;
 
         return nullptr;
+    }
+
+    // A parameter's value as a preset writes it: a choice's or a switch's as a whole number, any other as the shortest
+    // number that reads back as the same float ("0.6", rather than "0.6000000238418579", every digit of it as a double).
+    juce::var toPresetValue (const devices::ParameterInfo& parameter, float value)
+    {
+        if (parameter.unit == devices::Unit::choice || parameter.unit == devices::Unit::toggle)
+            return juce::roundToInt (value);
+
+        std::array<char, 32> text {};
+        const auto [end, error] = std::to_chars (text.data(), text.data() + text.size(), value);
+        return error == std::errc() ? juce::String (text.data(), (size_t) (end - text.data())).getDoubleValue() : (double) value;
     }
 
     // What of a device's state names a sound file or a table, besides its parameters: a drum sampler's pads', a wavetable
@@ -135,10 +149,11 @@ namespace
 
             const auto parameters = makeObject();
 
+            // Every parameter, so that the preset sets the whole device wherever it loads.
             for (const auto& parameter : info.parameters)
             {
                 const juce::Identifier id (toString (parameter.id));
-                set (parameters, id, state.hasProperty (id) ? (float) state[id] : parameter.defaultValue);
+                set (parameters, id, toPresetValue (parameter, state.hasProperty (id) ? (float) state[id] : parameter.defaultValue));
             }
 
             set (preset, keys::parameters, parameters);
@@ -827,8 +842,9 @@ namespace
         }
     };
 
-    // A preset's values put into one of Phazite's own devices of its type, each parameter through the undo manager; its
-    // sounds too, copied into the project.
+    // A preset's values put into one of Phazite's own devices of its type, each parameter through the undo manager, and a
+    // parameter it doesn't name at its default, so that a preset is the same starting point whatever the device was set to;
+    // its sounds too, copied into the project, and the device's own sound where it names none.
     bool loadInto (DevicePlugin& device, const juce::var& saved)
     {
         const auto& info = device.getDeviceInfo();
@@ -842,13 +858,13 @@ namespace
         // puts the value back rather than taking it away.
         for (const auto& parameter : info.parameters)
         {
-            if (const juce::Identifier id (toString (parameter.id)); values.hasProperty (id))
+            const juce::Identifier id (toString (parameter.id));
+
+            if (auto* found = findParameter (&device, id.toString()))
             {
-                if (auto* found = findParameter (&device, id.toString()))
-                {
-                    found->setParameter (found->getCurrentValue(), juce::sendNotification);
-                    found->setParameter (devices::constrain (parameter, (float) values[id]), juce::sendNotification);
-                }
+                const auto value = values.hasProperty (id) ? (float) values[id] : parameter.defaultValue;
+                found->setParameter (found->getCurrentValue(), juce::sendNotification);
+                found->setParameter (devices::constrain (parameter, value), juce::sendNotification);
             }
         }
 

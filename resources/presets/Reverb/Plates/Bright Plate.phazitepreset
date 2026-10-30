@@ -1,14 +1,17 @@
 {
   "kind": "device",
   "device": {
-    "type": "phaziteReverb",
     "name": "Reverb",
     "instrument": false,
+    "type": "phaziteReverb",
     "parameters": {
       "size": 0.35,
       "decay": 1.8,
+      "predelay": 10.0,
       "damping": 12000.0,
       "lowCut": 200.0,
+      "highCut": 20000.0,
+      "width": 1.0,
       "mix": 0.2
     }
   }
