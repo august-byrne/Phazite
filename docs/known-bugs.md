@@ -22,3 +22,19 @@ commit that fixes it. Races and allocations on the audio thread that Tracktion's
   `nextBlockStarted()`, before the play). `external/` is read-only, so report it upstream, or fork. A count-in hides it,
   as the block skipped is then silence before the count-in's first click. The recording tests start between beats until
   then (`tests/AudioRecordingTests.cpp`).
+
+## 5. A device switched off, or on a muted track, plays the rest of its sound when it plays again
+
+- **How it shows:** switch off a device while it sounds (a drum sampler's hit, a reverb's or a delay's tail), or mute
+  its track, and switch it on or unmute the track later: the rest of that sound plays then, from where it stopped, as if
+  no time had passed. Found while fixing the drum pads' clicks that waited and played late (2026-10-30, 8ecc97c).
+- **Why:** Tracktion's `PluginNode::process()` doesn't process a switched-off plug-in (unless it delays its sound and
+  plays it bypassed), nor the plug-ins of a muted track or one another track's solo silences
+  (`TrackMuteState::shouldTrackContentsBeProcessed()`, unless the track feeds a sidechain). `Plugin::setEnabled()`
+  changes the switch alone, and nothing resets the device as it plays again, so its voices and delay lines hold what
+  they held, frozen, and go on from there.
+- **How to fix:** reset a device (`devices::Processor::reset()` for Phazite's own, `te::Plugin::reset()` for a plug-in)
+  at the first block it plays after blocks it didn't: in `DevicePlugin`, the message thread sets an atomic flag as the
+  device's switch turns on, or its track is unmuted or no longer silenced by a solo (both the song's, in the model), and
+  `applyToBuffer()` resets before it plays when the flag is set. A test switches a device off mid-sound and on again
+  after its sound would have ended, and hears silence.
