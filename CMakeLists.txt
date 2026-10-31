@@ -91,6 +91,8 @@ target_sources(phazite_core PRIVATE
     src/devices/drums/DrumSampler.h
     src/devices/drums/DrumSynthesis.cpp
     src/devices/drums/DrumSynthesis.h
+    src/devices/drums/FactoryDrums.cpp
+    src/devices/drums/FactoryDrums.h
     src/devices/dsp/CombFilter.cpp
     src/devices/dsp/CombFilter.h
     src/devices/dsp/Crossover.h

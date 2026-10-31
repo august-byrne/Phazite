@@ -2,9 +2,10 @@
 // Phazite's drum sampler (roadmap step 1.6): 16 pads on the notes from 36 up, General MIDI's drums, as FL Studio's FPC
 // and Ableton's Drum Rack lay them out. Each pad plays a sound once, whole, however short the note (a one-shot), at its
 // level, pan and tuning, with an attack that softens its start and a length that cuts it short. Pads in the same choke
-// group stop each other, as an open hat stops when the closed one plays. A new sampler plays a kit that Phazite
-// synthesizes (DrumSynthesis.h); a pad can play a sound file instead, which its thin plug-in loads, and which the
-// sampler swaps in without the audio thread ever waiting or freeing memory.
+// group stop each other, as an open hat stops when the closed one plays. A new sampler plays the default kit of the
+// sounds Phazite synthesizes (FactoryDrums.h); a pad can play another of them, from the kits that come with Phazite, or a
+// sound file, which its thin plug-in loads, and which the sampler swaps in without the audio thread ever waiting or
+// freeing memory.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -52,17 +53,14 @@ public:
         double sampleRate = 48000.0;
     };
 
-    // The default kit's sound for a pad, synthesized the first time it is needed, and its name ("Kick").
-    static const Sound& getKitSound (int pad);
-    static std::string_view getKitName (int pad);
-
     DrumSampler();
     ~DrumSampler() override;
 
-    // Message thread. What a pad plays: a sound of its own, or with nullptr the kit's again. A sound the sampler no longer
-    // plays is freed by a later call, once the audio thread can't be playing it any more.
-    void setSound (int pad, std::unique_ptr<Sound>);
-    bool hasOwnSound (int pad) const noexcept;
+    // Message thread. What a pad plays: a sound given it (a factory sound, or a file's), or with nullptr its default, the
+    // default kit's (FactoryDrums.h). A sound the sampler no longer plays is let go by a later call, once the audio thread
+    // can't be playing it any more.
+    void setSound (int pad, std::shared_ptr<const Sound>);
+    bool hasOwnSound (int pad) const noexcept; // given one, rather than playing its default
 
     // Plays a pad at the next block, as if its note came in: for the editor's pads. Message thread, lock-free. Played while
     // the sampler plays no blocks (switched off, or on a muted or frozen track), it never plays: one that waited longer
@@ -73,8 +71,8 @@ public:
     // How hard each pad was hit since the editor last looked, from 0 to 1 (devices/core/MeterValue.h).
     MeterValue& getPadMeter (int pad) noexcept { return padMeters[(size_t) pad]; }
 
-    // Message thread: the sound a pad plays now, its own or the kit's, for drawing it.
-    const Sound& getPadSound (int pad) const noexcept { return *sounds[(size_t) pad].load (std::memory_order_acquire); }
+    // Message thread: the sound a pad plays now, for drawing it.
+    const Sound& getPadSound (int pad) const noexcept { return *playing[(size_t) pad]; }
 
     // Where each pad's newest hit is in its sound, from 0 to 1, or below 0 while it plays none (devices/core/LiveValue.h).
     const LiveValue& getPlayhead (int pad) const noexcept { return playheads[(size_t) pad]; }
@@ -98,7 +96,7 @@ private:
 
     struct Retired
     {
-        std::unique_ptr<Sound> sound;
+        std::shared_ptr<const Sound> sound;
         std::uint64_t safeAfter = 0; // blocks done after which the audio thread can't be playing it
     };
 
@@ -108,8 +106,10 @@ private:
     std::uint64_t hits = 0;
     std::atomic<std::uint64_t> blocksDone { 0 };
 
-    // The message thread's: the pads' own sounds, and those waiting to be freed.
-    std::array<std::unique_ptr<Sound>, numPads> owned;
+    // The message thread's: what each pad plays, whether it was given that, and the sounds let go of, held until the
+    // audio thread can't be playing them.
+    std::array<std::shared_ptr<const Sound>, numPads> playing;
+    std::array<bool, numPads> given {};
     std::vector<Retired> retired;
 
     // The pads the editor played, each with when (juce::Time::getMillisecondCounter()).

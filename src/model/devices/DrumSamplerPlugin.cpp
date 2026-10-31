@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DrumSamplerPlugin.h"
+#include "devices/drums/FactoryDrums.h"
 #include "internal/DeviceFiles.h"
 #include "model/base/internal/Schema.h"
 
@@ -45,7 +46,13 @@ DrumSampler& DrumSamplerPlugin::getSampler() noexcept
 
 juce::File DrumSamplerPlugin::getPadFile (int pad) const
 {
-    return findProjectFile (edit, state[schema::getPadSound (pad)].toString());
+    return findProjectFile (edit, state[schema::getPadSoundFile (pad)].toString());
+}
+
+int DrumSamplerPlugin::getFactorySound (int pad) const
+{
+    const auto index = devices::findFactoryDrum (state[schema::getPadSound (pad)].toString().toStdString());
+    return index >= 0 ? index : pad;
 }
 
 juce::String DrumSamplerPlugin::getPadName (int pad) const
@@ -53,7 +60,7 @@ juce::String DrumSamplerPlugin::getPadName (int pad) const
     if (const auto file = getPadFile (pad); file != juce::File())
         return file.getFileNameWithoutExtension();
 
-    const auto name = DrumSampler::getKitName (pad);
+    const auto name = devices::getFactoryDrumNames()[(size_t) getFactorySound (pad)];
     return juce::String (name.data(), name.size());
 }
 
@@ -61,11 +68,18 @@ void DrumSamplerPlugin::loadPad (int pad)
 {
     auto& sampler = getSampler();
 
-    // A file that is gone or can't be read leaves the pad with the kit's sound.
-    auto sound = readSound (edit.engine, getPadFile (pad));
+    // A file that is gone or can't be read leaves the pad with its factory sound.
+    if (const auto file = getPadFile (pad); file.existsAsFile())
+    {
+        if (auto sound = readSound (edit.engine, file))
+        {
+            sampler.setSound (pad, std::move (sound));
+            return;
+        }
+    }
 
-    if (sound != nullptr || sampler.hasOwnSound (pad))
-        sampler.setSound (pad, std::move (sound));
+    const auto index = getFactorySound (pad);
+    sampler.setSound (pad, index != pad ? devices::getFactoryDrum (index) : nullptr);
 }
 
 void DrumSamplerPlugin::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
@@ -74,7 +88,7 @@ void DrumSamplerPlugin::valueTreePropertyChanged (juce::ValueTree& tree, const j
 
     if (tree == state)
         for (int pad = 0; pad < DrumSampler::numPads; ++pad)
-            if (property == schema::getPadSound (pad))
+            if (property == schema::getPadSound (pad) || property == schema::getPadSoundFile (pad))
                 loadPad (pad);
 }
 
@@ -84,12 +98,13 @@ void DrumSamplerPlugin::restorePluginStateFromValueTree (const juce::ValueTree& 
 
     for (int pad = 0; pad < DrumSampler::numPads; ++pad)
     {
-        const auto& property = schema::getPadSound (pad);
-
-        if (source.hasProperty (property))
-            state.setProperty (property, source[property], nullptr);
-        else
-            state.removeProperty (property, nullptr);
+        for (const auto& property : { schema::getPadSound (pad), schema::getPadSoundFile (pad) })
+        {
+            if (source.hasProperty (property))
+                state.setProperty (property, source[property], nullptr);
+            else
+                state.removeProperty (property, nullptr);
+        }
     }
 }
 } // namespace phazite

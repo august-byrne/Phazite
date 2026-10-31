@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumSynthesis.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -42,40 +43,40 @@ Sound makeKick (double rate, double startHz, double endHz, double pitchSeconds, 
     return sound;
 }
 
-Sound makeSnare (double rate, double lowHz, double highHz, double snaresSeconds)
+Sound makeSnare (double rate, const SnareShape& shape)
 {
-    Sound sound (1, (int) (0.45 * rate));
-    juce::Random random (2);
+    Sound sound (1, (int) (shape.length * rate));
+    juce::Random random (shape.seed);
     juce::IIRFilter highPass, smooth;
-    highPass.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 800.0, 0.707));
-    smooth.setCoefficients (juce::IIRCoefficients::makeLowPass (rate, 9000.0, 0.707));
+    highPass.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, shape.snaresLowCut, 0.707));
+    smooth.setCoefficients (juce::IIRCoefficients::makeLowPass (rate, shape.snaresHighCut, 0.707));
 
     for (int i = 0; i < sound.getNumSamples(); ++i)
     {
         const auto t = i / rate;
-        const auto shell =
-            0.6 * std::sin (twoPi * lowHz * t) * std::exp (-t / 0.07) + 0.4 * std::sin (twoPi * highHz * t) * std::exp (-t / 0.045);
-        const auto snares =
-            0.55 * smooth.processSingleSampleRaw (highPass.processSingleSampleRaw (noise (random))) * std::exp (-t / snaresSeconds);
-        sound.setSample (0, i, softClip ((shell + snares) * juce::jmin (1.0, t / 0.0005), 1.6));
+        const auto shell = 0.6 * std::sin (twoPi * shape.lowHz * t) * std::exp (-t / shape.lowSeconds)
+                           + 0.4 * std::sin (twoPi * shape.highHz * t) * std::exp (-t / shape.highSeconds);
+        const auto snares = shape.snaresLevel * smooth.processSingleSampleRaw (highPass.processSingleSampleRaw (noise (random)))
+                            * std::exp (-t / shape.snaresSeconds);
+        sound.setSample (0, i, softClip ((shell + snares) * juce::jmin (1.0, t / 0.0005), shape.drive));
     }
 
     return sound;
 }
 
-Sound makeClap (double rate)
+Sound makeClap (double rate, const ClapShape& shape)
 {
-    Sound sound (1, (int) (0.55 * rate));
-    juce::Random random (3);
+    Sound sound (1, (int) (shape.length * rate));
+    juce::Random random (shape.seed);
     juce::IIRFilter bandPass, highPass;
-    bandPass.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, 1100.0, 1.3));
-    highPass.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 500.0, 0.707));
-    constexpr std::array<double, 4> strikes { 0.0, 0.0105, 0.0205, 0.031 };
+    bandPass.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, shape.centreHz, shape.q));
+    highPass.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, shape.lowCut, 0.707));
+    const std::array<double, 4> strikes { 0.0, 0.0105 * shape.spread, 0.0205 * shape.spread, 0.031 * shape.spread };
 
     for (int i = 0; i < sound.getNumSamples(); ++i)
     {
         const auto t = i / rate;
-        auto envelope = t >= strikes.back() ? std::exp (-(t - strikes.back()) / 0.13) : 0.0;
+        auto envelope = t >= strikes.back() ? std::exp (-(t - strikes.back()) / shape.tailSeconds) : 0.0;
 
         for (const auto strike : strikes)
             if (t >= strike)
@@ -87,14 +88,14 @@ Sound makeClap (double rate)
     return sound;
 }
 
-Sound makeHat (double rate, double decaySeconds, double length)
+Sound makeHat (double rate, const HatShape& shape)
 {
     static constexpr std::array<double, 6> frequencies { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 };
-    Sound sound (1, (int) (length * rate));
-    juce::Random random (4);
+    Sound sound (1, (int) (shape.length * rate));
+    juce::Random random (shape.seed);
     juce::IIRFilter bandPass, highPass;
-    bandPass.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, 7100.0, 1.0));
-    highPass.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 6000.0, 0.707));
+    bandPass.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, shape.centreHz, 1.0));
+    highPass.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, shape.lowCut, 0.707));
 
     for (int i = 0; i < sound.getNumSamples(); ++i)
     {
@@ -102,10 +103,11 @@ Sound makeHat (double rate, double decaySeconds, double length)
         auto metal = 0.0;
 
         for (const auto frequency : frequencies)
-            metal += std::fmod (t * frequency, 1.0) < 0.5 ? 1.0 : -1.0;
+            metal += std::fmod (t * (frequency * shape.pitch), 1.0) < 0.5 ? 1.0 : -1.0;
 
-        const auto x = highPass.processSingleSampleRaw (bandPass.processSingleSampleRaw ((float) (metal / 6.0 + 0.15 * noise (random))));
-        sound.setSample (0, i, (float) (x * std::exp (-t / decaySeconds)));
+        const auto x =
+            highPass.processSingleSampleRaw (bandPass.processSingleSampleRaw ((float) (metal / 6.0 + shape.noise * noise (random))));
+        sound.setSample (0, i, (float) (x * std::exp (-t / shape.decaySeconds)));
     }
 
     return sound;
@@ -126,5 +128,49 @@ Sound makeCowbell (double rate)
     }
 
     return sound;
+}
+
+Sound makeStereo (const Sound& left, const Sound& right)
+{
+    Sound sound (2, std::max (left.getNumSamples(), right.getNumSamples()));
+    sound.clear();
+    sound.copyFrom (0, 0, left, 0, 0, left.getNumSamples());
+    sound.copyFrom (1, 0, right, 0, 0, right.getNumSamples());
+    return sound;
+}
+
+void makeDusty (Sound& sound, double rate, const DustShape& shape)
+{
+    const auto step = shape.heldRate / rate;
+    const auto levels = std::pow (2.0, shape.bits - 1);
+
+    for (int channel = 0; channel < sound.getNumChannels(); ++channel)
+    {
+        std::array<juce::IIRFilter, 2> lowPasses;
+
+        for (auto& filter : lowPasses)
+            filter.setCoefficients (juce::IIRCoefficients::makeLowPass (rate, shape.cutoffHz, 0.707));
+
+        auto* samples = sound.getWritePointer (channel);
+        auto phase = 1.0; // a new reading at the first sample
+        auto held = 0.0f;
+
+        for (int i = 0; i < sound.getNumSamples(); ++i)
+        {
+            // A reading each 1 / heldRate seconds, rounded to the bits it has, held until the next.
+            if ((phase += step) >= 1.0)
+            {
+                phase -= 1.0;
+                held = (float) (std::round (samples[i] * levels) / levels);
+            }
+
+            auto x = held;
+
+            for (auto& filter : lowPasses)
+                x = filter.processSingleSampleRaw (x);
+
+            samples[i] = softClip (x, shape.drive);
+        }
+    }
 }
 } // namespace phazite::devices::drums

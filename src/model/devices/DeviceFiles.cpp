@@ -29,7 +29,7 @@ namespace
 
         if (type == devices::DrumSampler::typeID)
             for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-                properties.push_back (schema::getPadSound (pad));
+                properties.push_back (schema::getPadSoundFile (pad));
 
         if (type == devices::WavetableSynth::typeID)
             for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
@@ -44,8 +44,13 @@ std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo& inf
     std::vector<juce::Identifier> properties;
 
     if (info.typeID == std::string_view (devices::DrumSampler::typeID))
+    {
         for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+        {
             properties.push_back (schema::getPadSound (pad));
+            properties.push_back (schema::getPadSoundFile (pad));
+        }
+    }
 
     if (info.typeID == std::string_view (devices::WavetableSynth::typeID))
     {

@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumSampler.h"
-#include "DrumSynthesis.h"
+#include "FactoryDrums.h"
 #include "devices/dsp/Math.h"
 
 #include <algorithm>
 #include <cmath>
-#include <functional>
 #include <limits>
 
 namespace phazite::devices
@@ -58,11 +57,6 @@ namespace
                                                 "Pad 5 Choke",  "Pad 6 Choke",  "Pad 7 Choke",  "Pad 8 Choke",
                                                 "Pad 9 Choke",  "Pad 10 Choke", "Pad 11 Choke", "Pad 12 Choke",
                                                 "Pad 13 Choke", "Pad 14 Choke", "Pad 15 Choke", "Pad 16 Choke" };
-
-    // The default kit: General MIDI's drums from note 36, a kick, up to 51, a ride.
-    constexpr std::string_view kitNames[] = { "Kick",       "Rim",       "Snare",      "Clap",    "Snare 2",  "Low Tom",
-                                              "Closed Hat", "Floor Tom", "Pedal Hat",  "Mid Tom", "Open Hat", "Mid Tom 2",
-                                              "High Tom",   "Crash",     "High Tom 2", "Ride" };
 
     constexpr float longestLength = 10000.0f; // ms: a length this long plays the whole sound
     constexpr double fadeSeconds = 0.01;      // how long a cut or choked sound takes to stop
@@ -128,49 +122,6 @@ namespace
 
     constexpr auto parameters = makeParameters();
 
-    using drums::makeClap;
-    using drums::makeHat;
-    using drums::makeKick;
-    using drums::makeSnare;
-
-    // The kit, made at 48 kHz (the sampler plays it at any rate), each sound's peak at -6 dB so that hits add up.
-    std::array<DrumSampler::Sound, numPads> makeKit()
-    {
-        constexpr double rate = 48000.0;
-        const auto tom = [] (double fromHz, double toHz) { return makeKick (rate, fromHz, toHz, 0.05, 0.25, 0.55, 0.15, 1.2); };
-        const std::function<drums::Sound()> makers[] = {
-            [] { return makeKick (rate, 160.0, 48.0, 0.035, 0.32, 0.7, 0.6, 1.6); },
-            [] { return makeKick (rate, 1700.0, 900.0, 0.004, 0.018, 0.12, 1.0, 2.2); },
-            [] { return makeSnare (rate); },
-            [] { return makeClap (rate); },
-            [] { return makeSnare (rate, 230.0, 410.0, 0.08); },
-            [&tom] { return tom (140.0, 85.0); },
-            [] { return makeHat (rate, 0.035, 0.18); },
-            [&tom] { return tom (160.0, 100.0); },
-            [] { return makeHat (rate, 0.06, 0.25); },
-            [&tom] { return tom (190.0, 120.0); },
-            [] { return makeHat (rate, 0.32, 0.9); },
-            [&tom] { return tom (220.0, 140.0); },
-            [&tom] { return tom (250.0, 165.0); },
-            [] { return makeHat (rate, 0.9, 2.2); },
-            [&tom] { return tom (290.0, 190.0); },
-            [] { return makeHat (rate, 0.7, 1.8); },
-        };
-
-        std::array<DrumSampler::Sound, numPads> kit;
-
-        for (size_t pad = 0; pad < kit.size(); ++pad)
-        {
-            kit[pad].audio = makers[pad]();
-            kit[pad].sampleRate = rate;
-
-            if (const auto peak = kit[pad].audio.getMagnitude (0, kit[pad].audio.getNumSamples()); peak > 0.0f)
-                kit[pad].audio.applyGain (dsp::decibelsToGain (-6.0f) / peak);
-        }
-
-        return kit;
-    }
-
     // A point between samples, from the four around it (a cubic Hermite spline).
     float readAt (const float* samples, int length, double position)
     {
@@ -187,47 +138,42 @@ namespace
 
 const DeviceInfo DrumSampler::info { .typeID = typeID, .name = "Drum Sampler", .kind = DeviceKind::instrument, .parameters = parameters };
 
-const DrumSampler::Sound& DrumSampler::getKitSound (int pad)
-{
-    static const auto kit = makeKit();
-    return kit[(size_t) std::clamp (pad, 0, numPads - 1)];
-}
-
-std::string_view DrumSampler::getKitName (int pad)
-{
-    return kitNames[std::clamp (pad, 0, numPads - 1)];
-}
-
 DrumSampler::DrumSampler()
 {
     for (int pad = 0; pad < numPads; ++pad)
     {
-        sounds[(size_t) pad].store (&getKitSound (pad), std::memory_order_release);
+        playing[(size_t) pad] = getFactoryDrum (pad);
+        sounds[(size_t) pad].store (playing[(size_t) pad].get(), std::memory_order_release);
         playheads[(size_t) pad].set (-1.0f);
     }
 }
 
 DrumSampler::~DrumSampler() = default;
 
-void DrumSampler::setSound (int pad, std::unique_ptr<Sound> sound)
+void DrumSampler::setSound (int pad, std::shared_ptr<const Sound> sound)
 {
     if (! juce::isPositiveAndBelow (pad, numPads))
         return;
 
     freeRetired();
-    const auto* playing = sound != nullptr ? sound.get() : &getKitSound (pad);
-    sounds[(size_t) pad].store (playing, std::memory_order_release);
+    given[(size_t) pad] = sound != nullptr;
+
+    if (sound == nullptr)
+        sound = getFactoryDrum (pad);
+
+    if (sound == playing[(size_t) pad])
+        return;
+
+    sounds[(size_t) pad].store (sound.get(), std::memory_order_release);
 
     // The audio thread may play the one before until the end of its next block, when its voices notice the change.
-    if (auto& before = owned[(size_t) pad]; before != nullptr)
-        retired.push_back ({ std::move (before), blocksDone.load (std::memory_order_acquire) + 2 });
-
-    owned[(size_t) pad] = std::move (sound);
+    retired.push_back ({ std::move (playing[(size_t) pad]), blocksDone.load (std::memory_order_acquire) + 2 });
+    playing[(size_t) pad] = std::move (sound);
 }
 
 bool DrumSampler::hasOwnSound (int pad) const noexcept
 {
-    return juce::isPositiveAndBelow (pad, numPads) && owned[(size_t) pad] != nullptr;
+    return juce::isPositiveAndBelow (pad, numPads) && given[(size_t) pad];
 }
 
 void DrumSampler::freeRetired()
@@ -268,8 +214,8 @@ double DrumSampler::getTailSeconds() const
     auto longest = 0.0;
 
     for (const auto& sound : sounds)
-        if (const auto* playing = sound.load (std::memory_order_acquire))
-            longest = std::max (longest, playing->audio.getNumSamples() / playing->sampleRate);
+        if (const auto* each = sound.load (std::memory_order_acquire))
+            longest = std::max (longest, each->audio.getNumSamples() / each->sampleRate);
 
     return longest;
 }

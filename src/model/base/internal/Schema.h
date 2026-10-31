@@ -242,8 +242,8 @@ inline const juce::Identifier deviceWindowY { "windowY" };
 
 // Children of one of Phazite's own devices' DEVICE (T1, step 5b): VALUES, its parameters' values as they were set by hand
 // (not as automation or a modulator moves them), each a property named by the parameter's ID in the device's description,
-// none for one that was never set (at its default); and SOUNDS, the files and tables it plays, as properties named as on
-// its PLUGIN (getPadSound(), getOscillatorWavetable(), getOscillatorWavetableFile()).
+// none for one that was never set (at its default); and SOUNDS, the factory sounds, files and tables it plays, as
+// properties named as on its PLUGIN (getPadSound(), getPadSoundFile(), getOscillatorWavetable(), getOscillatorWavetableFile()).
 inline const juce::Identifier VALUES { "VALUES" };
 inline const juce::Identifier SOUNDS { "SOUNDS" };
 
@@ -605,14 +605,25 @@ inline constexpr const char* phaziteLoudnessMeter = "phaziteLoudnessMeter";
 // IDs in that description, as are its automation curves' paramIDs. So no parameter's ID may be a property Tracktion keeps
 // on every PLUGIN (type, id, enabled, process...): its value would take that property's place.
 
-// Phazite's drum sampler (devices/drums/DrumSampler.h) also keeps, on its PLUGIN, the sound file each pad plays: a path
-// relative to the project's folder ("Audio/Kick 01.wav"), or none (no property) for the default kit's sound; in a preset,
-// its full path. These are "pad1Sound" for its first pad up to "pad16Sound"; pad counts from 0.
+// Phazite's drum sampler (devices/drums/DrumSampler.h) also keeps, on its PLUGIN, what each pad plays: "pad1Sound" up to
+// "pad16Sound" name one of its factory sounds (devices/drums/FactoryDrums.h: "808 Kick"; with none, or a name that is none
+// of theirs, the pad's own in the default kit), and "pad1SoundFile" up to "pad16SoundFile" a sound file it plays instead
+// while they are there: a path relative to the project's folder ("Audio/Kick 01.wav"), or in a preset its full path. pad
+// counts from 0.
 inline const juce::Identifier& getPadSound (int pad)
 {
     static const juce::Identifier names[] = { "pad1Sound",  "pad2Sound",  "pad3Sound",  "pad4Sound",  "pad5Sound",  "pad6Sound",
                                               "pad7Sound",  "pad8Sound",  "pad9Sound",  "pad10Sound", "pad11Sound", "pad12Sound",
                                               "pad13Sound", "pad14Sound", "pad15Sound", "pad16Sound" };
+    return names[juce::jlimit (0, 15, pad)];
+}
+
+inline const juce::Identifier& getPadSoundFile (int pad)
+{
+    static const juce::Identifier names[] = { "pad1SoundFile",  "pad2SoundFile",  "pad3SoundFile",  "pad4SoundFile",
+                                              "pad5SoundFile",  "pad6SoundFile",  "pad7SoundFile",  "pad8SoundFile",
+                                              "pad9SoundFile",  "pad10SoundFile", "pad11SoundFile", "pad12SoundFile",
+                                              "pad13SoundFile", "pad14SoundFile", "pad15SoundFile", "pad16SoundFile" };
     return names[juce::jlimit (0, 15, pad)];
 }
 
@@ -646,8 +657,9 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
 //
 //   DEVICE, one of Phazite's own: { "type": its type ID, "name", "instrument": true or false,
 //       "parameters": { parameter ID: value, ... }, every one of them, its mix too,
-//       "sounds": { what names a file or a table (getPadSound(), getOscillatorWavetable(), getOscillatorWavetableFile()):
-//                   a file's full path, or a factory table's name } }
+//       "sounds": { what names a file, a factory sound or a table (getPadSound(), getPadSoundFile(),
+//                   getOscillatorWavetable(), getOscillatorWavetableFile()): a file's full path, or the factory sound's or
+//                   table's name } }
 //     or a plug-in: { "plugin": { "format", "name", "manufacturer", "identifier", "uid" }, "name", "instrument",
 //       "state": its own settings, in base 64, "program": its program, "mix": 0 to 1 }
 //   CONTAINER: { "name", "mix": 0 to 1, "devices": [ DEVICE, ... ], "macros": [ MACRO, ... ] }

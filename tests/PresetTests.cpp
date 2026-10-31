@@ -349,7 +349,7 @@ TEST_CASE ("A drum sampler's preset brings its sounds into the project that take
 
     // The preset names the sound by its full path, the project's copy of it.
     const auto preset = phazite::readPreset (file);
-    const auto path = preset[keys::device][keys::sounds][phazite::schema::getPadSound (0)].toString();
+    const auto path = preset[keys::device][keys::sounds][phazite::schema::getPadSoundFile (0)].toString();
     CHECK (juce::File::isAbsolutePath (path));
     CHECK (juce::File (path).existsAsFile());
 
@@ -360,7 +360,7 @@ TEST_CASE ("A drum sampler's preset brings its sounds into the project that take
     REQUIRE (drums.has_value());
     auto* plugin = te::findPluginForID (second.edit(), phazite::toTracktion (drums->id)).get();
     REQUIRE (plugin != nullptr);
-    CHECK (plugin->state[phazite::schema::getPadSound (0)].toString() == juce::String ("Audio/Boom.wav"));
+    CHECK (plugin->state[phazite::schema::getPadSoundFile (0)].toString() == juce::String ("Audio/Boom.wav"));
     CHECK (second.project->getAudioFolder().getChildFile ("Boom.wav").existsAsFile());
 }
 

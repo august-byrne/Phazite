@@ -6,6 +6,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/drums/FactoryDrums.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceStates.h"
@@ -152,8 +153,8 @@ TEST_CASE ("The drum sampler's description holds together, with General MIDI's d
     CHECK (DrumSampler::info.kind == devices::DeviceKind::instrument);
     CHECK (DrumSampler::info.parameters.size() == (size_t) DrumSampler::outputParameter + 1);
     CHECK (devices::findParameter (DrumSampler::info, "pad16Choke") == DrumSampler::getParameterIndex (15, DrumSampler::choke));
-    CHECK (DrumSampler::getKitName (0) == "Kick");
-    CHECK (DrumSampler::getKitName (6) == "Closed Hat");
+    CHECK (devices::getFactoryDrumNames()[0] == "Kick"); // the default kit, in the pads' order
+    CHECK (devices::getFactoryDrumNames()[6] == "Closed Hat");
 
     const auto values = getDefaults();
     CHECK (values[(size_t) DrumSampler::getParameterIndex (6, DrumSampler::choke)] == doctest::Approx (1.0f));
@@ -161,14 +162,67 @@ TEST_CASE ("The drum sampler's description holds together, with General MIDI's d
     CHECK (values[(size_t) DrumSampler::getParameterIndex (0, DrumSampler::choke)] == doctest::Approx (0.0f));
 
     for (int pad = 0; pad < DrumSampler::numPads; ++pad)
-        CHECK (DrumSampler::getKitSound (pad).audio.getNumSamples() > 0);
+        CHECK (devices::getFactoryDrum (pad)->audio.getNumSamples() > 0);
+}
+
+TEST_CASE ("The drum sampler's factory sounds: the default kit, then the kits', each at -6 dB, a kit's fading out at its end")
+{
+    const auto names = devices::getFactoryDrumNames();
+    REQUIRE (names.size() >= (size_t) DrumSampler::numPads * 8);
+    CHECK (names.size() % (size_t) DrumSampler::numPads == 0); // kits, each a sound for every pad
+    CHECK (names[15] == "Ride");
+    CHECK (devices::findFactoryDrum ("808 Kick") == DrumSampler::numPads);
+    CHECK (devices::findFactoryDrum ("Cowbell 3000") == -1);
+
+    for (size_t i = 0; i < names.size(); ++i)
+    {
+        CAPTURE (std::string (names[i]));
+        CHECK (devices::findFactoryDrum (names[i]) == (int) i); // no name twice
+
+        const auto sound = devices::getFactoryDrum ((int) i);
+        REQUIRE (sound != nullptr);
+        CHECK (sound == devices::getFactoryDrum ((int) i)); // made once, while it is held
+        const auto& audio = sound->audio;
+        REQUIRE (audio.getNumSamples() > 0);
+        CHECK (audio.getMagnitude (0, audio.getNumSamples()) == doctest::Approx (juce::Decibels::decibelsToGain (-6.0f)).epsilon (0.001));
+
+        auto finite = true;
+
+        for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+            for (int at = 0; at < audio.getNumSamples(); ++at)
+                finite = finite && std::isfinite (audio.getSample (channel, at));
+
+        CHECK (finite);
+
+        // So that it stops without a click, however loud it still was.
+        if (i >= (size_t) DrumSampler::numPads)
+            for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+                CHECK (std::abs (audio.getSample (channel, audio.getNumSamples() - 1)) < 1.0e-6f);
+    }
+
+    // The wide kit's snares, claps, hats and cymbals in stereo, a side apart; its kick in the middle.
+    for (const auto* name : { "Wide Snare", "Wide Clap", "Wide Open Hat", "Wide Crash" })
+    {
+        CAPTURE (std::string (name));
+        const auto wide = devices::getFactoryDrum (devices::findFactoryDrum (name));
+        REQUIRE (wide->audio.getNumChannels() == 2);
+        auto apart = 0.0f;
+
+        for (int at = 0; at < wide->audio.getNumSamples(); ++at)
+            apart = std::max (apart, std::abs (wide->audio.getSample (0, at) - wide->audio.getSample (1, at)));
+
+        CHECK (apart > 0.05f);
+    }
+
+    CHECK (devices::getFactoryDrum (devices::findFactoryDrum ("Wide Kick"))->audio.getNumChannels() == 1);
 }
 
 TEST_CASE ("A drum pad plays its sound once, whole, however short its note")
 {
     DrumSampler sampler;
     sampler.prepare (testRate, testBlockSize);
-    const auto& kick = DrumSampler::getKitSound (0).audio;
+    const auto kit = devices::getFactoryDrum (0);
+    const auto& kick = kit->audio;
     const auto played = play (sampler, getDefaults(), 48000, { noteOn (0, 36), { NoteEvent::Type::noteOff, 10, 36, 0.0f } });
 
     // The kit's kick, sample for sample, then silence.
@@ -184,7 +238,8 @@ TEST_CASE ("A drum pad plays its sound once, whole, however short its note")
 
 TEST_CASE ("A drum pad's level, pan, velocity, tuning and length shape what it plays")
 {
-    const auto& kick = DrumSampler::getKitSound (0).audio;
+    const auto kit = devices::getFactoryDrum (0);
+    const auto& kick = kit->audio;
     const auto loudest = kick.getMagnitude (0, kick.getNumSamples());
 
     auto values = getDefaults();
@@ -311,7 +366,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
 
         REQUIRE (phazite::setPadSound (*plugin, 0, sample));
         CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Put My Kick on Pad 1"));
-        CHECK (plugin->state[phazite::schema::getPadSound (0)].toString() == juce::String ("Audio/My Kick.wav"));
+        CHECK (plugin->state[phazite::schema::getPadSoundFile (0)].toString() == juce::String ("Audio/My Kick.wav"));
         CHECK (project.folder.getChildFile ("Audio/My Kick.wav").existsAsFile());
         CHECK (phazite::getPadName (*plugin, 0) == juce::String ("My Kick"));
         CHECK (phazite::getSamplerSounds (*track)->front().name == juce::String ("My Kick"));

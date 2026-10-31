@@ -6,8 +6,10 @@
 // number, and without going far over full scale.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/drums/FactoryDrums.h"
 #include "devices/dsp/Random.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
@@ -25,11 +27,14 @@
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/base/internal/Schema.h"
+#include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 
 #include <cmath>
 
@@ -133,6 +138,11 @@ Played play (const devices::DeviceInfo& info, const std::vector<float>& values, 
         for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
             if (const auto name = sounds[phazite::schema::getOscillatorWavetable (osc)].toString(); name.isNotEmpty())
                 wavetable->setTable (osc, devices::getFactoryWavetable (devices::findFactoryWavetable (name.toStdString())));
+
+    if (auto* drums = dynamic_cast<devices::DrumSampler*> (processor.get()))
+        for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+            if (const auto name = sounds[phazite::schema::getPadSound (pad)].toString(); name.isNotEmpty())
+                drums->setSound (pad, devices::getFactoryDrum (devices::findFactoryDrum (name.toStdString())));
 
     const auto isInstrument = info.kind == devices::DeviceKind::instrument;
     const auto isDrums = toString (info.typeID) == devices::DrumSampler::typeID;
@@ -251,16 +261,27 @@ TEST_CASE ("Phazite's presets: each a device's, in its folder, with parameters a
         // saves does.
         CHECK (values->getProperties().size() == (int) info->parameters.size());
 
-        // A wavetable synth's tables by their names; no sound files, which aren't in Phazite's repository.
+        // A wavetable synth's tables and a drum sampler's pads' sounds by their names; no sound files, which aren't in
+        // Phazite's repository.
         if (const auto* sounds = device[keys::sounds].getDynamicObject())
         {
-            CHECK (toString (info->typeID) == devices::WavetableSynth::typeID);
+            const auto isDrums = toString (info->typeID) == devices::DrumSampler::typeID;
+            CHECK ((isDrums || toString (info->typeID) == devices::WavetableSynth::typeID));
 
             for (const auto& [property, name] : sounds->getProperties())
             {
-                CHECK (
-                    (property == phazite::schema::getOscillatorWavetable (0) || property == phazite::schema::getOscillatorWavetable (1)));
-                CHECK (devices::findFactoryWavetable (name.toString().toStdString()) >= 0);
+                if (isDrums)
+                {
+                    CHECK (property.toString().startsWith ("pad"));
+                    CHECK (property.toString().endsWith ("Sound"));
+                    CHECK (devices::findFactoryDrum (name.toString().toStdString()) >= 0);
+                }
+                else
+                {
+                    CHECK ((property == phazite::schema::getOscillatorWavetable (0)
+                            || property == phazite::schema::getOscillatorWavetable (1)));
+                    CHECK (devices::findFactoryWavetable (name.toString().toStdString()) >= 0);
+                }
             }
         }
     }
@@ -303,6 +324,78 @@ TEST_CASE ("Phazite's presets play: sound comes out, only numbers, and never far
 
         if (! waitsForTrack)
             CHECK (played.rms > std::pow (10.0, -60.0 / 20.0));
+    }
+}
+
+TEST_CASE ("Phazite's drum kits each play sounds of their own on every pad, named after the kit, none of them another kit's")
+{
+    const auto names = devices::getFactoryDrumNames();
+    std::map<juce::String, juce::String> kitOf; // each sound, and the kit that plays it
+    auto kits = 0;
+
+    for (const auto& file : getPresetFiles())
+    {
+        const auto device = phazite::readPreset (file)[keys::device];
+
+        if (device[keys::type].toString() != devices::DrumSampler::typeID)
+            continue;
+
+        const auto kit = file.getFileNameWithoutExtension();
+        CAPTURE (kit.toStdString());
+        ++kits;
+
+        for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+        {
+            const auto name = device[keys::sounds][phazite::schema::getPadSound (pad)].toString();
+            CAPTURE (name.toStdString());
+            CHECK (devices::findFactoryDrum (name.toStdString()) >= devices::DrumSampler::numPads); // a kit's, not the default's
+            CHECK (kit.contains (name.upToFirstOccurrenceOf (" ", false, false)));                  // "808 Kick" in "Deep 808 Kit"
+            CHECK (kitOf.count (name) == 0);
+            kitOf[name] = kit;
+        }
+    }
+
+    // A kit for every sound past the default kit's.
+    CHECK (kits == (int) names.size() / devices::DrumSampler::numPads - 1);
+
+    for (size_t i = devices::DrumSampler::numPads; i < names.size(); ++i)
+        CHECK (kitOf.count (toString (names[i])) == 1);
+}
+
+TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the song keeps, under any file put on a pad")
+{
+    phazite::test::TestSong song;
+    const auto drums = song.setInstrument (song.firstTrack, devices::DrumSampler::typeID);
+    const auto device = phazite::getDeviceHandle (song.context, drums);
+    const auto kitsFolder = getFactoryPresets().getChildFile ("Drum Sampler").getChildFile ("Kits");
+    CHECK (device.getPadName (0) == juce::String ("Kick"));
+
+    // The 808's on every pad, and in the sampler.
+    REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("Deep 808 Kit.phazitepreset")));
+    CHECK (device.getPadName (0) == juce::String ("808 Kick"));
+    CHECK (device.getPadName (15) == juce::String ("808 Ride"));
+    auto* sampler = device.getProcessor<devices::DrumSampler>();
+    REQUIRE (sampler != nullptr);
+    CHECK (&sampler->getPadSound (0) == devices::getFactoryDrum (devices::findFactoryDrum ("808 Kick")).get());
+
+    // The song keeps them by their names, and a project's file is the song.
+    const auto sounds = phazite::findDeviceState (*phazite::getEdit (song.context), drums).getChildWithName (phazite::schema::SOUNDS);
+    CHECK (sounds[phazite::schema::getPadSound (0)].toString() == juce::String ("808 Kick"));
+
+    // A file put on a pad plays instead, until Reset brings the kit's sound back.
+    REQUIRE (device.setPadSound (0, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Boom.wav"), 0.2)));
+    CHECK (device.getPadName (0) == juce::String ("Boom"));
+    device.clearPadSound (0);
+    CHECK (device.getPadName (0) == juce::String ("808 Kick"));
+
+    // Another kit in its place, and Undo step by step back to the default kit.
+    REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("Techno Kit.phazitepreset")));
+    CHECK (device.getPadName (6) == juce::String ("Techno Closed Hat"));
+
+    for (const auto* expected : { "808 Kick", "Boom", "808 Kick", "Kick" })
+    {
+        song.run ("edit.undo");
+        CHECK (device.getPadName (0) == juce::String (expected));
     }
 }
 

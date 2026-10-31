@@ -394,7 +394,7 @@ Buffer synthesize (const juce::var& synth)
         return makeClap (rate);
 
     if (type == "hat")
-        return makeHat (rate, number ("decaySeconds"), number ("seconds"));
+        return makeHat (rate, { .decaySeconds = number ("decaySeconds"), .length = number ("seconds") });
 
     if (type == "cowbell")
         return makeCowbell (rate);
