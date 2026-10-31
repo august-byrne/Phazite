@@ -64,8 +64,11 @@ public:
     void setSound (int pad, std::unique_ptr<Sound>);
     bool hasOwnSound (int pad) const noexcept;
 
-    // Plays a pad at the next block, as if its note came in: for the editor's pads. Message thread, lock-free.
+    // Plays a pad at the next block, as if its note came in: for the editor's pads. Message thread, lock-free. Played while
+    // the sampler plays no blocks (switched off, or on a muted or frozen track), it never plays: one that waited longer
+    // than longestAuditionWait is dropped, rather than heard late with every pad played since.
     void audition (int pad, float velocity);
+    bool isWaitingToPlay() const noexcept override; // a pad played, for the next block
 
     // How hard each pad was hit since the editor last looked, from 0 to 1 (devices/core/MeterValue.h).
     MeterValue& getPadMeter (int pad) noexcept { return padMeters[(size_t) pad]; }
@@ -109,9 +112,18 @@ private:
     std::array<std::unique_ptr<Sound>, numPads> owned;
     std::vector<Retired> retired;
 
+    // The pads the editor played, each with when (juce::Time::getMillisecondCounter()).
+    struct Audition
+    {
+        int pad = -1;
+        float velocity = 0.0f;
+        juce::uint32 playedAt = 0;
+    };
+
     static constexpr int auditionSlots = 64;
+    static constexpr int longestAuditionWait = 250; // ms: longer than an audio device's longest blocks last
     juce::AbstractFifo auditionFifo { auditionSlots };
-    std::array<std::pair<int, float>, auditionSlots> auditions {};
+    std::array<Audition, auditionSlots> auditions {};
 
     std::array<MeterValue, numPads> padMeters;
     std::array<LiveValue, numPads> playheads;

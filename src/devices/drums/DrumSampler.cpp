@@ -242,7 +242,12 @@ void DrumSampler::audition (int pad, float velocity)
     const auto scope = auditionFifo.write (1);
 
     if (scope.blockSize1 > 0)
-        auditions[(size_t) scope.startIndex1] = { pad, velocity };
+        auditions[(size_t) scope.startIndex1] = { pad, velocity, juce::Time::getMillisecondCounter() };
+}
+
+bool DrumSampler::isWaitingToPlay() const noexcept
+{
+    return auditionFifo.getNumReady() > 0;
 }
 
 void DrumSampler::prepare (double newSampleRate, int)
@@ -364,16 +369,21 @@ void DrumSampler::process (const ProcessContext& block)
         if (voice.pad >= 0 && sounds[(size_t) voice.pad].load (std::memory_order_acquire) != voice.sound)
             voice.pad = -1;
 
-    // Pads the editor played.
+    // Pads the editor played, unless one waited too long for a block, as while the sampler was off. JUCE's approximate
+    // clock (an atomic read) can lag behind, never run ahead: a lag only lets a pad play.
+    const auto now = juce::Time::getApproximateMillisecondCounter();
+    const auto playAudition = [this, now, &values] (const Audition& waiting)
+    {
+        if (juce::isPositiveAndBelow (waiting.pad, numPads) && (int) (now - waiting.playedAt) <= longestAuditionWait)
+            hit (waiting.pad, waiting.velocity, values);
+    };
     const auto scope = auditionFifo.read (auditionFifo.getNumReady());
 
     for (int i = 0; i < scope.blockSize1; ++i)
-        if (const auto [pad, velocity] = auditions[(size_t) (scope.startIndex1 + i)]; juce::isPositiveAndBelow (pad, numPads))
-            hit (pad, velocity, values);
+        playAudition (auditions[(size_t) (scope.startIndex1 + i)]);
 
     for (int i = 0; i < scope.blockSize2; ++i)
-        if (const auto [pad, velocity] = auditions[(size_t) (scope.startIndex2 + i)]; juce::isPositiveAndBelow (pad, numPads))
-            hit (pad, velocity, values);
+        playAudition (auditions[(size_t) (scope.startIndex2 + i)]);
 
     auto* left = block.channels[0];
     auto* right = block.numChannels > 1 ? block.channels[1] : nullptr;

@@ -117,8 +117,9 @@ private:
     std::array<devices::dsp::DelayLine, 2> dryDelays;
 
     // Asleep (docs/performance-audit.md, A1): once what comes in and what it plays have been silent for sleepAfterSeconds
-    // (and longer than its latency), with nothing to play, it skips its work until sound, a note or an event comes in.
-    // Never in a render, which plays everything as the song has it.
+    // (and longer than its latency), with nothing to play, it skips its work until sound, a note or an event comes in, or
+    // something waits in the device to play (devices::Processor::isWaitingToPlay(): a pad its editor played). Never in a
+    // render, which plays everything as the song has it.
     static constexpr float silence = 1.0e-6f; // -120 dBFS
     static constexpr double sleepAfterSeconds = 0.25;
     int silentSamples = 0, sleepAfterSamples = 0;

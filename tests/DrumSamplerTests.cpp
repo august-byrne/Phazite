@@ -262,12 +262,22 @@ TEST_CASE ("A drum pad plays a sound of its own at its pitch, swapped in as the 
     CHECK (peakOf (played.left, 4800, 9600) > 0.1f);
     CHECK_FALSE (sampler.hasOwnSound (0));
 
-    // The editor plays a pad at the next block.
+    // The editor plays a pad at the next block, which it waits for (its thin plug-in wakes for it).
     sampler.getPadMeter (2).take();
+    CHECK_FALSE (sampler.isWaitingToPlay());
     sampler.audition (2, 0.8f);
+    CHECK (sampler.isWaitingToPlay());
     played = play (sampler, getDefaults(), 4800, {});
+    CHECK_FALSE (sampler.isWaitingToPlay());
     CHECK (peakOf (played.left, 0, 4800) > 0.1f);
     CHECK (sampler.getPadMeter (2).take() == doctest::Approx (0.8f));
+
+    // One that waited longer than a moment, as while the sampler was off, plays never rather than late.
+    sampler.audition (2, 0.8f);
+    juce::Thread::sleep (300);
+    juce::Time::getMillisecondCounter(); // the clock moves on, as the engine moves it after each block
+    play (sampler, getDefaults(), 4800, {});
+    CHECK (sampler.getPadMeter (2).take() == doctest::Approx (0.0f));
 }
 
 TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project's Audio folder, and plays when the project opens")

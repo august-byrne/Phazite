@@ -316,7 +316,8 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
         for (int channel = 0; channel < std::min (2, buffer.getNumChannels()); ++channel)
             buffer.clear (channel, start, numSamples);
 
-    // Nothing to play: no events, and silence in (on its own channels and its sidechain's).
+    // Nothing to play: no events, nothing waiting in the device (a pad its editor played), and silence in (on its own
+    // channels and its sidechain's).
     const auto isQuiet = [&buffer, start, numSamples] (int firstChannel, int numChannels)
     {
         for (int channel = firstChannel; channel < firstChannel + numChannels; ++channel)
@@ -326,8 +327,8 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
         return true;
     };
 
-    const auto quietIn =
-        numEvents == 0 && (isSynth() || isQuiet (0, std::min (2, buffer.getNumChannels()))) && (! hasSidechain || isQuiet (2, 2));
+    const auto quietIn = numEvents == 0 && ! processor->isWaitingToPlay()
+                         && (isSynth() || isQuiet (0, std::min (2, buffer.getNumChannels()))) && (! hasSidechain || isQuiet (2, 2));
 
     if (asleep && quietIn && ! edit.isRendering())
     {

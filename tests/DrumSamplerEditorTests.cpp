@@ -2,15 +2,19 @@
 // The drum sampler's editor (src/ui/devices/DrumSamplerEditor.h): its pads, which play and select, the selected pad's
 // controls, and sounds dropped on pads.
 #include "GoldenFiles.h"
+#include "HostedDevice.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DrumSamplerEditor.h"
 
@@ -152,4 +156,45 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     playNext (*sampler);
     CHECK (sampler->getPlayhead (0).get() > 0.0f);
     CHECK (sampler->getPlayhead (1).get() < 0.0f);
+}
+
+TEST_CASE ("A pad clicked in the drum sampler's editor sounds at once, however long the sampler was silent, or never")
+{
+    // The sampler sleeps once it has been silent a while (model/devices/internal/DevicePlugin.h): a click then waited in it
+    // unheard, and every click since sounded at once when the song's first note woke it. Switched off, it plays no blocks.
+    phazite::test::HostedDevice output;
+    phazite::test::TestSong song;
+    const auto drums = song.setInstrument (song.firstTrack, DrumSampler::typeID);
+    phazite::getEdit (song.context)->getTransport().ensureContextAllocated(); // as live notes have it in the app
+    phazite::test::settle (500);
+
+    phazite::ui::DrumSamplerEditor editor (phazite::getDeviceHandle (song.context, drums));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    phazite::test::Mouse mouse (editor.getPad (2));
+    const auto clickSnare = [&] { mouse.click (editor.getPad (2).getLocalBounds().getCentre()); };
+
+    // While the song is stopped, after a second of silence each time: in the next block.
+    for (int i = 0; i < 3; ++i)
+    {
+        output.process (100);
+        clickSnare();
+        const auto samples = output.samplesToFirstSound();
+        CHECK (samples >= 0);
+        CHECK (samples < phazite::test::HostedDevice::blockSize);
+    }
+
+    // Clicked while the sampler is off: not then, nor once it is on again. (The last snare ends first: Tracktion doesn't
+    // reset a device switched on again, which goes on from where it was.)
+    output.process (100);
+    phazite::setDeviceOn (song.context, drums, false);
+    phazite::test::settle (250);
+    clickSnare();
+    clickSnare();
+    CHECK (output.samplesToFirstSound() < 0);
+
+    phazite::setDeviceOn (song.context, drums, true);
+    phazite::test::settle (500);
+    CHECK (output.samplesToFirstSound() < 0);
+    clickSnare();
+    CHECK (output.samplesToFirstSound() >= 0);
 }
