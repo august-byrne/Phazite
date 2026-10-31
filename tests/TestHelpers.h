@@ -2,10 +2,10 @@
 // Shared includes and helpers for Phazite's tests.
 #pragma once
 
+#include "model/base/internal/Tracktion.h" // Tracktion as the model includes it, with one of GCC's warnings off for it
 #include "model/mixer/FreezeModel.h"
 
 #include <juce_events/juce_events.h>
-#include <tracktion_engine/tracktion_engine.h>
 
 // doctest, through Tracktion's wrapper, which silences doctest's warnings under JUCE's warning flags.
 #include <tracktion_engine/../3rd_party/doctest/tracktion_doctest.hpp>

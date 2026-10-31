@@ -611,8 +611,9 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
     // A clip of the song's playing the file from a time in it, as it was recorded.
     const auto place = [&] (double clipStart, double clipEnd, double fileStart) -> te::AudioClipBase*
     {
-        const auto from = std::max (0.0, fileStart);
-        const auto clipState = makeAudioClipState (edit, name, recording.file, toBeats (clipStart), { from, from + (clipEnd - clipStart) });
+        const auto partStart = std::max (0.0, fileStart);
+        const auto clipState =
+            makeAudioClipState (edit, name, recording.file, toBeats (clipStart), { partStart, partStart + (clipEnd - clipStart) });
         return dynamic_cast<te::AudioClipBase*> (placeClipState (edit, clipState, track));
     };
 

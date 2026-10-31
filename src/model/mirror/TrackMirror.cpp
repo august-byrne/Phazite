@@ -44,7 +44,11 @@ namespace
 
         auto fader = isVCA ? te::VCAPlugin::create() : te::VolumeAndPanPlugin::create();
         id.writeID (fader, nullptr);
-        return isVCA ? juce::Array<juce::ValueTree> { fader } : juce::Array<juce::ValueTree> { fader, te::LevelMeterPlugin::create() };
+
+        if (isVCA)
+            return juce::Array<juce::ValueTree> (fader);
+
+        return juce::Array<juce::ValueTree> (fader, te::LevelMeterPlugin::create());
     }
 
     bool isChannelFader (const te::Plugin& plugin)
