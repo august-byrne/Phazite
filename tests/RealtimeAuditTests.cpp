@@ -703,7 +703,7 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (container != nullptr);
         phazite::setMix (*container, 0.5f);
 
-        // Its first macro turns a band of the EQ; the track's LFO moves the compressor's threshold.
+        // Its first macro turns a band of the EQ; the track's LFO moves the compressor's makeup gain.
         phazite::setDeviceValue (*eq->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::on)], 1.0f);
         const auto macro = phazite::getContainerMacros (*container)[0];
         phazite::setModulation ({ nullptr, macro }, *eq->getAutomatableParameters()[Equalizer::getParameterIndex (0, Equalizer::gain)],
@@ -711,7 +711,7 @@ TEST_SUITE ("realtime-audit")
         phazite::setDeviceValue (*macro, 0.7f);
         const auto lfo = phazite::addModulator (track, phazite::ModulatorType::lfo);
         REQUIRE (lfo.has_value());
-        phazite::setModulation (*lfo, *compressor->getAutomatableParameterByID ("threshold"), 0.5f);
+        phazite::setModulation (*lfo, *compressor->getAutomatableParameterByID ("makeup"), 0.5f);
 
         const auto m = playAndMeasure (*edit);
         report ("A container of Phazite's EQ and compressor at half mix, a macro and the track's LFO turning them", m);
@@ -733,7 +733,9 @@ TEST_SUITE ("realtime-audit")
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
         REQUIRE (device != nullptr);
         REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
-        phazite::setDeviceValue (*device->findParameter ("threshold"), -40.0f);
+        // Its curve turning down from -40 dB, so that the tone ducks it.
+        phazite::setDeviceValue (*device->findParameter ("point2X"), phazite::devices::curves::axisForDecibels (-40.0f));
+        phazite::setDeviceValue (*device->findParameter ("point2Y"), phazite::devices::curves::axisForDecibels (-40.0f));
         phazite::setDeviceValue (*device->findParameter ("mix"), 0.7f);
         phazite::setSidechainSource (*device, &source);
         REQUIRE (phazite::getSidechainSource (*device) == &source);

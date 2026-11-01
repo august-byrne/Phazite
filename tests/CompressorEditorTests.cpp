@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The compressor's editor (src/ui/devices/CompressorEditor.h): its characters' buttons, its knobs, its curve, its meter, and
-// its key's cuts with Listen.
+// The compressor's editor (src/ui/devices/CompressorEditor.h): its characters' buttons, its knobs, its curve (the multiband's,
+// src/ui/devices/DynamicsCurve.h) lit up to the level it hears, its meter both ways, and its key's cuts with Listen.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -20,6 +20,7 @@
 namespace
 {
 using phazite::devices::Compressor;
+namespace curves = phazite::devices::curves;
 
 // Three tracks, Kick, Bass and Keys, with a compressor on the bass.
 struct Song
@@ -43,14 +44,27 @@ struct Song
     te::Plugin::Ptr compressor;
 };
 
-// Plays a steady level through the compressor's DSP at its default settings, as the audio thread would.
-void play (Compressor& compressor, float decibels, int numSamples)
+std::vector<float> getDefaults()
 {
     std::vector<float> values;
 
     for (const auto& parameter : Compressor::info.parameters)
         values.push_back (parameter.defaultValue);
 
+    return values;
+}
+
+// How far its curve turns a level down, at its default settings, once settled.
+float getDefaultReduction (float decibels)
+{
+    const auto values = getDefaults();
+    return decibels
+           - 20.0f * std::log10 (curves::fromAxis (curves::getAt (Compressor::getCurve (values), curves::axisForDecibels (decibels))));
+}
+
+// Plays a steady level through the compressor's DSP, at its default settings or at the ones given, as the audio thread would.
+void play (Compressor& compressor, float decibels, int numSamples, std::vector<float> values = getDefaults())
+{
     juce::AudioBuffer<float> buffer (2, numSamples);
 
     for (int i = 0; i < numSamples; ++i)
@@ -67,7 +81,7 @@ void play (Compressor& compressor, float decibels, int numSamples)
 }
 } // namespace
 
-TEST_CASE ("The compressor's editor shows its characters and knobs, and dragging across its curve moves the threshold as one undo step")
+TEST_CASE ("The compressor's editor shows its characters, its knobs and its curve, whose corner drags as one undo step")
 {
     Song song;
     const auto device = phazite::makeDeviceHandle (*song.compressor);
@@ -75,25 +89,32 @@ TEST_CASE ("The compressor's editor shows its characters and knobs, and dragging
 
     phazite::ui::CompressorEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    // A knob for each parameter but its character, a row of buttons, and its mix, its header's.
-    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Compressor::info.parameters.size() - 2);
+    // A knob for each parameter but its character, a row of buttons, its curve's, and its mix, its header's.
+    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Compressor::info.parameters.size() - 2 - curves::parameterCount);
     CHECK (editor.findControl ("character") != nullptr);
     CHECK (editor.findControl ("mix") == nullptr);
+    CHECK (editor.findControl ("points") == nullptr);
     phazite::test::checkChildrenApart (editor);
 
-    // Twelve decibels to the right, from the default -18 dB.
-    phazite::test::Mouse mouse (editor.getGraph());
-    const auto start = editor.getGraphPosition (-30.0f, -30.0f).roundToInt();
-    const auto twelveDecibels = editor.getGraphPosition (-18.0f, -30.0f).roundToInt().x - start.x;
-    mouse.press (start);
-    mouse.dragTo (start + juce::Point<int> (twelveDecibels, 0));
+    // The curve whole, square, beside its meter, over its tools.
+    auto& curve = editor.getCurve();
+    CHECK (curve.isShowing());
+    CHECK (curve.getWidth() == curve.getHeight());
+    CHECK (curve.getWidth() >= 150);
+
+    // Its corner at -18 dB dragged left, level (Shift): it turns down from lower.
+    phazite::test::Mouse mouse (curve);
+    const auto corner = curve.getPointPosition (1).roundToInt();
+    mouse.press (corner, juce::ModifierKeys::shiftModifier);
+    mouse.dragTo (corner - juce::Point<int> (20, 0));
     mouse.release();
-    CHECK (song.valueOf ("threshold") == doctest::Approx (-6.0f).epsilon (0.05));
-    CHECK (phazite::describeUndo (song.edit.get()) == juce::String ("Undo Change Threshold"));
+    CHECK (song.valueOf ("point2X") < curves::axisForDecibels (-18.0f) - 0.02f);
+    CHECK (song.valueOf ("point2Y") == doctest::Approx (curves::axisForDecibels (-18.0f)).epsilon (1.0e-4));
+    CHECK (phazite::describeUndo (song.edit.get()) == juce::String ("Undo Move Point"));
 
     phazite::undo (*song.edit);
     editor.refresh();
-    CHECK (song.valueOf ("threshold") == doctest::Approx (-18.0f));
+    CHECK (song.valueOf ("point2X") == doctest::Approx (curves::axisForDecibels (-18.0f)).epsilon (1.0e-4));
 }
 
 TEST_CASE ("The compressor's editor has its key's cuts, and Listen plays the key while it shows")
@@ -116,7 +137,7 @@ TEST_CASE ("The compressor's editor has its key's cuts, and Listen plays the key
     CHECK (compressor->isPlayingKey());
 }
 
-TEST_CASE ("The compressor's editor shows the level it hears and how far it turns the sound down")
+TEST_CASE ("The compressor's editor lights its curve up to the level it hears, and shows how far it turns the sound down or up")
 {
     Song song;
     const auto device = phazite::makeDeviceHandle (*song.compressor);
@@ -127,17 +148,34 @@ TEST_CASE ("The compressor's editor shows the level it hears and how far it turn
     // What played before the editor opened doesn't show.
     play (*compressor, -6.0f, 4800);
     phazite::ui::CompressorEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& curve = editor.getCurve();
     CHECK (editor.getShownReduction() == doctest::Approx (0.0f));
+    CHECK (curve.getHeardX() == doctest::Approx (curve.getPosition (0.0f, 0.0f).x));
 
-    // 12 dB over the threshold at 4:1, past the knee, settles 9 dB down.
+    // 12 dB over its corner, lit up to -6 dB and turned down as its curve says.
     play (*compressor, -6.0f, 24000);
     editor.refresh();
     CHECK (editor.getShownLevel() == doctest::Approx (-6.0f).epsilon (0.01));
-    CHECK (editor.getShownReduction() == doctest::Approx (9.0f).epsilon (0.01));
+    CHECK (curve.getHeardX() == doctest::Approx (curve.getPosition (curves::axisForDecibels (-6.0f), 0.0f).x).epsilon (0.01));
+    CHECK (getDefaultReduction (-6.0f) > 8.0f);
+    CHECK (editor.getShownReduction() == doctest::Approx (getDefaultReduction (-6.0f)).epsilon (0.01));
+    CHECK (editor.getShownBoost() == doctest::Approx (0.0f));
 
     // Then, with nothing playing, the meters fall back smoothly.
     editor.refresh();
-    CHECK (editor.getShownReduction() == doctest::Approx (8.5f).epsilon (0.01));
+    CHECK (editor.getShownReduction() == doctest::Approx (getDefaultReduction (-6.0f) - 0.5f).epsilon (0.01));
+
+    // Its curve lifting what is quiet: a quiet level comes out louder, and the meter says how far.
+    REQUIRE (curve.applyShape ("Lift under -30 dB"));
+    std::vector<float> values;
+
+    for (const auto& parameter : Compressor::info.parameters)
+        values.push_back (song.valueOf (parameter.id.data()));
+
+    play (*compressor, -45.0f, 24000, values);
+    editor.refresh();
+    CHECK (editor.getShownBoost() > 3.0f);
 }
 
 TEST_CASE ("The compressor's characters are a row of buttons: a click picks one as one undo step, and the one in use is lit")
@@ -175,11 +213,11 @@ TEST_CASE ("How far the compressor turns the sound down reads the same for any n
     REQUIRE (reduction != nullptr);
     CHECK (reduction->get() == doctest::Approx (0.0f));
 
-    // 12 dB over the threshold at 4:1 settles 9 dB down; reading it takes nothing away from the next reader.
+    // 12 dB over its corner, turned down as its curve says; reading it takes nothing away from the next reader.
     play (*compressor, -6.0f, 24000);
     const auto start = juce::Time::getMillisecondCounterHiRes();
     const auto first = reduction->get();
-    CHECK (first == doctest::Approx (9.0f).epsilon (0.02));
+    CHECK (first == doctest::Approx (getDefaultReduction (-6.0f)).epsilon (0.02));
     CHECK (reduction->get() == doctest::Approx (first).epsilon (0.01));
 
     // With nothing played since (a device asleep on silence plays nothing), it falls 15 dB a second.

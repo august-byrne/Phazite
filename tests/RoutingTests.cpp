@@ -297,7 +297,8 @@ TEST_CASE ("The sidechain's menu lists Off and every other track, greys one that
     // Kick: one step, the compressor ducking, and its slot in the mixer shows where it listens.
     items[1].action();
     CHECK (mix.describeUndo() == juce::String ("Undo Sidechain from Kick"));
-    CHECK (mix.compressor->getAutomatableParameterByID ("ratio")->getCurrentValue() == doctest::Approx (8.0f));
+    CHECK (mix.compressor->getAutomatableParameterByID ("point2X")->getCurrentValue()
+           == doctest::Approx (phazite::devices::curves::axisForDecibels (-30.0f))); // ducking, 8:1 over -30 dB
     const auto slots = phazite::getEffects (mix.context, mix.id (mix.bass));
     REQUIRE (slots.size() == 1);
     CHECK (slots[0].hasSidechain);

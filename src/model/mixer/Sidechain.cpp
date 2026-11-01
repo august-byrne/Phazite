@@ -82,8 +82,18 @@ namespace
                 setDeviceValue (*parameter, value);
         };
 
-        set ("threshold", -30.0f);
-        set ("ratio", 8.0f);
+        // Its curve: 8:1 over -30 dB, its last point in the places the others leave.
+        namespace curves = devices::curves;
+        const auto points = curves::makeCompression (-30.0f, 8.0f);
+        set (Compressor::info.parameters[(size_t) Compressor::points].id, (float) points.size());
+
+        for (int point = 0; point < curves::maxPoints; ++point)
+            for (int field = 0; field < curves::pointFields; ++field)
+                set (Compressor::info
+                         .parameters[(size_t) (Compressor::points + curves::getPointParameter (point, (curves::PointField) field))]
+                         .id,
+                     points[(size_t) std::min (point, (int) points.size() - 1)][(size_t) field]);
+
         set ("attack", 1.0f);
         set ("release", 150.0f);
 

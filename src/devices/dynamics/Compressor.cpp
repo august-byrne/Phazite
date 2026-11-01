@@ -13,6 +13,21 @@ namespace
 {
     constexpr std::string_view characters[] = { "Clean", "VCA", "FET", "Opto", "Tube" };
 
+    // A point of its curve. At first it compresses 4:1 over -18 dB (curves::makeCompression(), as a test checks).
+#define PHAZITE_COMPRESSOR_POINT(n, x, y, t)                                                                                               \
+    { .id = "point" #n "X", .name = "Point " #n " X", .defaultValue = x, .unit = Unit::percent },                                          \
+        { .id = "point" #n "Y", .name = "Point " #n " Y", .defaultValue = y, .unit = Unit::percent },                                      \
+        { .id = "point" #n "Tension",                                                                                                      \
+          .name = "Point " #n " Tension",                                                                                                  \
+          .minimum = -1.0f,                                                                                                                \
+          .maximum = 1.0f,                                                                                                                 \
+          .defaultValue = t,                                                                                                               \
+          .unit = Unit::percent },                                                                                                         \
+    {                                                                                                                                      \
+        .id = "point" #n "Type", .name = "Point " #n " Type", .maximum = (float) std::size (curves::pointTypeNames) - 1.0f,                \
+        .unit = Unit::choice, .choices = curves::pointTypeNames                                                                            \
+    }
+
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         { .id = "character",
@@ -22,8 +37,6 @@ namespace
           .unit = Unit::choice,
           .choices = characters },
         { .id = "inputGain", .name = "Input Gain", .minimum = -24.0f, .maximum = 24.0f, .unit = Unit::decibels },
-        { .id = "threshold", .name = "Threshold", .minimum = -60.0f, .maximum = 0.0f, .defaultValue = -18.0f, .unit = Unit::decibels },
-        { .id = "ratio", .name = "Ratio", .minimum = 1.0f, .maximum = 20.0f, .defaultValue = 4.0f, .unit = Unit::ratio, .midpoint = 4.0f },
         { .id = "attack",
           .name = "Attack",
           .minimum = 0.1f,
@@ -38,7 +51,6 @@ namespace
           .defaultValue = 120.0f,
           .unit = Unit::milliseconds,
           .midpoint = 100.0f },
-        { .id = "knee", .name = "Knee", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 6.0f, .unit = Unit::decibels },
         { .id = "makeup", .name = "Makeup", .minimum = -12.0f, .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
         { .id = "drive", .name = "Drive", .defaultValue = 0.0f, .unit = Unit::percent },
         { .id = "keyLowCut",
@@ -55,8 +67,19 @@ namespace
           .defaultValue = 20000.0f,
           .unit = Unit::hertz,
           .midpoint = 1500.0f },
+        { .id = "points", .name = "Points", .minimum = 2.0f, .maximum = (float) curves::maxPoints, .defaultValue = 4.0f },
+        PHAZITE_COMPRESSOR_POINT (1, 0.0f, 0.0f, 0.0f),
+        PHAZITE_COMPRESSOR_POINT (2, 0.102206f, 0.102206f, 0.0f),
+        PHAZITE_COMPRESSOR_POINT (3, 0.5f, 0.160455f, 0.100808f),
+        PHAZITE_COMPRESSOR_POINT (4, 1.0f, 0.213277f, 0.00657f),
+        PHAZITE_COMPRESSOR_POINT (5, 1.0f, 0.213277f, 0.00657f),
+        PHAZITE_COMPRESSOR_POINT (6, 1.0f, 0.213277f, 0.00657f),
+        PHAZITE_COMPRESSOR_POINT (7, 1.0f, 0.213277f, 0.00657f),
+        PHAZITE_COMPRESSOR_POINT (8, 1.0f, 0.213277f, 0.00657f),
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
+
+#undef PHAZITE_COMPRESSOR_POINT
 
     static_assert (std::size (parameters) == (size_t) Compressor::mix + 1);
     static_assert (std::size (characters) == (size_t) Compressor::Character::tube + 1);
@@ -66,11 +89,9 @@ namespace
     constexpr double keyFadeSeconds = 0.005; // between the key and the sound, as Listen turns on or off
 
     // The characters' ears and their timing.
-    constexpr double rmsSeconds = 0.01;            // the average a VCA, Opto or Tube hears, over about this long
-    constexpr float tubeRange = 15.0f;             // decibels over the threshold where a tube's ratio has grown to the one set
-    constexpr float opticalKnee = 12.0f;           // an Opto's knee is at least this wide
-    constexpr float opticalSlowdown = 6.0f;        // after its first half, an Opto lets go this many times slower...
-    constexpr float opticalMemorySlowdown = 12.0f; // ...and up to this many more times, after holding for a while
+    constexpr double rmsSeconds = 0.01;                                // the average a VCA, Opto or Tube hears, over about this long
+    constexpr float opticalSlowdown = 6.0f;                            // after its first half, an Opto lets go this many times slower...
+    constexpr float opticalMemorySlowdown = 12.0f;                     // ...and up to this many more times, after holding for a while
     constexpr double memoryRiseSeconds = 2.0, memoryFallSeconds = 6.0; // how long holding takes to count, and to be forgotten
     constexpr float memoryHold = 3.0f;                                 // decibels of reduction that count as holding
 
@@ -80,82 +101,15 @@ namespace
     constexpr float evenShares[] = { 0.0f, 0.05f, 0.0f, 0.15f, 0.3f };
     constexpr double dcBlockerFrequency = 10.0; // under what the even harmonics leave
 
+    // FET's and Tube's own colour: as much drive as this, added to the knob's, once they turn down by colourReduction
+    // decibels, and as much less as they turn down less (an 1176's distortion grows with its gain reduction, and a variable-mu
+    // tube's with how far its bias shifts).
+    constexpr float colourShares[] = { 0.0f, 0.0f, 0.1f, 0.0f, 0.1f };
+    constexpr float colourReduction = 12.0f;
+
     Compressor::Character getCharacter (float value) noexcept
     {
         return (Compressor::Character) juce::jlimit (0, (int) std::size (characters) - 1, (int) std::lround (value));
-    }
-
-    // How many decibels a level goes down by: (1 - 1 / ratio) of the way it goes over the threshold, easing in across
-    // the knee, which is centred on the threshold (Giannoulis, Massberg and Reiss, "Digital Dynamic Range Compressor
-    // Design: A Tutorial and Analysis", 2012).
-    float computeReduction (float level, float threshold, float slope, float knee) noexcept
-    {
-        const auto over = level - threshold;
-
-        if (2.0f * over <= -knee)
-            return 0.0f;
-
-        if (2.0f * over < knee) // within the knee, which is wider than 0 here
-        {
-            const auto into = over + 0.5f * knee;
-            return slope * into * into / (2.0f * knee);
-        }
-
-        return slope * over;
-    }
-
-    // A tube's (variable-mu) curve: no reduction at the threshold, its ratio growing over the next tubeRange decibels to
-    // the one set, as the tube's bias shifts with the level (Moore, 2012: a variable-mu compressor has no ratio of its own);
-    // the slope grows in a straight line, so the reduction grows as its square, then as the slope set.
-    float computeTubeReduction (float level, float threshold, float slope) noexcept
-    {
-        const auto over = level - threshold;
-
-        if (over <= 0.0f)
-            return 0.0f;
-
-        if (over < tubeRange)
-            return slope * over * over / (2.0f * tubeRange);
-
-        return slope * (over - 0.5f * tubeRange);
-    }
-
-    float getSlope (float ratio) noexcept
-    {
-        return 1.0f - 1.0f / std::max (ratio, 1.0f);
-    }
-
-    float getReductionFor (Compressor::Character character, float level, float threshold, float slope, float knee) noexcept
-    {
-        switch (character)
-        {
-            case Compressor::Character::tube:
-                return computeTubeReduction (level, threshold, slope);
-            case Compressor::Character::opto:
-                return computeReduction (level, threshold, slope, std::max (knee, opticalKnee));
-            case Compressor::Character::clean:
-            case Compressor::Character::vca:
-            case Compressor::Character::fet:
-            default:
-                return computeReduction (level, threshold, slope, knee);
-        }
-    }
-
-    // Where the reduction starts, in decibels: under it, the level needs no decibels worked out.
-    float getReductionStart (Compressor::Character character, float threshold, float knee) noexcept
-    {
-        switch (character)
-        {
-            case Compressor::Character::tube:
-                return threshold;
-            case Compressor::Character::opto:
-                return threshold - 0.5f * std::max (knee, opticalKnee);
-            case Compressor::Character::clean:
-            case Compressor::Character::vca:
-            case Compressor::Character::fet:
-            default:
-                return threshold - 0.5f * knee;
-        }
     }
 
     // Drive's curve, the odd harmonics' tanh with some of the even harmonics' tanh squared: f (x) = tanh x + e tanh^2 x, and
@@ -178,11 +132,6 @@ const DeviceInfo Compressor::info { .typeID = typeID,
                                     .kind = DeviceKind::effect,
                                     .parameters = parameters,
                                     .hasSidechain = true };
-
-float Compressor::getReduction (std::span<const float> values, float levelDecibels)
-{
-    return getReductionFor (getCharacter (values[character]), levelDecibels, values[threshold], getSlope (values[ratio]), values[knee]);
-}
 
 void Compressor::prepare (double newSampleRate, int)
 {
@@ -215,8 +164,9 @@ void Compressor::reset()
     meanSquare = 0.0f;
     releaseStart = 0.0f;
     memory = 0.0f;
-    lastReductionDecibels = 0.0f;
-    lastReductionGain = 1.0f;
+    lastLevel = -1.0f;
+    lastWanted = 0.0f;
+    lastMost = 0.0f;
     wasDriven = false;
     lastDriven = {};
     lastIntegral = {};
@@ -229,8 +179,7 @@ void Compressor::process (const ProcessContext& block)
     const auto numChannels = std::min (block.numChannels, 2);
     const auto type = getCharacter (values[character]);
 
-    // What the detector hears: the sidechain if one feeds it, else the sound itself; FET, Opto and Tube listen to what they put
-    // out (feedback), Clean and VCA to what comes in.
+    // What the detector hears: the sidechain if one feeds it, else the sound itself as it comes in.
     const float* const* heard = block.channels;
     auto numHeard = numChannels;
 
@@ -240,20 +189,19 @@ void Compressor::process (const ProcessContext& block)
         numHeard = std::min (block.numSidechainChannels, 2);
     }
 
-    const auto thresholdDecibels = values[threshold], kneeDecibels = values[knee], targetMakeup = values[makeup];
+    const auto targetMakeup = values[makeup];
     const auto targetInput = values[inputGain];
     const auto hearsItself = heard == block.channels; // the input gain drives the detector too, unless a sidechain feeds it
-    const auto feedsBack = hearsItself && (type == Character::fet || type == Character::opto || type == Character::tube);
     const auto hearsAverage = type == Character::vca || type == Character::opto || type == Character::tube;
-    const auto slope = getSlope (values[ratio]);
     const auto lowCut = dsp::makeFilter (dsp::FilterShape::highPass, values[keyLowCut], sampleRate, 0.70710678);
     const auto cutsHigh = values[keyHighCut] < highCutOff;
     const std::array highCut { dsp::makeFilter (dsp::FilterShape::lowPass, values[keyHighCut], sampleRate, dsp::getButterworthQ (4, 0)),
                                dsp::makeFilter (dsp::FilterShape::lowPass, values[keyHighCut], sampleRate, dsp::getButterworthQ (4, 1)) };
     const auto keyWanted = isPlayingKey() ? 1.0f : 0.0f;
-    const auto targetDrive = values[drive];
+    const auto targetDrive = std::min (1.0f, values[drive] + colourShares[(size_t) type] * std::min (1.0f, lastMost / colourReduction));
     const auto even = evenShares[(size_t) type];
     const auto dcBlocker = dsp::makeFilter (dsp::FilterShape::highPass, dcBlockerFrequency, sampleRate, 0.70710678);
+    gains.update (getCurve (values));
     reduction.setTimes (values[attack] * 0.001f, values[release] * 0.001f);
 
     // Opto's slow stage, after its first half: slower still the longer it has held lately.
@@ -268,10 +216,8 @@ void Compressor::process (const ProcessContext& block)
         isFirstBlock = false;
     }
 
-    // Under the reduction's start there is nothing to turn down, which the level tells without its decibels; and the gain is
-    // worked out again only when it changes (docs/performance-audit.md, A5).
-    const auto startGain = dsp::decibelsToGain (getReductionStart (type, thresholdDecibels, kneeDecibels));
-    auto loudestPeak = 0.0f, most = 0.0f;
+    // The gain is worked out again only when it changes (docs/performance-audit.md, A5).
+    auto loudestPeak = 0.0f, most = 0.0f, least = 0.0f;
 
     for (int i = 0; i < block.numSamples; ++i)
     {
@@ -284,9 +230,8 @@ void Compressor::process (const ProcessContext& block)
             lastInput = dsp::decibelsToGain (inputDecibels);
         }
 
-        // The key, through its cuts: what comes in, or with feedback what went out, turned down as last worked out (before the
-        // makeup, which comes after it, as on the hardware).
-        const auto keyGain = hearsItself ? lastInput * (feedsBack ? lastReductionGain : 1.0f) : 1.0f;
+        // The key, through its cuts.
+        const auto keyGain = hearsItself ? lastInput : 1.0f;
         auto peak = 0.0f, squares = 0.0f;
         std::array<float, 2> key {};
 
@@ -312,18 +257,24 @@ void Compressor::process (const ProcessContext& block)
             level = std::sqrt (2.0f * meanSquare);
         }
 
-        const auto wanted =
-            level <= startGain ? 0.0f : getReductionFor (type, dsp::gainToDecibels (level), thresholdDecibels, slope, kneeDecibels);
+        // How far its curve turns the level down (below 0, up), worked out again only when the level changes.
+        if (! juce::exactlyEqual (level, lastLevel))
+        {
+            lastLevel = level;
+            lastWanted = -gains.getDecibels (level);
+        }
+
+        const auto wanted = lastWanted;
         const auto previous = reduction.getValue();
         auto amount = reduction.process (wanted);
 
-        // Opto lets go at the release set for the first half of the way, as the LA-2A's cell does in its first 60 ms, then
-        // slowly.
+        // Opto lets go of a reduction at the release set for the first half of the way, as the LA-2A's cell does in its first
+        // 60 ms, then slowly.
         if (type == Character::opto)
         {
             if (amount >= previous)
                 releaseStart = amount; // gripping, or holding: where a release would start from
-            else if (previous < 0.5f * releaseStart)
+            else if (previous > 0.0f && previous < 0.5f * releaseStart)
                 amount = wanted + (previous - wanted) * opticalCoefficient;
 
             reduction.reset (amount);
@@ -338,12 +289,6 @@ void Compressor::process (const ProcessContext& block)
         {
             lastGainDecibels = gainDecibels;
             lastGain = dsp::decibelsToGain (gainDecibels);
-        }
-
-        if (feedsBack && ! juce::exactlyEqual (amount, lastReductionDecibels))
-        {
-            lastReductionDecibels = amount;
-            lastReductionGain = dsp::decibelsToGain (-amount);
         }
 
         // The sound, turned down and driven into its curve (the makeup after it); or what it hears, to listen to, faded in and
@@ -399,10 +344,13 @@ void Compressor::process (const ProcessContext& block)
 
         loudestPeak = std::max (loudestPeak, level);
         most = std::max (most, amount);
+        least = std::min (least, amount);
     }
 
     levelMeter.raise (dsp::gainToDecibels (loudestPeak));
     reductionMeter.raise (most);
+    boostMeter.raise (-least);
     gainReduction.push (most);
+    lastMost = most;
 }
 } // namespace phazite::devices

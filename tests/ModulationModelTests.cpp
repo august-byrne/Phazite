@@ -57,8 +57,8 @@ struct Song
         return {};
     }
 
-    // A's compressor's threshold, from -60 to 0 dB, and its synth's cutoff.
-    ParameterRef threshold() const { return { phazite::getEffects (context, idOf (*a))[0].id, "threshold" }; }
+    // A's compressor's makeup gain, from -12 to 24 dB, and its synth's cutoff.
+    ParameterRef makeup() const { return { phazite::getEffects (context, idOf (*a))[0].id, "makeup" }; }
     ParameterRef cutoff() const { return { phazite::getInstrument (context, idOf (*a))->id, "cutoff" }; }
 
     te::AutomatableParameter::Ptr find (const ParameterRef& ref) const { return phazite::findParameter (*edit, ref); }
@@ -192,27 +192,27 @@ TEST_CASE ("A modulator modulates its track's parameters by an amount, each chan
     Song song;
     auto& context = song.context;
     const auto a = idOf (*song.a);
-    const auto threshold = song.threshold();
+    const auto makeup = song.makeup();
     const auto lfo = phazite::addModulator (context, a, ModulatorType::lfo);
 
-    CHECK (phazite::canModulate (context, lfo, threshold));
+    CHECK (phazite::canModulate (context, lfo, makeup));
     CHECK (phazite::canModulate (context, lfo, phazite::getVolume (context, a).getRef()));
     CHECK_FALSE (phazite::canModulate (context, lfo, phazite::getVolume (context, idOf (*song.b)).getRef())); // another track's
     CHECK_FALSE (phazite::canModulate (context, lfo, { phazite::DeviceID::fromRaw (lfo.getRaw()), "rate" })); // its own
 
-    phazite::modulate (context, lfo, threshold, 0.5f);
-    CHECK (song.describeUndo() == juce::String ("Undo Modulate Threshold"));
-    auto modulations = phazite::getModulations (context, threshold);
+    phazite::modulate (context, lfo, makeup, 0.5f);
+    CHECK (song.describeUndo() == juce::String ("Undo Modulate Makeup"));
+    auto modulations = phazite::getModulations (context, makeup);
     REQUIRE (modulations.size() == 1);
     CHECK (modulations[0].modulator == lfo);
-    CHECK (modulations[0].parameter == threshold);
+    CHECK (modulations[0].parameter == makeup);
     CHECK (modulations[0].amount == doctest::Approx (0.5f));
     CHECK (phazite::getModulations (context, lfo).size() == 1);
 
     // Again: its amount changes, and amounts stay from -1 to 1.
-    phazite::modulate (context, lfo, threshold, -3.0f);
+    phazite::modulate (context, lfo, makeup, -3.0f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Modulation"));
-    modulations = phazite::getModulations (context, threshold);
+    modulations = phazite::getModulations (context, makeup);
     REQUIRE (modulations.size() == 1);
     CHECK (modulations[0].amount == doctest::Approx (-1.0f));
 
@@ -220,42 +220,42 @@ TEST_CASE ("A modulator modulates its track's parameters by an amount, each chan
     phazite::modulate (context, lfo, phazite::getVolume (context, idOf (*song.b)).getRef(), 0.5f);
     CHECK (phazite::getModulations (context, phazite::getVolume (context, idOf (*song.b)).getRef()).empty());
 
-    phazite::removeModulation (context, lfo, threshold);
+    phazite::removeModulation (context, lfo, makeup);
     CHECK (song.describeUndo() == juce::String ("Undo Remove Modulation"));
-    CHECK (phazite::getModulations (context, threshold).empty());
+    CHECK (phazite::getModulations (context, makeup).empty());
 
     // Removing a modulator takes what it modulates with it, and undo puts both back.
-    phazite::modulate (context, lfo, threshold, 0.25f);
+    phazite::modulate (context, lfo, makeup, 0.25f);
     phazite::removeModulator (context, lfo);
-    CHECK (phazite::getModulations (context, threshold).empty());
+    CHECK (phazite::getModulations (context, makeup).empty());
     phazite::undo (*song.edit);
-    CHECK (phazite::getModulations (context, threshold).size() == 1);
+    CHECK (phazite::getModulations (context, makeup).size() == 1);
 }
 
 TEST_CASE ("A macro moves what it modulates as it turns")
 {
     Song song;
     auto& context = song.context;
-    const auto threshold = song.threshold();
-    phazite::getParameter (context, threshold).setValue (-40.0f);
+    const auto makeup = song.makeup();
+    phazite::getParameter (context, makeup).setValue (-6.0f);
     const auto macro = phazite::addModulator (context, idOf (*song.a), ModulatorType::macro);
     const auto parameters = phazite::getModulatorParameters (context, macro);
     REQUIRE (parameters.size() == 1);
     CHECK (parameters[0].name == juce::String ("Macro 1"));
 
-    phazite::modulate (context, macro, threshold, 0.5f);
+    phazite::modulate (context, macro, makeup, 0.5f);
     auto knob = phazite::getModulatorParameter (context, macro, parameters[0].id);
     REQUIRE (knob.isValid());
 
-    // A macro at 0 leaves it where it is; turned all the way, it adds half the range (30 dB).
+    // A macro at 0 leaves it where it is; turned all the way, it adds half the range (18 dB).
     knob.setValue (0.0f);
-    CHECK (song.find (threshold)->getCurrentValue() == doctest::Approx (-40.0f).epsilon (0.01));
+    CHECK (song.find (makeup)->getCurrentValue() == doctest::Approx (-6.0f).epsilon (0.01));
     knob.setValue (1.0f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Macro 1"));
-    CHECK (song.find (threshold)->getCurrentValue() == doctest::Approx (-10.0f).epsilon (0.01));
+    CHECK (song.find (makeup)->getCurrentValue() == doctest::Approx (12.0f).epsilon (0.01));
 
     // Its value, not its modulation, is what the parameter is set to.
-    CHECK (song.find (threshold)->getCurrentExplicitValue() == doctest::Approx (-40.0f));
+    CHECK (song.find (makeup)->getCurrentExplicitValue() == doctest::Approx (-6.0f));
 }
 
 TEST_CASE ("A control's modulation: a new modulator for it, its modulators, and dragging the amount")
@@ -263,12 +263,12 @@ TEST_CASE ("A control's modulation: a new modulator for it, its modulators, and 
     Song song;
     auto& context = song.context;
     const auto a = idOf (*song.a);
-    auto handle = phazite::getParameter (context, song.threshold());
+    auto handle = phazite::getParameter (context, song.makeup());
     CHECK_FALSE (phazite::getModulationRange (handle).has_value());
 
     const auto lfo = phazite::modulateWithNew (handle, ModulatorType::lfo, phazite::defaultModulationAmount);
     REQUIRE (lfo.isValid());
-    CHECK (song.describeUndo() == juce::String ("Undo Modulate Threshold"));
+    CHECK (song.describeUndo() == juce::String ("Undo Modulate Makeup"));
     CHECK (song.namesOf (a) == std::vector<juce::String> { "LFO 1" });
 
     // One undo step took both back.
@@ -282,7 +282,7 @@ TEST_CASE ("A control's modulation: a new modulator for it, its modulators, and 
     CHECK (modulators[0].id == lfo);
 
     // The ring: a new LFO moves both ways, a quarter of the range each.
-    handle.setValue (-30.0f); // the middle
+    handle.setValue (6.0f); // the middle
     const auto range = phazite::getModulationRange (handle);
     REQUIRE (range.has_value());
     CHECK (range->low == doctest::Approx (0.25f));

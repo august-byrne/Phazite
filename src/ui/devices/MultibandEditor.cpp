@@ -2,6 +2,7 @@
 #include "MultibandEditor.h"
 #include "DeviceGraph.h"
 #include "DeviceTint.h"
+#include "DynamicsCurve.h"
 #include "devices/dynamics/Multiband.h"
 #include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
@@ -19,9 +20,6 @@ namespace
     constexpr int toolbarHeight = 26;
     constexpr int historySize = 1024;       // the monitor's columns, at most
     constexpr double bandsShownMs = 1500.0; // Bands, brought up while a crossover or a pre gain moves under Monitor
-    constexpr float snapDistance = 6.0f;    // pixels from a grid line within which a dragged point snaps to it
-    constexpr float tensionDrag = 2.0f;     // a drag the curve's height bends a line by this much of its range
-    constexpr float fineTension = 0.2f;     // with Ctrl
 
     juce::Colour getBandColour (int band)
     {
@@ -35,481 +33,9 @@ namespace
 
     float axisOf (float decibels)
     {
-        return Multiband::axisForDecibels (decibels);
-    }
-
-    // A point of a curve: across, up, its line's tension and its line's shape.
-    using CurvePoint = std::array<float, Multiband::pointFields>;
-
-    CurvePoint makePoint (float across, float up)
-    {
-        return { across, up, 0.0f, (float) Multiband::PointType::singleCurve };
-    }
-
-    // The shapes the curve's menu starts from, as Maximus's manual shows its curves: each point by its levels in and out.
-    struct Shape
-    {
-        const char* name;
-        std::vector<CurvePoint> points;
-    };
-
-    const std::vector<Shape>& getShapes()
-    {
-        static const std::vector<Shape> shapes {
-            { "Limit at 0 dB", { makePoint (0.0f, 0.0f), makePoint (axisOf (0.0f), axisOf (0.0f)), makePoint (1.0f, axisOf (0.0f)) } },
-            { "No Compression", { makePoint (0.0f, 0.0f), makePoint (1.0f, 1.0f) } },
-            { "Compress 2:1 over -12 dB",
-              { makePoint (0.0f, 0.0f), makePoint (axisOf (-12.0f), axisOf (-12.0f)), makePoint (axisOf (0.0f), axisOf (-6.0f)),
-                makePoint (1.0f, axisOf (0.0f)) } },
-            { "Compress 4:1 over -18 dB",
-              { makePoint (0.0f, 0.0f), makePoint (axisOf (-18.0f), axisOf (-18.0f)), makePoint (axisOf (0.0f), axisOf (-13.5f)),
-                makePoint (1.0f, axisOf (-10.5f)) } },
-            { "Gate under -30 dB",
-              { makePoint (0.0f, 0.0f), makePoint (axisOf (-31.0f), 0.0f), makePoint (axisOf (-30.0f), axisOf (-30.0f)),
-                makePoint (1.0f, 1.0f) } },
-            { "Expand under -24 dB",
-              { makePoint (0.0f, 0.0f), makePoint (axisOf (-40.0f), axisOf (-56.0f)), makePoint (axisOf (-24.0f), axisOf (-24.0f)),
-                makePoint (1.0f, 1.0f) } },
-            { "Lift under -30 dB",
-              { makePoint (0.0f, 0.0f), makePoint (axisOf (-60.0f), axisOf (-45.0f)), makePoint (axisOf (-30.0f), axisOf (-30.0f)),
-                makePoint (1.0f, 1.0f) } },
-            { "Squeeze Both Ways",
-              { makePoint (0.0f, 0.0f), makePoint (axisOf (-60.0f), axisOf (-42.0f)), makePoint (axisOf (-30.0f), axisOf (-30.0f)),
-                makePoint (axisOf (0.0f), axisOf (-14.0f)), makePoint (1.0f, axisOf (-11.0f)) } },
-        };
-        return shapes;
-    }
-
-    // Copy Curve's curve, for Paste Curve, any band's, for the session.
-    std::optional<std::vector<CurvePoint>>& getCopiedCurve()
-    {
-        static std::optional<std::vector<CurvePoint>> copied;
-        return copied;
+        return devices::curves::axisForDecibels (decibels);
     }
 } // namespace
-
-//==============================================================================
-// The selected band's compression curve, as Maximus's envelope editor shows and edits it.
-class MultibandEditor::Curve : public juce::Component
-{
-public:
-    explicit Curve (MultibandEditor& e)
-        : editor (e)
-    {
-        setTitle ("Compression curve");
-        setDescription ("How loud each level comes out of the selected band's compressor: level in across, level out up. Drag a "
-                        "point (Shift keeps it level, Ctrl keeps it where it is across); drag a hollow handle up or down to bend "
-                        "the line before it (Ctrl in fine steps) and right-click it to straighten it; right-click a point for its "
-                        "line's shape or to delete it (Alt+click deletes it too); right-click elsewhere to add a point.");
-    }
-
-    bool frozen = false, snaps = true;
-
-    juce::Rectangle<float> getArea() const { return getLocalBounds().toFloat().reduced (GraphTint::handleRadius * 1.5f + 1.0f); }
-
-    juce::Point<float> toScreen (float across, float up) const
-    {
-        const auto area = getArea();
-        return { area.getX() + across * area.getWidth(), area.getBottom() - up * area.getHeight() };
-    }
-
-    float acrossAt (float x) const { return juce::jlimit (0.0f, 1.0f, (x - getArea().getX()) / getArea().getWidth()); }
-    float upAt (float y) const { return juce::jlimit (0.0f, 1.0f, (getArea().getBottom() - y) / getArea().getHeight()); }
-
-    int getBand() const noexcept { return editor.selectedBand; }
-
-    int getCount() const
-    {
-        return juce::jlimit (2, Multiband::maxPoints,
-                             juce::roundToInt (editor.values[(size_t) Multiband::getBandParameter (getBand(), Multiband::points)]));
-    }
-
-    float getValue (int point, Multiband::PointField field) const
-    {
-        return editor.values[(size_t) Multiband::getPointParameter (getBand(), point, field)];
-    }
-
-    CurvePoint getPoint (int point) const
-    {
-        return { getValue (point, Multiband::pointX), getValue (point, Multiband::pointY), getValue (point, Multiband::pointTension),
-                 getValue (point, Multiband::pointType) };
-    }
-
-    std::vector<CurvePoint> getPoints() const
-    {
-        std::vector<CurvePoint> points;
-
-        for (int i = 0; i < getCount(); ++i)
-            points.push_back (getPoint (i));
-
-        return points;
-    }
-
-    juce::Point<float> getPointPosition (int point) const
-    {
-        return toScreen (getValue (point, Multiband::pointX), getValue (point, Multiband::pointY));
-    }
-
-    std::optional<juce::Point<float>> getTensionPosition (int point) const
-    {
-        if (point <= 0 || point >= getCount())
-            return {};
-
-        const auto middle = 0.5f * (getValue (point - 1, Multiband::pointX) + getValue (point, Multiband::pointX));
-        return toScreen (middle, Multiband::getCurveAt (editor.values, getBand(), middle));
-    }
-
-    // Writes a whole curve, its points in order (the last one repeated in the slots it leaves), as one undo step.
-    void setPoints (std::vector<CurvePoint> points, const juce::String& undoName)
-    {
-        if (points.size() < 2)
-            return;
-
-        points.resize (std::min (points.size(), (size_t) Multiband::maxPoints));
-        const auto band = getBand();
-        auto holder = editor.device.getParameter (idOf (Multiband::getBandParameter (band, Multiband::points)), undoName);
-        holder.beginGesture();
-
-        for (int i = 0; i < Multiband::maxPoints; ++i)
-        {
-            const auto& point = points[(size_t) std::min (i, (int) points.size() - 1)];
-
-            for (int field = 0; field < Multiband::pointFields; ++field)
-            {
-                auto handle = editor.device.getParameter (idOf (Multiband::getPointParameter (band, i, (Multiband::PointField) field)));
-
-                if (! juce::approximatelyEqual (handle.getValue(), point[(size_t) field]))
-                {
-                    handle.beginGesture();
-                    handle.setValue (point[(size_t) field]);
-                    handle.endGesture();
-                }
-            }
-        }
-
-        holder.setValue ((float) points.size());
-        holder.endGesture();
-        editor.refresh();
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        const auto& p = getPalette (*this);
-        const auto colour = getBandColour (getBand());
-        const auto area = getArea();
-        graph::paintBackground (g, p, getLocalBounds().toFloat());
-
-        // The grid at Maximus's levels, the 0 dB lines through the middle stronger, and level in equalling level out.
-        g.setFont (juce::FontOptions (TextSize::small));
-
-        for (const auto decibels : gridDecibels)
-        {
-            const auto place = axisOf (decibels);
-            const auto at = toScreen (place, place);
-            g.setColour (p.text.withAlpha (GraphTint::grid));
-            g.drawVerticalLine (juce::roundToInt (at.x), area.getY(), area.getBottom());
-            g.drawHorizontalLine (juce::roundToInt (at.y), area.getX(), area.getRight());
-        }
-
-        const auto middle = toScreen (0.5f, 0.5f);
-        g.setColour (p.text.withAlpha (GraphTint::zeroLine));
-        g.drawVerticalLine (juce::roundToInt (middle.x), area.getY(), area.getBottom());
-        g.drawHorizontalLine (juce::roundToInt (middle.y), area.getX(), area.getRight());
-        g.drawLine ({ toScreen (0.0f, 0.0f), toScreen (1.0f, 1.0f) });
-        g.setColour (p.textMuted);
-        g.drawText ("OUT", area.reduced (Space::xs).toNearestInt(), juce::Justification::topLeft);
-        g.drawText ("IN", area.reduced (Space::xs).toNearestInt(), juce::Justification::bottomRight);
-
-        // The curve, over a wash of what it lets through.
-        const auto line = graph::makeCurve (
-            area, [this, area] (float x)
-            { return area.getBottom() - Multiband::getCurveAt (editor.values, getBand(), acrossAt (x)) * area.getHeight(); }, 1.0f);
-        auto wash = line;
-        wash.lineTo (area.getBottomRight());
-        wash.lineTo (area.getBottomLeft());
-        wash.closeSubPath();
-        g.setColour ((frozen ? p.textMuted : colour).withAlpha (GraphTint::partCurve));
-        g.fillPath (wash);
-        g.setColour (frozen ? p.textMuted : colour);
-        g.strokePath (line, juce::PathStrokeType (GraphTint::curveWidth));
-
-        // What the band's compressor hears now, riding the curve.
-        if (editor.shownHeard[(size_t) getBand()] > -90.0f)
-        {
-            const auto in = std::min (1.0f, axisOf (editor.shownHeard[(size_t) getBand()]));
-            const auto dot = toScreen (in, Multiband::getCurveAt (editor.values, getBand(), in));
-            g.setColour (p.text);
-            g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (dot));
-        }
-
-        // Its points filled, its tension handles hollow; larger under the pointer and while dragged. Frozen, none.
-        if (frozen)
-            return;
-
-        for (int i = 0; i < getCount(); ++i)
-        {
-            if (const auto handle = getTensionPosition (i))
-                paintHandle (g, p, colour, { false, i }, *handle);
-
-            paintHandle (g, p, colour, { true, i }, getPointPosition (i));
-        }
-    }
-
-    // What a press takes: a point, or the tension handle of the line before it.
-    struct Target
-    {
-        bool point = true;
-        int index = 0;
-
-        bool operator== (const Target&) const = default;
-    };
-
-    std::optional<Target> findTarget (juce::Point<float> position) const
-    {
-        std::optional<Target> nearest;
-        auto nearestDistance = GraphTint::grabDistance;
-
-        const auto consider = [&] (Target target, juce::Point<float> at)
-        {
-            if (const auto distance = at.getDistanceFrom (position); distance <= nearestDistance)
-            {
-                nearest = target;
-                nearestDistance = distance;
-            }
-        };
-
-        for (int i = 0; i < getCount(); ++i)
-        {
-            consider ({ true, i }, getPointPosition (i));
-
-            if (const auto handle = getTensionPosition (i))
-                consider ({ false, i }, *handle);
-        }
-
-        return nearest;
-    }
-
-    void mouseMove (const juce::MouseEvent& e) override
-    {
-        const auto target = frozen ? std::optional<Target>() : findTarget (e.position);
-
-        if (target != hovered)
-        {
-            hovered = target;
-            setMouseCursor (! target.has_value() ? juce::MouseCursor::NormalCursor
-                            : target->point      ? juce::MouseCursor::DraggingHandCursor
-                                                 : juce::MouseCursor::UpDownResizeCursor);
-            repaint();
-        }
-    }
-
-    void mouseExit (const juce::MouseEvent&) override
-    {
-        hovered.reset();
-        repaint();
-    }
-
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        if (frozen)
-            return;
-
-        const auto target = findTarget (e.position);
-
-        // The right button: a point's menu, a handle straightened, or a point added where it is.
-        if (e.mods.isPopupMenu())
-        {
-            if (! target.has_value())
-                addPoint (e.position);
-            else if (target->point)
-                showPointMenu (target->index);
-            else
-                setValue (target->index, Multiband::pointTension, 0.0f, "Straighten Line");
-
-            return;
-        }
-
-        if (! target.has_value())
-            return;
-
-        if (target->point && e.mods.isAltDown())
-        {
-            editor.deletePoint (target->index);
-            return;
-        }
-
-        dragged = target;
-        const auto band = getBand();
-        const auto field = [band, &target] (Multiband::PointField f)
-        { return idOf (Multiband::getPointParameter (band, target->index, f)); };
-
-        if (target->point)
-        {
-            startAcross = getValue (target->index, Multiband::pointX);
-            startUp = getValue (target->index, Multiband::pointY);
-            first = editor.device.getParameter (field (Multiband::pointX), "Move Point");
-            second = editor.device.getParameter (field (Multiband::pointY));
-            first.beginGesture(); // its gesture holds the step, which the other's joins
-            second.beginGesture();
-        }
-        else
-        {
-            startUp = getValue (target->index, Multiband::pointTension);
-            first = editor.device.getParameter (field (Multiband::pointTension), "Bend Line");
-            first.beginGesture();
-        }
-    }
-
-    void mouseDrag (const juce::MouseEvent& e) override
-    {
-        if (! dragged.has_value())
-            return;
-
-        const auto area = getArea();
-        const auto up = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, area.getHeight());
-        const auto i = dragged->index;
-
-        if (! dragged->point)
-        {
-            // Up bends the line up; Ctrl in fine steps.
-            const auto fine = e.mods.isCtrlDown() ? fineTension : 1.0f;
-            first.setValue (juce::jlimit (-1.0f, 1.0f, startUp + tensionDrag * up * fine));
-            editor.refresh();
-            return;
-        }
-
-        // Shift keeps it level, Ctrl keeps it where it is across; the first and last points stay at the curve's ends.
-        const auto along = (float) e.getDistanceFromDragStartX() / std::max (1.0f, area.getWidth());
-        const auto isEnd = i == 0 || i == getCount() - 1;
-        auto across = isEnd || e.mods.isCtrlDown() ? startAcross : startAcross + along;
-        auto height = e.mods.isShiftDown() ? startUp : startUp + up;
-
-        if (snaps)
-        {
-            across = snap (across, area.getWidth());
-            height = snap (height, area.getHeight());
-        }
-
-        const auto earliest = i > 0 ? getValue (i - 1, Multiband::pointX) : 0.0f;
-        const auto latest = i < getCount() - 1 ? getValue (i + 1, Multiband::pointX) : 1.0f;
-        first.setValue (isEnd ? startAcross : juce::jlimit (earliest, std::max (earliest, latest), across));
-        second.setValue (juce::jlimit (0.0f, 1.0f, height));
-        editor.refresh();
-    }
-
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        if (! dragged.has_value())
-            return;
-
-        if (second.isInGesture())
-            second.endGesture();
-
-        if (first.isInGesture())
-            first.endGesture(); // its gesture holds the step: last
-
-        dragged.reset();
-        repaint();
-    }
-
-    // A point's line's shape, by the menu; one undo step.
-    void setValue (int point, Multiband::PointField field, float value, const juce::String& undoName)
-    {
-        auto handle = editor.device.getParameter (idOf (Multiband::getPointParameter (getBand(), point, field)), undoName);
-        handle.setValue (value);
-        editor.refresh();
-    }
-
-    void addPoint (juce::Point<float> position)
-    {
-        auto points = getPoints();
-
-        if ((int) points.size() >= Multiband::maxPoints)
-            return;
-
-        const auto across = acrossAt (position.x), height = upAt (position.y);
-        auto at = points.begin() + 1;
-
-        while (at != points.end() - 1 && (*at)[Multiband::pointX] < across)
-            ++at;
-
-        points.insert (at, makePoint (across, height));
-        setPoints (points, "Add Point");
-    }
-
-private:
-    MultibandEditor& editor;
-    std::optional<Target> hovered, dragged;
-    ParameterHandle first, second; // what a drag moves
-    float startAcross = 0.0f, startUp = 0.0f;
-
-    // To the nearest of the grid's lines, the middle and the ends, within a few pixels of it.
-    static float snap (float place, float size)
-    {
-        auto best = place, bestDistance = snapDistance / std::max (1.0f, size);
-
-        const auto consider = [&] (float line)
-        {
-            if (const auto distance = std::abs (line - place); distance <= bestDistance)
-            {
-                best = line;
-                bestDistance = distance;
-            }
-        };
-
-        for (const auto decibels : gridDecibels)
-            consider (axisOf (decibels));
-
-        for (const auto line : { 0.0f, 0.5f, 1.0f })
-            consider (line);
-
-        return best;
-    }
-
-    void paintHandle (juce::Graphics& g, const Palette& p, juce::Colour colour, Target target, juce::Point<float> at) const
-    {
-        const auto radius = target == hovered || target == dragged ? GraphTint::handleRadius * 1.5f : GraphTint::handleRadius;
-        const auto dot = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (at);
-        g.setColour (p.background);
-        g.fillEllipse (dot.expanded (1.0f));
-        g.setColour (colour);
-
-        if (target.point)
-            g.fillEllipse (dot);
-        else
-            g.drawEllipse (dot.reduced (GraphTint::handleOutline / 2.0f), GraphTint::handleOutline);
-    }
-
-    void showPointMenu (int point)
-    {
-        juce::PopupMenu menu;
-        const auto current = juce::roundToInt (getValue (point, Multiband::pointType));
-        const auto& names =
-            Multiband::info.parameters[(size_t) Multiband::getPointParameter (getBand(), point, Multiband::pointType)].choices;
-
-        for (int type = 0; type < (int) names.size(); ++type)
-            menu.addItem (juce::PopupMenu::Item (juce::String (names[(size_t) type].data(), names[(size_t) type].size()))
-                              .setID (type + 1)
-                              .setEnabled (point > 0)
-                              .setTicked (point > 0 && type == current));
-
-        menu.addSeparator();
-        menu.addItem (juce::PopupMenu::Item ("Delete Point").setID (100).setEnabled (point > 0 && point < getCount() - 1));
-
-        const juce::Component::SafePointer<Curve> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
-                            [safeThis, point] (int result)
-                            {
-                                if (safeThis == nullptr || result <= 0)
-                                    return;
-
-                                if (result == 100)
-                                    safeThis->editor.deletePoint (point);
-                                else
-                                    safeThis->editor.setPointType (point, result - 1);
-                            });
-    }
-};
 
 //==============================================================================
 // The analysis display: Monitor or Bands, as Maximus's.
@@ -654,7 +180,7 @@ public:
         {
             // The band's level under the pointer: its pre gain, on the curves' scale.
             const auto place = juce::jlimit (0.0f, 1.0f, (getArea().getBottom() - e.position.y) / getArea().getHeight());
-            const auto decibels = toDecibels (Multiband::fromAxis (place));
+            const auto decibels = toDecibels (devices::curves::fromAxis (place));
             handle.setValue (devices::constrain (Multiband::info.parameters[(size_t) *dragged], decibels));
         }
 
@@ -822,22 +348,7 @@ public:
         setTitle ("Multiband");
 
         // The curve's toolbar: its menu, Freeze and Snap.
-        menuButton.setTooltip ("The curve's menu: shapes to start from, copy and paste, flip, smooth all points, reset");
-        menuButton.onClick = [this] { showCurveMenu(); };
-        freezeButton.setClickingTogglesState (true);
-        freezeButton.setTooltip ("Freeze: the curve can't be edited while this is on");
-        freezeButton.onClick = [this]
-        {
-            editor.curve->frozen = freezeButton.getToggleState();
-            editor.curve->repaint();
-        };
-        snapButton.setClickingTogglesState (true);
-        snapButton.setToggleState (true, juce::dontSendNotification);
-        snapButton.setTooltip ("Snap: points dragged near the grid's lines go onto them");
-        snapButton.onClick = [this] { editor.curve->snaps = snapButton.getToggleState(); };
-
-        for (auto* button : { &menuButton, &freezeButton, &snapButton })
-            addAndMakeVisible (button);
+        addAndMakeVisible (tools);
 
         // The display's toolbar: its traces' switches, its speed, the spectrum, and Monitor or Bands.
         static constexpr const char* traceNames[] = { "In", "Band In", "Out", "Heard", "Gain", "All Gains", "Pre/Post" };
@@ -975,11 +486,7 @@ public:
         auto curveColumn = top.removeFromLeft (top.getHeight() - toolbarHeight);
         auto curveTools = curveColumn.removeFromBottom (toolbarHeight).reduced (0, 2);
         editor.curve->setBounds (curveColumn);
-        menuButton.setBounds (curveTools.removeFromLeft (toolbarHeight + Space::s));
-        curveTools.removeFromLeft (Space::xs);
-        freezeButton.setBounds (curveTools.removeFromLeft (toolbarHeight + Space::s));
-        curveTools.removeFromLeft (Space::xs);
-        snapButton.setBounds (curveTools.removeFromLeft (toolbarHeight + Space::s));
+        tools.setBounds (curveTools);
 
         top.removeFromLeft (Space::s);
         auto displayTools = top.removeFromBottom (toolbarHeight).reduced (0, 2);
@@ -1064,74 +571,11 @@ public:
 
 private:
     MultibandEditor& editor;
-    IconButton menuButton { "Curve menu", Icon::menu }, freezeButton { "Freeze", Icon::frozen }, snapButton { "Snap", Icon::magnet };
+    DynamicsCurveTools tools { *editor.curve };
     juce::OwnedArray<juce::TextButton> traceButtons;
     juce::Slider speed;
     juce::Label speedName { {}, "Speed" };
     juce::TextButton spectrumButton { "Spectrum" }, monitorButton { "Monitor" }, bandsButton { "Bands" };
-
-    void showCurveMenu()
-    {
-        juce::PopupMenu shapes;
-
-        for (const auto& name : getShapeNames())
-            shapes.addItem (name,
-                            [safe = juce::Component::SafePointer<Panel> (this), name]
-                            {
-                                if (safe != nullptr)
-                                    safe->editor.applyShape (name);
-                            });
-
-        juce::PopupMenu menu;
-        menu.addSubMenu ("Shapes", shapes);
-        menu.addSeparator();
-        const juce::Component::SafePointer<Panel> safe (this);
-        menu.addItem ("Copy Curve",
-                      [safe]
-                      {
-                          if (safe != nullptr)
-                              getCopiedCurve() = safe->editor.curve->getPoints();
-                      });
-        menu.addItem ("Paste Curve", getCopiedCurve().has_value(), false,
-                      [safe]
-                      {
-                          if (safe != nullptr && getCopiedCurve().has_value())
-                              safe->editor.curve->setPoints (*getCopiedCurve(), "Paste Curve");
-                      });
-        menu.addItem ("Flip Vertically",
-                      [safe]
-                      {
-                          if (safe == nullptr)
-                              return;
-
-                          auto points = safe->editor.curve->getPoints();
-
-                          for (auto& point : points)
-                              point[Multiband::pointY] = 1.0f - point[Multiband::pointY];
-
-                          safe->editor.curve->setPoints (points, "Flip Curve");
-                      });
-        menu.addItem ("Smooth All Points",
-                      [safe]
-                      {
-                          if (safe == nullptr)
-                              return;
-
-                          auto points = safe->editor.curve->getPoints();
-
-                          for (auto& point : points)
-                              point[Multiband::pointType] = (float) Multiband::PointType::singleCurve;
-
-                          safe->editor.curve->setPoints (points, "Smooth Curve");
-                      });
-        menu.addItem ("Reset Curve",
-                      [safe]
-                      {
-                          if (safe != nullptr)
-                              safe->editor.applyShape (getShapes().front().name);
-                      });
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&menuButton));
-    }
 };
 
 //==============================================================================
@@ -1149,8 +593,10 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle)
         if (parameters[i].isValid())
             values[i] = parameters[i].getValue();
 
-    auto& shownCurve = keep (std::make_unique<Curve> (*this));
+    auto& shownCurve = keep (std::make_unique<DynamicsCurve> (device, values));
     curve = &shownCurve;
+    curve->setCurve (Multiband::getBandParameter (selectedBand, Multiband::points), getBandColour (selectedBand));
+    curve->onEdit = [this] { refresh(); };
     auto& shownAnalysis = keep (std::make_unique<Analysis> (*this));
     analysis = &shownAnalysis;
     auto& shownPanel = keep (std::make_unique<Panel> (*this));
@@ -1252,7 +698,7 @@ void MultibandEditor::selectBand (int band)
 {
     selectedBand = juce::jlimit (0, Multiband::numBands - 1, band);
     panel->showBand (selectedBand);
-    curve->repaint();
+    curve->setCurve (Multiband::getBandParameter (selectedBand, Multiband::points), getBandColour (selectedBand));
     analysis->repaint();
 }
 
@@ -1261,7 +707,7 @@ juce::Button& MultibandEditor::getBandButton (int band)
     return *panel->bandButtons[band];
 }
 
-juce::Component& MultibandEditor::getCurve() const noexcept
+DynamicsCurve& MultibandEditor::getCurve() const noexcept
 {
     return *curve;
 }
@@ -1269,62 +715,6 @@ juce::Component& MultibandEditor::getCurve() const noexcept
 juce::Component& MultibandEditor::getDisplay() const noexcept
 {
     return *analysis;
-}
-
-juce::Point<float> MultibandEditor::getCurvePosition (float across, float up) const
-{
-    return curve->toScreen (across, up);
-}
-
-juce::Point<float> MultibandEditor::getPointPosition (int point) const
-{
-    return curve->getPointPosition (point);
-}
-
-std::optional<juce::Point<float>> MultibandEditor::getTensionPosition (int point) const
-{
-    return curve->getTensionPosition (point);
-}
-
-void MultibandEditor::setPointType (int point, int type)
-{
-    if (point > 0 && point < curve->getCount())
-        curve->setValue (point, Multiband::pointType, (float) type, "Change Line");
-}
-
-void MultibandEditor::deletePoint (int point)
-{
-    auto points = curve->getPoints();
-
-    if (point <= 0 || point >= (int) points.size() - 1)
-        return;
-
-    points.erase (points.begin() + point);
-    curve->setPoints (points, "Delete Point");
-}
-
-bool MultibandEditor::applyShape (const juce::String& name)
-{
-    for (const auto& shape : getShapes())
-    {
-        if (name == shape.name)
-        {
-            curve->setPoints (shape.points, "Change Curve");
-            return true;
-        }
-    }
-
-    return false;
-}
-
-juce::StringArray MultibandEditor::getShapeNames()
-{
-    juce::StringArray names;
-
-    for (const auto& shape : getShapes())
-        names.add (shape.name);
-
-    return names;
 }
 
 bool MultibandEditor::isShowingBands() const
@@ -1408,6 +798,7 @@ void MultibandEditor::refresh()
             analysis->repaint();
     }
 
+    curve->setHeardLevel (shownHeard[(size_t) selectedBand]);
     auto numbers = values;
     numbers.push_back (shownHeard[(size_t) selectedBand]);
 

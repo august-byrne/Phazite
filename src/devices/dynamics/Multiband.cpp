@@ -15,7 +15,6 @@ namespace
     constexpr std::string_view modes[] = { "On", "Comp Off", "Muted", "Off" };
     constexpr std::string_view detections[] = { "Peak", "RMS" };
     constexpr std::string_view curveShapes[] = { "1", "2", "3", "4", "5", "6", "7", "8" };
-    constexpr std::string_view pointTypes[] = { "Single Curve", "Double Curve", "Hold", "Stairs", "Smooth Stairs" };
 
     constexpr ParameterInfo makeChoice (std::string_view id, std::string_view name, std::span<const std::string_view> choices,
                                         float defaultValue)
@@ -56,7 +55,7 @@ namespace
     { .id = band "Point" #n "X", .name = Band " Point " #n " X", .defaultValue = x, .unit = Unit::percent },                               \
         { .id = band "Point" #n "Y", .name = Band " Point " #n " Y", .defaultValue = y, .unit = Unit::percent },                           \
         makeBipolar (band "Point" #n "Tension", Band " Point " #n " Tension"),                                                             \
-        makeChoice (band "Point" #n "Type", Band " Point " #n " Type", pointTypes, 0.0f)
+        makeChoice (band "Point" #n "Type", Band " Point " #n " Type", curves::pointTypeNames, 0.0f)
 
     // A band's parameters, in the order of Multiband::BandField. The master looks ahead by its attack, so it starts quicker.
 #define PHAZITE_MULTIBAND_BAND(band, Band, attackDefault)                                                                                  \
@@ -114,66 +113,14 @@ namespace
 #undef PHAZITE_MULTIBAND_POINT
 
     static_assert (std::size (parameters) == (size_t) Multiband::getBandParameter (Multiband::numBands, Multiband::mode));
-    static_assert (Multiband::getPointParameter (Multiband::master, Multiband::maxPoints - 1, Multiband::pointType) + 1
+    static_assert (Multiband::getPointParameter (Multiband::master, curves::maxPoints - 1, curves::pointType) + 1
                    == (int) std::size (parameters));
 
-    constexpr double gainSeconds = 0.02;  // how long a change of a band's pre or post gain takes, about
-    constexpr float log9 = 2.1972245773f; // the curves' axis: ln 9
-    constexpr float quietest = -120.0f;   // decibels: no quieter gains than this
-    constexpr float loudest = 48.0f;      // and no louder
+    constexpr double gainSeconds = 0.02; // how long a change of a band's pre or post gain takes, about
 
     int roundToChoice (float value, int count) noexcept
     {
         return juce::jlimit (0, count - 1, (int) std::lround (value));
-    }
-
-    // A line rising (or falling) from 0 to 1 over a fraction s of its way, bent up by a tension above 0 or down below it:
-    // (e^(-a s) - 1) / (e^(-a) - 1), the bend a = 8 tension (as the synths' envelopes bend, devices/dsp/Envelopes.h).
-    float bendUp (float s, float bend) noexcept
-    {
-        if (std::abs (bend) < 1.0e-4f)
-            return s;
-
-        return (float) (std::expm1 (-(double) bend * s) / std::expm1 (-(double) bend));
-    }
-
-    float getLine (Multiband::PointType type, float tension, float s, float from, float to) noexcept
-    {
-        // Bending "up" means faster first for a rising line, slower first for a falling one.
-        const auto bend = 8.0f * tension * (to >= from ? 1.0f : -1.0f);
-
-        switch (type)
-        {
-            case Multiband::PointType::doubleCurve:
-            {
-                // An S: the first half slow then fast, the second its mirror, the tension how steep its middle is.
-                const auto middle = 0.5f * (from + to);
-
-                if (s < 0.5f)
-                    return from + (middle - from) * bendUp (2.0f * s, -bend);
-
-                return middle + (to - middle) * (1.0f - bendUp (2.0f - 2.0f * s, -bend));
-            }
-            case Multiband::PointType::hold:
-                return s < 1.0f ? from : to;
-            case Multiband::PointType::stairs:
-            {
-                const auto steps = Multiband::getStairs (tension);
-                const auto step = std::min ((int) std::floor (s * (float) steps), steps - 1);
-                return from + (to - from) * (float) step / (float) (steps - 1);
-            }
-            case Multiband::PointType::smoothStairs:
-            {
-                const auto steps = Multiband::getStairs (tension);
-                const auto along = s * (float) steps;
-                const auto step = std::floor (along);
-                const auto rounded = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * (along - step));
-                return from + (to - from) * std::min (1.0f, (step + rounded) / (float) steps);
-            }
-            case Multiband::PointType::singleCurve:
-            default:
-                return from + (to - from) * bendUp (s, bend);
-        }
     }
 
     // The saturation: up to its threshold the sound passes as it is, then it rounds off into the ceiling (type A, softly, as
@@ -212,57 +159,6 @@ namespace
 
 const DeviceInfo Multiband::info { .typeID = typeID, .name = "Multiband", .kind = DeviceKind::effect, .parameters = parameters };
 
-float Multiband::toAxis (float amplitude) noexcept
-{
-    return std::log1p (2.0f * std::max (0.0f, amplitude)) / log9;
-}
-
-float Multiband::fromAxis (float place) noexcept
-{
-    return 0.5f * std::expm1 (place * log9);
-}
-
-float Multiband::axisForDecibels (float decibels) noexcept
-{
-    return toAxis (dsp::decibelsToGain (decibels));
-}
-
-int Multiband::getStairs (float tension) noexcept
-{
-    return 2 + (int) std::lround ((juce::jlimit (-1.0f, 1.0f, tension) + 1.0f) * 7.0f);
-}
-
-float Multiband::getCurveAt (std::span<const float> values, int band, float place)
-{
-    const auto value = [values, band] (int point, PointField field) { return values[(size_t) getPointParameter (band, point, field)]; };
-    const auto count = juce::jlimit (2, maxPoints, (int) std::lround (values[(size_t) getBandParameter (band, points)]));
-
-    // Each point no further left than the one before it.
-    auto lastX = 0.0f, lastY = value (0, pointY);
-
-    if (place <= value (0, pointX))
-        return lastY;
-
-    lastX = std::max (0.0f, value (0, pointX));
-
-    for (int i = 1; i < count; ++i)
-    {
-        const auto x = std::max (lastX, value (i, pointX)), y = value (i, pointY);
-
-        if (place <= x)
-        {
-            const auto s = x > lastX ? (place - lastX) / (x - lastX) : 1.0f;
-            const auto type = (PointType) roundToChoice (value (i, pointType), (int) std::size (pointTypes));
-            return getLine (type, value (i, pointTension), s, lastY, y);
-        }
-
-        lastX = x;
-        lastY = y;
-    }
-
-    return lastY;
-}
-
 void Multiband::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
@@ -280,7 +176,7 @@ void Multiband::prepare (double newSampleRate, int)
     for (auto& compressor : compressors)
     {
         compressor.heard.prepare (lookahead);
-        compressor.hasTable = false; // made again from the parameters at the first block
+        compressor.gains.reset(); // made again from the parameters at the first block
     }
 
     reset();
@@ -328,29 +224,6 @@ void Multiband::reset()
     isFirstBlock = true;
 }
 
-void Multiband::updateCurve (Compressor& compressor, std::span<const float> values, int band)
-{
-    // Made again only when the curve's parameters change.
-    const auto first = (size_t) getBandParameter (band, points);
-    const auto count = compressor.shownCurve.size();
-
-    if (compressor.hasTable && std::equal (compressor.shownCurve.begin(), compressor.shownCurve.end(), values.begin() + (long) first))
-        return;
-
-    std::copy (values.begin() + (long) first, values.begin() + (long) (first + count), compressor.shownCurve.begin());
-    compressor.hasTable = true;
-
-    // The gain for each place across the axis: how far out the curve puts it, against how far in it is.
-    for (int i = 0; i <= tableSize; ++i)
-    {
-        const auto place = std::max (1.0e-4f, (float) i / (float) tableSize);
-        const auto in = fromAxis (place), out = fromAxis (getCurveAt (values, band, place));
-        compressor.gains[(size_t) i] = juce::jlimit (quietest, loudest, dsp::gainToDecibels (out) - dsp::gainToDecibels (in));
-    }
-
-    compressor.lastGain = fromAxis (getCurveAt (values, band, 1.0f));
-}
-
 float Multiband::compress (Compressor& c, std::span<const float> values, int band, float level, bool compresses) noexcept
 {
     const auto value = [values, band] (BandField field) { return values[(size_t) getBandParameter (band, field)]; };
@@ -359,20 +232,7 @@ float Multiband::compress (Compressor& c, std::span<const float> values, int ban
     auto wanted = 0.0f;
 
     if (compresses)
-    {
-        const auto place = toAxis (level);
-
-        if (place >= 1.0f)
-        {
-            wanted = juce::jlimit (quietest, loudest, dsp::gainToDecibels (c.lastGain) - dsp::gainToDecibels (level));
-        }
-        else
-        {
-            const auto along = place * (float) tableSize;
-            const auto index = std::min ((int) along, tableSize - 1);
-            wanted = c.gains[(size_t) index] + (along - (float) index) * (c.gains[(size_t) index + 1] - c.gains[(size_t) index]);
-        }
-    }
+        wanted = c.gains.getDecibels (level);
 
     // The attack: through as many smoothing stages as the curve box says, the attack's time shared among them, so that a
     // higher number starts more roundly. The first release: speeding up from where it began, reaching the gain wanted as its
@@ -459,7 +319,7 @@ void Multiband::process (const ProcessContext& block)
     const auto bandMode = [&] (int band) { return (Mode) roundToChoice (bandValue (band, mode), (int) std::size (modes)); };
 
     for (int band = 0; band < numBands; ++band)
-        updateCurve (compressors[(size_t) band], values, band);
+        compressors[(size_t) band].gains.update (getCurve (values, band));
 
     // The filters: the low cut, and each crossover at 12 dB per octave (one section each way, the high one upside down, so
     // that they add up to a first-order all-pass) or 24 (two Butterworth sections each way, adding up to a second-order one).

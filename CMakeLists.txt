@@ -109,6 +109,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/SyncedLfo.h
     src/devices/dynamics/Compressor.cpp
     src/devices/dynamics/Compressor.h
+    src/devices/dynamics/DynamicsCurve.cpp
+    src/devices/dynamics/DynamicsCurve.h
     src/devices/dynamics/Limiter.cpp
     src/devices/dynamics/Limiter.h
     src/devices/dynamics/Multiband.cpp
@@ -543,6 +545,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DeviceWindowContent.h
     src/ui/devices/DrumSamplerEditor.cpp
     src/ui/devices/DrumSamplerEditor.h
+    src/ui/devices/DynamicsCurve.cpp
+    src/ui/devices/DynamicsCurve.h
     src/ui/devices/EqEditor.cpp
     src/ui/devices/EqEditor.h
     src/ui/devices/FilterEditor.cpp

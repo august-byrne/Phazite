@@ -40,7 +40,7 @@ struct Song
 
     ~Song() { setEdit (context, nullptr); }
 
-    ParameterRef threshold() const { return { phazite::getEffects (context, phazite::getTrackID (*a))[0].id, "threshold" }; }
+    ParameterRef makeup() const { return { phazite::getEffects (context, phazite::getTrackID (*a))[0].id, "makeup" }; }
     juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
@@ -60,7 +60,7 @@ struct KnobScreen
     }
 
     Song& song;
-    phazite::ui::Knob knob { "Threshold", 0.0 };
+    phazite::ui::Knob knob { "Makeup", 0.0 };
     phazite::ui::ParameterAttachment attachment { knob };
     phazite::test::TestWindow window { knob, 64, 64 };
 };
@@ -75,11 +75,11 @@ juce::DragAndDropTarget::SourceDetails dragOf (phazite::ModulatorID modulator, j
 TEST_CASE ("A modulated knob shows a ring, which a drag on it changes as one undo step")
 {
     Song song;
-    KnobScreen screen (song, song.threshold());
+    KnobScreen screen (song, song.makeup());
     CHECK_FALSE (screen.knob.getModulation().has_value());
 
-    auto handle = phazite::getParameter (song.context, song.threshold());
-    handle.setValue (-30.0f); // the middle
+    auto handle = phazite::getParameter (song.context, song.makeup());
+    handle.setValue (6.0f); // the middle
     const auto lfo = phazite::modulateWithNew (handle, ModulatorType::lfo, 0.25f);
     REQUIRE (lfo.isValid());
     screen.attachment.update();
@@ -100,7 +100,7 @@ TEST_CASE ("A modulated knob shows a ring, which a drag on it changes as one und
     REQUIRE (modulations.size() == 1);
     CHECK (modulations[0].amount == doctest::Approx (0.45f).epsilon (0.02));
     CHECK (song.describeUndo() == juce::String ("Undo Change Modulation"));
-    CHECK (handle.getValue() == doctest::Approx (-30.0f).epsilon (0.5)); // the knob's own value stays
+    CHECK (handle.getValue() == doctest::Approx (6.0f).epsilon (0.5)); // the knob's own value stays
 
     // In the middle, a drag still turns the knob.
     mouse.press ({ 32, 32 });
@@ -118,7 +118,7 @@ TEST_CASE ("A modulated knob shows a ring, which a drag on it changes as one und
 TEST_CASE ("A modulator dropped on a knob of its track modulates it; one of another track's isn't taken")
 {
     Song song;
-    KnobScreen screen (song, song.threshold());
+    KnobScreen screen (song, song.makeup());
     const auto lfo = phazite::addModulator (song.context, phazite::getTrackID (*song.a), ModulatorType::lfo);
     const auto elsewhere = phazite::addModulator (song.context, phazite::getTrackID (*song.b), ModulatorType::random);
     juce::Component source;
@@ -127,16 +127,16 @@ TEST_CASE ("A modulator dropped on a knob of its track modulates it; one of anot
     REQUIRE (screen.knob.isInterestedInDragSource (dragOf (lfo, source)));
     screen.knob.itemDropped (dragOf (lfo, source));
 
-    const auto modulations = phazite::getModulations (song.context, song.threshold());
+    const auto modulations = phazite::getModulations (song.context, song.makeup());
     REQUIRE (modulations.size() == 1);
     CHECK (modulations[0].modulator == lfo);
     CHECK (modulations[0].amount == doctest::Approx (phazite::defaultModulationAmount));
-    CHECK (song.describeUndo() == juce::String ("Undo Modulate Threshold"));
+    CHECK (song.describeUndo() == juce::String ("Undo Modulate Makeup"));
 
     // Dropped again, it keeps its amount.
-    phazite::modulate (song.context, lfo, song.threshold(), 0.6f);
+    phazite::modulate (song.context, lfo, song.makeup(), 0.6f);
     screen.knob.itemDropped (dragOf (lfo, source));
-    CHECK (phazite::getModulations (song.context, song.threshold())[0].amount == doctest::Approx (0.6f));
+    CHECK (phazite::getModulations (song.context, song.makeup())[0].amount == doctest::Approx (0.6f));
 }
 
 TEST_CASE ("A modulator's editor has a knob for each parameter, and a step sequencer's steps are drawn with the mouse")

@@ -12,6 +12,7 @@ namespace
 {
 namespace devices = phazite::devices;
 using devices::Multiband;
+namespace curves = devices::curves;
 constexpr double testRate = 48000.0;
 constexpr int testBlockSize = 480;
 constexpr double twoPi = juce::MathConstants<double>::twoPi;
@@ -117,7 +118,7 @@ float levelOut (const std::vector<float>& values, double frequency, float decibe
 // A band's curve set to limit at a level, as a flat line from it to the end.
 void limitAt (std::vector<float>& values, const char* band, float decibels)
 {
-    const auto place = Multiband::axisForDecibels (decibels);
+    const auto place = curves::axisForDecibels (decibels);
     const auto prefix = juce::String (band);
     set (values, (prefix + "Point2X").toStdString(), place);
     set (values, (prefix + "Point2Y").toStdString(), place);
@@ -134,7 +135,7 @@ TEST_CASE ("The multiband describes itself: global parameters, then each band's,
     CHECK (devices::findParameter (Multiband::info, "masterRelease2")
            == Multiband::getBandParameter (Multiband::master, Multiband::release2));
     CHECK (devices::findParameter (Multiband::info, "highPoint8Type")
-           == Multiband::getPointParameter (Multiband::high, Multiband::maxPoints - 1, Multiband::pointType));
+           == Multiband::getPointParameter (Multiband::high, curves::maxPoints - 1, curves::pointType));
     CHECK (devices::findParameter (Multiband::info, devices::mixParameterID) < 0); // LMH Mix, before the master band, is its mix
 
     // Its latency is the most both look-aheads take, whatever they are set to.
@@ -146,34 +147,34 @@ TEST_CASE ("The multiband describes itself: global parameters, then each band's,
 TEST_CASE ("The multiband's curves: Maximus's axis, a limiter at first, and each line's shape")
 {
     // Silence at one end, 0 dB in the middle, +12 dB at the other.
-    CHECK (Multiband::toAxis (0.0f) == doctest::Approx (0.0f));
-    CHECK (Multiband::toAxis (1.0f) == doctest::Approx (0.5f));
-    CHECK (Multiband::toAxis (4.0f) == doctest::Approx (1.0f));
-    CHECK (Multiband::fromAxis (Multiband::toAxis (0.3f)) == doctest::Approx (0.3f));
-    CHECK (Multiband::axisForDecibels (0.0f) == doctest::Approx (0.5f));
+    CHECK (curves::toAxis (0.0f) == doctest::Approx (0.0f));
+    CHECK (curves::toAxis (1.0f) == doctest::Approx (0.5f));
+    CHECK (curves::toAxis (4.0f) == doctest::Approx (1.0f));
+    CHECK (curves::fromAxis (curves::toAxis (0.3f)) == doctest::Approx (0.3f));
+    CHECK (curves::axisForDecibels (0.0f) == doctest::Approx (0.5f));
 
     // At first: level in, level out, up to 0 dB; then 0 dB.
     auto values = getDefaults();
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.3f) == doctest::Approx (0.3f));
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.8f) == doctest::Approx (0.5f));
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.3f) == doctest::Approx (0.3f));
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.8f) == doctest::Approx (0.5f));
 
     // A tension above 0 bends the line before a point up; a hold keeps the level before it; stairs step.
     set (values, "lowPoint2Tension", 0.5f);
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.25f) > 0.3f);
-    set (values, "lowPoint2Type", (float) Multiband::PointType::hold);
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.25f) == doctest::Approx (0.0f));
-    set (values, "lowPoint2Type", (float) Multiband::PointType::stairs);
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.25f) > 0.3f);
+    set (values, "lowPoint2Type", (float) curves::PointType::hold);
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.25f) == doctest::Approx (0.0f));
+    set (values, "lowPoint2Type", (float) curves::PointType::stairs);
     set (values, "lowPoint2Tension", -1.0f); // the fewest steps: two
-    CHECK (Multiband::getStairs (-1.0f) == 2);
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.2f) == doctest::Approx (0.0f));
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.3f) == doctest::Approx (0.5f));
+    CHECK (curves::getStairs (-1.0f) == 2);
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.2f) == doctest::Approx (0.0f));
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.3f) == doctest::Approx (0.5f));
 
     // A double curve passes through the middle of its line, as an S.
-    set (values, "lowPoint2Type", (float) Multiband::PointType::doubleCurve);
+    set (values, "lowPoint2Type", (float) curves::PointType::doubleCurve);
     set (values, "lowPoint2Tension", 0.8f);
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.25f) == doctest::Approx (0.25f).epsilon (0.01));
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.1f) < 0.1f);
-    CHECK (Multiband::getCurveAt (values, Multiband::low, 0.4f) > 0.4f);
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.25f) == doctest::Approx (0.25f).epsilon (0.01));
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.1f) < 0.1f);
+    CHECK (curves::getAt (Multiband::getCurve (values, Multiband::low), 0.4f) > 0.4f);
 }
 
 TEST_CASE ("The multiband passes quiet sound as it came in, at any frequency, and limits loud sound at 0 dB")

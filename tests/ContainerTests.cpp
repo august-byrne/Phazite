@@ -322,12 +322,12 @@ TEST_CASE ("A container's macros modulate its devices; its track's modulators re
     auto& context = song.context;
     const auto container = groupEqAndReverb (song);
     const auto inside = phazite::getContainerDevices (context, container);
-    const ParameterRef gain { inside[0].id, "band4Gain" };                     // the EQ's, inside
-    const ParameterRef threshold { song.effectsOf (*song.a)[1], "threshold" }; // the compressor's, outside
+    const ParameterRef gain { inside[0].id, "band4Gain" };               // the EQ's, inside
+    const ParameterRef makeup { song.effectsOf (*song.a)[1], "makeup" }; // the compressor's, outside
     const auto macro = phazite::getContainerMacros (context, container)[0].id;
 
     CHECK (phazite::canModulate (context, macro, gain));
-    CHECK_FALSE (phazite::canModulate (context, macro, threshold));
+    CHECK_FALSE (phazite::canModulate (context, macro, makeup));
 
     // Turning the macro moves the EQ's gain by the amount, from where it is: at 0, not at all.
     phazite::modulate (context, macro, gain, 0.5f);
@@ -350,7 +350,7 @@ TEST_CASE ("A container's macros modulate its devices; its track's modulators re
     REQUIRE (offered.size() == 9);
     CHECK (offered[0].id == macro);
     CHECK (offered[8].id == lfo);
-    CHECK (phazite::getModulatorsFor (phazite::getParameter (context, threshold)).size() == 1);
+    CHECK (phazite::getModulatorsFor (phazite::getParameter (context, makeup)).size() == 1);
 
     // A macro is renamed, but stays: the container keeps all eight.
     phazite::renameMacro (context, macro, "Air");

@@ -162,37 +162,44 @@ TEST_CASE ("An LFO's picture sets its depth with a drag up or down, and its rate
     CHECK (valueOf (song, synth, "lfoRate") == doctest::Approx (rate * 1.1f).epsilon (0.01));
 }
 
-TEST_CASE ("A compressor's curve: the line above the threshold drags the ratio, below it the makeup, and the wheel changes nothing")
+TEST_CASE ("A compressor's curve is the multiband's: a point drags, a line bends by its handle, and the wheel changes nothing")
 {
     using phazite::devices::Compressor;
     phazite::test::TestSong song;
     const auto device = song.addEffect (song.firstTrack, Compressor::typeID);
     phazite::ui::CompressorEditor editor (phazite::getDeviceHandle (song.context, device));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    phazite::test::Mouse mouse (editor.getGraph());
-    const auto at = [&editor] (float in, float out) { return editor.getGraphPosition (in, out).roundToInt(); };
+    auto& curve = editor.getCurve();
+    phazite::test::Mouse mouse (curve);
 
-    // 12 dB over the -18 dB threshold at 4:1 comes out 3 dB over it: the line dragged to 6 dB over there is 2:1.
-    mouse.press (at (-6.0f, -15.0f));
-    mouse.dragTo (at (-6.0f, -12.0f));
+    // Its corner at -18 dB, dragged down: it turns down more, from there on.
+    const auto corner = curve.getPointPosition (1).roundToInt();
+    const auto before = valueOf (song, device, "point2Y");
+    mouse.press (corner, juce::ModifierKeys::ctrlModifier); // Ctrl keeps it where it is across
+    mouse.dragTo (corner + juce::Point<int> (0, 20));
     mouse.release();
-    CHECK (valueOf (song, device, "ratio") == doctest::Approx (2.0f).epsilon (0.05));
-    CHECK (describeUndo (song) == juce::String ("Undo Change Ratio"));
+    CHECK (valueOf (song, device, "point2Y") < before);
+    CHECK (describeUndo (song) == juce::String ("Undo Move Point"));
+    undo (song);
+    CHECK (valueOf (song, device, "point2Y") == doctest::Approx (before));
+    editor.refresh();
 
-    // The line below the threshold, up: the whole curve 6 dB higher, the threshold where it was.
-    mouse.press (at (-40.0f, -40.0f));
-    mouse.dragTo (at (-40.0f, -34.0f));
+    // The handle in the middle of the line over it, dragged up: the line bends up.
+    REQUIRE (curve.getTensionPosition (2).has_value());
+    const auto handle = curve.getTensionPosition (2)->roundToInt();
+    mouse.press (handle);
+    mouse.dragTo (handle - juce::Point<int> (0, 20));
     mouse.release();
-    CHECK (valueOf (song, device, "makeup") == doctest::Approx (6.0f).epsilon (0.05));
-    CHECK (valueOf (song, device, "threshold") == doctest::Approx (-18.0f));
-    CHECK (describeUndo (song) == juce::String ("Undo Change Threshold"));
+    CHECK (valueOf (song, device, "point3Tension") > 0.1f);
+    CHECK (describeUndo (song) == juce::String ("Undo Bend Line"));
+    editor.refresh();
 
     // The wheel is the view's, to scroll it: no compressor's graph found turns anything with it (docs/design.md, B123).
-    const auto ratio = valueOf (song, device, "ratio"), knee = valueOf (song, device, "knee");
-    mouse.wheel (at (-18.0f, -12.0f), notchUp);
-    mouse.wheel (at (-6.0f, -6.0f), notchUp);
-    CHECK (valueOf (song, device, "knee") == doctest::Approx (knee));
-    CHECK (valueOf (song, device, "ratio") == doctest::Approx (ratio));
+    const auto tension = valueOf (song, device, "point3Tension"), height = valueOf (song, device, "point2Y");
+    mouse.wheel (curve.getTensionPosition (2)->roundToInt(), notchUp);
+    mouse.wheel (curve.getPointPosition (1).roundToInt(), notchUp);
+    CHECK (valueOf (song, device, "point3Tension") == doctest::Approx (tension));
+    CHECK (valueOf (song, device, "point2Y") == doctest::Approx (height));
 }
 
 TEST_CASE ("The stereo expander's fan follows a drag across its disc, and the wheel opens or closes it a step at a time")

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's compressor (src/devices/dynamics/Compressor.h): its curve, as it reports it and as it plays, its attack and
-// release times, input and makeup gains, sidechain, stereo link, low cut and meters.
+// Phazite's compressor (src/devices/dynamics/Compressor.h): its drawn curve as it plays, down and up, its attack and release
+// times, input and makeup gains, sidechain, stereo link, key cuts, meters and characters.
 #include "TestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 
@@ -14,6 +14,7 @@ namespace
 {
 namespace devices = phazite::devices;
 using devices::Compressor;
+namespace curves = devices::curves;
 constexpr double testRate = 48000.0;
 constexpr int testBlockSize = 256;
 
@@ -27,13 +28,33 @@ std::vector<float> getDefaults()
     return values;
 }
 
-// Settings that make its timing easy to read: a hard knee, 20 dB under -6 dB, a quick attack and makeup at 0 dB.
+// A curve's points into the parameters' values, the last one repeated in the places they leave.
+void setCurve (std::vector<float>& values, const std::vector<curves::Point>& points)
+{
+    values[Compressor::points] = (float) points.size();
+
+    for (int point = 0; point < curves::maxPoints; ++point)
+        for (int field = 0; field < curves::pointFields; ++field)
+            values[(size_t) (Compressor::points + curves::getPointParameter (point, (curves::PointField) field))] =
+                points[(size_t) std::min (point, (int) points.size() - 1)][(size_t) field];
+}
+
+// How many decibels louder its curve puts out a level (below 0, quieter), once settled.
+float getCurveGain (const std::vector<float>& values, float decibels)
+{
+    const auto out = curves::fromAxis (curves::getAt (Compressor::getCurve (values), curves::axisForDecibels (decibels)));
+    return 20.0f * std::log10 (out) - decibels;
+}
+
+// Settings that make its timing easy to read: level in, level out, up to -26 dB, then a hard corner to a point at -6 dB in,
+// which comes out 15 dB down; a quick attack and makeup at 0 dB.
 std::vector<float> getTestValues()
 {
     auto values = getDefaults();
-    values[Compressor::threshold] = -26.0f;
-    values[Compressor::ratio] = 4.0f;
-    values[Compressor::knee] = 0.0f;
+    setCurve (values,
+              { curves::makePoint (0.0f, 0.0f), curves::makePoint (curves::axisForDecibels (-26.0f), curves::axisForDecibels (-26.0f)),
+                curves::makePoint (curves::axisForDecibels (-6.0f), curves::axisForDecibels (-21.0f)),
+                curves::makePoint (1.0f, curves::axisForDecibels (-16.5f)) });
     values[Compressor::attack] = 1.0f;
     values[Compressor::release] = 50.0f;
     return values;
@@ -105,65 +126,81 @@ float gainAt (const std::vector<float>& played, int time, float inputDecibels)
 }
 } // namespace
 
-TEST_CASE ("The compressor's description holds together")
+TEST_CASE ("The compressor's description holds together: its curve's points after its knobs, at first 4:1 over -18 dB")
 {
     REQUIRE (devices::isValid (Compressor::info));
     CHECK (Compressor::info.parameters.size() == (size_t) Compressor::mix + 1);
     CHECK (devices::findParameter (Compressor::info, "character") == 0);                     // first: what kind of compressor it is
     CHECK (devices::findParameter (Compressor::info, "inputGain") == Compressor::inputGain); // then as the sound goes
     CHECK (devices::findParameter (Compressor::info, "drive") == Compressor::drive);
-    CHECK (devices::findParameter (Compressor::info, "threshold") == Compressor::threshold);
     CHECK (devices::findParameter (Compressor::info, "keyLowCut") == Compressor::keyLowCut);
     CHECK (devices::findParameter (Compressor::info, "keyHighCut") == Compressor::keyHighCut);
+    CHECK (devices::findParameter (Compressor::info, "points") == Compressor::points);
+    CHECK (devices::findParameter (Compressor::info, "point8Type")
+           == Compressor::points + curves::getPointParameter (curves::maxPoints - 1, curves::pointType));
     CHECK (devices::findParameter (Compressor::info, "mix") == Compressor::mix); // which its thin plug-in applies
+    CHECK (devices::findParameter (Compressor::info, "threshold") < 0);          // the curve says where it starts
+
+    // At first, as a compressor with a threshold at -18 dB and a ratio of 4:1 would be set.
+    const auto values = getDefaults();
+    const auto expected = curves::makeCompression (-18.0f, 4.0f);
+    REQUIRE (values[Compressor::points] == doctest::Approx ((float) expected.size()));
+
+    for (int point = 0; point < curves::maxPoints; ++point)
+    {
+        CAPTURE (point);
+
+        for (int field = 0; field < curves::pointFields; ++field)
+            CHECK (values[(size_t) (Compressor::points + curves::getPointParameter (point, (curves::PointField) field))]
+                   == doctest::Approx (expected[(size_t) std::min (point, (int) expected.size() - 1)][(size_t) field]).epsilon (1.0e-5));
+    }
 }
 
-TEST_CASE ("The compressor turns levels over the threshold down by its ratio, easing in across the knee")
+TEST_CASE ("The compressor turns each level as its curve says once settled: down, up, or not at all")
 {
+    // Downward: 4:1 over -18 dB, 18 dB over coming out 4.5 dB over exactly at 0 dB, and nearly 4:1 between.
     auto values = getDefaults();
-    values[Compressor::threshold] = -20.0f;
-    values[Compressor::ratio] = 4.0f;
-    values[Compressor::knee] = 0.0f;
+    CHECK (getCurveGain (values, -30.0f) == doctest::Approx (0.0f).epsilon (1.0e-4));
+    CHECK (getCurveGain (values, 0.0f) == doctest::Approx (-13.5f).epsilon (0.001));
+    CHECK (std::abs (getCurveGain (values, -9.0f) + 6.75f) < 0.1f); // nearly 4:1 between the points, its line bent
 
-    CHECK (Compressor::getReduction (values, -30.0f) == doctest::Approx (0.0f));
-    CHECK (Compressor::getReduction (values, -20.0f) == doctest::Approx (0.0f));
-    CHECK (Compressor::getReduction (values, -8.0f) == doctest::Approx (9.0f)); // 12 dB over comes out 3 dB over
-
-    // A 12 dB knee: from 6 dB under the threshold to 6 dB over, where it meets the line.
-    values[Compressor::knee] = 12.0f;
-    CHECK (Compressor::getReduction (values, -26.0f) == doctest::Approx (0.0f));
-    CHECK (Compressor::getReduction (values, -20.0f) == doctest::Approx (0.75f * 12.0f / 8.0f));
-    CHECK (Compressor::getReduction (values, -14.0f) == doctest::Approx (0.75f * 6.0f));
-    CHECK (Compressor::getReduction (values, -8.0f) == doctest::Approx (9.0f));
-
-    // It never turns a louder level down less, nor bends more steeply than the ratio.
-    auto last = 0.0f;
-
-    for (auto level = -40.0f; level <= 0.0f; level += 0.25f)
+    // Each shape as it plays, once settled, at levels around it: what its curve says, to a twentieth of a decibel (its table
+    // of gains is a little off the curve between its entries).
+    for (const auto* name : { "Compress 4:1 over -18 dB", "Lift under -30 dB", "Expand under -24 dB", "Limit at 0 dB" })
     {
-        const auto reduction = Compressor::getReduction (values, level);
-        CHECK (reduction >= last);
-        CHECK (reduction - last <= 0.75f * 0.25f + 1.0e-4f);
-        last = reduction;
+        CAPTURE (name);
+        REQUIRE (curves::findShape (name) != nullptr);
+        values = getTestValues();
+        setCurve (values, curves::findShape (name)->points);
+
+        for (const auto level : { -45.0f, -35.0f, -26.0f, -12.0f, -3.0f, 3.0f })
+        {
+            CAPTURE (level);
+            Compressor compressor;
+            compressor.prepare (testRate, testBlockSize);
+            const auto played = play (compressor, values, 24000, [level] (int t, int) { return steady (t, level); });
+
+            for (const auto& channel : played)
+                CHECK (std::abs (gainAt (channel, 23999, level) - getCurveGain (values, level)) < 0.05f);
+        }
     }
 
-    values[Compressor::ratio] = 1.0f;
-    CHECK (Compressor::getReduction (values, 0.0f) == doctest::Approx (0.0f));
-
-    // As it plays, once settled: its curve, with a soft knee.
+    // Upward: a quiet level comes out louder, and the meters say how far up.
     values = getTestValues();
-    values[Compressor::knee] = 6.0f;
+    setCurve (values, curves::findShape ("Lift under -30 dB")->points);
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    play (compressor, values, 24000, [] (int t, int) { return steady (t, -45.0f); });
+    CHECK (getCurveGain (values, -45.0f) > 3.0f);
+    CHECK (compressor.getBoostMeter().take() == doctest::Approx (getCurveGain (values, -45.0f)).epsilon (0.01));
+    CHECK (compressor.getReductionMeter().take() == doctest::Approx (0.0f));
 
-    for (const auto level : { -40.0f, -29.0f, -26.0f, -24.0f, -12.0f, 0.0f })
-    {
-        CAPTURE (level);
-        Compressor compressor;
-        compressor.prepare (testRate, testBlockSize);
-        const auto played = play (compressor, values, 12000, [level] (int t, int) { return steady (t, level); });
-
-        for (const auto& channel : played)
-            CHECK (gainAt (channel, 11999, level) == doctest::Approx (-Compressor::getReduction (values, level)).epsilon (0.002));
-    }
+    // A gate: under it, silence, or nearly.
+    setCurve (values, curves::findShape ("Gate under -30 dB")->points);
+    Compressor gate;
+    gate.prepare (testRate, testBlockSize);
+    const auto played = play (gate, values, 24000, [] (int t, int) { return steady (t, -36.0f); });
+    CHECK (gainAt (played[0], 23999, -36.0f) < -60.0f);
 }
 
 TEST_CASE ("The compressor's attack and release take their times")
@@ -173,7 +210,7 @@ TEST_CASE ("The compressor's attack and release take their times")
     Compressor compressor;
     compressor.prepare (testRate, testBlockSize);
 
-    // From silence to 20 dB over the threshold, which settles 15 dB down: after the attack time it has gone 63 % of the
+    // From silence to 20 dB over where its curve starts, which settles 15 dB down: after the attack time it has gone 63 % of the
     // way, as an analog compressor's time constant does.
     const auto onset = 4800;
     auto played = play (compressor, values, onset + 9600, [] (int t, int) { return t < onset ? 0.0f : steady (t, -6.0f); });
@@ -181,7 +218,7 @@ TEST_CASE ("The compressor's attack and release take their times")
     CHECK (gainAt (played[0], onset + attackSamples - 1, -6.0f) == doctest::Approx (-15.0f * (1.0f - std::exp (-1.0f))).epsilon (0.01));
     CHECK (gainAt (played[0], onset + 9599, -6.0f) == doctest::Approx (-15.0f).epsilon (0.001));
 
-    // Down to 20 dB under the threshold, which isn't turned down: after the release time 37 % of the reduction is left.
+    // Down to 20 dB under where its curve starts, which isn't turned down: after the release time 37 % of the reduction is left.
     played = play (compressor, values, 4800, [] (int t, int) { return steady (t, -46.0f); });
     const auto releaseSamples = (int) (0.050 * testRate);
     CHECK (gainAt (played[0], releaseSamples - 1, -46.0f) == doctest::Approx (-15.0f * std::exp (-1.0f)).epsilon (0.01));
@@ -200,7 +237,7 @@ TEST_CASE ("The compressor's makeup gain moves smoothly")
     Compressor compressor;
     compressor.prepare (testRate, testBlockSize);
 
-    // A new compressor starts at its makeup gain, and stays there under the threshold.
+    // A new compressor starts at its makeup gain, and stays there under where its curve starts.
     auto played = play (compressor, values, 4800, [] (int t, int) { return steady (t, -46.0f); });
     CHECK (gainAt (played[0], 0, -46.0f) == doctest::Approx (6.0f).epsilon (0.001));
     CHECK (gainAt (played[0], 4799, -46.0f) == doctest::Approx (6.0f).epsilon (0.001));
@@ -214,7 +251,7 @@ TEST_CASE ("The compressor's makeup gain moves smoothly")
 
 TEST_CASE ("The compressor's input gain drives the sound into it, and into its detector unless a sidechain feeds it")
 {
-    // 10 dB under the threshold: untouched at 0 dB in; 16 dB more goes 6 dB over, which 4:1 turns down by 4.5 dB.
+    // 10 dB under where its curve starts: untouched at 0 dB in; 16 dB more goes 6 dB over, which it turns down.
     auto values = getTestValues();
     Compressor compressor;
     compressor.prepare (testRate, testBlockSize);
@@ -224,7 +261,8 @@ TEST_CASE ("The compressor's input gain drives the sound into it, and into its d
     values[Compressor::inputGain] = 16.0f;
     played = play (compressor, values, 24000, [] (int t, int) { return steady (t, -36.0f); });
     CHECK (gainAt (played[0], 0, -36.0f) < 1.0f); // it glides there, as the makeup does
-    CHECK (gainAt (played[0], 23999, -36.0f) == doctest::Approx (16.0f - 4.5f).epsilon (0.001));
+    CHECK (getCurveGain (values, -20.0f) < -1.0f);
+    CHECK (gainAt (played[0], 23999, -36.0f) == doctest::Approx (16.0f + getCurveGain (values, -20.0f)).epsilon (0.003));
 
     // With a sidechain, the sound goes in louder, and the key, which says how far down, is as it was.
     values[Compressor::inputGain] = 6.0f;
@@ -373,31 +411,9 @@ TEST_CASE ("The compressor plays its key while its editor listens, through its c
     CHECK_FALSE (compressor.overridesMix());
 }
 
-TEST_CASE ("The compressor's characters: a tube's ratio grows over 15 dB, an Opto's knee is soft, and the curve reports them")
+TEST_CASE ("The compressor's characters hear differently: VCA the average, Opto letting go slowly, and each settles on the curve")
 {
-    auto values = getDefaults(); // -18 dB, 4:1, a 6 dB knee
-    const auto slope = 0.75f;
-
-    // Tube: nothing at the threshold, the reduction growing as the square of how far over it is, then as the ratio set.
-    values[Compressor::character] = (float) Compressor::Character::tube;
-    CHECK (Compressor::getReduction (values, -18.0f) == doctest::Approx (0.0f));
-    CHECK (Compressor::getReduction (values, -20.0f) == doctest::Approx (0.0f)); // no knee below the threshold
-    CHECK (Compressor::getReduction (values, -10.5f) == doctest::Approx (slope * 7.5f * 7.5f / 30.0f));
-    CHECK (Compressor::getReduction (values, -3.0f) == doctest::Approx (slope * 7.5f));
-    CHECK (Compressor::getReduction (values, 0.0f) == doctest::Approx (slope * 10.5f));
-
-    // Opto: a knee at least 12 dB wide, so it starts 6 dB under the threshold however hard the knee is set.
-    values[Compressor::character] = (float) Compressor::Character::opto;
-    values[Compressor::knee] = 0.0f;
-    CHECK (Compressor::getReduction (values, -24.5f) == doctest::Approx (0.0f));
-    CHECK (Compressor::getReduction (values, -18.0f) == doctest::Approx (slope * 36.0f / 24.0f));
-    CHECK (Compressor::getReduction (values, -6.0f) == doctest::Approx (slope * 12.0f));
-}
-
-TEST_CASE ("The compressor's characters hear differently: VCA the average, FET what it puts out, Opto letting go slowly")
-{
-    // How far each turns down: a millisecond's burst 10 dB over the threshold every 1000 samples, and a steady level 12 dB
-    // over.
+    // How far each turns down: a millisecond's burst 10 dB over where the curve starts every 1000 samples.
     const auto reductionOf = [] (Compressor::Character character, auto input, int numSamples)
     {
         Compressor compressor;
@@ -414,13 +430,25 @@ TEST_CASE ("The compressor's characters hear differently: VCA the average, FET w
     CHECK (clean > 1.0f);
     CHECK (vca < 0.5f * clean); // a burst is short: its average is lower than its peaks
 
-    // At a steady level 12 dB over the threshold, 4:1 settles 9 dB down; listening to what it puts out, FET settles where
-    // what comes out is as far over as the curve allows, less far.
-    const auto level = [] (int time, int) { return steady (time, -14.0f); };
-    CHECK (reductionOf (Compressor::Character::clean, level, 24000) == doctest::Approx (9.0f).epsilon (0.02));
-    const auto fet = reductionOf (Compressor::Character::fet, level, 24000);
-    CHECK (fet > 1.0f);
-    CHECK (fet < 8.0f);
+    // Each hears what comes in, so that once settled each follows the curve, whatever its character: a steady sine (whose
+    // average an RMS ear hears as loud as its peaks) 20 dB over where the curve starts settles 15 dB down.
+    const auto sine = [] (int time, int)
+    { return toGain (-6.0f) * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * time / testRate); };
+
+    for (const auto character : { Compressor::Character::clean, Compressor::Character::vca, Compressor::Character::fet,
+                                  Compressor::Character::opto, Compressor::Character::tube })
+    {
+        CAPTURE ((int) character);
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        auto values = getTestValues();
+        values[Compressor::character] = (float) character;
+        values[Compressor::release] = 500.0f; // so that a peak ear's reduction barely ripples between the sine's peaks
+        play (compressor, values, 48000, sine);
+        compressor.getReductionMeter().take();
+        play (compressor, values, 4800, sine);
+        CHECK (compressor.getReductionMeter().take() == doctest::Approx (15.0f).epsilon (0.02));
+    }
 
     // Opto lets go at the release set for the first half of the way, then slower: half a second after a loud part, it is
     // still further down than Clean.
@@ -439,17 +467,50 @@ TEST_CASE ("The compressor's characters hear differently: VCA the average, FET w
     CHECK (releaseAfter (Compressor::Character::opto) > 0.5f);
 }
 
+TEST_CASE ("FET and Tube colour the sound the further they turn it down, FET with odd harmonics and Tube with even ones")
+{
+    // A 200 Hz sine at a level through each, limited at 0 dB with no drive set: its loudest and quietest samples, once settled.
+    const auto peaksOf = [] (Compressor::Character character, float decibels)
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        auto values = getTestValues();
+        values[Compressor::character] = (float) character;
+        values[Compressor::release] = 500.0f;
+        setCurve (values, curves::findShape ("Limit at 0 dB")->points);
+        const auto sine = [decibels] (int time, int)
+        { return toGain (decibels) * (float) std::sin (juce::MathConstants<double>::twoPi * 200.0 * time / testRate); };
+        auto played = play (compressor, values, 48000, sine)[0];
+        played.erase (played.begin(), played.begin() + 36000);
+        const auto [lowest, highest] = std::minmax_element (played.begin(), played.end());
+        return std::pair { *lowest, *highest };
+    };
+
+    // Turned 12 dB down: Clean's sine as it was, only quieter; FET's flattened alike both ways; Tube's lopsided.
+    const auto [cleanLow, cleanHigh] = peaksOf (Compressor::Character::clean, 12.0f);
+    CHECK (-cleanLow == doctest::Approx (cleanHigh).epsilon (0.01));
+    const auto [fetLow, fetHigh] = peaksOf (Compressor::Character::fet, 12.0f);
+    CHECK (fetHigh < 0.97f * cleanHigh);
+    CHECK (-fetLow == doctest::Approx (fetHigh).epsilon (0.01));
+    const auto [tubeLow, tubeHigh] = peaksOf (Compressor::Character::tube, 12.0f);
+    CHECK (std::abs (-tubeLow - tubeHigh) > 0.02f * tubeHigh);
+
+    // Not turned down, none of them colours it.
+    const auto [quietLow, quietHigh] = peaksOf (Compressor::Character::fet, -36.0f);
+    const auto [quietCleanLow, quietCleanHigh] = peaksOf (Compressor::Character::clean, -36.0f);
+    CHECK (quietHigh == doctest::Approx (quietCleanHigh).epsilon (0.001));
+}
+
 TEST_CASE ("The compressor's drive saturates what it puts out in its character's colour, and leaves quiet sound be")
 {
-    // A sine at a level, through a compressor that turns nothing down (a threshold at the top), driven all the way.
+    // A sine at a level, through a compressor that turns nothing down (a straight curve), driven all the way.
     const auto drive = [] (Compressor::Character character, float decibels)
     {
         Compressor compressor;
         compressor.prepare (testRate, testBlockSize);
         auto values = getDefaults();
         values[Compressor::character] = (float) character;
-        values[Compressor::threshold] = 0.0f;
-        values[Compressor::knee] = 0.0f;
+        setCurve (values, curves::findShape ("No Compression")->points);
         values[Compressor::drive] = 1.0f;
         const auto sine = [decibels] (int time, int)
         { return toGain (decibels) * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 200.0 * time / testRate); };
@@ -471,4 +532,48 @@ TEST_CASE ("The compressor's drive saturates what it puts out in its character's
     // ...and lopsided for a tube's even ones, driven less hard, where they show most.
     const auto [tubeLow, tubeHigh] = drive (Compressor::Character::tube, -20.0f);
     CHECK (std::abs (-tubeLow - tubeHigh) > 0.1f * tubeHigh);
+}
+
+TEST_CASE ("A curve made as a threshold, a ratio and a knee set it follows them, though a straight line on its axes isn't a ratio")
+{
+    struct Setting
+    {
+        float threshold, ratio, knee, within;
+    };
+
+    // Exact at its points, and between them as near as its lines' tensions bend them: within a tenth of a decibel for the
+    // presets' settings and the default, a fifth for the ducking a sidechain sets up; a lower corner, further from the
+    // middle of Maximus's axes, less closely.
+    for (const auto& setting :
+         { Setting { -18.0f, 4.0f, 0.0f, 0.1f }, Setting { -14.0f, 2.0f, 12.0f, 0.1f }, Setting { -24.0f, 10.0f, 6.0f, 0.1f },
+           Setting { -20.0f, 3.0f, 10.0f, 0.1f }, Setting { -30.0f, 8.0f, 0.0f, 0.2f }, Setting { -36.0f, 4.0f, 0.0f, 0.6f } })
+    {
+        CAPTURE (setting.threshold);
+        CAPTURE (setting.ratio);
+        CAPTURE (setting.knee);
+        auto values = getDefaults();
+        setCurve (values, curves::makeCompression (setting.threshold, setting.ratio, setting.knee));
+        const auto slope = 1.0f - 1.0f / setting.ratio;
+
+        for (auto in = setting.threshold - setting.knee - 6.0f; in <= 12.0f; in += 0.25f)
+        {
+            CAPTURE (in);
+            const auto over = in - setting.threshold;
+            const auto out = 2.0f * over <= -setting.knee ? in
+                             : 2.0f * over < setting.knee
+                                 ? in - slope * (over + 0.5f * setting.knee) * (over + 0.5f * setting.knee) / (2.0f * setting.knee)
+                                 : in - slope * over;
+            CHECK (std::abs (in + getCurveGain (values, in) - out) < setting.within);
+        }
+    }
+
+    // A straight line would be a decibel and more off at -36 dB.
+    auto straight = curves::makeCompression (-36.0f, 4.0f);
+
+    for (auto& point : straight)
+        point[curves::pointTension] = 0.0f;
+
+    auto values = getDefaults();
+    setCurve (values, straight);
+    CHECK (std::abs (getCurveGain (values, -18.0f) + 13.5f) > 1.0f);
 }

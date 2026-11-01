@@ -233,8 +233,10 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
     auto& compressor = addCompressor (*song.bass);
     phazite::getSongUndoManager (*song.edit).clearUndoHistory();
     phazite::setSidechainSource (compressor, song.kick);
-    CHECK (valueOf (compressor, "threshold") == doctest::Approx (-30.0f));
-    CHECK (valueOf (compressor, "ratio") == doctest::Approx (8.0f));
+    const auto ducking = phazite::devices::curves::makeCompression (-30.0f, 8.0f); // its curve: 8:1 over -30 dB
+    CHECK (valueOf (compressor, "points") == doctest::Approx ((float) ducking.size()));
+    CHECK (valueOf (compressor, "point2X") == doctest::Approx (ducking[1][0]));
+    CHECK (valueOf (compressor, "point3Y") == doctest::Approx (ducking[2][1]));
     CHECK (valueOf (compressor, "attack") == doctest::Approx (1.0f));
     CHECK (valueOf (compressor, "release") == doctest::Approx (150.0f));
     CHECK (valueOf (compressor, "keyHighCut") == doctest::Approx (20000.0f));
@@ -243,14 +245,14 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
     // One step: undo puts back both the source and the settings.
     phazite::undo (*song.edit);
     CHECK (phazite::getSidechainSource (compressor) == nullptr);
-    CHECK (valueOf (compressor, "threshold") == doctest::Approx (-18.0f));
+    CHECK (valueOf (compressor, "point2X") == doctest::Approx (phazite::devices::curves::axisForDecibels (-18.0f)).epsilon (1.0e-5));
     CHECK (valueOf (compressor, "attack") == doctest::Approx (10.0f));
 
     // A compressor already set its own way keeps its settings.
-    phazite::setDeviceValue (*compressor.getAutomatableParameterByID ("ratio"), 2.0f);
+    phazite::setDeviceValue (*compressor.getAutomatableParameterByID ("attack"), 2.0f);
     phazite::setSidechainSource (compressor, song.kick);
-    CHECK (valueOf (compressor, "ratio") == doctest::Approx (2.0f));
-    CHECK (valueOf (compressor, "threshold") == doctest::Approx (-18.0f));
+    CHECK (valueOf (compressor, "attack") == doctest::Approx (2.0f));
+    CHECK (valueOf (compressor, "point2X") == doctest::Approx (phazite::devices::curves::axisForDecibels (-18.0f)).epsilon (1.0e-5));
 
     // A source that plays a drum sampler: only its lows, so that the kick ducks the keys and the hats don't.
     REQUIRE (phazite::setInstrument (*song.kick, song.edit->getPluginCache().createNewPlugin (phazite::devices::DrumSampler::typeID, {}))
@@ -268,7 +270,8 @@ TEST_CASE ("Duck Under puts a compressor on a track, ducking under another, as o
     REQUIRE (compressor != nullptr);
     CHECK (compressor->getOwnerTrack() == song.bass);
     CHECK (phazite::getSidechainSource (*compressor) == song.kick);
-    CHECK (compressor->getAutomatableParameterByID ("ratio")->getCurrentValue() == doctest::Approx (8.0f));
+    CHECK (compressor->getAutomatableParameterByID ("point2X")->getCurrentValue()
+           == doctest::Approx (phazite::devices::curves::axisForDecibels (-30.0f))); // ducking, 8:1 over -30 dB
     CHECK (phazite::getSongUndoManager (*song.edit).getUndoDescription() == juce::String ("Duck Bass Under Kick"));
 
     phazite::undo (*song.edit);

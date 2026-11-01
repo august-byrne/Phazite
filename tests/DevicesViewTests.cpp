@@ -547,14 +547,14 @@ TEST_CASE ("A container shows its macros and its devices in line, as cards; a ma
     CHECK (panel->getLocalArea (eq, eq->getLocalBounds()).getRight() <= panel->getWidth());
     phazite::test::checkChildrenApart (*panel);
 
-    // The first macro, dropped on the compressor's threshold, in its card opened: it modulates it.
+    // The first macro, dropped on the compressor's makeup gain, in its card opened: it modulates it.
     const auto macro = phazite::getContainerMacros (screen.context, container)[0].id;
     screen.view.setOpen (effects[1], true);
     compressor = screen.view.findPanel (effects[1]);
     REQUIRE (compressor != nullptr);
-    auto* threshold = phazite::test::findComponentWithTitle (*compressor, "Threshold");
-    REQUIRE (threshold != nullptr);
-    auto* knob = dynamic_cast<phazite::ui::Knob*> (threshold);
+    auto* makeup = phazite::test::findComponentWithTitle (*compressor, "Makeup");
+    REQUIRE (makeup != nullptr);
+    auto* knob = dynamic_cast<phazite::ui::Knob*> (makeup);
     REQUIRE (knob != nullptr);
     juce::Component source;
     const juce::DragAndDropTarget::SourceDetails drop { phazite::ui::makeModulatorDrag (macro), &source, {} };

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The multiband's editor (src/ui/devices/MultibandEditor.h), in Maximus's layout: a control for every parameter but its curves'
-// points, the selected band's showing; the curve's points, tension handles and menus, each one undo step; and the Bands view's
-// crossovers and band levels.
+// points, the selected band's showing; the curve (src/ui/devices/DynamicsCurve.h, the compressor's too), its line and its
+// area lit up to the level heard, its points, tension handles and menus, each one undo step; and the Bands view's crossovers
+// and band levels.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -14,10 +15,12 @@
 #include "model/project/internal/Project.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/MultibandEditor.h"
+#include "ui/theme/DesignTokens.h"
 
 namespace
 {
 using phazite::devices::Multiband;
+namespace curves = phazite::devices::curves;
 
 // A multiband on a track of its own Edit.
 struct Song
@@ -37,7 +40,7 @@ struct Song
         return plugin->getAutomatableParameterByID (juce::String (id.data(), id.size()))->getCurrentValue();
     }
 
-    float pointValue (int band, int point, Multiband::PointField field) const
+    float pointValue (int band, int point, curves::PointField field) const
     {
         return valueOf (Multiband::info.parameters[(size_t) Multiband::getPointParameter (band, point, field)].id);
     }
@@ -134,48 +137,48 @@ TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and
     phazite::test::Mouse mouse (curve);
 
     // The corner at 0 dB, dragged down (Shift keeps it where it is up and down, so here Ctrl keeps it across).
-    const auto corner = editor.getPointPosition (1).roundToInt();
+    const auto corner = curve.getPointPosition (1).roundToInt();
     mouse.press (corner, juce::ModifierKeys::ctrlModifier);
     mouse.dragTo (corner + juce::Point<int> (25, 20));
     mouse.release();
-    CHECK (song.pointValue (Multiband::low, 1, Multiband::pointY) < 0.45f);
-    CHECK (song.pointValue (Multiband::low, 1, Multiband::pointX) == doctest::Approx (0.5f)); // Ctrl: across, it stayed
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) < 0.45f);
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointX) == doctest::Approx (0.5f)); // Ctrl: across, it stayed
     CHECK (song.describeUndo() == juce::String ("Undo Move Point"));
     phazite::undo (*song.edit);
     editor.refresh();
-    CHECK (song.pointValue (Multiband::low, 1, Multiband::pointY) == doctest::Approx (0.5f));
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) == doctest::Approx (0.5f));
 
     // The handle of the line before it, dragged up: bent up; right-clicked: straight again.
-    REQUIRE (editor.getTensionPosition (1).has_value());
-    const auto handle = editor.getTensionPosition (1)->roundToInt();
+    REQUIRE (curve.getTensionPosition (1).has_value());
+    const auto handle = curve.getTensionPosition (1)->roundToInt();
     mouse.press (handle);
     mouse.dragTo (handle - juce::Point<int> (0, 30));
     mouse.release();
-    CHECK (song.pointValue (Multiband::low, 1, Multiband::pointTension) > 0.1f);
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointTension) > 0.1f);
     CHECK (song.describeUndo() == juce::String ("Undo Bend Line"));
     editor.refresh();
-    mouse.click (editor.getTensionPosition (1)->roundToInt(), juce::ModifierKeys::rightButtonModifier);
-    CHECK (song.pointValue (Multiband::low, 1, Multiband::pointTension) == doctest::Approx (0.0f));
+    mouse.click (curve.getTensionPosition (1)->roundToInt(), juce::ModifierKeys::rightButtonModifier);
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointTension) == doctest::Approx (0.0f));
 
     // A right-click away from the points adds one there; Alt and a click deletes it.
-    const auto empty = editor.getCurvePosition (0.75f, 0.9f).roundToInt();
+    const auto empty = curve.getPosition (0.75f, 0.9f).roundToInt();
     mouse.click (empty, juce::ModifierKeys::rightButtonModifier);
     CHECK (song.pointCount (Multiband::low) == doctest::Approx (4.0f));
-    CHECK (song.pointValue (Multiband::low, 2, Multiband::pointX) == doctest::Approx (0.75f).epsilon (0.02));
+    CHECK (song.pointValue (Multiband::low, 2, curves::pointX) == doctest::Approx (0.75f).epsilon (0.02));
     CHECK (song.describeUndo() == juce::String ("Undo Add Point"));
     editor.refresh();
-    mouse.click (editor.getPointPosition (2).roundToInt(), juce::ModifierKeys::altModifier);
+    mouse.click (curve.getPointPosition (2).roundToInt(), juce::ModifierKeys::altModifier);
     CHECK (song.pointCount (Multiband::low) == doctest::Approx (3.0f));
     CHECK (song.describeUndo() == juce::String ("Undo Delete Point"));
 
     // The point menu's shapes, and the curve menu's shapes to start from.
-    editor.setPointType (1, (int) Multiband::PointType::stairs);
-    CHECK (song.pointValue (Multiband::low, 1, Multiband::pointType) == doctest::Approx ((float) Multiband::PointType::stairs));
-    REQUIRE (editor.applyShape ("No Compression"));
+    curve.setPointType (1, (int) curves::PointType::stairs);
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointType) == doctest::Approx ((float) curves::PointType::stairs));
+    REQUIRE (curve.applyShape ("No Compression"));
     CHECK (song.pointCount (Multiband::low) == doctest::Approx (2.0f));
-    CHECK (song.pointValue (Multiband::low, 1, Multiband::pointY) == doctest::Approx (1.0f));
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) == doctest::Approx (1.0f));
     CHECK (song.describeUndo() == juce::String ("Undo Change Curve"));
-    CHECK_FALSE (editor.applyShape ("No Such Shape"));
+    CHECK_FALSE (curve.applyShape ("No Such Shape"));
 }
 
 TEST_CASE ("The multiband's Bands view: a band's edge moves its crossover, a band up or down its pre gain")
@@ -215,4 +218,62 @@ TEST_CASE ("The multiband's Bands view: a band's edge moves its crossover, a ban
     editor.refresh();
     CHECK_FALSE (editor.isShowingBands());
     CHECK (window.takeRepaintedArea().intersectsRectangle (window.getLocalArea (&display, display.getLocalBounds())));
+}
+
+TEST_CASE ("The multiband's curve draws its line, and lights the area under it up to the level the band's compressor hears")
+{
+    Song song;
+    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    phazite::ui::MultibandEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    editor.selectBand (Multiband::low);
+    auto& curve = editor.getCurve();
+    const auto pixelAt = [&] (juce::Image& image, float across, float up)
+    {
+        const auto at = window.getLocalPoint (&curve, curve.getPosition (across, up)).roundToInt();
+        return image.getPixelAt (at.x, at.y);
+    };
+    const auto band = juce::Colour (phazite::ui::partColours[Multiband::low]);
+    const auto quiet = curves::axisForDecibels (-24.0f), loud = curves::axisForDecibels (4.5f); // between grid lines
+
+    // The line, up the diagonal to 0 dB: in the band's colour over the grid's grey line (no line at all was drawn, and the
+    // area under it a wedge from the first point to the last: 2026-11-01).
+    {
+        auto image = window.paintEverything();
+        const auto onLine = pixelAt (image, 0.3f, 0.3f);
+        CHECK (std::abs (onLine.getRed() - band.getRed()) < 40);
+        CHECK (std::abs (onLine.getGreen() - band.getGreen()) < 40);
+
+        // In silence, nothing lit.
+        CHECK (pixelAt (image, quiet, 0.02f).getRed() < pixelAt (image, loud, 0.02f).getRed() + 10);
+    }
+
+    // A tone in the low band, at -6 dB: lit up to it, not past it.
+    auto* multiband = device.getProcessor<Multiband>();
+    REQUIRE (multiband != nullptr);
+    multiband->prepare (48000.0, 480);
+    std::vector<float> values;
+
+    for (const auto& parameter : Multiband::info.parameters)
+        values.push_back (song.valueOf (parameter.id));
+
+    juce::AudioBuffer<float> buffer (2, 480);
+
+    for (int block = 0, sample = 0; block < 20; ++block)
+    {
+        for (int i = 0; i < buffer.getNumSamples(); ++i, ++sample)
+            for (int channel = 0; channel < 2; ++channel)
+                buffer.setSample (channel, i, 0.5f * std::sin (juce::MathConstants<float>::twoPi * 60.0f * (float) sample / 48000.0f));
+
+        phazite::devices::ProcessContext context;
+        context.channels = buffer.getArrayOfWritePointers();
+        context.numChannels = 2;
+        context.numSamples = buffer.getNumSamples();
+        context.parameters = values;
+        multiband->process (context);
+    }
+
+    editor.refresh();
+    auto image = window.paintEverything();
+    CHECK (pixelAt (image, quiet, 0.02f).getRed() > pixelAt (image, loud, 0.02f).getRed() + 40);
 }

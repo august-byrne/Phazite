@@ -107,7 +107,7 @@ TEST_CASE ("A container saved as a preset loads into another project with its ma
         const auto macro = phazite::getContainerMacros (first.context, container)[0].id;
         phazite::renameMacro (first.context, macro, "Air");
         phazite::modulate (first.context, macro, { eq, "band7Gain" }, 0.5f);
-        phazite::getParameter (first.context, { compressor, "threshold" }).setValue (-30.0f);
+        phazite::getParameter (first.context, { compressor, "makeup" }).setValue (6.0f);
 
         REQUIRE (phazite::saveDevicePreset (first.context, container, file));
         CHECK (phazite::getPresetFolderName (first.context, container) == juce::String ("Containers"));
@@ -131,7 +131,7 @@ TEST_CASE ("A container saved as a preset loads into another project with its ma
     const auto container = effects[1].id;
     const auto inside = phazite::getContainerDevices (second.context, container);
     CHECK (namesOf (inside) == std::vector<juce::String> { "EQ", "Compressor" });
-    CHECK (second.find ({ inside[1].id, "threshold" })->getCurrentValue() == doctest::Approx (-30.0f));
+    CHECK (second.find ({ inside[1].id, "makeup" })->getCurrentValue() == doctest::Approx (6.0f));
 
     const auto macros = phazite::getContainerMacros (second.context, container);
     REQUIRE (macros.size() == 8);
@@ -163,15 +163,15 @@ TEST_CASE ("A device's preset holds its settings and mix, not its automation, ou
     auto& context = song.context;
     const auto track = song.track (0), other = song.track (1);
     const auto compressor = song.addEffect (track, "phaziteCompressor");
-    const ParameterRef threshold { compressor, "threshold" };
+    const ParameterRef makeup { compressor, "makeup" };
 
     // Set by hand, automated, modulated by the track's LFO, listening to the other track, and off.
-    phazite::getParameter (context, threshold).setValue (-24.0f);
+    phazite::getParameter (context, makeup).setValue (-6.0f);
     phazite::getMix (context, compressor).setValue (0.5f);
-    phazite::showAutomationLane (context, threshold);
-    phazite::addAutomationPoint (context, threshold, { phazite::BeatPosition::fromBeats (4.0), -6.0f });
+    phazite::showAutomationLane (context, makeup);
+    phazite::addAutomationPoint (context, makeup, { phazite::BeatPosition::fromBeats (4.0), 3.0f });
     const auto lfo = phazite::addModulator (context, track, ModulatorType::lfo);
-    phazite::modulate (context, lfo, threshold, 0.25f);
+    phazite::modulate (context, lfo, makeup, 0.25f);
     phazite::setSidechainSource (context, compressor, other);
     phazite::setDeviceOn (context, compressor, false);
 
@@ -187,9 +187,9 @@ TEST_CASE ("A device's preset holds its settings and mix, not its automation, ou
     const auto* parameters = saved[keys::parameters].getDynamicObject();
     REQUIRE (parameters != nullptr);
     CHECK (parameters->getProperties().size() == (int) phazite::devices::Compressor::info.parameters.size());
-    CHECK ((float) parameters->getProperty ("threshold") == doctest::Approx (-24.0f));
+    CHECK ((float) parameters->getProperty ("makeup") == doctest::Approx (-6.0f));
     CHECK ((float) parameters->getProperty ("mix") == doctest::Approx (0.5f));
-    CHECK ((float) parameters->getProperty ("ratio") == doctest::Approx (4.0f)); // its default, written too
+    CHECK ((float) parameters->getProperty ("attack") == doctest::Approx (10.0f)); // its default, written too
 
     // Nothing that ties it to its project, and nothing of Tracktion's.
     CHECK (saved.getDynamicObject()->getProperties().size() == 4); // type, name, instrument and parameters
@@ -206,7 +206,7 @@ TEST_CASE ("A device's preset holds its settings and mix, not its automation, ou
     CHECK (master.back().name == juce::String ("Compressor"));
     CHECK (master.back().isOn);
     CHECK (master.back().id != compressor);
-    CHECK (song.find ({ master.back().id, "threshold" })->getCurrentValue() == doctest::Approx (-24.0f));
+    CHECK (song.find ({ master.back().id, "makeup" })->getCurrentValue() == doctest::Approx (-6.0f));
 }
 
 TEST_CASE ("An instrument's preset takes a track's instrument's place, or makes a track of its own below the tracks")

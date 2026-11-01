@@ -262,8 +262,10 @@ TEST_SUITE ("golden")
 
     TEST_CASE ("Golden render: Phazite's compressor on a beat and stabs")
     {
-        checkEffect (phazite::devices::Compressor::typeID, "effect-compressor", { { "threshold", -36.0f } },
-                     "Phazite's compressor at a threshold of -36 dB, on a beat and chord stabs.");
+        // Its curve turning down from -36 dB, its corner there.
+        const auto corner = phazite::devices::curves::axisForDecibels (-36.0f);
+        checkEffect (phazite::devices::Compressor::typeID, "effect-compressor", { { "point2X", corner }, { "point2Y", corner } },
+                     "Phazite's compressor turning down from -36 dB, on a beat and chord stabs.");
     }
 
     TEST_CASE ("Golden render: Phazite's limiter on a beat and stabs")

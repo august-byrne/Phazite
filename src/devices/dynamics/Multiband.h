@@ -12,12 +12,11 @@
 // compression off, muted, or off (passing as it came, the mid band taking a low or high band's room), and a band can be
 // soloed; the master's compressor can listen to the mid band instead of what it plays (Maximus's Master Mid mode: ducking,
 // gating and de-essing), the low and high bands' compression off meanwhile. Not built: Maximus's oversampling, its
-// linear-phase crossovers and its spare state (Phazite's undo and presets do that).
-//
-// The curves' axes: an amplitude a (1 at 0 dB) sits at ln (1 + 2a) / ln 9 across, from silence at 0 through 0 dB at the
-// middle to +12 dB at 1, as Maximus draws its curves.
+// linear-phase crossovers and its spare state (Phazite's undo and presets do that). Its curves are Maximus's, as the
+// compressor's is (DynamicsCurve.h).
 #pragma once
 
+#include "DynamicsCurve.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
@@ -41,8 +40,6 @@ public:
         master,
         numBands
     };
-
-    static constexpr int maxPoints = 8;
 
     // The global parameters, first; then each band's, in the bands' order (getBandParameter()), its points last
     // (getPointParameter()).
@@ -75,18 +72,8 @@ public:
         detection,    // peak or RMS
         saturation,   // from -1 (type A, softest at -1) through 0 (none) to 1 (type B)
         ceiling,      // decibels, the most the saturation lets out
-        points,       // how many points its curve has, 2 to maxPoints
-        firstPoint,
-        bandFields = firstPoint + 4 * maxPoints
-    };
-
-    enum PointField
-    {
-        pointX, // across the curve's axis, from 0 to 1 (the first point at 0, the last at 1)
-        pointY,
-        pointTension, // from -1 to 1: how the line to it bends (up for 1)
-        pointType,    // a PointType: how the line to it goes
-        pointFields
+        points,       // its curve (DynamicsCurve.h): how many points it has, then its points
+        bandFields = points + curves::parameterCount
     };
 
     enum class Mode
@@ -97,34 +84,19 @@ public:
         off // the band passes as it came in; a low or high band off goes into the mid band
     };
 
-    enum class PointType
-    {
-        singleCurve, // bent by its tension
-        doubleCurve, // an S, bent by its tension
-        hold,        // the level before it held until it
-        stairs,      // steps, as many as its tension says
-        smoothStairs // the same, each step rounded
-    };
-
     static constexpr int getBandParameter (int band, BandField field) noexcept { return numGlobals + band * bandFields + field; }
-    static constexpr int getPointParameter (int band, int point, PointField field) noexcept
+    static constexpr int getPointParameter (int band, int point, curves::PointField field) noexcept
     {
-        return getBandParameter (band, firstPoint) + point * pointFields + field;
+        return getBandParameter (band, points) + curves::getPointParameter (point, field);
+    }
+
+    // A band's curve, among the parameters' values in the device's order.
+    static std::span<const float> getCurve (std::span<const float> parameters, int band)
+    {
+        return parameters.subspan ((size_t) getBandParameter (band, points), curves::parameterCount);
     }
 
     static const DeviceInfo info;
-
-    // The curves' axis: an amplitude's place across it, from 0 to 1, and back; and where a level in decibels is.
-    static float toAxis (float amplitude) noexcept;
-    static float fromAxis (float place) noexcept;
-    static float axisForDecibels (float decibels) noexcept;
-
-    // A band's curve at a place across its axis (from 0 to 1), for the parameters' values in the device's order: where it
-    // puts out, from 0 to 1. For its editor's drawing and for tests.
-    static float getCurveAt (std::span<const float> parameters, int band, float place);
-
-    // How many steps a stairs line takes, for a tension.
-    static int getStairs (float tension) noexcept;
 
     // Each band as its editor shows it, since it last looked (devices/core/MeterValue.h), in decibels: what came in (after its
     // pre gain), what went out, what its compressor heard, and how far it was turned down (0 or more; up, below 0); and what
@@ -141,18 +113,14 @@ public:
     int getLatencySamples() const override { return 2 * lookahead; }
     const FallingValue* getGainReduction() const noexcept override { return &gainReduction; } // the master's
 
-    // How far each part looks ahead, at most, in seconds; and how many entries a band's table of gains has.
+    // How far each part looks ahead, at most, in seconds.
     static constexpr double mostLookaheadSeconds = 0.005;
-    static constexpr int tableSize = 512;
 
 private:
-    // One band's compressor: its table of gains along the axis, its detector and its timing.
+    // One band's compressor: its curve's gains, its detector and its timing.
     struct Compressor
     {
-        std::array<float, tableSize + 1> gains {};          // decibels, for each place across the axis
-        std::array<float, 1 + 4 * maxPoints> shownCurve {}; // the parameters the table was made from
-        bool hasTable = false;
-        float lastGain = 0.0f; // decibels: the amplitude's at the axis's end, for levels past it
+        curves::Gains gains;
 
         float meanSquare = 0.0f, held = 0.0f;
         int heldFor = 0;
@@ -213,7 +181,6 @@ private:
     FallingValue gainReduction { reductionFallPerSecond };
     bool isFirstBlock = true;
 
-    void updateCurve (Compressor&, std::span<const float> values, int band);
     float compress (Compressor&, std::span<const float> values, int band, float level, bool compresses) noexcept;
 };
 } // namespace phazite::devices
