@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // How editors reach Phazite's own devices (src/model/devices/DeviceHandle.h), the knobs a device gets until it has an
-// editor of its own (src/ui/devices/DeviceEditors.h), and what every device's editor repaints.
+// editor of its own (src/ui/devices/DeviceEditors.h), what every device's editor repaints, and the curves their graphs draw
+// (src/ui/devices/DeviceGraph.h).
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -15,6 +16,7 @@
 #include "model/project/internal/Project.h"
 #include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
+#include "ui/devices/DeviceGraph.h"
 
 namespace
 {
@@ -129,4 +131,34 @@ TEST_CASE ("Every device's editor rests while nothing it shows moves, and shows 
         editor = nullptr;
         plugin = nullptr; // before its Edit
     }
+}
+
+TEST_CASE ("A graph's curve is one line from end to end, through the level at each step")
+{
+    // Every point began a path of its own (Path::isEmpty() holds until a path has a line), so that no graph drew its line,
+    // and a wash under one was a wedge from its last point (2026-11-01, the multiband's curve).
+    const juce::Rectangle<float> area (10.0f, 20.0f, 100.0f, 50.0f);
+    const auto curve = phazite::ui::graph::makeCurve (area, [] (float x) { return x < 60.0f ? 70.0f : 20.0f; }, 1.0f);
+    juce::Path::Iterator element (curve);
+    int starts = 0, lines = 0;
+
+    while (element.next())
+    {
+        if (element.elementType == juce::Path::Iterator::startNewSubPath)
+            ++starts;
+        else if (element.elementType == juce::Path::Iterator::lineTo)
+            ++lines;
+    }
+
+    CHECK (starts == 1);
+    CHECK (lines == 100);
+    CHECK (curve.getBounds() == area);
+
+    // Under it, the area below the line: low to the left, high to the right.
+    auto wash = curve;
+    wash.lineTo (area.getBottomRight());
+    wash.lineTo (area.getBottomLeft());
+    wash.closeSubPath();
+    CHECK (! wash.contains (30.0f, 60.0f));
+    CHECK (wash.contains (90.0f, 30.0f));
 }

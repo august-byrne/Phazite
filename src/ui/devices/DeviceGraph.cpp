@@ -93,7 +93,8 @@ juce::Path makeCurve (juce::Rectangle<float> area, const std::function<float (fl
         const auto shownX = std::min (x, area.getRight());
         const juce::Point<float> point { shownX, juce::jlimit (area.getY(), area.getBottom(), yAt (shownX)) };
 
-        if (curve.isEmpty())
+        // Not Path::isEmpty(), which holds while a path has nothing but its start, so that every point began a path of its own.
+        if (juce::exactlyEqual (x, area.getX()))
             curve.startNewSubPath (point);
         else
             curve.lineTo (point);
