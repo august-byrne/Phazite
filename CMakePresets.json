@@ -131,15 +131,18 @@
       "name": "linux-asan",
       "inherits": "linux-test-base",
       "configurePreset": "linux-asan",
-      "description": "Known leaks in JUCE and Tracktion, which Phazite can't change, are suppressed (tools/lsan-suppressions.txt).",
-      "environment": { "LSAN_OPTIONS": "suppressions=${sourceDir}/tools/lsan-suppressions.txt" }
+      "description": "Known leaks in JUCE and Tracktion, which Phazite can't change, are suppressed (tools/lsan-suppressions.txt). A crash is reported by AddressSanitizer, with its stack, not by doctest's signal handler (allow_user_segv_handler=0), so that CI annotates where it was.",
+      "environment": {
+        "LSAN_OPTIONS": "suppressions=${sourceDir}/tools/lsan-suppressions.txt",
+        "ASAN_OPTIONS": "allow_user_segv_handler=0"
+      }
     },
     {
       "name": "linux-tsan",
       "inherits": "linux-test-base",
       "configurePreset": "linux-tsan",
-      "description": "Known data races in Tracktion, which Phazite can't change, are suppressed (tools/tsan-suppressions.txt, docs/realtime-audit.md).",
-      "environment": { "TSAN_OPTIONS": "suppressions=${sourceDir}/tools/tsan-suppressions.txt" }
+      "description": "Known data races in Tracktion, which Phazite can't change, are suppressed (tools/tsan-suppressions.txt, docs/realtime-audit.md). A crash is reported by ThreadSanitizer, with its stack, not by doctest's signal handler (allow_user_segv_handler=0).",
+      "environment": { "TSAN_OPTIONS": "suppressions=${sourceDir}/tools/tsan-suppressions.txt:allow_user_segv_handler=0" }
     }
   ]
 }
