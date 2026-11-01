@@ -212,5 +212,7 @@ TEST_CASE ("A random source moves what it modulates, differently each time, so i
     const auto random = song.addModulator (song.firstTrack, ModulatorType::random);
     song.modulate (random, song.getVolumeParameter (song.firstTrack), 0.5f);
     phazite::test::settle();
-    CHECK (swings (phazite::test::renderFingerprint (song.context, 4.0), 2, 38, 3.0f, "the random source moves the volume"));
+
+    // Over twelve seconds: over four, it stayed within 3 dB about one time in twelve (2026-11-01, CI run 41355268575).
+    CHECK (swings (phazite::test::renderFingerprint (song.context, 12.0), 2, 118, 3.0f, "the random source moves the volume"));
 }

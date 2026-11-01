@@ -761,16 +761,18 @@ TEST_CASE ("An open card's Presets button asks for its device's presets; a folde
         CHECK (child->getTitle() != juce::String ("Presets"));
 }
 
-TEST_CASE ("On a machine without a screen, as Linux CI is, a test window gives JUCE a display: a drag let go fades out")
+TEST_CASE ("On a machine without a screen, as Linux CI is, a test mouse letting go gives JUCE a display for that moment only")
 {
     // The image of a drag let go fades out by a copy of itself, which JUCE's animator scales for the display it is on; with
-    // no display (Linux CI's) it read nothing, and every drag in the tests crashed as it was let go (2026-11-01).
+    // no display (Linux CI's) it read nothing, and every drag in the tests crashed as it was let go (2026-11-01). A display
+    // kept for good crashed elsewhere: Tracktion then took the machine for one with a screen and turned its screen saver
+    // off as it recorded, which without a screen crashes (Desktop::isHeadless()).
     auto& displays = const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays());
     displays.displays.clear();
 
     {
         Screen screen;
-        CHECK (displays.displays.size() == 1);
+        CHECK (juce::Desktop::getInstance().isHeadless());
         const auto effects = screen.effects (0);
         REQUIRE (effects.size() == 3);
         auto* eq = screen.view.findPanel (effects[0]);
@@ -783,6 +785,7 @@ TEST_CASE ("On a machine without a screen, as Linux CI is, a test window gives J
         drag (mouse, eqName->getLocalBounds().getCentre(), eqName->getLocalPoint (plugin, juce::Point<int> (plugin->getWidth() - 4, 60)));
         CHECK (phazite::test::dispatchMessagesUntil ([&]
                                                      { return screen.effects (0) == std::vector { effects[1], effects[2], effects[0] }; }));
+        CHECK (juce::Desktop::getInstance().isHeadless()); // as it was: none since the drag ended
     }
 
     displays.refresh(); // the machine's own again, if it has any

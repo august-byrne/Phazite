@@ -194,30 +194,42 @@ namespace
 
 namespace
 {
-    // A machine without a screen (Linux CI's) has no displays, and JUCE's code that asks which display something is on
-    // reads one: the drag image that fades out as a drag is let go (ComponentAnimator's proxy) crashed there. The tests get
-    // one display, as a screen gives; where there are displays, nothing changes. Each test window makes sure of it, since
-    // Desktop::setGlobalScaleFactor() finds the displays again.
-    void ensureDisplay()
+    // While a test mouse lets go, JUCE has a display, as a screen gives, where the machine has none (Linux CI's): a drag let
+    // go fades its image out through a copy of it, which JUCE's animator scales for the display it is on, and with none it
+    // read nothing and crashed (2026-11-01). Only then: Tracktion takes a machine without displays for one without a screen,
+    // as it is (Desktop::isHeadless()), and leaves its screen saver alone, which there would crash too.
+    class DisplayWhileReleasing
     {
-        auto& displays = const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays());
+    public:
+        DisplayWhileReleasing()
+        {
+            if (! displays.displays.isEmpty())
+                return;
 
-        if (! displays.displays.isEmpty())
-            return;
+            juce::Displays::Display screen;
+            screen.isMain = true;
+            screen.logicalBounds = screen.userBounds = { 0.0f, 0.0f, 1920.0f, 1080.0f };
+            screen.physicalBounds = { 0, 0, 1920, 1080 };
+            screen.scale = 1.0;
+            screen.dpi = 96.0;
+            displays.displays.add (screen);
+            added = true;
+        }
 
-        juce::Displays::Display screen;
-        screen.isMain = true;
-        screen.logicalBounds = screen.userBounds = { 0.0f, 0.0f, 1920.0f, 1080.0f };
-        screen.physicalBounds = { 0, 0, 1920, 1080 };
-        screen.scale = 1.0;
-        screen.dpi = 96.0;
-        displays.displays.add (screen);
-    }
+        ~DisplayWhileReleasing()
+        {
+            if (added)
+                displays.displays.clear();
+        }
+
+    private:
+        juce::Displays& displays = const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays());
+        bool added = false;
+    };
 } // namespace
 
 TestWindow::TestWindow (juce::Component& content, int width, int height)
 {
-    ensureDisplay();
     setTitle ("Test window");
     setOpaque (true);
     setBounds (0, 0, width, height);
@@ -341,6 +353,7 @@ void Mouse::dragTo (juce::Point<int> where)
 void Mouse::release()
 {
     button = {};
+    const DisplayWhileReleasing display;
     send (position, keys);
     keys = {};
     juce::ModifierKeys::currentModifiers = {};
