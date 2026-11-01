@@ -78,9 +78,12 @@ public:
     void saveProjectAs();       // a copy under a new name, which then stays open; the first save if untitled
     void exportSong();          // through onExport
 
-    // Makes an untitled project with what the settings choose, and opens it, the computer keyboard on its synth track if
-    // it has one: the new-project window's Create.
+    // Makes an untitled project with what the settings choose, and opens it: the new-project window's Create.
     juce::Result createProject (const NewProjectSettings&);
+
+    // Opens an example song (model/project/ExampleSongs.h) as a new untitled project, after asking whether to save the one
+    // that is open, with the computer keyboard on its lead: Help > Example Songs.
+    void openExampleSong (const juce::String& id);
 
     // The name the save dialog suggests: the project's own, or with " 2" and so on if a project has it in the folder.
     static juce::String suggestName (const juce::File& folder, const juce::String& name);
@@ -118,8 +121,7 @@ private:
     void askWhetherToRestore (const juce::File&, bool untitled, std::function<void (bool restore)>);
     void askHowToOpenAfterCrash (const juce::File&, std::function<void (AfterCrash)>);
     bool pluginsOffUntilOpen = false; // the project opening opens with its plug-ins off
-    void createFirstProject();
-    void selectSynthTrack(); // in a new project that has one (findSynthTrack())
+    void createFirstProject();        // an empty one, as every new project starts
 
     // Saves the project, asking where first if it is untitled, and calls back with whether it was saved.
     void saveThen (std::function<void (bool saved)>);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The new-project window (docs/design.md, section 13; roadmap step 1.9): the project's tempo, time signature and key, a
-// song outline that lays out its sections, and whether it starts with a drum track and a synth track. Its name comes with
-// its first save, which asks where it goes.
+// song outline that lays out its sections. It starts with no tracks. Its name comes with its first save, which asks where it
+// goes.
 #pragma once
 
 #include "model/project/NewProject.h"
@@ -35,7 +35,6 @@ public:
     juce::ComboBox& getKeyBox() noexcept { return keyBox; }
     juce::ComboBox& getScaleBox() noexcept { return scaleBox; }
     juce::ComboBox& getOutlineBox() noexcept { return outlineBox; }
-    juce::ToggleButton& getInstrumentsButton() noexcept { return instrumentsButton; }
     juce::TextButton& getCreateButton() noexcept { return createButton; }
     juce::TextButton& getCancelButton() noexcept { return cancelButton; }
     juce::String getOutlineText() const { return outlineText.getText(); }
@@ -46,7 +45,6 @@ private:
     juce::Label heading, saveText, tempoLabel, timeSignatureLabel, keyLabel, outlineLabel, outlineText, error;
     NumberField tempoField;
     juce::ComboBox timeSignatureBox, keyBox, scaleBox, outlineBox;
-    juce::ToggleButton instrumentsButton { "Start with a drum track and a synth track, ready to play" };
     juce::TextButton cancelButton { "Cancel" }, createButton { "Create" };
 
     void updateOutlineText();

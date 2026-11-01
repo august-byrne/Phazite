@@ -15,12 +15,13 @@ namespace phazite::ui
 class Guide : private CommandRegistry::Listener
 {
 public:
-    // The steps, in the order they are suggested.
+    // The steps, in the order they are suggested: something to play first, as a new project starts empty (the owner,
+    // 2026-11-01).
     enum class Step
     {
-        play,      // play the song
+        addSound,  // put an instrument or a sound into the song (the browser, the plug-in picker), or open an example song
         playNotes, // play an instrument with the computer keyboard
-        addSound,  // put a sound from the browser into the song
+        play,      // play the song
         record,    // record what is played (or capture it)
         exportSong // export the song
     };

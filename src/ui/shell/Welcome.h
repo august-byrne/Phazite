@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The welcome window (docs/design.md, section 13): what Phazite asks when it first opens, a page at a time, all of it
-// optional. Which app's shortcuts to use ("Coming from...?"), the audio output, with a test sound, and Phazite Sounds,
-// the free sounds that aren't part of Phazite's own download. Help > Welcome opens it again, and Help > Phazite Sounds
-// at its last page.
+// optional. Which app's shortcuts to use ("Coming from...?"), the audio output, with a test sound, Phazite Sounds, the free
+// sounds that aren't part of Phazite's own download, and where to start: an example song or a lesson. Help > Welcome opens
+// it again, and Help > Phazite Sounds at its third page.
 #pragma once
 
 #include "services/SoundPack.h"
@@ -99,6 +99,28 @@ private:
 };
 
 //==============================================================================
+// Where to start, now that a new project is empty (the owner, 2026-11-01): the example songs, each opening as a new
+// project (Help > Example Songs), and the lessons, each starting one (Help > Lessons). A choice runs its command, and
+// then the window closes.
+class StartPage : public juce::Component
+{
+public:
+    explicit StartPage (std::function<void (const juce::String& commandID)> run);
+
+    void resized() override;
+    void lookAndFeelChanged() override;
+
+    // For tests: a choice's button, by what it says ("House Groove", "Make a Beat").
+    juce::Button* findChoice (const juce::String& name) const;
+
+private:
+    const std::function<void (const juce::String&)> run;
+    juce::Label title, about, examplesHeading, lessonsHeading;
+    juce::OwnedArray<juce::TextButton> examples, lessons;
+    juce::OwnedArray<juce::Label> exampleDescriptions;
+};
+
+//==============================================================================
 class WelcomePanel : public juce::Component,
                      private juce::ChangeListener
 {
@@ -108,15 +130,19 @@ public:
     {
         comingFrom,
         sound,
-        sounds
+        sounds,
+        start
     };
 
-    static constexpr int numPages = 3;
+    static constexpr int numPages = 4;
 
-    // keymapName: the keymap in use. chooseKeymap: switches to another (the main window's). isOutputBluetooth: whether
-    // the output is Bluetooth (EngineContext::getAudioOutput()); none, for an output never Bluetooth.
+    // keymapName: the keymap in use. chooseKeymap: switches to another (the main window's). runCommand: runs the command of
+    // an example song or a lesson, chosen on the last page (the app's registry), and then the window closes.
+    // isOutputBluetooth: whether the output is Bluetooth (EngineContext::getAudioOutput()); none, for an output never
+    // Bluetooth.
     WelcomePanel (SoundPack&, juce::AudioDeviceManager&, const juce::String& keymapName,
-                  std::function<void (const juce::String& keymapName)> chooseKeymap, std::function<bool()> isOutputBluetooth = {});
+                  std::function<void (const juce::String& keymapName)> chooseKeymap,
+                  std::function<void (const juce::String& commandID)> runCommand, std::function<bool()> isOutputBluetooth = {});
     ~WelcomePanel() override;
 
     void showPage (Page);
@@ -136,6 +162,7 @@ public:
     ComingFromPage& getComingFromPage() noexcept { return comingFromPage; }
     SoundPage& getSoundPage() noexcept { return soundPage; }
     SoundPackPage& getSoundPackPage() noexcept { return soundPackPage; }
+    StartPage& getStartPage() noexcept { return startPage; }
 
 private:
     SoundPack& soundPack;
@@ -144,9 +171,11 @@ private:
     ComingFromPage comingFromPage;
     SoundPage soundPage;
     SoundPackPage soundPackPage;
+    StartPage startPage;
     juce::TextButton backButton { "Back" }, closeButton, nextButton { "Next" };
 
     void updateButtons();
+    void close(); // calls onClose, and closes the dialog window
     void changeListenerCallback (juce::ChangeBroadcaster*) override { updateButtons(); }
 };
 } // namespace phazite::ui

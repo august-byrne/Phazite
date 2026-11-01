@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Welcome.h"
+#include "Lessons.h"
+#include "model/project/ExampleSongs.h"
 #include "ui/components/Controls.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/Keymap.h"
@@ -16,6 +18,7 @@ namespace
     constexpr int helpHeight = 56;              // three lines
     constexpr int testButtonWidth = 160;
     constexpr int footerButtonWidth = 96;
+    constexpr int exampleButtonWidth = 140;
 
     struct ComingFromChoice
     {
@@ -365,34 +368,138 @@ void SoundPackPage::resized()
 }
 
 //==============================================================================
+StartPage::StartPage (std::function<void (const juce::String&)> runCommand)
+    : run (std::move (runCommand))
+{
+    setTitle ("Where to start");
+    makeTitle (title, "Where to start");
+    about.setText ("A new project starts empty. Open an example song to hear what Phazite does and take it apart, or take a "
+                   "short lesson. Help > Example Songs and Help > Lessons have them too.",
+                   juce::dontSendNotification);
+    about.setJustificationType (juce::Justification::topLeft);
+    examplesHeading.setText ("Example songs", juce::dontSendNotification);
+    lessonsHeading.setText ("Lessons", juce::dontSendNotification);
+
+    for (auto* heading : { &examplesHeading, &lessonsHeading })
+        heading->setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
+
+    const auto addChoice = [this] (juce::OwnedArray<juce::TextButton>& buttons, const juce::String& name, const juce::String& tooltip,
+                                   const juce::String& commandID)
+    {
+        auto* button = buttons.add (new juce::TextButton (name));
+        button->setTooltip (tooltip);
+        button->onClick = [this, commandID]
+        {
+            if (run != nullptr)
+                run (commandID);
+        };
+        addAndMakeVisible (button);
+    };
+
+    for (const auto& song : getExampleSongs())
+    {
+        addChoice (examples, song.name, "Opens " + juce::String (song.name) + " as a new project, to play, change and save as your own",
+                   "help.example." + juce::String (song.id));
+        auto* description = exampleDescriptions.add (new juce::Label ({}, song.description));
+        description->setJustificationType (juce::Justification::topLeft);
+        description->setFont (juce::FontOptions (TextSize::small));
+        addAndMakeVisible (description);
+    }
+
+    for (const auto& lesson : Lessons::getAll())
+        addChoice (lessons, lesson.name, lesson.description, "help.lesson." + juce::String (lesson.id));
+
+    for (auto* c : std::initializer_list<juce::Component*> { &title, &about, &examplesHeading, &lessonsHeading })
+        addAndMakeVisible (c);
+
+    lookAndFeelChanged();
+}
+
+juce::Button* StartPage::findChoice (const juce::String& name) const
+{
+    for (auto* buttons : { &examples, &lessons })
+        for (auto* button : *buttons)
+            if (button->getButtonText() == name)
+                return button;
+
+    return nullptr;
+}
+
+void StartPage::lookAndFeelChanged()
+{
+    const auto& p = getPalette (*this);
+    about.setColour (juce::Label::textColourId, p.textMuted);
+
+    for (auto* description : exampleDescriptions)
+        description->setColour (juce::Label::textColourId, p.textMuted);
+}
+
+void StartPage::resized()
+{
+    auto area = getLocalBounds();
+    title.setBounds (area.removeFromTop (titleHeight));
+    about.setBounds (area.removeFromTop (choiceDescriptionHeight));
+    area.removeFromTop (Space::s);
+
+    // Each example song a button with what it shows beside it, then the lessons, three to a row.
+    examplesHeading.setBounds (area.removeFromTop (controlHeight));
+
+    for (int i = 0; i < examples.size(); ++i)
+    {
+        auto row = area.removeFromTop (choiceDescriptionHeight);
+        examples[i]->setBounds (row.removeFromLeft (exampleButtonWidth).withHeight (controlHeight));
+        row.removeFromLeft (Space::m);
+        exampleDescriptions[i]->setBounds (row);
+        area.removeFromTop (Space::xs);
+    }
+
+    area.removeFromTop (Space::s);
+    lessonsHeading.setBounds (area.removeFromTop (controlHeight));
+    constexpr int perRow = 3;
+    const auto width = (area.getWidth() - (perRow - 1) * Space::s) / perRow;
+
+    for (int i = 0; i < lessons.size(); ++i)
+    {
+        if (i % perRow == 0 && i > 0)
+            area.removeFromTop (controlHeight + Space::s);
+
+        lessons[i]->setBounds (area.getX() + (i % perRow) * (width + Space::s), area.getY(), width, controlHeight);
+    }
+}
+
+//==============================================================================
 WelcomePanel::WelcomePanel (SoundPack& pack, juce::AudioDeviceManager& deviceManager, const juce::String& keymapName,
-                            std::function<void (const juce::String&)> chooseKeymap, std::function<bool()> isOutputBluetooth)
+                            std::function<void (const juce::String&)> chooseKeymap, std::function<void (const juce::String&)> runCommand,
+                            std::function<bool()> isOutputBluetooth)
     : soundPack (pack),
       comingFromPage (keymapName, std::move (chooseKeymap)),
       soundPage (deviceManager, std::move (isOutputBluetooth)),
-      soundPackPage (pack)
+      soundPackPage (pack),
+      startPage (
+          [this, run = std::move (runCommand)] (const juce::String& commandID)
+          {
+              // Once the window has gone: opening an example song can ask whether to save the open project first.
+              if (run != nullptr)
+                  juce::MessageManager::callAsync ([run, commandID] { run (commandID); });
+
+              close();
+          })
 {
     setTitle ("Welcome to Phazite");
 
     heading.setText ("Welcome to Phazite", juce::dontSendNotification);
     heading.setFont (juce::FontOptions (TextSize::heading, juce::Font::bold));
-    intro.setText ("Three things to set up, all of them optional. Help > Welcome brings this window back.", juce::dontSendNotification);
+    intro.setText ("Three things to set up, all of them optional, and where to start. Help > Welcome brings this window back.",
+                   juce::dontSendNotification);
 
-    closeButton.onClick = [this]
-    {
-        if (onClose != nullptr)
-            onClose();
-
-        if (auto* window = findParentComponentOfClass<juce::DialogWindow>())
-            window->exitModalState (0); // which deletes it
-    };
+    closeButton.onClick = [this] { close(); };
     backButton.onClick = [this] { showPage ((Page) juce::jmax (0, (int) page - 1)); };
     nextButton.onClick = [this] { showPage ((Page) juce::jmin (numPages - 1, (int) page + 1)); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &heading, &intro, &stepLabel, &backButton, &closeButton, &nextButton })
         addAndMakeVisible (c);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &comingFromPage, &soundPage, &soundPackPage })
+    for (auto* c : std::initializer_list<juce::Component*> { &comingFromPage, &soundPage, &soundPackPage, &startPage })
         addChildComponent (c);
 
     soundPack.addChangeListener (this);
@@ -411,17 +518,19 @@ void WelcomePanel::showPage (Page newPage)
     comingFromPage.setVisible (page == comingFrom);
     soundPage.setVisible (page == sound);
     soundPackPage.setVisible (page == sounds);
+    startPage.setVisible (page == start);
     stepLabel.setText (juce::String ((int) page + 1) + " of " + juce::String (numPages), juce::dontSendNotification);
     updateButtons();
 }
 
 void WelcomePanel::updateButtons()
 {
-    // Not Now until the last page, and on it until something has been done about Phazite Sounds.
+    // Not Now until the last page, where to start, which has nothing left to set up; and on Phazite Sounds' page once
+    // something has been done about them.
     const auto state = soundPack.getState();
     const auto untouched = (state == SoundPack::State::notInstalled || state == SoundPack::State::failed) && ! soundPack.isInstalled();
     const auto last = page == numPages - 1;
-    closeButton.setButtonText (last && ! untouched ? "Done" : "Not Now");
+    closeButton.setButtonText (last || (page == sounds && ! untouched) ? "Done" : "Not Now");
     backButton.setVisible (page > 0);
     nextButton.setVisible (! last);
     resized();
@@ -463,7 +572,16 @@ void WelcomePanel::resized()
     footer.removeFromLeft (Space::m);
     stepLabel.setBounds (footer.removeFromLeft (footerButtonWidth));
 
-    for (auto* c : std::initializer_list<juce::Component*> { &comingFromPage, &soundPage, &soundPackPage })
+    for (auto* c : std::initializer_list<juce::Component*> { &comingFromPage, &soundPage, &soundPackPage, &startPage })
         c->setBounds (area);
+}
+
+void WelcomePanel::close()
+{
+    if (onClose != nullptr)
+        onClose();
+
+    if (auto* window = findParentComponentOfClass<juce::DialogWindow>())
+        window->exitModalState (0); // which deletes it
 }
 } // namespace phazite::ui

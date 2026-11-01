@@ -55,7 +55,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
 {
     Screen screen;
 
-    // No recent projects: the first start makes My First Song.
+    // No recent projects: the first start makes an untitled project, with no tracks.
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
     REQUIRE (getEdit (screen.session.getContext()) != nullptr);
@@ -108,7 +108,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK (save->isEnabled());
     REQUIRE (screen.registry.invoke ("project.save"));
     CHECK_FALSE (screen.session.isUntitled());
-    CHECK (screen.session.getProject()->getFile() == screen.temp.folder.getChildFile ("Projects/My First Song/My First Song.phazite"));
+    CHECK (screen.session.getProject()->getFile() == screen.temp.folder.getChildFile ("Projects/Untitled/Untitled.phazite"));
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 }
 
@@ -258,11 +258,11 @@ TEST_CASE ("The hint bar shows the guide's next step, which a note on the comput
     phazite::test::dispatchPendingMessages();
     auto& hints = screen.shell.getHintBar();
 
-    // With the pointer on nothing, the guide's first step.
-    CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().startsWith ("Try this: press Space to play"); }));
+    // With the pointer on nothing, the guide's first step: something to play, as a new project starts empty.
+    CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().contains ("drag an instrument or a sound"); }));
 
-    REQUIRE (screen.registry.invoke ("transport.playStop"));
-    REQUIRE (screen.registry.invoke ("transport.playStop"));
+    // Something put into the song from the browser (which tells the guide).
+    screen.shell.getGuide().markDone (phazite::ui::Guide::Step::addSound);
     CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().contains ("on your computer keyboard"); }));
 
     // A note played on the computer keyboard, as its keys reach it. The guide moves on after the note has gone out, in a
@@ -272,7 +272,7 @@ TEST_CASE ("The hint bar shows the guide's next step, which a note on the comput
     CHECK_FALSE (screen.shell.getGuide().isDone (phazite::ui::Guide::Step::playNotes));
     phazite::test::dispatchPendingMessages();
     CHECK (screen.shell.getGuide().isDone (phazite::ui::Guide::Step::playNotes));
-    CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().contains ("drag a sound from the browser"); }));
+    CHECK (phazite::test::dispatchMessagesUntil ([&hints] { return hints.getHint().startsWith ("Try this: press Space to play"); }));
 }
 
 TEST_SUITE ("golden")

@@ -2,10 +2,12 @@
 #include "ProjectSession.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/project/ExampleSongs.h"
+#include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Export.h"
 #include "model/project/internal/NewProject.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/project/internal/StarterProject.h"
+#include "services/Library.h"
 #include "ui/shell/NewProjectPanel.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -182,21 +184,36 @@ juce::Result ProjectSession::createUntitled (const juce::String& name, const std
 
 void ProjectSession::createFirstProject()
 {
-    if (const auto result = createUntitled ("My First Song", addStarterContent); result.failed())
-    {
+    // Empty, as every new project starts (the owner, 2026-11-01): the welcome window offers the example songs.
+    if (const auto result = createProject ({}); result.failed())
         showError ("Phazite couldn't create a project", result.getErrorMessage());
-        return;
-    }
-
-    selectSynthTrack();
 }
 
-void ProjectSession::selectSynthTrack()
+void ProjectSession::openExampleSong (const juce::String& id)
 {
-    // Live MIDI follows the selection, so the computer keyboard plays the synth, in its octave.
-    if (project != nullptr)
-        if (auto* synth = findSynthTrack (project->getEdit()))
-            getSelection().selectOnly (synth);
+    const auto* song = findExampleSong (id);
+
+    if (song == nullptr)
+        return;
+
+    closeThen (
+        [this, song] (bool closed)
+        {
+            if (! closed)
+                return;
+
+            const auto content = getExampleSongContent (*engineContext, song->id, Library::getDefaultFactoryPresetsFolder());
+
+            if (const auto result = createUntitled (song->name, content); result.failed())
+            {
+                showError ("Phazite couldn't open the example song", result.getErrorMessage());
+                return;
+            }
+
+            // Live MIDI follows the selection, so the computer keyboard plays the song's lead.
+            if (const auto track = findExampleTrackToPlay (context, *song); track.isValid())
+                context.getSongSelection().selectOnly (track);
+        });
 }
 
 void ProjectSession::newProject()
@@ -208,7 +225,7 @@ void ProjectSession::newProject()
                 return;
 
             auto* panel = new ui::NewProjectPanel ([this] (const NewProjectSettings& settings) { return createProject (settings); });
-            panel->setSize (540, 460);
+            panel->setSize (540, 424);
 
             juce::DialogWindow::LaunchOptions o;
             o.dialogTitle = "New Project";
@@ -235,14 +252,7 @@ juce::String ProjectSession::suggestName (const juce::File& folder, const juce::
 juce::Result ProjectSession::createProject (const NewProjectSettings& settings)
 {
     // What the project starts with is part of its first save, not undo steps.
-    if (const auto result = createUntitled ("Untitled", [settings] (te::Edit& edit) { addNewProjectContent (edit, settings); });
-        result.failed())
-        return result;
-
-    if (settings.withInstruments)
-        selectSynthTrack();
-
-    return juce::Result::ok();
+    return createUntitled ("Untitled", [settings] (te::Edit& edit) { addNewProjectContent (edit, settings); });
 }
 
 juce::File ProjectSession::getExportFolder() const
@@ -572,6 +582,19 @@ void ProjectSession::showError (const juce::String& title, const juce::String& m
 
 void ProjectSession::addCommands (CommandRegistry& registry)
 {
+    // Help > Example Songs, each as a new untitled project.
+    for (const auto& song : getExampleSongs())
+    {
+        const juce::String id (song.id);
+        registry.add (
+            { .id = "help.example." + id,
+              .name = "Example Song: " + juce::String (song.name),
+              .category = "Help",
+              .description = juce::String (song.description) + " It opens as a new project, to play, change and save as your own.",
+              .synonyms = { "example", "demo", "demo song", "learn", "template", "song" },
+              .perform = [this, id] { openExampleSong (id); } });
+    }
+
     registry.add ({ .id = "project.new",
                     .name = "New Project",
                     .category = "Project",

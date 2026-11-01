@@ -55,6 +55,18 @@ struct TemporaryFolder
         juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("PhaziteTests", {}, false);
 };
 
+// The presets that come with Phazite: resources/presets in the source tree, above the test program, as the golden tests
+// find tests/ (the app finds them next to itself).
+inline juce::File getFactoryPresetsFolder()
+{
+    auto folder = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+
+    while (! folder.getChildFile ("resources").getChildFile ("presets").isDirectory() && ! folder.isRoot())
+        folder = folder.getParentDirectory();
+
+    return folder.getChildFile ("resources").getChildFile ("presets");
+}
+
 // Writes a WAV file (and the folders it is in) of a sine, some seconds long, and returns it: by default a quiet A
 // (220 Hz, at a quarter of full scale).
 inline juce::File writeSound (const juce::File& file, double seconds, double frequency = 220.0, float amplitude = 0.25f)

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden files of saved projects (tests/golden/projects): a new project, the starter project and a project with one of
+// Golden files of saved projects (tests/golden/projects): a new project, the First Beat example song and a project with one of
 // each kind of track and every piece of Phazite's data are saved, reopened and saved again, and the second save is
 // compared with a committed file. The representative project also freezes the 0.1.0 project that MigrationTests.cpp
 // opens. GoldenFiles.h says what the comparison leaves out and how to regenerate the files.
@@ -21,8 +21,8 @@
 #include "model/chords/internal/Chords.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
-#include "model/project/internal/StarterProject.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/pianoroll/DrumRows.h"
@@ -397,12 +397,14 @@ TEST_SUITE ("golden")
                                 "A new, empty project (Project::create), saved, reopened and saved again: tests/GoldenProjectTests.cpp");
     }
 
-    TEST_CASE ("Golden project: the starter project")
+    TEST_CASE ("Golden project: the First Beat example song")
     {
-        // As ProjectSession::createFirstProject makes Phazite's first project.
+        // As Help > Example Songs makes it (ProjectSession::openExampleSong()).
         phazite::test::TemporaryFolder temp;
         juce::String error;
-        auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Starter", error, phazite::addStarterContent);
+        auto project = phazite::Project::create (
+            phazite::test::getEngine(), temp.folder, "First Beat", error,
+            phazite::getExampleSongContent (phazite::test::getEngineContext(), "firstBeat", phazite::test::getFactoryPresetsFolder()));
         INFO (error.toStdString());
         REQUIRE (project != nullptr);
         phazite::test::settle();
@@ -411,8 +413,9 @@ TEST_SUITE ("golden")
         CHECK_FALSE (project->hasUnsavedChanges());
         CHECK_FALSE (phazite::getSongUndoManager (project->getEdit()).canUndo());
 
-        saveReopenAndSaveAgain (std::move (project), "starter",
-                                "The starter project (addStarterContent), saved, reopened and saved again: tests/GoldenProjectTests.cpp");
+        saveReopenAndSaveAgain (std::move (project), "first-beat",
+                                "The First Beat example song (ExampleSongs.h), saved, reopened and saved again: "
+                                "tests/GoldenProjectTests.cpp");
     }
 
     TEST_CASE ("Golden project: one of each kind of track and every piece of Phazite data")

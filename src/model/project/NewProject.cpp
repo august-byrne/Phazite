@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "NewProject.h"
 #include "internal/NewProject.h"
-#include "internal/StarterProject.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Outlines.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -21,23 +21,16 @@ bool isValid (const NewProjectSettings& settings)
 
 void addNewProjectContent (te::Edit& edit, const NewProjectSettings& settings)
 {
-    // Not undo steps that matter: the project opens from its first save, without them.
+    // Not undo steps that matter: the project opens from its first save, without them. It starts with no tracks (the owner,
+    // 2026-11-01), so the one Tracktion makes with the Edit goes.
+    deleteTracks (getPlaylistTracks (edit), nullptr);
     setTempo (edit, settings.tempo);
     setTimeSignature (edit, settings.timeSignature);
 
-    if (settings.withInstruments)
-        addInstrumentTracks (edit);
-
+    // The key goes on the tracks added later.
     if (settings.keyRoot.has_value())
-    {
         if (const auto scale = findScale (settings.scale))
-        {
             setLastKey (edit, { *settings.keyRoot, *scale });
-
-            for (auto* track : te::getAudioTracks (edit))
-                applyLastKey (*track);
-        }
-    }
 
     if (settings.outline.isNotEmpty())
         applyOutline (edit, settings.outline);

@@ -4,6 +4,7 @@
 #include "internal/Clips.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
+#include "model/devices/internal/DeviceFiles.h"
 #include "model/mirror/internal/Mirror.h"
 
 #include <algorithm>
@@ -136,8 +137,10 @@ juce::ValueTree makeAudioClipState (te::Edit& edit, const juce::String& name, co
     clipState.setProperty (schema::clipKind, schema::clipIsAudio, nullptr);
     clipState.setProperty (schema::clipName, name, nullptr);
     clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), nullptr);
-    const auto path = te::SourceFileReference::findPathFromFile (edit, file, true).replaceCharacter ('\\', '/');
-    clipState.setProperty (schema::clipFile, path, nullptr);
+    // Relative to the project's folder, as Tracktion finds it again (from the project file's folder) and as devices keep their
+    // files (DeviceFiles.h): also while a new project's content is made, before its file exists, when Tracktion's own
+    // findPathFromFile() would start from the file as if it were a folder ("../Audio/...").
+    clipState.setProperty (schema::clipFile, getProjectPath (edit, file), nullptr);
     clipState.setProperty (schema::clipFileStart, part.start, nullptr);
     clipState.setProperty (schema::clipFileEnd, part.end, nullptr);
     return clipState;

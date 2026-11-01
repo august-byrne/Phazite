@@ -8,9 +8,9 @@
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
+#include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/project/internal/StarterProject.h"
 #include "model/transport/TransportModel.h"
 
 namespace phazite::test
@@ -30,8 +30,9 @@ TestSong::TestSong (Start start)
 {
     juce::String error;
     REQUIRE (folder.createDirectory().wasOk());
-    project = Project::create (getEngine(), folder, "Song", error,
-                               start == Start::starter ? std::function<void (te::Edit&)> (addStarterContent) : nullptr);
+    project = Project::create (
+        getEngine(), folder, "Song", error,
+        start == Start::firstBeat ? getExampleSongContent (getEngineContext(), "firstBeat", getFactoryPresetsFolder()) : nullptr);
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     setEdit (context, &project->getEdit());
     addSongCommands (commands, context, renders);

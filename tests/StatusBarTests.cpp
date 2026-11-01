@@ -78,6 +78,7 @@ TEST_CASE ("The status bar says what is selected, and where what is played on a 
 {
     Screen screen;
     screen.session.openAtStartup();
+    REQUIRE (screen.registry.invoke ("help.example.firstBeat")); // tracks with clips, as Help > Example Songs opens it
     phazite::test::dispatchPendingMessages();
     phazite::test::settle();
     auto& status = screen.shell.getStatusBar();
@@ -188,7 +189,7 @@ TEST_CASE ("While clips are stretched in the background after a tempo change, th
     CHECK (status.getRenderText().isEmpty());
 
     // A loop long enough to take a while, at its own tempo, then the song a little slower.
-    const auto track = phazite::getAllPlaylistTracks (context).back();
+    const auto track = phazite::addTrackAtEnd (context, false);
     REQUIRE (! phazite::importFiles (context,
                                      { phazite::test::writeClicks (screen.temp.folder.getChildFile ("Loop"), 64, 120.0).getFullPathName() },
                                      track, phazite::BeatPosition::fromBeats (64.0))

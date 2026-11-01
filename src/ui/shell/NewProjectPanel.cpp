@@ -94,16 +94,12 @@ NewProjectPanel::NewProjectPanel (Create createProject)
     outlineBox.setSelectedId (noneID, juce::dontSendNotification);
     outlineBox.onChange = [this] { updateOutlineText(); };
 
-    instrumentsButton.setToggleState (NewProjectSettings().withInstruments, juce::dontSendNotification);
-    instrumentsButton.setTooltip (
-        "A Drums track on the drum sampler and a Synth track on the synth, so the computer keyboard plays at once");
-
     cancelButton.onClick = [this] { close(); };
     createButton.onClick = [this] { createClicked(); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &heading, &saveText, &tempoLabel, &tempoField, &timeSignatureLabel,
                                                              &timeSignatureBox, &keyLabel, &keyBox, &scaleBox, &outlineLabel, &outlineBox,
-                                                             &outlineText, &instrumentsButton, &error, &cancelButton, &createButton })
+                                                             &outlineText, &error, &cancelButton, &createButton })
         addAndMakeVisible (c);
 
     updateOutlineText();
@@ -142,7 +138,6 @@ NewProjectSettings NewProjectPanel::getSettings() const
     if (const auto index = outlineBox.getSelectedId() - 2; juce::isPositiveAndBelow (index, (int) getBuiltInOutlines().size()))
         settings.outline = getBuiltInOutlines()[(size_t) index].id;
 
-    settings.withInstruments = instrumentsButton.getToggleState();
     return settings;
 }
 
@@ -227,8 +222,6 @@ void NewProjectPanel::resized()
 
     outlineBox.setBounds (row (outlineLabel).removeFromLeft (boxWidth));
     outlineText.setBounds (area.removeFromTop (outlineTextHeight).withTrimmedLeft (labelWidth));
-    area.removeFromTop (Space::s);
-    instrumentsButton.setBounds (area.removeFromTop (controlHeight));
 
     auto footer = area.removeFromBottom (controlHeight);
     createButton.setBounds (footer.removeFromRight (buttonWidth));

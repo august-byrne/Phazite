@@ -4,6 +4,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceStates.h"
+#include "model/engine/AppInfo.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mirror/internal/Mirror.h"
@@ -128,6 +129,11 @@ std::unique_ptr<te::Edit> createSongEdit (te::Engine& engine, const juce::File& 
     recordFirstTrack (*edit);
     addPhaziteParts (*edit);
     return edit;
+}
+
+juce::File getDefaultProjectsFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (appName).getChildFile ("Projects");
 }
 
 std::unique_ptr<te::Edit> createEditFromSong (te::Engine& engine, const juce::ValueTree& song, const juce::File& file,

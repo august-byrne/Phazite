@@ -303,6 +303,8 @@ target_sources(phazite_core PRIVATE
     src/model/presets/PresetModel.h
     src/model/presets/Presets.cpp
     src/model/presets/internal/Presets.h
+    src/model/project/ExampleSongs.cpp
+    src/model/project/ExampleSongs.h
     src/model/project/Export.cpp
     src/model/project/Export.h
     src/model/project/NewProject.cpp
@@ -310,13 +312,12 @@ target_sources(phazite_core PRIVATE
     src/model/project/Project.cpp
     src/model/project/ProjectContext.cpp
     src/model/project/ProjectContext.h
-    src/model/project/StarterProject.cpp
     src/model/project/UnsavedProjects.cpp
+    src/model/project/internal/ExampleSongs.h
     src/model/project/internal/Export.h
     src/model/project/internal/NewProject.h
     src/model/project/internal/Project.h
     src/model/project/internal/ProjectContext.h
-    src/model/project/internal/StarterProject.h
     src/model/project/internal/UnsavedProjects.h
     src/model/transport/AudioRecorder.cpp
     src/model/transport/Capture.cpp
@@ -519,9 +520,9 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/DisplayTicker.cpp
     src/ui/components/DisplayTicker.h
     src/ui/components/ModulatorDrag.h
-    src/ui/components/ValueText.cpp
     src/ui/components/TrackSwitch.cpp
     src/ui/components/TrackSwitch.h
+    src/ui/components/ValueText.cpp
     src/ui/components/ValueText.h
     src/ui/devices/CompressorEditor.cpp
     src/ui/devices/CompressorEditor.h
@@ -834,6 +835,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/EffectEditorTests.cpp
         tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
+        tests/ExampleSongTests.cpp
         tests/ExportTests.cpp
         tests/FactoryPresetTests.cpp
         tests/FreezeTests.cpp

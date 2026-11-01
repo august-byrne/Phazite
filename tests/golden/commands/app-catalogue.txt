@@ -84,6 +84,9 @@ track.arm
 clip.previousTake
 clip.nextTake
 transport.capture | ctrl + shift + C
+help.example.firstBeat
+help.example.houseGroove
+help.example.loFiBeat
 project.new | ctrl + N
 project.open | ctrl + O
 project.openRecent

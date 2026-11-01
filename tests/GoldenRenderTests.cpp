@@ -109,13 +109,13 @@ bool soundsLikeTheMix (const Fingerprint& fingerprint, const juce::AudioBuffer<f
 }
 
 //==============================================================================
-constexpr int starterSeconds = 8; // its 4 bars at 120 BPM
+constexpr int firstBeatSeconds = 8; // its 4 bars at 120 BPM
 
 // Something in every block of its 8 seconds, the same on each side (the drums and the synth are in the middle), and the
 // kick loud on the first beat.
-bool soundsLikeTheStarter (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+bool soundsLikeFirstBeat (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
 {
-    REQUIRE (fingerprint.size() == (size_t) starterSeconds * 10);
+    REQUIRE (fingerprint.size() == (size_t) firstBeatSeconds * 10);
     auto everywhere = true, inTheMiddle = true;
 
     for (const auto& block : fingerprint)
@@ -124,8 +124,8 @@ bool soundsLikeTheStarter (const Fingerprint& fingerprint, const juce::AudioBuff
         inTheMiddle = inTheMiddle && std::abs (block.rms[0] - block.rms[1]) < 0.01f;
     }
 
-    CHECK_MESSAGE (everywhere, "every 100 ms of the starter project should be above -40 dBFS on each side");
-    CHECK_MESSAGE (inTheMiddle, "the starter project's drums and synth should be as loud on each side");
+    CHECK_MESSAGE (everywhere, "every 100 ms of the First Beat example should be above -40 dBFS on each side");
+    CHECK_MESSAGE (inTheMiddle, "First Beat's drums and synth should be as loud on each side");
 
     const auto kick = fingerprint.front().peak[0] > -18.0f;
     CHECK_MESSAGE (kick,
@@ -579,14 +579,14 @@ TEST_SUITE ("golden")
             golden ("mix", "two tones through a bus, a send to a reverb return, volume automation and pan.", 4.0, soundsLikeTheMix));
     }
 
-    TEST_CASE ("Golden render: the starter project, a beat on Phazite's drum sampler and an arpeggio on its synth")
+    TEST_CASE ("Golden render: the First Beat example song, a beat on Phazite's drum sampler and an arpeggio on its synth")
     {
-        TestSong song (TestSong::Start::starter);
+        TestSong song (TestSong::Start::firstBeat);
         phazite::test::settle();
-        phazite::test::checkGoldenRender (song.context, golden ("starter",
-                                                                "the starter project, a beat on Phazite's drum sampler and an "
-                                                                "arpeggio on its synth.",
-                                                                starterSeconds, soundsLikeTheStarter));
+        phazite::test::checkGoldenRender (song.context, golden ("first-beat",
+                                                                "the First Beat example song, a beat on Phazite's drum sampler and "
+                                                                "an arpeggio on its synth.",
+                                                                firstBeatSeconds, soundsLikeFirstBeat));
     }
 
     TEST_CASE ("Golden render: two chords on Phazite's wavetable synth, in unison, an envelope sweeping each note's table")

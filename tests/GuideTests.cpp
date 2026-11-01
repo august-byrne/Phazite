@@ -36,21 +36,25 @@ TEST_CASE ("The guide suggests one step at a time, each gone once it is done, in
 {
     GuideSetup s;
     phazite::ui::Guide guide (s.commands, s.settings);
+
+    // Something to play first, as a new project starts empty.
+    CHECK (guide.getNextStep() == Step::addSound);
+    CHECK (guide.getHint().contains ("drag an instrument or a sound from the browser"));
+    CHECK (guide.getHint().contains ("Help > Example Songs"));
+
+    // Put into the song from the browser (the main window tells the guide).
+    guide.markDone (Step::addSound);
+    CHECK (guide.getNextStep() == Step::playNotes);
+    CHECK (guide.getHint().contains ("play it on your computer keyboard: A S D F G H J K L"));
+
+    // Played on the computer keyboard (the main window tells the guide too).
+    guide.markDone (Step::playNotes);
     CHECK (guide.getNextStep() == Step::play);
     CHECK (guide.getHint() == "Try this: press Space to play the song, and Space again to stop it.");
 
     // The play button, Space, the menu and the palette all run the command.
     s.registry.invoke ("transport.playStop");
     CHECK (guide.isDone (Step::play));
-    CHECK (guide.getNextStep() == Step::playNotes);
-    CHECK (guide.getHint().contains ("play it on your computer keyboard: A S D F G H J K L"));
-
-    // Played on the computer keyboard (the main window tells the guide).
-    guide.markDone (Step::playNotes);
-    CHECK (guide.getNextStep() == Step::addSound);
-    CHECK (guide.getHint().contains ("drag a sound from the browser"));
-
-    guide.markDone (Step::addSound);
     CHECK (guide.getNextStep() == Step::record);
     CHECK (guide.getHint().startsWith ("Try this: press R to record what you play"));
     CHECK (guide.getHint().contains ("+Shift+C captures it."));
@@ -66,7 +70,7 @@ TEST_CASE ("The guide suggests one step at a time, each gone once it is done, in
     // The settings keep what was done, for the next session.
     phazite::ui::Guide later (s.commands, s.settings);
     CHECK_FALSE (later.getNextStep().has_value());
-    CHECK (s.settings.get (phazite::Settings::guideStepsDone) == juce::StringArray { "play", "playNotes", "addSound", "record", "export" });
+    CHECK (s.settings.get (phazite::Settings::guideStepsDone) == juce::StringArray { "addSound", "playNotes", "play", "record", "export" });
 }
 
 TEST_CASE ("The guide skips what recording shows was done, says how to turn the computer keyboard on, and can be turned off")
@@ -75,6 +79,7 @@ TEST_CASE ("The guide skips what recording shows was done, says how to turn the 
     phazite::ui::Guide guide (s.commands, s.settings);
     guide.addCommands (s.registry);
 
+    guide.markDone (Step::addSound);
     s.registry.invoke ("transport.playStop");
     s.keyboardOn = false;
     CHECK (guide.getHint().startsWith ("Try this: press M to play notes on your computer keyboard"));
@@ -83,7 +88,7 @@ TEST_CASE ("The guide skips what recording shows was done, says how to turn the 
     s.registry.invoke ("transport.record");
     CHECK (guide.isDone (Step::playNotes));
     CHECK (guide.isDone (Step::record));
-    CHECK (guide.getNextStep() == Step::addSound);
+    CHECK (guide.getNextStep() == Step::exportSong);
 
     // Help > Getting Started Tips.
     const auto* tips = s.registry.find ("help.guide");
@@ -93,8 +98,8 @@ TEST_CASE ("The guide skips what recording shows was done, says how to turn the 
     CHECK_FALSE (guide.isOn());
     CHECK_FALSE (tips->isTicked());
     CHECK (guide.getHint().isEmpty());
-    CHECK (guide.getNextStep() == Step::addSound); // still there for when it is on again
+    CHECK (guide.getNextStep() == Step::exportSong); // still there for when it is on again
 
     s.registry.invoke ("help.guide");
-    CHECK (guide.getHint().contains ("drag a sound from the browser"));
+    CHECK (guide.getHint().contains ("export the song"));
 }

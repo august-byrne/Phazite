@@ -15,6 +15,9 @@ class SongFollower;
 // where its audio files' paths start from. For a song outside a project: tests' songs, and what is rendered alone.
 std::unique_ptr<te::Edit> createSongEdit (te::Engine&, const juce::File& file = {});
 
+// Where new projects go unless the user picks another folder: Documents/Phazite/Projects.
+juce::File getDefaultProjectsFolder();
+
 // An Edit made from a song alone (Phazite's state, Schema.h, which it takes), as the mirror builds Tracktion's side of it
 // (docs/tracktion-migration.md, T1): what the song doesn't hold isn't in it. Its file, if given, is where its audio files'
 // paths start from, and its cache folder where its frozen tracks' files are. No undo steps, no unsaved changes.

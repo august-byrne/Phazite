@@ -14,7 +14,7 @@ struct Welcome
         : soundPack (packs.folder, release),
           panel (
               soundPack, deviceManager, keymapName, [this] (const juce::String& name) { chosenKeymaps.add (name); },
-              [this] { return bluetooth; })
+              [this] (const juce::String& commandID) { commandsRun.add (commandID); }, [this] { return bluetooth; })
     {
     }
 
@@ -23,7 +23,7 @@ struct Welcome
     phazite::test::TemporaryFolder packs;
     phazite::SoundPack soundPack;
     juce::AudioDeviceManager deviceManager; // never opened
-    juce::StringArray chosenKeymaps;
+    juce::StringArray chosenKeymaps, commandsRun;
     phazite::ui::WelcomePanel panel;
     phazite::test::TestWindow window { panel, 600, 560 };
 
@@ -85,10 +85,19 @@ TEST_CASE ("The welcome window goes page by page, and its sound page plays a tes
     w.click (w.panel.getNextButton());
     CHECK (w.panel.getPage() == phazite::ui::WelcomePanel::sounds);
     CHECK (w.panel.getSoundPackPage().isVisible());
-    CHECK_FALSE (w.panel.getNextButton().isVisible());
     CHECK (w.panel.getCloseButton().getButtonText() == juce::String ("Not Now"));
     phazite::test::checkChildrenApart (w.panel);
 
+    // The last page, where to start: nothing more to set up.
+    w.click (w.panel.getNextButton());
+    CHECK (w.panel.getPage() == phazite::ui::WelcomePanel::start);
+    CHECK (w.panel.getStartPage().isVisible());
+    CHECK_FALSE (w.panel.getNextButton().isVisible());
+    CHECK (w.panel.getCloseButton().getButtonText() == juce::String ("Done"));
+    phazite::test::checkChildrenApart (w.panel.getStartPage());
+    phazite::test::checkChildrenApart (w.panel);
+
+    w.click (w.panel.getBackButton());
     w.click (w.panel.getBackButton());
     CHECK (w.panel.getPage() == phazite::ui::WelcomePanel::sound);
 
@@ -176,4 +185,30 @@ TEST_CASE ("The welcome window's sound page warns while the output is Bluetooth"
     w.bluetooth = false;
     w.deviceManager.sendSynchronousChangeMessage();
     CHECK_FALSE (w.panel.getSoundPage().warnsOfBluetooth());
+}
+
+TEST_CASE ("The welcome window's last page opens an example song or starts a lesson, and then closes")
+{
+    phazite::test::PackRelease source;
+    Welcome w (source.release);
+    w.panel.showPage (phazite::ui::WelcomePanel::start);
+    bool closed = false;
+    w.panel.onClose = [&closed] { closed = true; };
+
+    // Every example song and every lesson is there.
+    auto& page = w.panel.getStartPage();
+
+    for (const auto* name : { "First Beat", "House Groove", "Lo-fi Beat", "Make a Beat", "Write Chords" })
+    {
+        CAPTURE (name);
+        CHECK (page.findChoice (name) != nullptr);
+    }
+
+    // A choice runs its command once the window has gone.
+    auto* house = page.findChoice ("House Groove");
+    REQUIRE (house != nullptr);
+    w.click (*house);
+    CHECK (closed);
+    phazite::test::dispatchPendingMessages();
+    CHECK (w.commandsRun.joinIntoString (", ") == "help.example.houseGroove");
 }

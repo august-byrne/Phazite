@@ -16,8 +16,8 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
-#include "model/project/internal/StarterProject.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
@@ -293,10 +293,10 @@ TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, s
     CHECK_FALSE (phazite::doesLoopFollowSong (*song.edit));
 }
 
-TEST_CASE ("The starter project loops its song")
+TEST_CASE ("The First Beat example song loops its song")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::addStarterContent (*edit);
+    phazite::getExampleSongContent (phazite::test::getEngineContext(), "firstBeat", phazite::test::getFactoryPresetsFolder()) (*edit);
 
     CHECK (edit->getTransport().looping.get());
     CHECK (phazite::doesLoopFollowSong (*edit));

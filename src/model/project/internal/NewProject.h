@@ -10,7 +10,7 @@ namespace phazite
 struct NewProjectSettings;
 
 // Adds what the settings choose to a new project's Edit, as Project::create()'s content function, so that it is part of
-// the first save: the tempo and time signature, the instrument tracks, the key (each track's, and new tracks') and the
-// outline's sections, in bars of that time signature.
+// the first save: the tempo and time signature, the key that tracks added later get, and the outline's sections, in bars
+// of that time signature. It takes away the track Tracktion makes with the Edit: a new project starts with none.
 void addNewProjectContent (te::Edit&, const NewProjectSettings&);
 } // namespace phazite

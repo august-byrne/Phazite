@@ -44,13 +44,12 @@ TEST_CASE ("The new-project window makes a project with the choices it shows")
     NewProjectWindow w;
     phazite::test::checkChildrenApart (w.panel);
 
-    // Its defaults: 120 BPM in 4/4, no key, no outline, and the two instrument tracks.
+    // Its defaults: 120 BPM in 4/4, no key and no outline (and no tracks: a new project starts empty).
     const auto defaults = w.panel.getSettings();
     CHECK (defaults.tempo == doctest::Approx (120.0));
     CHECK (defaults.timeSignature == phazite::TimeSignature {});
     CHECK_FALSE (defaults.keyRoot.has_value());
     CHECK (defaults.outline.isEmpty());
-    CHECK (defaults.withInstruments);
     CHECK (w.panel.getTempoField().getTextFromValue (120.0) == "120 BPM");
     CHECK_FALSE (w.panel.getScaleBox().isEnabled());
     CHECK (w.panel.getOutlineText().startsWith ("The song starts without sections."));
@@ -61,7 +60,6 @@ TEST_CASE ("The new-project window makes a project with the choices it shows")
     CHECK (w.panel.getScaleBox().isEnabled());
     w.panel.getScaleBox().setSelectedId (2, juce::sendNotificationSync); // minor
     w.panel.getOutlineBox().setSelectedId (getOutlineItemID ("hipHop"), juce::sendNotificationSync);
-    w.click (w.panel.getInstrumentsButton()); // off
     phazite::test::dispatchPendingMessages();
 
     const auto* hipHop = phazite::findOutline ("hipHop");
@@ -77,7 +75,6 @@ TEST_CASE ("The new-project window makes a project with the choices it shows")
     CHECK (made.keyRoot == std::optional<int> (2));
     CHECK (made.scale == "minor");
     CHECK (made.outline == "hipHop");
-    CHECK_FALSE (made.withInstruments);
     CHECK (phazite::isValid (made));
     CHECK (w.closed);
 }

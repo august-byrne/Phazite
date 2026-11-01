@@ -3,6 +3,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/project/ExampleSongs.h"
 #include "model/project/internal/Export.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/ExportPanel.h"
@@ -448,7 +449,13 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
 
     auto* panel = new ui::WelcomePanel (
         services.soundPack, engine.getDeviceManager().deviceManager, commands.getKeymap().name,
-        [this] (const juce::String& name) { setKeymap (name); }, [this] { return services.engineContext->getAudioOutput().isBluetooth; });
+        [this] (const juce::String& name) { setKeymap (name); },
+        [safeThis = juce::Component::SafePointer<MainWindow> (this)] (const juce::String& commandID)
+        {
+            if (safeThis != nullptr)
+                safeThis->commands.invoke (commandID);
+        },
+        [this] { return services.engineContext->getAudioOutput().isBluetooth; });
     panel->setSize (600, 560);
     panel->showPage (page);
     welcomePanel = panel;
@@ -902,6 +909,14 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
                 lessonsMenu.addSeparator();
                 addOne (lessonsMenu, "help.stopLesson");
                 menu.addSubMenu ("Lessons", lessonsMenu);
+
+                // Songs that show what Phazite does, each opening as a new project (model/project/ExampleSongs.h).
+                juce::PopupMenu examplesMenu;
+
+                for (const auto& song : getExampleSongs())
+                    addOne (examplesMenu, "help.example." + juce::String (song.id));
+
+                menu.addSubMenu ("Example Songs", examplesMenu);
             }
 
             menu.addSeparator();

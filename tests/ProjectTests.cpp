@@ -17,8 +17,8 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
-#include "model/project/internal/StarterProject.h"
 #include "model/transport/internal/Playback.h"
 #include "ui/playlist/TrackHeights.h"
 
@@ -353,9 +353,11 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
     juce::String error;
     std::unique_ptr<phazite::Project> project;
 
-    SUBCASE ("The starter song, as the first start makes it")
+    SUBCASE ("The First Beat example song, as Help > Example Songs makes it")
     {
-        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "First", error, phazite::addStarterContent);
+        project = phazite::Project::create (
+            phazite::test::getEngine(), temp.folder, "First", error,
+            phazite::getExampleSongContent (phazite::test::getEngineContext(), "firstBeat", phazite::test::getFactoryPresetsFolder()));
         INFO (error.toStdString());
         REQUIRE (project != nullptr);
         const auto tracks = te::getAudioTracks (project->getEdit());

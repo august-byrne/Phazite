@@ -50,15 +50,9 @@ juce::String toString (std::string_view text)
     return juce::String (text.data(), text.size());
 }
 
-// resources/presets in the source tree, above the test program, as the golden tests find tests/.
 juce::File getFactoryPresets()
 {
-    auto folder = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
-
-    while (! folder.getChildFile ("resources").getChildFile ("presets").isDirectory() && ! folder.isRoot())
-        folder = folder.getParentDirectory();
-
-    return folder.getChildFile ("resources").getChildFile ("presets");
+    return phazite::test::getFactoryPresetsFolder();
 }
 
 juce::Array<juce::File> getPresetFiles()

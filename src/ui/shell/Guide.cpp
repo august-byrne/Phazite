@@ -84,6 +84,10 @@ void Guide::commandInvoked (const Command& command)
     {
         markDone (Step::play);
     }
+    else if (id == "device.add" || id.startsWith ("help.example."))
+    {
+        markDone (Step::addSound); // the plug-in picker's instrument, or a song to play with
+    }
     else if (id == "transport.record" || id == "transport.capture")
     {
         markDone (Step::playNotes); // recording what was played: playing came first, on whatever keyboard
@@ -121,7 +125,8 @@ juce::String Guide::getHint() const
                    "white keys, W E T Y U O P the black ones.";
 
         case Step::addSound:
-            return "Try this: drag a sound from the browser on the left onto a track, or below the tracks for a new track.";
+            return "Try this: drag an instrument or a sound from the browser on the left into the playlist, or open an example song "
+                   "from Help > Example Songs to hear what Phazite does.";
 
         case Step::record:
         {

@@ -10,7 +10,7 @@
 #include "RunMarker.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/internal/EngineSetup.h"
-#include "model/project/internal/StarterProject.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/UnsavedProjects.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/KeymapStore.h"

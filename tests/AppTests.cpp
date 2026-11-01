@@ -8,12 +8,13 @@
 #include "app/ProjectSession.h"
 #include "app/RunMarker.h"
 #include "model/arrangement/Outlines.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/base/internal/Schema.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/project/internal/StarterProject.h"
 #include "model/transport/internal/Tempo.h"
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
@@ -79,7 +80,7 @@ TEST_CASE ("The session opens and saves a project")
     CHECK (uiBehaviour.getLastFocusedEdit() == nullptr);
 }
 
-TEST_CASE ("The first start makes My First Song, which its first save names and places")
+TEST_CASE ("The first start makes an empty, untitled project, which its first save names and places")
 {
     auto& engine = phazite::test::getEngine();
     phazite::test::TemporaryFolder temp;
@@ -94,16 +95,10 @@ TEST_CASE ("The first start makes My First Song, which its first save names and 
     const auto file = session.getProject()->getFile();
     CHECK (session.isUntitled());
     CHECK (file.isAChildOf (unsaved));
-    CHECK (file.getFileName() == juce::String ("My First Song") + phazite::Project::fileExtension);
+    CHECK (file.getFileName() == juce::String ("Untitled") + phazite::Project::fileExtension);
     CHECK (file.existsAsFile());
-    CHECK (te::getAudioTracks (*getEdit (session.getContext())).size() == 2); // the starter song: drums and a synth
-    CHECK (recent.getProjects().isEmpty());                                   // until it is saved
-
-    // The computer keyboard plays the synth, in its octave: its track is selected, and live MIDI follows the selection.
-    auto* synth = phazite::findSynthTrack (*getEdit (session.getContext()));
-    REQUIRE (synth != nullptr);
-    CHECK (synth->getName() == "Synth");
-    CHECK (session.getSelection().isSelected (synth));
+    CHECK (phazite::getAllPlaylistTracks (session.getContext()).empty()); // a new project starts empty
+    CHECK (recent.getProjects().isEmpty());                               // until it is saved
 
     // It is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();
@@ -111,7 +106,44 @@ TEST_CASE ("The first start makes My First Song, which its first save names and 
     CHECK_FALSE (phazite::getSongUndoManager (*getEdit (session.getContext())).canUndo());
 }
 
-TEST_CASE ("A new project starts as the new-project window chooses, with the computer keyboard on its synth")
+TEST_CASE ("An example song opens as a new untitled project, with the computer keyboard on its lead")
+{
+    auto& engine = phazite::test::getEngine();
+    phazite::test::TemporaryFolder temp;
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+
+    // Help > Example Songs.
+    phazite::CommandRegistry registry;
+    session.addCommands (registry);
+    REQUIRE (registry.invoke ("help.example.firstBeat"));
+    phazite::test::dispatchPendingMessages();
+
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.isUntitled());
+    CHECK (session.getProject()->getFile().getFileNameWithoutExtension() == "First Beat");
+
+    auto& context = session.getContext();
+    juce::StringArray names;
+
+    for (const auto& row : phazite::getPlaylistRows (context))
+        names.add (row.name);
+
+    CHECK (names.joinIntoString (", ") == "Drums, Synth");
+
+    // The computer keyboard plays the synth: its track is selected, and live MIDI follows the selection.
+    const auto selected = context.getSongSelection().getTracks();
+    REQUIRE (selected.size() == 1);
+    CHECK (phazite::getTrackRow (context, selected.front())->name == "Synth");
+
+    // The song is what the project starts with: no unsaved changes, nothing to undo.
+    phazite::test::settle();
+    CHECK_FALSE (session.getProject()->hasUnsavedChanges());
+    CHECK_FALSE (phazite::getSongUndoManager (*getEdit (context)).canUndo());
+}
+
+TEST_CASE ("A new project starts as the new-project window chooses, with no tracks; the tracks added get its key")
 {
     auto& engine = phazite::test::getEngine();
     phazite::test::TemporaryFolder temp;
@@ -130,43 +162,33 @@ TEST_CASE ("A new project starts as the new-project window chooses, with the com
     CHECK (session.isUntitled());
     CHECK (session.getProject()->getFile().getFileNameWithoutExtension() == "Untitled");
 
-    auto* edit = getEdit (session.getContext());
+    auto& context = session.getContext();
+    auto* edit = getEdit (context);
     REQUIRE (edit != nullptr);
     CHECK (phazite::getTempo (*edit) == doctest::Approx (90.0));
     CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 6, 8 });
     CHECK (phazite::getSections (*edit).size() == phazite::findOutline ("hipHop")->sections.size());
-
-    const auto tracks = te::getAudioTracks (*edit);
-    REQUIRE (tracks.size() == 2);
-    CHECK (tracks[0]->getName() == "Drums");
-    CHECK (tracks[1]->getName() == "Synth");
-
-    for (auto* track : tracks)
-    {
-        CHECK (phazite::getInstrument (*track) != nullptr);
-        CHECK (track->getClips().isEmpty());
-        const auto key = phazite::getTrackKey (*track);
-        REQUIRE (key.has_value());
-        CHECK (key->root == 2);
-        CHECK (phazite::getSavedScaleName (key->scale) == "minor");
-    }
-
-    CHECK (session.getSelection().isSelected (tracks[1]));
+    CHECK (phazite::getAllPlaylistTracks (context).empty());
 
     // What it starts with is in its first save: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
 
-    // Without instruments, a key or an outline: an empty song at 120 BPM in 4/4.
-    phazite::NewProjectSettings plain;
-    plain.withInstruments = false;
-    REQUIRE (session.createProject (plain).wasOk());
+    // A track added gets the key chosen.
+    const auto track = phazite::addTrackAtEnd (context, false);
+    const auto key = phazite::getTrackKey (context, track);
+    REQUIRE (key.has_value());
+    CHECK (key->root == 2);
+    CHECK (phazite::getSavedScaleName (key->scale) == "minor");
+
+    // Without a key or an outline: an empty song at 120 BPM in 4/4.
+    REQUIRE (session.createProject ({}).wasOk());
     auto* plainEdit = getEdit (session.getContext());
     REQUIRE (plainEdit != nullptr);
     CHECK (phazite::getTempo (*plainEdit) == doctest::Approx (120.0));
     CHECK (phazite::getSections (*plainEdit).empty());
-    CHECK (phazite::findSynthTrack (*plainEdit) == nullptr);
+    CHECK (phazite::getAllPlaylistTracks (session.getContext()).empty());
 }
 
 TEST_CASE ("New-project settings are checked")
@@ -419,7 +441,7 @@ TEST_CASE ("At startup, Phazite offers to restore an untitled project it didn't 
     session.openAtStartup();
     CHECK_FALSE (discarded.getParentDirectory().getParentDirectory().exists());
     REQUIRE (session.getProject() != nullptr);
-    CHECK (session.getProject()->getFile().getFileNameWithoutExtension() == "My First Song");
+    CHECK (session.getProject()->getFile().getFileNameWithoutExtension() == "Untitled");
 
 #if JUCE_WINDOWS
     // A folder another Phazite holds is left alone, whatever is in it. (Linux's locks don't keep a process from itself.)
