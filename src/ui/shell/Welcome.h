@@ -100,8 +100,8 @@ private:
 
 //==============================================================================
 // Where to start, now that a new project is empty (the owner, 2026-11-01): the example songs, each opening as a new
-// project (Help > Example Songs), and the lessons, each starting one (Help > Lessons). A choice runs its command, and
-// then the window closes.
+// project (Help > Example Songs), and the lessons, each starting in the lesson card (Help > Lessons). A choice runs its
+// command, and then the window closes.
 class StartPage : public juce::Component
 {
 public:

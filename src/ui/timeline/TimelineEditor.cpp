@@ -459,6 +459,7 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, 
         button->setClickingTogglesState (true);
         button->setToggleState (toolToShow == tool, juce::dontSendNotification);
         button->onClick = [this, toolToShow] { commands.invoke (getToolCommandID (toolToShow)); };
+        button->setComponentID (getToolCommandID (toolToShow)); // what lessons point at (Lessons::Step::target)
         addChildComponent (button);
     }
 

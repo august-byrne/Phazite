@@ -26,6 +26,7 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Piano roll");
+    setComponentID ("pianoRoll"); // what lessons point at (Lessons::Step::target)
 
     // The notes being edited stay in view while the song plays (the owner's choice, 2026-10-16); View > Follow
     // Playback turns following on, as the playlist has it.

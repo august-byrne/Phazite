@@ -35,6 +35,10 @@ SongViews::SongViews (juce::Component& playlistPanel, juce::Component& mixerPane
     addTab ("Playlist", background, &playlistPanel, false);
     addTab ("Mixer", background, &mixerPanel, false);
 
+    // What lessons point at (Lessons::Step::target): each tab by the command that shows it.
+    getTabbedButtonBar().getTabButton (playlist)->setComponentID ("view.playlist");
+    getTabbedButtonBar().getTabButton (mixer)->setComponentID ("view.mixer");
+
     routingButton.setClickingTogglesState (true);
     routingButton.setTooltip ("Shows every channel's wires in place of the mixer's strips: where its sound goes, its sends and the "
                               "sidechains that listen to it. Drag from a channel's Out to route it");
@@ -107,6 +111,11 @@ EditorDock::EditorDock (ProjectContext& projectContext, PianoRoll& notes, AudioC
     addTab ("Piano roll", background, clipTab.get(), false);
     addTab ("Instrument", background, &devicesView, false); // the same view in both: the tab chosen picks its page
     addTab ("Effects", background, &devicesView, false);
+
+    // What lessons point at (Lessons::Step::target): each tab by the command that shows it.
+    getTabbedButtonBar().getTabButton (clipEditor)->setComponentID ("view.pianoRoll");
+    getTabbedButtonBar().getTabButton (instrument)->setComponentID ("view.instrument");
+    getTabbedButtonBar().getTabButton (effects)->setComponentID ("view.effects");
     context.getSongSelection().addChangeListener (this);
 }
 

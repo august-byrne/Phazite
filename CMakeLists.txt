@@ -658,6 +658,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/Guide.h
     src/ui/shell/HintBar.cpp
     src/ui/shell/HintBar.h
+    src/ui/shell/LessonCard.cpp
+    src/ui/shell/LessonCard.h
     src/ui/shell/Lessons.cpp
     src/ui/shell/Lessons.h
     src/ui/shell/NewProjectPanel.cpp

@@ -354,6 +354,26 @@ namespace ArmTint
     inline constexpr float outline = 1.5f;
 } // namespace ArmTint
 
+// The lesson card (ui/shell/LessonCard.h): as wide as this, with a shadow this deep around it (pixels) and so dark (an
+// alpha), its corners, its outline in the accent colour and the dots of how far the lesson has come; and the ring around
+// the control a step is about: its width and how far outside the control (pixels); as a step starts, so many rings that
+// spread out this far and fade, over so many seconds, drawn so many times a second; and after, how many times a second
+// the card looks whether the control moved and whether the song shows the step done.
+namespace LessonTint
+{
+    inline constexpr int width = 380;
+    inline constexpr int shadow = 12;
+    inline constexpr float shadowAlpha = 0.4f;
+    inline constexpr float corner = 8.0f;
+    inline constexpr float outline = 1.5f;
+    inline constexpr float dot = 6.0f;
+    inline constexpr float ringWidth = 2.5f, ringGap = 3.0f;
+    inline constexpr int pulses = 3;
+    inline constexpr float pulseSpread = 10.0f;
+    inline constexpr double pulseSeconds = 1.8;
+    inline constexpr int pulseFramesPerSecond = 30, checksPerSecond = 4;
+} // namespace LessonTint
+
 // A track's mute and solo switch (ui/components/TrackSwitch.h): its light, as a part of the switch's size, with an edge in
 // the background colour that keeps it apart from a track's tinted header, and the ring of a muted one's light (its outline)
 // and of a soloed one's, this far outside it (pixels); and how faint the light is while other tracks' solos silence the

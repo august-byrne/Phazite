@@ -213,6 +213,12 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Playlist");
 
+    // What lessons point at (Lessons::Step::target): controls by the commands they run, others by names of their own.
+    setComponentID ("playlist");
+    addTrackButton.setComponentID ("track.add");
+    sectionsStrip.setComponentID ("sections");
+    chordLane.setComponentID ("chordLane");
+
     addTrackButton.setButtonText ("Track");
     addTrackButton.onClick = [this] { getCommands().invoke ("track.add"); };
     addTrackButton.setEnabled (false); // until a project is open

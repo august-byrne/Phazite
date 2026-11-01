@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Guide.h"
+#include "LessonCard.h"
 #include "Lessons.h"
 #include "PanelLayout.h"
 #include "Panels.h"
@@ -81,6 +82,11 @@ public:
     bool showsOpening() const noexcept { return openingLabel.isVisible(); } // for tests
     Guide& getGuide() noexcept { return guide; }
     Lessons& getLessons() noexcept { return lessons; }
+    LessonCard& getLessonCard() noexcept { return lessonCard; }
+
+    // The control a lesson's step names (Lessons::Step::target), if it shows: a component with that ID, the first found depth
+    // first, or one inside another ("pianoRoll/tool.draw").
+    juce::Component* findLessonTarget (const juce::String& target);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -107,8 +113,9 @@ private:
     SongViews songViews { playlist, mixer }; // the centre
     EditorDock editorDock { projectContext, pianoRoll, audioClipEditor, devices };
     StatusBar statusBar;
-    Guide guide;              // the hint bar's next step for newcomers
-    Lessons lessons;          // Help > Lessons, in the hint bar while one runs
+    Guide guide;     // the hint bar's next step for newcomers
+    Lessons lessons; // Help > Lessons, in the lesson card while one runs
+    LessonCard lessonCard { lessons, [this] (const juce::String& target) { return findLessonTarget (target); } };
     juce::Label openingLabel; // over the centre until a project is open: what the window shows as Phazite starts
 
     // The editor used last, which the time line's commands (zoom, grid, tools, nudge) act on.

@@ -84,7 +84,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       devices (bridge, context),
       statusBar (engine, bridge, context),
       guide (bridge, s),
-      lessons (bridge, context)
+      lessons (bridge, context, s)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Phazite");
@@ -102,13 +102,15 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
                 });
     };
     browser.onUsed = [this] (const LibraryItem&) { guide.markDone (Guide::Step::addSound); };
-    getHintBar().setDefaultHint (
-        [this]
-        {
-            lessons.update(); // a step the song shows done goes on
-            return getDefaultHint();
-        });
-    getHintBar().onClick = [this] { lessons.next(); };
+    getHintBar().setDefaultHint ([this] { return getDefaultHint(); });
+
+    // The lesson that runs, in its card over the window's corner, with a ring around the control its step is about.
+    lessons.onChange = [this]
+    {
+        lessonCard.update();
+        lessonCard.getRing().toFront (false);
+        lessonCard.toFront (false);
+    };
 
     // Double-clicking a clip opens it in the editor dock, a MIDI clip in the piano roll and an audio clip in the audio clip
     // editor, which then has the keys.
@@ -167,6 +169,10 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     openingLabel.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
     addChildComponent (openingLabel);
     openingLabel.setVisible (! projectContext.hasProject());
+
+    // Over everything while a lesson runs: the ring around a step's control, which clicks pass through, and the card.
+    addChildComponent (lessonCard.getRing());
+    addChildComponent (lessonCard);
 
     // The panels as they were left, or every panel.
     panels.setFromText (settings.get (Settings::panelLayout));
@@ -627,6 +633,40 @@ void AppShell::resized()
         centre.setBounds (area);
 
     placePanelButtons();
+
+    // The lesson card in the bottom right corner, over the panels and above the status bar, as tall as its text; its ring
+    // over the whole window.
+    lessonCard.getRing().setBounds (getLocalBounds());
+    const auto cardWidth = juce::jmin (LessonTint::width + 2 * LessonTint::shadow, getWidth() - 2 * edgeInset);
+    const auto cardHeight = lessonCard.getHeightFor (cardWidth);
+    lessonCard.setBounds (getWidth() - edgeInset - cardWidth, statusBar.getY() - cardHeight, cardWidth, cardHeight);
+}
+
+juce::Component* AppShell::findLessonTarget (const juce::String& target)
+{
+    // A component with that ID that shows, depth first; each part of a path inside the one before it.
+    const std::function<juce::Component*(juce::Component&, const juce::String&)> findShowing =
+        [&findShowing] (juce::Component& within, const juce::String& id) -> juce::Component*
+    {
+        for (auto* child : within.getChildren())
+        {
+            if (child->getComponentID() == id && child->isShowing())
+                return child;
+
+            if (auto* found = findShowing (*child, id))
+                return found;
+        }
+
+        return nullptr;
+    };
+
+    juce::Component* found = this;
+
+    for (const auto& id : juce::StringArray::fromTokens (target, "/", {}))
+        if (found = findShowing (*found, id); found == nullptr)
+            return nullptr;
+
+    return found;
 }
 
 void AppShell::layOutCentre()
@@ -854,10 +894,7 @@ void AppShell::refreshShortcutTexts()
 
 juce::String AppShell::getDefaultHint() const
 {
-    if (auto lesson = lessons.getHint(); lesson.isNotEmpty())
-        return lesson;
-
-    if (auto next = guide.getHint(); next.isNotEmpty())
+    if (auto next = guide.getHint(); next.isNotEmpty() && ! lessons.isRunning()) // the lesson card says what to do then
         return next;
 
     const auto paletteKey = getKeyText (commands, "view.commandPalette");

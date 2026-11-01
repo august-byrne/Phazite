@@ -13,6 +13,7 @@ ArmButton::ArmButton (ProjectContext& projectContext)
       context (projectContext)
 {
     setTitle ("Arm");
+    setComponentID ("track.arm"); // what lessons point at (Lessons::Step::target)
     setMouseClickGrabsKeyboardFocus (false);
 }
 

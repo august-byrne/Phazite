@@ -209,6 +209,10 @@ TitleBar::TitleBar (CommandBridge& bridge)
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Title bar");
 
+    // Lessons point at controls by the commands they run (Lessons::Step::target).
+    searchBox->setComponentID ("view.commandPalette");
+    menuButton.setComponentID ("view.menus");
+
     projectName.setFont (juce::FontOptions (TextSize::body));
     projectName.setMinimumHorizontalScale (1.0f);
 
@@ -258,6 +262,7 @@ void TitleBar::setMenus (juce::MenuBarModel* model)
     {
         menuBar = std::make_unique<juce::MenuBarComponent> (model);
         menuBar->getProperties().set (LookAndFeel::onBarProperty, true); // the bar's background behind it
+        menuBar->setComponentID ("view.menus");
         addAndMakeVisible (*menuBar);
     }
     else

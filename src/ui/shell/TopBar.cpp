@@ -19,6 +19,11 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Transport");
 
+    // Lessons point at controls by the commands they run (Lessons::Step::target).
+    playButton.setComponentID ("transport.playStop");
+    recordButton.setComponentID ("transport.record");
+    metronomeButton.setComponentID ("transport.metronome");
+
     playButton.onClick = [this] { commands.invoke ("transport.playStop"); };
     recordButton.onClicked = [this] (bool isMenuClick)
     {
