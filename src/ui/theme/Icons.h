@@ -36,6 +36,7 @@ enum class Icon
     // The browser
     folder,
     addFolder,
+    returnTrack, // a return track, which takes back what the sends to it feed it: the Return key's arrow
     favorite,
     recent,
     sound,

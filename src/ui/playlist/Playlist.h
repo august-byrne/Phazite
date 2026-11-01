@@ -130,8 +130,9 @@ private:
     std::unordered_map<ClipID, size_t> clipIndex;
     std::unordered_map<ClipID, std::unique_ptr<ClipComponent>> clipComponents;
     std::unordered_map<ClipID, std::unique_ptr<ClipWaveform>> waveforms;
-    int contentHeight = 0; // of the scrolling rows
-    int pinnedHeight = 0;  // of the pinned band
+    std::unordered_map<TrackID, FolderSummary> folderSummaries; // what each folder's row shows of its tracks' clips
+    int contentHeight = 0;                                      // of the scrolling rows
+    int pinnedHeight = 0;                                       // of the pinned band
     bool focusMode = false;
     std::optional<BeatPosition> fileDropBeat; // where files dragged over the playlist would go
     int fileDropRow = -1;

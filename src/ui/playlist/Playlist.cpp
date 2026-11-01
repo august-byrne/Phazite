@@ -59,6 +59,38 @@ void Playlist::Lanes::paint (juce::Graphics& g)
 
     paintGridLines (g, playlist, clip);
 
+    // A folder's row, which holds no clips of its own: its tracks' clips, a thin lane for each track, so that the row shows
+    // what the folder plays even while it is collapsed, as Ableton Live's and Bitwig's group tracks show theirs.
+    for (const auto& row : playlist.rows)
+    {
+        const auto found = playlist.folderSummaries.find (row.track.id);
+        const auto area = getRowArea (row).reduced (0, FolderTint::inset).withTrimmedBottom (1);
+
+        if (found == playlist.folderSummaries.end() || found->second.lanes == 0 || ! area.intersects (clip))
+            continue;
+
+        const auto& summary = found->second;
+        const auto laneHeight = std::min (FolderTint::tallestLane, (float) area.getHeight() / (float) summary.lanes);
+        const auto top = (float) area.getCentreY() - laneHeight * (float) summary.lanes / 2.0f;
+
+        for (const auto& folded : summary.clips)
+        {
+            const auto left = (float) timeline.beatToX (folded.range.getStart());
+            const auto right = (float) timeline.beatToX (folded.range.getEnd());
+
+            if (right < (float) clip.getX() || left > (float) clip.getRight())
+                continue;
+
+            // On whole pixels, so that the bars' edges are crisp, with a pixel's gap after each clip and under each lane.
+            const auto laneTop = std::round (top + laneHeight * (float) folded.lane);
+            const auto laneBottom = std::max (laneTop + 1.0f, std::round (top + laneHeight * (float) (folded.lane + 1)) - 1.0f);
+            const auto x = std::round (left);
+            g.setColour (folded.colour.withAlpha (folded.muted ? FolderTint::mutedClip : FolderTint::clip));
+            g.fillRect (
+                juce::Rectangle<float>::leftTopRightBottom (x, laneTop, std::max (x + 1.0f, std::round (right) - 1.0f), laneBottom));
+        }
+    }
+
     // A line under each track, and a stronger one under the pinned band.
     g.setColour (p.border);
 
@@ -166,7 +198,7 @@ Playlist::AddTrackRow::AddTrackRow (Playlist& p)
       playlist (p)
 {
     setTitle ("Add track at the end");
-    setDescription ("Click to add a track at the end, or right-click for a folder or a return track. Double-clicking under "
+    setDescription ("Click to add a track at the end, or right-click for a folder (return tracks are the mixer's). Double-clicking under "
                     "the last track adds one too, and so does dropping an audio or MIDI file there.");
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     onClick = [this] { playlist.addTrackAtEnd (false); };

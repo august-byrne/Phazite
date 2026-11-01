@@ -376,6 +376,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/circle.svg
         resources/icons/lucide/clock-arrow-down.svg
         resources/icons/lucide/clock.svg
+        resources/icons/lucide/corner-down-left.svg
         resources/icons/lucide/copy.svg
         resources/icons/lucide/download.svg
         resources/icons/lucide/eraser.svg

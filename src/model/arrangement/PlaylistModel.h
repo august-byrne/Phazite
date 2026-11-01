@@ -20,7 +20,7 @@ class ProjectContext;
 
 //==============================================================================
 // The tracks, top to bottom as the playlist shows them: tracks and folders (Tracks.h), with the tracks in collapsed
-// folders left out.
+// folders left out, then the returns that have automation lanes (the others have no row: they hold no clips).
 enum class TrackType
 {
     track,
@@ -53,6 +53,25 @@ std::optional<TrackRow> getMasterRow (const ProjectContext&);
 
 // Whether a track is inside a folder, at any depth.
 bool isInside (const ProjectContext&, TrackID track, TrackID folder);
+
+// What a folder's row shows of the tracks inside it, at any depth, since it holds no clips of its own (docs/design.md,
+// section 6): their clips, each where it is in the song, in its track's colour, on a thin lane of its track's, the tracks
+// that hold clips one under another in the playlist's order.
+struct FolderClip
+{
+    BeatRange range {};
+    juce::Colour colour {};
+    int lane = 0; // its track's place among the folder's tracks that hold clips, from 0 at the top
+    bool muted = false;
+};
+
+struct FolderSummary
+{
+    std::vector<FolderClip> clips;
+    int lanes = 0; // how many of the folder's tracks hold clips
+};
+
+FolderSummary getFolderSummary (const ProjectContext&, TrackID folder);
 
 // View state, written without undo steps (Tracks.h).
 void setCollapsed (ProjectContext&, TrackID, bool);

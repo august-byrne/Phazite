@@ -137,6 +137,38 @@ TEST_CASE ("The playlist's rows are its tracks top to bottom, without those in c
     CHECK (phazite::getAllPlaylistTracks (context).empty());
 }
 
+TEST_CASE ("A folder's row sums up its tracks' clips, a lane for each track that holds clips, in its color")
+{
+    Song song;
+    auto& context = song.context;
+    auto* folder = phazite::groupIntoFolder ({ song.a, song.b }, nullptr);
+    REQUIRE (folder != nullptr);
+
+    // A's clip, on the first lane; B has none, but holds clips, so it has the second lane.
+    auto summary = phazite::getFolderSummary (context, idOf (*folder));
+    CHECK (summary.lanes == 2);
+    REQUIRE (summary.clips.size() == 1);
+    CHECK (summary.clips[0].range == phazite::BeatRange { beat (4.0), beats (4.0) });
+    CHECK (summary.clips[0].lane == 0);
+    CHECK (summary.clips[0].colour == phazite::getTrackRow (context, idOf (*song.a))->colour);
+    CHECK_FALSE (summary.clips[0].muted);
+
+    // B's clip on the second lane, and a muted clip fainter.
+    const auto second = phazite::addMidiClipAt (context, idOf (*song.b), beat (8.0));
+    REQUIRE (second.isValid());
+    phazite::toggleClipsMuted (context, { second });
+    summary = phazite::getFolderSummary (context, idOf (*folder));
+    REQUIRE (summary.clips.size() == 2);
+    CHECK (summary.clips[1].lane == 1);
+    CHECK (summary.clips[1].muted);
+
+    // Collapsed, it still sums them up; a track, or what is gone, has nothing to sum up.
+    phazite::setCollapsed (context, idOf (*folder), true);
+    CHECK (phazite::getFolderSummary (context, idOf (*folder)).clips.size() == 2);
+    CHECK (phazite::getFolderSummary (context, idOf (*song.a)).lanes == 0);
+    CHECK (phazite::getFolderSummary (context, {}).clips.empty());
+}
+
 TEST_CASE ("Tracks by ID are renamed, colored, moved and added, each as one undo step")
 {
     Song song;

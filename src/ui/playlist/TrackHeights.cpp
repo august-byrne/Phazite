@@ -17,7 +17,9 @@ namespace
 
 int getTrackHeight (const TrackRow& row)
 {
-    return juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, row.savedHeight.value_or (TrackHeight::standard));
+    // A folder's row starts shorter (the owner, 2026-11-01: as tall as a track's, it took room for nothing it holds).
+    const auto initial = row.kind == TrackType::folder ? TrackHeight::folder : TrackHeight::standard;
+    return juce::jlimit (TrackHeight::minimum, TrackHeight::maximum, row.savedHeight.value_or (initial));
 }
 
 int getShownTrackHeight (const TrackRow& row)

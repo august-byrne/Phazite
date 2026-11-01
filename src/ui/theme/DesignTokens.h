@@ -233,6 +233,16 @@ namespace TrackTint
     inline constexpr float selectedHeader = 0.5f;
 } // namespace TrackTint
 
+// How a folder's row in the playlist shows its tracks' clips (model/arrangement/PlaylistModel.h: getFolderSummary()): a thin
+// lane for each track that holds clips, at most this tall (pixels), between this much room above and below; each clip a bar
+// in its track's color (alphas, a muted one fainter), a pixel apart from the next lane's.
+namespace FolderTint
+{
+    inline constexpr float tallestLane = 5.0f;
+    inline constexpr int inset = 3;
+    inline constexpr float clip = 0.8f, mutedClip = 0.3f;
+} // namespace FolderTint
+
 // How a frozen track shows (docs/design.md, section 18; roadmap step 2.11): its clips under a wash of the palette's frozen
 // color, with stripes of it across them this far apart (pixels), like frost (alphas); and its frozen devices' controls
 // faded to this alpha.

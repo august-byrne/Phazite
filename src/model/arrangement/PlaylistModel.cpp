@@ -199,11 +199,22 @@ std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
         return rows;
 
     const auto tracks = getPlaylistTracks (*edit);
+    std::vector<TrackRow> returns;
 
     for (int i = 0; i < tracks.size(); ++i)
-        if (! isHiddenInCollapsedFolder (*tracks[i]))
-            rows.push_back (makeRow (*tracks[i], i));
+    {
+        if (isHiddenInCollapsedFolder (*tracks[i]))
+            continue;
 
+        // A return holds no clips: its row shows only while it has automation lanes, after the tracks, where the master's shows
+        // too (docs/design.md, section 6).
+        if (auto row = makeRow (*tracks[i], i); row.kind != TrackType::returnTrack)
+            rows.push_back (std::move (row));
+        else if (! getLanes (*tracks[i]).empty())
+            returns.push_back (std::move (row));
+    }
+
+    rows.insert (rows.end(), returns.begin(), returns.end());
     return rows;
 }
 
@@ -245,6 +256,29 @@ bool isInside (const ProjectContext& context, TrackID track, TrackID folder)
     auto* inner = findTrack (context, track);
     auto* outer = findTrack (context, folder);
     return inner != nullptr && outer != nullptr && inner != outer && inner->isAChildOf (*outer);
+}
+
+FolderSummary getFolderSummary (const ProjectContext& context, TrackID folder)
+{
+    FolderSummary summary;
+
+    if (findTrack (context, folder) == nullptr)
+        return summary;
+
+    for (const auto id : getAllPlaylistTracks (context))
+    {
+        if (! isInside (context, id, folder) || ! canHoldClips (context, id))
+            continue;
+
+        const auto colour = getTrackRow (context, id).value_or (TrackRow()).colour;
+
+        for (const auto& clip : getClips (context, id))
+            summary.clips.push_back ({ clip.range, colour, summary.lanes, clip.muted });
+
+        ++summary.lanes;
+    }
+
+    return summary;
 }
 
 void setCollapsed (ProjectContext& context, TrackID id, bool collapsed)

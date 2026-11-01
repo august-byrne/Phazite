@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A track's header in the playlist: its color, a handle to move it by, a chevron that collapses it (and its lanes), its name,
+// A track's header in the playlist: its color, a handle to move it by, a chevron that collapses it (and its lanes), a folder's
+// or a return's icon (a folder, as most DAWs mark their folders and groups, or the Return key's arrow), its name,
 // its switch for mute and solo, an arm switch for a track that records audio (with what it records under its name while
 // armed), and a snowflake while it is frozen (a click unfreezes it). Clicking selects the track, double-clicking
 // the name renames it, dragging the handle moves the track, dragging the bottom edge resizes it, and dragging elsewhere
@@ -83,11 +84,15 @@ private:
     IconButton frozenButton { "Unfreeze track", Icon::frozen }; // while it is frozen
     std::unique_ptr<juce::Drawable> gripIcon;
     juce::Colour gripIconColour { juce::Colours::black }; // the color the drawing is in now
+    std::unique_ptr<juce::Drawable> kindIcon;             // a folder's or a return's, before its name
+    juce::Colour kindIconColour { juce::Colours::black };
+    juce::Rectangle<int> kindIconArea;
     bool selected = false;
 
     bool isFolder() const noexcept { return row.kind == TrackType::folder; }
     bool isMaster() const noexcept { return row.kind == TrackType::master; }
-    juce::Colour getBackground() const; // the surface, tinted with the track's color
+    juce::String getAccessibleName() const; // its name, and what it is if it isn't a track
+    juce::Colour getBackground() const;     // the surface, tinted with the track's color
     void updateColours();
     void updateCollapseButton();
     void updateFrozenButton();

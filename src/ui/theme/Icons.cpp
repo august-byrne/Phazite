@@ -64,6 +64,8 @@ namespace
                 return "folder.svg";
             case Icon::addFolder:
                 return "folder-plus.svg";
+            case Icon::returnTrack:
+                return "corner-down-left.svg";
             case Icon::favorite:
                 return "star.svg";
             case Icon::recent:

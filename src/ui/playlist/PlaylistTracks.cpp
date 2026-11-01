@@ -38,7 +38,6 @@ void Playlist::showAddTrackMenu()
                           safeThis->addTrackAtEnd (true);
                   });
 
-    addCommandItem (menu, getCommands(), "track.addReturn"); // returns go at the end anyway
     menu.showMenuAsync (juce::PopupMenu::Options());
 }
 

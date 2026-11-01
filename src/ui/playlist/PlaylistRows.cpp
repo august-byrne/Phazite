@@ -73,9 +73,9 @@ void Playlist::layOutRows()
         auto& top = row.track.pinned ? pinnedTop : scrollingTop;
         const auto inFocus = isInFocus (row.track.id);
         row.top = top;
-        row.height = row.track.kind == TrackType::master ? TrackHeight::collapsed
-                     : inFocus                           ? getShownTrackHeight (row.track)
-                                                         : focusedOutHeight;
+        // The master's and a return's, which hold no clips and show for their lanes, are thin rows over them.
+        const auto holdsNothing = row.track.kind == TrackType::master || row.track.kind == TrackType::returnTrack;
+        row.height = holdsNothing ? TrackHeight::collapsed : inFocus ? getShownTrackHeight (row.track) : focusedOutHeight;
 
         // Its lanes under it, while it is in focus: thin rows while it is one, or each that is collapsed, but never hidden,
         // as their automation plays (focus mode is a view of some tracks only). A folder collapses by hiding its tracks.
@@ -240,9 +240,14 @@ void Playlist::rebuildClips()
     shownClips.clear();
     shownSubRows.clear();
     clipIndex.clear();
+    folderSummaries.clear();
 
     for (const auto& row : rows)
     {
+        // A folder holds no clips: its row shows its tracks' (Lanes::paint()).
+        if (row.track.kind == TrackType::folder)
+            folderSummaries.emplace (row.track.id, getFolderSummary (context, row.track.id));
+
         auto clips = getClips (context, row.track.id);
         const auto subRows = getClipSubRows (clips);
 

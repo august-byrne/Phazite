@@ -37,11 +37,12 @@ struct Example
 
     ~Example() { setEdit (context, nullptr); }
 
+    // Any of its tracks by name: the returns too, which the playlist shows only while they have automation lanes.
     phazite::TrackID track (const juce::String& name) const
     {
-        for (const auto& row : phazite::getPlaylistRows (context))
-            if (row.name == name)
-                return row.id;
+        for (const auto id : phazite::getAllPlaylistTracks (context))
+            if (const auto row = phazite::getTrackRow (context, id); row.has_value() && row->name == name)
+                return id;
 
         FAIL ("no track called " << name);
         return {};

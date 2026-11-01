@@ -779,3 +779,33 @@ TEST_CASE ("The master's row is in the playlist while the master has lanes")
     phazite::removeAutomationLane (context, phazite::getMasterVolume (context).getRef());
     CHECK_FALSE (phazite::getMasterRow (context).has_value());
 }
+
+TEST_CASE ("A return's row is in the playlist while the return has lanes, after the tracks, as the master's is")
+{
+    Song song;
+    auto& context = song.context;
+    auto* returnTrack = phazite::addReturnTrack (*song.edit, "Reverb", nullptr);
+    REQUIRE (returnTrack != nullptr);
+    const auto id = idOf (*returnTrack);
+
+    // It holds no clips, and has no lanes yet: no row (the mixer shows it).
+    const auto hasRow = [&context, id]
+    {
+        const auto rows = phazite::getPlaylistRows (context);
+        return std::any_of (rows.begin(), rows.end(), [id] (const phazite::TrackRow& row) { return row.id == id; });
+    };
+
+    CHECK_FALSE (hasRow());
+    CHECK (phazite::getTrackRow (context, id).has_value()); // still the playlist's, as a track in a collapsed folder is
+
+    // With a lane, it shows after the tracks, wherever it is in the song's list of tracks.
+    phazite::moveTracksAfter (context, { id }, {});
+    phazite::showAutomationLane (context, phazite::getVolume (context, id).getRef());
+    const auto rows = phazite::getPlaylistRows (context);
+    REQUIRE (rows.size() == 3);
+    CHECK (rows.back().id == id);
+    CHECK (rows.back().kind == phazite::TrackType::returnTrack);
+
+    phazite::removeAutomationLane (context, phazite::getVolume (context, id).getRef());
+    CHECK_FALSE (hasRow());
+}

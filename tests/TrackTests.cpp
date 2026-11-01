@@ -323,12 +323,13 @@ TEST_CASE ("A track collapses to a thin row by its command, or by getting shorte
     CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::minimum);
     CHECK_FALSE (phazite::getSongUndoManager (*tracks.edit).canUndo()); // collapsing changes the view, as heights do
 
-    // A collapsed folder keeps its height (its tracks are hidden instead), and doesn't collapse by resizing.
+    // A collapsed folder keeps its height, shorter than a track's at first (its tracks are hidden instead), and doesn't collapse
+    // by resizing.
     tracks.select ({ "B" });
     REQUIRE (tracks.registry.invoke ("track.groupIntoFolder"));
     auto& folder = *tracks["Folder"];
     phazite::setCollapsed (folder, true);
-    CHECK (tracks.shownHeightOf (folder) == phazite::ui::TrackHeight::standard);
+    CHECK (tracks.shownHeightOf (folder) == phazite::ui::TrackHeight::folder);
     phazite::setCollapsed (folder, false);
     tracks.setShownHeight (folder, 0);
     CHECK_FALSE (phazite::isCollapsed (folder));

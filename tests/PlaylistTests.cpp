@@ -530,6 +530,40 @@ TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren'
     CHECK (image.getPixelAt (point.x, point.y) == phazite::ui::getPalette (screen.playlist).background);
 }
 
+TEST_CASE ("A folder's row shows its tracks' clips in their colors, collapsed too, with no components of its own")
+{
+    PlaylistScreen screen;
+    screen.addClip (1, 4.0, 4.0);
+    auto* folder = phazite::groupIntoFolder ({ screen.tracks[1] }, nullptr);
+    REQUIRE (folder != nullptr);
+    phazite::setCollapsed (screen.context, phazite::getTrackID (*folder), true);
+    phazite::test::dispatchPendingMessages();
+
+    // Only the folder's header shows of it: its track is hidden, and its clip has no component.
+    const auto headers = phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist);
+    auto* header = std::find_if (headers.begin(), headers.end(), [folder] (phazite::ui::TrackHeader* each)
+                                 { return each->getTrack() == phazite::getTrackID (*folder) && each->isShowing(); });
+    REQUIRE (header != headers.end());
+    CHECK (phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist).isEmpty());
+    CHECK ((*header)->getHeight() == phazite::ui::TrackHeight::folder); // shorter than a track's at first: it holds no clips
+
+    // The row shows the clip, in its track's color, in the middle of its row (between grid lines); and nothing after it.
+    const auto row = screen.lanes->getLocalArea (*header, (*header)->getLocalBounds());
+    const auto image = screen.window.paintEverything();
+    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto xOf = [&screen, lanesAt] (double beat)
+    { return lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))); };
+    const auto y = lanesAt.y + row.getCentreY();
+    const auto trackColour = phazite::getTrackRow (screen.context, phazite::getTrackID (*screen.tracks[1]))->colour;
+    const auto background = phazite::ui::getPalette (screen.playlist).background;
+    const auto expected = background.overlaidWith (trackColour.withAlpha (phazite::ui::FolderTint::clip));
+    const auto shown = image.getPixelAt (xOf (5.37), y);
+    CHECK (std::abs ((int) shown.getRed() - (int) expected.getRed()) <= 2);
+    CHECK (std::abs ((int) shown.getGreen() - (int) expected.getGreen()) <= 2);
+    CHECK (std::abs ((int) shown.getBlue() - (int) expected.getBlue()) <= 2);
+    CHECK (image.getPixelAt (xOf (10.37), y) == background);
+}
+
 TEST_CASE ("Only the clips in view have components, which come and go as the playlist scrolls and zooms")
 {
     // A song much bigger than the playlist (docs/performance-audit.md, section 8): its clips once all had components, each

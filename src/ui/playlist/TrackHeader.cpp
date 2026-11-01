@@ -16,7 +16,8 @@ namespace
     constexpr int dragThreshold = 4;   // pixels the mouse moves before a press on the handle becomes a drag
     constexpr int indentPerLevel = 12; // a track in a folder is indented this much more than the folder
     constexpr int collapseButtonSize = 20;
-    constexpr float gripAlpha = 0.6f; // the handle is drawn in the header's ink, a little muted
+    constexpr float gripAlpha = 0.6f;     // the handle is drawn in the header's ink, a little muted
+    constexpr float kindIconSize = 14.0f; // a folder's or a return's icon
 } // namespace
 
 TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackRow& shown)
@@ -25,7 +26,10 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
       row (shown),
       muteSolo (projectContext),
       arm (projectContext),
-      gripIcon (createIcon (Icon::grip))
+      gripIcon (createIcon (Icon::grip)),
+      kindIcon (shown.kind == TrackType::folder        ? createIcon (Icon::folder)
+                : shown.kind == TrackType::returnTrack ? createIcon (Icon::returnTrack)
+                                                       : nullptr)
 {
     setDescription ("Click to select the track, Ctrl+click to add it to the selection, Shift+click to select up to it. "
                     "Drag the handle at the left to move the track, and the bottom edge to resize it. The arrow "
@@ -75,7 +79,7 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
     addChildComponent (inputLabel);
     updateFrozenButton();
 
-    setTitle (isFolder() ? row.name + " (folder)" : row.name); // what screen readers call the header
+    setTitle (getAccessibleName()); // what screen readers call the header
 
     if (isMaster())
         setDescription ("The master's automation lanes are under it. Its chevron collapses them to thin rows.");
@@ -88,7 +92,7 @@ void TrackHeader::update (const TrackRow& shown, bool isSelected)
 {
     const auto before = row;
     row = shown;
-    setTitle (isFolder() ? row.name + " (folder)" : row.name);
+    setTitle (getAccessibleName());
 
     if (! nameLabel.isBeingEdited())
         nameLabel.setText (row.name, juce::dontSendNotification);
@@ -145,6 +149,11 @@ void TrackHeader::updateFrozenButton()
     frozenButton.setTooltip (row.name
                              + " is frozen: it plays a file of its sound, so its instrument and effects take no CPU. "
                                "Click to play it live again. Changing its clips or notes unfreezes it too.");
+}
+
+juce::String TrackHeader::getAccessibleName() const
+{
+    return isFolder() ? row.name + " (folder)" : row.kind == TrackType::returnTrack ? row.name + " (return)" : row.name;
 }
 
 juce::Colour TrackHeader::getBackground() const
@@ -207,6 +216,19 @@ void TrackHeader::paint (juce::Graphics& g)
                               juce::RectanglePlacement::centred, 1.0f);
     }
 
+    // A folder's or a return's icon, before its name, in the header's ink.
+    if (kindIcon != nullptr && ! kindIconArea.isEmpty())
+    {
+        if (const auto ink = getInkFor (background).withAlpha (gripAlpha); ink != kindIconColour)
+        {
+            kindIcon->replaceColour (kindIconColour, ink);
+            kindIconColour = ink;
+        }
+
+        kindIcon->drawWithin (g, kindIconArea.toFloat().withSizeKeepingCentre (kindIconSize, kindIconSize),
+                              juce::RectanglePlacement::centred, 1.0f);
+    }
+
     g.setColour (p.border);
     g.fillRect (area.removeFromBottom (1));
 }
@@ -253,6 +275,7 @@ void TrackHeader::resized()
         collapseButton.setBounds (top.removeFromLeft (collapseButtonSize).withSizeKeepingCentre (collapseButtonSize, size));
     }
 
+    kindIconArea = kindIcon != nullptr && roomForButtons ? top.removeFromLeft ((int) kindIconSize + Space::xs) : juce::Rectangle<int>();
     nameLabel.setBounds (top);
 
     // Under the name, while the track is armed and has room for it: what it records.

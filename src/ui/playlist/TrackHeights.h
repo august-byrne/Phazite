@@ -19,9 +19,10 @@ namespace TrackHeight
 {
     inline constexpr int minimum = 32, standard = 64, maximum = 320, step = 16;
     inline constexpr int collapsed = 24; // a collapsed track's row, which shows its name
+    inline constexpr int folder = 40;    // a folder's row at first: it holds no clips, and shows its tracks' in thin lanes
 } // namespace TrackHeight
 
-int getTrackHeight (const TrackRow&); // the saved height, between the minimum and the maximum
+int getTrackHeight (const TrackRow&); // the saved height (at first a folder's or a track's), between the minimum and the maximum
 
 // How tall the playlist shows a track: its height, or TrackHeight::collapsed while it is collapsed. A collapsed
 // folder keeps its height, as collapsing it hides its tracks instead.
