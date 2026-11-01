@@ -29,7 +29,9 @@ EnvelopeView::EnvelopeView (const juce::String& title, ParameterHandle a, Parame
       level (std::move (newestLevel))
 {
     setTitle (title);
-    setDescription ("The envelope's shape: its attack, decay, sustain and release, with a line at the newest note's level.");
+    setDescription ("The envelope's shape: its attack, decay, sustain and release, with a line at the newest note's level. Drag its "
+                    "points: the peak sideways for the attack, the corner after the decay for the decay and the sustain, the end for "
+                    "the release; a double-click puts a point back where it started.");
 }
 
 void EnvelopeView::tick()
@@ -40,19 +42,78 @@ void EnvelopeView::tick()
         repaint();
 }
 
+EnvelopeView::Layout EnvelopeView::getLayout() const
+{
+    Layout layout;
+    layout.area = getLocalBounds().toFloat().reduced (GraphTint::handleRadius + 2.0f);
+    layout.attack = std::max (5.0f, attack.getValue());
+    layout.decay = std::max (5.0f, decay.getValue());
+    layout.release = std::max (5.0f, release.getValue());
+
+    // While a point is dragged, the scale it had as the drag began.
+    layout.hold = dragged.has_value() ? dragHold : (layout.attack + layout.decay + layout.release) * 0.4f;
+    layout.total = dragged.has_value() ? dragTotal : layout.attack + layout.decay + layout.hold + layout.release;
+    return layout;
+}
+
+juce::Point<float> EnvelopeView::getPointPosition (Point point) const
+{
+    const auto layout = getLayout();
+    const auto held = juce::jlimit (0.0f, 1.0f, sustain.getValue());
+
+    switch (point)
+    {
+        case Point::attack:
+            return { layout.x (layout.attack), layout.y (1.0f) };
+        case Point::decay:
+            return { layout.x (layout.attack + layout.decay), layout.y (held) };
+        case Point::release:
+        default:
+            return { layout.x (layout.attack + layout.decay + layout.hold + layout.release), layout.y (0.0f) };
+    }
+}
+
+std::optional<EnvelopeView::Point> EnvelopeView::findPoint (juce::Point<float> position) const
+{
+    std::optional<Point> nearest;
+    auto nearestDistance = GraphTint::grabDistance;
+
+    for (const auto point : { Point::attack, Point::decay, Point::release })
+    {
+        if (const auto distance = getPointPosition (point).getDistanceFrom (position); distance <= nearestDistance)
+        {
+            nearest = point;
+            nearestDistance = distance;
+        }
+    }
+
+    return nearest;
+}
+
+ParameterHandle& EnvelopeView::getTimeOf (Point point)
+{
+    return point == Point::attack ? attack : point == Point::decay ? decay : release;
+}
+
+void EnvelopeView::setHovered (std::optional<Point> point)
+{
+    if (point == hovered)
+        return;
+
+    hovered = point;
+    setMouseCursor (point.has_value() ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
 void EnvelopeView::paint (juce::Graphics& g)
 {
     paintFrame (g, *this);
     const auto& p = getPalette (*this);
     const auto tint = getDeviceTint (*this);
-    const auto area = getLocalBounds().toFloat().reduced (4.0f);
-
-    // The stages side by side, a held sustain between the decay and the release, each at least a little wide.
-    const auto a = std::max (5.0f, attack.getValue()), d = std::max (5.0f, decay.getValue()), r = std::max (5.0f, release.getValue());
-    const auto hold = (a + d + r) * 0.4f;
-    const auto total = a + d + hold + r;
-    const auto x = [&area, total] (float time) { return area.getX() + time / total * area.getWidth(); };
-    const auto y = [&area] (float value) { return area.getBottom() - value * area.getHeight(); };
+    const auto layout = getLayout();
+    const auto a = layout.attack, d = layout.decay, hold = layout.hold, end = a + d + hold + layout.release;
+    const auto x = [&layout] (float time) { return layout.x (time); };
+    const auto y = [&layout] (float value) { return layout.y (value); };
     const auto held = juce::jlimit (0.0f, 1.0f, sustain.getValue());
 
     juce::Path shape;
@@ -60,7 +121,11 @@ void EnvelopeView::paint (juce::Graphics& g)
     shape.quadraticTo (x (a * 0.3f), y (0.95f), x (a), y (1.0f));
     shape.quadraticTo (x (a + d * 0.15f), y (held), x (a + d), y (held));
     shape.lineTo (x (a + d + hold), y (held));
-    shape.quadraticTo (x (a + d + hold + r * 0.15f), y (0.0f), x (total), y (0.0f));
+    shape.quadraticTo (x (a + d + hold + layout.release * 0.15f), y (0.0f), x (end), y (0.0f));
+
+    // A point dragged past the picture's end goes out of sight rather than over its frame.
+    juce::Graphics::ScopedSaveState clipped (g);
+    g.reduceClipRegion (getLocalBounds().reduced (1));
 
     auto filled = shape;
     filled.lineTo (x (0.0f), y (0.0f));
@@ -74,10 +139,111 @@ void EnvelopeView::paint (juce::Graphics& g)
     if (shownLevel > 0.001f)
     {
         g.setColour (p.text.withAlpha (GraphTint::marker));
-        g.drawHorizontalLine (juce::roundToInt (y (shownLevel)), area.getX(), area.getRight());
+        g.drawHorizontalLine (juce::roundToInt (y (shownLevel)), layout.area.getX(), layout.area.getRight());
         g.setColour (p.text);
-        g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ area.getRight() - 3.0f, y (shownLevel) }));
+        g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ layout.area.getRight() - 3.0f, y (shownLevel) }));
     }
+
+    // Its points, larger under the pointer and while dragged.
+    for (const auto point : { Point::attack, Point::decay, Point::release })
+    {
+        const auto radius = point == hovered || point == dragged ? GraphTint::handleRadius * 1.5f : GraphTint::handleRadius;
+        const auto dot = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (getPointPosition (point));
+        g.setColour (p.background);
+        g.fillEllipse (dot.expanded (1.0f));
+        g.setColour (tint);
+        g.fillEllipse (dot);
+    }
+}
+
+void EnvelopeView::mouseMove (const juce::MouseEvent& e)
+{
+    setHovered (findPoint (e.position));
+}
+
+void EnvelopeView::mouseExit (const juce::MouseEvent&)
+{
+    setHovered ({});
+}
+
+void EnvelopeView::mouseDown (const juce::MouseEvent& e)
+{
+    const auto point = findPoint (e.position);
+
+    if (! point.has_value() || e.mods.isPopupMenu())
+        return;
+
+    // The scale stays as it is while the point moves, so that the point stays under the pointer.
+    const auto layout = getLayout();
+    dragTotal = layout.total;
+    dragHold = layout.hold;
+    dragged = point;
+    startTime = getTimeOf (*point).getValue();
+    startSustain = sustain.getValue();
+    getTimeOf (*point).beginGesture();
+
+    if (point == Point::decay)
+        sustain.beginGesture();
+}
+
+void EnvelopeView::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! dragged.has_value())
+        return;
+
+    const auto layout = getLayout();
+    const auto fine = e.mods.isShiftDown() ? GraphTint::fineDragFactor : 1.0f;
+    auto& time = getTimeOf (*dragged);
+    const auto timeRange = time.getRange();
+    const auto moved = (float) e.getDistanceFromDragStartX() / std::max (1.0f, layout.area.getWidth()) * dragTotal * fine;
+    time.setValue (juce::jlimit (timeRange.start, timeRange.end, startTime + moved));
+
+    if (dragged == Point::decay)
+    {
+        const auto rise = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, layout.area.getHeight()) * fine;
+        sustain.setValue (juce::jlimit (0.0f, 1.0f, startSustain + rise));
+    }
+
+    repaint();
+}
+
+void EnvelopeView::mouseUp (const juce::MouseEvent&)
+{
+    if (! dragged.has_value())
+        return;
+
+    if (dragged == Point::decay)
+        sustain.endGesture();
+
+    getTimeOf (*dragged).endGesture();
+    dragged.reset();
+    repaint(); // at its own scale again
+}
+
+void EnvelopeView::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    const auto point = findPoint (e.position);
+
+    if (! point.has_value())
+        return;
+
+    // Back where it started, as a knob's double-click puts its value back: one undo step.
+    std::vector<ParameterHandle*> handles { &getTimeOf (*point) };
+
+    if (point == Point::decay)
+        handles.push_back (&sustain);
+
+    for (auto* handle : handles)
+        handle->beginGesture();
+
+    for (auto* handle : handles)
+        if (const auto initial = handle->getDefaultValue())
+            handle->setValue (*initial);
+
+    for (auto* handle : handles)
+        handle->endGesture();
+
+    repaint();
 }
 
 float getDrawnLfoValue (int shape, float phase)
@@ -101,11 +267,27 @@ LfoView::LfoView (const juce::String& title, std::function<float (float)> shape,
     setDescription ("The LFO's wave, one cycle, with a dot where it is now.");
 }
 
+void LfoView::setControls (ParameterHandle newDepth, ParameterHandle newRate, ParameterHandle newSync, ParameterHandle newDivision)
+{
+    depth = std::move (newDepth);
+    rate = std::move (newRate);
+    sync = std::move (newSync);
+    division = std::move (newDivision);
+    setDescription (juce::String ("The LFO's wave, one cycle, with a dot where it is now.")
+                    + (depth.exists() ? " Drag up or down for its depth; the wheel turns its rate." : " The wheel turns its rate."));
+    setMouseCursor (depth.exists() ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
+}
+
+float LfoView::getDrawnDepth() const
+{
+    return depth.exists() ? juce::jlimit (0.0f, 1.0f, depth.getValue()) : 1.0f;
+}
+
 void LfoView::tick()
 {
     // Where it is, and its wave across a cycle, which its settings change.
     shownPhase = phase != nullptr ? phase() : -1.0f;
-    std::vector<float> numbers { shownPhase };
+    std::vector<float> numbers { shownPhase, getDrawnDepth() };
 
     for (int i = 0; i < drawnWavePoints; ++i)
         numbers.push_back (shapeAt ((float) i / (float) drawnWavePoints));
@@ -120,7 +302,8 @@ void LfoView::paint (juce::Graphics& g)
     const auto& p = getPalette (*this);
     const auto tint = getDeviceTint (*this);
     const auto area = getLocalBounds().toFloat().reduced (4.0f);
-    const auto yFor = [&area] (float value) { return area.getCentreY() - juce::jlimit (-1.0f, 1.0f, value) * area.getHeight() * 0.45f; };
+    const auto height = area.getHeight() * 0.45f * getDrawnDepth();
+    const auto yFor = [&area, height] (float value) { return area.getCentreY() - juce::jlimit (-1.0f, 1.0f, value) * height; };
 
     g.setColour (p.text.withAlpha (GraphTint::grid * 2.0f));
     g.drawHorizontalLine (juce::roundToInt (area.getCentreY()), area.getX(), area.getRight());
@@ -134,6 +317,56 @@ void LfoView::paint (juce::Graphics& g)
         const juce::Point<float> dot { area.getX() + shownPhase * area.getWidth(), yFor (shapeAt (shownPhase)) };
         g.setColour (p.text);
         g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (dot));
+    }
+}
+
+void LfoView::mouseDown (const juce::MouseEvent& e)
+{
+    wheel.end(); // a step of its own, not the wheel's
+
+    if (! depth.exists() || e.mods.isPopupMenu())
+        return;
+
+    startDepth = depth.getValue();
+    depth.beginGesture();
+}
+
+void LfoView::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! depth.isInGesture())
+        return;
+
+    // Up for more, the whole height for the whole range; Shift in fine steps.
+    const auto fine = e.mods.isShiftDown() ? GraphTint::fineDragFactor : 1.0f;
+    const auto change = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, (float) getHeight()) * fine;
+    depth.setValue (juce::jlimit (0.0f, 1.0f, startDepth + change));
+    repaint();
+}
+
+void LfoView::mouseUp (const juce::MouseEvent&)
+{
+    if (depth.isInGesture())
+        depth.endGesture();
+}
+
+void LfoView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details)
+{
+    const auto step = details.deltaY > 0.0f ? 1 : details.deltaY < 0.0f ? -1 : 0;
+
+    if (step == 0)
+        return;
+
+    // A note value a notch while synced; otherwise a tenth faster or slower a notch (Shift: a fiftieth).
+    if (sync.exists() && sync.getValue() >= 0.5f && division.exists())
+    {
+        const auto range = division.getRange();
+        wheel.turn (division, juce::jlimit (range.start, range.end, division.getValue() + (float) step));
+    }
+    else if (rate.exists())
+    {
+        const auto range = rate.getRange();
+        const auto factor = std::pow (e.mods.isShiftDown() ? 1.02f : 1.1f, (float) step);
+        wheel.turn (rate, juce::jlimit (range.start, range.end, rate.getValue() * factor));
     }
 }
 

@@ -159,6 +159,7 @@ SynthEditor::SynthEditor (const DeviceHandle& handle)
     auto& lfoView = keep (std::make_unique<LfoView> (
         "LFO wave", [lfoShape] (float phase) { return getDrawnLfoValue (juce::roundToInt (lfoShape->getValue()), phase); },
         [shown] { return shown() != nullptr ? shown()->lfoPhase.get() : -1.0f; }));
+    lfoView.setControls (parameter (Synth::lfoDepth), parameter (Synth::lfoRate)); // a drag for the depth, the wheel for the rate
     lfo = &lfoView;
 
     const auto oscillatorsPart =

@@ -434,6 +434,11 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
             [lfoShape] (float phase) { return getDrawnLfoValue (juce::roundToInt (lfoShape->getValue()), phase); },
             [shown, lfo] { return shown() != nullptr ? shown()->lfoPhases[(size_t) lfo].get() : -1.0f; }));
 
+        // The wheel for its rate, or its note value while synced; it has no depth of its own (the matrix's slots have).
+        view.setControls ({}, parameter (WavetableSynth::getLfoParameter (lfo, WavetableSynth::lfoRate)),
+                          parameter (WavetableSynth::getLfoParameter (lfo, WavetableSynth::lfoSync)),
+                          parameter (WavetableSynth::getLfoParameter (lfo, WavetableSynth::lfoDivision)));
+
         std::vector<std::string_view> ids;
 
         for (const auto field : { WavetableSynth::lfoShape, WavetableSynth::lfoRate, WavetableSynth::lfoSync, WavetableSynth::lfoDivision,

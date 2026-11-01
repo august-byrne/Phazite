@@ -32,8 +32,10 @@ public:
           rights ((size_t) maxDots)
     {
         setTitle ("Stereo image");
-        setDescription ("What it plays, each moment a dot: mono stands straight up, the sides out of step lie flat. Under it, how "
-                        "alike the two sides are, from -1 to +1; below 0 the mono sum loses sound.");
+        setDescription ("What it plays, each moment a dot: mono stands straight up, the sides out of step lie flat, and a fan as "
+                        "wide as its width: drag across the disc to open or close it, or turn the wheel. Under it, how alike the "
+                        "two sides are, from -1 to +1; below 0 the mono sum loses sound.");
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
     }
 
     ~Image() override
@@ -58,6 +60,58 @@ public:
         paintMeter (g, p, tint, meter);
     }
 
+    // The fan's edge follows the pointer, at its angle from straight up (as wide as the fan opens), as one undo step; the
+    // wheel opens or closes it a step at a time.
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        wheel.end(); // a step of its own, not the wheel's
+
+        if (e.mods.isPopupMenu())
+            return;
+
+        width.beginGesture();
+        mouseDrag (e);
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! width.isInGesture())
+            return;
+
+        const auto [centre, radius] = getDisc();
+        const auto angle = std::abs (std::atan2 (e.position.x - centre.x, std::max (0.0f, centre.y - e.position.y)));
+        const auto range = width.getRange();
+        width.setValue (juce::jlimit (range.start, range.end, angle / juce::MathConstants<float>::halfPi * 2.0f));
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (width.isInGesture())
+            width.endGesture();
+    }
+
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& details) override
+    {
+        if (const auto step = details.deltaY > 0.0f   ? 0.05f
+                              : details.deltaY < 0.0f ? -0.05f
+                                                      : 0.0f;
+            ! juce::approximatelyEqual (step, 0.0f))
+        {
+            const auto range = width.getRange();
+            wheel.turn (width, juce::jlimit (range.start, range.end, width.getValue() + step));
+        }
+    }
+
+    // The half disc's centre, at its bottom, and its radius, where paintDisc() draws it.
+    std::pair<juce::Point<float>, float> getDisc() const
+    {
+        auto area = getLocalBounds().toFloat();
+        area.removeFromBottom ((float) meterHeight + (float) Space::xs);
+        area = area.reduced (4.0f);
+        return { { area.getCentreX(), area.getBottom() }, std::min (area.getWidth() * 0.5f, area.getHeight()) };
+    }
+
 private:
     struct Dot
     {
@@ -66,6 +120,7 @@ private:
 
     DeviceHandle device;
     ParameterHandle width;
+    graph::WheelGesture wheel; // after the handle it turns
     std::vector<float> lefts, rights;
     std::vector<Dot> outputs, inputs;
     float correlation = StereoExpander::noReading, inputCorrelation = StereoExpander::noReading;
@@ -244,5 +299,10 @@ float StereoExpanderEditor::getShownInputCorrelation() const
 int StereoExpanderEditor::getNumDots() const
 {
     return image->getNumDots();
+}
+
+juce::Point<float> StereoExpanderEditor::getDiscCentre() const
+{
+    return image->getDisc().first;
 }
 } // namespace phazite::ui

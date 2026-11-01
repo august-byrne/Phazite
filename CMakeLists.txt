@@ -848,6 +848,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/GoldenModulationTests.cpp
         tests/GoldenProjectTests.cpp
         tests/GoldenRenderTests.cpp
+        tests/GraphEditingTests.cpp
         tests/GuideTests.cpp
         tests/HostedDevice.h
         tests/IconTests.cpp

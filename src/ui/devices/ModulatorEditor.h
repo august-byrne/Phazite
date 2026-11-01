@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A modulator's editor (docs/design.md, section 10; roadmap step 2.3), which its slot in a channel strip opens
-// (ui/mixer/ModulatorSlots.h): its output over the last seconds, a step sequencer's steps, drawn with the mouse, and a
-// knob for each of its parameters, by name, showing its value; a macro's is its one knob. It works through the model's
-// ModulationModel.h and ParameterHandles, so the model owns every undo step.
+// (ui/mixer/ModulatorSlots.h): its output over the last seconds, a step sequencer's steps, drawn with the mouse, a
+// breakpoint envelope's points, dragged and bent with the mouse, and a knob for each of its parameters, by name, showing
+// its value; a macro's is its one knob. It works through the model's ModulationModel.h and ParameterHandles, so the
+// model owns every undo step.
 #pragma once
 
 #include "model/modulation/ModulationModel.h"
@@ -31,6 +32,7 @@ public:
 
     struct Scope;
     struct Steps;
+    struct Breakpoints;
 
 private:
     static constexpr int columns = 4;
@@ -39,7 +41,8 @@ private:
     const ModulatorID modulator;
     juce::Label title;
     std::unique_ptr<Scope> scope;
-    std::unique_ptr<Steps> steps; // a step sequencer's
+    std::unique_ptr<Steps> steps;             // a step sequencer's
+    std::unique_ptr<Breakpoints> breakpoints; // a breakpoint envelope's
     std::vector<juce::String> parameterIDs;
     juce::OwnedArray<Knob> knobs;
     juce::OwnedArray<ParameterAttachment> attachments;

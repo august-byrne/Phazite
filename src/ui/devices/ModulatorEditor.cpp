@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModulatorEditor.h"
+#include "DeviceGraph.h"
 #include "model/commands/SongGesture.h"
 #include "ui/theme/LookAndFeel.h"
+
+#include <array>
+#include <optional>
 
 namespace phazite::ui
 {
@@ -164,6 +168,317 @@ struct ModulatorEditor::Steps : public juce::Component
 };
 
 //==============================================================================
+// A breakpoint envelope's points over its cycle: from its start level through each point to the last, the rest of the
+// cycle holding there, each line bent by its curve as the envelope plays it. A point drags (the start up and down, the
+// others along too, between their neighbours); the hollow handle in a line's middle drags up or down to bend it, and the
+// wheel over a line bends it too (the owner, 2026-11-01: "scroll on lines in order to bend them"); a double-click on a
+// line straightens it. Shift drags finely, as on knobs. Each drag, and each turn of the wheel until it rests, is one
+// undo step.
+struct ModulatorEditor::Breakpoints : public juce::Component
+{
+    Breakpoints (ProjectContext& c, ModulatorID m)
+        : context (c),
+          modulator (m)
+    {
+        setTitle ("Breakpoints");
+        setDescription ("The envelope's points over its cycle. Drag a point, or the handle in a line's middle up or down to bend "
+                        "the line; the wheel bends the line under it, and a double-click straightens it.");
+
+        static constexpr const char* stages[] = { "Zero", "One", "Two", "Three", "Four" };
+
+        for (int i = 0; i <= maxPoints; ++i)
+        {
+            const auto stage = juce::String ("stage") + stages[i];
+            levels[(size_t) i] = getModulatorParameter (context, modulator, stage + "Value");
+
+            if (i > 0)
+            {
+                times[(size_t) i] = getModulatorParameter (context, modulator, stage + "Time");
+                curves[(size_t) i] = getModulatorParameter (context, modulator, stage + "Curve");
+            }
+        }
+
+        count = getModulatorParameter (context, modulator, "numActivePoints");
+    }
+
+    static constexpr int maxPoints = 4;
+
+    // What a press takes: a point, or the handle that bends the line ending at a point.
+    struct Target
+    {
+        enum Kind
+        {
+            point,
+            bend
+        } kind = point;
+
+        int index = 0;
+
+        bool operator== (const Target&) const = default;
+    };
+
+    int getCount() const { return juce::jlimit (1, maxPoints, juce::roundToInt (count.getBaseValue())); }
+    float getTime (int i) const { return i == 0 ? 0.0f : juce::jlimit (0.0f, 1.0f, times[(size_t) i].getBaseValue()); }
+    float getLevel (int i) const { return juce::jlimit (0.0f, 1.0f, levels[(size_t) i].getBaseValue()); }
+    float getCurve (int i) const { return curves[(size_t) i].getBaseValue(); }
+
+    juce::Rectangle<float> getArea() const { return getLocalBounds().toFloat().reduced (GraphTint::handleRadius * 1.5f + 1.0f); }
+
+    juce::Point<float> toScreen (juce::Point<float> timeAndLevel) const
+    {
+        const auto area = getArea();
+        return { area.getX() + timeAndLevel.x * area.getWidth(), area.getBottom() - timeAndLevel.y * area.getHeight() };
+    }
+
+    juce::Point<float> getPointPosition (int i) const { return toScreen ({ getTime (i), getLevel (i) }); }
+
+    // The control point of the line that ends at point i (from 1), as Tracktion's breakpoint envelope bends it: its curve,
+    // from -0.5 to 0.5, moves it from the line's middle to the corner at the line's end time and start level (0.5) or at
+    // its start time and end level (-0.5). Tracktion's getQuadraticControlPoint() has a branch for each way the line runs;
+    // both come to this.
+    juce::Point<float> getControl (int i) const
+    {
+        const juce::Point<float> start { getTime (i - 1), getLevel (i - 1) }, end { getTime (i), getLevel (i) };
+        const auto c = juce::jlimit (-1.0f, 1.0f, getCurve (i) * 2.0f);
+        return { start.x + (end.x - start.x) / 2.0f * (1.0f + c), start.y + (end.y - start.y) / 2.0f * (1.0f - c) };
+    }
+
+    // The middle of the line that ends at point i (from 1), where its handle is.
+    juce::Point<float> getBendPosition (int i) const
+    {
+        return getPointPosition (i - 1) * 0.25f + toScreen (getControl (i)) * 0.5f + getPointPosition (i) * 0.25f;
+    }
+
+    // How the curve of the line ending at point i changes to bend it up: lower for a rising line, higher for a falling one.
+    float getUpward (int i) const { return getLevel (i) >= getLevel (i - 1) ? -1.0f : 1.0f; }
+
+    // Repainted when what it draws moved.
+    void refresh()
+    {
+        std::vector<float> now { count.getBaseValue() };
+
+        for (int i = 0; i <= maxPoints; ++i)
+            now.insert (now.end(), { getLevel (i), getTime (i), i > 0 ? getCurve (i) : 0.0f });
+
+        if (now != shown)
+        {
+            shown = std::move (now);
+            repaint();
+        }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto& p = getPalette (*this);
+        g.setColour (p.surfaceRaised);
+        g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), cornerRadius);
+
+        juce::Path line;
+        line.startNewSubPath (getPointPosition (0));
+
+        for (int i = 1; i <= getCount(); ++i)
+            line.quadraticTo (toScreen (getControl (i)), getPointPosition (i));
+
+        line.lineTo (toScreen ({ 1.0f, getLevel (getCount()) })); // the rest of the cycle, holding
+        g.setColour (p.modulation);
+        g.strokePath (line, juce::PathStrokeType (GraphTint::curveWidth));
+
+        for (int i = 0; i <= getCount(); ++i)
+        {
+            paintHandle (g, p, { Target::point, i }, getPointPosition (i));
+
+            if (i > 0)
+                paintHandle (g, p, { Target::bend, i }, getBendPosition (i));
+        }
+    }
+
+    // A point filled, a line's handle hollow; larger under the pointer and while dragged.
+    void paintHandle (juce::Graphics& g, const Palette& p, Target target, juce::Point<float> at) const
+    {
+        const auto radius = target == hovered || target == dragged ? GraphTint::handleRadius * 1.5f : GraphTint::handleRadius;
+        const auto dot = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (at);
+        g.setColour (p.surfaceRaised);
+        g.fillEllipse (dot.expanded (1.0f));
+        g.setColour (p.modulation);
+
+        if (target.kind == Target::point)
+            g.fillEllipse (dot);
+        else
+            g.drawEllipse (dot.reduced (GraphTint::handleOutline / 2.0f), GraphTint::handleOutline);
+    }
+
+    // The point or handle nearest the pointer, if one is near enough to take.
+    std::optional<Target> findTarget (juce::Point<float> position) const
+    {
+        std::optional<Target> nearest;
+        auto nearestDistance = GraphTint::grabDistance;
+
+        const auto consider = [&] (Target target, juce::Point<float> at)
+        {
+            if (const auto distance = at.getDistanceFrom (position); distance <= nearestDistance)
+            {
+                nearest = target;
+                nearestDistance = distance;
+            }
+        };
+
+        for (int i = 0; i <= getCount(); ++i)
+        {
+            consider ({ Target::point, i }, getPointPosition (i));
+
+            if (i > 0)
+                consider ({ Target::bend, i }, getBendPosition (i));
+        }
+
+        return nearest;
+    }
+
+    // The line under a place across the picture, by the point it ends at; 0 past the last point, where the level holds.
+    int findLine (float x) const
+    {
+        for (int i = 1; i <= getCount(); ++i)
+            if (x <= getPointPosition (i).x)
+                return i;
+
+        return 0;
+    }
+
+    void setHovered (std::optional<Target> target)
+    {
+        if (target == hovered)
+            return;
+
+        hovered = target;
+
+        // The start and the lines' handles move up and down only.
+        if (! target.has_value())
+            setMouseCursor (juce::MouseCursor::NormalCursor);
+        else if (target->kind == Target::bend || target->index == 0)
+            setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        else
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+
+        repaint();
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override { setHovered (findTarget (e.position)); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered ({}); }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        wheel.end(); // a step of its own, not the wheel's
+        const auto target = findTarget (e.position);
+
+        if (! target.has_value() || e.mods.isPopupMenu())
+            return;
+
+        dragged = target;
+        const auto i = target->index;
+
+        if (target->kind == Target::bend)
+        {
+            startCurve = getCurve (i);
+            curves[(size_t) i].beginGesture();
+            return;
+        }
+
+        startLevel = getLevel (i);
+        startTime = getTime (i);
+        levels[(size_t) i].beginGesture(); // its gesture holds the step, which the time's joins (the start has none)
+        times[(size_t) i].beginGesture();
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! dragged.has_value())
+            return;
+
+        const auto area = getArea();
+        const auto fine = e.mods.isShiftDown() ? GraphTint::fineDragFactor : 1.0f;
+        const auto up = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, area.getHeight()) * fine;
+        const auto i = dragged->index;
+
+        if (dragged->kind == Target::bend)
+        {
+            const auto range = curves[(size_t) i].getRange();
+            curves[(size_t) i].setValue (juce::jlimit (range.start, range.end, startCurve + getUpward (i) * up));
+        }
+        else
+        {
+            levels[(size_t) i].setValue (juce::jlimit (0.0f, 1.0f, startLevel + up));
+
+            if (i > 0)
+            {
+                const auto along = (float) e.getDistanceFromDragStartX() / std::max (1.0f, area.getWidth()) * fine;
+                const auto earliest = getTime (i - 1), latest = i < getCount() ? getTime (i + 1) : 1.0f;
+                times[(size_t) i].setValue (juce::jlimit (earliest, std::max (earliest, latest), startTime + along));
+            }
+        }
+
+        refresh();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (! dragged.has_value())
+            return;
+
+        const auto i = (size_t) dragged->index;
+
+        for (auto* handle : { &curves[i], &times[i], &levels[i] }) // the level's last: its gesture holds the step
+            handle->endGesture();
+
+        dragged.reset();
+        repaint();
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details) override
+    {
+        const auto step = details.deltaY > 0.0f ? 1 : details.deltaY < 0.0f ? -1 : 0;
+        const auto i = findLine (e.position.x);
+
+        // Past the last point, or turned sideways: the view around it scrolls.
+        if (i == 0 || step == 0)
+        {
+            Component::mouseWheelMove (e, details);
+            return;
+        }
+
+        auto& curve = curves[(size_t) i];
+        const auto range = curve.getRange();
+        wheel.turn (curve, juce::jlimit (range.start, range.end, getCurve (i) + getUpward (i) * (float) step * curveStep));
+        refresh();
+    }
+
+    // Straight again: the line under the pointer, or whose handle it is on. A point has no place of its own to go back
+    // to (Tracktion's points are all at 0.5 as parameters), so a double-click on one does nothing.
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        const auto target = findTarget (e.position);
+
+        if (target.has_value() && target->kind == Target::point)
+            return;
+
+        if (const auto i = target.has_value() ? target->index : findLine (e.position.x); i > 0)
+        {
+            curves[(size_t) i].setValue (0.0f);
+            refresh();
+        }
+    }
+
+    static constexpr float curveStep = 0.05f; // how far a notch of the wheel bends a line
+
+    ProjectContext& context;
+    const ModulatorID modulator;
+    std::array<ParameterHandle, maxPoints + 1> levels, times, curves; // the start's time and curve stay empty: it has none
+    ParameterHandle count;
+    graph::WheelGesture wheel; // after the handles it turns
+    std::vector<float> shown;
+    std::optional<Target> hovered, dragged;
+    float startLevel = 0.0f, startTime = 0.0f, startCurve = 0.0f;
+};
+
+//==============================================================================
 ModulatorEditor::ModulatorEditor (ProjectContext& projectContext, ModulatorID id)
     : context (projectContext),
       modulator (id)
@@ -189,6 +504,12 @@ ModulatorEditor::ModulatorEditor (ProjectContext& projectContext, ModulatorID id
         addAndMakeVisible (*steps);
     }
 
+    if (info.has_value() && info->type == ModulatorType::breakpoints)
+    {
+        breakpoints = std::make_unique<Breakpoints> (context, modulator);
+        addAndMakeVisible (*breakpoints);
+    }
+
     for (const auto& parameter : getModulatorParameters (context, modulator))
     {
         auto* knob = knobs.add (new Knob (parameter.name, 0.0));
@@ -206,7 +527,8 @@ ModulatorEditor::ModulatorEditor (ProjectContext& projectContext, ModulatorID id
     }
 
     const auto rows = (knobs.size() + columns - 1) / columns;
-    const auto graphs = (scope != nullptr ? graphHeight + Space::s : 0) + (steps != nullptr ? graphHeight + Space::s : 0);
+    const auto graphs = (scope != nullptr ? graphHeight + Space::s : 0) + (steps != nullptr ? graphHeight + Space::s : 0)
+                        + (breakpoints != nullptr ? graphHeight + Space::s : 0);
     setSize (columns * (knobSize + Space::s) + 2 * Space::m, titleHeight + graphs + rows * (knobSize + nameHeight) + 2 * Space::m);
 
     refresh();
@@ -234,7 +556,7 @@ void ModulatorEditor::resized()
     auto area = getLocalBounds().reduced (Space::m);
     title.setBounds (area.removeFromTop (titleHeight));
 
-    for (auto* graph : std::initializer_list<juce::Component*> { scope.get(), steps.get() })
+    for (auto* graph : std::initializer_list<juce::Component*> { scope.get(), steps.get(), breakpoints.get() })
     {
         if (graph != nullptr)
         {
@@ -266,6 +588,9 @@ void ModulatorEditor::refresh()
 
     if (steps != nullptr)
         steps->refresh();
+
+    if (breakpoints != nullptr)
+        breakpoints->refresh();
 
     for (auto* attachment : attachments)
         attachment->update();

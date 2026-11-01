@@ -12,11 +12,17 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace phazite::ui
 {
-// An envelope's attack, decay, sustain and release, and a line at the level of the newest note's.
+// An envelope's attack, decay, sustain and release, and a line at the level of the newest note's. Its points drag (the owner,
+// 2026-11-01: a picture's key points should move as its knobs do, as Ableton's envelopes' breakpoints do): the peak sideways
+// for the attack, the corner where the decay ends sideways for the decay and up and down for the sustain, and the end
+// sideways for the release, each drag one undo step, Shift in fine steps; a double-click puts a point back where it
+// started. While a point is dragged the picture keeps its scale, so that the point stays under the pointer. Its stages
+// have no curve of their own to bend (they curve as analog envelopes do).
 class EnvelopeView : public juce::Component,
                      private DisplayTicker::Display
 {
@@ -26,18 +32,52 @@ public:
                   ParameterHandle release, std::function<float()> level);
 
     float getShownLevel() const noexcept { return shownLevel; }
+
+    enum class Point
+    {
+        attack, // the peak
+        decay,  // the corner where the decay ends, at the sustain level
+        release // the end
+    };
+
+    juce::Point<float> getPointPosition (Point) const;
+
     void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
     ParameterHandle attack, decay, sustain, release;
     std::function<float()> level;
     float shownLevel = 0.0f;
     DrawnNumbers drawn;
+    std::optional<Point> hovered, dragged;
+    float dragTotal = 0.0f, dragHold = 0.0f; // the picture's time across, and its held sustain's, while a point is dragged
+    float startTime = 0.0f, startSustain = 0.0f;
 
+    // The stages across the picture: the attack, the decay, a held sustain and the release, each at least a little wide.
+    struct Layout
+    {
+        juce::Rectangle<float> area;
+        float attack = 0.0f, decay = 0.0f, hold = 0.0f, release = 0.0f, total = 1.0f;
+
+        float x (float time) const { return area.getX() + time / total * area.getWidth(); }
+        float y (float value) const { return area.getBottom() - value * area.getHeight(); }
+    };
+
+    Layout getLayout() const;
+    std::optional<Point> findPoint (juce::Point<float>) const;
+    ParameterHandle& getTimeOf (Point);
+    void setHovered (std::optional<Point>);
     void tick() override;
 };
 
-// An LFO's wave, one cycle, and a dot where it is now.
+// An LFO's wave, one cycle, and a dot where it is now. With its controls given, a drag up or down sets its depth (the wave
+// drawn as tall as it moves) and the wheel its rate, or with its sync on, the note value, each one undo step.
 class LfoView : public juce::Component,
                 private DisplayTicker::Display
 {
@@ -45,16 +85,27 @@ public:
     // shapeAt: the wave at a phase from 0 to 1, from -1 to 1; phase: where it is now, from 0 to 1 (below 0 for nowhere).
     LfoView (const juce::String& title, std::function<float (float phase)> shapeAt, std::function<float()> phase);
 
+    // What a drag and the wheel change: the depth from 0 to 1 (none: drawn whole, and a drag changes nothing), the rate in
+    // hertz, and while sync, a switch, is on, the division, a choice of note values.
+    void setControls (ParameterHandle depth, ParameterHandle rate, ParameterHandle sync = {}, ParameterHandle division = {});
+
     void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
     static constexpr int drawnWavePoints = 64; // where a tick reads the wave, to see whether it changed
 
     std::function<float (float)> shapeAt;
     std::function<float()> phase;
-    float shownPhase = -1.0f;
+    ParameterHandle depth, rate, sync, division;
+    graph::WheelGesture wheel; // after the handles it turns
+    float shownPhase = -1.0f, startDepth = 0.0f;
     DrawnNumbers drawn;
 
+    float getDrawnDepth() const; // how tall the wave is drawn, from 0 to 1
     void tick() override;
 };
 

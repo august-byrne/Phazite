@@ -27,11 +27,17 @@ class CompressorEditor::Graph : public juce::Component
 {
 public:
     explicit Graph (CompressorEditor& e)
-        : editor (e)
+        : editor (e),
+          threshold (editor.device.getParameter (getInfo (Compressor::threshold).id)),
+          ratio (editor.device.getParameter (getInfo (Compressor::ratio).id)),
+          knee (editor.device.getParameter (getInfo (Compressor::knee).id)),
+          makeup (editor.device.getParameter (getInfo (Compressor::makeup).id))
     {
         setTitle ("Compressor curve");
         setDescription ("How loud each level comes out, with a dot at the level the compressor hears, and a meter of how far it "
-                        "turns the sound down. Drag across the curve to move the threshold.");
+                        "turns the sound down. Drag across it to move the threshold (the ring); drag the line above the threshold "
+                        "up or down for the ratio, the line below it for the makeup gain. The wheel bends the knee at the threshold, "
+                        "and above it changes the ratio.");
     }
 
     juce::Rectangle<float> getCurveArea() const
@@ -80,6 +86,17 @@ public:
         g.setColour (palette.text);
         g.strokePath (curve, juce::PathStrokeType (GraphTint::curveWidth));
 
+        // Where it can be taken: a ring at the threshold, which a drag across moves, and a point at the line's top end, whose
+        // height is the ratio. Larger while the pointer is on their part.
+        const auto thresholdLevel = editor.values[Compressor::threshold];
+        const auto ring = getPosition (thresholdLevel, outputFor (thresholdLevel));
+        const auto end = getPosition (0.0f, juce::jlimit (lowestLevel, 0.0f, outputFor (0.0f)));
+        const auto size = [this] (Zone zone) { return 2.0f * GraphTint::handleRadius * (zone == hovered ? 1.5f : 1.0f); };
+        g.setColour (getDeviceTint (*this));
+        g.drawEllipse (juce::Rectangle<float> (size (Zone::threshold), size (Zone::threshold)).withCentre (ring), GraphTint::handleOutline);
+        g.fillEllipse (
+            juce::Rectangle<float> (size (Zone::ratio), size (Zone::ratio)).withCentre (end.withX (end.x - size (Zone::ratio) / 2.0f)));
+
         // The level the compressor hears, riding the curve.
         if (editor.shownLevel > lowestLevel)
         {
@@ -92,27 +109,140 @@ public:
         paintMeter (g, palette);
     }
 
-    // Dragging sideways moves the threshold by as much as the graph's levels move, as one undo step.
+    // What a press takes, by where it is (the owner, 2026-11-01: a picture's points and lines should move as its knobs do):
+    // near the threshold, the threshold (dragged across); the line above it, the ratio (up and down, as Kilohearts' Dynamics
+    // sets it); the line below it, the makeup (up and down, the whole curve with it) and the threshold (across).
+    enum class Zone
+    {
+        threshold,
+        ratio,
+        below
+    };
+
+    Zone getZone (juce::Point<float> position) const
+    {
+        const auto thresholdLevel = editor.values[Compressor::threshold];
+        const auto halfKnee = std::max (editor.values[Compressor::knee] / 2.0f, 3.0f);
+        const auto level = levelFor (position.x);
+        const auto ring = getPosition (thresholdLevel, outputFor (thresholdLevel));
+
+        if (std::abs (level - thresholdLevel) <= halfKnee || position.getDistanceFrom (ring) <= GraphTint::grabDistance)
+            return Zone::threshold;
+
+        return level > thresholdLevel ? Zone::ratio : Zone::below;
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const auto zone = getZone (e.position);
+        setMouseCursor (zone == Zone::threshold ? juce::MouseCursor::LeftRightResizeCursor
+                        : zone == Zone::ratio   ? juce::MouseCursor::UpDownResizeCursor
+                                                : juce::MouseCursor::UpDownLeftRightResizeCursor);
+
+        if (zone != hovered)
+        {
+            hovered = zone;
+            repaint();
+        }
+    }
+
+    void mouseExit (const juce::MouseEvent&) override
+    {
+        hovered.reset();
+        repaint();
+    }
+
+    // Each drag one undo step: across for the threshold, by as much as the graph's levels move; up and down for the ratio,
+    // the line passing under the pointer, or for the makeup.
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        wheel.end(); // a step of its own, not the wheel's
+
+        if (e.mods.isPopupMenu())
+            return;
+
+        dragged = getZone (e.position);
+        startThreshold = threshold.getValue();
+        startMakeup = makeup.getValue();
+
+        if (dragged == Zone::ratio)
+        {
+            ratio.beginGesture();
+        }
+        else
+        {
+            threshold.beginGesture();
+
+            if (dragged == Zone::below)
+                makeup.beginGesture();
+        }
+    }
+
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        if (! threshold.isInGesture())
+        if (! dragged.has_value())
+            return;
+
+        const auto area = getCurveArea();
+        const auto fine = e.mods.isShiftDown() ? GraphTint::fineDragFactor : 1.0f;
+
+        if (dragged == Zone::ratio)
         {
-            threshold = editor.device.getParameter (getInfo (Compressor::threshold).id);
-            threshold.beginGesture();
-            startThreshold = threshold.getValue();
+            // The ratio that puts the line, at the pointer's level in, under the pointer: how far over the threshold it comes in,
+            // against how far it comes out.
+            const auto in = levelFor (e.position.x);
+            const auto out =
+                lowestLevel + (area.getBottom() - e.position.y) / area.getHeight() * -lowestLevel - editor.values[Compressor::makeup];
+            const auto over = in - startThreshold, outOver = out - startThreshold;
+            const auto& info = getInfo (Compressor::ratio);
+            ratio.setValue (outOver <= 0.0f ? info.maximum : devices::constrain (info, over / std::max (0.01f, outOver)));
+        }
+        else
+        {
+            const auto across = (float) e.getDistanceFromDragStartX() / area.getWidth() * -lowestLevel * fine;
+            threshold.setValue (devices::constrain (getInfo (Compressor::threshold), startThreshold + across));
+
+            if (dragged == Zone::below)
+            {
+                const auto up = (float) -e.getDistanceFromDragStartY() / area.getHeight() * -lowestLevel * fine;
+                makeup.setValue (devices::constrain (getInfo (Compressor::makeup), startMakeup + up));
+            }
         }
 
-        const auto moved = (float) e.getDistanceFromDragStartX() / getCurveArea().getWidth() * -lowestLevel;
-        threshold.setValue (devices::constrain (getInfo (Compressor::threshold), startThreshold + moved));
         editor.refresh();
     }
 
-    void mouseUp (const juce::MouseEvent&) override { threshold.endGesture(); }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        for (auto* handle : { &makeup, &ratio, &threshold })
+            if (handle->isInGesture())
+                handle->endGesture();
+
+        dragged.reset();
+    }
+
+    // The wheel bends the knee at the threshold (and below it), and above it changes the ratio; one undo step until it rests.
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details) override
+    {
+        const auto step = details.deltaY > 0.0f ? 1.0f : details.deltaY < 0.0f ? -1.0f : 0.0f;
+
+        if (juce::approximatelyEqual (step, 0.0f))
+            return;
+
+        if (getZone (e.position) == Zone::ratio)
+            wheel.turn (ratio, devices::constrain (getInfo (Compressor::ratio), ratio.getValue() * std::pow (1.1f, step)));
+        else
+            wheel.turn (knee, devices::constrain (getInfo (Compressor::knee), knee.getValue() + step));
+
+        editor.refresh();
+    }
 
 private:
     CompressorEditor& editor;
-    ParameterHandle threshold;
-    float startThreshold = 0.0f;
+    ParameterHandle threshold, ratio, knee, makeup;
+    graph::WheelGesture wheel; // after the handles it turns
+    float startThreshold = 0.0f, startMakeup = 0.0f;
+    std::optional<Zone> hovered, dragged;
 
     void paintGrid (juce::Graphics& g, const Palette& palette, juce::Rectangle<float> area)
     {
