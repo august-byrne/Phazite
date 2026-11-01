@@ -21,7 +21,7 @@ if [ -z "$gitleaks" ]; then
     esac
 fi
 [ -n "$gitleaks" ] || stop "gitleaks is not installed, so the commits can't be checked for secrets.
-Windows: run tools\\setup-windows.cmd. Linux: see \"No secrets in git\" in README.md."
+Windows: run tools\\setup-windows.cmd. Linux: see \"The git hooks\" in CONTRIBUTING.md."
 
 # Colour off for the "git log" gitleaks runs (see pre-commit).
 GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'color.ui=never' 'color.diff=never'"

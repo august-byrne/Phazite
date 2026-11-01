@@ -63,7 +63,7 @@ find_clang_format() {
 
 clang_format=$(find_clang_format) || {
     echo "clang-format wasn't found. Install VS Code's C/C++ extension (tools\\setup-windows.cmd does this), or LLVM" >&2
-    echo "(tools\\setup-windows.cmd -WithLlvm). On Linux, install clang-format 23 (see README.md, Code formatting)." >&2
+    echo "(tools\\setup-windows.cmd -WithLlvm). On Linux, install clang-format 23 (see CONTRIBUTING.md, Code style)." >&2
     exit 2
 }
 

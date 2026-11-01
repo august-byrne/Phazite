@@ -102,7 +102,7 @@ if [ -z "$gitleaks" ]; then
     esac
 fi
 [ -n "$gitleaks" ] || stop "gitleaks is not installed, so the staged changes can't be checked for secrets.
-Windows: run tools\\setup-windows.cmd. Linux: see \"No secrets in git\" in README.md."
+Windows: run tools\\setup-windows.cmd. Linux: see \"The git hooks\" in CONTRIBUTING.md."
 
 # gitleaks reads "git diff" and finds nothing in it when git colours it (color.ui = always), so colour
 # is turned off for it; appended to GIT_CONFIG_PARAMETERS, this beats every config file and "git -c".
@@ -120,7 +120,7 @@ can't hold comments, add its Fingerprint line to .gitleaksignore.
 $report" ;;
     *) # The "git" command arrived in gitleaks 8.19; Ubuntu's own package (8.16) doesn't report its version.
        "$gitleaks" git --help >/dev/null 2>&1 || stop "gitleaks is too old: this check needs 8.19 or newer.
-Windows: run tools\\setup-windows.cmd. Linux: see \"No secrets in git\" in README.md."
+Windows: run tools\\setup-windows.cmd. Linux: see \"The git hooks\" in CONTRIBUTING.md."
        stop "gitleaks failed, so the staged changes were not checked for secrets:
 
 $report" ;;
