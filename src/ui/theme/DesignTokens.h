@@ -32,6 +32,8 @@ struct Palette
     juce::Colour modulation; // what modulation does to a control: the ring around a knob, a modulator's output
     juce::Colour frozen;     // a frozen track's frost, over its clips and its snowflake (FrozenTint)
     juce::Colour boost;      // a level brought up, as upward compression does (danger: one turned down), in devices' graphs
+    juce::Colour playing;    // a track's switch while the track plays, lit as FL Studio's mute switch is (TrackSwitch.h)
+    juce::Colour soloed;     // a soloed track's switch, in the yellow most DAWs light solo with
 };
 
 inline Palette getPalette (ThemeName theme)
@@ -41,20 +43,23 @@ inline Palette getPalette (ThemeName theme)
     switch (theme)
     {
         case ThemeName::light:
-            return { Colour (0xfff4f5f7), Colour (0xffffffff), Colour (0xffeceef1), Colour (0xffd3d7dd), Colour (0xff1b1f24),
-                     Colour (0xff545d69), Colour (0xff1f6feb), Colour (0xffffffff), Colour (0xff9a5b00), Colour (0xffc62828),
-                     Colour (0xff1a7f5a), Colour (0xff7b3fd4), Colour (0xff2b8fd6), Colour (0xff1e7d3c) };
+            return { Colour (0xfff4f5f7), Colour (0xffffffff), Colour (0xffeceef1), Colour (0xffd3d7dd),
+                     Colour (0xff1b1f24), Colour (0xff545d69), Colour (0xff1f6feb), Colour (0xffffffff),
+                     Colour (0xff9a5b00), Colour (0xffc62828), Colour (0xff1a7f5a), Colour (0xff7b3fd4),
+                     Colour (0xff2b8fd6), Colour (0xff1e7d3c), Colour (0xff1f8a43), Colour (0xffb07d00) };
 
         case ThemeName::highContrast:
-            return { Colour (0xff000000), Colour (0xff000000), Colour (0xff1a1a1a), Colour (0xffffffff), Colour (0xffffffff),
-                     Colour (0xffe6e6e6), Colour (0xffffd400), Colour (0xff000000), Colour (0xffffb000), Colour (0xffff6b6b),
-                     Colour (0xff00ff9c), Colour (0xffff5cff), Colour (0xff00e5ff), Colour (0xff3dff7a) };
+            return { Colour (0xff000000), Colour (0xff000000), Colour (0xff1a1a1a), Colour (0xffffffff),
+                     Colour (0xffffffff), Colour (0xffe6e6e6), Colour (0xffffd400), Colour (0xff000000),
+                     Colour (0xffffb000), Colour (0xffff6b6b), Colour (0xff00ff9c), Colour (0xffff5cff),
+                     Colour (0xff00e5ff), Colour (0xff3dff7a), Colour (0xff3dff7a), Colour (0xffffe14d) };
 
         case ThemeName::dark:
         default:
-            return { Colour (0xff15171a), Colour (0xff1c1f23), Colour (0xff272b31), Colour (0xff343a42), Colour (0xffe8eaed),
-                     Colour (0xffa5adb8), Colour (0xff5b9dff), Colour (0xff0b1220), Colour (0xfff2b84b), Colour (0xffff7a6b),
-                     Colour (0xff3fbf8f), Colour (0xffb48cff), Colour (0xffa8dcff), Colour (0xff6fdc8c) };
+            return { Colour (0xff15171a), Colour (0xff1c1f23), Colour (0xff272b31), Colour (0xff343a42),
+                     Colour (0xffe8eaed), Colour (0xffa5adb8), Colour (0xff5b9dff), Colour (0xff0b1220),
+                     Colour (0xfff2b84b), Colour (0xffff7a6b), Colour (0xff3fbf8f), Colour (0xffb48cff),
+                     Colour (0xffa8dcff), Colour (0xff6fdc8c), Colour (0xff4fd47c), Colour (0xfff7c948) };
     }
 }
 
@@ -254,7 +259,9 @@ namespace LaneTint
 
 // The ring around a modulated knob (ui::Knob), in the modulation color: how thick its arc is, how far outside the knob's
 // edge, the size of the dot where the value is now, and how far inside the edge a drag takes the ring rather than the
-// knob (pixels); and how faint it is while its modulators are switched off, as is a modulator's meter (an alpha).
+// knob (pixels); and how faint it is while its modulators are switched off, as is a modulator's meter (an alpha). While
+// a modulator is dragged: how faint the ring is round each knob it could modulate, and how thick it is round the one under
+// the pointer, over a wash of the modulation color (alpha).
 namespace ModulationRing
 {
     inline constexpr float width = 1.5f;
@@ -262,7 +269,23 @@ namespace ModulationRing
     inline constexpr float dotSize = 3.5f;
     inline constexpr float grabWidth = 3.0f;
     inline constexpr float offAlpha = 0.35f;
+    inline constexpr float targetAlpha = 0.5f;
+    inline constexpr float dropWidth = 2.5f;
+    inline constexpr float dropWash = 0.2f;
 } // namespace ModulationRing
+
+// A modulator being dragged by its grip (ui/mixer/StripParts.h): its grip lit in a wash of the modulation colour under
+// the pointer and while dragging (alpha); the chip with its name that follows the pointer, its height, and how far right
+// of and below the pointer it is, so that the knob under the pointer stays in view (pixels), and how opaque it is; and
+// the outline of the slot it is dragged from.
+namespace ModulatorDragTint
+{
+    inline constexpr float gripWash = 0.25f;
+    inline constexpr int chipHeight = 20;
+    inline constexpr int chipOffsetX = 14, chipOffsetY = 12;
+    inline constexpr float chipAlpha = 0.92f;
+    inline constexpr float sourceOutline = 1.5f;
+} // namespace ModulatorDragTint
 
 // How the song's sections show behind the playlist's tracks, as ghosts: a faint wash of each section's color
 // (stronger while it is selected) and a line in it where the section starts (alphas).
@@ -330,6 +353,19 @@ namespace ArmTint
     inline constexpr float dot = 0.55f;
     inline constexpr float outline = 1.5f;
 } // namespace ArmTint
+
+// A track's mute and solo switch (ui/components/TrackSwitch.h): its light, as a part of the switch's size, with an edge in
+// the background colour that keeps it apart from a track's tinted header, and the ring of a muted one's light (its outline)
+// and of a soloed one's, this far outside it (pixels); and how faint the light is while other tracks' solos silence the
+// track (an alpha). A switch is this large to click, its light smaller.
+namespace SwitchTint
+{
+    inline constexpr float light = 0.5f;
+    inline constexpr float edge = 1.0f;
+    inline constexpr float ring = 1.5f, ringGap = 2.0f;
+    inline constexpr float silenced = 0.3f;
+    inline constexpr int size = 20;
+} // namespace SwitchTint
 
 // An audio clip in the playlist while its render is being made (roadmap step 2.18), silent until then: its waveform faint
 // (alpha), and a bar along its bottom edge of how far the render has come, over a track of the same ink (alpha, height).

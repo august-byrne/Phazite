@@ -38,6 +38,10 @@ public:
     int getPreferredHeight() const;
     void resized() override;
 
+    // While one of its modulators is dragged, the knobs it could modulate light up (Knob::showModulatorTargets()).
+    void dragOperationStarted (const juce::DragAndDropTarget::SourceDetails&) override;
+    void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override;
+
     struct Slot;
 
 private:

@@ -17,12 +17,6 @@ namespace
 
     // A meter falls 30 dB a second.
     constexpr float meterFallDbPerTick = 30.0f / DisplayTicker::ticksPerSecond;
-
-    juce::String getMuteTooltip (bool silencedBySolo)
-    {
-        return silencedBySolo ? "Silent while other tracks are soloed. Click to mute it anyway, or right-click to solo it alone"
-                              : "Mute: silences this track. Right-click to solo it alone, as in FL Studio";
-    }
 } // namespace
 
 //==============================================================================
@@ -124,7 +118,7 @@ void Knob::paint (juce::Graphics& g)
 {
     ValueSlider::paint (g);
 
-    if (! modulation.has_value() && ! dropping)
+    if (! modulation.has_value() && ! dropping && ! target)
         return;
 
     const auto& p = getPalette (*this);
@@ -135,11 +129,23 @@ void Knob::paint (juce::Graphics& g)
     const auto angleOf = [&rotary] (float proportion)
     { return rotary.startAngleRadians + juce::jlimit (0.0f, 1.0f, proportion) * (rotary.endAngleRadians - rotary.startAngleRadians); };
 
-    g.setColour (p.modulation);
+    // While a modulator is dragged that could modulate it: a faint ring all the way round; under the pointer, a full one over
+    // a wash.
+    if (dropping || target)
+    {
+        const auto circle = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);
 
-    // A modulator dragged over it, which it would take: all the way round.
-    if (dropping)
-        g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre), ModulationRing::width);
+        if (dropping)
+        {
+            g.setColour (p.modulation.withAlpha (ModulationRing::dropWash));
+            g.fillEllipse (circle);
+        }
+
+        g.setColour (p.modulation.withMultipliedAlpha (dropping ? 1.0f : ModulationRing::targetAlpha));
+        g.drawEllipse (circle, dropping ? ModulationRing::dropWidth : ModulationRing::width);
+    }
+
+    g.setColour (p.modulation);
 
     // Its modulators switched off: faint, where they would move it, with no dot.
     if (modulation.has_value())
@@ -195,6 +201,33 @@ void Knob::mouseUp (const juce::MouseEvent& e)
 
     if (onModulationDragEnd != nullptr)
         onModulationDragEnd();
+}
+
+void Knob::showModulatorTargets (std::optional<ModulatorID> modulator)
+{
+    // Every knob in every window: a modulator dragged reaches them all, a device's own window too.
+    const std::function<void (juce::Component&)> visit = [&modulator, &visit] (juce::Component& component)
+    {
+        if (auto* knob = dynamic_cast<Knob*> (&component))
+        {
+            const auto isTarget = modulator.has_value() && knob->canAcceptModulator != nullptr && knob->canAcceptModulator (*modulator);
+
+            if (isTarget != knob->target)
+            {
+                knob->target = isTarget;
+                knob->repaint();
+            }
+        }
+
+        for (auto* child : component.getChildren())
+            visit (*child);
+    };
+
+    auto& desktop = juce::Desktop::getInstance();
+
+    for (int i = 0; i < desktop.getNumComponents(); ++i)
+        if (auto* window = desktop.getComponent (i))
+            visit (*window);
 }
 
 bool Knob::isInterestedInDragSource (const SourceDetails& details)
@@ -813,106 +846,5 @@ std::unique_ptr<juce::AccessibilityHandler> ValueMeter::createAccessibilityHandl
 
     return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::progressBar, juce::AccessibilityActions(),
                                                          juce::AccessibilityHandler::Interfaces { std::make_unique<Value> (*this) });
-}
-
-//==============================================================================
-// A button that shows the track's state rather than toggling itself, and tells a right-click (which JUCE's
-// buttons report as clicks too) from a click by the keys it passes on. Half lit is a state between off and on.
-struct MuteSoloButtons::Button : public juce::TextButton
-{
-    Button (const juce::String& buttonText, const juce::String& title)
-        : juce::TextButton (buttonText)
-    {
-        setTitle (title);
-    }
-
-    using juce::TextButton::clicked;
-
-    void clicked (const juce::ModifierKeys& mods) override
-    {
-        if (onClickWith != nullptr)
-            onClickWith (mods);
-    }
-
-    void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
-    {
-        auto& lf = getLookAndFeel();
-        const auto off = findColour (buttonColourId), on = findColour (buttonOnColourId);
-        lf.drawButtonBackground (g, *this, getToggleState() ? on : (halfLit ? off.interpolatedWith (on, halfLitAmount) : off),
-                                 isHighlighted, isDown);
-        lf.drawButtonText (g, *this, isHighlighted, isDown);
-    }
-
-    static constexpr float halfLitAmount = 0.4f;
-    std::function<void (const juce::ModifierKeys&)> onClickWith;
-    bool halfLit = false;
-};
-
-MuteSoloButtons::MuteSoloButtons (ProjectContext& projectContext)
-    : context (projectContext),
-      mute (std::make_unique<Button> ("M", "Mute")),
-      solo (std::make_unique<Button> ("S", "Solo"))
-{
-    mute->setTooltip (getMuteTooltip (false));
-    solo->setTooltip ("Solo: plays only the soloed tracks, and leaves the mute switches as they are. Ctrl+click solos this track alone");
-
-    mute->onClickWith = [this] (const juce::ModifierKeys& mods)
-    {
-        if (mods.isPopupMenu())
-            toggleSoloAlone (context, track);
-        else
-            toggleMute (context, track);
-
-        update();
-    };
-
-    solo->onClickWith = [this] (const juce::ModifierKeys& mods)
-    {
-        if (mods.isCommandDown())
-            toggleSoloAlone (context, track);
-        else
-            toggleSolo (context, track);
-
-        update();
-    };
-
-    addAndMakeVisible (*mute);
-    addAndMakeVisible (*solo);
-    update();
-}
-
-MuteSoloButtons::~MuteSoloButtons() = default;
-
-void MuteSoloButtons::setTrack (TrackID newTrack)
-{
-    track = newTrack;
-    update();
-}
-
-void MuteSoloButtons::update()
-{
-    const auto state = getMuteSolo (context, track);
-    const auto silenced = state.has_value() && state->silencedBySolo;
-
-    mute->setEnabled (state.has_value());
-    solo->setEnabled (state.has_value());
-    mute->setToggleState (state.has_value() && state->muted, juce::dontSendNotification);
-    solo->setToggleState (state.has_value() && state->soloed, juce::dontSendNotification);
-
-    if (mute->halfLit != silenced)
-    {
-        mute->halfLit = silenced;
-        mute->setTooltip (getMuteTooltip (silenced));
-        mute->repaint();
-    }
-}
-
-void MuteSoloButtons::resized()
-{
-    // Two buttons, a small gap between them.
-    auto area = getLocalBounds();
-    const auto width = (area.getWidth() - Space::xs / 2) / 2;
-    mute->setBounds (area.removeFromLeft (width));
-    solo->setBounds (area.removeFromRight (width));
 }
 } // namespace phazite::ui

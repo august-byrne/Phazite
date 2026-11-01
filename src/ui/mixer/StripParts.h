@@ -108,17 +108,34 @@ namespace strip
                       const DeviceSlot&);
 
     // Dots to drag a modulator or a macro by, onto a knob it can modulate (ui/components/ModulatorDrag.h), in devices'
-    // windows too. Its drag-and-drop container is the nearest around it.
+    // windows too, in the modulation colour, lit under the pointer and while dragged (the owner, 2026-11-01: nothing showed
+    // that the right part was being dragged until a knob was reached). Dragged, a chip with the modulator's name follows the
+    // pointer, and the knobs it could modulate light up (its container calls Knob::showModulatorTargets()). Its drag-and-drop
+    // container is the nearest around it.
     struct ModulatorGrip : public juce::Component,
                            public juce::SettableTooltipClient
     {
-        ModulatorGrip (ModulatorID, const juce::String& tooltip);
+        ModulatorGrip (ModulatorID, const juce::String& name, const juce::String& tooltip);
         void paint (juce::Graphics&) override;
+        void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+        void mouseExit (const juce::MouseEvent&) override { repaint(); }
         void mouseDrag (const juce::MouseEvent&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+
+        bool isDragging() const noexcept { return dragging; }
+        juce::ScaledImage makeDragImage() const; // the chip
 
         const ModulatorID modulator;
+        juce::String chipText; // the modulator's name, on the chip that follows the pointer
         static constexpr int width = 12;
+
+    private:
+        bool dragging = false;
+        void setDragging (bool); // and the slot it is in shows it: outlineDragSource()
     };
+
+    // The outline of a modulator's slot while its grip is dragged, painted over the slot's children.
+    void outlineDragSource (juce::Graphics&, const juce::Component& slot);
 } // namespace strip
 
 //==============================================================================

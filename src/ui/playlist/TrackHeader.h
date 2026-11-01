@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A track's header in the playlist: its color, a handle to move it by, a chevron that collapses it (and its lanes), its name,
-// mute and solo, an arm switch for a track that records audio (with what it records under its name while armed), and a
-// snowflake while it is frozen (a click unfreezes it). Clicking selects the track, double-clicking
+// its switch for mute and solo, an arm switch for a track that records audio (with what it records under its name while
+// armed), and a snowflake while it is frozen (a click unfreezes it). Clicking selects the track, double-clicking
 // the name renames it, dragging the handle moves the track, dragging the bottom edge resizes it, and dragging elsewhere
 // selects the tracks the mouse passes.
 #pragma once
 
 #include "model/arrangement/PlaylistModel.h"
 #include "ui/components/ArmButton.h"
-#include "ui/components/Controls.h"
+#include "ui/components/TrackSwitch.h"
 #include "ui/theme/Icons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -76,7 +76,7 @@ private:
     ProjectContext& context;
     TrackRow row; // as it was shown last
     juce::Label nameLabel;
-    MuteSoloButtons muteSolo;
+    TrackSwitch muteSolo;   // mute (a click) and solo (a right-click)
     ArmButton arm;          // a track that records audio's
     juce::Label inputLabel; // what it records, while it is armed
     IconButton collapseButton { "Collapse track", Icon::expanded };

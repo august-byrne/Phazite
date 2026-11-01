@@ -4,7 +4,9 @@
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -13,6 +15,7 @@
 #include "ui/mixer/MasterStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/mixer/StripParts.h"
+#include "ui/shell/Panels.h"
 #include "ui/theme/DesignTokens.h"
 
 TEST_CASE ("The mixer's strips keep their parts apart, however short the window is")
@@ -184,4 +187,73 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
 
     selection.deselectAll();
     setEdit (context, nullptr);
+}
+
+TEST_CASE ("The mixer has no row of its own: a slim column after the returns adds one, and a sidechain outlines both its ends")
+{
+    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::ensureTracks (*edit, 2);
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    setEdit (context, edit.get());
+    const auto tracks = phazite::getAllPlaylistTracks (context);
+    REQUIRE (tracks.size() == 2);
+    phazite::CommandRegistry registry;
+    int returnsAdded = 0;
+    registry.add ({ .id = "track.addReturn", .name = "Add Return Track", .perform = [&returnsAdded] { ++returnsAdded; } });
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::MixerView mixer { commands, context };
+    phazite::test::TestWindow window { mixer, 900, 600 };
+    phazite::test::dispatchPendingMessages();
+
+    // The strips start at the mixer's top, and the "+" sits after the last of them, level with their names.
+    const auto strips = phazite::test::findAll<phazite::ui::ChannelStrip> (mixer);
+    REQUIRE (strips.size() == 2);
+    CHECK (strips[0]->getScreenY() == mixer.getScreenY());
+    auto* add = phazite::test::findComponentWithTitle (mixer, "Add Return Track");
+    REQUIRE (add != nullptr);
+    CHECK (add->isShowing());
+    CHECK (add->getScreenX() >= strips[1]->getScreenBounds().getRight());
+    CHECK (add->getScreenY() < strips[1]->getScreenY() + phazite::ui::strip::headerHeight);
+    phazite::test::Mouse mouse (*add);
+    mouse.click (add->getLocalBounds().getCentre());
+    CHECK (returnsAdded == 1);
+
+    // A sidechain links its two ends: selecting the kick outlines the bass that ducks under it, and the other way round.
+    phazite::duckUnder (context, tracks[1], tracks[0]);
+    auto& selection = context.getSongSelection();
+    selection.selectOnly (tracks[0]);
+    phazite::test::dispatchPendingMessages();
+    CHECK (strips[1]->isRelated());
+
+    selection.selectOnly (tracks[1]);
+    phazite::test::dispatchPendingMessages();
+    CHECK (strips[0]->isRelated());
+
+    selection.clear();
+    setEdit (context, nullptr);
+}
+
+TEST_CASE ("The song's tab bar holds the mixer's Routing switch while the mixer shows, and none while the playlist does")
+{
+    juce::Component playlist, mixer;
+    phazite::ui::SongViews views { playlist, mixer };
+    phazite::test::TestWindow window { views, 900, 400 };
+    std::optional<bool> shown;
+    views.onRoutingChanged = [&shown] (bool on) { shown = on; };
+
+    auto& routing = views.getRoutingButton();
+    CHECK_FALSE (routing.isShowing());
+
+    views.showTab (phazite::ui::SongViews::mixer);
+    CHECK (routing.isShowing());
+    CHECK (routing.getBottom() <= views.getTabBarDepth()); // in the tab bar, taking none of the mixer's height
+    CHECK (routing.getX() >= views.getTabbedButtonBar().getRight());
+
+    phazite::test::Mouse mouse (routing);
+    mouse.click (routing.getLocalBounds().getCentre());
+    REQUIRE (shown.has_value());
+    CHECK (*shown);
+
+    views.showTab (phazite::ui::SongViews::playlist);
+    CHECK_FALSE (routing.isShowing());
 }

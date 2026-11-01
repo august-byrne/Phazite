@@ -5,6 +5,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/modulation/ModulationModel.h"
+#include "ui/components/ModulatorDrag.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/devices/ModulatorEditor.h"
@@ -83,7 +84,8 @@ namespace
             : context (c),
               id (info.id),
               knob (info.name, 0.0),
-              grip (info.id, "Drag onto a knob of this container's devices: the macro then turns it too")
+              grip (info.id, info.name,
+                    "Drag onto a knob of this container's devices: the macro then turns it too. The knobs it can turn light up")
         {
             if (const auto parameters = getModulatorParameters (context, id); ! parameters.empty())
                 attachment.setParameter (getModulatorParameter (context, id, parameters.front().id));
@@ -108,6 +110,13 @@ namespace
                 label.setText (macroName, juce::dontSendNotification);
 
             knob.setTitle (macroName);
+            grip.chipText = macroName;
+        }
+
+        void paintOverChildren (juce::Graphics& g) override
+        {
+            if (grip.isDragging())
+                outlineDragSource (g, *this);
         }
 
         void resized() override
@@ -1240,6 +1249,16 @@ void DevicesView::paint (juce::Graphics& g)
 
     g.setColour (p.border);
     g.fillRect (columnWidth - 1, 0, 1, getHeight());
+}
+
+void DevicesView::dragOperationStarted (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    Knob::showModulatorTargets (readModulatorDrag (details.description));
+}
+
+void DevicesView::dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&)
+{
+    Knob::showModulatorTargets ({});
 }
 
 void DevicesView::resized()

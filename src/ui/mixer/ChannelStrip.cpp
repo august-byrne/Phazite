@@ -428,15 +428,26 @@ void ChannelStrip::resized()
     area.removeFromBottom (Space::xs);
     area.removeFromTop (colourBarHeight);
 
+    // The name, with the track's switches at its right, as FL Studio's mixer has its mute switch at the top: the arm switch of
+    // a track that records audio, and mute and solo.
     auto header = area.removeFromTop (headerHeight - colourBarHeight);
-    nameLabel.setBounds (header.removeFromTop (controlHeight - 4));
+    auto nameRow = header.removeFromTop (controlHeight - 4);
+    const auto placeSwitch = [&nameRow] (juce::Component& c)
+    { c.setBounds (nameRow.removeFromRight (SwitchTint::size).withSizeKeepingCentre (SwitchTint::size, SwitchTint::size)); };
+    placeSwitch (muteSolo);
+    arm.setVisible (arm.isShown());
+
+    if (arm.isVisible())
+        placeSwitch (arm);
+
+    nameLabel.setBounds (nameRow);
 
     if (busButton.isVisible())
         busButton.setBounds (header.removeFromRight (40).reduced (0, 1));
 
     inputLabel.setBounds (header);
 
-    // At the bottom: the fader with the meter, as tall in every strip, mute and solo, pan, and where the sound goes. The
+    // At the bottom: the fader with the meter, as tall in every strip, pan, and where the sound goes. The
     // instrument, effects and sends get what is left above them, and scroll. (The mixer keeps the strip at least
     // getMinimumHeight() tall.)
     auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
@@ -444,18 +455,6 @@ void ChannelStrip::resized()
     volume.setBounds (faderArea);
     area.removeFromBottom (Space::xs);
 
-    // A track that records audio has its arm switch before its mute and solo.
-    auto switches = area.removeFromBottom (buttonHeight);
-    arm.setVisible (arm.isShown());
-
-    if (arm.isVisible())
-    {
-        arm.setBounds (switches.removeFromLeft (buttonHeight));
-        switches.removeFromLeft (Space::xs / 2);
-    }
-
-    muteSolo.setBounds (switches);
-    area.removeFromBottom (Space::xs);
     pan.setBounds (area.removeFromBottom (panKnobSize).withSizeKeepingCentre (panKnobSize, panKnobSize));
     area.removeFromBottom (Space::xs);
     outputButton.setBounds (area.removeFromBottom (outputHeight));
@@ -467,10 +466,9 @@ void ChannelStrip::resized()
 
 int ChannelStrip::getMinimumHeight()
 {
-    // As resized() lays it out: the header, a heading and a button, where the sound goes, pan, mute and solo, the fader,
-    // and the CPU bar.
-    return 2 * Space::xs + headerHeight + minSlotsHeight + outputHeight + panKnobSize + buttonHeight + faderHeight + 4 * Space::xs
-           + CpuBar::height + Space::xs;
+    // As resized() lays it out: the header, a heading and a button, where the sound goes, pan, the fader, and the CPU bar.
+    return 2 * Space::xs + headerHeight + minSlotsHeight + outputHeight + panKnobSize + faderHeight + 3 * Space::xs + CpuBar::height
+           + Space::xs;
 }
 
 void ChannelStrip::layOutSlots()

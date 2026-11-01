@@ -13,6 +13,7 @@ namespace phazite::ui
 namespace
 {
     constexpr int tabBarDepth = 32;
+    constexpr int routingButtonWidth = 80;
 
     // A panel's tabs end before its buttons (PanelLayout.h), in the bar's top right corner; where they don't all fit, the
     // tab bar shows the rest in its menu.
@@ -33,12 +34,33 @@ SongViews::SongViews (juce::Component& playlistPanel, juce::Component& mixerPane
     const auto background = juce::Colours::transparentBlack; // each view paints its own
     addTab ("Playlist", background, &playlistPanel, false);
     addTab ("Mixer", background, &mixerPanel, false);
+
+    routingButton.setClickingTogglesState (true);
+    routingButton.setTooltip ("Shows every channel's wires in place of the mixer's strips: where its sound goes, its sends and the "
+                              "sidechains that listen to it. Drag from a channel's Out to route it");
+    routingButton.onClick = [this]
+    {
+        if (onRoutingChanged != nullptr)
+            onRoutingChanged (routingButton.getToggleState());
+    };
+    addChildComponent (routingButton);
 }
 
 void SongViews::resized()
 {
     juce::TabbedComponent::resized();
     leaveCorner (*this, 2); // maximize and hide
+
+    // While the mixer shows, its Routing switch at the end of the tab bar, before the corner.
+    routingButton.setVisible (getTab() == mixer);
+
+    if (routingButton.isVisible())
+    {
+        auto& bar = getTabbedButtonBar();
+        auto barArea = bar.getBounds();
+        routingButton.setBounds (barArea.removeFromRight (routingButtonWidth).reduced (0, Space::xs));
+        bar.setBounds (barArea.withTrimmedRight (Space::xs));
+    }
 }
 
 void SongViews::refreshTooltips (const CommandBridge& commands)

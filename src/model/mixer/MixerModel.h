@@ -78,6 +78,8 @@ struct MuteSolo
 {
     bool muted = false, soloed = false;
     bool silencedBySolo = false; // other tracks' solos keep it quiet
+
+    friend bool operator== (const MuteSolo&, const MuteSolo&) = default;
 };
 
 std::optional<MuteSolo> getMuteSolo (const ProjectContext&, TrackID); // nothing for a track that is gone

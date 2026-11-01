@@ -46,6 +46,13 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
         // A level brought up, in devices' graphs (on the background behind them).
         CHECK (getContrastRatio (p.boost, p.background) >= 3.0);
 
+        // A track's switch, lit or soloed, on panels: a part of a control. (Its edge, in the background colour, keeps it apart
+        // from a tinted header.)
+        CHECK (getContrastRatio (p.playing, p.surface) >= 3.0);
+        CHECK (getContrastRatio (p.soloed, p.surface) >= 3.0);
+        CHECK (getContrastRatio (p.playing, p.background) >= 3.0);
+        CHECK (getContrastRatio (p.soloed, p.background) >= 3.0);
+
         // Each kind of device's colour, its knobs' arcs and graphs on panels and on graphs' backgrounds, and apart from the
         // modulation colour that rings its knobs and from the others.
         const DeviceFamily families[] = { DeviceFamily::dynamics, DeviceFamily::tone,   DeviceFamily::drive, DeviceFamily::space,

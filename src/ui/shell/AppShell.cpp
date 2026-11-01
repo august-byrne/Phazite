@@ -121,6 +121,9 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
         setActiveEditor (&editor);
     };
 
+    // The mixer's Routing switch is in the song's tab bar, so that the mixer has no row of its own for it.
+    songViews.onRoutingChanged = [this] (bool on) { mixer.showRouting (on); };
+
     // Enter or a double-click in the browser, and the plug-in picker.
     browser.onPlace = [this] (const LibraryItem& item) { return placeItem (item); };
     browser.onShowSoundPack = [this] { commands.invoke ("help.phaziteSounds"); };

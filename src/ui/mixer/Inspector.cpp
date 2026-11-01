@@ -9,6 +9,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/transport/TransportModel.h"
 #include "ui/components/Controls.h"
+#include "ui/components/TrackSwitch.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/CommandUI.h"
@@ -103,6 +104,42 @@ namespace
         label.setFont (juce::FontOptions (TextSize::body));
         label.setMinimumHorizontalScale (1.0f);
     }
+
+    // A track's switch for mute and solo, with what it shows in words beside it ("Playing", "Soloed").
+    struct SwitchRow : public juce::Component
+    {
+        explicit SwitchRow (ProjectContext& context)
+            : trackSwitch (context)
+        {
+            setUpValueLabel (state);
+            state.setInterceptsMouseClicks (false, false);
+            state.setAccessible (false); // the switch says it
+            addAndMakeVisible (trackSwitch);
+            addAndMakeVisible (state);
+        }
+
+        void setTrack (TrackID track)
+        {
+            trackSwitch.setTrack (track);
+            update();
+        }
+
+        void update()
+        {
+            trackSwitch.update();
+            state.setText (trackSwitch.getStateText(), juce::dontSendNotification);
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds();
+            trackSwitch.setBounds (area.removeFromLeft (SwitchTint::size).withSizeKeepingCentre (SwitchTint::size, SwitchTint::size));
+            state.setBounds (area);
+        }
+
+        TrackSwitch trackSwitch;
+        juce::Label state;
+    };
 
     // A single-line field that changes something when Enter is pressed or the focus leaves it.
     void setUpNameEditor (juce::TextEditor& editor, std::function<void (const juce::String&)> apply)
@@ -515,7 +552,7 @@ namespace
         Fader volume { Fader::Direction::horizontal, "Volume", decibelsToFaderPosition (0.0f) };
         Fader pan { Fader::Direction::horizontal, "Pan", 0.0 };
         ParameterAttachment volumeAttachment { volume }, panAttachment { pan };
-        MuteSoloButtons muteSolo;
+        SwitchRow muteSolo;
         juce::TextButton instrumentButton, effectsButton, lanesButton, addSendButton { "+ Send" };
         juce::ComboBox modeBox;
         juce::OwnedArray<SendRow> sendRows;

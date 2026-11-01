@@ -12,7 +12,7 @@ namespace
     constexpr int gripWidth = 14;       // the handle that moves the track, right of the color strip
     constexpr int resizeEdgeHeight = 5; // the bottom edge, which resizes the track when dragged
     constexpr int buttonSize = 24;
-    constexpr int minButtonSize = 16;  // mute and solo shrink to fit a short row, down to this
+    constexpr int minButtonSize = 16;  // the switches shrink to fit a short row, down to this
     constexpr int dragThreshold = 4;   // pixels the mouse moves before a press on the handle becomes a drag
     constexpr int indentPerLevel = 12; // a track in a folder is indented this much more than the folder
     constexpr int collapseButtonSize = 20;
@@ -219,7 +219,7 @@ void TrackHeader::resized()
                     .withTrimmedBottom (1);
     auto top = area.removeFromTop (juce::jmin (area.getHeight(), controlHeight + Space::xs));
 
-    // Mute and solo shrink to fit a collapsed row. A row shorter than that has room only for the name. The master's row
+    // The switches shrink to fit a collapsed row. A row shorter than that has room only for the name. The master's row
     // has its chevron only, for its lanes.
     const auto size = juce::jmin (buttonSize, top.getHeight() - 2);
     const auto roomForButtons = size >= minButtonSize;
@@ -232,8 +232,9 @@ void TrackHeader::resized()
     {
         if (! isMaster())
         {
-            const auto buttonsWidth = 2 * size + Space::xs / 2;
-            muteSolo.setBounds (top.removeFromRight (buttonsWidth).withSizeKeepingCentre (buttonsWidth, size));
+            // Mute and solo at the right end, small, as FL Studio's mute switch is.
+            const auto switchSize = juce::jmin (SwitchTint::size, size);
+            muteSolo.setBounds (top.removeFromRight (switchSize).withSizeKeepingCentre (switchSize, switchSize));
             top.removeFromRight (Space::xs);
 
             if (arm.isVisible())

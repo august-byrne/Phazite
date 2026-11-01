@@ -7,6 +7,7 @@
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/commands/CommandRegistry.h"
@@ -26,6 +27,8 @@
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/DevicesView.h"
 #include "ui/mixer/MixerView.h"
+#include "ui/mixer/ModulatorSlots.h"
+#include "ui/mixer/StripParts.h"
 
 #include <algorithm>
 
@@ -278,6 +281,57 @@ TEST_CASE ("A folded card shows only what every effect has, one under another: i
     CHECK (view.isOpen (effects[1]));
     CHECK (countEditors<phazite::ui::CompressorEditor> (*compressor) == 1);
     CHECK (phazite::test::findComponentWithTitle (*compressor, "Mix")->getY() < 30);
+}
+
+TEST_CASE ("A modulator dragged by its grip lights every knob it can modulate as the drag starts, until it is let go")
+{
+    Screen screen;
+    auto& view = screen.view;
+    auto* group = phazite::test::findComponentWithTitle (view, "Modulators");
+    REQUIRE (group != nullptr);
+    const auto lfo = phazite::addModulator (screen.context, screen.track (0), phazite::ModulatorType::lfo);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "LFO 1") != nullptr; }));
+
+    // Its grip carries a chip with its name, right of and below the pointer.
+    auto* grip = dynamic_cast<phazite::ui::strip::ModulatorGrip*> (phazite::test::findComponentWithTitle (*group, "Drag to modulate"));
+    REQUIRE (grip != nullptr);
+    CHECK (grip->chipText == juce::String ("LFO 1"));
+    const auto chip = grip->makeDragImage();
+    CHECK (chip.getScaledBounds().getWidth() > 2.0 * phazite::ui::ModulatorDragTint::chipOffsetX);
+    CHECK (chip.getScaledBounds().getHeight() > phazite::ui::ModulatorDragTint::chipHeight);
+
+    // A knob of the other track's reverb, in a window of its own, as a device's window would show it.
+    phazite::ui::Knob otherKnob { "Mix", 1.0 };
+    phazite::ui::ParameterAttachment otherAttachment { otherKnob };
+    otherAttachment.setParameter (phazite::getParameter (screen.context, { screen.effects (1)[0], "mix" }));
+    phazite::test::TestWindow otherWindow { otherKnob, 64, 64 };
+
+    const auto countLit = [&view]
+    {
+        const auto knobs = phazite::test::findAll<phazite::ui::Knob> (view);
+        return std::count_if (knobs.begin(), knobs.end(), [] (const phazite::ui::Knob* knob) { return knob->isModulatorTarget(); });
+    };
+
+    // As the drag starts, as JUCE tells the container the grip is in: every knob of the track's devices that it can modulate
+    // lights, before the pointer reaches one; the other track's doesn't.
+    auto* slots = grip->findParentComponentOfClass<phazite::ui::ModulatorSlots>();
+    REQUIRE (slots != nullptr);
+    const juce::DragAndDropTarget::SourceDetails dragged { phazite::ui::makeModulatorDrag (lfo), grip, {} };
+    slots->dragOperationStarted (dragged);
+    CHECK (countLit() > 2);
+    CHECK_FALSE (otherKnob.isModulatorTarget());
+
+    // Let go: none.
+    slots->dragOperationEnded (dragged);
+    CHECK (countLit() == 0);
+
+    // The other track's modulator lights the other knob, in its window, and none here.
+    const auto otherLfo = phazite::addModulator (screen.context, screen.track (1), phazite::ModulatorType::lfo);
+    phazite::ui::Knob::showModulatorTargets (otherLfo);
+    CHECK (otherKnob.isModulatorTarget());
+    CHECK (countLit() == 0);
+    phazite::ui::Knob::showModulatorTargets ({});
+    CHECK_FALSE (otherKnob.isModulatorTarget());
 }
 
 TEST_CASE ("An effect dragged by its name moves among its neighbours, in the Devices view and in the mixer")

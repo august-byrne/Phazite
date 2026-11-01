@@ -11,6 +11,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/components/TrackSwitch.h"
 #include "ui/components/ValueText.h"
 
 TEST_CASE ("A slider linked to a track's volume sets it, one undo step per change")
@@ -144,7 +145,7 @@ TEST_CASE ("A level meter repaints only while what it shows moves: a silent one 
     CHECK (window.takeRepaintedArea().isEmpty());
 }
 
-TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
+TEST_CASE ("A track's one switch mutes it with a click and solos it with a right-click, each leaving the other as it is")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ensureTracks (*edit, 2);
@@ -152,27 +153,42 @@ TEST_CASE ("The mute and solo buttons switch their track's own mute and solo")
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     setEdit (context, edit.get());
 
-    phazite::ui::MuteSoloButtons buttons (context);
-    phazite::test::TestWindow window (buttons, 60, 24);
-    buttons.setTrack (phazite::getTrackID (*tracks[0]));
-    phazite::test::Mouse mouse (buttons);
-    const juce::Point<int> muteButton (10, 12), soloButton (50, 12);
+    phazite::ui::TrackSwitch trackSwitch (context);
+    phazite::test::TestWindow window (trackSwitch, 20, 20);
+    trackSwitch.setTrack (phazite::getTrackID (*tracks[0]));
+    phazite::test::Mouse mouse (trackSwitch);
+    const juce::Point<int> centre (10, 10);
+    const auto rightButton = juce::ModifierKeys::rightButtonModifier;
+    CHECK (trackSwitch.getStateText() == "Playing");
 
-    mouse.click (muteButton);
+    mouse.click (centre);
     CHECK (tracks[0]->isMuted (false));
-    mouse.click (muteButton);
+    CHECK (trackSwitch.getStateText() == "Muted");
+    mouse.click (centre);
     CHECK_FALSE (tracks[0]->isMuted (false));
 
-    // Solo plays the track along with the others soloed; with Ctrl, alone. Neither touches the mute switch.
+    // A right-click solos the track alone, as in FL Studio, and again unsolos it; with Ctrl, along with the others soloed.
     phazite::setTrackSoloed (*tracks[1], true);
-    mouse.click (soloButton);
+    trackSwitch.update();
+    CHECK (trackSwitch.getStateText() == "Silent while other tracks are soloed");
+
+    mouse.click (centre, rightButton);
+    CHECK (tracks[0]->isSolo (false));
+    CHECK_FALSE (tracks[1]->isSolo (false));
+    CHECK (trackSwitch.getStateText() == "Soloed");
+    mouse.click (centre, rightButton);
+    CHECK_FALSE (tracks[0]->isSolo (false));
+
+    phazite::setTrackSoloed (*tracks[1], true);
+    mouse.click (centre, rightButton | juce::ModifierKeys::commandModifier);
     CHECK (tracks[0]->isSolo (false));
     CHECK (tracks[1]->isSolo (false));
 
-    mouse.click (soloButton, juce::ModifierKeys::commandModifier);
-    CHECK (tracks[0]->isSolo (false));
-    CHECK_FALSE (tracks[1]->isSolo (false));
+    // Soloing never touched the mute switch, nor muting the solo.
     CHECK_FALSE (tracks[0]->isMuted (false));
+    mouse.click (centre);
+    CHECK (tracks[0]->isSolo (false));
+    CHECK (trackSwitch.getStateText() == "Muted and soloed");
 }
 
 TEST_CASE ("A number field moves in steps when dragged or stepped, takes any value typed, and says it with its units")

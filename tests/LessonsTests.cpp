@@ -75,7 +75,7 @@ TEST_CASE ("A lesson's step that the song shows done goes on by itself, and a co
     const auto track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
 
     REQUIRE (s.registry.invoke ("help.lesson.recording"));
-    CHECK (s.lessons.getHint().startsWith ("Record Audio, 1 of 4: Right-click the round button"));
+    CHECK (s.lessons.getHint().startsWith ("Record Audio, 1 of 4: Right-click the arm button"));
 
     // Armed from its button (no command): the hint bar's next look goes on.
     phazite::setTrackInput (s.context, track, "1");

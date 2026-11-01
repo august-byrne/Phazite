@@ -71,8 +71,8 @@ const std::vector<Lessons::Lesson>& Lessons::getAll()
           "Record Audio",
           "Records a voice or an instrument through the audio interface: its input, the metronome, a take, and punching in to do a "
           "part again.",
-          { { .text = "Right-click the round button beside the M and S of a track without an instrument, and choose the input your "
-                      "microphone or instrument is on: the track is armed.",
+          { { .text = "Right-click the arm button, the hollow circle in the header of a track without an instrument, and choose the "
+                      "input your microphone or instrument is on: the track is armed.",
               .doneBy = { "track.arm" },
               .isDone = [] (const ProjectContext& project) { return ! getArmedTracks (project).empty(); } },
             { .text = "{run:transport.metronome} to hear the beat as you play.", .doneBy = { "transport.metronome" } },

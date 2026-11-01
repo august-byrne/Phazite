@@ -2,7 +2,8 @@
 // A channel's controls, as the mixer and the inspector show them (docs/design.md, section 8), top to bottom in the
 // order the sound goes through them, as in Logic Pro and Studio One: the track's name and what feeds it, its
 // instrument, its effects (each with a few key controls), a send knob for each return (off until first turned), where its
-// sound goes (a menu of the master and the buses), pan, mute, solo, fader and meter, and how much CPU its devices take.
+// sound goes (a menu of the master and the buses), pan, fader and meter, and how much CPU its devices take; and by its name,
+// its switch for mute and solo (and its arm switch, while it records audio).
 #pragma once
 
 #include "DeviceSlots.h"
@@ -11,6 +12,7 @@
 #include "model/project/ProjectContext.h"
 #include "ui/components/ArmButton.h"
 #include "ui/components/Controls.h"
+#include "ui/components/TrackSwitch.h"
 #include "ui/input/CommandBridge.h"
 
 #include <optional>
@@ -76,8 +78,8 @@ private:
     LevelMeter meter { "Level" };
     Fader volume { Fader::Direction::vertical, "Volume", decibelsToFaderPosition (0.0f) };
     Knob pan { "Pan", 0.0 };
-    MuteSoloButtons muteSolo;
-    ArmButton arm; // a track's that records audio
+    TrackSwitch muteSolo; // mute (a click) and solo (a right-click)
+    ArmButton arm;        // a track's that records audio
     strip::CpuBar cpuBar;
     ParameterAttachment volumeAttachment { volume }, panAttachment { pan };
 

@@ -146,8 +146,9 @@ namespace strip
     }
 
     //==============================================================================
-    ModulatorGrip::ModulatorGrip (ModulatorID m, const juce::String& tooltip)
-        : modulator (m)
+    ModulatorGrip::ModulatorGrip (ModulatorID m, const juce::String& name, const juce::String& tooltip)
+        : modulator (m),
+          chipText (name)
     {
         setTitle ("Drag to modulate");
         setTooltip (tooltip);
@@ -156,10 +157,19 @@ namespace strip
 
     void ModulatorGrip::paint (juce::Graphics& g)
     {
+        const auto& p = getPalette (*this);
+        const auto area = getLocalBounds().toFloat();
+
+        // Lit under the pointer and while dragged: this is what drags.
+        if (dragging || isMouseOver())
+        {
+            g.setColour (p.modulation.withAlpha (ModulatorDragTint::gripWash));
+            g.fillRoundedRectangle (area, cornerRadius);
+        }
+
         constexpr int dots = 3;
         constexpr float dotSize = 2.0f;
-        g.setColour (getPalette (*this).textMuted);
-        const auto area = getLocalBounds().toFloat();
+        g.setColour (p.modulation);
 
         for (int row = 0; row < dots; ++row)
             for (int column = 0; column < 2; ++column)
@@ -173,7 +183,59 @@ namespace strip
         auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this);
 
         if (container != nullptr && e.getDistanceFromDragStart() > 4 && ! container->isDragAndDropActive())
-            container->startDragging (makeModulatorDrag (modulator), this, juce::ScaledImage(), true);
+        {
+            // The image's top left at the pointer: the chip in it is a little right of and below it.
+            setDragging (true);
+            const juce::Point<int> chipAtPointer;
+            container->startDragging (makeModulatorDrag (modulator), this, makeDragImage(), true, &chipAtPointer);
+        }
+    }
+
+    void ModulatorGrip::mouseUp (const juce::MouseEvent&)
+    {
+        setDragging (false);
+    }
+
+    void ModulatorGrip::setDragging (bool isDragging)
+    {
+        if (dragging == isDragging)
+            return;
+
+        dragging = isDragging;
+        repaint();
+
+        if (auto* slot = getParentComponent())
+            slot->repaint();
+    }
+
+    juce::ScaledImage ModulatorGrip::makeDragImage() const
+    {
+        // Drawn at twice the size, sharp on a screen scaled up, in an image in memory (not one the screen draws with, which
+        // takes long to make).
+        constexpr float scale = 2.0f;
+        const auto& p = getPalette (*this);
+        const juce::Font font (juce::FontOptions (TextSize::small, juce::Font::bold));
+        const auto chipWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, chipText)) + 2 * Space::s;
+        const juce::Rectangle<float> chip ((float) ModulatorDragTint::chipOffsetX, (float) ModulatorDragTint::chipOffsetY,
+                                           (float) chipWidth, (float) ModulatorDragTint::chipHeight);
+
+        juce::Image image (juce::Image::ARGB, juce::roundToInt (chip.getRight() * scale), juce::roundToInt (chip.getBottom() * scale), true,
+                           juce::SoftwareImageType());
+        juce::Graphics g (image);
+        g.addTransform (juce::AffineTransform::scale (scale));
+        g.setColour (p.modulation.withAlpha (ModulatorDragTint::chipAlpha));
+        g.fillRoundedRectangle (chip, cornerRadius);
+        g.setColour (getInkFor (p.modulation));
+        g.setFont (font);
+        g.drawText (chipText, chip, juce::Justification::centred, false);
+        return { image, scale };
+    }
+
+    void outlineDragSource (juce::Graphics& g, const juce::Component& slot)
+    {
+        g.setColour (getPalette (slot).modulation);
+        g.drawRoundedRectangle (slot.getLocalBounds().toFloat().reduced (ModulatorDragTint::sourceOutline / 2.0f), cornerRadius,
+                                ModulatorDragTint::sourceOutline);
     }
 } // namespace strip
 

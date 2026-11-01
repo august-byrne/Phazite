@@ -38,7 +38,17 @@ public:
     // What each tab shows, with its key in the keymap in use (AppShell::refreshShortcutTexts()).
     void refreshTooltips (const CommandBridge&);
 
-    void resized() override; // its tabs leave the panel's buttons their corner
+    // The mixer's Routing switch, in the tab bar after the tabs while the mixer shows, so that it takes none of the mixer's
+    // height (the owner, 2026-11-01): on, every channel's wires show in place of the strips (MixerView::showRouting()).
+    std::function<void (bool)> onRoutingChanged;
+    juce::Button& getRoutingButton() noexcept { return routingButton; }
+
+    void resized() override; // its tabs leave the panel's buttons their corner, and the Routing switch its place
+
+private:
+    juce::TextButton routingButton { "Routing" };
+
+    void currentTabChanged (int, const juce::String&) override { resized(); } // the Routing switch shows with the mixer
 };
 
 //==============================================================================

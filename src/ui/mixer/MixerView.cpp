@@ -8,9 +8,11 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr int toolbarHeight = 36;
-
     constexpr int returnsGap = Space::m; // between the tracks' strips and the returns'
+
+    // The slim column after the returns, whose "+" adds one: as wide as the button, with a little room around it, as FL Studio
+    // and Ardour put theirs after their channels.
+    constexpr int addReturnColumnWidth = controlHeight + Space::s;
 } // namespace
 
 MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
@@ -22,7 +24,7 @@ MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Mixer");
     setDescription ("A channel for every track, in the playlist's order, and the return tracks next to the master. Click a channel to "
-                    "select its track: the channels it feeds, and those that feed it, get an outline.");
+                    "select its track: the channels it feeds, those that feed it and those its sidechains link it to get an outline.");
 
     viewport.setViewedComponent (&stripHolder, false);
     viewport.setScrollBarsShown (false, true);
@@ -32,19 +34,14 @@ MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
     content.addAndMakeVisible (master);
     addReturnButton.onClick = [this] { commands.invoke ("track.addReturn"); };
     addReturnButton.setEnabled (false);
+    stripHolder.addAndMakeVisible (addReturnButton);
 
-    // The routing view, in place of the strips while the button is on.
-    routingButton.setClickingTogglesState (true);
-    routingButton.setTooltip ("Shows every channel's wires: where its sound goes, its sends and the sidechains that listen to it. "
-                              "Drag from a channel's Out to route it");
-    routingButton.onClick = [this] { showRouting (routingButton.getToggleState()); };
+    // The routing view, in place of the strips while the tab bar's Routing switch is on.
     routingViewport.setViewedComponent (&routing, false);
     routingViewport.setScrollBarsShown (false, true);
     addChildComponent (routingViewport);
 
     addAndMakeVisible (verticalView);
-    addAndMakeVisible (addReturnButton);
-    addAndMakeVisible (routingButton);
 
     context.getSongSelection().addChangeListener (this);
     context.addListener (this);
@@ -123,14 +120,24 @@ void MixerView::updateSelection()
     const auto& selection = context.getSongSelection();
     const auto selected = selection.getTracks();
 
+    // What links two channels: the sound of one reaching the other (a send, a bus), or a sidechain of one listening to the
+    // other, either way round, so that a kick shows the bass that ducks under it.
+    const auto connections = getConnections (context);
+    const auto linked = [this, &connections] (TrackID a, TrackID b)
+    {
+        const auto listens = [a, b] (const Connection& c)
+        { return c.kind == Connection::Kind::sidechain && ((c.from == a && c.to == b) || (c.from == b && c.to == a)); };
+
+        return feeds (context, a, b) || feeds (context, b, a) || std::any_of (connections.begin(), connections.end(), listens);
+    };
+
     for (auto* strip : strips)
     {
         const auto id = strip->getTrack();
         const auto isSelected = selection.isSelected (id);
         strip->setSelected (isSelected);
         strip->setRelated (! isSelected
-                           && std::any_of (selected.begin(), selected.end(),
-                                           [this, id] (TrackID s) { return feeds (context, s, id) || feeds (context, id, s); }));
+                           && std::any_of (selected.begin(), selected.end(), [&linked, id] (TrackID s) { return linked (s, id); }));
     }
 }
 
@@ -150,7 +157,6 @@ void MixerView::paint (juce::Graphics& g)
 
 void MixerView::showRouting (bool show)
 {
-    routingButton.setToggleState (show, juce::dontSendNotification);
     routingViewport.setVisible (show);
     verticalView.setVisible (! show);
     resized();
@@ -158,11 +164,7 @@ void MixerView::showRouting (bool show)
 
 void MixerView::resized()
 {
-    auto area = getLocalBounds();
-    auto toolbar = area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs);
-    addReturnButton.setBounds (toolbar.removeFromLeft (96));
-    toolbar.removeFromLeft (Space::s);
-    routingButton.setBounds (toolbar.removeFromLeft (96));
+    const auto area = getLocalBounds();
 
     routingViewport.setBounds (area);
     routing.setSize (std::max (area.getWidth(), routing.getPreferredWidth()),
@@ -178,12 +180,16 @@ void MixerView::resized()
     master.setBounds (inside.removeFromRight (MasterStrip::width));
     viewport.setBounds (inside);
 
-    // The strips fill the height, leaving room for the scroll bar along the bottom. A gap sets the returns apart.
+    // The strips fill the height, leaving room for the scroll bar along the bottom. A gap sets the returns apart, and the
+    // column after them holds the "+" that adds one, level with the strips' names.
     const auto height = inside.getHeight() - viewport.getScrollBarThickness();
     const auto gap = firstReturn > 0 && firstReturn < strips.size() ? returnsGap : 0;
-    stripHolder.setSize (std::max (1, strips.size() * ChannelStrip::width + gap), height);
+    const auto stripsWidth = strips.size() * ChannelStrip::width + gap;
+    stripHolder.setSize (stripsWidth + addReturnColumnWidth, height);
 
     for (int i = 0; i < strips.size(); ++i)
         strips[i]->setBounds (i * ChannelStrip::width + (i >= firstReturn ? gap : 0), 0, ChannelStrip::width, height);
+
+    addReturnButton.setBounds (stripsWidth + Space::s / 2, Space::xs, controlHeight, controlHeight);
 }
 } // namespace phazite::ui

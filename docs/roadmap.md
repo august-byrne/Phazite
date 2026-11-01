@@ -512,6 +512,11 @@ Done before this plan (progress since then is under [Status](#status)):
 - **Routing explained:** a send gives a return a copy of the track, which still goes to its Out; a bus runs several tracks' whole sound through one effect. The mixer's tooltips say so.
 - Tests in `tests/DevicesViewTests.cpp`, `tests/MixerViewTests.cpp`, `tests/ContainerUiTests.cpp` and `tests/AudioClipEditorTests.cpp`.
 
+**Feedback round (2026-11-01)**, the owner's list ([design decision log](design.md#26-decision-log)):
+- **Mute and solo:** one small switch for each track in place of its M and S buttons, in its playlist header, its mixer strip (by its name, so the strip lost a row) and the inspector: a click mutes, a right-click solos alone, Ctrl+right-click solos along with others (`src/ui/components/TrackSwitch.h`, tests in `tests/ControlsTests.cpp`).
+- **Dragging a modulator:** its grip in the modulation colour, lit under the pointer; a chip with its name follows the pointer, its slot is outlined, and every knob it can modulate lights from the start of the drag, in every window (`Knob::showModulatorTargets()`, tests in `tests/DevicesViewTests.cpp`).
+- **The mixer's row:** "+ Return" is a slim column after the returns, the Routing switch is in the centre's tab bar while the mixer shows, and a selected channel outlines what its sidechains link it to (tests in `tests/MixerViewTests.cpp`). The routing audit: [design question 21](design.md#25-open-questions), for the owner.
+
 **3.8 Usability rounds (S each)**
 - Repeat the milestone test with new people and fix what they trip over.
 - *Done when:* new users finish the milestone task without help.

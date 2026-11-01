@@ -15,11 +15,6 @@
 #include <array>
 #include <optional>
 
-namespace phazite
-{
-class ProjectContext;
-}
-
 namespace phazite::ui
 {
 //==============================================================================
@@ -71,6 +66,13 @@ public:
     std::function<bool (ModulatorID)> canAcceptModulator;
     std::function<void (ModulatorID)> onModulatorDropped;
 
+    // While a modulator is dragged, from the moment the drag starts, every knob it can modulate shows a faint ring all the way
+    // round, in every window, so that where it can go shows before the pointer gets there (the owner, 2026-11-01); the one
+    // under the pointer, a full one. Called by what a modulator is dragged in (its drag container) as the drag starts, and
+    // with nothing as it ends.
+    static void showModulatorTargets (std::optional<ModulatorID>);
+    bool isModulatorTarget() const noexcept { return target; }
+
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -84,6 +86,7 @@ public:
 private:
     std::optional<ModulationRange> modulation;
     bool draggingRing = false, dropping = false;
+    bool target = false; // a modulator dragged now could modulate it
 
     bool isOnRing (juce::Point<float>) const; // the outer edge, where the ring is
 };
@@ -280,30 +283,5 @@ public:
     {
         return (onNavigationKey != nullptr && onNavigationKey (key)) || juce::TextEditor::keyPressed (key);
     }
-};
-
-//==============================================================================
-// A track's mute (M) and solo (S) buttons, side by side. Clicking M mutes or unmutes the track; right-clicking it
-// solos the track alone, as in FL Studio, and again unsolos it. Clicking S solos the track along with others,
-// and Ctrl+click solos it alone. Soloing never changes the mute switches (FL Studio's solo does, a long-standing
-// complaint): a track silent because others are soloed shows its M half lit. Neither is an undo step, as in
-// many DAWs.
-class MuteSoloButtons : public juce::Component
-{
-public:
-    explicit MuteSoloButtons (ProjectContext&);
-    ~MuteSoloButtons() override;
-
-    void setTrack (TrackID); // an empty ID for none
-    void update();           // shows the track's mute and solo as they are now
-
-    void resized() override;
-
-private:
-    struct Button;
-
-    ProjectContext& context;
-    TrackID track;
-    std::unique_ptr<Button> mute, solo;
 };
 } // namespace phazite::ui

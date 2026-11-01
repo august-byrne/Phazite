@@ -2,6 +2,7 @@
 #include "ModulatorSlots.h"
 #include "StripParts.h"
 #include "model/automation/AutomationModel.h"
+#include "ui/components/ModulatorDrag.h"
 #include "ui/devices/ModulatorEditor.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -58,7 +59,8 @@ struct ModulatorSlots::Slot : public juce::Component
     Slot (ModulatorSlots& o, const ModulatorInfo& info)
         : owner (o),
           shown (info),
-          grip (info.id, "Drag onto a knob of this track's devices, or its volume, pan or sends, to modulate it")
+          grip (info.id, info.name,
+                "Drag onto a knob of this track's devices, or its volume, pan or sends, to modulate it: the knobs it can modulate light up")
     {
         nameButton.onClicked = [this] (bool isMenuClick)
         {
@@ -112,6 +114,12 @@ struct ModulatorSlots::Slot : public juce::Component
         const auto on = isModulatorOn (owner.context, shown.id);
         power.setToggleState (on, juce::dontSendNotification);
         meter.show (getModulatorValue (owner.context, shown.id), isBipolar (owner.context, shown.id), on);
+    }
+
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (grip.isDragging())
+            outlineDragSource (g, *this);
     }
 
     void resized() override
@@ -216,6 +224,16 @@ void ModulatorSlots::resized()
     }
 
     addButton.setBounds (area.removeFromTop (buttonHeight));
+}
+
+void ModulatorSlots::dragOperationStarted (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    Knob::showModulatorTargets (readModulatorDrag (details.description));
+}
+
+void ModulatorSlots::dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&)
+{
+    Knob::showModulatorTargets ({});
 }
 
 void ModulatorSlots::openEditor (ModulatorID id)

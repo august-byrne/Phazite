@@ -69,6 +69,10 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    // While a macro is dragged from a container here, the knobs it could modulate light up (Knob::showModulatorTargets()).
+    void dragOperationStarted (const juce::DragAndDropTarget::SourceDetails&) override;
+    void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override;
+
     struct Panel;
     struct Row;
 

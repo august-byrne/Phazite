@@ -520,6 +520,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/DisplayTicker.h
     src/ui/components/ModulatorDrag.h
     src/ui/components/ValueText.cpp
+    src/ui/components/TrackSwitch.cpp
+    src/ui/components/TrackSwitch.h
     src/ui/components/ValueText.h
     src/ui/devices/CompressorEditor.cpp
     src/ui/devices/CompressorEditor.h
