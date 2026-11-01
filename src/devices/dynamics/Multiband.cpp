@@ -143,7 +143,7 @@ namespace
     // A band's stereo separation, from mono (-1) through as it is (0) to twice as wide (1), through its middle and sides.
     void separate (float& left, float& right, float amount) noexcept
     {
-        if (amount == 0.0f)
+        if (juce::exactlyEqual (amount, 0.0f))
             return;
 
         const auto middle = 0.5f * (left + right), side = 0.5f * (left - right) * (1.0f + amount);

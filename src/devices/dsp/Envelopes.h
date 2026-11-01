@@ -43,7 +43,7 @@ public:
     {
         const auto bend = getBend (curve);
 
-        if (bend == 0.0)
+        if (isStraightBend (bend))
             return fraction;
 
         return (float) (std::expm1 (bend * (double) fraction) / std::expm1 (bend));
@@ -110,8 +110,10 @@ private:
     static double getBend (float curve) noexcept
     {
         const auto bend = (curve < -1.0f ? -1.0f : (curve > 1.0f ? 1.0f : curve)) * steepestBend;
-        return std::abs (bend) < 1.0e-4 ? 0.0 : bend;
+        return isStraightBend (bend) ? 0.0 : bend;
     }
+
+    static bool isStraightBend (double bend) noexcept { return std::abs (bend) < 1.0e-4; }
 
     double sampleRate = 44100.0;
     float attack = 0.005f, decay = 0.1f, sustain = 1.0f, release = 0.1f;
@@ -156,7 +158,7 @@ private:
             return;
         }
 
-        isStraight = bend == 0.0;
+        isStraight = isStraightBend (bend);
         step = (newTarget - level) / (float) samplesLeft;
         aim = isStraight ? newTarget : (float) (level - (double) (newTarget - level) / std::expm1 (bend));
         coefficient = (float) std::exp (bend / samplesLeft);
