@@ -760,3 +760,30 @@ TEST_CASE ("An open card's Presets button asks for its device's presets; a folde
     for (auto* child : containerCard->getChildren())
         CHECK (child->getTitle() != juce::String ("Presets"));
 }
+
+TEST_CASE ("On a machine without a screen, as Linux CI is, a test window gives JUCE a display: a drag let go fades out")
+{
+    // The image of a drag let go fades out by a copy of itself, which JUCE's animator scales for the display it is on; with
+    // no display (Linux CI's) it read nothing, and every drag in the tests crashed as it was let go (2026-11-01).
+    auto& displays = const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays());
+    displays.displays.clear();
+
+    {
+        Screen screen;
+        CHECK (displays.displays.size() == 1);
+        const auto effects = screen.effects (0);
+        REQUIRE (effects.size() == 3);
+        auto* eq = screen.view.findPanel (effects[0]);
+        auto* plugin = screen.view.findPanel (effects[2]);
+        REQUIRE (eq != nullptr);
+        REQUIRE (plugin != nullptr);
+        auto* eqName = findNameButton (*eq, "EQ");
+        REQUIRE (eqName != nullptr);
+        phazite::test::Mouse mouse (*eqName);
+        drag (mouse, eqName->getLocalBounds().getCentre(), eqName->getLocalPoint (plugin, juce::Point<int> (plugin->getWidth() - 4, 60)));
+        CHECK (phazite::test::dispatchMessagesUntil ([&]
+                                                     { return screen.effects (0) == std::vector { effects[1], effects[2], effects[0] }; }));
+    }
+
+    displays.refresh(); // the machine's own again, if it has any
+}

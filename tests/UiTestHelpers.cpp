@@ -192,8 +192,32 @@ namespace
     };
 } // namespace
 
+namespace
+{
+    // A machine without a screen (Linux CI's) has no displays, and JUCE's code that asks which display something is on
+    // reads one: the drag image that fades out as a drag is let go (ComponentAnimator's proxy) crashed there. The tests get
+    // one display, as a screen gives; where there are displays, nothing changes. Each test window makes sure of it, since
+    // Desktop::setGlobalScaleFactor() finds the displays again.
+    void ensureDisplay()
+    {
+        auto& displays = const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays());
+
+        if (! displays.displays.isEmpty())
+            return;
+
+        juce::Displays::Display screen;
+        screen.isMain = true;
+        screen.logicalBounds = screen.userBounds = { 0.0f, 0.0f, 1920.0f, 1080.0f };
+        screen.physicalBounds = { 0, 0, 1920, 1080 };
+        screen.scale = 1.0;
+        screen.dpi = 96.0;
+        displays.displays.add (screen);
+    }
+} // namespace
+
 TestWindow::TestWindow (juce::Component& content, int width, int height)
 {
+    ensureDisplay();
     setTitle ("Test window");
     setOpaque (true);
     setBounds (0, 0, width, height);
