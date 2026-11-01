@@ -62,6 +62,13 @@ namespace
         return { .id = id, .name = name, .minimum = minimum, .defaultValue = defaultValue, .unit = Unit::percent };
     }
 
+    // How an envelope's stage bends (dsp::Adsr::setCurves()): from -100 % (fast at first) through 0 (straight) to 100 % (slow at
+    // first), an analog envelope's curve at first.
+    constexpr ParameterInfo makeCurve (std::string_view id, std::string_view name, float defaultValue)
+    {
+        return makePercent (id, name, defaultValue, -1.0f);
+    }
+
     constexpr ParameterInfo makeToggle (std::string_view id, std::string_view name, float defaultValue)
     {
         return { .id = id, .name = name, .maximum = 1.0f, .defaultValue = defaultValue, .unit = Unit::toggle };
@@ -132,14 +139,23 @@ namespace
         makeTime ("env1Decay", "Envelope 1 Decay", 0.0f, 300.0f),
         makePercent ("env1Sustain", "Envelope 1 Sustain", 0.8f),
         makeTime ("env1Release", "Envelope 1 Release", 0.5f, 200.0f),
+        makeCurve ("env1AttackCurve", "Envelope 1 Attack Curve", dsp::Adsr::analogAttackCurve),
+        makeCurve ("env1DecayCurve", "Envelope 1 Decay Curve", dsp::Adsr::analogSettleCurve),
+        makeCurve ("env1ReleaseCurve", "Envelope 1 Release Curve", dsp::Adsr::analogSettleCurve),
         makeTime ("env2Attack", "Envelope 2 Attack", 0.0f, 1.0f),
         makeTime ("env2Decay", "Envelope 2 Decay", 0.0f, 400.0f),
         makePercent ("env2Sustain", "Envelope 2 Sustain", 0.2f),
         makeTime ("env2Release", "Envelope 2 Release", 0.0f, 300.0f),
+        makeCurve ("env2AttackCurve", "Envelope 2 Attack Curve", dsp::Adsr::analogAttackCurve),
+        makeCurve ("env2DecayCurve", "Envelope 2 Decay Curve", dsp::Adsr::analogSettleCurve),
+        makeCurve ("env2ReleaseCurve", "Envelope 2 Release Curve", dsp::Adsr::analogSettleCurve),
         makeTime ("env3Attack", "Envelope 3 Attack", 0.0f, 1.0f),
         makeTime ("env3Decay", "Envelope 3 Decay", 0.0f, 800.0f),
         makePercent ("env3Sustain", "Envelope 3 Sustain", 0.0f),
         makeTime ("env3Release", "Envelope 3 Release", 0.0f, 300.0f),
+        makeCurve ("env3AttackCurve", "Envelope 3 Attack Curve", dsp::Adsr::analogAttackCurve),
+        makeCurve ("env3DecayCurve", "Envelope 3 Decay Curve", dsp::Adsr::analogSettleCurve),
+        makeCurve ("env3ReleaseCurve", "Envelope 3 Release Curve", dsp::Adsr::analogSettleCurve),
         makeChoice ("lfo1Shape", "LFO 1 Shape", lfoShapes, 0.0f),
         makeRate ("lfo1Rate", "LFO 1 Rate", 2.0f),
         makeToggle ("lfo1Sync", "LFO 1 Sync", 0.0f),
@@ -190,6 +206,7 @@ namespace
 
     static_assert (std::size (parameters) == (size_t) Synth::level + 1);
     static_assert (Synth::getParameter (1, Synth::oscWarpAmount) == Synth::osc2WarpAmount);
+    static_assert (Synth::getEnvelopeParameter (2, Synth::envReleaseCurve) == Synth::env3ReleaseCurve);
     static_assert (Synth::getLfoParameter (1, Synth::lfoRetrigger) == Synth::lfo2Retrigger);
     static_assert (Synth::getModParameter (Synth::numModSlots - 1, Synth::modAmount) == Synth::mod8Amount);
     static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::unisonDetune + 1);
@@ -1191,10 +1208,11 @@ void WavetableSynth::process (const ProcessContext& block)
         shownMode = mode;
     }
 
-    const auto setEnvelope = [values] (dsp::Adsr& envelope, int attack)
+    const auto setEnvelope = [values] (dsp::Adsr& envelope, int number)
     {
-        envelope.setParameters (values[(size_t) attack] * 0.001f, values[(size_t) attack + 1] * 0.001f, values[(size_t) attack + 2],
-                                values[(size_t) attack + 3] * 0.001f);
+        const auto value = [values, number] (EnvelopeField field) { return values[(size_t) getEnvelopeParameter (number, field)]; };
+        envelope.setParameters (value (envAttack) * 0.001f, value (envDecay) * 0.001f, value (envSustain), value (envRelease) * 0.001f);
+        envelope.setCurves (value (envAttackCurve), value (envDecayCurve), value (envReleaseCurve));
     };
 
     // The LFOs' rates: in hertz, or a note value at the song's tempo.
@@ -1213,9 +1231,9 @@ void WavetableSynth::process (const ProcessContext& block)
 
     for (auto& voice : voices)
     {
-        setEnvelope (voice.amp, env1Attack);
-        setEnvelope (voice.envelope2, env2Attack);
-        setEnvelope (voice.envelope3, env3Attack);
+        setEnvelope (voice.amp, 0);
+        setEnvelope (voice.envelope2, 1);
+        setEnvelope (voice.envelope3, 2);
 
         for (size_t i = 0; i < voice.lfos.size(); ++i)
             voice.lfos[i].setRate (rates[i]);

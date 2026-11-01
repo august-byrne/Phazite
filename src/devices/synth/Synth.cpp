@@ -46,6 +46,13 @@ namespace
         return { .id = id, .name = name, .defaultValue = defaultValue, .unit = Unit::percent };
     }
 
+    // How an envelope's stage bends (dsp::Adsr::setCurves()): from -100 % (fast at first) through 0 (straight) to 100 % (slow at
+    // first), an analog envelope's curve at first.
+    constexpr ParameterInfo makeCurve (std::string_view id, std::string_view name, float defaultValue)
+    {
+        return { .id = id, .name = name, .minimum = -1.0f, .maximum = 1.0f, .defaultValue = defaultValue, .unit = Unit::percent };
+    }
+
     // In the order of Synth::Parameter. The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
         makeChoice ("osc1Wave", "Osc 1 Wave", waves, 2.0f),
@@ -80,10 +87,16 @@ namespace
         makeTime ("filterDecay", "Filter Decay", 0.0f, 400.0f),
         makePercent ("filterSustain", "Filter Sustain", 0.2f),
         makeTime ("filterRelease", "Filter Release", 0.0f, 300.0f),
+        makeCurve ("filterAttackCurve", "Filter Attack Curve", dsp::Adsr::analogAttackCurve),
+        makeCurve ("filterDecayCurve", "Filter Decay Curve", dsp::Adsr::analogSettleCurve),
+        makeCurve ("filterReleaseCurve", "Filter Release Curve", dsp::Adsr::analogSettleCurve),
         makeTime ("attack", "Attack", 0.5f, 2.0f), // never instant, so a note doesn't click
         makeTime ("decay", "Decay", 0.0f, 300.0f),
         makePercent ("sustain", "Sustain", 0.8f),
         makeTime ("release", "Release", 0.5f, 200.0f),
+        makeCurve ("attackCurve", "Attack Curve", dsp::Adsr::analogAttackCurve),
+        makeCurve ("decayCurve", "Decay Curve", dsp::Adsr::analogSettleCurve),
+        makeCurve ("releaseCurve", "Release Curve", dsp::Adsr::analogSettleCurve),
         makeChoice ("lfoShape", "LFO Shape", lfoShapes, 0.0f),
         makeChoice ("lfoTarget", "LFO Target", lfoTargets, 0.0f),
         { .id = "lfoRate",
@@ -630,8 +643,10 @@ void Synth::process (const ProcessContext& block)
     for (auto& voice : voices)
     {
         voice.amp.setParameters (values[attack] * 0.001f, values[decay] * 0.001f, values[sustain], values[release] * 0.001f);
+        voice.amp.setCurves (values[attackCurve], values[decayCurve], values[releaseCurve]);
         voice.filterEnvelope.setParameters (values[filterAttack] * 0.001f, values[filterDecay] * 0.001f, values[filterSustain],
                                             values[filterRelease] * 0.001f);
+        voice.filterEnvelope.setCurves (values[filterAttackCurve], values[filterDecayCurve], values[filterReleaseCurve]);
     }
 
     lfo.setRate (values[lfoRate]);

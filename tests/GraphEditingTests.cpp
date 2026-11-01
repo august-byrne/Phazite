@@ -5,6 +5,7 @@
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/dsp/Envelopes.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
@@ -77,6 +78,60 @@ TEST_CASE ("An envelope's points drag in its picture, each drag one undo step, a
     mouse.doubleClick (envelope->getPointPosition (Point::decay).roundToInt());
     CHECK (valueOf (song, synth, "decay") == doctest::Approx (decay));
     CHECK (valueOf (song, synth, "sustain") == doctest::Approx (sustain));
+}
+
+TEST_CASE ("An envelope's stages bend by the handle in their middle, the wheel leaves them be, and a double-click puts a curve back")
+{
+    using Point = phazite::ui::EnvelopeView::Point;
+    phazite::test::TestSong song;
+    const auto synth = song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+    auto editor = phazite::ui::createDeviceEditor (phazite::getDeviceHandle (song.context, synth));
+    REQUIRE (editor != nullptr);
+    phazite::test::TestWindow window (*editor, editor->getWidth(), editor->getHeight());
+    auto* envelope = dynamic_cast<phazite::ui::EnvelopeView*> (phazite::test::findComponentWithTitle (*editor, "Amp envelope"));
+    REQUIRE (envelope != nullptr);
+    REQUIRE (envelope->isShowing());
+
+    // Each stage starts as an analog envelope's, which the synth played before its stages could bend.
+    const auto attackCurve = valueOf (song, synth, "attackCurve"), decayCurve = valueOf (song, synth, "decayCurve");
+    CHECK (attackCurve == doctest::Approx (phazite::devices::dsp::Adsr::analogAttackCurve));
+    CHECK (decayCurve == doctest::Approx (phazite::devices::dsp::Adsr::analogSettleCurve));
+
+    // The attack's handle dragged up bends it up, rising faster at first: its curve lower, as one undo step.
+    REQUIRE (envelope->getBendPosition (Point::attack).has_value());
+    phazite::test::Mouse mouse (*envelope);
+    const auto handle = envelope->getBendPosition (Point::attack)->roundToInt();
+    mouse.press (handle);
+    mouse.dragTo (handle - juce::Point<int> (0, 10));
+    mouse.release();
+    CHECK (valueOf (song, synth, "attackCurve") < attackCurve - 0.05f);
+    CHECK (describeUndo (song).startsWith ("Undo Change"));
+    undo (song);
+    CHECK (valueOf (song, synth, "attackCurve") == doctest::Approx (attackCurve));
+
+    // The decay's handle dragged up bends it up too, slower at first: its curve higher.
+    REQUIRE (envelope->getBendPosition (Point::decay).has_value());
+    const auto decayHandle = envelope->getBendPosition (Point::decay)->roundToInt();
+    mouse.press (decayHandle);
+    mouse.dragTo (decayHandle - juce::Point<int> (0, 10));
+    mouse.release();
+    CHECK (valueOf (song, synth, "decayCurve") > decayCurve + 0.05f);
+
+    // The wheel over it bends nothing: it is the view's, to scroll it (no envelope editor found bends with it).
+    const auto bent = valueOf (song, synth, "decayCurve");
+    const auto overDecay = juce::Point<int> (
+        (envelope->getPointPosition (Point::attack).roundToInt().x + envelope->getPointPosition (Point::decay).roundToInt().x) / 2,
+        envelope->getHeight() / 2);
+    mouse.wheel (overDecay, notchUp);
+    CHECK (valueOf (song, synth, "decayCurve") == doctest::Approx (bent));
+
+    // A double-click on the decay puts its curve back.
+    mouse.doubleClick (overDecay);
+    CHECK (valueOf (song, synth, "decayCurve") == doctest::Approx (decayCurve));
+
+    // A level stage has nothing to bend: a decay to a full sustain has no handle.
+    phazite::getParameter (song.context, { synth, "sustain" }).setValue (1.0f);
+    CHECK_FALSE (envelope->getBendPosition (Point::decay).has_value());
 }
 
 TEST_CASE ("An LFO's picture sets its depth with a drag up or down, and its rate with the wheel")
@@ -165,8 +220,7 @@ TEST_CASE ("The stereo expander's fan follows a drag across its disc, and the wh
     CHECK (valueOf (song, device, "width") == doctest::Approx (1.95f));
 }
 
-TEST_CASE (
-    "A breakpoint envelope's points drag in its picture, its lines bend with a drag or the wheel, and a double-click straightens one")
+TEST_CASE ("A breakpoint envelope's points drag in its picture, its lines bend by their handles, and a double-click straightens one")
 {
     phazite::test::TestSong song;
     const auto modulator = song.addModulator (song.firstTrack, phazite::ModulatorType::breakpoints);
@@ -212,7 +266,7 @@ TEST_CASE (
     mouse.doubleClick (at (0.25f, 0.5f));
     CHECK (valueOfPart ("stageOneCurve") == doctest::Approx (0.0f));
 
-    // The wheel over the second line, which falls, bends it up a notch.
+    // The wheel over the second line bends nothing: it is the view's, to scroll it.
     mouse.wheel (at (0.75f, 0.2f), notchUp);
-    CHECK (valueOfPart ("stageTwoCurve") == doctest::Approx (0.05f));
+    CHECK (valueOfPart ("stageTwoCurve") == doctest::Approx (0.0f));
 }

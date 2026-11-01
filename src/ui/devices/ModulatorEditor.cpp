@@ -170,10 +170,9 @@ struct ModulatorEditor::Steps : public juce::Component
 //==============================================================================
 // A breakpoint envelope's points over its cycle: from its start level through each point to the last, the rest of the
 // cycle holding there, each line bent by its curve as the envelope plays it. A point drags (the start up and down, the
-// others along too, between their neighbours); the hollow handle in a line's middle drags up or down to bend it, and the
-// wheel over a line bends it too (the owner, 2026-11-01: "scroll on lines in order to bend them"); a double-click on a
-// line straightens it. Shift drags finely, as on knobs. Each drag, and each turn of the wheel until it rests, is one
-// undo step.
+// others along too, between their neighbours); the hollow handle in a line's middle drags up or down to bend it, as
+// most envelope editors bend theirs (none found bends with the wheel, which scrolls the view around it: docs/design.md,
+// B123); a double-click on a line straightens it. Shift drags finely, as on knobs. Each drag is one undo step.
 struct ModulatorEditor::Breakpoints : public juce::Component
 {
     Breakpoints (ProjectContext& c, ModulatorID m)
@@ -182,7 +181,7 @@ struct ModulatorEditor::Breakpoints : public juce::Component
     {
         setTitle ("Breakpoints");
         setDescription ("The envelope's points over its cycle. Drag a point, or the handle in a line's middle up or down to bend "
-                        "the line; the wheel bends the line under it, and a double-click straightens it.");
+                        "the line; a double-click straightens it.");
 
         static constexpr const char* stages[] = { "Zero", "One", "Two", "Three", "Four" };
 
@@ -366,7 +365,6 @@ struct ModulatorEditor::Breakpoints : public juce::Component
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        wheel.end(); // a step of its own, not the wheel's
         const auto target = findTarget (e.position);
 
         if (! target.has_value() || e.mods.isPopupMenu())
@@ -432,24 +430,6 @@ struct ModulatorEditor::Breakpoints : public juce::Component
         repaint();
     }
 
-    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details) override
-    {
-        const auto step = details.deltaY > 0.0f ? 1 : details.deltaY < 0.0f ? -1 : 0;
-        const auto i = findLine (e.position.x);
-
-        // Past the last point, or turned sideways: the view around it scrolls.
-        if (i == 0 || step == 0)
-        {
-            Component::mouseWheelMove (e, details);
-            return;
-        }
-
-        auto& curve = curves[(size_t) i];
-        const auto range = curve.getRange();
-        wheel.turn (curve, juce::jlimit (range.start, range.end, getCurve (i) + getUpward (i) * (float) step * curveStep));
-        refresh();
-    }
-
     // Straight again: the line under the pointer, or whose handle it is on. A point has no place of its own to go back
     // to (Tracktion's points are all at 0.5 as parameters), so a double-click on one does nothing.
     void mouseDoubleClick (const juce::MouseEvent& e) override
@@ -466,13 +446,10 @@ struct ModulatorEditor::Breakpoints : public juce::Component
         }
     }
 
-    static constexpr float curveStep = 0.05f; // how far a notch of the wheel bends a line
-
     ProjectContext& context;
     const ModulatorID modulator;
     std::array<ParameterHandle, maxPoints + 1> levels, times, curves; // the start's time and curve stay empty: it has none
     ParameterHandle count;
-    graph::WheelGesture wheel; // after the handles it turns
     std::vector<float> shown;
     std::optional<Target> hovered, dragged;
     float startLevel = 0.0f, startTime = 0.0f, startCurve = 0.0f;

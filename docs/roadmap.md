@@ -524,6 +524,7 @@ Done before this plan (progress since then is under [Status](#status)):
 **Feedback round, second list (2026-11-01)**, the owner's list ([design decision log](design.md#26-decision-log)):
 - **No routing view:** the owner decided [design question 21](design.md#25-open-questions): routing is set on the strips, and the routing view and its switch went.
 - **No switch on an instrument:** an instrument has no on/off switch in the Devices view, the mixer's slot or its menu, and the model keeps it on; the track's switch mutes it and Freeze frees its CPU (tests in `tests/DevicesViewTests.cpp`).
+- **Envelope curves:** each stage of the synth's and the wavetable synth's envelopes has a curve, from fast at first through straight to slow at first, which starts as the analog shape the stages had (so no sound, golden render or preset sound changed; the presets list the new curves); the envelope pictures draw each stage along its curve, and a hollow handle in each stage's middle bends it; a knob for each curve sits under the picture. The wheel bends no line in any picture (no editor researched does it) and scrolls the view instead, in the breakpoint envelope too (tests in `tests/DspTests.cpp` and `tests/GraphEditingTests.cpp`).
 
 **3.8 Usability rounds (S each)**
 - Repeat the milestone test with new people and fix what they trip over.

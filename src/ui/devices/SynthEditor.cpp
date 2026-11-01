@@ -148,11 +148,14 @@ SynthEditor::SynthEditor (const DeviceHandle& handle)
     auto& filterEnvelopeView = keep (std::make_unique<EnvelopeView> (
         "Filter envelope", parameter (Synth::filterAttack), parameter (Synth::filterDecay), parameter (Synth::filterSustain),
         parameter (Synth::filterRelease), [shown] { return shown() != nullptr ? shown()->filterEnvelope.get() : 0.0f; }));
+    filterEnvelopeView.setCurves (parameter (Synth::filterAttackCurve), parameter (Synth::filterDecayCurve),
+                                  parameter (Synth::filterReleaseCurve));
     filterEnvelope = &filterEnvelopeView;
 
     auto& ampView = keep (std::make_unique<EnvelopeView> ("Amp envelope", parameter (Synth::attack), parameter (Synth::decay),
                                                           parameter (Synth::sustain), parameter (Synth::release),
                                                           [shown] { return shown() != nullptr ? shown()->amp.get() : 0.0f; }));
+    ampView.setCurves (parameter (Synth::attackCurve), parameter (Synth::decayCurve), parameter (Synth::releaseCurve));
     ampEnvelope = &ampView;
 
     auto lfoShape = std::make_shared<ParameterHandle> (parameter (Synth::lfoShape));
@@ -172,9 +175,13 @@ SynthEditor::SynthEditor (const DeviceHandle& handle)
     const auto filterPart = makePicturePart (
         "Filter", filterView, 70, 40, { "filterType", "cutoff", "resonance", "filterSlope", "filterEnvelope", "keyTracking" }, 3,
         ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Slope", "Envelope", "Key" });
-    const auto filterEnvelopePart = makePicturePart ("Filter Envelope", filterEnvelopeView, 56, 32,
-                                                     { "filterAttack", "filterDecay", "filterSustain", "filterRelease" }, 4);
-    const auto amp = makePicturePart ("Amp", ampView, 56, 32, { "attack", "decay", "sustain", "release" }, 4);
+    const auto filterEnvelopePart = makePicturePart (
+        "Filter Envelope", filterEnvelopeView, 56, 32,
+        { "filterAttack", "filterDecay", "filterSustain", "filterRelease", "filterAttackCurve", "filterDecayCurve", "filterReleaseCurve" },
+        4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release", "A Curve", "D Curve", "R Curve" });
+    const auto amp =
+        makePicturePart ("Amp", ampView, 56, 32, { "attack", "decay", "sustain", "release", "attackCurve", "decayCurve", "releaseCurve" },
+                         4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release", "A Curve", "D Curve", "R Curve" });
     const auto lfoPart = makePicturePart ("LFO", lfoView, 56, 32, { "lfoShape", "lfoRate", "lfoTarget", "lfoDepth" }, 2,
                                           ParameterControls::Size::compact, { "Shape", "Rate", "Target", "Depth" });
 

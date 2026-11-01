@@ -358,6 +358,53 @@ TEST_CASE ("An ADSR takes exactly its times, and moves on from where it is")
     CHECK (adsr.next() == doctest::Approx (0.0f));
 }
 
+TEST_CASE ("An ADSR's stages bend either way along their curves, and still take exactly their times")
+{
+    // Halfway through a 480-sample attack, for a curve: where the envelope is, and where its shape says it is.
+    const auto halfwayUp = [] (float curve)
+    {
+        dsp::Adsr adsr;
+        adsr.prepare (testRate);
+        adsr.setParameters (0.01f, 0.0f, 1.0f, 0.0f);
+        adsr.setCurves (curve, 0.0f, 0.0f);
+        adsr.noteOn();
+        float level = 0.0f;
+
+        for (int i = 0; i < 240; ++i)
+            level = adsr.next();
+
+        CHECK (level == doctest::Approx (dsp::Adsr::getShape (curve, 0.5f)).epsilon (0.01));
+
+        for (int i = 240; i < 480; ++i)
+            level = adsr.next();
+
+        CHECK (level == doctest::Approx (1.0f)); // on its target as its time is up, whatever its curve
+        return dsp::Adsr::getShape (curve, 0.5f);
+    };
+
+    CHECK (halfwayUp (0.0f) == doctest::Approx (0.5f)); // straight
+    CHECK (halfwayUp (-1.0f) > 0.95f);                  // fast at first
+    CHECK (halfwayUp (1.0f) < 0.05f);                   // slow at first
+    // An analog attack, as the synths played before: aiming 30 % past its target, halfway it has gone 1.3 (1 - sqrt (0.3 / 1.3)).
+    CHECK (halfwayUp (dsp::Adsr::analogAttackCurve) == doctest::Approx (1.3f * (1.0f - std::sqrt (0.3f / 1.3f))).epsilon (0.001));
+
+    // The release from where it is, along its curve, never below silence.
+    dsp::Adsr adsr;
+    adsr.prepare (testRate);
+    adsr.setParameters (0.0f, 0.0f, 0.8f, 0.01f);
+    adsr.setCurves (0.0f, 0.0f, 0.5f);
+    adsr.noteOn();
+    adsr.next();
+    adsr.noteOff();
+    auto lowest = 1.0f;
+
+    for (int i = 0; i < 480; ++i)
+        lowest = std::min (lowest, adsr.next());
+
+    CHECK (lowest >= 0.0f);
+    CHECK_FALSE (adsr.isActive());
+}
+
 TEST_CASE ("A level follower rises and falls with its time constants")
 {
     dsp::LevelFollower follower;

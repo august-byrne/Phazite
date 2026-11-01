@@ -415,15 +415,22 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
 
     for (int envelope = 0; envelope < 3; ++envelope)
     {
-        const auto first = WavetableSynth::env1Attack + 4 * envelope;
-        auto& view = keep (std::make_unique<EnvelopeView> (
-            "Envelope " + juce::String (envelope + 1), parameter (first), parameter (first + 1), parameter (first + 2),
-            parameter (first + 3), [shown, envelope] { return shown() != nullptr ? shown()->envelopes[(size_t) envelope].get() : 0.0f; }));
+        const auto field = [envelope] (WavetableSynth::EnvelopeField f) { return WavetableSynth::getEnvelopeParameter (envelope, f); };
+        auto& view = keep (
+            std::make_unique<EnvelopeView> ("Envelope " + juce::String (envelope + 1), parameter (field (WavetableSynth::envAttack)),
+                                            parameter (field (WavetableSynth::envDecay)), parameter (field (WavetableSynth::envSustain)),
+                                            parameter (field (WavetableSynth::envRelease)), [shown, envelope]
+                                            { return shown() != nullptr ? shown()->envelopes[(size_t) envelope].get() : 0.0f; }));
+        view.setCurves (parameter (field (WavetableSynth::envAttackCurve)), parameter (field (WavetableSynth::envDecayCurve)),
+                        parameter (field (WavetableSynth::envReleaseCurve)));
         const auto name = envelope == 0 ? juce::String ("Amp") : "Envelope " + juce::String (envelope + 1);
-        modulation.push_back (
-            makePicturePart (name, view, 64, 36,
-                             { getParameterID (first), getParameterID (first + 1), getParameterID (first + 2), getParameterID (first + 3) },
-                             4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release" }));
+        modulation.push_back (makePicturePart (
+            name, view, 64, 36,
+            { getParameterID (field (WavetableSynth::envAttack)), getParameterID (field (WavetableSynth::envDecay)),
+              getParameterID (field (WavetableSynth::envSustain)), getParameterID (field (WavetableSynth::envRelease)),
+              getParameterID (field (WavetableSynth::envAttackCurve)), getParameterID (field (WavetableSynth::envDecayCurve)),
+              getParameterID (field (WavetableSynth::envReleaseCurve)) },
+            4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release", "A Curve", "D Curve", "R Curve" }));
     }
 
     for (int lfo = 0; lfo < 2; ++lfo)

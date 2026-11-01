@@ -17,12 +17,14 @@
 
 namespace phazite::ui
 {
-// An envelope's attack, decay, sustain and release, and a line at the level of the newest note's. Its points drag (the owner,
-// 2026-11-01: a picture's key points should move as its knobs do, as Ableton's envelopes' breakpoints do): the peak sideways
-// for the attack, the corner where the decay ends sideways for the decay and up and down for the sustain, and the end
-// sideways for the release, each drag one undo step, Shift in fine steps; a double-click puts a point back where it
-// started. While a point is dragged the picture keeps its scale, so that the point stays under the pointer. Its stages
-// have no curve of their own to bend (they curve as analog envelopes do).
+// An envelope's attack, decay, sustain and release, each stage along its curve (dsp::Adsr), and a line at the level of the
+// newest note's. Its points drag (the owner, 2026-11-01: a picture's key points should move as its knobs do, as Ableton's
+// envelopes' breakpoints do): the peak sideways for the attack, the corner where the decay ends sideways for the decay and up
+// and down for the sustain, and the end sideways for the release; a double-click puts a point back where it started. With
+// its curves given, each stage that goes up or down bends by the handle in its middle, dragged up or down, as Vital's,
+// FabFilter Twin's and Ableton's envelopes bend (no envelope found bends with the wheel, which scrolls the view around it:
+// docs/design.md, B123); a double-click on a stage puts its curve back. Each drag is one undo step; Shift drags in fine
+// steps. While a point is dragged the picture keeps its scale, so that the point stays under the pointer.
 class EnvelopeView : public juce::Component,
                      private DisplayTicker::Display
 {
@@ -30,6 +32,9 @@ public:
     // Times in milliseconds, the sustain from 0 to 1; level: the newest note's envelope now, from 0 to 1.
     EnvelopeView (const juce::String& title, ParameterHandle attack, ParameterHandle decay, ParameterHandle sustain,
                   ParameterHandle release, std::function<float()> level);
+
+    // How its stages bend (from -1 to 1: dsp::Adsr::setCurves()), which its handles then change.
+    void setCurves (ParameterHandle attackCurve, ParameterHandle decayCurve, ParameterHandle releaseCurve);
 
     float getShownLevel() const noexcept { return shownLevel; }
 
@@ -42,6 +47,10 @@ public:
 
     juce::Point<float> getPointPosition (Point) const;
 
+    // The handle in the middle of the stage that ends at a point, which bends it; none while the stage is level (a decay to
+    // a full sustain, a release from none) or its curves aren't given.
+    std::optional<juce::Point<float>> getBendPosition (Point) const;
+
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
@@ -51,13 +60,23 @@ public:
     void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
+    // What a press takes: a point, or the handle that bends the stage ending at it.
+    struct Target
+    {
+        Point point = Point::attack;
+        bool bend = false;
+
+        bool operator== (const Target&) const = default;
+    };
+
     ParameterHandle attack, decay, sustain, release;
+    ParameterHandle attackCurve, decayCurve, releaseCurve; // empty until given
     std::function<float()> level;
     float shownLevel = 0.0f;
     DrawnNumbers drawn;
-    std::optional<Point> hovered, dragged;
+    std::optional<Target> hovered, dragged;
     float dragTotal = 0.0f, dragHold = 0.0f; // the picture's time across, and its held sustain's, while a point is dragged
-    float startTime = 0.0f, startSustain = 0.0f;
+    float startTime = 0.0f, startSustain = 0.0f, startCurve = 0.0f;
 
     // The stages across the picture: the attack, the decay, a held sustain and the release, each at least a little wide.
     struct Layout
@@ -70,9 +89,14 @@ private:
     };
 
     Layout getLayout() const;
-    std::optional<Point> findPoint (juce::Point<float>) const;
+    std::optional<Target> findTarget (juce::Point<float>) const;
+    std::optional<Point> findStage (float x) const; // the stage under a place across the picture, by the point it ends at
     ParameterHandle& getTimeOf (Point);
-    void setHovered (std::optional<Point>);
+    ParameterHandle& getCurveOf (Point);
+    float getCurve (Point) const;                      // a stage's, or an analog envelope's while its curves aren't given
+    float getStageLevel (Point, float fraction) const; // the envelope a fraction of a stage's time in, from 0 to 1
+    static float getUpward (Point);                    // how a stage's curve changes to bend it up
+    void setHovered (std::optional<Target>);
     void tick() override;
 };
 

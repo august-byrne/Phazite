@@ -71,14 +71,23 @@ public:
         env1Decay,
         env1Sustain,
         env1Release,
+        env1AttackCurve, // how each stage bends (dsp::Adsr::setCurves())
+        env1DecayCurve,
+        env1ReleaseCurve,
         env2Attack,
         env2Decay,
         env2Sustain,
         env2Release,
+        env2AttackCurve, // how each stage bends (dsp::Adsr::setCurves())
+        env2DecayCurve,
+        env2ReleaseCurve,
         env3Attack,
         env3Decay,
         env3Sustain,
         env3Release,
+        env3AttackCurve, // how each stage bends (dsp::Adsr::setCurves())
+        env3DecayCurve,
+        env3ReleaseCurve,
         lfo1Shape,
         lfo1Rate,
         lfo1Sync,
@@ -134,6 +143,18 @@ public:
         oscFields
     };
 
+    enum EnvelopeField
+    {
+        envAttack,
+        envDecay,
+        envSustain,
+        envRelease,
+        envAttackCurve,
+        envDecayCurve,
+        envReleaseCurve,
+        envFields
+    };
+
     enum LfoField
     {
         lfoShape,
@@ -153,6 +174,11 @@ public:
     };
 
     static constexpr int getParameter (int osc, OscillatorField field) noexcept { return osc1On + osc * oscFields + field; }
+    static constexpr int getEnvelopeParameter (int envelope, EnvelopeField field) noexcept
+    {
+        return env1Attack + envelope * envFields + field;
+    }
+
     static constexpr int getLfoParameter (int lfo, LfoField field) noexcept { return lfo1Shape + lfo * lfoFields + field; }
     static constexpr int getModParameter (int slot, ModField field) noexcept { return mod1Source + slot * modFields + field; }
 

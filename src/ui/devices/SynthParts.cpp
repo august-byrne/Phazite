@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SynthParts.h"
 #include "DeviceTint.h"
+#include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Oscillators.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -34,11 +35,24 @@ EnvelopeView::EnvelopeView (const juce::String& title, ParameterHandle a, Parame
                     "the release; a double-click puts a point back where it started.");
 }
 
+void EnvelopeView::setCurves (ParameterHandle a, ParameterHandle d, ParameterHandle r)
+{
+    attackCurve = std::move (a);
+    decayCurve = std::move (d);
+    releaseCurve = std::move (r);
+    setDescription ("The envelope's shape: its attack, decay, sustain and release, with a line at the newest note's level. Drag its "
+                    "points: the peak sideways for the attack, the corner after the decay for the decay and the sustain, the end for "
+                    "the release; a double-click puts a point back where it started. Drag the handle in a stage's middle up or down "
+                    "to bend it; a double-click on a stage puts its curve back.");
+    repaint();
+}
+
 void EnvelopeView::tick()
 {
     shownLevel = level != nullptr ? level() : 0.0f;
 
-    if (drawn.changed ({ attack.getValue(), decay.getValue(), sustain.getValue(), release.getValue(), shownLevel }))
+    if (drawn.changed ({ attack.getValue(), decay.getValue(), sustain.getValue(), release.getValue(), getCurve (Point::attack),
+                         getCurve (Point::decay), getCurve (Point::release), shownLevel }))
         repaint();
 }
 
@@ -51,8 +65,9 @@ EnvelopeView::Layout EnvelopeView::getLayout() const
     layout.release = std::max (5.0f, release.getValue());
 
     // While a point is dragged, the scale it had as the drag began.
-    layout.hold = dragged.has_value() ? dragHold : (layout.attack + layout.decay + layout.release) * 0.4f;
-    layout.total = dragged.has_value() ? dragTotal : layout.attack + layout.decay + layout.hold + layout.release;
+    const auto keepsScale = dragged.has_value() && ! dragged->bend;
+    layout.hold = keepsScale ? dragHold : (layout.attack + layout.decay + layout.release) * 0.4f;
+    layout.total = keepsScale ? dragTotal : layout.attack + layout.decay + layout.hold + layout.release;
     return layout;
 }
 
@@ -73,21 +88,86 @@ juce::Point<float> EnvelopeView::getPointPosition (Point point) const
     }
 }
 
-std::optional<EnvelopeView::Point> EnvelopeView::findPoint (juce::Point<float> position) const
+float EnvelopeView::getCurve (Point stage) const
 {
-    std::optional<Point> nearest;
+    const auto& curve = stage == Point::attack ? attackCurve : stage == Point::decay ? decayCurve : releaseCurve;
+
+    if (curve.isValid())
+        return curve.getValue();
+
+    return stage == Point::attack ? devices::dsp::Adsr::analogAttackCurve : devices::dsp::Adsr::analogSettleCurve;
+}
+
+float EnvelopeView::getStageLevel (Point stage, float fraction) const
+{
+    const auto held = juce::jlimit (0.0f, 1.0f, sustain.getValue());
+    const auto shape = devices::dsp::Adsr::getShape (getCurve (stage), fraction);
+
+    switch (stage)
+    {
+        case Point::attack:
+            return shape;
+        case Point::decay:
+            return 1.0f + (held - 1.0f) * shape;
+        case Point::release:
+        default:
+            return held * (1.0f - shape);
+    }
+}
+
+std::optional<juce::Point<float>> EnvelopeView::getBendPosition (Point stage) const
+{
+    const auto held = juce::jlimit (0.0f, 1.0f, sustain.getValue());
+    const auto& curve = stage == Point::attack ? attackCurve : stage == Point::decay ? decayCurve : releaseCurve;
+
+    if (! curve.isValid() || (stage == Point::decay && held >= 1.0f) || (stage == Point::release && held <= 0.0f))
+        return {};
+
+    const auto layout = getLayout();
+    const auto starts = stage == Point::attack ? 0.0f : stage == Point::decay ? layout.attack : layout.attack + layout.decay + layout.hold;
+    const auto lasts = stage == Point::attack ? layout.attack : stage == Point::decay ? layout.decay : layout.release;
+    return juce::Point<float> { layout.x (starts + lasts / 2.0f), layout.y (getStageLevel (stage, 0.5f)) };
+}
+
+std::optional<EnvelopeView::Target> EnvelopeView::findTarget (juce::Point<float> position) const
+{
+    std::optional<Target> nearest;
     auto nearestDistance = GraphTint::grabDistance;
+
+    const auto consider = [&] (Target target, juce::Point<float> at)
+    {
+        if (const auto distance = at.getDistanceFrom (position); distance <= nearestDistance)
+        {
+            nearest = target;
+            nearestDistance = distance;
+        }
+    };
 
     for (const auto point : { Point::attack, Point::decay, Point::release })
     {
-        if (const auto distance = getPointPosition (point).getDistanceFrom (position); distance <= nearestDistance)
-        {
-            nearest = point;
-            nearestDistance = distance;
-        }
+        consider ({ point, false }, getPointPosition (point));
+
+        if (const auto bend = getBendPosition (point))
+            consider ({ point, true }, *bend);
     }
 
     return nearest;
+}
+
+std::optional<EnvelopeView::Point> EnvelopeView::findStage (float x) const
+{
+    const auto layout = getLayout();
+
+    if (x <= layout.x (layout.attack))
+        return Point::attack;
+
+    if (x <= layout.x (layout.attack + layout.decay))
+        return Point::decay;
+
+    if (x >= layout.x (layout.attack + layout.decay + layout.hold) && x <= getPointPosition (Point::release).x)
+        return Point::release;
+
+    return {}; // the held sustain, or past the end
 }
 
 ParameterHandle& EnvelopeView::getTimeOf (Point point)
@@ -95,13 +175,26 @@ ParameterHandle& EnvelopeView::getTimeOf (Point point)
     return point == Point::attack ? attack : point == Point::decay ? decay : release;
 }
 
-void EnvelopeView::setHovered (std::optional<Point> point)
+ParameterHandle& EnvelopeView::getCurveOf (Point point)
 {
-    if (point == hovered)
+    return point == Point::attack ? attackCurve : point == Point::decay ? decayCurve : releaseCurve;
+}
+
+float EnvelopeView::getUpward (Point stage)
+{
+    // Below 0 a stage moves fast at first: the rising attack bulges up, the falling stages sag.
+    return stage == Point::attack ? -1.0f : 1.0f;
+}
+
+void EnvelopeView::setHovered (std::optional<Target> target)
+{
+    if (target == hovered)
         return;
 
-    hovered = point;
-    setMouseCursor (point.has_value() ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+    hovered = target;
+    setMouseCursor (! target.has_value() ? juce::MouseCursor::NormalCursor
+                    : target->bend       ? juce::MouseCursor::UpDownResizeCursor
+                                         : juce::MouseCursor::DraggingHandCursor);
     repaint();
 }
 
@@ -111,17 +204,30 @@ void EnvelopeView::paint (juce::Graphics& g)
     const auto& p = getPalette (*this);
     const auto tint = getDeviceTint (*this);
     const auto layout = getLayout();
-    const auto a = layout.attack, d = layout.decay, hold = layout.hold, end = a + d + hold + layout.release;
+    const auto a = layout.attack, d = layout.decay, hold = layout.hold;
     const auto x = [&layout] (float time) { return layout.x (time); };
     const auto y = [&layout] (float value) { return layout.y (value); };
     const auto held = juce::jlimit (0.0f, 1.0f, sustain.getValue());
 
+    // Each stage along its curve, a couple of pixels at a time.
     juce::Path shape;
     shape.startNewSubPath (x (0.0f), y (0.0f));
-    shape.quadraticTo (x (a * 0.3f), y (0.95f), x (a), y (1.0f));
-    shape.quadraticTo (x (a + d * 0.15f), y (held), x (a + d), y (held));
+
+    const auto addStage = [&] (Point stage, float starts, float lasts)
+    {
+        const auto steps = std::max (2, juce::roundToInt ((x (starts + lasts) - x (starts)) / 2.0f));
+
+        for (int i = 1; i <= steps; ++i)
+        {
+            const auto fraction = (float) i / (float) steps;
+            shape.lineTo (x (starts + lasts * fraction), y (getStageLevel (stage, fraction)));
+        }
+    };
+
+    addStage (Point::attack, 0.0f, a);
+    addStage (Point::decay, a, d);
     shape.lineTo (x (a + d + hold), y (held));
-    shape.quadraticTo (x (a + d + hold + layout.release * 0.15f), y (0.0f), x (end), y (0.0f));
+    addStage (Point::release, a + d + hold, layout.release);
 
     // A point dragged past the picture's end goes out of sight rather than over its frame.
     juce::Graphics::ScopedSaveState clipped (g);
@@ -144,21 +250,33 @@ void EnvelopeView::paint (juce::Graphics& g)
         g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ layout.area.getRight() - 3.0f, y (shownLevel) }));
     }
 
-    // Its points, larger under the pointer and while dragged.
-    for (const auto point : { Point::attack, Point::decay, Point::release })
+    // Its points filled and its stages' handles hollow, larger under the pointer and while dragged.
+    const auto paintHandle = [&] (Target target, juce::Point<float> at)
     {
-        const auto radius = point == hovered || point == dragged ? GraphTint::handleRadius * 1.5f : GraphTint::handleRadius;
-        const auto dot = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (getPointPosition (point));
+        const auto radius = target == hovered || target == dragged ? GraphTint::handleRadius * 1.5f : GraphTint::handleRadius;
+        const auto dot = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (at);
         g.setColour (p.background);
         g.fillEllipse (dot.expanded (1.0f));
         g.setColour (tint);
-        g.fillEllipse (dot);
+
+        if (target.bend)
+            g.drawEllipse (dot.reduced (GraphTint::handleOutline / 2.0f), GraphTint::handleOutline);
+        else
+            g.fillEllipse (dot);
+    };
+
+    for (const auto point : { Point::attack, Point::decay, Point::release })
+    {
+        if (const auto bend = getBendPosition (point))
+            paintHandle ({ point, true }, *bend);
+
+        paintHandle ({ point, false }, getPointPosition (point));
     }
 }
 
 void EnvelopeView::mouseMove (const juce::MouseEvent& e)
 {
-    setHovered (findPoint (e.position));
+    setHovered (findTarget (e.position));
 }
 
 void EnvelopeView::mouseExit (const juce::MouseEvent&)
@@ -168,21 +286,29 @@ void EnvelopeView::mouseExit (const juce::MouseEvent&)
 
 void EnvelopeView::mouseDown (const juce::MouseEvent& e)
 {
-    const auto point = findPoint (e.position);
+    const auto target = findTarget (e.position);
 
-    if (! point.has_value() || e.mods.isPopupMenu())
+    if (! target.has_value() || e.mods.isPopupMenu())
         return;
 
-    // The scale stays as it is while the point moves, so that the point stays under the pointer.
+    // The scale stays as it is while a point moves, so that the point stays under the pointer.
     const auto layout = getLayout();
     dragTotal = layout.total;
     dragHold = layout.hold;
-    dragged = point;
-    startTime = getTimeOf (*point).getValue();
-    startSustain = sustain.getValue();
-    getTimeOf (*point).beginGesture();
+    dragged = target;
 
-    if (point == Point::decay)
+    if (target->bend)
+    {
+        startCurve = getCurve (target->point);
+        getCurveOf (target->point).beginGesture();
+        return;
+    }
+
+    startTime = getTimeOf (target->point).getValue();
+    startSustain = sustain.getValue();
+    getTimeOf (target->point).beginGesture();
+
+    if (target->point == Point::decay)
         sustain.beginGesture();
 }
 
@@ -193,16 +319,25 @@ void EnvelopeView::mouseDrag (const juce::MouseEvent& e)
 
     const auto layout = getLayout();
     const auto fine = e.mods.isShiftDown() ? GraphTint::fineDragFactor : 1.0f;
-    auto& time = getTimeOf (*dragged);
+    const auto rise = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, layout.area.getHeight()) * fine;
+
+    if (dragged->bend)
+    {
+        // Up bends it up: twice the picture's height takes a curve across its whole range.
+        auto& curve = getCurveOf (dragged->point);
+        const auto range = curve.getRange();
+        curve.setValue (juce::jlimit (range.start, range.end, startCurve + getUpward (dragged->point) * rise));
+        repaint();
+        return;
+    }
+
+    auto& time = getTimeOf (dragged->point);
     const auto timeRange = time.getRange();
     const auto moved = (float) e.getDistanceFromDragStartX() / std::max (1.0f, layout.area.getWidth()) * dragTotal * fine;
     time.setValue (juce::jlimit (timeRange.start, timeRange.end, startTime + moved));
 
-    if (dragged == Point::decay)
-    {
-        const auto rise = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, layout.area.getHeight()) * fine;
+    if (dragged->point == Point::decay)
         sustain.setValue (juce::jlimit (0.0f, 1.0f, startSustain + rise));
-    }
 
     repaint();
 }
@@ -212,25 +347,43 @@ void EnvelopeView::mouseUp (const juce::MouseEvent&)
     if (! dragged.has_value())
         return;
 
-    if (dragged == Point::decay)
-        sustain.endGesture();
+    if (dragged->bend)
+    {
+        getCurveOf (dragged->point).endGesture();
+    }
+    else
+    {
+        if (dragged->point == Point::decay)
+            sustain.endGesture();
 
-    getTimeOf (*dragged).endGesture();
+        getTimeOf (dragged->point).endGesture();
+    }
+
     dragged.reset();
     repaint(); // at its own scale again
 }
 
 void EnvelopeView::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    const auto point = findPoint (e.position);
+    const auto target = findTarget (e.position);
 
-    if (! point.has_value())
+    // On a stage that bends, or its handle: its curve back, one undo step.
+    if (! target.has_value() || target->bend)
+    {
+        const auto stage = target.has_value() ? std::optional<Point> (target->point) : findStage (e.position.x);
+
+        if (stage.has_value() && getBendPosition (*stage).has_value())
+            if (const auto initial = getCurveOf (*stage).getDefaultValue())
+                getCurveOf (*stage).setValue (*initial);
+
+        repaint();
         return;
+    }
 
-    // Back where it started, as a knob's double-click puts its value back: one undo step.
-    std::vector<ParameterHandle*> handles { &getTimeOf (*point) };
+    // A point back where it started, as a knob's double-click puts its value back: one undo step.
+    std::vector<ParameterHandle*> handles { &getTimeOf (target->point) };
 
-    if (point == Point::decay)
+    if (target->point == Point::decay)
         handles.push_back (&sustain);
 
     for (auto* handle : handles)

@@ -7,9 +7,9 @@
 
 namespace phazite::devices::dsp
 {
-// Attack, decay, sustain and release. Each stage takes exactly its time: it curves exponentially toward a point a
-// little past its target, as analog envelopes do, and lands on the target when its time is up. A note that starts
-// or ends mid-stage moves on from the level it has reached, so retriggering a voice doesn't click.
+// Attack, decay, sustain and release. Each stage takes exactly its time along a curve of its own, and lands on its target
+// when its time is up: an exponential that bends either way, or a straight line. A note that starts or ends mid-stage
+// moves on from the level it has reached, so retriggering a voice doesn't click.
 class Adsr
 {
 public:
@@ -23,6 +23,30 @@ public:
         decay = decaySeconds;
         sustain = sustainLevel < 0.0f ? 0.0f : (sustainLevel > 1.0f ? 1.0f : sustainLevel);
         release = releaseSeconds;
+    }
+
+    // How each stage bends, from -1 to 1: 0 is a straight line; below 0 it moves fast at first and slows into its target,
+    // as analog envelopes do, and above 0 it starts slowly and speeds up. A change applies from the next stage on.
+    void setCurves (float attackCurve, float decayCurve, float releaseCurve) noexcept
+    {
+        attackBend = getBend (attackCurve);
+        decayBend = getBend (decayCurve);
+        releaseBend = getBend (releaseCurve);
+    }
+
+    // The curves stages have until set: an analog envelope's, each stage aiming a little past its target (the attack 30 %
+    // of its way past it, so that it rises nearly straight, the others 1 %, settling gently), as ln (o / (1 + o)) / 10.
+    static constexpr float analogAttackCurve = -0.146633707f, analogSettleCurve = -0.461512052f;
+
+    // Where a stage that bends by a curve is, from 0 (its start) to 1 (its target), a fraction of its time in: for drawing it.
+    static float getShape (float curve, float fraction) noexcept
+    {
+        const auto bend = getBend (curve);
+
+        if (bend == 0.0)
+            return fraction;
+
+        return (float) (std::expm1 (bend * (double) fraction) / std::expm1 (bend));
     }
 
     void noteOn() noexcept { startStage (Stage::attack); }
@@ -57,7 +81,7 @@ public:
             case Stage::attack:
             case Stage::decay:
             case Stage::release:
-                level = aim + (level - aim) * coefficient;
+                level = isStraight ? level + step : aim + (level - aim) * coefficient;
 
                 if (--samplesLeft <= 0)
                     finishStage();
@@ -78,14 +102,23 @@ private:
         release
     };
 
-    // How far past its target a stage aims, as a fraction of the way it goes: more is a straighter curve.
-    static constexpr double attackOvershoot = 0.3, settleOvershoot = 0.01;
     static constexpr float sustainFollow = 0.002f; // a few milliseconds
+    static constexpr double steepestBend = 10.0;   // at a curve of 1, a stage's last tenth goes 63 % of its way (at -1, its first)
+
+    // A curve as the exponent of its shape, (e^(bend t) - 1) / (e^bend - 1) over the stage's time t from 0 to 1; nearly
+    // straight curves are straight, which keeps the exponent away from 0.
+    static double getBend (float curve) noexcept
+    {
+        const auto bend = (curve < -1.0f ? -1.0f : (curve > 1.0f ? 1.0f : curve)) * steepestBend;
+        return std::abs (bend) < 1.0e-4 ? 0.0 : bend;
+    }
 
     double sampleRate = 44100.0;
     float attack = 0.005f, decay = 0.1f, sustain = 1.0f, release = 0.1f;
+    double attackBend = getBend (analogAttackCurve), decayBend = getBend (analogSettleCurve), releaseBend = getBend (analogSettleCurve);
     Stage stage = Stage::idle;
-    float level = 0.0f, target = 0.0f, aim = 0.0f, coefficient = 0.0f;
+    float level = 0.0f, target = 0.0f, aim = 0.0f, coefficient = 0.0f, step = 0.0f;
+    bool isStraight = false;
     int samplesLeft = 0;
 
     void startStage (Stage newStage) noexcept
@@ -95,13 +128,13 @@ private:
         switch (newStage)
         {
             case Stage::attack:
-                startSegment (1.0f, attack, attackOvershoot);
+                startSegment (1.0f, attack, attackBend);
                 break;
             case Stage::decay:
-                startSegment (sustain, decay, settleOvershoot);
+                startSegment (sustain, decay, decayBend);
                 break;
             case Stage::release:
-                startSegment (0.0f, release, settleOvershoot);
+                startSegment (0.0f, release, releaseBend);
                 break;
             case Stage::sustain:
             case Stage::idle:
@@ -109,9 +142,10 @@ private:
         }
     }
 
-    // Toward newTarget in seconds: the distance to the aim shrinks by the same factor each sample, from
-    // (1 + overshoot) to overshoot times the way to go, whatever the level it starts from.
-    void startSegment (float newTarget, float seconds, double overshoot) noexcept
+    // Toward newTarget in seconds, from whatever level it starts at, along its shape: the distance to an aim beyond the
+    // target (bending below 0) or behind the start (above 0) changes by the same factor each sample, e^(bend / samples),
+    // so that it lands on the target as its time is up. A straight stage steps the same amount each sample.
+    void startSegment (float newTarget, float seconds, double bend) noexcept
     {
         target = newTarget;
         samplesLeft = (int) std::lround ((double) seconds * sampleRate);
@@ -122,8 +156,10 @@ private:
             return;
         }
 
-        aim = (float) (newTarget + (newTarget - level) * overshoot);
-        coefficient = (float) std::pow (overshoot / (1.0 + overshoot), 1.0 / samplesLeft);
+        isStraight = bend == 0.0;
+        step = (newTarget - level) / (float) samplesLeft;
+        aim = isStraight ? newTarget : (float) (level - (double) (newTarget - level) / std::expm1 (bend));
+        coefficient = (float) std::exp (bend / samplesLeft);
     }
 
     void finishStage() noexcept
