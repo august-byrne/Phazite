@@ -230,8 +230,8 @@ DeviceID duckUnder (ProjectContext&, TrackID ducked, TrackID key);
 float getCpuLoad (const ProjectContext&, TrackID);
 
 //==============================================================================
-// The routing view's wires (docs/design.md, section 8): where each channel's sound goes (its bus, or the master), its
-// sends to returns, and the sidechains that listen to it.
+// What links the channels (docs/design.md, section 8), which the mixer outlines from the selection: where each channel's
+// sound goes (its bus, or the master), its sends to returns, and the sidechains that listen to it.
 struct Connection
 {
     enum class Kind

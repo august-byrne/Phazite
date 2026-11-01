@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer, as it lays out in the window (the inspector: InspectorTests.cpp).
-#include "AppScreen.h"
 #include "TestClips.h"
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
@@ -16,7 +15,6 @@
 #include "ui/mixer/MasterStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/mixer/StripParts.h"
-#include "ui/shell/Panels.h"
 #include "ui/theme/DesignTokens.h"
 
 TEST_CASE ("The mixer's strips keep their parts apart, however short the window is")
@@ -232,32 +230,4 @@ TEST_CASE ("The mixer has no row of its own: a slim column after the returns add
 
     selection.clear();
     setEdit (context, nullptr);
-}
-
-TEST_CASE ("The tab bar of the area the mixer is in holds its Routing switch while the mixer shows, and none while another view does")
-{
-    using phazite::ui::ViewTab;
-    phazite::test::AppScreen screen;
-    screen.session.openAtStartup(); // until a project is open, the window shows that it is opening one over its views
-    phazite::test::dispatchPendingMessages();
-    auto* views = dynamic_cast<phazite::ui::ViewArea*> (&screen.shell.getPanel (phazite::ui::Panel::song));
-    REQUIRE (views != nullptr);
-    auto& routing = views->getRoutingButton();
-    views->showTab (ViewTab::playlist);
-    CHECK_FALSE (routing.isShowing());
-
-    views->showTab (ViewTab::mixer);
-    CHECK (routing.isShowing());
-    CHECK (routing.getBottom() <= views->getTabBarDepth()); // in the tab bar, taking none of the mixer's height
-    CHECK (routing.getX() >= views->getTabbedButtonBar().getRight());
-
-    phazite::test::Mouse mouse (routing);
-    mouse.click (routing.getLocalBounds().getCentre());
-    CHECK (routing.getToggleState());
-    auto* mixer = phazite::test::findAll<phazite::ui::MixerView> (screen.shell).getFirst();
-    REQUIRE (mixer != nullptr);
-    CHECK (mixer->isShowingRouting());
-
-    views->showTab (ViewTab::playlist);
-    CHECK_FALSE (routing.isShowing());
 }

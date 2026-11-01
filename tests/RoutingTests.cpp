@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Mixer depth (roadmap step 2.9; src/model/mixer/MixerModel.h): a send knob for every return, which its first turn makes;
 // where a channel's sound goes, the master or a bus; a device's sidechain by its ID, as its menu picks it; each channel's
-// CPU load; the routing view's wires (src/ui/mixer/RoutingView.h), dragged and taken away; and a strip's send knobs and
-// output button.
+// CPU load; what links the channels; and a strip's send knobs and output button.
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -15,7 +14,6 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/devices/SidechainMenus.h"
 #include "ui/mixer/ChannelStrip.h"
-#include "ui/mixer/RoutingView.h"
 
 namespace
 {
@@ -173,7 +171,7 @@ TEST_CASE ("Where a channel's sound goes: the master, or a bus, which the track 
     CHECK (mix.bass->getParentFolderTrack() == nullptr);
 }
 
-TEST_CASE ("A device's sidechain by its ID, and the routing's wires: outputs, sends and sidechains")
+TEST_CASE ("A device's sidechain by its ID, and what links the channels: outputs, sends and sidechains")
 {
     Mix mix;
     const auto compressor = phazite::getDeviceID (*mix.compressor);
@@ -217,72 +215,6 @@ TEST_CASE ("A device's sidechain by its ID, and the routing's wires: outputs, se
     }
 
     CHECK (phazite::getCpuLoad (mix.context, {}) == doctest::Approx (0.0f));
-}
-
-TEST_CASE ("A kick-to-bass sidechain shows as a cable in the routing view, and dragging cables routes, sends and listens")
-{
-    Mix mix;
-    phazite::ui::RoutingView routing (mix.context);
-    phazite::test::TestWindow window (routing, 1200, 400);
-    phazite::test::dispatchPendingMessages();
-
-    // A box for every channel, and the master.
-    for (auto* track : { (te::Track*) mix.kick, (te::Track*) mix.bass, (te::Track*) mix.drums, (te::Track*) mix.reverb })
-        CHECK_FALSE (routing.getBoxArea (mix.id (track)).isEmpty());
-
-    CHECK_FALSE (routing.getBoxArea ({}).isEmpty());
-    const auto compressor = phazite::getDeviceID (*mix.compressor);
-    REQUIRE (routing.getSidechainJack (compressor).has_value());
-
-    // The sidechain, as the compressor's picker sets it, shows while the bass is selected.
-    phazite::setSidechainSource (mix.context, compressor, mix.id (mix.kick));
-    mix.context.getSongSelection().selectOnly (mix.id (mix.bass));
-    phazite::test::dispatchPendingMessages();
-
-    const auto shown = routing.getShownConnections();
-    const phazite::Connection cable { phazite::Connection::Kind::sidechain, mix.id (mix.kick), mix.id (mix.bass), compressor };
-    CHECK (std::find (shown.begin(), shown.end(), cable) != shown.end());
-
-    // A channel not selected shows none of its wires: Keys has only its output.
-    for (const auto& connection : shown)
-        CHECK ((connection.from == mix.id (mix.bass) || connection.to == mix.id (mix.bass)));
-
-    // Dragging from Keys' Out jack: onto a return sends to it, onto a bus routes it there, onto a sidechain jack listens.
-    phazite::test::Mouse mouse (routing);
-    const auto dragCable = [&mouse] (juce::Point<int> from, juce::Point<int> to)
-    {
-        mouse.press (from);
-        mouse.dragTo ((from + to) / 2);
-        mouse.dragTo (to);
-        mouse.release();
-    };
-
-    REQUIRE (routing.getOutJack (mix.id (mix.keys)).has_value());
-    dragCable (*routing.getOutJack (mix.id (mix.keys)), routing.getBoxArea (mix.id (mix.reverb)).getCentre());
-    CHECK (phazite::getSends (*mix.keys).size() == 1);
-
-    dragCable (*routing.getOutJack (mix.id (mix.keys)), routing.getBoxArea (mix.id (mix.drums)).getCentre());
-    CHECK (mix.keys->getParentFolderTrack() == mix.drums);
-
-    phazite::test::dispatchPendingMessages();
-    dragCable (*routing.getOutJack (mix.id (mix.keys)), *routing.getSidechainJack (compressor));
-    CHECK (phazite::getSidechainSource (mix.context, compressor) == mix.id (mix.keys));
-
-    // A right-click on a box offers to take its wires away.
-    const auto menu = routing.getMenuFor (mix.id (mix.keys));
-    auto removed = false;
-
-    for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
-    {
-        if (it.getItem().text.startsWith ("Remove the Send from Keys") && it.getItem().action != nullptr)
-        {
-            it.getItem().action();
-            removed = true;
-        }
-    }
-
-    CHECK (removed);
-    CHECK (phazite::getSends (*mix.keys).isEmpty());
 }
 
 TEST_CASE ("A strip has a send knob for every return, and one drag sends the track to a reverb return")

@@ -614,8 +614,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/mixer/MixerView.h
     src/ui/mixer/ModulatorSlots.cpp
     src/ui/mixer/ModulatorSlots.h
-    src/ui/mixer/RoutingView.cpp
-    src/ui/mixer/RoutingView.h
     src/ui/mixer/StripParts.cpp
     src/ui/mixer/StripParts.h
     src/ui/pianoroll/DrumRows.cpp

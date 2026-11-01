@@ -18,8 +18,7 @@ namespace
 MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
     : commands (bridge),
       context (projectContext),
-      master (bridge, projectContext),
-      routing (projectContext)
+      master (bridge, projectContext)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Mixer");
@@ -36,12 +35,6 @@ MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
     addReturnButton.onClick = [this] { commands.invoke ("track.addReturn"); };
     addReturnButton.setEnabled (false);
     stripHolder.addAndMakeVisible (addReturnButton);
-
-    // The routing view, in place of the strips while the tab bar's Routing switch is on.
-    routingViewport.setViewedComponent (&routing, false);
-    routingViewport.setScrollBarsShown (false, true);
-    addChildComponent (routingViewport);
-
     addAndMakeVisible (verticalView);
 
     context.getSongSelection().addChangeListener (this);
@@ -156,20 +149,9 @@ void MixerView::paint (juce::Graphics& g)
     }
 }
 
-void MixerView::showRouting (bool show)
-{
-    routingViewport.setVisible (show);
-    verticalView.setVisible (! show);
-    resized();
-}
-
 void MixerView::resized()
 {
     const auto area = getLocalBounds();
-
-    routingViewport.setBounds (area);
-    routing.setSize (std::max (area.getWidth(), routing.getPreferredWidth()),
-                     std::max (1, area.getHeight() - routingViewport.getScrollBarThickness()));
 
     // At least as tall as the strips need to be; a shorter mixer scrolls up and down.
     verticalView.setBounds (area);

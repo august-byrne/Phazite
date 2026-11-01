@@ -138,15 +138,10 @@ public:
     std::function<void (View, Panel area, int index)> onMove;
     std::function<void()> onReset;
 
-    // The mixer's Routing switch, in the tab bar after the tabs while the mixer shows here, so that it takes none of the
-    // mixer's height (the owner, 2026-11-01): on, every channel's wires show in place of the strips (MixerView::showRouting()).
-    std::function<void (bool)> onRoutingChanged;
-    juce::Button& getRoutingButton() noexcept { return routingButton; }
-
     // While a view is dragged over it, where it would go: before the view at an index here, or after them (-1). For tests.
     std::optional<int> getDropIndex() const noexcept { return dropIndex; }
 
-    void resized() override;                           // its tabs leave the panel's buttons their corner, and the switch its place
+    void resized() override;                           // its tabs leave the panel's buttons their corner
     void paintOverChildren (juce::Graphics&) override; // a view dragged over it: a tint, and a line where its tab would go
 
     bool isInterestedInDragSource (const SourceDetails&) override;
@@ -168,7 +163,6 @@ private:
     const Views views;
     std::vector<ViewTab> tabs; // in the tabs' order
     std::array<Holder, 5> holders;
-    juce::TextButton routingButton { "Routing" };
     const CommandBridge* shortcuts = nullptr;
     std::optional<int> dropIndex;
 

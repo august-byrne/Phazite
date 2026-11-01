@@ -123,18 +123,9 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
         setActiveEditor (&editor);
     };
 
-    // The mixer's Routing switch is in the tab bar of the area the mixer is in, so that the mixer has no row of its own for
-    // it. And the views move between the areas by their tabs (Panels.h).
+    // The views move between the areas by their tabs (Panels.h).
     for (auto* area : { &upperArea, &lowerArea })
     {
-        area->onRoutingChanged = [this] (bool on)
-        {
-            mixer.showRouting (on);
-
-            for (auto* each : { &upperArea, &lowerArea })
-                each->getRoutingButton().setToggleState (on, juce::dontSendNotification);
-        };
-
         area->onMove = [this] (View view, Panel to, int index) { moveView (view, to, index); };
         area->onReset = [this] { commands.invoke ("view.resetViewPlaces"); };
     }

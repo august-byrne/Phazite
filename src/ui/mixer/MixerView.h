@@ -3,13 +3,13 @@
 // order and colors, so folders come with their tracks after them; then the return tracks, together next to the
 // master, as in Ableton Live, with a slim column after them whose "+" adds a return; and the master on the right, with its
 // effects and its loudness meter. Selecting a channel outlines the ones it feeds and those that feed it, through sends,
-// buses and sidechains. The Routing switch, in the tab bar above it (Panels.h), shows every channel's wires instead, in
-// the routing view (RoutingView.h). It has no row of its own (the owner, 2026-11-01: the row took height the strips need).
+// buses and sidechains: routing is set on the strips and shows from the selection, with no view apart (the owner,
+// 2026-11-01, after an audit of how DAWs route: docs/design.md, section 8). It has no row of its own (the owner,
+// 2026-11-01: the row took height the strips need).
 #pragma once
 
 #include "ChannelStrip.h"
 #include "MasterStrip.h"
-#include "RoutingView.h"
 #include "model/project/ProjectContext.h"
 #include "ui/theme/Icons.h"
 
@@ -25,10 +25,6 @@ public:
     // Shows the open project's channels, and none while no project is open.
     MixerView (CommandBridge&, ProjectContext&);
     ~MixerView() override;
-
-    // Every channel's wires in place of the strips, or the strips again (the tab bar's Routing switch).
-    void showRouting (bool);
-    bool isShowingRouting() const noexcept { return routingViewport.isVisible(); }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -46,8 +42,6 @@ private:
     int firstReturn = 0;                   // the index of the first return's strip
     MasterStrip master;
     IconButton addReturnButton { "Add Return Track", Icon::plus }; // in a slim column after the returns, left of the master
-    juce::Viewport routingViewport;
-    RoutingView routing;
 
     void showProject(); // the open project's channels, or none while no project is open
     void rebuild();     // after tracks were added, deleted or moved

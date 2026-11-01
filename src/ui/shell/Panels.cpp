@@ -15,7 +15,6 @@ namespace phazite::ui
 namespace
 {
     constexpr int tabBarDepth = 32;
-    constexpr int routingButtonWidth = 80;
     constexpr int dragThreshold = 4; // how far a tab moves before it is dragged rather than clicked
     constexpr const char* dragPrefix = "phazite.view:";
     constexpr std::array allViews { View::playlist, View::mixer, View::clipEditor, View::devices };
@@ -289,16 +288,6 @@ ViewArea::ViewArea (Panel which, const Views& shown)
 
     for (auto& holder : holders)
         holder.setTitle ("View");
-
-    routingButton.setClickingTogglesState (true);
-    routingButton.setTooltip ("Shows every channel's wires in place of the mixer's strips: where its sound goes, its sends and the "
-                              "sidechains that listen to it. Drag from a channel's Out to route it");
-    routingButton.onClick = [this]
-    {
-        if (onRoutingChanged != nullptr)
-            onRoutingChanged (routingButton.getToggleState());
-    };
-    addChildComponent (routingButton);
 }
 
 ViewArea::~ViewArea() = default;
@@ -395,8 +384,6 @@ void ViewArea::currentTabChanged (int index, const juce::String&)
 
     if (tab == ViewTab::instrument || tab == ViewTab::effects)
         views.devices.showPage (tab == ViewTab::instrument ? DevicesView::Page::instrument : DevicesView::Page::effects);
-
-    resized(); // the Routing switch shows with the mixer
 }
 
 void ViewArea::refreshTooltips (const CommandBridge& commands)
@@ -483,17 +470,6 @@ void ViewArea::resized()
 
     for (auto& holder : holders)
         holder.resized();
-
-    // While the mixer shows here, its Routing switch at the end of the tab bar, before the corner.
-    routingButton.setVisible (getShownTab() == ViewTab::mixer);
-
-    if (routingButton.isVisible())
-    {
-        auto& bar = getTabbedButtonBar();
-        auto barArea = bar.getBounds();
-        routingButton.setBounds (barArea.removeFromRight (routingButtonWidth).reduced (0, Space::xs));
-        bar.setBounds (barArea.withTrimmedRight (Space::xs));
-    }
 }
 
 //==============================================================================
