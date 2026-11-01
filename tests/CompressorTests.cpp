@@ -4,6 +4,7 @@
 #include "TestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <type_traits>
@@ -108,7 +109,9 @@ TEST_CASE ("The compressor's description holds together")
 {
     REQUIRE (devices::isValid (Compressor::info));
     CHECK (Compressor::info.parameters.size() == (size_t) Compressor::mix + 1);
-    CHECK (devices::findParameter (Compressor::info, "inputGain") == 0); // first, as the sound goes
+    CHECK (devices::findParameter (Compressor::info, "character") == 0);                     // first: what kind of compressor it is
+    CHECK (devices::findParameter (Compressor::info, "inputGain") == Compressor::inputGain); // then as the sound goes
+    CHECK (devices::findParameter (Compressor::info, "drive") == Compressor::drive);
     CHECK (devices::findParameter (Compressor::info, "threshold") == Compressor::threshold);
     CHECK (devices::findParameter (Compressor::info, "keyLowCut") == Compressor::keyLowCut);
     CHECK (devices::findParameter (Compressor::info, "keyHighCut") == Compressor::keyHighCut);
@@ -368,4 +371,104 @@ TEST_CASE ("The compressor plays its key while its editor listens, through its c
     CHECK_FALSE (compressor.isPlayingKey());
     play (compressor, values, 4800, sound, key);
     CHECK_FALSE (compressor.overridesMix());
+}
+
+TEST_CASE ("The compressor's characters: a tube's ratio grows over 15 dB, an Opto's knee is soft, and the curve reports them")
+{
+    auto values = getDefaults(); // -18 dB, 4:1, a 6 dB knee
+    const auto slope = 0.75f;
+
+    // Tube: nothing at the threshold, the reduction growing as the square of how far over it is, then as the ratio set.
+    values[Compressor::character] = (float) Compressor::Character::tube;
+    CHECK (Compressor::getReduction (values, -18.0f) == doctest::Approx (0.0f));
+    CHECK (Compressor::getReduction (values, -20.0f) == doctest::Approx (0.0f)); // no knee below the threshold
+    CHECK (Compressor::getReduction (values, -10.5f) == doctest::Approx (slope * 7.5f * 7.5f / 30.0f));
+    CHECK (Compressor::getReduction (values, -3.0f) == doctest::Approx (slope * 7.5f));
+    CHECK (Compressor::getReduction (values, 0.0f) == doctest::Approx (slope * 10.5f));
+
+    // Opto: a knee at least 12 dB wide, so it starts 6 dB under the threshold however hard the knee is set.
+    values[Compressor::character] = (float) Compressor::Character::opto;
+    values[Compressor::knee] = 0.0f;
+    CHECK (Compressor::getReduction (values, -24.5f) == doctest::Approx (0.0f));
+    CHECK (Compressor::getReduction (values, -18.0f) == doctest::Approx (slope * 36.0f / 24.0f));
+    CHECK (Compressor::getReduction (values, -6.0f) == doctest::Approx (slope * 12.0f));
+}
+
+TEST_CASE ("The compressor's characters hear differently: VCA the average, FET what it puts out, Opto letting go slowly")
+{
+    // How far each turns down: a millisecond's burst 10 dB over the threshold every 1000 samples, and a steady level 12 dB
+    // over.
+    const auto reductionOf = [] (Compressor::Character character, auto input, int numSamples)
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        auto values = getTestValues();
+        values[Compressor::character] = (float) character;
+        play (compressor, values, numSamples, input);
+        return compressor.getReductionMeter().take();
+    };
+
+    const auto clicks = [] (int time, int) { return time % 1000 < 48 ? steady (time, -16.0f) : 0.0f; };
+    const auto clean = reductionOf (Compressor::Character::clean, clicks, 10000);
+    const auto vca = reductionOf (Compressor::Character::vca, clicks, 10000);
+    CHECK (clean > 1.0f);
+    CHECK (vca < 0.5f * clean); // a burst is short: its average is lower than its peaks
+
+    // At a steady level 12 dB over the threshold, 4:1 settles 9 dB down; listening to what it puts out, FET settles where
+    // what comes out is as far over as the curve allows, less far.
+    const auto level = [] (int time, int) { return steady (time, -14.0f); };
+    CHECK (reductionOf (Compressor::Character::clean, level, 24000) == doctest::Approx (9.0f).epsilon (0.02));
+    const auto fet = reductionOf (Compressor::Character::fet, level, 24000);
+    CHECK (fet > 1.0f);
+    CHECK (fet < 8.0f);
+
+    // Opto lets go at the release set for the first half of the way, then slower: half a second after a loud part, it is
+    // still further down than Clean.
+    const auto releaseAfter = [] (Compressor::Character character)
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        auto values = getTestValues();
+        values[Compressor::character] = (float) character;
+        play (compressor, values, 24000, [] (int time, int) { return steady (time, -6.0f); });
+        const auto played = play (compressor, values, 24000, [] (int time, int) { return steady (time, -40.0f); });
+        return -gainAt (played[0], 23999, -40.0f);
+    };
+
+    CHECK (releaseAfter (Compressor::Character::clean) == doctest::Approx (0.0f).epsilon (0.05)); // 10 release times later
+    CHECK (releaseAfter (Compressor::Character::opto) > 0.5f);
+}
+
+TEST_CASE ("The compressor's drive saturates what it puts out in its character's colour, and leaves quiet sound be")
+{
+    // A sine at a level, through a compressor that turns nothing down (a threshold at the top), driven all the way.
+    const auto drive = [] (Compressor::Character character, float decibels)
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        auto values = getDefaults();
+        values[Compressor::character] = (float) character;
+        values[Compressor::threshold] = 0.0f;
+        values[Compressor::knee] = 0.0f;
+        values[Compressor::drive] = 1.0f;
+        const auto sine = [decibels] (int time, int)
+        { return toGain (decibels) * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 200.0 * time / testRate); };
+        auto played = play (compressor, values, 24000, sine)[0];
+        played.erase (played.begin(), played.begin() + 12000); // after the DC blocker settles
+        const auto [lowest, highest] = std::minmax_element (played.begin(), played.end());
+        return std::pair { *lowest, *highest };
+    };
+
+    // Quiet, it passes nearly as it came: the curve is straight there and drive takes back its own gain.
+    const auto [quietLow, quietHigh] = drive (Compressor::Character::clean, -40.0f);
+    CHECK (quietHigh == doctest::Approx (toGain (-40.0f)).epsilon (0.02));
+
+    // Loud, its peaks round off: lower than they came in, the same both ways for FET's odd harmonics...
+    const auto [fetLow, fetHigh] = drive (Compressor::Character::fet, -3.0f);
+    CHECK (fetHigh < 0.9f * toGain (-3.0f));
+    CHECK (-fetLow == doctest::Approx (fetHigh).epsilon (0.02));
+
+    // ...and lopsided for a tube's even ones, driven less hard, where they show most.
+    const auto [tubeLow, tubeHigh] = drive (Compressor::Character::tube, -20.0f);
+    CHECK (std::abs (-tubeLow - tubeHigh) > 0.1f * tubeHigh);
 }

@@ -247,4 +247,95 @@ void ParameterControls::resized()
             control.value->setBounds (cell.removeFromTop (labelHeight));
     }
 }
+
+//==============================================================================
+ChoiceButtons::ChoiceButtons (const DeviceHandle& device, std::string_view parameterID, Direction d,
+                              const std::vector<juce::String>& tooltips)
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
+      parameter (device.getParameter (parameterID)),
+      direction (d)
+{
+    const auto info = parameter.getInfo();
+
+    if (! info.has_value())
+        return;
+
+    setTitle (toString (info->name));
+    const auto count = (int) info->choices.size();
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto& button = *buttons.add (std::make_unique<juce::TextButton> (toString (info->choices[(size_t) i])));
+        button.setTitle (toString (info->name) + ": " + button.getButtonText());
+
+        if (juce::isPositiveAndBelow (i, (int) tooltips.size()))
+            button.setTooltip (tooltips[(size_t) i]);
+
+        const auto before = direction == Direction::across ? juce::Button::ConnectedOnLeft : juce::Button::ConnectedOnTop;
+        const auto after = direction == Direction::across ? juce::Button::ConnectedOnRight : juce::Button::ConnectedOnBottom;
+        button.setConnectedEdges ((i > 0 ? before : 0) | (i + 1 < count ? after : 0));
+        button.onClick = [this, i]
+        {
+            if (juce::roundToInt (parameter.getValue() - parameter.getRange().start) != i)
+                parameter.setValue (parameter.getRange().start + (float) i);
+
+            refresh();
+        };
+        addAndMakeVisible (button);
+    }
+
+    refresh();
+}
+
+ChoiceButtons::~ChoiceButtons() = default;
+
+int ChoiceButtons::getPreferredWidth() const
+{
+    auto widest = 0;
+
+    for (auto* button : buttons)
+        widest = std::max (widest, button->getBestWidthForHeight (controlHeight));
+
+    return direction == Direction::across ? widest * buttons.size() : widest;
+}
+
+int ChoiceButtons::getPreferredHeight() const
+{
+    return direction == Direction::across ? controlHeight : controlHeight * buttons.size();
+}
+
+void ChoiceButtons::refresh()
+{
+    const auto chosen = juce::roundToInt (parameter.getValue() - parameter.getRange().start);
+
+    for (int i = 0; i < buttons.size(); ++i)
+        buttons[i]->setToggleState (i == chosen, juce::dontSendNotification);
+}
+
+void ChoiceButtons::resized()
+{
+    if (buttons.isEmpty())
+        return;
+
+    auto area = getLocalBounds();
+
+    // Shared evenly, the last taking what is left; across, at most controlHeight tall, in the middle.
+    if (direction == Direction::across)
+        area = area.withSizeKeepingCentre (area.getWidth(), std::min (area.getHeight(), controlHeight));
+
+    const auto count = buttons.size();
+    const auto step = (direction == Direction::across ? area.getWidth() : area.getHeight()) / count;
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto* button = buttons[i];
+
+        if (i + 1 == count)
+            button->setBounds (area);
+        else if (direction == Direction::across)
+            button->setBounds (area.removeFromLeft (step));
+        else
+            button->setBounds (area.removeFromTop (step));
+    }
+}
 } // namespace phazite::ui

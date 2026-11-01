@@ -20,9 +20,19 @@ namespace
     {
         return Compressor::info.parameters[(size_t) index];
     }
+
+    // What each character is for, as its button's tooltip says.
+    const std::vector<juce::String> characterTips {
+        "Clean: hears each peak and turns it down as set, with no colour of its own",
+        "VCA: hears the average level, so short peaks pass through: punchy, for drums and buses",
+        "FET: listens to what it puts out and grips fast: aggressive, for drums and vocals; Drive adds odd harmonics",
+        "Opto: lets go fast at first, then slowly, the longer it held the slower, with a soft knee: smooth, for vocals and bass",
+        "Tube: its ratio grows with the level, from none at the threshold: gentle glue for a mix; Drive adds even harmonics",
+    };
 } // namespace
 
 //==============================================================================
+// The curve: how loud each level comes out once the compressor has settled, with the makeup.
 class CompressorEditor::Graph : public juce::Component
 {
 public:
@@ -30,14 +40,12 @@ public:
         : editor (e),
           threshold (editor.device.getParameter (getInfo (Compressor::threshold).id)),
           ratio (editor.device.getParameter (getInfo (Compressor::ratio).id)),
-          knee (editor.device.getParameter (getInfo (Compressor::knee).id)),
           makeup (editor.device.getParameter (getInfo (Compressor::makeup).id))
     {
         setTitle ("Compressor curve");
-        setDescription ("How loud each level comes out, with a dot at the level the compressor hears, and a meter of how far it "
+        setDescription ("How loud each level comes out, with a dot at the level the compressor hears and a meter of how far it "
                         "turns the sound down. Drag across it to move the threshold (the ring); drag the line above the threshold "
-                        "up or down for the ratio, the line below it for the makeup gain. The wheel bends the knee at the threshold, "
-                        "and above it changes the ratio.");
+                        "up or down for the ratio, the line below it for the makeup gain.");
     }
 
     juce::Rectangle<float> getCurveArea() const
@@ -64,12 +72,13 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto& palette = getPalette (*this);
+        const auto tint = getDeviceTint (*this);
         const auto area = getCurveArea();
         g.setColour (palette.background);
         g.fillRoundedRectangle (area, cornerRadius);
         paintGrid (g, palette, area);
 
-        // The curve, within the graph.
+        // The curve, within the graph, over a faint wash of what it lets through.
         juce::Path curve;
 
         for (auto x = area.getX(); x <= area.getRight(); x += 1.5f)
@@ -83,35 +92,38 @@ public:
                 curve.lineTo (clipped);
         }
 
-        g.setColour (palette.text);
+        auto wash = curve;
+        wash.lineTo (area.getBottomRight());
+        wash.lineTo (area.getBottomLeft());
+        wash.closeSubPath();
+        g.setColour (tint.withAlpha (GraphTint::partCurve));
+        g.fillPath (wash);
+        g.setColour (tint);
         g.strokePath (curve, juce::PathStrokeType (GraphTint::curveWidth));
 
-        // Where it can be taken: a ring at the threshold, which a drag across moves, and a point at the line's top end, whose
-        // height is the ratio. Larger while the pointer is on their part.
+        // The threshold's ring, which a drag across moves; larger while the pointer is on its part.
         const auto thresholdLevel = editor.values[Compressor::threshold];
-        const auto ring = getPosition (thresholdLevel, outputFor (thresholdLevel));
-        const auto end = getPosition (0.0f, juce::jlimit (lowestLevel, 0.0f, outputFor (0.0f)));
-        const auto size = [this] (Zone zone) { return 2.0f * GraphTint::handleRadius * (zone == hovered ? 1.5f : 1.0f); };
-        g.setColour (getDeviceTint (*this));
-        g.drawEllipse (juce::Rectangle<float> (size (Zone::threshold), size (Zone::threshold)).withCentre (ring), GraphTint::handleOutline);
-        g.fillEllipse (
-            juce::Rectangle<float> (size (Zone::ratio), size (Zone::ratio)).withCentre (end.withX (end.x - size (Zone::ratio) / 2.0f)));
+        const auto ring = getPosition (thresholdLevel, juce::jlimit (lowestLevel, 0.0f, outputFor (thresholdLevel)));
+        const auto size = 2.0f * GraphTint::handleRadius * (hovered == Zone::threshold ? 1.5f : 1.0f);
+        g.setColour (palette.background);
+        g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (ring));
+        g.setColour (tint);
+        g.drawEllipse (juce::Rectangle<float> (size, size).withCentre (ring), GraphTint::handleOutline);
 
         // The level the compressor hears, riding the curve.
         if (editor.shownLevel > lowestLevel)
         {
             const auto in = std::min (editor.shownLevel, 0.0f);
             const auto dot = getPosition (in, juce::jlimit (lowestLevel, 0.0f, outputFor (in)));
-            g.setColour (getDeviceTint (*this));
+            g.setColour (palette.text);
             g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (dot));
         }
 
         paintMeter (g, palette);
     }
 
-    // What a press takes, by where it is (the owner, 2026-11-01: a picture's points and lines should move as its knobs do):
-    // near the threshold, the threshold (dragged across); the line above it, the ratio (up and down, as Kilohearts' Dynamics
-    // sets it); the line below it, the makeup (up and down, the whole curve with it) and the threshold (across).
+    // What a press takes, by where it is: near the threshold, the threshold (dragged across); the line above it, the ratio
+    // (up and down); the line below it, the makeup (up and down, the whole curve with it) and the threshold (across).
     enum class Zone
     {
         threshold,
@@ -156,8 +168,6 @@ public:
     // the line passing under the pointer, or for the makeup.
     void mouseDown (const juce::MouseEvent& e) override
     {
-        wheel.end(); // a step of its own, not the wheel's
-
         if (e.mods.isPopupMenu())
             return;
 
@@ -221,26 +231,9 @@ public:
         dragged.reset();
     }
 
-    // The wheel bends the knee at the threshold (and below it), and above it changes the ratio; one undo step until it rests.
-    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details) override
-    {
-        const auto step = details.deltaY > 0.0f ? 1.0f : details.deltaY < 0.0f ? -1.0f : 0.0f;
-
-        if (juce::approximatelyEqual (step, 0.0f))
-            return;
-
-        if (getZone (e.position) == Zone::ratio)
-            wheel.turn (ratio, devices::constrain (getInfo (Compressor::ratio), ratio.getValue() * std::pow (1.1f, step)));
-        else
-            wheel.turn (knee, devices::constrain (getInfo (Compressor::knee), knee.getValue() + step));
-
-        editor.refresh();
-    }
-
 private:
     CompressorEditor& editor;
-    ParameterHandle threshold, ratio, knee, makeup;
-    graph::WheelGesture wheel; // after the handles it turns
+    ParameterHandle threshold, ratio, makeup;
     float startThreshold = 0.0f, startMakeup = 0.0f;
     std::optional<Zone> hovered, dragged;
 
@@ -261,11 +254,9 @@ private:
                 juce::Justification::centredLeft);
         }
 
-        // Level in equals level out, and the threshold.
+        // Level in equals level out.
         g.setColour (palette.text.withAlpha (GraphTint::zeroLine));
         g.drawLine ({ getPosition (lowestLevel, lowestLevel), getPosition (0.0f, 0.0f) });
-        g.setColour (getDeviceTint (*this).withAlpha (GraphTint::marker));
-        g.drawVerticalLine (juce::roundToInt (getPosition (editor.values[Compressor::threshold], 0.0f).x), area.getY(), area.getBottom());
     }
 
     // How far the sound goes down, from the top, with the number of decibels beside it.
@@ -320,35 +311,6 @@ private:
 };
 
 //==============================================================================
-// The curve, then the history beside it.
-class CompressorEditor::Activity : public juce::Component
-{
-public:
-    explicit Activity (CompressorEditor& editor)
-        : graph (editor),
-          history ("Compressor history", lowestLevel, meterRange, 4 * DisplayTicker::ticksPerSecond),
-          threshold (editor.device.getParameter (getInfo (Compressor::threshold).id))
-    {
-        setTitle ("Activity");
-        history.setLine (&threshold, "Threshold");
-        addAndMakeVisible (graph);
-        addAndMakeVisible (history);
-    }
-
-    void resized() override
-    {
-        auto area = getLocalBounds();
-        graph.setBounds (area.removeFromLeft (std::min (area.getWidth() / 2, area.getHeight() + Space::s + GraphTint::meterWidth)));
-        area.removeFromLeft (Space::s);
-        history.setBounds (area);
-    }
-
-    Graph graph;
-    LevelHistoryView history;
-    ParameterHandle threshold; // the history's line
-};
-
-//==============================================================================
 CompressorEditor::CompressorEditor (const DeviceHandle& handle)
     : DeviceEditorBase (handle),
       DisplayTicker::Display (static_cast<juce::Component&> (*this)),
@@ -360,8 +322,12 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle)
         values.push_back (parameter.defaultValue);
     }
 
-    auto& shownActivity = keep (std::make_unique<Activity> (*this));
-    activity = &shownActivity;
+    auto& shownGraph = keep (std::make_unique<Graph> (*this));
+    graph = &shownGraph;
+    auto& shownCharacters = keep (
+        std::make_unique<ChoiceButtons> (device, getInfo (Compressor::character).id, ChoiceButtons::Direction::across, characterTips));
+    characters = &shownCharacters;
+    addControl (getInfo (Compressor::character).id, shownCharacters);
 
     // The meters' first readings would show what played before the editor opened.
     if (auto* compressor = device.getProcessor<Compressor>())
@@ -372,31 +338,23 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle)
 
     const auto main = makeControlsPart ("Squeeze", { "threshold", "ratio" }, 2, ParameterControls::Size::large);
     const auto timing = makeControlsPart ("Timing", { "attack", "release" }, 2);
-    const auto shape =
-        makeControlsPart ("Gain and Knee", { "inputGain", "knee", "makeup" }, 3, ParameterControls::Size::compact, { "In", "Knee", "Out" });
+    const auto tone = makeControlsPart ("Tone", { "knee", "drive", "inputGain", "makeup" }, 4, ParameterControls::Size::compact,
+                                        { "Knee", "Drive", "In", "Out" });
     auto& cuts = makeControls ({ "keyLowCut", "keyHighCut" }, 2, ParameterControls::Size::compact, "Key", { "Low Cut", "High Cut" });
     auto& shownKey = keep (std::make_unique<KeyPart> (cuts));
     keyPart = &shownKey;
 
-    setParts ({ { { "Activity", &shownActivity, 340, 196, 110, true } },
+    const auto width = std::max (240, shownCharacters.getPreferredWidth());
+    setParts ({ { { "Character", &shownCharacters, width, controlHeight, controlHeight }, { "Curve", &shownGraph, width, 180, 110, true } },
                 { main, timing },
-                { shape, { "Key", &shownKey, shownKey.getPreferredWidth(), cuts.getPreferredHeight(), cuts.getPreferredHeight() } } });
+                { tone, { "Sidechain", &shownKey, shownKey.getPreferredWidth(), cuts.getPreferredHeight(), cuts.getPreferredHeight() } } });
 }
 
-CompressorEditor::~CompressorEditor()
-{
-    if (auto* scope = device.getScope())
-        scope->setListening (false);
-}
+CompressorEditor::~CompressorEditor() = default;
 
 juce::Component& CompressorEditor::getGraph()
 {
-    return activity->graph;
-}
-
-LevelHistoryView& CompressorEditor::getHistory()
-{
-    return activity->history;
+    return *graph;
 }
 
 juce::Button& CompressorEditor::getListenButton()
@@ -404,9 +362,14 @@ juce::Button& CompressorEditor::getListenButton()
     return keyPart->listen;
 }
 
+juce::Button& CompressorEditor::getCharacterButton (int character)
+{
+    return characters->getButton (character);
+}
+
 juce::Point<float> CompressorEditor::getGraphPosition (float inputDecibels, float outputDecibels) const
 {
-    return activity->graph.getPosition (inputDecibels, outputDecibels);
+    return graph->getPosition (inputDecibels, outputDecibels);
 }
 
 void CompressorEditor::refresh()
@@ -415,26 +378,14 @@ void CompressorEditor::refresh()
         if (parameters[i].isValid())
             values[i] = parameters[i].getValue();
 
-    // The meters jump up and fall back smoothly; the history takes each reading as it comes, with what goes out.
+    characters->refresh();
+
+    // The meters jump up and fall back smoothly.
     if (auto* compressor = device.getProcessor<Compressor>())
     {
         const auto level = compressor->getLevelMeter().take(), reduction = compressor->getReductionMeter().take();
         shownLevel = std::max (level, shownLevel - meterFall);
         shownReduction = std::max (reduction, shownReduction - meterFall);
-
-        auto output = devices::DeviceScope::silentDecibels;
-
-        if (auto* scope = device.getScope())
-        {
-            scope->setListening (true);
-            output = scope->getOutputPeak().take();
-        }
-
-        activity->history.push (level, output, reduction);
-
-        // What it hears, when that is another track: in that track's colour, named, so that what ducks the sound shows.
-        const auto key = device.getSidechainSource();
-        activity->history.setKey (key.name, key.colour);
 
         // Listen: the key, for as long as the editor shows and asks.
         if (keyPart->listen.getToggleState())
@@ -446,6 +397,6 @@ void CompressorEditor::refresh()
     numbers.insert (numbers.end(), { shownLevel, shownReduction });
 
     if (drawnGraph.changed (std::move (numbers)))
-        activity->graph.repaint();
+        graph->repaint();
 }
 } // namespace phazite::ui

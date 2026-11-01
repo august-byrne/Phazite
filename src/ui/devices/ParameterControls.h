@@ -63,4 +63,43 @@ private:
 
 // A parameter's name without the words before it that its part's title has already said.
 juce::String getShownName (const juce::String& name, const juce::String& partTitle);
+
+//==============================================================================
+// A choice's options as buttons, side by side or one above another (a switch's positions), the one chosen lit: a click picks
+// one, as one undo step, as a compressor's characters and a multiband's band modes are picked. The DisplayTicker shows
+// changes made elsewhere (automation, undo).
+class ChoiceButtons : public juce::Component,
+                      private DisplayTicker::Display
+{
+public:
+    enum class Direction
+    {
+        across,
+        down
+    };
+
+    // Each option's tooltip, in the choice's order, when given.
+    ChoiceButtons (const DeviceHandle&, std::string_view parameterID, Direction = Direction::across,
+                   const std::vector<juce::String>& tooltips = {});
+    ~ChoiceButtons() override;
+
+    juce::Button& getButton (int index) { return *buttons[index]; }
+    int getNumButtons() const noexcept { return buttons.size(); }
+
+    // The size it takes: each button as wide as its text needs, controlHeight tall.
+    int getPreferredWidth() const;
+    int getPreferredHeight() const;
+
+    // The button of the option chosen now lit; the ticker does it.
+    void refresh();
+
+    void resized() override;
+
+private:
+    ParameterHandle parameter;
+    const Direction direction;
+    juce::OwnedArray<juce::TextButton> buttons;
+
+    void tick() override { refresh(); }
+};
 } // namespace phazite::ui

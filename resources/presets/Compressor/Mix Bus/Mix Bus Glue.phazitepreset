@@ -5,6 +5,7 @@
     "instrument": false,
     "type": "phaziteCompressor",
     "parameters": {
+      "character": 4,
       "inputGain": 0.0,
       "threshold": -14.0,
       "ratio": 2.0,
@@ -12,6 +13,7 @@
       "release": 200.0,
       "knee": 12.0,
       "makeup": 1.5,
+      "drive": 0.1,
       "keyLowCut": 90.0,
       "keyHighCut": 20000.0,
       "mix": 1.0

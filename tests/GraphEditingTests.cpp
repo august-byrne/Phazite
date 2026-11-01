@@ -162,7 +162,7 @@ TEST_CASE ("An LFO's picture sets its depth with a drag up or down, and its rate
     CHECK (valueOf (song, synth, "lfoRate") == doctest::Approx (rate * 1.1f).epsilon (0.01));
 }
 
-TEST_CASE ("A compressor's curve: the line above the threshold drags the ratio, below it the makeup, and the wheel bends the knee")
+TEST_CASE ("A compressor's curve: the line above the threshold drags the ratio, below it the makeup, and the wheel changes nothing")
 {
     using phazite::devices::Compressor;
     phazite::test::TestSong song;
@@ -187,12 +187,12 @@ TEST_CASE ("A compressor's curve: the line above the threshold drags the ratio, 
     CHECK (valueOf (song, device, "threshold") == doctest::Approx (-18.0f));
     CHECK (describeUndo (song) == juce::String ("Undo Change Threshold"));
 
-    // The wheel at the threshold bends the knee a decibel a notch; above it, it changes the ratio by a tenth.
+    // The wheel is the view's, to scroll it: no compressor's graph found turns anything with it (docs/design.md, B123).
+    const auto ratio = valueOf (song, device, "ratio"), knee = valueOf (song, device, "knee");
     mouse.wheel (at (-18.0f, -12.0f), notchUp);
-    CHECK (valueOf (song, device, "knee") == doctest::Approx (7.0f));
-    const auto ratio = valueOf (song, device, "ratio");
     mouse.wheel (at (-6.0f, -6.0f), notchUp);
-    CHECK (valueOf (song, device, "ratio") == doctest::Approx (ratio * 1.1f).epsilon (0.01));
+    CHECK (valueOf (song, device, "knee") == doctest::Approx (knee));
+    CHECK (valueOf (song, device, "ratio") == doctest::Approx (ratio));
 }
 
 TEST_CASE ("The stereo expander's fan follows a drag across its disc, and the wheel opens or closes it a step at a time")

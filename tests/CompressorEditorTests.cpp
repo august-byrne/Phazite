@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The compressor's editor (src/ui/devices/CompressorEditor.h): its knobs, its curve, its meters, and its key's cuts with
-// Listen.
+// The compressor's editor (src/ui/devices/CompressorEditor.h): its characters' buttons, its knobs, its curve, its meter, and
+// its key's cuts with Listen.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -11,7 +11,6 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/mixer/internal/Sidechain.h"
 #include "model/project/internal/Project.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DeviceEditors.h"
@@ -68,7 +67,7 @@ void play (Compressor& compressor, float decibels, int numSamples)
 }
 } // namespace
 
-TEST_CASE ("The compressor's editor shows its knobs, and dragging across its curve moves the threshold as one undo step")
+TEST_CASE ("The compressor's editor shows its characters and knobs, and dragging across its curve moves the threshold as one undo step")
 {
     Song song;
     const auto device = phazite::makeDeviceHandle (*song.compressor);
@@ -76,7 +75,9 @@ TEST_CASE ("The compressor's editor shows its knobs, and dragging across its cur
 
     phazite::ui::CompressorEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Compressor::info.parameters.size() - 1); // its mix is its header's
+    // A knob for each parameter but its character, a row of buttons, and its mix, its header's.
+    CHECK (phazite::test::findAll<phazite::ui::Knob> (editor).size() == Compressor::info.parameters.size() - 2);
+    CHECK (editor.findControl ("character") != nullptr);
     CHECK (editor.findControl ("mix") == nullptr);
     phazite::test::checkChildrenApart (editor);
 
@@ -139,20 +140,29 @@ TEST_CASE ("The compressor's editor shows the level it hears and how far it turn
     CHECK (editor.getShownReduction() == doctest::Approx (8.5f).epsilon (0.01));
 }
 
-TEST_CASE ("The compressor's history shows the track its sidechain listens to, in that track's colour and named")
+TEST_CASE ("The compressor's characters are a row of buttons: a click picks one as one undo step, and the one in use is lit")
 {
     Song song;
     phazite::ui::CompressorEditor editor ((phazite::makeDeviceHandle (*song.compressor)));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     editor.refresh();
-    CHECK (editor.getHistory().getKeyName().isEmpty()); // the sound itself, pale
+    CHECK (editor.getCharacterButton (0).getToggleState()); // Clean at first
+    CHECK (editor.getCharacterButton (0).getButtonText() == juce::String ("Clean"));
+    CHECK (editor.getCharacterButton (4).getButtonText() == juce::String ("Tube"));
 
-    phazite::setSidechainSource (*song.compressor, te::getAudioTracks (*song.edit)[0]);
-    editor.refresh();
-    CHECK (editor.getHistory().getKeyName() == juce::String ("Kick"));
+    // Opto: a click, one undo step, and its button lit alone.
+    phazite::test::Mouse mouse (editor.getCharacterButton (3));
+    mouse.click (editor.getCharacterButton (3).getLocalBounds().getCentre());
+    CHECK (song.valueOf ("character") == doctest::Approx ((float) Compressor::Character::opto));
+    CHECK (phazite::describeUndo (song.edit.get()) == juce::String ("Undo Change Character"));
+    CHECK (editor.getCharacterButton (3).getToggleState());
+    CHECK_FALSE (editor.getCharacterButton (0).getToggleState());
 
-    phazite::setSidechainSource (*song.compressor, nullptr);
+    // Undone, the editor shows Clean again at its next refresh.
+    phazite::undo (*song.edit);
     editor.refresh();
-    CHECK (editor.getHistory().getKeyName().isEmpty());
+    CHECK (editor.getCharacterButton (0).getToggleState());
+    CHECK_FALSE (editor.getCharacterButton (3).getToggleState());
 }
 
 TEST_CASE ("How far the compressor turns the sound down reads the same for any number of displays, then falls back")
