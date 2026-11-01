@@ -112,19 +112,38 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
         lessonCard.toFront (false);
     };
 
-    // Double-clicking a clip opens it in the editor dock, a MIDI clip in the piano roll and an audio clip in the audio clip
+    // Double-clicking a clip opens it in its editor, a MIDI clip in the piano roll and an audio clip in the audio clip
     // editor, which then has the keys.
     playlist.onOpenClip = [this] (ClipID clip)
     {
-        editorDock.openClip (clip);
-        revealEditor (EditorDock::clipEditor);
-        auto& editor = editorDock.getClipEditor();
+        clipEditor.openClip (clip);
+        revealView (ViewTab::clipEditor);
+        auto& editor = clipEditor.getEditor();
         editor.grabKeyboardFocus();
         setActiveEditor (&editor);
     };
 
-    // The mixer's Routing switch is in the song's tab bar, so that the mixer has no row of its own for it.
-    songViews.onRoutingChanged = [this] (bool on) { mixer.showRouting (on); };
+    // The mixer's Routing switch is in the tab bar of the area the mixer is in, so that the mixer has no row of its own for
+    // it. And the views move between the areas by their tabs (Panels.h).
+    for (auto* area : { &upperArea, &lowerArea })
+    {
+        area->onRoutingChanged = [this] (bool on)
+        {
+            mixer.showRouting (on);
+
+            for (auto* each : { &upperArea, &lowerArea })
+                each->getRoutingButton().setToggleState (on, juce::dontSendNotification);
+        };
+
+        area->onMove = [this] (View view, Panel to, int index) { moveView (view, to, index); };
+        area->onReset = [this] { commands.invoke ("view.resetViewPlaces"); };
+    }
+
+    clipEditor.onEditorChanged = [this]
+    {
+        upperArea.refreshTabs();
+        lowerArea.refreshTabs();
+    };
 
     // Enter or a double-click in the browser, and the plug-in picker.
     browser.onPlace = [this] (const LibraryItem& item) { return placeItem (item); };
@@ -136,7 +155,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
                                                              &inspector, &statusBar, &browserButtons, &inspectorButtons })
         addAndMakeVisible (c);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &songViews, &editorDivider, &editorDock, &songButtons, &editorButtons })
+    for (auto* c : std::initializer_list<juce::Component*> { &upperArea, &editorDivider, &lowerArea, &songButtons, &editorButtons })
         centre.addAndMakeVisible (c);
 
     centre.onResize = [this] { layOutCentre(); };
@@ -146,7 +165,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     browserDivider.onDrag = [this] (int distance) { dragDivider (Panel::browser, distance); };
     inspectorDivider.onDragStart = [this] { sizeAtDragStart = inspector.getWidth(); };
     inspectorDivider.onDrag = [this] (int distance) { dragDivider (Panel::inspector, distance); };
-    editorDivider.onDragStart = [this] { sizeAtDragStart = editorDock.getHeight(); };
+    editorDivider.onDragStart = [this] { sizeAtDragStart = lowerArea.getHeight(); };
     editorDivider.onDrag = [this] (int distance) { dragDivider (Panel::editor, distance); };
 
     // Clicking in an editor makes it the one the time line's commands act on; so does the keyboard focus
@@ -174,8 +193,10 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     addChildComponent (lessonCard.getRing());
     addChildComponent (lessonCard);
 
-    // The panels as they were left, or every panel.
+    // The panels as they were left, or every panel, and the views where they were left.
     panels.setFromText (settings.get (Settings::panelLayout));
+    viewPlaces = ViewPlaces::fromString (settings.get (Settings::viewPlaces));
+    placeViews();
     updateLayout();
 }
 
@@ -235,57 +256,108 @@ void AppShell::setLayout (Layout layout)
         panels.hide (Panel::inspector);
 
     panels.editorShare = layout == Layout::mix ? Shell::mixEditorShare : Shell::editorShare; // tall enough for most devices' editors
-    songViews.showTab (layout == Layout::mix ? SongViews::mixer : SongViews::playlist);
-    editorDock.showTab (layout == Layout::mix ? EditorDock::effects : EditorDock::clipEditor);
+    // The layout's views, wherever they are: its main one last, so that it shows where both are in one area.
+    const auto tabs =
+        layout == Layout::mix ? std::array { ViewTab::effects, ViewTab::mixer } : std::array { ViewTab::clipEditor, ViewTab::playlist };
+
+    for (const auto tab : tabs)
+        getAreaOf (tab).showTab (tab);
+
     updateLayout();
 }
 
-void AppShell::showEditor (EditorDock::Tab tab)
+ViewArea& AppShell::getAreaOf (ViewTab tab)
 {
-    // In its own window, the editor just shows that tab.
-    if (editorWindow != nullptr)
+    return upperArea.holds (tab) ? upperArea : lowerArea;
+}
+
+bool AppShell::takesRoom (Panel panel) const
+{
+    // An area without views takes none, as if it were hidden.
+    if ((panel == Panel::song && upperArea.isEmpty()) || (panel == Panel::editor && lowerArea.isEmpty()))
+        return false;
+
+    return panels.takesRoom (panel);
+}
+
+void AppShell::showView (ViewTab tab)
+{
+    auto& area = getAreaOf (tab);
+    const auto lower = area.getArea() == Panel::editor;
+
+    // In its own window, the lower panel just shows that tab.
+    if (lower && editorWindow != nullptr)
     {
-        editorDock.showTab (tab);
+        area.showTab (tab);
         editorWindow->toFront (true);
         return;
     }
 
-    // Like FL Studio's F7: show that editor, or hide it if it is already showing.
-    if (panels.takesRoom (Panel::editor) && editorDock.getCurrentTabIndex() == tab)
+    // In the lower panel, like FL Studio's F7: shows that view, or hides the panel if it shows it already.
+    if (lower && takesRoom (Panel::editor) && area.getShownTab() == tab)
     {
         panels.hide (Panel::editor);
     }
     else
     {
-        panels.show (Panel::editor);
-        editorDock.showTab (tab);
+        panels.show (area.getArea());
+        area.showTab (tab);
     }
 
     updateLayout();
 }
 
-void AppShell::showSongView (SongViews::Tab tab)
+void AppShell::revealView (ViewTab tab)
 {
-    songViews.showTab (tab);
+    auto& area = getAreaOf (tab);
+    area.showTab (tab);
 
-    if (! panels.takesRoom (Panel::song))
-    {
-        panels.show (Panel::song);
-        updateLayout();
-    }
-}
-
-void AppShell::revealEditor (EditorDock::Tab tab)
-{
-    editorDock.showTab (tab);
-
-    if (editorWindow != nullptr)
+    if (area.getArea() == Panel::editor && editorWindow != nullptr)
     {
         editorWindow->toFront (true);
         return;
     }
 
-    panels.show (Panel::editor);
+    panels.show (area.getArea());
+    updateLayout();
+}
+
+void AppShell::placeViews()
+{
+    upperArea.setViews (viewPlaces.upper);
+    lowerArea.setViews (viewPlaces.lower);
+}
+
+void AppShell::moveView (View view, Panel area, int index)
+{
+    viewPlaces.move (view, area, index);
+    settings.set (Settings::viewPlaces, viewPlaces.toString());
+    placeViews();
+
+    // It shows where it went: the devices on the page they showed.
+    switch (view)
+    {
+        case View::playlist:
+            revealView (ViewTab::playlist);
+            break;
+        case View::mixer:
+            revealView (ViewTab::mixer);
+            break;
+        case View::clipEditor:
+            revealView (ViewTab::clipEditor);
+            break;
+        case View::devices:
+        default:
+            revealView (devices.getPage() == DevicesView::Page::instrument ? ViewTab::instrument : ViewTab::effects);
+            break;
+    }
+}
+
+void AppShell::resetViewPlaces()
+{
+    viewPlaces = {};
+    settings.set (Settings::viewPlaces, viewPlaces.toString());
+    placeViews();
     updateLayout();
 }
 
@@ -295,7 +367,7 @@ void AppShell::showSelectedDevice()
         devices.showDevice (selected.front());
 
     // The tab of the page the device is on: its track's instrument, or the effects.
-    revealEditor (devices.getPage() == DevicesView::Page::instrument ? EditorDock::instrument : EditorDock::effects);
+    revealView (devices.getPage() == DevicesView::Page::instrument ? ViewTab::instrument : ViewTab::effects);
 }
 
 void AppShell::showCommandPalette()
@@ -398,12 +470,12 @@ juce::Component& AppShell::getPanel (Panel which)
         case Panel::browser:
             return browser;
         case Panel::song:
-            return songViews;
+            return upperArea;
         case Panel::inspector:
             return inspector;
         case Panel::editor:
         default:
-            return editorDock;
+            return lowerArea;
     }
 }
 
@@ -458,14 +530,23 @@ void AppShell::maximizePanelInUse()
     if (panels.getMaximized().has_value())
         panels.restore();
     else
-        panels.maximize (panels.takesRoom (panelInUse) ? panelInUse : Panel::song);
+        panels.maximize (takesRoom (panelInUse) ? panelInUse : Panel::song);
 
     updateLayout();
 }
 
 void AppShell::toggleMixer()
 {
-    showSongView (panels.takesRoom (Panel::song) && songViews.getTab() == SongViews::mixer ? SongViews::playlist : SongViews::mixer);
+    // F9, as in FL Studio: the mixer, or the playlist again while the mixer shows in the area that holds both; in the lower
+    // panel, as F7 there, the mixer or the panel hidden.
+    auto& area = getAreaOf (ViewTab::mixer);
+
+    if (area.holds (ViewTab::playlist) && takesRoom (area.getArea()) && area.getShownTab() == ViewTab::mixer)
+        revealView (ViewTab::playlist);
+    else if (area.getArea() == Panel::editor)
+        showView (ViewTab::mixer);
+    else
+        revealView (ViewTab::mixer);
 }
 
 TimelineEditor* AppShell::getTimelineEditorInUse()
@@ -474,8 +555,8 @@ TimelineEditor* AppShell::getTimelineEditorInUse()
     if (activeEditor != nullptr && activeEditor->isActive() && activeEditor->isShowing())
         return activeEditor;
 
-    if (! playlist.isShowing() && editorDock.getClipEditor().isShowing())
-        return &editorDock.getClipEditor();
+    if (! playlist.isShowing() && clipEditor.getEditor().isShowing())
+        return &clipEditor.getEditor();
 
     return &playlist;
 }
@@ -485,8 +566,8 @@ void AppShell::updateLayout()
 {
     // A panel in its own window, or behind a maximized one, takes no room here; panels in their own windows stay visible
     // there.
-    const auto browserDocked = panels.takesRoom (Panel::browser), songDocked = panels.takesRoom (Panel::song);
-    const auto editorDocked = panels.takesRoom (Panel::editor), inspectorDocked = panels.takesRoom (Panel::inspector);
+    const auto browserDocked = panels.takesRoom (Panel::browser), songDocked = takesRoom (Panel::song);
+    const auto editorDocked = takesRoom (Panel::editor), inspectorDocked = panels.takesRoom (Panel::inspector);
     const auto centreDocked = songDocked || editorDocked;
 
     if (browserWindow == nullptr)
@@ -496,9 +577,9 @@ void AppShell::updateLayout()
         inspector.setVisible (inspectorDocked);
 
     if (editorWindow == nullptr)
-        editorDock.setVisible (editorDocked);
+        lowerArea.setVisible (editorDocked);
 
-    songViews.setVisible (songDocked);
+    upperArea.setVisible (songDocked);
     centre.setVisible (centreDocked);
     browserDivider.setVisible (browserDocked && centreDocked);
     inspectorDivider.setVisible (inspectorDocked && centreDocked);
@@ -507,7 +588,7 @@ void AppShell::updateLayout()
     for (const auto panel : allPanels)
     {
         auto& buttons = getButtons (panel);
-        buttons.setVisible (panels.takesRoom (panel));
+        buttons.setVisible (takesRoom (panel));
         buttons.update (panels);
     }
 
@@ -611,7 +692,7 @@ void AppShell::resized()
     // The side panels at the widths they keep, as far as the window has room, and the centre between them. A panel in its
     // own window is that window's to lay out.
     const auto sides = panels.getSideWidths (area.getWidth());
-    const auto centreDocked = panels.takesRoom (Panel::song) || panels.takesRoom (Panel::editor);
+    const auto centreDocked = takesRoom (Panel::song) || takesRoom (Panel::editor);
 
     if (panels.takesRoom (Panel::browser))
     {
@@ -671,22 +752,22 @@ juce::Component* AppShell::findLessonTarget (const juce::String& target)
 
 void AppShell::layOutCentre()
 {
-    // The editor dock under the song's views, at its share of the height, or either alone.
+    // The lower area under the upper one, at its share of the height, or either alone.
     auto area = centre.getLocalBounds();
-    const auto songDocked = panels.takesRoom (Panel::song), editorDocked = panels.takesRoom (Panel::editor);
+    const auto songDocked = takesRoom (Panel::song), editorDocked = takesRoom (Panel::editor);
 
     if (songDocked && editorDocked)
     {
-        editorDock.setBounds (area.removeFromBottom (panels.getEditorHeight (area.getHeight())));
+        lowerArea.setBounds (area.removeFromBottom (panels.getEditorHeight (area.getHeight())));
         editorDivider.setBounds (area.removeFromBottom (Shell::dividerSize));
     }
     else if (editorDocked)
     {
-        editorDock.setBounds (area);
+        lowerArea.setBounds (area);
     }
 
     if (songDocked)
-        songViews.setBounds (area);
+        upperArea.setBounds (area);
 
     placePanelButtons();
 }
@@ -769,11 +850,11 @@ void AppShell::addCommands (CommandRegistry& registry)
     for (const auto& command :
          { PanelCommands { Panel::browser, "Shows or hides the browser on the left.", { "files", "samples", "plugins", "sounds" } },
            PanelCommands { Panel::song,
-                           "Shows or hides the playlist or the mixer in the centre; the editor takes their place.",
-                           { "song", "arrangement", "centre", "tracks" } },
+                           "Shows or hides the upper panel, by default the playlist and the mixer; the lower panel takes its place.",
+                           { "song", "arrangement", "centre", "tracks", "top" } },
            PanelCommands { Panel::editor,
-                           "Shows or hides the editor dock under the playlist.",
-                           { "dock", "piano roll", "devices", "bottom" } },
+                           "Shows or hides the lower panel, by default the clip editor and the selected track's devices.",
+                           { "dock", "editor", "piano roll", "devices", "bottom" } },
            PanelCommands { Panel::inspector, "Shows or hides the inspector on the right.", { "properties", "info" } } })
     {
         const auto which = command.panel;
@@ -806,36 +887,36 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .perform = [this] { maximizePanelInUse(); },
                     .currentName = [this] { return panels.getMaximizeInUseName(); } });
 
-    // The editor dock's first tab, which edits the selected clip: named for the editor it shows.
+    // The clip editor's tab, which edits the selected clip: named for the editor it shows. In the lower panel, these show a
+    // view or hide the panel if it shows it, as FL Studio's F7 does; in the upper panel, they show it.
     registry.add ({ .id = "view.pianoRoll",
                     .name = "Piano Roll",
                     .category = "View",
                     .description = "Shows the selected clip's editor, or hides it if it is showing: the piano roll for MIDI clips, and "
                                    "the audio clip editor for audio clips.",
                     .synonyms = { "notes", "midi", "audio clip", "audio editor", "sample editor", "clip editor" },
-                    .perform = [this] { showEditor (EditorDock::clipEditor); },
-                    .currentName = [this] { return editorDock.showsAudioClip() ? juce::String ("Audio Clip Editor") : juce::String(); } });
+                    .perform = [this] { showView (ViewTab::clipEditor); },
+                    .currentName = [this] { return clipEditor.showsAudioClip() ? juce::String ("Audio Clip Editor") : juce::String(); } });
 
     add ("view.instrument", "Instrument", "Shows the selected track's instrument, or hides it if it is showing.",
-         { "synth", "sampler", "device view", "channel rack" }, [this] { showEditor (EditorDock::instrument); });
+         { "synth", "sampler", "device view", "channel rack" }, [this] { showView (ViewTab::instrument); });
 
     add ("view.effects", "Effects", "Shows the selected track's effects, or hides them if they are showing.",
-         { "devices", "device view", "chain", "plug-ins", "fx" }, [this] { showEditor (EditorDock::effects); });
+         { "devices", "device view", "chain", "plug-ins", "fx" }, [this] { showView (ViewTab::effects); });
 
     registry.add ({ .id = "device.show",
                     .name = "Show Device",
                     .category = "Device",
-                    .description = "Shows the selected device under the playlist or the mixer: an instrument in the Instrument tab, an "
-                                   "effect in the Effects tab.",
+                    .description = "Shows the selected device: an instrument in the Instrument tab, an effect in the Effects tab.",
                     .synonyms = { "edit", "open", "effect", "instrument", "plug-in" },
                     .perform = [this] { showSelectedDevice(); },
                     .isEnabled = [this] { return ! projectContext.getSongSelection().getDevices().empty(); } });
 
-    add ("view.playlist", "Playlist", "Shows the playlist in the centre, in place of the mixer.",
-         { "arrange", "tracks", "clips", "timeline" }, [this] { showSongView (SongViews::playlist); });
+    add ("view.playlist", "Playlist", "Shows the playlist, in place of the view beside it.", { "arrange", "tracks", "clips", "timeline" },
+         [this] { revealView (ViewTab::playlist); });
 
-    add ("view.mixer", "Mixer", "Shows the mixer in the centre, in place of the playlist, or the playlist again if it is showing.",
-         { "channels", "faders" }, [this] { toggleMixer(); });
+    add ("view.mixer", "Mixer", "Shows the mixer, or the playlist again if the mixer is showing in its place.", { "channels", "faders" },
+         [this] { toggleMixer(); });
 
     add ("view.layoutBeat", "Beat Layout", "Arranges the panels for making beats: playlist, piano roll and browser.", { "layout" },
          [this] { setLayout (Layout::beat); });
@@ -844,6 +925,16 @@ void AppShell::addCommands (CommandRegistry& registry)
          { "layout" }, [this] { setLayout (Layout::mix); });
 
     add ("view.layoutFull", "Full Layout", "Shows every panel.", { "layout", "all" }, [this] { setLayout (Layout::full); });
+
+    // A view's tab drags to the other panel, or moves there from its menu (Panels.h); this puts them back.
+    registry.add ({ .id = "view.resetViewPlaces",
+                    .name = "Reset View Places",
+                    .category = "View",
+                    .description = "Puts the playlist and the mixer back in the upper panel, and the clip editor and the devices in the "
+                                   "lower one, as they start.",
+                    .synonyms = { "layout", "views", "tabs", "panels", "move back", "restore" },
+                    .perform = [this] { resetViewPlaces(); },
+                    .isEnabled = [this] { return ! (viewPlaces == ViewPlaces()); } });
 
     struct DetachCommand
     {
@@ -854,7 +945,7 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     for (const auto& command : { DetachCommand { Panel::browser, "view.detachBrowser", "Browser in Its Own Window" },
                                  DetachCommand { Panel::inspector, "view.detachInspector", "Inspector in Its Own Window" },
-                                 DetachCommand { Panel::editor, "view.detachEditor", "Editor in Its Own Window" } })
+                                 DetachCommand { Panel::editor, "view.detachEditor", "Lower Panel in Its Own Window" } })
     {
         const auto which = command.panel;
         registry.add ({ .id = command.id,
@@ -881,8 +972,8 @@ void AppShell::refreshShortcutTexts()
 {
     titleBar.refreshTooltips();
     topBar.refreshTooltips();
-    songViews.refreshTooltips (commands);
-    editorDock.refreshTooltips (commands);
+    upperArea.refreshTooltips (commands);
+    lowerArea.refreshTooltips (commands);
 
     for (const auto panel : allPanels)
         getButtons (panel).refreshTooltips();

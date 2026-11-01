@@ -64,9 +64,9 @@ juce::String getPanelName (Panel panel)
         case Panel::browser:
             return "Browser";
         case Panel::song:
-            return "Playlist and Mixer";
+            return "Upper Panel"; // by default the playlist and the mixer (Panels.h: ViewPlaces)
         case Panel::editor:
-            return "Editor";
+            return "Lower Panel"; // by default the selected clip's editor and the selected track's devices
         case Panel::inspector:
         default:
             return "Inspector";
@@ -80,9 +80,9 @@ juce::String describePanel (Panel panel)
         case Panel::browser:
             return "the browser";
         case Panel::song:
-            return "the playlist and mixer";
+            return "the upper panel";
         case Panel::editor:
-            return "the editor";
+            return "the lower panel";
         case Panel::inspector:
         default:
             return "the inspector";
@@ -352,8 +352,8 @@ void PanelButtons::refreshTooltips()
                                            getPanelCommandID ("detach", panel)));
     hideButton.setTooltip (withShortcut (commands,
                                          panel == Panel::song
-                                             ? juce::String ("Hides the playlist and mixer: the editor takes their place. The "
-                                                             "Layout menu at the top of the window shows them again")
+                                             ? juce::String ("Hides the upper panel: the lower panel takes its place. The Layout "
+                                                             "menu at the top of the window shows it again")
                                              : "Hides " + name + ". Its switch at the top of the window shows it again",
                                          getPanelCommandID ("toggle", panel)));
 }

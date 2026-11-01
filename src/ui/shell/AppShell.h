@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The main window's content: the title bar, the transport bar, the browser, the song's views over the editor dock, the
-// inspector and the status bar.
+// The main window's content: the title bar, the transport bar, the browser, two areas of views one over the other (by
+// default the playlist and the mixer over the clip editor and the devices), the inspector and the status bar.
 #pragma once
 
 #include "Guide.h"
@@ -24,6 +24,7 @@
 namespace phazite::ui
 {
 class AppShell : public juce::Component,
+                 public juce::DragAndDropContainer, // a view's tab dragged from one area to the other (Panels.h)
                  private juce::FocusChangeListener,
                  private juce::ChangeListener,
                  private ProjectContext::Listener
@@ -36,7 +37,7 @@ public:
               Previewer&);
     ~AppShell() override;
 
-    // A panel (not the song's views) can move to a window of its own, for example on a second monitor. Closing that
+    // A panel (not the upper area of views) can move to a window of its own, for example on a second monitor. Closing that
     // window puts the panel back.
     void setDetached (Panel, bool);
     bool isDetached (Panel) const;
@@ -109,9 +110,11 @@ private:
     PianoRoll pianoRoll;
     AudioClipEditor audioClipEditor;
     MixerView mixer;
-    DevicesView devices;                     // the selected track's
-    SongViews songViews { playlist, mixer }; // the centre
-    EditorDock editorDock { projectContext, pianoRoll, audioClipEditor, devices };
+    DevicesView devices;                                                      // the selected track's
+    ClipEditorView clipEditor { projectContext, pianoRoll, audioClipEditor }; // the selected clip's
+    ViewPlaces viewPlaces;                                                    // which views each area holds; the settings keep it
+    ViewArea upperArea { Panel::song, { playlist, mixer, clipEditor, devices } };
+    ViewArea lowerArea { Panel::editor, { playlist, mixer, clipEditor, devices } };
     StatusBar statusBar;
     Guide guide;     // the hint bar's next step for newcomers
     Lessons lessons; // Help > Lessons, in the lesson card while one runs
@@ -125,8 +128,7 @@ private:
     Panel panelInUse = Panel::song; // the one the keyboard focus was in last, which "Maximize the Panel in Use" maximizes
     int edgeInset = 0;              // setEdgeInset()
 
-    // Holds the song's views (the playlist or the mixer), the divider and the editor dock, and lays them out when
-    // resized.
+    // Holds the two areas of views, one over the other, and the divider between them, and lays them out when resized.
     struct Centre : public juce::Component
     {
         std::function<void()> onResize;
@@ -156,7 +158,7 @@ private:
     void togglePanel (Panel);
     void toggleMaximized (Panel);
     void maximizePanelInUse(); // or restores the panels
-    void toggleMixer();        // the mixer in the centre, or the playlist again if it shows ("view.mixer")
+    void toggleMixer();        // the mixer, or the playlist again if it shows beside it ("view.mixer")
 
     // The editor the time line's commands act on: the one used last, while it shows; or one that shows, the playlist first.
     TimelineEditor* getTimelineEditorInUse();
@@ -167,10 +169,14 @@ private:
     void updateAudioAlert();
     void changeListenerCallback (juce::ChangeBroadcaster*) override { updateAudioAlert(); } // the audio devices changed
 
-    void showEditor (EditorDock::Tab);   // or hides it if it is showing, as FL Studio's F7 does
-    void showSongView (SongViews::Tab);  // in the centre
-    void revealEditor (EditorDock::Tab); // shows it, even if it is showing already
-    void showSelectedDevice();           // in the Devices view (the "device.show" command)
+    ViewArea& getAreaOf (ViewTab);               // the area that holds it
+    bool takesRoom (Panel) const;                // PanelLayout::takesRoom(), and for the two areas, holding a view
+    void showView (ViewTab);                     // in its area; in the lower panel, or the panel hidden if it shows it, as FL Studio's F7
+    void revealView (ViewTab);                   // in its area, even if it shows already
+    void moveView (View, Panel area, int index); // into that area (ViewPlaces::move()), where it shows
+    void resetViewPlaces();                      // every view back where it starts
+    void placeViews();                           // in the areas, as viewPlaces says
+    void showSelectedDevice();                   // in the Devices view (the "device.show" command)
     void placePanelButtons();
     void setActiveEditor (TimelineEditor*);
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track

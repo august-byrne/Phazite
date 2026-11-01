@@ -872,6 +872,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/NoteTests.cpp
         tests/NotesModelTests.cpp
         tests/PanelLayoutTests.cpp
+        tests/PanelsTests.cpp
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp

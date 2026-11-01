@@ -117,6 +117,7 @@ view.mixer | F9
 view.layoutBeat
 view.layoutMix
 view.layoutFull
+view.resetViewPlaces
 view.detachBrowser
 view.detachInspector
 view.detachEditor

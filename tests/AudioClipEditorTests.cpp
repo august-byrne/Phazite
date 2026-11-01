@@ -3,8 +3,8 @@
 // selected audio clip's whole audio, and stays on it; its edges trim the clip, its handles fade it and a drag moves the
 // clip along its audio; its fields and switches change the clip's gain, pitch, direction and tempo; and every change is
 // one undo step (the roadmap's step 2.6: a vocal clip trimmed, faded, turned up, pitched and stretched to the tempo). And
-// the editor dock's first tab, which shows the piano roll or the audio clip editor as the selection asks, named for what
-// it shows.
+// the clip editor's tab, which shows the piano roll or the audio clip editor as the selection asks, named for what it
+// shows.
 #include "UiTestHelpers.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/internal/Clips.h"
@@ -323,42 +323,47 @@ TEST_CASE ("In the audio clip editor, a vocal is turned up, pitched, reversed an
     CHECK (screen.get().clip.range.getEnd().inBeats() == doctest::Approx (12.0));
 }
 
-TEST_CASE ("The editor dock's first tab shows the piano roll or the audio clip editor, as the selection asks, named for it")
+TEST_CASE ("The clip editor's tab shows the piano roll or the audio clip editor, as the selection asks, named for it")
 {
+    using phazite::ui::View;
     EditorScreen screen;
     phazite::ui::PianoRoll pianoRoll { screen.commands, screen.context };
     phazite::ui::AudioClipEditor audioEditor { screen.commands, screen.context };
     phazite::ui::DevicesView devices { screen.commands, screen.context };
-    phazite::ui::EditorDock dock { screen.context, pianoRoll, audioEditor, devices };
-    phazite::test::TestWindow dockWindow { dock, 1000, 400 };
+    phazite::ui::ClipEditorView clipEditor { screen.context, pianoRoll, audioEditor };
+    juce::Component playlist, mixer;
+    phazite::ui::ViewArea area { phazite::ui::Panel::editor, { playlist, mixer, clipEditor, devices } };
+    area.setViews ({ View::clipEditor, View::devices });
+    clipEditor.onEditorChanged = [&area] { area.refreshTabs(); }; // as the shell does
+    phazite::test::TestWindow window { area, 1000, 400 };
     auto& selection = screen.context.getSongSelection();
-    CHECK (dock.getTabNames()[phazite::ui::EditorDock::clipEditor] == juce::String ("Piano roll"));
+    CHECK (area.getTabNames()[0] == juce::String ("Piano roll"));
     CHECK (pianoRoll.isVisible());
     CHECK_FALSE (audioEditor.isVisible());
 
     selection.selectOnly (screen.vocal);
     phazite::test::dispatchPendingMessages();
-    CHECK (dock.showsAudioClip());
-    CHECK (dock.getTabNames()[phazite::ui::EditorDock::clipEditor] == juce::String ("Audio clip"));
+    CHECK (clipEditor.showsAudioClip());
+    CHECK (area.getTabNames()[0] == juce::String ("Audio clip"));
     CHECK (audioEditor.isVisible());
     CHECK_FALSE (pianoRoll.isVisible());
-    CHECK (&dock.getClipEditor() == &audioEditor);
+    CHECK (&clipEditor.getEditor() == &audioEditor);
     CHECK (audioEditor.getClip() == screen.vocal);
 
     selection.selectOnly (screen.midi);
     phazite::test::dispatchPendingMessages();
-    CHECK_FALSE (dock.showsAudioClip());
-    CHECK (dock.getTabNames()[phazite::ui::EditorDock::clipEditor] == juce::String ("Piano roll"));
+    CHECK_FALSE (clipEditor.showsAudioClip());
+    CHECK (area.getTabNames()[0] == juce::String ("Piano roll"));
     CHECK (pianoRoll.isVisible());
-    CHECK (&dock.getClipEditor() == &pianoRoll);
+    CHECK (&clipEditor.getEditor() == &pianoRoll);
 
     // Opening a clip, as a double-click in the playlist does, shows it in its editor.
     selection.clear();
     phazite::test::dispatchPendingMessages();
-    dock.openClip (screen.vocal);
-    CHECK (dock.showsAudioClip());
+    clipEditor.openClip (screen.vocal);
+    CHECK (clipEditor.showsAudioClip());
     CHECK (audioEditor.getClip() == screen.vocal);
-    dock.openClip (screen.midi);
-    CHECK_FALSE (dock.showsAudioClip());
+    clipEditor.openClip (screen.midi);
+    CHECK_FALSE (clipEditor.showsAudioClip());
     CHECK (pianoRoll.getClips() == std::vector<phazite::ClipID> { screen.midi });
 }

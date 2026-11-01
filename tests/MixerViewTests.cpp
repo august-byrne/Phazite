@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer, as it lays out in the window (the inspector: InspectorTests.cpp).
+#include "AppScreen.h"
 #include "TestClips.h"
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
@@ -233,27 +234,30 @@ TEST_CASE ("The mixer has no row of its own: a slim column after the returns add
     setEdit (context, nullptr);
 }
 
-TEST_CASE ("The song's tab bar holds the mixer's Routing switch while the mixer shows, and none while the playlist does")
+TEST_CASE ("The tab bar of the area the mixer is in holds its Routing switch while the mixer shows, and none while another view does")
 {
-    juce::Component playlist, mixer;
-    phazite::ui::SongViews views { playlist, mixer };
-    phazite::test::TestWindow window { views, 900, 400 };
-    std::optional<bool> shown;
-    views.onRoutingChanged = [&shown] (bool on) { shown = on; };
-
-    auto& routing = views.getRoutingButton();
+    using phazite::ui::ViewTab;
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup(); // until a project is open, the window shows that it is opening one over its views
+    phazite::test::dispatchPendingMessages();
+    auto* views = dynamic_cast<phazite::ui::ViewArea*> (&screen.shell.getPanel (phazite::ui::Panel::song));
+    REQUIRE (views != nullptr);
+    auto& routing = views->getRoutingButton();
+    views->showTab (ViewTab::playlist);
     CHECK_FALSE (routing.isShowing());
 
-    views.showTab (phazite::ui::SongViews::mixer);
+    views->showTab (ViewTab::mixer);
     CHECK (routing.isShowing());
-    CHECK (routing.getBottom() <= views.getTabBarDepth()); // in the tab bar, taking none of the mixer's height
-    CHECK (routing.getX() >= views.getTabbedButtonBar().getRight());
+    CHECK (routing.getBottom() <= views->getTabBarDepth()); // in the tab bar, taking none of the mixer's height
+    CHECK (routing.getX() >= views->getTabbedButtonBar().getRight());
 
     phazite::test::Mouse mouse (routing);
     mouse.click (routing.getLocalBounds().getCentre());
-    REQUIRE (shown.has_value());
-    CHECK (*shown);
+    CHECK (routing.getToggleState());
+    auto* mixer = phazite::test::findAll<phazite::ui::MixerView> (screen.shell).getFirst();
+    REQUIRE (mixer != nullptr);
+    CHECK (mixer->isShowingRouting());
 
-    views.showTab (phazite::ui::SongViews::playlist);
+    views->showTab (ViewTab::playlist);
     CHECK_FALSE (routing.isShowing());
 }

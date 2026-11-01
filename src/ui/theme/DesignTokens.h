@@ -381,6 +381,14 @@ namespace LessonTint
     inline constexpr int pulseFramesPerSecond = 30, checksPerSecond = 4;
 } // namespace LessonTint
 
+// A view's tab dragged over one of the two areas (ui/shell/Panels.h): the accent colour's alpha over the area, and the width of
+// the line where its tab would go (pixels).
+namespace ViewDropTint
+{
+    inline constexpr float wash = 0.12f;
+    inline constexpr float line = 2.0f;
+} // namespace ViewDropTint
+
 // A track's mute and solo switch (ui/components/TrackSwitch.h): its light, as a part of the switch's size, with an edge in
 // the background colour that keeps it apart from a track's tinted header, and the ring of a muted one's light (its outline)
 // and of a soloed one's, this far outside it (pixels); and how faint the light is while other tracks' solos silence the

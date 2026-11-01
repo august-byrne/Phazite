@@ -149,12 +149,12 @@ struct TitleBar::PanelSwitch : public juce::Button
             case Panel::browser:
                 return "Browser";
             case Panel::editor:
-                return "Editor";
+                return "Lower panel";
             case Panel::inspector:
                 return "Inspector";
             case Panel::song:
             default:
-                return "Playlist and mixer";
+                return "Upper panel";
         }
     }
 

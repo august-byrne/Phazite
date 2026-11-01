@@ -92,7 +92,7 @@ private:
 
 // The name a panel goes by in the settings ("browser", "song", "editor", "inspector"); its commands' IDs ("view." and
 // the verb, then "Browser", "Song", "Editor" or "Inspector": view.toggleBrowser); its name in commands ("Browser",
-// "Playlist and Mixer"); and what a tooltip calls it ("the browser").
+// "Upper Panel"); and what a tooltip calls it ("the browser").
 juce::String getPanelKey (Panel);
 std::optional<Panel> findPanelByKey (const juce::String&);
 juce::String getPanelCommandID (const char* verb, Panel);

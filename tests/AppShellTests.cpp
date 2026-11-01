@@ -77,9 +77,9 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
 
     CHECK (screen.window.paintEverything().isValid());
 
-    // The whole song in the centre, as tabs anyone can see, and the selection in the editor dock under it. Automation has
-    // no tab: it is edited in its lanes in the playlist.
-    auto* song = dynamic_cast<juce::TabbedComponent*> (phazite::test::findComponentWithTitle (screen.shell, "Song"));
+    // By default the whole song in the upper panel, as tabs anyone can see, and the selection in the lower panel under it.
+    // Automation has no tab: it is edited in its lanes in the playlist.
+    auto* song = dynamic_cast<juce::TabbedComponent*> (phazite::test::findComponentWithTitle (screen.shell, "Upper panel"));
     REQUIRE (song != nullptr);
     CHECK (song->getTabNames() == juce::StringArray { "Playlist", "Mixer" });
     auto* dock = dynamic_cast<juce::TabbedComponent*> (&screen.shell.getPanel (phazite::ui::Panel::editor));

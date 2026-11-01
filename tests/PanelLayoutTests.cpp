@@ -105,7 +105,7 @@ TEST_CASE ("The panels' commands say what they do now")
 
     layout.maximize (Panel::song);
     CHECK (layout.getToggleName (Panel::browser) == juce::String ("Show the Browser")); // out of sight
-    CHECK (layout.getToggleName (Panel::song) == juce::String ("Hide the Playlist and Mixer"));
+    CHECK (layout.getToggleName (Panel::song) == juce::String ("Hide the Upper Panel"));
     CHECK (layout.getMaximizeName (Panel::song) == juce::String ("Restore the Panels"));
     CHECK (layout.getMaximizeName (Panel::editor).isEmpty());
     CHECK (layout.getMaximizeInUseName() == juce::String ("Restore the Panels"));
