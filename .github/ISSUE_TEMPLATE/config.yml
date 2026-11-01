@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: The build fails
+    url: https://github.com/august-byrne/Phazite/blob/main/docs/building.md#troubleshooting
+    about: Most build problems are in the troubleshooting table. If yours isn't, open a bug report with the first line that says error.
+  - name: Known bugs
+    url: https://github.com/august-byrne/Phazite/blob/main/docs/known-bugs.md
+    about: Bugs found and not fixed yet, each with why and how to fix it.

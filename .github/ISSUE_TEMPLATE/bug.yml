@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in Phazite doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Phazite. Please check the [known bugs](https://github.com/august-byrne/Phazite/blob/main/docs/known-bugs.md) and the [open issues](https://github.com/august-byrne/Phazite/issues) first. If the build fails, see [Troubleshooting](https://github.com/august-byrne/Phazite/blob/main/docs/building.md#troubleshooting).
+
+        This page is public: don't attach crash dumps (`.dmp` files hold Phazite's whole memory), and take your user name out of any path you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you saw or heard, and what you expected instead.
+      placeholder: I dragged a kick from the browser onto the Beat track while the song played, and it stayed silent until I stopped and played again.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to make it happen again
+      description: Start from a new project or an example song (Help > Example Songs) if you can, and say whether it happens every time.
+      placeholder: |
+        1. Help > Example Songs > House Groove
+        2. Press Space
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The commit you built, which `git log -1 --format=%h` prints in your Phazite folder.
+      placeholder: dc383a8
+    validations:
+      required: true
+  - type: dropdown
+    id: preset
+    attributes:
+      label: Build
+      description: The preset you built with.
+      options:
+        - windows-profile
+        - windows-release
+        - windows-debug
+        - linux-release
+        - linux-debug
+        - linux-asan
+        - linux-tsan
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Your operating system, your audio device and driver (Options > Audio Settings), and any plug-in involved, with its version.
+      placeholder: Windows 11 24H2; Focusrite Scarlett 2i2, ASIO; Serum 2.0.17
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: The last lines of `%APPDATA%\Phazite\Phazite.log` (on Linux, `~/.config/Phazite/Phazite.log`) from the run where it happened.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: A screenshot or a short screen recording helps most with what you see; drag it in here.

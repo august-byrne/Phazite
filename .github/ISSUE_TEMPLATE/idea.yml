@@ -1,0 +1,28 @@
+name: Idea or feature request
+description: Something Phazite should do, or do differently.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Phazite's [design](https://github.com/august-byrne/Phazite/blob/main/docs/design.md) and [roadmap](https://github.com/august-byrne/Phazite/blob/main/docs/roadmap.md) may already cover your idea; if so, link the part it would change.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The music you're making and where Phazite gets in the way. This helps more than a finished solution.
+      placeholder: I make a beat in eight bars, then copy it out to a whole song, and changing the drums afterwards means editing every copy.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you'd like it to work.
+    validations:
+      required: true
+  - type: textarea
+    id: other-daws
+    attributes:
+      label: How other DAWs do it
+      description: Which DAW does this well, and what you like about its way. A screenshot or a link to its manual helps.
