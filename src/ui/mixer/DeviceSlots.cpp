@@ -88,7 +88,11 @@ struct DeviceSlots::Slot : public juce::Component
             nameButton.addMouseListener (this, false);
 
         addAndMakeVisible (nameButton);
-        addAndMakeVisible (power);
+
+        // An instrument has no switch: its track's switch mutes it (the owner, 2026-11-01).
+        if (owner.kind == Kind::effects)
+            addAndMakeVisible (power);
+
         show (device);
     }
 
@@ -127,8 +131,8 @@ struct DeviceSlots::Slot : public juce::Component
             device.sidechain.track.isValid() ? ". Listens to " + device.sidechain.name + " (its sidechain)" : juce::String();
         const auto moves = owner.kind == Kind::effects ? juce::String ("; drag it up or down to move it") : juce::String();
         nameButton.setTooltip (device.frozen ? "Frozen with its track: unfreeze the track (its snowflake) to change it"
-                                             : "Shows " + what + listens
-                                                   + ". Ctrl-click to select it with others; right-click to turn it off, " + more + moves);
+                                             : "Shows " + what + listens + ". Ctrl-click to select it with others; right-click to "
+                                                   + (owner.kind == Kind::effects ? "turn it off, " : "") + more + moves);
         power.setToggleState (device.isOn, juce::dontSendNotification);
 
         // A frozen device's sound is in its track's file: its switch is off until the track is unfrozen.
@@ -160,7 +164,9 @@ struct DeviceSlots::Slot : public juce::Component
         if (reductionMeter != nullptr)
             reductionMeter->setBounds (area.removeFromRight (reductionMeterWidth).reduced (0, 2));
 
-        power.setBounds (area.removeFromRight (slotPowerWidth));
+        if (power.isVisible())
+            power.setBounds (area.removeFromRight (slotPowerWidth));
+
         nameButton.setBounds (area.withTrimmedRight (2));
     }
 
@@ -461,7 +467,8 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
     if (device.opensWindow)
         menu.addItem ("Open Window", [&projectContext, id] { showDeviceWindow (projectContext, id); });
 
-    menu.addItem ("On", true, device.isOn, act ([&projectContext, id, on = device.isOn] { setDeviceOn (projectContext, id, ! on); }));
+    if (place != DevicePlace::instrument) // which stays on: its track's switch mutes it
+        menu.addItem ("On", true, device.isOn, act ([&projectContext, id, on = device.isOn] { setDeviceOn (projectContext, id, ! on); }));
 
     // Its parameters, each of which shows its automation lane under the track in the playlist (those with automation
     // ticked). A plug-in's own window can't offer this: Automate Last Touched does, for the knob moved last.

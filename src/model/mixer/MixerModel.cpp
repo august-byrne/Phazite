@@ -303,8 +303,17 @@ MixHandle getMix (ProjectContext& context, DeviceID id)
 
 void setDeviceOn (ProjectContext& context, DeviceID id, bool on)
 {
-    if (auto* device = findDevice (context, id))
-        phazite::setDeviceOn (*device, on);
+    auto* device = findDevice (context, id);
+
+    if (device == nullptr)
+        return;
+
+    // An instrument stays on: its track's switch mutes it (the owner, 2026-11-01: with one instrument a track, its own switch
+    // was a second way to silence the track).
+    if (auto* track = device->getOwnerTrack(); ! on && track != nullptr && getInstrument (*track) == device)
+        return;
+
+    phazite::setDeviceOn (*device, on);
 }
 
 void moveEffect (ProjectContext& context, DeviceID id, int places)

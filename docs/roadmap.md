@@ -521,6 +521,10 @@ Done before this plan (progress since then is under [Status](#status)):
 - **Pictures as controls:** the synths' envelopes drag by their points (a double-click puts one back), the synth's LFO picture sets its depth with a drag and its rate with the wheel (the wavetable's, its rate or note value), the compressor's curve drags its threshold, ratio and makeup and the wheel bends its knee or changes its ratio, the stereo expander's fan follows the pointer, and the breakpoint envelope modulator's picture drags its points, bends its lines with a handle or the wheel and straightens one with a double-click (tests in `tests/GraphEditingTests.cpp`). The synths' envelopes have no curves to bend: adding them would change their sound and presets.
 - **Movable views:** the playlist, the mixer, the clip editor and the devices (Instrument and Effects together) move between the upper and the lower panel by dragging their tabs, or from a tab's menu; the settings keep where each is, View > Reset View Places puts them back, an area left without views hides, and F5, F6, F7 and F9 show a view wherever it is (`src/ui/shell/Panels.h`, tests in `tests/PanelsTests.cpp`).
 
+**Feedback round, second list (2026-11-01)**, the owner's list ([design decision log](design.md#26-decision-log)):
+- **No routing view:** the owner decided [design question 21](design.md#25-open-questions): routing is set on the strips, and the routing view and its switch went.
+- **No switch on an instrument:** an instrument has no on/off switch in the Devices view, the mixer's slot or its menu, and the model keeps it on; the track's switch mutes it and Freeze frees its CPU (tests in `tests/DevicesViewTests.cpp`).
+
 **3.8 Usability rounds (S each)**
 - Repeat the milestone test with new people and fix what they trip over.
 - *Done when:* new users finish the milestone task without help.

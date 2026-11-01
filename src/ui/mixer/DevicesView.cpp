@@ -299,7 +299,11 @@ struct DevicesView::Panel : public juce::Component
 
         bodyView.setScrollBarsShown (true, false);
         addAndMakeVisible (bodyView);
-        addAndMakeVisible (power);
+
+        // An instrument has no switch: its track's switch mutes it (the owner, 2026-11-01).
+        if (place != DevicePlace::instrument)
+            addAndMakeVisible (power);
+
         addAndMakeVisible (nameButton);
         setFolded (device.windowOpen || (foldButton != nullptr && ! view.isOpen (device.id)), true); // in its window: folded from the start
         show (device);
@@ -614,8 +618,12 @@ struct DevicesView::Panel : public juce::Component
         }
 
         auto header = area.removeFromTop (controlHeight).reduced (Space::xs, 2);
-        power.setBounds (header.removeFromLeft (powerWidth));
-        header.removeFromLeft (Space::xs);
+
+        if (power.isVisible())
+        {
+            power.setBounds (header.removeFromLeft (powerWidth));
+            header.removeFromLeft (Space::xs);
+        }
 
         if (foldButton != nullptr)
             foldButton->setBounds (header.removeFromLeft (foldButtonWidth));

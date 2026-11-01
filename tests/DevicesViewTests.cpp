@@ -454,6 +454,11 @@ TEST_CASE ("The Instrument page shows the track's instrument alone, as wide as t
     CHECK (view.getPageOf (effects[0]) == Page::effects);
     phazite::test::checkChildrenApart (view);
 
+    // No switch of its own, and it stays on: the track's switch mutes it (the owner, 2026-11-01).
+    CHECK (phazite::test::findComponentWithTitle (*panel, "On") == nullptr);
+    phazite::setDeviceOn (screen.context, instrument->id, false);
+    CHECK (phazite::getInstrument (screen.context, screen.track (0))->isOn);
+
     // The effects are on the other page, without it; shown from elsewhere, a device brings its own page.
     view.showPage (Page::effects);
     CHECK (view.findPanel (instrument->id) == nullptr);

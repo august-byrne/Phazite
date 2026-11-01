@@ -126,7 +126,8 @@ bool canHoldInstrument (const ProjectContext&, TrackID); // a track that isn't a
 std::vector<ParameterHandle> getKeyControls (ProjectContext&, DeviceID, int maximum);
 MixHandle getMix (ProjectContext&, DeviceID);
 
-// These reach devices in containers too (ContainerModel.h), and move one among its container's devices.
+// These reach devices in containers too (ContainerModel.h), and move one among its container's devices. An instrument has
+// no switch of its own and stays on (its track's switch mutes it).
 void setDeviceOn (ProjectContext&, DeviceID, bool);
 void moveEffect (ProjectContext&, DeviceID, int places); // earlier (negative) or later among its channel's effects
 void removeDevice (ProjectContext&, DeviceID);
