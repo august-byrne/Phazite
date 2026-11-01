@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The devices of roadmap step 2.10, as DSP (src/devices/): the delay's timing and ping-pong, the saturator's curves and
-// level, the filter's response, the multiband dynamics' flat split and both-way squeeze, the maximizer's ceiling, and the
-// synth's unison. The stereo expander's have a file of their own (StereoExpanderTests.cpp), as the phaser's and the
-// flanger's do (MotionEffectTests.cpp).
+// level, the filter's response and the synth's unison. The stereo expander's have a file of their own (StereoExpanderTests.cpp),
+// as the phaser's and the flanger's do (MotionEffectTests.cpp), and the multiband's (MultibandTests.cpp).
 #include "TestHelpers.h"
 #include "devices/delay/Delay.h"
-#include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/saturation/Saturator.h"
@@ -138,7 +136,7 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
     std::set<std::string_view> types;
 
     for (const auto* info : { &devices::Delay::info, &devices::Saturator::info, &devices::FilterEffect::info,
-                              &devices::StereoExpander::info, &devices::Multiband::info, &devices::Maximizer::info, &devices::Synth::info })
+                              &devices::StereoExpander::info, &devices::Multiband::info, &devices::Synth::info })
     {
         INFO (std::string (info->typeID));
         CHECK (devices::isValid (*info));
@@ -148,10 +146,10 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
     // The synth's unison plays one voice at first.
     CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].defaultValue == doctest::Approx (0.0f));
 
-    // The stereo expander changes nothing until turned, and has no mix; nor has the maximizer, whose mix below 100 % would
-    // let peaks past its ceiling (2026-10-30).
+    // The stereo expander changes nothing until turned, and has no mix; nor has the multiband, whose LMH Mix blends its bands
+    // with the dry sound before its master band, so that the master still limits what comes out.
     CHECK (devices::findParameter (devices::StereoExpander::info, devices::mixParameterID) < 0);
-    CHECK (devices::findParameter (devices::Maximizer::info, devices::mixParameterID) < 0);
+    CHECK (devices::findParameter (devices::Multiband::info, devices::mixParameterID) < 0);
 
     // The delay's parameters are named as its editor names them: the note value, and the time in milliseconds.
     CHECK (devices::Delay::info.parameters[(size_t) devices::findParameter (devices::Delay::info, "time")].name == "Note");
@@ -362,69 +360,6 @@ TEST_CASE ("The filter's vowel, phaser and sample and hold: after the combs, eac
     const auto folded = play (filter, values, 24000, sine (2700.0, 0.25f));
     CHECK (getAmplitudeAt (folded.left, 12000, 24000, 700.0) > 0.1f);
     CHECK (filter.getTailSeconds() == doctest::Approx (0.0));
-}
-
-TEST_CASE ("The multiband dynamics: a flat split, quiet sound brought up and loud sound turned down")
-{
-    auto values = getDefaults (devices::Multiband::info);
-
-    // Its curve: loud down, quiet up, silence left alone.
-    set (values, devices::Multiband::info, "depth", 1.0f);
-    CHECK (devices::Multiband::getGainChange (values, -6.0f) < -10.0f);
-    CHECK (devices::Multiband::getGainChange (values, -55.0f) > 5.0f);
-    CHECK (devices::Multiband::getGainChange (values, -120.0f) == doctest::Approx (0.0f));
-    CHECK (devices::Multiband::getGainChange (values, -35.0f) == doctest::Approx (0.0f));
-
-    // With no depth, every frequency comes out as loud as it went in.
-    set (values, devices::Multiband::info, "depth", 0.0f);
-    devices::Multiband multiband;
-    multiband.prepare (testRate, testBlockSize);
-
-    for (const auto frequency : { 50.0, 90.0, 1000.0, 2500.0, 8000.0 })
-    {
-        INFO (frequency);
-        multiband.reset();
-        const auto out = play (multiband, values, 48000, sine (frequency, 0.25f));
-        CHECK (toDecibels (getRms (out.left, 24000, 48000)) == doctest::Approx (toDecibels (0.25f / std::sqrt (2.0f))).epsilon (0.02));
-    }
-
-    // At full depth: a quiet tone louder, a loud one quieter.
-    set (values, devices::Multiband::info, "depth", 1.0f);
-    multiband.reset();
-    const auto quiet = play (multiband, values, 96000, sine (1000.0, 0.001f));
-    multiband.reset();
-    const auto loud = play (multiband, values, 96000, sine (1000.0, 0.8f));
-    CHECK (getRms (quiet.left, 48000, 96000) > 2.0f * 0.001f / std::sqrt (2.0f));
-    CHECK (getRms (loud.left, 48000, 96000) < 0.5f * 0.8f / std::sqrt (2.0f));
-}
-
-TEST_CASE ("The maximizer: louder, but never over its ceiling, and the limiter alone with nothing turned")
-{
-    auto values = getDefaults (devices::Maximizer::info);
-    devices::Maximizer maximizer;
-    maximizer.prepare (testRate, testBlockSize);
-    const auto latency = (size_t) maximizer.getLatencySamples();
-
-    // Without gain or squeeze, a quiet tone comes out as it went in, after the limiter's look-ahead.
-    set (values, devices::Maximizer::info, "lowSqueeze", 0.0f);
-    set (values, devices::Maximizer::info, "midSqueeze", 0.0f);
-    set (values, devices::Maximizer::info, "highSqueeze", 0.0f);
-    const auto plain = play (maximizer, values, 48000, sine (440.0, 0.1f));
-    CHECK (toDecibels (getRms (plain.left, 24000, 48000)) == doctest::Approx (toDecibels (0.1f / std::sqrt (2.0f))).epsilon (0.02));
-
-    // Pushed 18 dB with the default squeeze: much louder, and never over the ceiling, -1 dB.
-    values = getDefaults (devices::Maximizer::info);
-    set (values, devices::Maximizer::info, "gain", 18.0f);
-    maximizer.reset();
-    const auto pushed = play (maximizer, values, 96000, sine (220.0, 0.25f));
-    CHECK (getRms (pushed.left, 48000, 96000) > 1.5f * 0.25f / std::sqrt (2.0f));
-    CHECK (getPeak (pushed.left, latency, 96000) <= juce::Decibels::decibelsToGain (-1.0f) * 1.0001f);
-    CHECK (getPeak (pushed.right, latency, 96000) <= juce::Decibels::decibelsToGain (-1.0f) * 1.0001f);
-
-    // A band's squeeze turns it down once it is loud.
-    CHECK (devices::Maximizer::getReduction (1.0f, 0.0f) > 6.0f);
-    CHECK (devices::Maximizer::getReduction (0.0f, 0.0f) == doctest::Approx (0.0f));
-    CHECK (devices::Maximizer::getReduction (1.0f, -30.0f) == doctest::Approx (0.0f));
 }
 
 TEST_CASE ("The synth's unison: one voice the same on both sides; seven spread across them")

@@ -17,7 +17,6 @@
 #include "devices/delay/Delay.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
-#include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
@@ -895,8 +894,8 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and maximizer in a "
-               "row, the filter swept")
+    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and limiter in a row, "
+               "the filter swept")
     {
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
@@ -907,7 +906,7 @@ TEST_SUITE ("realtime-audit")
         for (const auto* type :
              { phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID, phazite::devices::Multiband::typeID,
                phazite::devices::Delay::typeID, phazite::devices::Phaser::typeID, phazite::devices::Flanger::typeID,
-               phazite::devices::StereoExpander::typeID, phazite::devices::Maximizer::typeID })
+               phazite::devices::StereoExpander::typeID, phazite::devices::Limiter::typeID })
         {
             const auto plugin = edit->getPluginCache().createNewPlugin (type, {});
             auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -929,10 +928,10 @@ TEST_SUITE ("realtime-audit")
         }
 
         const auto m = playAndMeasure (*edit);
-        report ("Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and maximizer in a row, the filter swept",
+        report ("Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and limiter in a row, the filter swept",
                 m);
         CHECK (m.peakLevel > 0.001f);
-        CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // the maximizer's ceiling
+        CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // the limiter's ceiling
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
@@ -946,7 +945,7 @@ TEST_SUITE ("realtime-audit")
         for (const auto* type :
              { phazite::devices::Equalizer::typeID, phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID,
                phazite::devices::Compressor::typeID, phazite::devices::Multiband::typeID, phazite::devices::Delay::typeID,
-               phazite::devices::Reverb::typeID, phazite::devices::Phaser::typeID, phazite::devices::Maximizer::typeID })
+               phazite::devices::Reverb::typeID, phazite::devices::Phaser::typeID, phazite::devices::Limiter::typeID })
         {
             const auto plugin = edit->getPluginCache().createNewPlugin (type, {});
             auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());

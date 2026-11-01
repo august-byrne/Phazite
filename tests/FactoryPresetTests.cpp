@@ -13,7 +13,6 @@
 #include "devices/dsp/Random.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
-#include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
@@ -87,8 +86,6 @@ std::unique_ptr<devices::Processor> makeProcessor (const devices::DeviceInfo& in
         return std::make_unique<devices::Compressor>();
     if (type == devices::Limiter::typeID)
         return std::make_unique<devices::Limiter>();
-    if (type == devices::Maximizer::typeID)
-        return std::make_unique<devices::Maximizer>();
     if (type == devices::Multiband::typeID)
         return std::make_unique<devices::Multiband>();
     if (type == devices::Reverb::typeID)

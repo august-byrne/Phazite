@@ -9,7 +9,6 @@
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
-#include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
@@ -273,16 +272,10 @@ TEST_SUITE ("golden")
                      "Phazite's limiter, 18 dB of gain into it, on a beat and chord stabs.");
     }
 
-    TEST_CASE ("Golden render: Phazite's maximizer on a beat and stabs")
+    TEST_CASE ("Golden render: Phazite's multiband on a beat and stabs")
     {
-        checkEffect (phazite::devices::Maximizer::typeID, "effect-maximizer", { { "gain", 18.0f } },
-                     "Phazite's maximizer, 18 dB of gain into it, on a beat and chord stabs.");
-    }
-
-    TEST_CASE ("Golden render: Phazite's multiband compressor on a beat and stabs")
-    {
-        checkEffect (phazite::devices::Multiband::typeID, "effect-multiband", { { "depth", 1.0f } },
-                     "Phazite's multiband compressor at full depth, on a beat and chord stabs.");
+        checkEffect (phazite::devices::Multiband::typeID, "effect-multiband", { { "masterPre", 12.0f } },
+                     "Phazite's multiband, 12 dB into its master band's limiter at 0 dB, on a beat and chord stabs.");
     }
 
     TEST_CASE ("Golden render: Phazite's EQ on a beat and stabs")

@@ -3,7 +3,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "devices/dynamics/Limiter.h"
-#include "devices/dynamics/Maximizer.h"
+#include "devices/dynamics/Multiband.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Selection.h"
@@ -264,9 +264,9 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
     }
 
     // As the notes were lost when they were first seen to be.
-    SUBCASE ("With a limiter and a maximizer on the master")
+    SUBCASE ("With a limiter and a multiband on the master")
     {
-        for (const auto* type : { phazite::devices::Limiter::typeID, phazite::devices::Maximizer::typeID })
+        for (const auto* type : { phazite::devices::Limiter::typeID, phazite::devices::Multiband::typeID })
             phazite::insertMasterDevice (*edit, edit->getPluginCache().createNewPlugin (type, {}));
     }
 

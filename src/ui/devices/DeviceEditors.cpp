@@ -7,7 +7,6 @@
 #include "FilterEditor.h"
 #include "FlangerEditor.h"
 #include "LimiterEditor.h"
-#include "MaximizerEditor.h"
 #include "MultibandEditor.h"
 #include "PhaserEditor.h"
 #include "ReverbEditor.h"
@@ -20,7 +19,6 @@
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
-#include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
@@ -89,9 +87,6 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Multiband::typeID)
         return std::make_unique<MultibandEditor> (device);
-
-    if (info->typeID == devices::Maximizer::typeID)
-        return std::make_unique<MaximizerEditor> (device);
 
     if (info->typeID == devices::Phaser::typeID)
         return std::make_unique<PhaserEditor> (device);

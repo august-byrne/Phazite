@@ -111,8 +111,6 @@ target_sources(phazite_core PRIVATE
     src/devices/dynamics/Compressor.h
     src/devices/dynamics/Limiter.cpp
     src/devices/dynamics/Limiter.h
-    src/devices/dynamics/Maximizer.cpp
-    src/devices/dynamics/Maximizer.h
     src/devices/dynamics/Multiband.cpp
     src/devices/dynamics/Multiband.h
     src/devices/eq/Equalizer.cpp
@@ -555,8 +553,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/LevelHistoryView.h
     src/ui/devices/LimiterEditor.cpp
     src/ui/devices/LimiterEditor.h
-    src/ui/devices/MaximizerEditor.cpp
-    src/ui/devices/MaximizerEditor.h
     src/ui/devices/ModulatorEditor.cpp
     src/ui/devices/ModulatorEditor.h
     src/ui/devices/MultibandEditor.cpp
@@ -830,7 +826,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/DrumSamplerEditorTests.cpp
         tests/DrumSamplerTests.cpp
         tests/DspTests.cpp
-        tests/DynamicsEditorTests.cpp
         tests/EngineSetupTests.cpp
         tests/EffectDeviceTests.cpp
         tests/EffectEditorTests.cpp
@@ -866,6 +861,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
         tests/MotionEffectTests.cpp
+        tests/MultibandEditorTests.cpp
+        tests/MultibandTests.cpp
         tests/NewProjectTests.cpp
         tests/NoteIDTests.cpp
         tests/NoteTests.cpp

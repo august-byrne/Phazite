@@ -6,7 +6,6 @@
 #include "devices/drums/FactoryDrums.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
-#include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/reverb/Reverb.h"
@@ -441,7 +440,7 @@ namespace
     // House at 124 BPM in A minor, 40 bars: drums in a bus, samples in the playlist (a top loop that follows the tempo, a
     // crash and a reversed one), a bass made from the chord lane that ducks under the kick through a sidechain, chord stabs
     // whose filter an automation lane opens and an LFO moves, a lead, a noise riser whose volume rises, a reverb and a delay
-    // on returns, and the master's maximizer.
+    // on returns, and the master's multiband.
     void makeHouseGroove (Builder& song)
     {
         constexpr double bpm = 124.0;
@@ -586,12 +585,12 @@ namespace
         song.automate (getVolume (song.context, riser).getRef(),
                        { { at (bar (8)), decibelsToFaderPosition (-24.0f), -0.3f }, { at (bar (16)), decibelsToFaderPosition (0.0f) } });
 
-        // A reverb and a delay that several tracks send to, and the master's maximizer.
+        // A reverb and a delay that several tracks send to, and the master's multiband, which makes the mix loud.
         const auto reverb = song.addReturn (chords, devices::Reverb::typeID, "Reverb/Halls/Large Hall", -10.0f);
         song.send (lead, reverb, -16.0f);
         song.send (riser, reverb, -8.0f);
         song.addReturn (lead, devices::Delay::typeID, "Delay/Rhythmic/Dotted Eighth", -12.0f);
-        song.addEffect ({}, devices::Maximizer::typeID, "Maximizer/Mastering/Gentle Master");
+        song.addEffect ({}, devices::Multiband::typeID, "Multiband/Mastering/Gentle Master");
 
         useKeyOnEveryTrack (song.context, key);
     }
@@ -677,7 +676,7 @@ namespace
         song.setVolume (shakers, -14.0f);
 
         const auto drums = song.addBus ("Drums", "Vermilion", { beat, shakers });
-        song.addEffect (drums, devices::Multiband::typeID, "Multiband/Creative/Light Squash");
+        song.addEffect (drums, devices::Multiband::typeID, "Multiband/Mixing/Drum Punch");
 
         // The drums fade out over the outro's last four bars.
         song.automate (getVolume (song.context, drums).getRef(),

@@ -14,7 +14,6 @@
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
-#include "devices/dynamics/Maximizer.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
@@ -244,7 +243,6 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Compressor", maker<dev::Compressor>(), &dev::Compressor::info },
         { "Multiband", maker<dev::Multiband>(), &dev::Multiband::info },
         { "Limiter", maker<dev::Limiter>(), &dev::Limiter::info },
-        { "Maximizer", maker<dev::Maximizer>(), &dev::Maximizer::info },
         { "Saturator", maker<dev::Saturator>(), &dev::Saturator::info },
         { "Delay", maker<dev::Delay>(), &dev::Delay::info },
         { "Reverb", maker<dev::Reverb>(), &dev::Reverb::info },

@@ -138,12 +138,12 @@ TEST_CASE ("House Groove shows a bus, samples, a bass that ducks under the kick,
     CHECK (phazite::getModulations (context, cutoff).size() == 1);
     CHECK (phazite::getAutomationPoints (context, phazite::getVolume (context, example.track ("Riser")).getRef()).size() == 2);
 
-    // A reverb and a delay on returns, and the master's maximizer.
+    // A reverb and a delay on returns, and the master's multiband.
     CHECK (phazite::getTrackRow (context, example.track ("Reverb"))->kind == phazite::TrackType::returnTrack);
     CHECK (example.sends ("Chords", "Reverb"));
     CHECK (example.sends ("Lead", "Reverb"));
     CHECK (example.sends ("Lead", "Delay"));
-    CHECK (findDevice (phazite::getEffects (context, {}), "Maximizer").isValid());
+    CHECK (findDevice (phazite::getEffects (context, {}), "Multiband").isValid());
 }
 
 TEST_CASE ("Lo-fi Beat shows a container with macros, an LFO on the pan, samples, and the drums fading out")
