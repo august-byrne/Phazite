@@ -166,7 +166,7 @@
       "masterCurve": 1,
       "masterReleaseCurve": 2,
       "masterDetection": 0,
-      "masterSaturation": 0.0,
+      "masterSaturation": -0.02,
       "masterCeiling": 0.0,
       "masterPoints": 3.0,
       "masterPoint1X": 0.0,

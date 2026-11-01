@@ -258,6 +258,7 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
     auto edit = phazite::createSongEdit (engine);
     phazite::ensureTracks (*edit, 2);
     addInstrument (*te::getAudioTracks (*edit)[0]);
+    auto lookAhead = 0; // samples: what the master's devices look ahead by delays what is played live as much
 
     SUBCASE ("Alone in the song")
     {
@@ -268,6 +269,15 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
     {
         for (const auto* type : { phazite::devices::Limiter::typeID, phazite::devices::Multiband::typeID })
             phazite::insertMasterDevice (*edit, edit->getPluginCache().createNewPlugin (type, {}));
+
+        phazite::devices::Limiter limiter;
+        phazite::devices::Multiband multiband;
+
+        for (auto* processor : std::initializer_list<phazite::devices::Processor*> { &limiter, &multiband })
+        {
+            processor->prepare (phazite::test::HostedDevice::sampleRate, phazite::test::HostedDevice::blockSize);
+            lookAhead += processor->getLatencySamples();
+        }
     }
 
     phazite::routeLiveMidiInput (*edit);
@@ -284,10 +294,11 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
         return samples;
     };
 
-    // Once the graph plays the note, every note after it sounds as soon.
+    // Once the graph plays the note, in the block it came in (after the master's look-ahead), every note after it sounds as
+    // soon.
     const auto first = playUntil (playNote, [] (int samples) { return samples >= 0; });
     REQUIRE (first >= 0);
-    CHECK (first < phazite::test::HostedDevice::blockSize);
+    CHECK (first < phazite::test::HostedDevice::blockSize + lookAhead);
 
     for (int i = 0; i < 12; ++i)
         CHECK (playNote() == first);

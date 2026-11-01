@@ -158,10 +158,11 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     CHECK (sampler->getPlayhead (1).get() < 0.0f);
 }
 
-TEST_CASE ("A pad clicked in the drum sampler's editor sounds at once, however long the sampler was silent, or never")
+TEST_CASE ("A pad clicked in the drum sampler's editor sounds at once, however long the sampler was silent")
 {
     // The sampler sleeps once it has been silent a while (model/devices/internal/DevicePlugin.h): a click then waited in it
-    // unheard, and every click since sounded at once when the song's first note woke it. Switched off, it plays no blocks.
+    // unheard, and every click since sounded at once when the song's first note woke it. (An instrument has no switch of its
+    // own since 2026-11-01, so it is never off: DevicesViewTests.cpp.)
     phazite::test::HostedDevice output;
     phazite::test::TestSong song;
     const auto drums = song.setInstrument (song.firstTrack, DrumSampler::typeID);
@@ -182,19 +183,4 @@ TEST_CASE ("A pad clicked in the drum sampler's editor sounds at once, however l
         CHECK (samples >= 0);
         CHECK (samples < phazite::test::HostedDevice::blockSize);
     }
-
-    // Clicked while the sampler is off: not then, nor once it is on again. (The last snare ends first: Tracktion doesn't
-    // reset a device switched on again, which goes on from where it was.)
-    output.process (100);
-    phazite::setDeviceOn (song.context, drums, false);
-    phazite::test::settle (250);
-    clickSnare();
-    clickSnare();
-    CHECK (output.samplesToFirstSound() < 0);
-
-    phazite::setDeviceOn (song.context, drums, true);
-    phazite::test::settle (500);
-    CHECK (output.samplesToFirstSound() < 0);
-    clickSnare();
-    CHECK (output.samplesToFirstSound() >= 0);
 }
