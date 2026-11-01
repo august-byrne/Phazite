@@ -74,7 +74,7 @@ Phazite is built in the open, and every kind of help counts:
 
 - **Try it and say what tripped you up:** [open an issue](https://github.com/august-byrne/Phazite/issues) for a bug or an idea.
 - **Help write it:** [CONTRIBUTING.md](CONTRIBUTING.md) covers setting up, how the code is laid out, its rules for the audio thread, the tests and the checks a change goes through.
-- **See where it's going:** [the roadmap](docs/roadmap.md) (what comes next), [the design](docs/design.md) (what Phazite should be, and why) and [the known bugs](docs/known-bugs.md).
+- **See where it's going:** [the project board](https://github.com/users/august-byrne/projects/1) (the open steps, by month), [the roadmap](docs/roadmap.md) (the plan, step by step), [the design](docs/design.md) (what Phazite should be, and why) and [the known bugs](docs/known-bugs.md).
 
 ## License
 

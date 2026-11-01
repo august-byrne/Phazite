@@ -3,6 +3,7 @@
 *Status: draft for review, October 2026.* This is the plan for getting from today's smoke-test app to v1 of the [design](design.md).
 - **Order:** each step builds on the ones before it and ends with something that can be built, tested and tried.
 - **Sizes:** relative effort, S < M < L < XL, for ordering only. They are not dates.
+- **On GitHub:** each open step is an issue in its phase's milestone, and the [project board](https://github.com/users/august-byrne/projects/1) shows which month each is planned for.
 
 ## How each step is done
 
