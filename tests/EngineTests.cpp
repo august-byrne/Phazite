@@ -324,7 +324,7 @@ void requireSame (const juce::AudioBuffer<float>& actual, const juce::AudioBuffe
 
     for (int channel = 0; channel < 2; ++channel)
         for (int i = 0; i < actual.getNumSamples(); ++i)
-            if (actual.getSample (channel, i) != expected.getSample (channel, i))
+            if (! juce::exactlyEqual (actual.getSample (channel, i), expected.getSample (channel, i)))
                 FAIL ("sample " << i << " on channel " << channel << ": " << actual.getSample (channel, i) << ", expected "
                                 << expected.getSample (channel, i));
 }
@@ -396,7 +396,7 @@ TEST_CASE ("A new plan with another tempo leaves the playhead on its beat")
     auto first = -1;
 
     for (int i = 0; i < after.getNumSamples() && first < 0; ++i)
-        if (after.getSample (0, i) != 0.0f)
+        if (! juce::exactlyEqual (after.getSample (0, i), 0.0f))
             first = i;
 
     // The click's first sample is silent (its attack starts at 0): its second is the first heard.

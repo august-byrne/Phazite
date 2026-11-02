@@ -40,9 +40,9 @@ struct Plan
     struct Input
     {
         int strip = 0;
-        std::shared_ptr<Delay> delay;
+        std::shared_ptr<Delay> delay {};
         bool beforeFader = false;
-        std::shared_ptr<SendLevel> level;
+        std::shared_ptr<SendLevel> level {};
     };
 
     // A device, with the parameters its automation moves, which follow the song as late as the sound comes into it (from
@@ -51,15 +51,15 @@ struct Plan
     // points the audio thread gives it for each block.
     struct Device
     {
-        std::shared_ptr<DeviceNode> node;
-        std::vector<ParameterCurve> automation;
+        std::shared_ptr<DeviceNode> node {};
+        std::vector<ParameterCurve> automation {};
         int latency = 0;
-        std::shared_ptr<Modulation> modulation;
+        std::shared_ptr<Modulation> modulation {};
 
         // The strip its sidechain listens to (after that strip's fader and before its mute), lined up with its sound by a
         // delay (none when it needs none); or none.
         int sidechain = -1;
-        std::shared_ptr<Delay> sidechainDelay;
+        std::shared_ptr<Delay> sidechainDelay {};
     };
 
     // A container of effects among a strip's devices: from its first to its last, and its mix with what came in.

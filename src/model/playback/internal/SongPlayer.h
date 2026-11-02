@@ -113,10 +113,10 @@ private:
     // sends to it, what its sidechains listen to), and what of that it refuses, which would feed itself round a loop.
     struct ChannelInfo
     {
-        juce::ValueTree state;
+        juce::ValueTree state {};
         std::int64_t id = 0, output = 0;
-        std::vector<std::int64_t> needs;
-        std::set<std::int64_t> refused;
+        std::vector<std::int64_t> needs {};
+        std::set<std::int64_t> refused {};
 
         bool refuses (std::int64_t other) const { return refused.contains (other); }
     };

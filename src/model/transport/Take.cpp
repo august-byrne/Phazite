@@ -320,7 +320,7 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
         return;
 
     // Where each was in the song: folded into the looped range (one held over its end ending there), kept to the punched one.
-    const auto toSample = [this] (BeatPosition beat) { return std::llround (tempo->toSamples (beat.inBeats())); };
+    const auto toSample = [this] (BeatPosition beat) -> std::int64_t { return std::llround (tempo->toSamples (beat.inBeats())); };
     const auto toBeat = [this] (std::int64_t sample) { return BeatPosition::fromBeats (tempo->toBeats ((double) sample)); };
 
     auto from = startSample, to = end;

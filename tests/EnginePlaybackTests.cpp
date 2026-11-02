@@ -35,7 +35,7 @@ namespace
 int findFirstSound (const juce::AudioBuffer<float>& audio, int from = 0)
 {
     for (int i = from; i < audio.getNumSamples(); ++i)
-        if (audio.getSample (0, i) != 0.0f)
+        if (! juce::exactlyEqual (audio.getSample (0, i), 0.0f))
             return i;
 
     return -1;
