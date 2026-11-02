@@ -667,6 +667,34 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords through a filter that an LFO and a note follower move, the pan and volume "
+               "by an envelope follower, steps and a macro")
+    {
+        using phazite::ModulatorType;
+        phazite::test::TestSong song;
+        const auto track = song.firstTrack;
+        song.setInstrument (track, phazite::devices::Synth::typeID);
+        const auto filter = song.addEffect (track, phazite::devices::FilterEffect::typeID);
+        song.modulate (song.addModulator (track, ModulatorType::lfo), { filter, "cutoff" }, 0.4f);
+        song.modulate (song.addModulator (track, ModulatorType::noteFollower), { filter, "cutoff" }, 0.2f);
+        song.modulate (song.addModulator (track, ModulatorType::envelopeFollower), song.getPanParameter (track), 0.5f);
+        song.modulate (song.addModulator (track, ModulatorType::steps), song.getVolumeParameter (track), 0.3f);
+        song.modulate (song.addModulator (track, ModulatorType::random), song.getVolumeParameter (track), 0.1f);
+        song.modulate (song.addModulator (track, ModulatorType::breakpoints), { filter, "resonance" }, 0.2f);
+        const auto macro = song.addModulator (track, ModulatorType::macro);
+        song.modulate (macro, song.getVolumeParameter (track), -0.2f);
+        song.setMacroValue (macro, 0.5f);
+        const auto clip = song.addMidiClip (track, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (clip, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        const auto m = playPhaziteAndMeasure (song.context);
+        report ("Phazite's engine: modulation", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: volume automation and an LFO on pan")
     {
         auto edit = phazite::createSongEdit (phazite::test::getEngine());

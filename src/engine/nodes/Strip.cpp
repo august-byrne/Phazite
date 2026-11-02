@@ -10,6 +10,9 @@ void StripState::prepare (double sampleRate, int maximumBlockSize)
     buffer.setSize (2, maximumBlockSize);
     buffer.clear();
     scratch.setSize (2, 9 * maximumBlockSize + 16);
+    noteStarts.reserve ((size_t) DeviceRunner::maximumEvents);
+    volumeModulation.assign ((size_t) (maximumBlockSize / controlPointSpacing + 3), 0.0f);
+    panModulation.assign (volumeModulation.size(), 0.0f);
     channel.prepare (sampleRate);
     sequence = nullptr;
     nextEvent = 0;

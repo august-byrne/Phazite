@@ -43,12 +43,22 @@ struct Plan
     };
 
     // A device, with the parameters its automation moves, which follow the song as late as the sound comes into it (from
-    // the devices before it, and for the master's, from the tracks it adds up), so that they line up with its sound.
+    // the devices before it, and for the master's, from the tracks it adds up), so that they line up with its sound; and
+    // what modulates it, its sources its strip's modulators in their order (or none), whose values on a block's control
+    // points the audio thread gives it for each block.
     struct Device
     {
         std::shared_ptr<DeviceNode> node;
         std::vector<ParameterCurve> automation;
         int latency = 0;
+        std::shared_ptr<Modulation> modulation;
+    };
+
+    // A modulator moving a fader's volume or pan, by its place among its strip's, by an amount from -1 to 1.
+    struct Route
+    {
+        int source = 0;
+        float amount = 0.0f;
     };
 
     // A track, or the master: what it plays (its notes into its instrument, or the strips it adds up), through its devices
@@ -64,7 +74,9 @@ struct Plan
         std::vector<Input> inputs;
         int latency = 0; // how late its sound comes out, in samples, from its devices and what it adds up, as its fader's
                          // automation follows the song
-        std::shared_ptr<const Curve> volume, pan; // or none
+        std::shared_ptr<const Curve> volume, pan;               // or none
+        std::vector<std::shared_ptr<ModulatorNode>> modulators; // its modulators and macros, kept by their IDs
+        std::vector<Route> volumeModulation, panModulation;
     };
 
     // In the order they play: each after the strips it adds up. The master last, whose sound goes out; none in a plan of

@@ -93,8 +93,8 @@ PlaybackSession* findSession (const te::Edit&);
 PlaybackSession* findPlayingSession (const te::Edit&);
 
 // A parameter's value as Phazite's engine played it last, while the engine plays the parameter's project and its automation
-// moves it (SongPlayer::getPlayedValue()), with its modulation or without; nothing otherwise, while its value is the one
-// set by hand.
+// or modulation moves it (SongPlayer::getPlayedValue()), with its modulation or without; nothing otherwise, while its value
+// is the one set by hand.
 std::optional<float> getPlayedValue (const te::AutomatableParameter&, bool withModulation);
 
 // The song rendered by Phazite's own engine, offline, from its start: so many samples at a rate, in blocks of a size, in

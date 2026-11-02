@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <span>
 
 namespace phazite::engine
 {
@@ -25,9 +26,11 @@ struct PanGains
 
 PanGains getPanGains (float pan) noexcept;
 
-// The fader's travel, as automation draws it: a position from 0 to 1 is 20 ln (position) + 6 decibels, 0 dB at about 0.74
-// and +6 dB at the top, as Tracktion's faders go (Tracktion's volumeFaderPositionToDB()); 0 is silence.
+// The fader's travel, as automation draws it and modulation moves it: a position from 0 to 1 is 20 ln (position) + 6
+// decibels, 0 dB at about 0.74 and +6 dB at the top, as Tracktion's faders go (Tracktion's volumeFaderPositionToDB()); 0 is
+// silence. And back.
 float faderPositionToDecibels (float position) noexcept;
+float decibelsToFaderPosition (float decibels) noexcept;
 
 class Channel
 {
@@ -54,13 +57,22 @@ public:
     void setVolumeWriting (bool isWriting) noexcept { volumeWriting.store (isWriting, std::memory_order_relaxed); }
     void setPanWriting (bool isWriting) noexcept { panWriting.store (isWriting, std::memory_order_relaxed); }
 
-    // Any thread: the volume, in decibels, and pan it played last, its automation's or the values set by hand.
-    float getPlayedVolume() const noexcept { return playedVolume.load (std::memory_order_relaxed); }
-    float getPlayedPan() const noexcept { return playedPan.load (std::memory_order_relaxed); }
+    // Any thread: the volume, in decibels, and pan it played last, its automation's or the values set by hand, with its
+    // modulation or without.
+    float getPlayedVolume (bool withModulation = true) const noexcept
+    {
+        return (withModulation ? playedVolume : playedBaseVolume).load (std::memory_order_relaxed);
+    }
+    float getPlayedPan (bool withModulation = true) const noexcept
+    {
+        return (withModulation ? playedPan : playedBasePan).load (std::memory_order_relaxed);
+    }
 
     // A block's automation of the volume (in the fader's positions) and the pan, either of them none, and where the song
     // is: while it plays, the fader follows them exactly, at their values on the song's control points and in a straight
-    // line between; stopped, it eases to their values where the song is, as to a value set by hand.
+    // line between; stopped, it eases to their values where the song is, as to a value set by hand. And the block's
+    // modulation of each, as parts of its range on each control point from the one at or before the block's start (none
+    // for none), which moves it from there, in a straight line between the points.
     struct Automation
     {
         const Curve* volume = nullptr;
@@ -68,6 +80,7 @@ public:
         double beat = 0.0;
         double beatsPerSample = 0.0; // 0 while the song is stopped
         std::int64_t sample = 0;     // the song's sample at the block's start
+        std::span<const float> volumeModulation, panModulation;
     };
 
     // Audio thread: turns two channels (or one, the same on both sides) by the fader, easing to a new volume or pan set
@@ -78,14 +91,15 @@ public:
     LevelMeter& getMeter() noexcept { return meter; }
 
 private:
-    std::atomic<float> volume { 0.0f }, pan { 0.0f }, playedVolume { 0.0f }, playedPan { 0.0f };
+    std::atomic<float> volume { 0.0f }, pan { 0.0f }, playedVolume { 0.0f }, playedPan { 0.0f }, playedBaseVolume { 0.0f },
+        playedBasePan { 0.0f };
     std::atomic<bool> audible { true }, volumeWriting { false }, panWriting { false };
 
     // The audio thread's: each side's gain now and where it eases to, how many samples are left to get there and how much it
     // moves in each; and the mute's fade, likewise.
     double sampleRate = 44100.0;
     float gains[2] = { 1.0f, 1.0f }, steps[2] = {};
-    float targetVolume = 0.0f, targetPan = 0.0f;
+    float targetVolume = 0.0f, targetPan = 0.0f, baseVolume = 0.0f, basePan = 0.0f;
     int easing = 0;
     bool started = false;
     float heard = 1.0f, heardTarget = 1.0f, heardStep = 0.0f;

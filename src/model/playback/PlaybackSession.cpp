@@ -193,7 +193,7 @@ std::optional<float> getPlayedValue (const te::AutomatableParameter& parameter, 
     const auto* session = findPlayingSession (parameter.getEdit());
     const auto ref = getParameterRef (parameter);
 
-    if (session != nullptr && session->getPlayer().findCurve (ref) != nullptr)
+    if (session != nullptr && session->getPlayer().isMoved (ref))
         return session->getPlayer().getPlayedValue (ref, withModulation);
 
     return {};

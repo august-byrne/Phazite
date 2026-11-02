@@ -3,6 +3,7 @@
 // Tracktion: how the audio thread is handed what it plays, Phazite's devices as the engine plays them, the tempo map, the
 // transport and its metronome, to the sample, and audio files and the clips that play them.
 #include "TestHelpers.h"
+#include "devices/modulation/Modulators.h"
 #include "devices/motion/Phaser.h"
 #include "devices/synth/Synth.h"
 #include "engine/audio/AudioRegion.h"
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace
@@ -813,4 +815,187 @@ TEST_CASE ("A device's automation moves its parameter on the song's control poin
     block.beatsPerSample = 1.0 / samplesPerBeat;
     node.process (buffer, 0, 512, block, automation);
     CHECK (node.getPlayedBaseValue (depth) == doctest::Approx (0.25f));
+}
+
+namespace
+{
+// A modulator's parameters at their defaults, with some set.
+std::vector<float> getModulatorValues (dev::ModulatorKind kind, std::initializer_list<std::pair<std::string_view, float>> set = {})
+{
+    std::vector<float> values;
+
+    for (const auto& parameter : dev::getModulatorParameters (kind))
+        values.push_back (parameter.defaultValue);
+
+    for (const auto& [id, value] : set)
+        values[(size_t) dev::findModulatorParameter (kind, id)] = value;
+
+    return values;
+}
+
+// Where a song at 120 BPM in 4/4 is at a beat.
+dev::SongPlace placeAt (double beat)
+{
+    return { beat / 2.0, beat, 120.0, 4 };
+}
+} // namespace
+
+TEST_CASE ("An LFO runs free at its rate from its start, or follows the transport, or starts again with each note")
+{
+    using dev::ModulatorKind;
+    constexpr double secondsPerPoint = engine::controlPointSpacing / rate;
+
+    // Free at 2 Hz: a sine from its cycle's start, moving on by a control point's time each time.
+    dev::Modulator lfo (ModulatorKind::lfo);
+    lfo.prepare (rate, 1);
+    const auto free = getModulatorValues (ModulatorKind::lfo, { { "rateType", 0.0f }, { "rate", 2.0f } });
+
+    for (int point = 0; point < 3000; ++point)
+    {
+        const auto expected = (std::sin (juce::MathConstants<double>::twoPi * 2.0 * point * secondsPerPoint) + 1.0) / 2.0;
+        REQUIRE (lfo.next (free, {}, placeAt (0.0), secondsPerPoint) == doctest::Approx (expected).epsilon (1.0e-4));
+    }
+
+    // Synced to the transport, a bar a cycle, a saw: where the song is in its bar, wherever it was before.
+    const auto synced = getModulatorValues (ModulatorKind::lfo, { { "syncType", 1.0f }, { "wave", 2.0f } });
+
+    for (const auto beat : { 0.0, 1.0, 2.5, 7.0, 13.0 })
+        CHECK (lfo.next (synced, {}, placeAt (beat), secondsPerPoint) == doctest::Approx (std::fmod (beat / 4.0, 1.0)).epsilon (1.0e-5));
+
+    // Synced to notes: a note starts its cycle again.
+    lfo.reset();
+    const auto noted = getModulatorValues (ModulatorKind::lfo, { { "syncType", 2.0f }, { "wave", 2.0f }, { "rateType", 0.0f } });
+
+    for (int point = 0; point < 100; ++point)
+        lfo.next (noted, {}, placeAt (0.0), secondsPerPoint);
+
+    CHECK (lfo.next (noted, {}, placeAt (0.0), secondsPerPoint) > 0.05f);
+    lfo.noteOn (60, 100);
+    CHECK (lfo.next (noted, {}, placeAt (0.0), secondsPerPoint) == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("A step sequencer, a breakpoint envelope and a random source move as Tracktion's do, the random one the same each time")
+{
+    using dev::ModulatorKind;
+    constexpr double secondsPerPoint = engine::controlPointSpacing / rate;
+
+    // Four steps a quarter note each, synced to the transport: the step the song is on.
+    dev::Modulator steps (ModulatorKind::steps);
+    steps.prepare (rate, 1);
+    const auto stepValues = getModulatorValues (ModulatorKind::steps, { { "syncType", 1.0f }, { "numSteps", 4.0f }, { "rateType", 8.0f } });
+    const std::vector<float> pattern { -1.0f, -0.25f, 0.5f, 1.0f };
+
+    for (const auto& [beat, expected] : { std::pair (0.5, -1.0f), std::pair (1.2, -0.25f), std::pair (3.9, 1.0f), std::pair (6.0, 0.5f) })
+        CHECK (steps.next (stepValues, pattern, placeAt (beat), secondsPerPoint) == doctest::Approx (expected));
+
+    // The breakpoint envelope as it is made: up to 1 at a quarter of its cycle, to 0.5 at half, held, and down to 0.
+    dev::Modulator envelope (ModulatorKind::breakpoints);
+    envelope.prepare (rate, 1);
+    const auto envelopeValues = getModulatorValues (ModulatorKind::breakpoints, { { "syncType", 1.0f } });
+
+    for (const auto& [beat, expected] :
+         { std::pair (0.5, 0.5f), std::pair (1.0, 1.0f), std::pair (1.5, 0.75f), std::pair (2.5, 0.5f), std::pair (3.5, 0.25f) })
+        CHECK (envelope.next (envelopeValues, {}, placeAt (beat), secondsPerPoint) == doctest::Approx (expected).epsilon (1.0e-5));
+
+    // Random values, the same each time for the same seed, another for another; held for a cycle each, from 0 to 1.
+    const auto randomValues = getModulatorValues (ModulatorKind::random, { { "rateType", 0.0f }, { "rate", 50.0f } });
+    const auto play = [&randomValues] (std::uint32_t seed)
+    {
+        dev::Modulator source (ModulatorKind::random);
+        source.prepare (rate, seed);
+        std::vector<float> values;
+
+        for (int point = 0; point < 2000; ++point)
+            values.push_back (source.next (randomValues, {}, placeAt (0.0), secondsPerPoint));
+
+        return values;
+    };
+
+    const auto first = play (7);
+    CHECK (first == play (7));
+    CHECK (first != play (8));
+    CHECK (std::all_of (first.begin(), first.end(), [] (float value) { return value >= 0.0f && value <= 1.0f; }));
+    CHECK (std::set<float> (first.begin(), first.end()).size() > 20);
+}
+
+TEST_CASE ("An envelope follower rises and falls with what it hears, and a note follower follows the notes")
+{
+    using dev::ModulatorKind;
+
+    // At 0.5 for a tenth of a second, its attack: it rises all but 14% of the way (exp (-2): Tracktion's digital time
+    // constant); then in silence, it falls.
+    dev::Modulator follower (ModulatorKind::envelopeFollower);
+    follower.prepare (rate, 1);
+    const auto values = getModulatorValues (ModulatorKind::envelopeFollower);
+    juce::AudioBuffer<float> sound (2, 4800);
+    sound.clear();
+
+    for (int channel = 0; channel < 2; ++channel)
+        juce::FloatVectorOperations::fill (sound.getWritePointer (channel), 0.5f, 4800);
+
+    follower.listen (sound.getArrayOfReadPointers(), 2, 4800, values);
+    CHECK (follower.next (values, {}, placeAt (0.0), 0.0) == doctest::Approx (0.5 * (1.0 - std::exp (-2.0))).epsilon (0.01));
+
+    sound.clear();
+    follower.listen (sound.getArrayOfReadPointers(), 2, 4800, values);
+    const auto fallen = follower.next (values, {}, placeAt (0.0), 0.0);
+    CHECK (fallen < 0.45f);
+    CHECK (fallen > 0.2f);
+
+    // The note follower: -1 for the lowest note, 0 in the middle, 1 for the highest; relative, a root and a spread.
+    dev::Modulator notes (ModulatorKind::noteFollower);
+    notes.prepare (rate, 1);
+    const auto absolute = getModulatorValues (ModulatorKind::noteFollower);
+    const auto relative = getModulatorValues (ModulatorKind::noteFollower, { { "mode", 1.0f } });
+
+    for (const auto& [note, expected] : { std::pair (0, -1.0f), std::pair (63, 0.0f), std::pair (79, 0.25f), std::pair (127, 1.0f) })
+    {
+        notes.noteOn (note, 100);
+        CHECK (notes.next (absolute, {}, placeAt (0.0), 0.0) == doctest::Approx (expected));
+    }
+
+    notes.noteOn (72, 100);
+    CHECK (notes.next (relative, {}, placeAt (0.0), 0.0) == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("A modulator moves a fader on the song's control points, the same at any block size")
+{
+    // A note held for two beats, at 0.5, its volume swung by a bipolar LFO at 3 Hz by half the fader's travel.
+    const auto play = [] (int samplesInBlock)
+    {
+        auto plan = makeClickPlan();
+        plan->metronome = false;
+        auto track = makeTrack (1, HeldLevel::info, std::make_unique<HeldLevel>(), { { 0.0, 2.0, 60, 0.8f } }, samplesInBlock);
+        auto lfo = std::make_shared<engine::ModulatorNode> (dev::ModulatorKind::lfo);
+        lfo->prepare (rate, samplesInBlock, 1);
+
+        for (const auto& [id, value] : { std::pair ("rateType", 0.0f), std::pair ("rate", 3.0f), std::pair ("biopolar", 1.0f) })
+            lfo->setParameter (dev::findModulatorParameter (dev::ModulatorKind::lfo, id), value);
+
+        track.modulators.push_back (lfo);
+        track.volumeModulation.push_back ({ 0, 0.5f });
+        plan->strips.push_back (std::move (track));
+        plan->strips.push_back (makeMaster (*plan, samplesInBlock));
+
+        engine::Engine player;
+        player.prepare (rate, samplesInBlock);
+        player.setPlan (std::move (plan));
+        return player.render (48000);
+    };
+
+    // It swings: loud at the top of the LFO's cycle (1/12 s), quiet at its bottom (1/4 s).
+    const auto reference = play (256);
+    CHECK (reference.getMagnitude (0, 3800, 400) > 0.9f);
+    CHECK (reference.getMagnitude (0, 11800, 400) < 0.1f);
+
+    for (const auto samplesInBlock : { 64, 333 })
+    {
+        const auto other = play (samplesInBlock);
+        auto largest = 0.0f;
+
+        for (int i = 0; i < 48000; ++i)
+            largest = std::max (largest, std::abs (other.getSample (0, i) - reference.getSample (0, i)));
+
+        CHECK (largest < 1.0e-5f);
+    }
 }

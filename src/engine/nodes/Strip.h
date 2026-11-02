@@ -7,9 +7,11 @@
 #include "Channel.h"
 #include "DeviceRunner.h"
 #include "NoteSequence.h"
+#include "engine/modulation/ModulatorNode.h"
 
 #include <array>
 #include <bitset>
+#include <vector>
 
 namespace phazite::engine
 {
@@ -38,6 +40,11 @@ public:
     int numEvents = 0;
     void addEvent (devices::NoteEvent) noexcept; // dropped once full
     void sortEvents() noexcept;
+
+    // What its modulators hear of its notes in a block, the notes started; and its fader's modulation on each of the block's
+    // control points (Channel::Automation).
+    std::vector<ModulatorNode::NoteStart> noteStarts;
+    std::vector<float> volumeModulation, panModulation;
 
 private:
     Channel channel;

@@ -35,8 +35,11 @@ struct Modulation
     struct Source
     {
         // Set for each block: whether it is on, and its value as the block starts; and for an LFO whose wave is set by the
-        // point of its cycle alone, its wave, from where its cycle is as the block starts, moving so far in a sample.
+        // point of its cycle alone, its wave, from where its cycle is as the block starts, moving so far in a sample. Or, in
+        // Phazite's engine, its value on each control point of the block, from the one at or before its start
+        // (modulation/ModulatorNode.h), which each stretch takes from the point it starts on.
         bool isOn = true;
+        std::span<const float> points;
         float value = 0.0f;
         bool followsWave = false;
         devices::LfoShape shape;
@@ -140,7 +143,7 @@ private:
     bool hasPreviousValues = false;
     void keepValues() noexcept;
     void startModulation (Modulation&) noexcept;
-    void setStretchValues (const Block&, bool automationMoves, int controlPoint, int done, int length, int numSamples);
+    void setStretchValues (const Block&, bool automationMoves, int controlPoint, int stretch, int done, int length, int numSamples);
 
     juce::AudioBuffer<float> stereo; // for a mono channel: sized in prepare(), as long as the stretches played at once
     int latencySamples = 0;

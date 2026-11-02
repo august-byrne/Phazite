@@ -16,6 +16,8 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <span>
+#include <vector>
 
 namespace phazite::engine
 {
@@ -119,6 +121,16 @@ private:
     void playSpan (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
     void playStrips (const Plan&, int offset, int numSamples) noexcept;
     void addNotes (const Plan::Strip&, const Plan&, int numSamples) noexcept;
+
+    // The control points of a stretch of a block that modulators play on (ModulatorNode.h), the samples counted since the
+    // engine started (its clock) numbering them while the song is stopped; each strip's modulators on them, and what they
+    // move its fader by on each.
+    std::vector<ModulatorNode::Point> controlPoints;
+    int numControlPoints = 0;
+    std::int64_t clock = 0;
+    void findControlPoints (const Plan&, std::int64_t gridSample, int numSamples) noexcept;
+    void playModulators (const Plan::Strip&) noexcept;
+    std::span<const float> getFaderModulation (const Plan::Strip&, const std::vector<Plan::Route>&, std::vector<float>& offsets) noexcept;
     bool endsAtLoop = false; // the stretch played ends at the loop's end
 
     // Live notes: those waiting, from any thread; and those of the block played, each at its sample.

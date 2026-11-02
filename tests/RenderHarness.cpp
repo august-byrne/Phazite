@@ -494,7 +494,9 @@ void checkGoldenAudio (const juce::AudioBuffer<float>& audio, double sampleRate,
 void checkGoldenChange (ProjectContext& context, const std::function<void()>& change, GoldenRender golden, const ChangeCheck& check)
 {
     settle();
-    const auto before = renderFingerprint (context, golden.seconds);
+    // Before, through the engine the render after is golden of: Phazite's, for one it plays otherwise on purpose.
+    const auto before = golden.ownEngine == OwnEngine::differs ? getFingerprint (makeOwnEngine()->render (context, golden.seconds))
+                                                               : renderFingerprint (context, golden.seconds);
     change();
     settle();
     golden.check = [&before, &check] (const Fingerprint& after, const juce::AudioBuffer<float>&) { return check (before, after); };

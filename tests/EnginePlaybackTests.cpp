@@ -13,6 +13,7 @@
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/LevelSource.h"
 #include "model/mixer/MixerModel.h"
+#include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
@@ -346,4 +347,44 @@ TEST_CASE ("On Phazite's engine, latch writes from a control's first move until 
     points = phazite::getAutomationPoints (song.context, lane);
     CHECK (points.front().beat.inBeats() == doctest::Approx (0.0));
     CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.25f) < 0.001f; }));
+}
+
+TEST_CASE ("Phazite's engine plays a track's LFO on its volume, which the LFO's editor and the fader's ring show, and a macro")
+{
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lfo = song.addModulator (track, phazite::ModulatorType::lfo);
+    song.setModulatorParameter (lfo, "rateType", 0.0f); // in hertz, at 1 Hz
+    song.modulate (lfo, song.getVolumeParameter (track), 0.5f);
+    EnginePlayback playback;
+    const auto volume = phazite::getVolume (song.context, track);
+
+    // Its editor's history, as it played, swinging both ways: a bipolar LFO, as Phazite makes one.
+    song.run ("transport.playStop");
+    playback.play (1.25); // to the top of its cycle
+    const auto history = phazite::getModulatorOutput (song.context, lfo, 1.0);
+    REQUIRE (history.size() >= 90);
+    CHECK (*std::min_element (history.begin(), history.end()) < -0.8f);
+    CHECK (*std::max_element (history.begin(), history.end()) > 0.8f);
+    CHECK (phazite::getModulatorValue (song.context, lfo) == doctest::Approx (history.back()).epsilon (0.05));
+
+    // The fader moves with it, from where it is set by hand: its ring shows where it is now.
+    const auto range = phazite::getModulationRange (volume);
+    REQUIRE (range.has_value());
+    CHECK (range->now >= range->low - 0.001f);
+    CHECK (range->now <= range->high + 0.001f);
+    CHECK (std::abs (volume.getValue() - volume.getBaseValue()) > 0.01f);
+
+    // A macro turned up turns the volume down at once, without a new plan.
+    song.run ("transport.playStop");
+    phazite::setModulatorOn (song.context, lfo, false);
+    const auto macro = song.addModulator (track, phazite::ModulatorType::macro);
+    song.modulate (macro, song.getVolumeParameter (track), -0.5f);
+    playback.play (0.1);
+    const auto before = volume.getValue();
+    song.setMacroValue (macro, 1.0f);
+    playback.play (0.1);
+    CHECK (volume.getValue() == doctest::Approx (std::max (0.0f, before - 0.5f)).epsilon (0.01));
 }

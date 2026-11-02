@@ -50,6 +50,12 @@ public:
     const engine::Curve* findCurve (const ParameterRef&) const;
     std::optional<float> getPlayedValue (const ParameterRef&, bool withModulation) const;
 
+    // Whether automation or modulation moves a parameter in the plan, so that its control shows what the engine played.
+    bool isMoved (const ParameterRef&) const;
+
+    // What plays a modulator or a macro (by its ID), for its editor and slot; nullptr for none.
+    engine::ModulatorNode* findModulator (std::int64_t id) const;
+
     // Whether a parameter plays its value set by hand rather than its automation, while automation is written by hand
     // (AutomationWriter.h). It stays so from plan to plan, until it is written no more.
     void setWriting (const ParameterRef&, bool);
@@ -60,6 +66,9 @@ private:
     int preparedBlockSize = 0;
 
     std::map<std::int64_t, std::shared_ptr<engine::DeviceNode>> devices;
+    std::map<std::int64_t, std::shared_ptr<engine::ModulatorNode>> modulators;
+    std::set<std::int64_t> usedModulators;
+    std::set<std::pair<std::uint64_t, juce::String>> modulated;         // the parameters the plan being compiled modulates
     std::map<std::int64_t, std::shared_ptr<engine::StripState>> strips; // the master's under 0
     std::map<std::int64_t, std::shared_ptr<engine::Delay>> delays;      // each track's into the master
     std::set<std::int64_t> used;                                        // the devices the plan being compiled plays
@@ -87,7 +96,10 @@ private:
 
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
     std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState);
-    void addDevices (engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false);
+    std::vector<std::int64_t> addDevices (engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false); // their IDs
+    std::shared_ptr<engine::ModulatorNode> getModulator (const juce::ValueTree& modulatorState);
+    void setModulatorValues (engine::ModulatorNode&, const juce::ValueTree& modulatorState);
+    void addModulation (engine::Plan::Strip&, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs);
     void setValues (engine::DeviceNode&, const juce::ValueTree& deviceState);
     void loadSounds (engine::DeviceNode&, const juce::ValueTree& deviceState);
     void setChannel (const juce::ValueTree& channelState, bool isMaster);

@@ -124,6 +124,8 @@ target_sources(phazite_core PRIVATE
     src/devices/filter/FilterEffect.h
     src/devices/modulation/Modulation.cpp
     src/devices/modulation/Modulation.h
+    src/devices/modulation/Modulators.cpp
+    src/devices/modulation/Modulators.h
     src/devices/motion/Flanger.cpp
     src/devices/motion/Flanger.h
     src/devices/motion/Phaser.cpp
@@ -162,6 +164,8 @@ target_sources(phazite_core PRIVATE
     src/engine/core/Plan.h
     src/engine/core/TempoMap.cpp
     src/engine/core/TempoMap.h
+    src/engine/modulation/ModulatorNode.cpp
+    src/engine/modulation/ModulatorNode.h
     src/engine/nodes/Channel.cpp
     src/engine/nodes/Channel.h
     src/engine/nodes/DeviceNode.cpp

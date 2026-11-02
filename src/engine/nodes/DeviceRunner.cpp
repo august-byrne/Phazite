@@ -179,13 +179,13 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
     const auto sinceControlPoint = (int) (((in.sample % smoothingStep) + smoothingStep) % smoothingStep);
     const auto toControlPoint = smoothingStep - sinceControlPoint;
 
-    for (int done = 0; done < numSamples;)
+    for (int done = 0, stretch = 0; done < numSamples; ++stretch)
     {
         const auto length =
             std::min (numSamples - done, inStretches ? (done == 0 ? toControlPoint : smoothingStep) : stereo.getNumSamples());
 
         if (inStretches)
-            setStretchValues (in, automationMoves, done == 0 ? -sinceControlPoint : done, done, length, numSamples);
+            setStretchValues (in, automationMoves, done == 0 ? -sinceControlPoint : done, stretch, done, length, numSamples);
 
         float* channels[2];
 
@@ -283,7 +283,8 @@ void DeviceRunner::startModulation (Modulation& plan) noexcept
     }
 }
 
-void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int controlPoint, int done, int length, int numSamples)
+void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int controlPoint, int stretch, int done, int length,
+                                     int numSamples)
 {
     // A continuous parameter that moved since the last block glides there, as far as the stretch's end; an automated one
     // is at its curve's value on the stretch's control point (where it starts, or before the block for the rest of the
@@ -306,8 +307,9 @@ void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int 
     if (plan == nullptr)
         return;
 
-    // Then a modulated one is moved by its sources where the stretch is: an LFO by its wave at the stretch's middle, a
-    // modulator or a macro by its value gliding as far as the stretch's end.
+    // Then a modulated one is moved by its sources where the stretch is: by their values on its control point, in Phazite's
+    // engine; or an LFO by its wave at the stretch's middle, a modulator or a macro by its value gliding as far as the
+    // stretch's end.
     std::fill (offsets.begin(), offsets.end(), 0.0f);
     const auto middle = done + length / 2;
 
@@ -318,7 +320,8 @@ void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int 
         if (! source.isOn)
             continue;
 
-        const auto value = source.followsWave
+        const auto value = ! source.points.empty() ? source.points[std::min ((size_t) stretch, source.points.size() - 1)]
+                           : source.followsWave
                                ? devices::getLfoValue (source.shape, devices::movePhase (source.phase, middle * source.cyclesPerSample))
                                : source.previous + (source.now - source.previous) * along;
         offsets[(size_t) route.parameter] += route.amount * value;

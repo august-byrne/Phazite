@@ -24,20 +24,24 @@ using phazite::test::changesLevel;
 using phazite::test::isLouder;
 using phazite::test::swings;
 
-phazite::test::GoldenRender golden (const char* name, const char* about)
+phazite::test::GoldenRender golden (const char* name, const char* about, phazite::test::OwnEngine ownEngine)
 {
-    return { name,
-             juce::String ("Golden render (tests/GoldenModulationTests.cpp): ") + about
-                 + " Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
-             4.0,
-             {} };
+    return phazite::test::GoldenRender {
+        name,
+        juce::String ("Golden render (tests/GoldenModulationTests.cpp): ") + about
+            + " Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
+        4.0,
+        {}
+    }.on (ownEngine);
 }
 
-// Renders a song as it is, then with a change, as a golden render (RenderHarness.h: checkGoldenChange()).
+// Renders a song as it is, then with a change, as a golden render (RenderHarness.h: checkGoldenChange()). Phazite's engine
+// plays modulation on the song's control points, its modulators from their own starts (docs/tracktion-migration.md, T2
+// step 5), where Tracktion moved them once a block, from 0.51 s before the song: its renders are golden.
 void checkChange (TestSong& song, const std::function<void()>& change, const char* name, const char* about,
-                  const phazite::test::ChangeCheck& check)
+                  const phazite::test::ChangeCheck& check, phazite::test::OwnEngine ownEngine = phazite::test::OwnEngine::differs)
 {
-    phazite::test::checkGoldenChange (song.context, change, golden (name, about), check);
+    phazite::test::checkGoldenChange (song.context, change, golden (name, about, ownEngine), check);
 }
 
 // A tone on the first track, from the song's start for 4 s at 120 BPM.
@@ -116,7 +120,8 @@ TEST_SUITE ("golden")
                 song.modulate (steps, song.getVolumeParameter (song.firstTrack), 0.5f);
             },
             "modulation-steps", "a step sequencer, its steps rising, stepping a tone's volume by half its range.",
-            [] (const Fingerprint&, const Fingerprint& after) { return swings (after, 2, 38, 6.0f, "the steps move the volume"); });
+            // Its steps last a bar each (2 s): from the song's start, its first (-1) and its second, 4.9 dB louder.
+            [] (const Fingerprint&, const Fingerprint& after) { return swings (after, 2, 38, 4.0f, "the steps move the volume"); });
     }
 
     TEST_CASE ("Golden render: a breakpoint envelope moves a tone's volume")
@@ -201,7 +206,8 @@ TEST_SUITE ("golden")
             "modulation-container-macro",
             "a container of a filter, closed at 200 Hz, and a saturator on a high chord, its first macro opening the filter.",
             [] (const Fingerprint& before, const Fingerprint& after)
-            { return changesLevel (before, after, 20, 10.0f, "the macro opens the filter on the chord"); });
+            { return changesLevel (before, after, 20, 10.0f, "the macro opens the filter on the chord"); },
+            phazite::test::OwnEngine::notYet); // containers play on Phazite's engine from T2 step 6
     }
 }
 

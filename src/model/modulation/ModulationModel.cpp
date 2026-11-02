@@ -5,6 +5,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/mixer/internal/Containers.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -24,6 +25,14 @@ namespace
     {
         auto* edit = getEdit (context);
         return edit != nullptr ? findModulator (*edit, id) : std::nullopt;
+    }
+
+    // What plays a modulator or a macro while Phazite's engine plays the project, or nullptr.
+    engine::ModulatorNode* findPlayedModulator (const ProjectContext& context, ModulatorID id)
+    {
+        auto* edit = getEdit (context);
+        auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr;
+        return session != nullptr ? session->getPlayer().findModulator ((std::int64_t) id.getRaw()) : nullptr;
     }
 
     te::AutomatableParameter::Ptr find (const ProjectContext& context, const ParameterRef& parameter)
@@ -218,6 +227,10 @@ void renameMacro (ProjectContext& context, ModulatorID id, const juce::String& n
 
 std::vector<float> getModulatorOutput (const ProjectContext& context, ModulatorID id, double seconds)
 {
+    // As Phazite's engine played it, while it plays the project.
+    if (auto* node = findPlayedModulator (context, id))
+        return node->getHistory (seconds);
+
     if (const auto modulator = find (context, id); modulator.has_value() && modulator->modifier != nullptr)
         return modulator->modifier->getValues (te::TimeDuration::fromSeconds (seconds));
 
@@ -226,6 +239,9 @@ std::vector<float> getModulatorOutput (const ProjectContext& context, ModulatorI
 
 float getModulatorValue (const ProjectContext& context, ModulatorID id)
 {
+    if (auto* node = findPlayedModulator (context, id))
+        return node->isMacro() ? node->getValue() : juce::jlimit (-1.0f, 1.0f, node->getValue());
+
     if (const auto modulator = find (context, id))
     {
         if (modulator->modifier != nullptr)
@@ -433,7 +449,8 @@ std::optional<ModulationRange> getModulationRange (const ParameterHandle& handle
     // whose modulators are on, unless all are off.
     const auto anyOn = std::any_of (modulations.begin(), modulations.end(), [] (const auto& m) { return isModulatorOn (m.modulator); });
     const auto& range = parameter->valueRange;
-    const auto base = range.convertTo0to1 (range.snapToLegalValue (parameter->getCurrentBaseValue()));
+    const auto base =
+        range.convertTo0to1 (range.snapToLegalValue (getPlayedValue (*parameter, false).value_or (parameter->getCurrentBaseValue())));
     auto low = base, high = base;
 
     for (const auto& modulation : modulations)
@@ -447,7 +464,9 @@ std::optional<ModulationRange> getModulationRange (const ParameterHandle& handle
         high += std::max ({ amount, reach, 0.0f });
     }
 
-    return ModulationRange { juce::jlimit (0.0f, 1.0f, low), juce::jlimit (0.0f, 1.0f, high), parameter->getCurrentNormalisedValue(),
+    const auto now = getPlayedValue (*parameter, true);
+    return ModulationRange { juce::jlimit (0.0f, 1.0f, low), juce::jlimit (0.0f, 1.0f, high),
+                             now.has_value() ? range.convertTo0to1 (range.snapToLegalValue (*now)) : parameter->getCurrentNormalisedValue(),
                              anyOn };
 }
 } // namespace phazite

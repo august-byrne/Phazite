@@ -33,6 +33,8 @@ void Engine::prepare (double rate, int blockSize)
     accentClick = makeClick (sampleRate, true);
     clicking = nullptr;
     transport.plan = nullptr; // a plan for another rate: the playhead stays on its beat
+    controlPoints.assign ((size_t) (maximumBlockSize / controlPointSpacing + 3), {});
+    numControlPoints = 0;
 }
 
 void Engine::setPlan (std::unique_ptr<Plan> plan)
@@ -266,6 +268,7 @@ void Engine::process (float* const* outputs, int numOutputs, int numSamples) noe
     const auto share = numSamples > 0 ? seconds * sampleRate / numSamples : 0.0;
     load.store (load.load (std::memory_order_relaxed) * 0.95 + share * 0.05, std::memory_order_relaxed);
     blocksPlayed.fetch_add (1, std::memory_order_release);
+    clock += numSamples;
 }
 
 void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept
@@ -295,10 +298,14 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
     const auto tempo = plan.tempo.getTempoAt (beat);
 
     // Where automation is: moving with the song while it plays, as late as the sound it moves comes (so that it lines up
-    // with it); at the playhead while the song is stopped.
+    // with it); at the playhead while the song is stopped. The control points it and modulation move on are the song's while
+    // it plays, time's while it is stopped.
     const auto beatsPerSample =
         transport.playing && numSamples > 0 ? (plan.tempo.toBeats ((double) (transport.sample + numSamples)) - beat) / numSamples : 0.0;
-    const auto getAutomationSample = [this] (int latency) { return transport.sample - (transport.playing ? latency : 0); };
+    const auto getAutomationBeat = [this, &plan, beat] (int latency)
+    { return transport.playing && latency > 0 ? plan.tempo.toBeats ((double) (transport.sample - latency)) : beat; };
+    const auto gridSample = transport.playing ? transport.sample : clock + offset;
+    findControlPoints (plan, gridSample, numSamples);
 
     for (const auto& strip : plan.strips)
     {
@@ -336,6 +343,9 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
             }
         }
 
+        state.sortEvents();
+        playModulators (strip);
+
         // A channel muted (or soloed out) plays nothing, and its devices start from silence when it is heard again.
         if (state.getChannel().isSilenced())
         {
@@ -350,8 +360,6 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
 
                 state.wasSilenced = false;
             }
-
-            state.sortEvents();
 
             // Its audio clips play into it before its effects, beside its instrument (after it, which plays into a cleared
             // buffer).
@@ -373,11 +381,19 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
                 block.isPlaying = transport.playing;
                 block.isRendering = rendering;
                 block.beatsPerSample = beatsPerSample;
+                block.sample = gridSample;
+                block.automationBeat = strip.devices[i].automation.empty() ? beat : getAutomationBeat (strip.devices[i].latency);
 
-                if (! strip.devices[i].automation.empty())
+                // What modulates it: its strip's modulators, on the block's control points.
+                if (auto* modulation = strip.devices[i].modulation.get())
                 {
-                    block.sample = getAutomationSample (strip.devices[i].latency);
-                    block.automationBeat = plan.tempo.toBeats ((double) block.sample);
+                    for (size_t source = 0; source < modulation->sources.size() && source < strip.modulators.size(); ++source)
+                    {
+                        modulation->sources[source].points = strip.modulators[source]->getValues();
+                        modulation->sources[source].isOn = strip.modulators[source]->isOn();
+                    }
+
+                    block.modulation = modulation;
                 }
 
                 if (i == 0 && strip.hasInstrument)
@@ -394,14 +410,82 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
         faderAutomation.volume = strip.volume.get();
         faderAutomation.pan = strip.pan.get();
         faderAutomation.beatsPerSample = beatsPerSample;
-
-        if (strip.volume != nullptr || strip.pan != nullptr)
-        {
-            faderAutomation.sample = getAutomationSample (strip.latency);
-            faderAutomation.beat = plan.tempo.toBeats ((double) faderAutomation.sample);
-        }
+        faderAutomation.sample = gridSample;
+        faderAutomation.beat = strip.volume != nullptr || strip.pan != nullptr ? getAutomationBeat (strip.latency) : beat;
+        faderAutomation.volumeModulation = getFaderModulation (strip, strip.volumeModulation, state.volumeModulation);
+        faderAutomation.panModulation = getFaderModulation (strip, strip.panModulation, state.panModulation);
         state.getChannel().process (channels, 2, numSamples, faderAutomation);
+
+        // An envelope follower listens to its track after the fader, for the next block.
+        for (const auto& modulator : strip.modulators)
+            modulator->listen (channels, 2, numSamples);
     }
+}
+
+void Engine::findControlPoints (const Plan& plan, std::int64_t gridSample, int numSamples) noexcept
+{
+    // From the one at or before the block's start to the one at or after its end, each where the song is: while it plays,
+    // on the song's samples; stopped, on time's, all at the playhead (numbered apart from the song's, so that none is taken
+    // for one given before).
+    constexpr std::int64_t stoppedPoints = std::int64_t (1) << 52;
+    const auto since = (int) (((gridSample % controlPointSpacing) + controlPointSpacing) % controlPointSpacing);
+    const auto first = (gridSample - since) / controlPointSpacing;
+    numControlPoints = std::min ((int) controlPoints.size(), (since + numSamples + controlPointSpacing - 1) / controlPointSpacing + 1);
+
+    for (int k = 0; k < numControlPoints; ++k)
+    {
+        auto& point = controlPoints[(size_t) k];
+        point.index = first + k + (transport.playing ? 0 : stoppedPoints);
+        point.sample = std::max (0, k * controlPointSpacing - since);
+        const auto songSample = transport.playing ? (double) (gridSample - since + k * controlPointSpacing) : (double) transport.sample;
+        const auto beat = plan.tempo.toBeats (songSample);
+        point.place = { songSample / sampleRate, beat, plan.tempo.getTempoAt (beat), plan.tempo.getTimeSignatureAt (beat).numerator };
+    }
+}
+
+void Engine::playModulators (const Plan::Strip& strip) noexcept
+{
+    // Its modulators, on the block's control points, each after the notes its instrument starts before the point.
+    if (strip.modulators.empty())
+        return;
+
+    auto& state = *strip.state;
+    state.noteStarts.clear();
+
+    for (int i = 0; i < state.numEvents && state.noteStarts.size() < state.noteStarts.capacity(); ++i)
+        if (const auto& event = state.events[(size_t) i]; event.type == devices::NoteEvent::Type::noteOn)
+            state.noteStarts.push_back ({ event.sample, event.number, juce::roundToInt (event.value * 127.0f) });
+
+    const std::span<const ModulatorNode::Point> points (controlPoints.data(), (size_t) numControlPoints);
+
+    for (const auto& modulator : strip.modulators)
+        modulator->play (points, state.noteStarts, controlPointSpacing / sampleRate);
+}
+
+std::span<const float> Engine::getFaderModulation (const Plan::Strip& strip, const std::vector<Plan::Route>& routes,
+                                                   std::vector<float>& offsets) noexcept
+{
+    // Each modulator's value by its amount, added up on each of the block's control points.
+    if (routes.empty())
+        return {};
+
+    const auto count = std::min ((size_t) numControlPoints, offsets.size());
+    std::fill_n (offsets.begin(), count, 0.0f);
+
+    for (const auto& route : routes)
+    {
+        const auto& modulator = *strip.modulators[(size_t) route.source];
+
+        if (! modulator.isOn())
+            continue;
+
+        const auto values = modulator.getValues();
+
+        for (size_t k = 0; k < count && k < values.size(); ++k)
+            offsets[k] += route.amount * values[k];
+    }
+
+    return { offsets.data(), count };
 }
 
 void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSamples) noexcept
