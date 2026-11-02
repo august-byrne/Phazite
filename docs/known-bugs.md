@@ -5,36 +5,16 @@ the owner says otherwise. Add a bug here when it can't be fixed in the change th
 commit that fixes it. Races and allocations on the audio thread that Tracktion's code causes are in
 [realtime-audit.md](realtime-audit.md) instead, and Tracktion's other quirks in [design.md](design.md), section 23.
 
-## 4. Recording from a stop now and then skips the song's first block
+## 6. Exports, stems, freezes and bounces sound a little otherwise than the song plays
 
-- **How it shows:** recording from a stop with no count-in, the first block that the song should play (about 5 ms, at
-  256 frames and 48 kHz) now and then isn't played, so what starts in it, such as the metronome's first click, isn't
-  heard. What comes in is recorded, and placed, as it should be.
-- **Why:** Tracktion's `TransportControl::performRecord()` posts the position that playback starts from, then the play.
-  The audio thread applies a posted play at the start of a block (`NodePlaybackContext::nextBlockStarted()`), from where
-  the block before began, and a posted position later in the block (`process()`), once the block's own place is set.
-  When the position is posted while the audio thread is between those two points of a block, it is applied in that
-  block, with the song still stopped, and the play in the next block starts a block late. Tracktion's `performPlay()`
-  says as much of setting the position in the wrong block ("actually starting playback 1 block from the start"). The
-  `linux-tsan` build showed it in every run of one test (2026-10-29), as its timing lined up there; on Windows, an input
-  consumer slowed to take 3 ms a block showed it in 4 runs of 6.
-- **How to fix:** in Tracktion, apply a posted start position with the posted play, in the same block (in
-  `nextBlockStarted()`, before the play). `external/` is read-only, so report it upstream, or fork. A count-in hides it,
-  as the block skipped is then silence before the count-in's first click. The recording tests start between beats until
-  then (`tests/AudioRecordingTests.cpp`).
-
-## 5. A device switched off, or on a muted track, plays the rest of its sound when it plays again
-
-- **How it shows:** switch off a device while it sounds (a drum sampler's hit, a reverb's or a delay's tail), or mute
-  its track, and switch it on or unmute the track later: the rest of that sound plays then, from where it stopped, as if
-  no time had passed. Found while fixing the drum pads' clicks that waited and played late (2026-10-30, 8ecc97c).
-- **Why:** Tracktion's `PluginNode::process()` doesn't process a switched-off plug-in (unless it delays its sound and
-  plays it bypassed), nor the plug-ins of a muted track or one another track's solo silences
-  (`TrackMuteState::shouldTrackContentsBeProcessed()`, unless the track feeds a sidechain). `Plugin::setEnabled()`
-  changes the switch alone, and nothing resets the device as it plays again, so its voices and delay lines hold what
-  they held, frozen, and go on from there.
-- **How to fix:** reset a device (`devices::Processor::reset()` for Phazite's own, `te::Plugin::reset()` for a plug-in)
-  at the first block it plays after blocks it didn't: in `DevicePlugin`, the message thread sets an atomic flag as the
-  device's switch turns on, or its track is unmuted or no longer silenced by a solo (both the song's, in the model), and
-  `applyToBuffer()` resets before it plays when the flag is set. A test switches a device off mid-sound and on again
-  after its sound would have ended, and hears silence.
+- **How it shows:** since Phazite's own engine plays the song (2026-11-02), what an export writes, its stems, and a
+  track frozen or bounced in place are still Tracktion's renders: a track panned off centre is up to 3 dB louder on one
+  side than it plays (Tracktion's linear pan law against Phazite's constant-power one), a bent automation line bends half
+  as much, a mono clip sent before the fader reaches its return on the left alone, modulators start 0.51 s before the
+  song, and a reverb starts warmed by Tracktion's pre-roll; a frozen track plays the file Tracktion rendered.
+- **Why:** rendering moves to Phazite's engine in T5 ([tracktion-migration.md](tracktion-migration.md)); T2 moved
+  playback and recording.
+- **How to fix:** T5: render the song (`renderWithOwnEngine()`), its stems, and a track's devices up to its freeze
+  point through Phazite's engine, with loudness normalization and dither of Phazite's own; then the stems' golden test
+  compares them with Phazite's render of the song, and the frozen track's (`tests/GoldenMixerTests.cpp`) compares it
+  with the track played live to within the fingerprints' tolerance again.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's own engine playing the open project as the app plays it (model/playback/; docs/tracktion-migration.md, T2),
 // driven by a test a block at a time, as an audio device would drive it, but not in real time: what it plays is the same
-// every time. For as long as it lasts, the app's engine is Phazite's, on a device with two inputs.
+// every time. For as long as it lasts, the app's engine plays on a device with two inputs.
 #pragma once
 
 #include "TestHelpers.h"
@@ -32,13 +32,18 @@ public:
     explicit EnginePlayback (Input in = Input::silence)
         : input (in)
     {
-        getEngineContext().setPhaziteEngineOn (true);
         getPlaybackHost (getEngineContext()).prepare (sampleRate, blockSize, 2, input == Input::loopback ? blockSize : 0);
         previous.clear();
         nextInput();
     }
 
-    ~EnginePlayback() { getEngineContext().setPhaziteEngineOn (false); }
+    // Stopped, and on a device without inputs again.
+    ~EnginePlayback()
+    {
+        auto& host = getPlaybackHost (getEngineContext());
+        host.getEngine().stop();
+        host.prepare (sampleRate, blockSize);
+    }
 
     // Plays so many seconds of what the engine plays, the song's changes given to it first (dispatchPendingMessages()).
     juce::AudioBuffer<float> play (double seconds)

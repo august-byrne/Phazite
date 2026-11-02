@@ -76,11 +76,6 @@ bool haveSameControls (const te::MidiClip&, const juce::ValueTree& clipState);
 // element.
 juce::ValueTree adoptMidiClip (te::MidiClip&);
 
-// Takes what one of Tracktion's MIDI recordings left on the song's tracks into the song, as it stops (in its undo step):
-// the clips it made, and the notes it added to the song's (Overdub merges them into the clip they overlap, and lengthens
-// it), which the clip's aliases get too.
-void adoptRecordedMidi (te::Edit&);
-
 //==============================================================================
 // The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).
 juce::Array<te::Clip*> getSelectedClips (const Selection&);

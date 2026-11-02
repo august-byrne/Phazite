@@ -336,3 +336,26 @@ the song stopped).
   a sample at a time, and the devices that do work on blocks are cheap already. It would cost the computers without AVX2
   (Intel's Pentium and Celeron chips of up to about 2020) a start that crashes, and on GCC fused multiply-adds would
   change the golden renders. Not worth it either; section 5's "measure first" is answered.
+
+## 9. Phazite's own engine (2026-11-02)
+
+Phazite's own engine ([tracktion-migration.md](tracktion-migration.md), T2) plays every project since step 10. The
+benchmarks of a project and of a live note now play as the app plays: a project opened in a project context, Tracktion's
+hosted device calling both callbacks, Tracktion's playing nothing of the project and Phazite's engine all of it. Measured
+with `phazite_tests.exe --test-suite=benchmark --no-skip` from the `windows-profile` build, on the same PC, before step 10
+(Tracktion's engine playing) and after.
+
+| What | Tracktion's engine | Phazite's engine, one thread | Phazite's engine, four threads |
+|---|---|---|---|
+| 20 empty tracks, stopped | 0.96 % of the audio thread | 0.33 % | 0.33 % |
+| 20 empty tracks, playing | 0.50 % | 0.33 % | 0.33 % |
+| 20 tracks with a synth, an EQ, a compressor and a reverb each, stopped | 2.53 % | 0.86 % | 0.50 % |
+| The same, playing chords | 29.35 % | 27.67 % | 8.18 % |
+
+A live note is heard as soon as it was with Tracktion once it is in a block, but its place in the block is new: Tracktion
+put every live note at the start of the next block (heard 2 samples in), so that a note's delay was anything from none to
+a whole block, as it came; Phazite's engine plays it as far into the next block as it came after the last one started
+(T2 step 2), so that every note waits exactly a block and keeps its timing against the others, as Ableton Live and REAPER
+time what they record. The benchmark, which plays its note about 1.5 ms after a block, hears it 71 samples into the next
+(1.48 ms at 48 kHz), and the delay compensation of a limiter on another track (+98 samples) and on the master too (+99)
+as before. With 256-sample blocks at 48 kHz a live note waits a constant 5.3 ms, where Tracktion's waited 0 to 5.3 ms.

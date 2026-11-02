@@ -10,6 +10,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
+#include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -193,9 +194,11 @@ namespace
     {
         auto* edit = getEdit (context);
 
+        // A track's while it is the song's (the engine may play one deleted a moment ago), the master's always.
         if (auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr)
-            if (auto* strip = session->getPlayer().findStrip (id))
-                return &strip->getChannel().getMeter();
+            if (id == 0 || findTrackState (*edit, TrackID::fromRaw ((std::uint64_t) id)).isValid())
+                if (auto* strip = session->getPlayer().findStrip (id))
+                    return &strip->getChannel().getMeter();
 
         return nullptr;
     }
@@ -781,24 +784,36 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
     if (edit == nullptr)
         return compensation;
 
+    // Each device's, as Phazite's engine plays it, while it plays the project.
+    auto* session = findPlayingSession (*edit);
+    const auto latencyOf = [session] (auto& plugin)
+    {
+        if (session == nullptr)
+            return plugin.isEnabled() ? plugin.getLatencySeconds() : 0.0;
+
+        // While Low Latency is on, one that looks ahead further than its limit is bypassed (EngineSetup.h).
+        auto* node = session->getPlayer().findDevice ((std::int64_t) plugin.itemID.getRawID());
+        const auto latency =
+            node != nullptr && node->isOn() ? node->getRunner().getLatencySamples() / session->getEngine().getSampleRate() : 0.0;
+        return isLowLatency (plugin.engine) && latency > lowLatencyLimitSeconds ? 0.0 : latency;
+    };
+
     for (auto* track : te::getAllTracks (*edit))
         for (auto* plugin : track->pluginList.getPlugins())
-            if (plugin->isEnabled())
-                if (const auto latency = plugin->getLatencySeconds(); latency > 0.0)
-                    compensation.devices.push_back (
-                        { plugin->getName() + " on " + (track->isMasterTrack() ? juce::String ("Master") : getTrackName (*track)),
-                          latency });
+            if (const auto latency = latencyOf (*plugin); latency > 0.0)
+                compensation.devices.push_back (
+                    { plugin->getName() + " on " + (track->isMasterTrack() ? juce::String ("Master") : getTrackName (*track)), latency });
 
     std::stable_sort (compensation.devices.begin(), compensation.devices.end(),
                       [] (const auto& a, const auto& b) { return a.second > b.second; });
 
-    // What the playback graph waits for, the longest of its paths; the latest device without one.
+    // What the engine waits for, the longest of its paths; the latest device while it plays nothing.
     if (edit->isLatencyCompensationEnabled())
     {
-        const auto rate = edit->engine.getDeviceManager().getSampleRate();
+        const auto* plan = session != nullptr ? session->getEngine().getPlan() : nullptr;
 
-        if (auto* playback = edit->getTransport().getCurrentPlaybackContext(); playback != nullptr && rate > 0.0)
-            compensation.seconds = playback->getLatencySamples() / rate;
+        if (plan != nullptr)
+            compensation.seconds = engine::Engine::getOutputLatency (*plan) / session->getEngine().getSampleRate();
         else if (! compensation.devices.empty())
             compensation.seconds = compensation.devices.front().second;
     }

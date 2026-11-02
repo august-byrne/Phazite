@@ -28,55 +28,61 @@ Replacing a part of the engine outright is a separate decision, made one capabil
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** 26 scenarios must allocate and free nothing on the audio thread once playback is running, or the tests fail. They read no files, but for the frozen track's, which Phazite made: the browser's preview of a loop, which plays from memory (step 2.18), one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), an audio input recorded onto an armed track that hears it (step 3.4), automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2, automation clips until 2026-10-17), every kind of modulator and a macro moving the EQ (step 2.3; since 2026-10-30 the EQ moves its bands itself, every 32 samples: `model/devices/internal/DeviceModulation.h`), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), a frozen track playing its file (step 2.11), and Phazite's own devices (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler; then the devices of step 2.10 in a row, the synth's unison, the wavetable synth, and the filter types of steps 2.14 and 2.15; then, in step 2.17, every effect with its editor's displays listening, and the vocoder at 40 bands with another track as its carrier through the sidechain). The other scenarios only report.
+- **Guards:** 32 scenarios must allocate and free nothing on the audio thread once playback is running, or the tests fail; since T2 step 10 they play through Phazite's engine, as the app does. They read no files, but for the frozen track's, which Phazite made: the browser's preview of a loop, which plays from memory (step 2.18), one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), an audio input recorded onto an armed track that hears it (step 3.4), automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2, automation clips until 2026-10-17), every kind of modulator and a macro moving the EQ (step 2.3; since 2026-10-30 the EQ moves its bands itself, every 32 samples: `model/devices/internal/DeviceModulation.h`), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), a frozen track playing its file (step 2.11), and Phazite's own devices (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler; then the devices of step 2.10 in a row, the synth's unison, the wavetable synth, and the filter types of steps 2.14 and 2.15; then, in step 2.17, every effect with its editor's displays listening, and the vocoder at 40 bands with another track as its carrier through the sidechain). The other scenarios only report.
 
 ## Results (Windows Debug)
 
-The first column covers the warm-up after playback starts (about 0.5 s); the second covers the next second. Measured on 2026-10-16, each scenario added since when it was added, and the two that moved to Phazite's devices on 2026-10-18; the counts vary a little from run to run, with timing and the file cache.
+Since [T2 step 10](tracktion-migration.md) (2026-11-02) every scenario but the preview plays as the app plays: its song
+opened as a project, Tracktion's hosted device calling both callbacks on the one audio thread, Tracktion's (which plays
+nothing of a project) and Phazite's engine (on one thread, so that the monitor counts all it does: its workers play the
+same strips' code), with a tone coming into the device's two inputs. The first column covers the warm-up after playback
+starts (about 0.5 s); the second covers the next second. Measured on 2026-11-02; the counts before, through Tracktion's
+graph, were in this table's history.
 
 | Scenario | Warm-up | Next 1 s |
 |---|---|---|
-| One empty track | 3 allocations | 0 |
-| The metronome, clicking louder on each bar's first beat | 2 allocations | 0 |
-| Phazite's own engine (docs/tracktion-migration.md, T2), its transport and its metronome (2026-11-02) | 0 | 0 |
-| Phazite's own engine: chords on Phazite's synth through a track's EQ and fader into the master (2026-11-02) | 0 | 0 |
-| Phazite's own engine: audio clips on two tracks, one faded in, read from their files as they play (2026-11-02) | 0 | 0 |
-| Phazite's own engine: chords through a filter whose cutoff is automated, with the volume and the pan automated too (2026-11-02) | 0 | 0 |
-| Phazite's own engine: chords through a filter that an LFO, a note follower and a breakpoint envelope move, the pan and the volume by an envelope follower, steps, a random source and a macro (2026-11-02) | 0 | 0 |
-| Phazite's own engine: chords in a bus with a container, sends before and after the fader to returns, a sidechain and the loudness meter (2026-11-02) | 0 | 0 |
-| Phazite's own engine: chords through a plug-in (the tests' stand-in) after Phazite's synth (2026-11-02) | 0 | 0 |
-| Phazite's own engine recording a take: an armed track's input, heard and recorded, and notes played live from another thread (2026-11-02) | 0 | 0 |
-| Volume automation and an LFO on pan | 2 allocations | 0 |
-| A tone through a bus, with a send to Phazite's reverb on a return, into the loudness meter | 7 allocations | 0 |
-| Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |
-| Lanes sweeping Phazite's EQ, a cycle a beat, and fading a track's volume | 3 allocations | 0 |
-| Every kind of modulator, and a macro, moving Phazite's EQ | 3 allocations | 0 |
-| A container of Phazite's EQ and compressor at half mix, a macro and the track's LFO turning them | 3 allocations | 0 |
-| Phazite's compressor, ducked by another track at 70 % mix, with its meters read | 4 allocations | 0 |
-| Phazite's vocoder at 40 bands, its carrier another track through the sidechain (step 2.17) | 5 allocations | 0 |
-| Phazite's limiter on the master, pushed 12 dB, with its meters read | 2 allocations | 0 |
-| Phazite's reverb on a return, with an 8-second decay | 4 allocations | 0 |
-| MIDI into Phazite's synth, notes overlapping, with noise and its LFO | 24 allocations (Tracktion's MIDI message arrays, used for the first time as Tracktion passes them between its nodes) | 0 |
-| Phazite's synth with seven unison voices, spread wide, playing chords a sixteenth apart (step 2.10) | about 22 allocations (the same) | 0 |
-| Phazite's wavetable synth with eight unison voices and two oscillators warped (sync and FM), an envelope sweeping each note's table and an LFO the other's, playing chords a sixteenth apart (step 2.13) | about 25 allocations (the same) | 0 |
-| Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and limiter in a row on a tone, the filter swept by a lane (step 2.10; the phaser, the flanger and the stereo expander since step 2.17; the limiter in the maximizer's place, and the multiband in Maximus's image, since 2026-11-01) | 2 allocations | 0 |
-| Phazite's EQ, filter, saturator, compressor, multiband, delay, reverb, phaser and limiter in a row on a tone, every one's editor's displays listening to what goes in and out of it (step 2.17; the limiter in the maximizer's place since 2026-11-01) | 2 allocations | 0 |
-| Phazite's synth's Comb +, swept by its filter envelope, playing chords a sixteenth apart, and its filter's Comb - on a tone, swept by a lane (step 2.14) | about 27 allocations (Tracktion's MIDI message arrays, as above) | 0 |
-| Phazite's wavetable synth's Comb +, swept by an envelope at each note, playing chords a sixteenth apart (step 2.14) | about 24 allocations (the same) | 0 |
-| Phazite's synth's Vowel, swept by its filter envelope, playing chords a sixteenth apart, and its filter's Phaser on a tone, swept by a lane (step 2.15) | about 27 allocations (the same) | 0 |
-| Phazite's wavetable synth's Sample & Hold, swept by an envelope at each note, playing chords a sixteenth apart (step 2.15) | about 24 allocations (the same) | 0 |
-| Notes recorded from the computer keyboard onto Phazite's synth | 20 allocations (the same) | 0 |
-| A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor | 24 allocations (the same) | 0 |
-| A frozen track: its synth's notes played from its frozen file (step 2.11) | 1 allocation | 0 |
-| An audio clip | 6 allocations, 3 frees (fewer if the file cache hits) | 0 |
-| Two tracks in a folder bus with Phazite's compressor | 13 allocations, 6 frees (a file cache miss logs in Debug builds) | 0 |
-| One empty track with two audio inputs enabled | 8 allocations, 4 frees | 0 |
-| An audio input recorded onto an armed track, heard as it comes in (step 3.4, measured 2026-10-29) | 5 allocations, 2 frees (the input's first buffers, finding 1, and the meters', finding 2) | 0 |
-| A loop at 120 BPM stretched to 100 BPM, played from Phazite's render (a loop dropped from the browser; step 2.18) | 13 allocations, 9 frees (from a file cache miss) | 0 |
-| An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from Phazite's render (as the audio clip editor sets them, steps 2.6 and 2.18) | 3 allocations | 0 |
-| A loop at 120 BPM previewed at 100 BPM, stretched by Phazite into memory as it starts (the browser's preview, since 2026-10-28) | 9 allocations (the meters' and the device's, findings 2 and 3; SoundTouch's 21 allocations and 14 frees before) | 0 |
+| One empty track | 1 allocation | 0 |
+| The metronome, clicking louder on each bar's first beat | 0 | 0 |
+| Phazite's engine: its transport and its metronome | 0 | 0 |
+| Phazite's engine: chords on Phazite's synth through a track's EQ and fader into the master | 0 | 0 |
+| Phazite's engine: audio clips on two tracks, one faded in, read from their files as they play | 0 | 0 |
+| Phazite's engine: chords through a filter whose cutoff is automated, with the volume and the pan automated too | 0 | 0 |
+| Phazite's engine: chords through a filter that an LFO, a note follower and a breakpoint envelope move, the pan and the volume by an envelope follower, steps, a random source and a macro | 0 | 0 |
+| Phazite's engine: chords in a bus with a container, sends before and after the fader to returns, a sidechain and the loudness meter | 0 | 0 |
+| Phazite's engine: chords through a plug-in (the tests' stand-in) after Phazite's synth | 0 | 0 |
+| Phazite's engine recording a take: an armed track's input, heard and recorded, and notes played live from another thread | 0 | 0 |
+| Volume automation and an LFO on pan | 0 | 0 |
+| A tone through a bus, with a send to Phazite's reverb on a return, into the loudness meter | 0 | 0 |
+| Phazite's EQ, every band on and one automated, with its analyzer listening | 0 | 0 |
+| Lanes sweeping Phazite's EQ, a cycle a beat, and fading a track's volume | 0 | 0 |
+| Every kind of modulator, and a macro, moving Phazite's EQ | 0 | 0 |
+| A container of Phazite's EQ and compressor at half mix, a macro and the track's LFO turning them | 0 | 0 |
+| Phazite's compressor, ducked by another track at 70 % mix, with its meters read | 0 | 0 |
+| Phazite's vocoder at 40 bands, its carrier another track through the sidechain | 0 | 0 |
+| Phazite's limiter on the master, pushed 12 dB, with its meters read | 0 | 0 |
+| Phazite's reverb on a return, with an 8-second decay | 0 | 0 |
+| MIDI into Phazite's synth, notes overlapping, with noise and its LFO | 0 | 0 |
+| Phazite's synth with seven unison voices, spread wide, playing chords a sixteenth apart | 0 | 0 |
+| Phazite's wavetable synth with eight unison voices and two oscillators warped, an envelope sweeping each note's table | 0 | 0 |
+| Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and limiter in a row on a tone, the filter swept by a lane | 0 | 0 |
+| Phazite's EQ, filter, saturator, compressor, multiband, delay, reverb, phaser and limiter in a row on a tone, every one's editor's displays listening | 0 | 0 |
+| Phazite's synth's Comb +, swept by its filter envelope, chords a sixteenth apart, and its filter's Comb - on a tone | 0 | 0 |
+| Phazite's wavetable synth's Comb +, swept by an envelope at each note, chords a sixteenth apart | 0 | 0 |
+| Phazite's synth's Vowel, swept by its filter envelope, chords a sixteenth apart, and its filter's Phaser on a tone | 0 | 0 |
+| Phazite's wavetable synth's Sample & Hold, swept by an envelope at each note, chords a sixteenth apart | 0 | 0 |
+| A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor | 0 | 0 |
+| A frozen track: its synth's notes played from its frozen file | 0 | 0 |
+| An audio clip | 0 | 0 |
+| Two tracks in a folder bus with Phazite's compressor | 0 | 0 |
+| A loop at 120 BPM stretched to 100 BPM, played from Phazite's render | 0 | 0 |
+| An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from Phazite's render | 0 | 0 |
+| A loop at 120 BPM previewed at 100 BPM, stretched by Phazite into memory as it starts (the browser's preview, still Tracktion's graph until T5) | 8 allocations (the meters' and the device's, findings 2 and 3) | 0 |
 
-Steady playback is clean everywhere. Every scenario allocates something in its first blocks, though.
+Steady playback is clean everywhere, and the warm-up nearly so: what Tracktion's graph allocated in its first blocks
+(its MIDI message arrays, its meters, its inputs' buffers) is gone with the graph, held silent while Phazite's engine
+plays a project. Tracktion's own audio inputs stay off since step 10 (`AudioRecorder`): one that is on makes a buffer on
+the audio thread for each block it hands its consumers (`te::WaveInputDevice::consumeNextAudioBlock()`), 376 allocations
+and frees a second at 48 kHz with two inputs, which the audit found once its scenarios played through both callbacks.
 
 ## Findings and actions
 

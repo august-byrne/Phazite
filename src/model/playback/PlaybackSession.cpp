@@ -81,7 +81,7 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
 
 bool PlaybackSession::isPlayingProject() const
 {
-    return exists.get() != nullptr && host.isOn() && host.getPlayingSession() == this && ! edit.getTransport().isRecording();
+    return exists.get() != nullptr && host.getPlayingSession() == this;
 }
 
 engine::Engine& PlaybackSession::getEngine() noexcept
@@ -221,7 +221,7 @@ void PlaybackSession::update()
     cancelPendingUpdate();
     auto& engine = host.getEngine();
 
-    if (exists.get() != nullptr && host.isOn() && host.getPlayingSession() == this)
+    if (isPlayingProject())
     {
         auto plan = player.compile (engine.getSampleRate(), engine.getMaximumBlockSize(), false);
 

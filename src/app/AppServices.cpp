@@ -13,6 +13,5 @@ AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
       library (*engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),
       previewer (createPreviewer (engine))
 {
-    engineContext->setPhaziteEngineOn (settings.get (Settings::ownEngine));
 }
 } // namespace phazite

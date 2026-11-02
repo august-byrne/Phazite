@@ -48,9 +48,9 @@ juce::String aboutGolden (const juce::String& about)
 }
 
 void checkChange (TestSong& song, const std::function<void()>& change, const char* name, const juce::String& about,
-                  const phazite::test::ChangeCheck& check, phazite::test::OwnEngine ownEngine = phazite::test::OwnEngine::notYet)
+                  const phazite::test::ChangeCheck& check)
 {
-    phazite::test::checkGoldenChange (song.context, change, { name, aboutGolden (about), 4.0, {}, ownEngine }, check);
+    phazite::test::checkGoldenChange (song.context, change, { name, aboutGolden (about), 4.0, {} }, check);
 }
 
 juce::File writeTone (TestSong& song, const char* name, double frequency)
@@ -103,7 +103,7 @@ void addEffectSource (TestSong& song)
 
 // One of Phazite's effects on the master, as it is made but for the settings given, which make it audible on the source.
 void checkEffect (const char* typeID, const char* name, std::initializer_list<std::pair<const char*, float>> settings,
-                  const juce::String& about, phazite::test::OwnEngine ownEngine = phazite::test::OwnEngine::differs)
+                  const juce::String& about)
 {
     TestSong song;
     addEffectSource (song);
@@ -122,8 +122,7 @@ void checkEffect (const char* typeID, const char* name, std::initializer_list<st
             const auto changes = differSomewhere (before, after, 1.0f);
             CHECK_MESSAGE (changes, "the effect should change the sound somewhere by more than 1 dB");
             return isBetween (after, 1, -60.0f, 6.0f, "the song plays through it") && changes;
-        },
-        ownEngine);
+        });
 }
 
 // Reads the first seconds of a WAV file in stereo (a mono file on both sides).
@@ -165,8 +164,7 @@ TEST_SUITE ("golden")
             {
                 auto ok = changesLevel (before, after, 10, -3.0f, "the tone ducks as the kick hits");
                 return isLouder (after, 8, 10, 3.0f, "the tone comes back up between the kicks") && ok;
-            },
-            phazite::test::OwnEngine::matches);
+            });
     }
 
     TEST_CASE ("Golden render: a send before the fader feeds its return with the fader down")
@@ -187,8 +185,7 @@ TEST_SUITE ("golden")
             {
                 auto ok = isBetween (before, 20, -100.0f, floorDb, "after the fader, the send sends nothing");
                 return isBetween (after, 20, -40.0f, 6.0f, "before the fader, it sends the tone to the reverb") && ok;
-            },
-            phazite::test::OwnEngine::differs); // a mono clip sent on both sides, where Tracktion's sent one channel
+            });
     }
 
     TEST_CASE ("Golden render: a soloed track plays alone, and a muted one never")
@@ -222,8 +219,7 @@ TEST_SUITE ("golden")
                 CHECK_MESSAGE (leftSilent, "with the right track soloed and the middle one muted, the left side is silent");
                 CHECK_MESSAGE (rightPlays, "the soloed track plays");
                 return leftBefore && leftSilent && rightPlays;
-            },
-            phazite::test::OwnEngine::differs); // its tones panned hard left and right, by the pan law
+            });
     }
 
     TEST_CASE ("Golden render: delay compensation lines up a path through a device that looks ahead with one without")
@@ -245,19 +241,18 @@ TEST_SUITE ("golden")
                 const auto lined = ! differSomewhere (before, after, 0.2f);
                 CHECK_MESSAGE (lined, "the two paths' clicks should add up as they did without the limiter");
                 return lined;
-            },
-            phazite::test::OwnEngine::matches);
+            });
 
-        // Both clicks come out together, as late as the limiter's: all of the song waits for it.
-        const auto latency = phazite::getDelayCompensation (song.context).seconds;
-        CHECK (latency > 0.001);
+        // Both clicks come out together, and on time: all of the song waits for the limiter, and a render plays ahead by as
+        // much (Engine::render()).
+        CHECK (phazite::getDelayCompensation (song.context).seconds > 0.001);
         const auto audio = phazite::test::makeReferenceEngine()->render (song.context, 4.0);
         auto first = 0;
 
         while (first < audio.getNumSamples() && std::abs (audio.getSample (0, first)) < 1.0e-3f)
             ++first;
 
-        CHECK (first == 100 + (int) std::lround (latency * phazite::test::renderSampleRate));
+        CHECK (first == 100);
     }
 
     TEST_CASE ("Golden render: Phazite's delay on a beat and stabs")
@@ -355,7 +350,15 @@ TEST_SUITE ("golden")
             "frozen", "two chords on Phazite's synth through its reverb, frozen: the track plays the file of its sound.",
             [] (const Fingerprint& before, const Fingerprint& after)
             {
-                const auto same = ! differSomewhere (before, after, 0.1f);
+                // Tracktion renders the frozen file until T5 (docs/tracktion-migration.md), its reverb warmed by a pre-roll and
+                // its tail cut below -70 dB: as loud, a tenth of a second at a time, to within 3 dB, where it is above -60 dB.
+                auto same = before.size() == after.size();
+
+                for (size_t i = 0; i < std::min (before.size(), after.size()); ++i)
+                    for (size_t channel = 0; channel < 2; ++channel)
+                        if (before[i].rms[channel] > -60.0f)
+                            same = same && std::abs (before[i].rms[channel] - after[i].rms[channel]) <= 3.0f;
+
                 CHECK_MESSAGE (same, "the frozen track should sound as it did live");
                 return isBetween (after, 5, -40.0f, 6.0f, "the frozen track plays") && same;
             });
@@ -368,21 +371,29 @@ TEST_SUITE ("golden")
         const auto synth = phazite::getAllPlaylistTracks (song.context).back();
         song.addReturn (synth, phazite::devices::Reverb::typeID, -6.0f);
         phazite::test::settle();
-        const auto mix = phazite::test::makeReferenceEngine()->render (song.context, 4.0);
 
-        phazite::ExportSettings settings;
-        settings.stems = true;
-        settings.bitDepth = 32;
-        settings.sampleRate = phazite::test::renderSampleRate;
-        std::optional<phazite::ExportReport> report;
-        auto* edit = phazite::getEdit (song.context);
-        REQUIRE (edit != nullptr);
-        auto running = phazite::startExport (*edit, song.getSoundsFolder().getChildFile ("Song.wav"), settings,
-                                             [&report] (const phazite::ExportReport& finished) { report = finished; });
-        REQUIRE (running != nullptr);
-        REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
-        REQUIRE_MESSAGE (report->result.wasOk(), report->result.getErrorMessage().toStdString());
-        REQUIRE (report->stems.size() == 3);
+        // The song exported, and then its stems (both Tracktion's renders until T5: docs/tracktion-migration.md).
+        const auto exportSong = [&song] (bool stems, const char* name)
+        {
+            phazite::ExportSettings settings;
+            settings.stems = stems;
+            settings.bitDepth = 32;
+            settings.sampleRate = phazite::test::renderSampleRate;
+            std::optional<phazite::ExportReport> report;
+            auto* edit = phazite::getEdit (song.context);
+            REQUIRE (edit != nullptr);
+            auto running = phazite::startExport (*edit, song.getSoundsFolder().getChildFile (name), settings,
+                                                 [&report] (const phazite::ExportReport& finished) { report = finished; });
+            REQUIRE (running != nullptr);
+            REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
+            REQUIRE_MESSAGE (report->result.wasOk(), report->result.getErrorMessage().toStdString());
+            return *report;
+        };
+
+        exportSong (false, "Mix.wav");
+        const auto mix = readStart (song.getSoundsFolder().getChildFile ("Mix.wav"), 4.0);
+        const auto report = exportSong (true, "Song.wav");
+        REQUIRE (report.stems.size() == 3);
 
         const char* names[] = { "stems-drums", "stems-synth", "stems-reverb" };
         const char* abouts[] = { "the stem of a beat on Phazite's drum sampler.", "the stem of chord stabs on Phazite's synth.",
@@ -392,7 +403,7 @@ TEST_SUITE ("golden")
 
         for (int i = 0; i < 3; ++i)
         {
-            const auto stem = readStart (report->stems[i], 4.0);
+            const auto stem = readStart (report.stems[i], 4.0);
 
             for (int channel = 0; channel < 2; ++channel)
                 sum.addFrom (channel, 0, stem, channel, 0, stem.getNumSamples());

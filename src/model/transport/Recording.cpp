@@ -20,7 +20,7 @@ namespace
     constexpr const char* sixteenths = "1/4 beat";
     constexpr const char* notQuantized = "(none)";
 
-    // Tracktion keeps the MIDI input's settings with its own, for every project.
+    // Tracktion keeps the MIDI input's settings with its own, for every project (until T6: docs/tracktion-migration.md).
     void saveSettings (te::MidiInputDevice& device)
     {
         if (auto* merged = dynamic_cast<te::VirtualMidiInputDevice*> (&device))
@@ -31,13 +31,15 @@ namespace
 bool canRecord (te::Edit& edit)
 {
     const auto* recorder = AudioRecorder::findFor (edit);
-    return (getLiveMidiTrack (edit) != nullptr && findLiveMidiInput (edit) != nullptr) || (recorder != nullptr && recorder->canRecord());
+    return findPlayingSession (edit) != nullptr
+           && ((getLiveMidiTrack (edit) != nullptr && findLiveMidiInput (edit) != nullptr)
+               || (recorder != nullptr && recorder->canRecord()));
 }
 
 bool isRecording (const te::Edit& edit)
 {
     const auto* session = findSession (edit);
-    return edit.getTransport().isRecording() || (session != nullptr && session->isRecording());
+    return session != nullptr && session->isRecording();
 }
 
 void startRecording (te::Edit& edit)
@@ -47,56 +49,14 @@ void startRecording (te::Edit& edit)
 
     // Phazite's engine records what it plays (Take.h): from where playback starts, after the count-in, or from where the
     // song is if it plays already.
-    if (auto* session = findPlayingSession (edit))
+    auto* session = findPlayingSession (edit);
+    const auto playing = session->isPlaying();
+
+    if (session->startTake() && ! playing)
     {
-        const auto playing = session->isPlaying();
-
-        if (session->startTake() && ! playing)
-        {
-            session->locate (fromTracktion (edit.tempoSequence.toBeats (getPlayStart (edit))));
-            session->play (isCountInOn (edit));
-        }
-
-        return;
+        session->locate (fromTracktion (edit.tempoSequence.toBeats (getPlayStart (edit))));
+        session->play (isCountInOn (edit));
     }
-
-    auto& transport = edit.getTransport();
-
-    // Punched in, the take doesn't loop (Tracktion records in one or the other): the loop goes off for it, and stopping
-    // puts it back on (Playback.h). The song's own loop doesn't loop a recording either, which runs on past the song's
-    // end: for the take, the loop runs from where recording starts to the end of the time line, and stopping puts the
-    // song's loop back. A range looped on purpose does loop it.
-    if (isPunching (edit))
-    {
-        edit.recordingPunchInOut = true;
-        transport.looping = false;
-    }
-    else if (isLoopOn (edit) && doesLoopFollowSong (edit))
-    {
-        transport.setLoopRange ({ transport.isPlaying() ? transport.getPosition() : getPlayStart (edit), te::Edit::getMaximumEditEnd() });
-    }
-
-    // With no input of Tracktion's armed: audio is Phazite's to record (AudioRecorder.h), its recordings ready before
-    // playback starts and dropped if recording doesn't (Tracktion refuses a loop shorter than two seconds), and Tracktion
-    // records what is played on MIDI.
-    auto* recorder = AudioRecorder::findFor (edit);
-
-    if (recorder != nullptr)
-        recorder->prepareRecordings();
-
-    // Tracktion's graph plays while it records.
-    auto* session = findSession (edit);
-
-    if (session != nullptr)
-        session->holdTracktion (false);
-
-    transport.record (false, true);
-
-    if (recorder != nullptr && ! transport.isRecording())
-        recorder->discardRecordings();
-
-    if (session != nullptr && ! transport.isRecording())
-        session->followLiveMidi();
 }
 
 void stopRecording (te::Edit& edit)

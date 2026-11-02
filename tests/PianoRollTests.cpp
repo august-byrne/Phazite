@@ -153,7 +153,7 @@ TEST_CASE ("Selecting a track shows its clip nearest the playhead, or lets the f
     auto& later = screen.addClip (0, 16.0, 4.0);
 
     // The playhead is in neither clip: the nearer one shows.
-    screen.edit->getTransport().setPosition (screen.edit->tempoSequence.toTime (beats (13.0)));
+    phazite::movePlayhead (*screen.edit, screen.edit->tempoSequence.toTime (beats (13.0)));
     screen.select (*screen.tracks[0]);
     CHECK (screen.pianoRoll.getClips() == std::vector { phazite::getClipID (later) });
 

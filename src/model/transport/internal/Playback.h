@@ -111,7 +111,6 @@ private:
     juce::ValueTree editState;
     te::TimePosition songEnd;                     // where the song's loop ends: getSongEnd(), or a bar in for a song without clips
     std::optional<te::TimePosition> lastPosition; // while playing without a loop: where the playhead was last time
-    bool wasRecording = false;
 
     void changed (const juce::ValueTree&);
     void handleAsyncUpdate() override;

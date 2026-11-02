@@ -118,11 +118,6 @@ bool setLiveMidiTrack (te::AudioTrack& track)
             ! destination.has_value() || *destination == nullptr)
             return false;
 
-    // Armed from the start, so that Record can begin at once: arming rebuilds Tracktion's playback graph, which would
-    // lose a recording begun meanwhile.
-    if (! instance->isRecordingEnabled (track.itemID))
-        instance->setRecordingEnabled (track.itemID, true);
-
     // Phazite's own engine plays it, while it plays the project (docs/tracktion-migration.md, T2).
     if (auto* session = findSession (edit))
         session->followLiveMidi();
@@ -137,11 +132,7 @@ void routeLiveMidiInput (te::Edit& edit)
     if (auto* session = findSession (edit))
         session->followLiveMidi();
 
-    // Capture's seconds: Tracktion gives every input the same length, which Phazite leaves at none for audio inputs.
-    if (const auto input = getAllMidiInputs (edit.engine))
-        input->updateRetrospectiveBufferLength (captureSeconds);
-
-    // The track it plays already, armed as setLiveMidiTrack() arms it.
+    // The track it plays already.
     if (auto* track = getLiveMidiTrack (edit))
     {
         setLiveMidiTrack (*track);

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's own engine on the audio device (docs/tracktion-migration.md, T2): one for the app, which its EngineContext
-// owns. While T2 builds it, it plays beside Tracktion's when the app says so (setOn()): a second callback on the device
-// Tracktion opens (JUCE adds what the two play), which plays the song of the open project's PlaybackSession, with what
-// comes into the device's inputs, which the tracks that hear them play and a take records.
+// owns, a second callback on the device Tracktion opens (JUCE adds what the two play: Tracktion's plays nothing of a
+// project, PlaybackSession.h), which plays the song of the open project's PlaybackSession, with what comes into the
+// device's inputs, which the tracks that hear them play and a take records.
 #pragma once
 
 #include "engine/audio/FileReader.h"
@@ -27,15 +27,13 @@ public:
     explicit PlaybackHost (te::Engine&);
     ~PlaybackHost() override;
 
-    // Whether Phazite's engine plays the open project rather than Tracktion's. Off at first.
-    bool isOn() const noexcept { return on; }
-    void setOn (bool);
-
     engine::Engine& getEngine() noexcept { return engine; }
     engine::FileReader& getFileReader() noexcept { return fileReader; } // the audio files the engine plays, read ahead
 
     // The sessions of the projects open (model/playback/internal/PlaybackSession.h): the one added last plays, and the one
-    // before it again when it goes (a test's second project).
+    // before it again when it goes (a test's second project). As one goes, what the engine played of it goes too (plug-ins
+    // among it, which the project's Edit owns), once the audio thread can't be playing it; and so do the notes played into
+    // it, which Capture takes no more.
     void add (PlaybackSession&);
     void remove (PlaybackSession&);
     PlaybackSession* getPlayingSession() const noexcept;
@@ -59,8 +57,10 @@ private:
     te::Engine& tracktion;
     engine::Engine engine;
     engine::FileReader fileReader;
-    bool on = false;
     std::vector<PlaybackSession*> sessions;
+    std::atomic<bool> running { false }; // a device calls the engine from its own thread
+    void letGoOfPlans();
+    void forgetPlayed();
 
     std::atomic<int> numInputs { 0 }, inputLatency { 0 }, outputLatency { 0 };
     std::vector<int> openInputs;                                       // each open input's channel, as the device hands them
@@ -73,7 +73,7 @@ private:
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples,
                                            const juce::AudioIODeviceCallbackContext&) override;
     void audioDeviceAboutToStart (juce::AudioIODevice*) override;
-    void audioDeviceStopped() override {}
+    void audioDeviceStopped() override { running = false; }
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (PlaybackHost)
     JUCE_DECLARE_NON_COPYABLE (PlaybackHost)

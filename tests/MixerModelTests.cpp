@@ -565,12 +565,7 @@ TEST_CASE ("Mixer functions give nothing, and do nothing, for what is gone or wi
     CHECK (phazite::getEffects (context, {}).size() == phazite::getMasterDevices (*song.edit).size()); // not the master's
 
     CHECK (phazite::getMasterVolume (context).isValid());
-    // Nothing without a loudness meter on the master, which every song has (Project.h: createSongEdit()).
-    auto* meter = phazite::ensureLoudnessMeter (*song.edit);
-    REQUIRE (meter != nullptr);
-    meter->deleteFromParent();
-    CHECK_FALSE (phazite::getLoudness (context).has_value());
-    REQUIRE (phazite::ensureLoudnessMeter (*song.edit) != nullptr);
+    // Phazite's engine measures the master's loudness, with the project open.
     const auto loudness = phazite::getLoudness (context);
     REQUIRE (loudness.has_value());
     CHECK_FALSE (loudness->integrated.has_value()); // until enough has been measured

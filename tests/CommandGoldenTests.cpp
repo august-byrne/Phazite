@@ -168,7 +168,7 @@ juce::String describeSelected (const phazite::Selection& selection, const phazit
 // Where the playhead is, in beats: "playhead at 2.000".
 juce::String describePlayhead (const te::Edit& edit)
 {
-    return "playhead at " + juce::String (edit.tempoSequence.toBeats (edit.getTransport().getPosition()).inBeats(), 3);
+    return "playhead at " + juce::String (edit.tempoSequence.toBeats (phazite::getPlayheadTime (edit)).inBeats(), 3);
 }
 
 // The loop's range in beats, whether looping is on or not (Loop's tick says which): "loop 2.000-6.000 beats".

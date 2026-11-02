@@ -14,12 +14,6 @@ namespace phazite
 {
 namespace
 {
-    // What a recording's buffer holds before its thread writes it, in seconds: room for the thread to fall far behind.
-    constexpr double bufferSeconds = 8.0;
-
-    // How often the thread writes what has come in, in milliseconds.
-    constexpr int writeEveryMilliseconds = 20;
-
     // How long a punch's edges cross-fade with what was there, in seconds.
     constexpr double crossfadeSeconds = 0.01;
 
@@ -37,12 +31,11 @@ namespace
         return trackState.getProperty (schema::trackInput).toString();
     }
 
-    // When the track hears its input: schema::monitorAlways, schema::monitorNever, or while it is armed (none).
-    juce::String getMonitoringOf (const juce::ValueTree& trackState)
+    // Whether the track hears its input always (schema::monitorAlways), or while it is armed (none), or never.
+    bool alwaysHears (const juce::ValueTree& trackState)
     {
-        return trackState.getProperty (schema::trackMonitoring).toString();
+        return trackState.getProperty (schema::trackMonitoring).toString() == schema::monitorAlways;
     }
-
 } // namespace
 
 int AudioRecorder::getNumInputs() const
@@ -86,162 +79,6 @@ void setRecordingCorrection (te::Engine& engine, double milliseconds)
 }
 
 //==============================================================================
-// One armed track's recording: the consumer that the audio thread hands each block of the track's input, the buffer it
-// copies the track's channels into, and the WAV file the recorder's thread writes them into.
-struct AudioRecorder::Recording : public te::InputDeviceInstance::Consumer
-{
-    Recording (TrackID t, te::InputDeviceInstance& in, te::EditPlaybackContext& context, std::vector<int> channelsInInput, juce::File f,
-               double rate, juce::int64 delay)
-        : track (t),
-          instance (&in),
-          playback (context),
-          channels (std::move (channelsInInput)),
-          file (std::move (f)),
-          sampleRate (rate),
-          shift (delay),
-          devices (context.edit.engine.getDeviceManager()),
-          buffer ((int) channels.size(), (int) (bufferSeconds * rate)),
-          fifo ((int) (bufferSeconds * rate))
-    {
-    }
-
-    // The file, made empty, to write into; false if it can't be.
-    bool open()
-    {
-        file.getParentDirectory().createDirectory();
-        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
-
-        if (! static_cast<juce::FileOutputStream&> (*stream).openedOk())
-            return false;
-
-        writer = juce::WavAudioFormat().createWriterFor (
-            stream,
-            juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels ((int) channels.size()).withBitsPerSample (24));
-        return writer != nullptr;
-    }
-
-    // Audio thread: the input's block, its track's channels copied into the buffer if there is room (lost otherwise, and
-    // said so), once the song plays; and at the second, where in the song (as if nothing looped) the first frame came in.
-    void acceptInputBuffer (choc::buffer::ChannelArrayView<float> block) override
-    {
-        if (! capturing.load (std::memory_order_acquire) || ! playback.isPlaying())
-            return;
-
-        const auto frames = (int) block.getNumFrames();
-
-        // As Tracktion's own recording finds it, from the device's clock, which puts a block that comes in where the song
-        // played the block before; but taken at the second block. In the first block of playing from a stop, Tracktion
-        // syncs its playhead to where it starts only after the inputs come in, so the clock maps that block a block late:
-        // later than the blocks after it, and than a recording started while the song plays.
-        if (! hasStart.load (std::memory_order_relaxed) && copied > 0)
-        {
-            startTime =
-                playback.globalStreamTimeToEditTimeUnlooped (devices.getCurrentStreamTime()).inSeconds() - (double) copied / sampleRate;
-            hasStart.store (true, std::memory_order_release);
-        }
-
-        if (fifo.getFreeSpace() < frames)
-        {
-            overflowed.store (true, std::memory_order_relaxed);
-            return;
-        }
-
-        int start1, size1, start2, size2;
-        fifo.prepareToWrite (frames, start1, size1, start2, size2);
-
-        for (size_t c = 0; c < channels.size(); ++c)
-        {
-            if ((uint32_t) channels[c] >= block.getNumChannels())
-            {
-                buffer.clear ((int) c, start1, size1);
-                buffer.clear ((int) c, start2, size2);
-                continue;
-            }
-
-            const auto* in = block.data.channels[channels[c]] + block.data.offset;
-            buffer.copyFrom ((int) c, start1, in, size1);
-
-            if (size2 > 0)
-                buffer.copyFrom ((int) c, start2, in + size1, size2);
-        }
-
-        fifo.finishedWrite (size1 + size2);
-        copied += frames;
-    }
-
-    // The recorder's thread, then the message thread at the end: what has come in, into the file.
-    void write()
-    {
-        for (auto ready = fifo.getNumReady(); ready > 0; ready = fifo.getNumReady())
-        {
-            int start1, size1, start2, size2;
-            fifo.prepareToRead (ready, start1, size1, start2, size2);
-            writeFrames (start1, size1);
-            writeFrames (start2, size2);
-            fifo.finishedRead (size1 + size2);
-        }
-    }
-
-    void writeFrames (int start, int count)
-    {
-        if (count <= 0 || writer == nullptr)
-            return;
-
-        const float* data[] = { buffer.getReadPointer (0, start), channels.size() > 1 ? buffer.getReadPointer (1, start) : nullptr };
-        writer->writeFromFloatArrays (data, (int) channels.size(), count);
-        written += count;
-    }
-
-    void close() { writer = nullptr; } // the file whole
-
-    const TrackID track;
-    te::InputDeviceInstance* instance; // compared only: it may be gone
-    te::EditPlaybackContext& playback; // the Edit's, which lives while it records
-    const std::vector<int> channels;   // the track's, in its input's
-    const juce::File file;
-    const double sampleRate;
-    const juce::int64 shift; // how many frames late the input's sound comes in
-    te::DeviceManager& devices;
-    juce::AudioBuffer<float> buffer;
-    juce::AbstractFifo fifo;
-    std::unique_ptr<juce::AudioFormatWriter> writer;
-    juce::int64 written = 0;
-    juce::int64 copied = 0; // into the buffer, by the audio thread
-    std::atomic<bool> capturing { false }, overflowed { false };
-    std::atomic<bool> hasStart { false };
-    double startTime = 0.0; // where in the song, as if nothing looped, the first frame copied came in, once hasStart is set
-};
-
-//==============================================================================
-// The thread that writes what the recordings' buffers hold into their files, a few dozen times a second.
-class AudioRecorder::Writer : public juce::Thread
-{
-public:
-    explicit Writer (std::vector<Recording*> written)
-        : juce::Thread ("Phazite audio recorder"),
-          recordings (std::move (written))
-    {
-        startThread (juce::Thread::Priority::high);
-    }
-
-    ~Writer() override { stopThread (2000); }
-
-    void run() override
-    {
-        while (! threadShouldExit())
-        {
-            for (auto* recording : recordings)
-                recording->write();
-
-            wait (writeEveryMilliseconds);
-        }
-    }
-
-private:
-    const std::vector<Recording*> recordings;
-};
-
-//==============================================================================
 AudioRecorder::AudioRecorder (te::Edit& e)
     : edit (e),
       engine (e.engine),
@@ -252,17 +89,11 @@ AudioRecorder::AudioRecorder (te::Edit& e)
     getRecorders()[key] = this;
     editState.addListener (this);
     engine.getDeviceManager().addChangeListener (this);
-    edit.getTransport().addListener (this);
     update();
 }
 
 AudioRecorder::~AudioRecorder()
 {
-    finishRecordings ({}, true);
-
-    if (alive.get() != nullptr) // otherwise its transport went with it
-        edit.getTransport().removeListener (this);
-
     engine.getDeviceManager().removeChangeListener (this);
     editState.removeListener (this);
     armed.clear();
@@ -328,8 +159,9 @@ bool AudioRecorder::canRecord() const
 //==============================================================================
 void AudioRecorder::update()
 {
-    // While recording, the inputs stay as they are: changing them remakes them, and the recordings would lose theirs.
-    if (updating || isRecording())
+    // While a take records, the inputs stay as they are: changing them opens the device again (Take.h updates them after).
+    if (const auto* session = alive.get() != nullptr ? findSession (edit) : nullptr;
+        updating || (session != nullptr && session->isRecording()))
         return;
 
     const juce::ScopedValueSetter<bool> svs (updating, true);
@@ -338,14 +170,7 @@ void AudioRecorder::update()
     const auto numInputs = device != nullptr ? device->getInputChannelNames().size() : 0;
     auto* liveEdit = alive.get(); // once the Edit is gone, its tracks need nothing
 
-    // What the tracks need now, by the first channel of each input: whether it is a pair, and the tracks that hear it.
-    struct Need
-    {
-        bool pair = false;
-        juce::Array<te::EditItemID> hearers;
-    };
-
-    std::map<int, Need> needs;
+    // The channels the tracks need now: those of a track that is armed or always hears its input.
     juce::BigInteger wanted;
 
     for (auto* track : liveEdit != nullptr ? te::getAudioTracks (*liveEdit) : juce::Array<te::AudioTrack*>())
@@ -356,20 +181,9 @@ void AudioRecorder::update()
         if (channels.empty() || channels.back() >= numInputs)
             continue;
 
-        const auto monitoring = getMonitoringOf (trackState);
-        const auto isOn = isArmed (*track) || monitoring == schema::monitorAlways;
-
-        if (! isOn)
-            continue;
-
-        auto& need = needs[channels.front()];
-        need.pair = need.pair || channels.size() == 2;
-
-        for (auto channel : channels)
-            wanted.setBit (channel);
-
-        if (monitoring == schema::monitorAlways || (isArmed (*track) && monitoring.isEmpty()))
-            need.hearers.add (track->itemID);
+        if (isArmed (*track) || alwaysHears (trackState))
+            for (auto channel : channels)
+                wanted.setBit (channel);
     }
 
     // The audio device's inputs: those the tracks need opened, and those opened for them before and no longer needed
@@ -397,190 +211,14 @@ void AudioRecorder::update()
             setup.inputChannels = channels;
             setup.useDefaultInputChannels = false;
             devices.deviceManager.setAudioDeviceSetup (setup, true);
-            return; // the device opens again, and Tracktion remakes its inputs: then this runs again
         }
     }
 
-    // Tracktion's inputs: a channel alone or a pair as the tracks need it, enabled while needed, heard by the tracks that
-    // hear it now, and by no others.
-    auto* playback = liveEdit != nullptr ? liveEdit->getCurrentPlaybackContext() : nullptr;
-
+    // Tracktion's own inputs stay off: Phazite's engine takes what comes in itself (model/playback/internal/PlaybackHost.h),
+    // and one of Tracktion's that is on makes a buffer on the audio thread for each block (docs/realtime-audit.md).
     for (auto* input : devices.getWaveInputDevices())
-    {
-        const auto& channels = input->getChannels();
-
-        if (channels.size() == 0)
-            continue;
-
-        const auto first = channels[0].indexInDevice;
-        const auto need = needs.find (first);
-        const auto isNeeded = need != needs.end();
-
-        if (isNeeded && need->second.pair != (channels.size() == 2) && regroupings < 3)
-        {
-            ++regroupings;
-            devices.setDeviceNumChannels (*input, need->second.pair ? 2u : 1u);
-            return; // remade: then this runs again
-        }
-
-        if (input->isEnabled() != isNeeded)
-            devices.setDeviceEnabled (*input, isNeeded);
-
-        const auto hearers = isNeeded ? need->second.hearers : juce::Array<te::EditItemID>();
-        const auto mode = hearers.isEmpty() ? te::InputDevice::MonitorMode::off : te::InputDevice::MonitorMode::on;
-
-        if (input->getMonitorMode() != mode)
-            input->setMonitorMode (mode);
-
-        if (auto* instance = playback != nullptr ? playback->getInputFor (input) : nullptr)
-        {
-            for (auto target : instance->getTargets())
-                if (! hearers.contains (target))
-                    (void) instance->removeTarget (target, nullptr);
-
-            for (auto hearer : hearers)
-                if (! instance->getTargets().contains (hearer))
-                    (void) instance->setTarget (hearer, false, nullptr);
-        }
-    }
-
-    regroupings = 0;
-}
-
-//==============================================================================
-void AudioRecorder::recordingStarted (te::SyncPoint start, std::optional<te::TimeRange> punch)
-{
-    prepareRecordings(); // prepared already when Phazite started recording; otherwise from now, missing what played before
-    startRecordings (start, punch);
-}
-
-void AudioRecorder::recordingStopped (te::SyncPoint stopped, bool discard)
-{
-    finishRecordings (stopped, discard);
-}
-
-void AudioRecorder::prepareRecordings()
-{
-    if (isRecording())
-        return;
-
-    edit.getTransport().ensureContextAllocated(); // as recording would: the inputs that the recordings take in
-    auto* playback = edit.getCurrentPlaybackContext();
-    auto& devices = edit.engine.getDeviceManager();
-    const auto rate = devices.getSampleRate();
-
-    if (playback == nullptr || rate <= 0.0)
-        return;
-
-    for (auto* track : getArmedTracks())
-    {
-        const auto wanted = getInputChannels (getInputOf (findTrackState (*track)));
-
-        // The input that holds the track's channels, and where they are in it.
-        for (auto* instance : playback->getAllInputs())
-        {
-            auto* input = dynamic_cast<te::WaveInputDevice*> (&instance->getInputDevice());
-
-            if (input == nullptr || ! input->isEnabled())
-                continue;
-
-            std::vector<int> inInput;
-            const auto& channels = input->getChannels();
-
-            for (auto channel : wanted)
-                for (size_t i = 0; i < channels.size(); ++i)
-                    if (channels[i].indexInDevice == channel)
-                        inInput.push_back ((int) i);
-
-            if (inInput.size() != wanted.size())
-                continue;
-
-            // How late the input's sound comes in: the delays the audio device reports for its input and output, the
-            // song's delay compensation, and the audio settings' own correction.
-            const auto delay = devices.getRecordAdjustmentSamples() + playback->getLatencySamples()
-                               + (juce::int64) std::llround (input->getRecordAdjustmentMs() * rate / 1000.0);
-
-            auto recording = std::make_unique<Recording> (getTrackID (findTrackState (*track)), *instance, *playback, inInput,
-                                                          getTakeFile (*track), rate, delay);
-
-            if (recording->open())
-            {
-                recording->capturing.store (true, std::memory_order_release);
-                instance->addConsumer (recording.get());
-                recordings.push_back (std::move (recording));
-            }
-
-            break;
-        }
-    }
-}
-
-void AudioRecorder::discardRecordings()
-{
-    finishRecordings ({}, true);
-}
-
-void AudioRecorder::startRecordings (te::SyncPoint start, std::optional<te::TimeRange> punch)
-{
-    if (recordings.empty() || started.has_value())
-        return;
-
-    started = start;
-    punchRange = punch;
-    auto& transport = edit.getTransport();
-    loopRange = transport.looping.get() && ! punch.has_value() ? std::optional (transport.getLoopRange()) : std::nullopt;
-
-    std::vector<Recording*> written;
-
-    for (auto& recording : recordings)
-        written.push_back (recording.get());
-
-    writer = std::make_unique<Writer> (std::move (written));
-}
-
-void AudioRecorder::removeConsumers()
-{
-    auto* liveEdit = alive.get();
-    auto* playback = liveEdit != nullptr ? liveEdit->getCurrentPlaybackContext() : nullptr;
-    const auto inputs = playback != nullptr ? playback->getAllInputs() : juce::Array<te::InputDeviceInstance*>();
-
-    // Once removed, under the lock the audio thread holds while it hands a consumer a block, a consumer gets no more. An
-    // input that is gone took its consumers with it.
-    for (auto& recording : recordings)
-        if (inputs.contains (recording->instance))
-            recording->instance->removeConsumer (recording.get());
-}
-
-void AudioRecorder::finishRecordings (te::SyncPoint stopped, bool discard)
-{
-    if (! isRecording())
-        return;
-
-    for (auto& recording : recordings)
-        recording->capturing.store (false, std::memory_order_release);
-
-    removeConsumers();
-    writer = nullptr; // its thread ends
-
-    for (auto& recording : recordings)
-    {
-        recording->write(); // what was left
-        recording->close();
-    }
-
-    for (auto& recording : recordings)
-    {
-        if (! discard && started.has_value() && alive.get() != nullptr)
-            makeClips (*recording, stopped); // if its track is still there
-        else
-            recording->file.deleteFile();
-    }
-
-    recordings.clear();
-    started.reset();
-    punchRange.reset();
-    loopRange.reset();
-    update(); // what was armed meanwhile
+        if (input->isEnabled())
+            devices.setDeviceEnabled (*input, false);
 }
 
 juce::File AudioRecorder::getTakeFile (const te::AudioTrack& track) const
@@ -592,39 +230,6 @@ juce::File AudioRecorder::getTakeFile (const te::AudioTrack& track) const
     for (int take = 1;; ++take)
         if (const auto file = folder.getChildFile (name + " Take " + juce::String (take) + ".wav"); ! file.exists())
             return file;
-}
-
-//==============================================================================
-void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
-{
-    if (! recording.hasStart.load (std::memory_order_acquire) || recording.written <= 0)
-    {
-        recording.file.deleteFile();
-        return;
-    }
-
-    lastShift = recording.shift;
-    const auto& start = *started;
-
-    // Where in the song, as if nothing looped, the file's first frame was played: where it came in, less the delay the
-    // input comes in with.
-    TakePlace place;
-    place.sampleRate = recording.sampleRate;
-    place.frames = recording.written;
-    place.firstFrame = recording.startTime - (double) recording.shift / recording.sampleRate;
-    place.start = start.unloopedTime.inSeconds();
-    place.stop = stopped.unloopedTime.inSeconds();
-
-    if (punchRange.has_value())
-        place.punch = juce::Range (punchRange->getStart().inSeconds(), punchRange->getEnd().inSeconds());
-
-    if (loopRange.has_value())
-    {
-        place.loop = juce::Range (loopRange->getStart().inSeconds(), loopRange->getEnd().inSeconds());
-        place.firstLoopStart = start.unloopedTime.inSeconds() - (start.time.inSeconds() - loopRange->getStart().inSeconds());
-    }
-
-    placeTake (edit, recording.track, recording.file, place);
 }
 
 void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const TakePlace& take)
@@ -756,11 +361,6 @@ void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const T
 void AudioRecorder::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     update(); // Tracktion remade its inputs, or the audio device changed
-}
-
-void AudioRecorder::playbackContextChanged()
-{
-    update();
 }
 
 void AudioRecorder::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)

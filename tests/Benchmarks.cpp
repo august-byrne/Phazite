@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Benchmarks (docs/performance-audit.md): what each device costs and how soon it sounds, how soon a live note sounds
-// through Tracktion, what a project costs stopped and playing, how long saving, opening and the UI's work take, and what
+// through Phazite's engine, what a project costs stopped and playing, how long saving, opening and the UI's work take, and what
 // scrolling and zooming a big song cost.
 // ctest and CI skip them; run them from an optimised build (windows-profile or windows-release) with
 //   phazite_tests.exe --test-suite=benchmark --no-skip
@@ -31,8 +31,11 @@
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/PreviewLoop.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackHost.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
@@ -288,13 +291,16 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
     MESSAGE (report);
 }
 
-TEST_CASE ("Benchmark: a live note's way through Tracktion" * doctest::test_suite ("benchmark") * doctest::skip())
+TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::test_suite ("benchmark") * doctest::skip())
 {
     auto& engine = phazite::test::getEngine();
     REQUIRE (findAllMidiInputs() != nullptr);
     HostedDevice device;
 
+    // A project, as the app plays it: Tracktion's callback plays nothing of it, Phazite's engine all.
     auto edit = phazite::createSongEdit (engine);
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, edit.get());
     phazite::ensureTracks (*edit, 2);
     auto* track = te::getAudioTracks (*edit)[0];
     phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (dev::Synth::typeID, {}));
@@ -339,6 +345,7 @@ TEST_CASE ("Benchmark: a live note's way through Tracktion" * doctest::test_suit
 
     MESSAGE (report);
     limiter = nullptr; // before its Edit
+    setEdit (context, nullptr);
     edit = nullptr;
 }
 
@@ -377,23 +384,37 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
         return edit;
     };
 
-    juce::String report ("\n| Project (one audio thread) | Stopped | Playing |\n|---|---|---|\n");
+    // Each a project, as the app plays it: Tracktion's callback plays nothing of it, Phazite's engine all, on one thread and
+    // then on four.
+    auto& playing = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    const auto threads = playing.getNumThreads();
+    juce::String report ("\n| Project | Threads | Stopped | Playing |\n|---|---|---|---|\n");
 
     for (const auto& [numTracks, withDevices] : { std::pair (20, false), std::pair (20, true) })
     {
-        auto edit = makeEdit (numTracks, withDevices);
-        phazite::test::settle (800);
-        const auto stopped = device.percentOfRealTime (500);
-        edit->getTransport().play (false);
-        phazite::test::settle (500);
-        const auto playing = device.percentOfRealTime (500);
-        edit->getTransport().stop (false, false);
-        phazite::test::settle (300);
-        report << "| " << numTracks << (withDevices ? " tracks, each a synth, an EQ, a compressor and a reverb, chords" : " empty tracks")
-               << " | " << juce::String (stopped, 2) << " % | " << juce::String (playing, 2) << " % |\n";
-        edit = nullptr;
-        phazite::test::settle (300);
+        for (const auto numThreads : { 1, 4 })
+        {
+            playing.setNumThreads (numThreads); // while no block plays
+            auto edit = makeEdit (numTracks, withDevices);
+            phazite::ProjectContext context { phazite::test::getEngineContext() };
+            setEdit (context, edit.get());
+            phazite::test::settle (800);
+            const auto stopped = device.percentOfRealTime (500);
+            phazite::playOrStop (*edit);
+            phazite::test::settle (500);
+            const auto played = device.percentOfRealTime (500);
+            phazite::stopAndReturn (*edit);
+            phazite::test::settle (300);
+            report << "| " << numTracks
+                   << (withDevices ? " tracks, each a synth, an EQ, a compressor and a reverb, chords" : " empty tracks") << " | "
+                   << numThreads << " | " << juce::String (stopped, 2) << " % | " << juce::String (played, 2) << " % |\n";
+            setEdit (context, nullptr);
+            edit = nullptr;
+            phazite::test::settle (300);
+        }
     }
+
+    playing.setNumThreads (threads);
 
     MESSAGE (report);
 }

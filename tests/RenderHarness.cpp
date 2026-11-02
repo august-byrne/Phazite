@@ -50,41 +50,15 @@ namespace
     }
 
     //==============================================================================
-    // Tracktion's renderer, as Phazite's export uses it, into a temporary file that is read back. Tracktion runs the
-    // render with the UIBehaviour's runTaskWithProgressBar(), which Phazite's runs to the end on this thread.
+    // Phazite's engine, playing an Edit's song.
     juce::AudioBuffer<float> renderEdit (te::Edit& edit, double seconds)
     {
-        REQUIRE (renderMissingClipAudio (edit)); // as an export does: Tracktion would render a clip whose render isn't ready silent
-
-        const auto samples = (int) std::lround (seconds * renderSampleRate);
-        const juce::TemporaryFile wav (".wav"); // in the temporary folder, never in the repository, and deleted after
-
-        te::Renderer::Parameters params (edit);
-        params.destFile = wav.getFile();
-        params.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
-        params.bitDepth = 32;
-        params.sampleRateForAudio = renderSampleRate;
-        params.blockSizeForAudio = renderBlockSize;
-        params.time = te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds ((double) samples / renderSampleRate));
-        params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
-        params.useMasterPlugins = true;
-        params.canRenderInMono = false;
-        params.ditheringEnabled = false;
-        REQUIRE (te::Renderer::renderToFile ("Golden render", params) == params.destFile);
-
-        const std::unique_ptr<juce::AudioFormatReader> reader (
-            edit.engine.getAudioFileFormatManager().readFormatManager.createReaderFor (wav.getFile()));
-        REQUIRE (reader != nullptr);
-        REQUIRE (reader->numChannels == (unsigned int) renderChannels);
-        REQUIRE (reader->lengthInSamples == (juce::int64) samples);
-
-        juce::AudioBuffer<float> audio (renderChannels, samples);
-        REQUIRE (reader->read (&audio, 0, samples, 0, true, true));
-        return audio;
+        REQUIRE (renderMissingClipAudio (edit)); // as an export does: a clip whose render isn't ready would play nothing
+        return renderWithOwnEngine (edit, (int) std::lround (seconds * renderSampleRate), renderSampleRate, renderBlockSize);
     }
 
-    // Tracktion's engine, playing the open project's Edit.
-    class TracktionEngine final : public RenderEngine
+    // The open project's.
+    class OwnEngineRender final : public RenderEngine
     {
     public:
         juce::String getName() const override { return "reference"; }
@@ -97,11 +71,10 @@ namespace
         }
     };
 
-    // Tracktion's engine again, playing an Edit built afresh from a copy of the song alone, as a save would hold it, in a
-    // context of its own as a project opens in: so that nothing a render leaves behind (where its modulators were) plays
-    // in the next, and the song alone makes what it plays (as T1 asks of Phazite's own document: Tracktion's Edit a mirror
-    // that can be built again from it at any moment).
-    class TracktionOnACopy final : public RenderEngine
+    // A project opened afresh from a copy of the song alone, as a save would hold it, in a context of its own as a project
+    // opens in: so that nothing a render leaves behind (where its modulators were) plays in the next, and the song alone
+    // makes what it plays.
+    class OwnEngineOnACopy final : public RenderEngine
     {
     public:
         juce::String getName() const override { return "candidate"; }
@@ -121,22 +94,6 @@ namespace
             auto audio = renderEdit (*copy, seconds);
             setEdit (opened, nullptr);
             return audio;
-        }
-    };
-
-    // Phazite's own engine (docs/tracktion-migration.md, T2), playing the song of the open project.
-    class OwnEngineRender final : public RenderEngine
-    {
-    public:
-        juce::String getName() const override { return "phazite"; }
-
-        juce::AudioBuffer<float> render (ProjectContext& context, double seconds) override
-        {
-            auto* edit = getEdit (context);
-            REQUIRE (edit != nullptr);
-            REQUIRE (renderMissingClipAudio (*edit)); // as an export does, and Tracktion's render here
-            const auto samples = (int) std::lround (seconds * renderSampleRate);
-            return renderWithOwnEngine (*edit, samples, renderSampleRate, renderBlockSize);
         }
     };
 
@@ -439,37 +396,22 @@ Fingerprint renderFingerprint (ProjectContext& context, double seconds)
 
 std::unique_ptr<RenderEngine> makeReferenceEngine()
 {
-    return std::make_unique<TracktionEngine>();
+    return std::make_unique<OwnEngineRender>();
 }
 
 std::unique_ptr<RenderEngine> makeCandidateEngine()
 {
-    return std::make_unique<TracktionOnACopy>();
-}
-
-std::unique_ptr<RenderEngine> makeOwnEngine()
-{
-    return std::make_unique<OwnEngineRender>();
+    return std::make_unique<OwnEngineOnACopy>();
 }
 
 void checkGoldenRender (ProjectContext& context, const GoldenRender& golden)
 {
-    // Played otherwise by Phazite's engine on purpose: its render is the golden one.
-    if (golden.ownEngine == OwnEngine::differs)
-    {
-        const auto own = makeOwnEngine();
-        const auto audio = own->render (context, golden.seconds);
-        const auto text = checkRender (audio, renderSampleRate, golden, golden.name + "-" + own->getName());
-        compareWithGolden (text, audio, renderSampleRate, golden, golden.name + "-" + own->getName());
-        return;
-    }
-
     const auto reference = makeReferenceEngine();
     const auto referenceAudio = reference->render (context, golden.seconds);
     const auto referenceText = checkRender (referenceAudio, renderSampleRate, golden, golden.name + "-" + reference->getName());
     compareWithGolden (referenceText, referenceAudio, renderSampleRate, golden, golden.name + "-" + reference->getName());
 
-    const auto candidate = golden.ownEngine == OwnEngine::matches ? makeOwnEngine() : makeCandidateEngine();
+    const auto candidate = makeCandidateEngine();
     const auto candidateAudio = candidate->render (context, golden.seconds);
     const auto candidateText = checkRender (candidateAudio, renderSampleRate, golden, golden.name + "-" + candidate->getName());
     const auto differences = compareFingerprints (referenceText, candidateText);
@@ -478,7 +420,7 @@ void checkGoldenRender (ProjectContext& context, const GoldenRender& golden)
         keepRender (candidateAudio, renderSampleRate, golden.name + "-" + candidate->getName());
 
     const auto apart = getDifference (referenceAudio, candidateAudio, renderSampleRate);
-    INFO (("The candidate engine plays " + golden.name + " otherwise than the reference engine (sample by sample, up to "
+    INFO (("A copy of the song plays " + golden.name + " otherwise than the song itself (sample by sample, up to "
            + formatLevel (apart.peakDb) + " dBFS apart, at " + juce::String (apart.seconds, 4) + " s):\n  "
            + differences.joinIntoString ("\n  "))
               .toStdString());
@@ -494,9 +436,7 @@ void checkGoldenAudio (const juce::AudioBuffer<float>& audio, double sampleRate,
 void checkGoldenChange (ProjectContext& context, const std::function<void()>& change, GoldenRender golden, const ChangeCheck& check)
 {
     settle();
-    // Before, through the engine the render after is golden of: Phazite's, for one it plays otherwise on purpose.
-    const auto before = golden.ownEngine == OwnEngine::differs ? getFingerprint (makeOwnEngine()->render (context, golden.seconds))
-                                                               : renderFingerprint (context, golden.seconds);
+    const auto before = renderFingerprint (context, golden.seconds);
     change();
     settle();
     golden.check = [&before, &check] (const Fingerprint& after, const juce::AudioBuffer<float>&) { return check (before, after); };

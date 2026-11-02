@@ -2,8 +2,8 @@
 // Modulation by IDs and plain values (src/model/modulation/ModulationModel.h; roadmap step 2.3): a track's modulators and
 // macros, added and removed as named undo steps; what they modulate, by how much, and what that does to a parameter as
 // the song plays; a modulator's parameters and a step sequencer's steps; and that they are saved with the project.
+#include "EnginePlayback.h"
 #include "GoldenFiles.h"
-#include "RealTimePlayback.h"
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
@@ -14,9 +14,11 @@
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 
@@ -350,22 +352,19 @@ TEST_CASE ("An LFO moves the synth's cutoff as the song plays")
 
     const auto parameter = song.find (cutoff);
     const auto base = parameter->getCurrentBaseValue();
-    const phazite::test::RealTimePlayback playback (phazite::test::getEngine());
-    auto& transport = song.edit->getTransport();
-    transport.setPosition (te::TimePosition());
-    transport.play (false);
+    phazite::test::EnginePlayback playback;
+    phazite::playOrStop (*song.edit);
 
-    // Sampled as it plays: it moves, around where it is set.
+    // Sampled as Phazite's engine plays it: it moves, around where it is set.
     std::vector<float> seen;
 
     for (int i = 0; i < 20; ++i)
     {
-        phazite::test::RealTimePlayback::wait (25);
-        seen.push_back (parameter->getCurrentValue());
+        playback.play (0.025);
+        seen.push_back (phazite::getPlayedValue (*parameter, true).value_or (parameter->getCurrentValue()));
     }
 
-    transport.stop (false, false);
-    phazite::test::RealTimePlayback::wait (200);
+    phazite::stopAndReturn (*song.edit);
 
     const auto [lowest, highest] = std::minmax_element (seen.begin(), seen.end());
     CHECK (*highest > *lowest);
@@ -441,22 +440,20 @@ TEST_CASE ("A modulator switched off moves nothing and keeps what it modulates, 
     const auto parameter = song.find (cutoff);
     const auto base = parameter->getCurrentBaseValue();
 
+    // As Phazite's engine plays it (the value it played, while it moves the parameter).
     const auto play = [&song, &parameter]
     {
-        const phazite::test::RealTimePlayback playback (phazite::test::getEngine());
-        auto& transport = song.edit->getTransport();
-        transport.setPosition (te::TimePosition());
-        transport.play (false);
+        phazite::test::EnginePlayback playback;
+        phazite::playOrStop (*song.edit);
         std::vector<float> seen;
 
         for (int i = 0; i < 16; ++i)
         {
-            phazite::test::RealTimePlayback::wait (25);
-            seen.push_back (parameter->getCurrentValue());
+            playback.play (0.025);
+            seen.push_back (phazite::getPlayedValue (*parameter, true).value_or (parameter->getCurrentValue()));
         }
 
-        transport.stop (false, false);
-        phazite::test::RealTimePlayback::wait (200);
+        phazite::stopAndReturn (*song.edit);
         return seen;
     };
 

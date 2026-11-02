@@ -69,24 +69,7 @@ namespace
             return;
         }
 
-        auto& transport = edit.getTransport();
-
-        if (transport.isRecording())
-        {
-            {
-                const UndoStep step (edit, "Record");
-                transport.stop (false, false);
-                adoptRecordedMidi (edit); // what Tracktion recorded becomes the song's
-            }
-
-            // A punched take turned Tracktion's loop off, and a take around the song's loop ran on past its end
-            // (Recording.h): the song's loop again.
-            edit.recordingPunchInOut = false;
-            mirror::reconcileTransport (edit);
-            return;
-        }
-
-        transport.stop (false, false);
+        edit.getTransport().stop (false, false);
     }
 } // namespace
 
@@ -328,21 +311,6 @@ void SongFollower::handleAsyncUpdate()
 
 void SongFollower::timerCallback()
 {
-    auto& transport = edit.getTransport();
-
-    // A recording that stopped some other way than Playback.h's functions: the song's loop back.
-    if (const auto recording = transport.isRecording(); recording != wasRecording)
-    {
-        wasRecording = recording;
-
-        if (! recording)
-            mirror::reconcileTransport (edit);
-
-        // Tracktion plays live MIDI while it records, and Phazite's own engine again after (T2 step 9 changes that).
-        if (auto* session = findSession (edit))
-            session->followLiveMidi();
-    }
-
     if (! isSongPlaying (edit) || isLoopOn (edit) || isRecording (edit))
     {
         lastPosition.reset();

@@ -40,8 +40,7 @@ public:
     AutomationWriter& getWriter() noexcept { return writer; }
     engine::Engine& getEngine() noexcept; // the host's, which plays it
 
-    // Whether Phazite's engine plays this project now: the host is on, this is the project it plays, and Tracktion isn't
-    // recording.
+    // Whether Phazite's engine plays this project now: its Edit is there, and it is the project the host plays.
     bool isPlayingProject() const;
 
     // The transport, through the host's engine. The playhead is in the song's beats.
@@ -70,13 +69,13 @@ public:
 
     // Live MIDI (the computer keyboard and the MIDI inputs, which Tracktion's "All MIDI Ins" brings together) plays the track
     // it goes to (model/engine/internal/LiveInput.h) through Phazite's engine while the engine plays the project, in its next
-    // block, and Tracktion, which still records it, doesn't play it too: after the track it goes to changes, or Tracktion's
-    // inputs are made again, this takes them in again.
+    // block, and Tracktion doesn't play it too: after the track it goes to changes, or Tracktion's inputs are made again,
+    // this takes them in again.
     void followLiveMidi();
 
     // While Phazite's engine plays the project, Tracktion's playback graph plays nothing: it is held, never prepared, in a
     // silent node, so that a plug-in, which both reach, only ever plays through Phazite's engine. followLiveMidi() holds it
-    // or lets it go as the engine that plays changes; recording lets it go first, while Tracktion records.
+    // or lets it go as the project the engine plays changes.
     void holdTracktion (bool);
 
     // The piano roll's guide notes into a track, through Phazite's engine; and their ends.

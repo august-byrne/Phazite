@@ -45,8 +45,7 @@ public:
     float getPlayedBaseValue (int parameter) const noexcept;
 
     // Audio thread: plays a block through the device, if it is on, its parameters moved by their automation (the plan's)
-    // as the block says. One switched back on starts from silence, rather than from where it was when it was switched off
-    // (docs/known-bugs.md, bug 5).
+    // as the block says. One switched back on starts from silence, rather than from where it was when it was switched off.
     void process (juce::AudioBuffer<float>&, int startSample, int numSamples, DeviceRunner::Block,
                   std::span<const ParameterCurve> automation = {}) noexcept;
 

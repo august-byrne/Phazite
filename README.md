@@ -27,6 +27,8 @@ What works today, on Windows:
 - **Record:** MIDI from a keyboard or the computer keyboard, audio from an interface (ASIO®) with count-in and punch-in, and Capture, which turns what you just played into a clip.
 - **Finish:** export the song, or its stems, to WAV or FLAC, normalized to a loudness if you like.
 
+Since November 2026 the song plays and records through Phazite's own engine; Tracktion Engine still hosts plug-ins and renders exports while the [move off it](docs/tracktion-migration.md) goes on.
+
 Next come chord suggestions, the sound generator, plug-ins in their own processes (so that a crashing plug-in can't take Phazite down), and passes on performance and accessibility; then an installer and version 1. The [roadmap](docs/roadmap.md) has the plan step by step.
 
 | Platform | Status |

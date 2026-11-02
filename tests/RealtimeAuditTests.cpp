@@ -11,7 +11,6 @@
 // docs/realtime-audit.md lists the findings and what Phazite does about each.
 
 #include "AudioThreadMonitor.h"
-#include "EnginePlayback.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -54,6 +53,7 @@
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
@@ -104,17 +104,17 @@ double warmUp (ProcessFor& processFor)
 }
 
 //==============================================================================
-// A two-second stereo sine wave file, so audio clips have something to play.
+// A stereo sine wave file, two seconds long or as long as asked, so audio clips have something to play.
 class SineFile
 {
 public:
-    SineFile()
+    explicit SineFile (double seconds = 2.0)
     {
-        juce::AudioBuffer<float> buffer (2, juce::roundToInt (auditSampleRate * 2.0));
+        juce::AudioBuffer<float> buffer (2, juce::roundToInt (auditSampleRate * seconds));
 
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
-            const auto sample = 0.25f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * (float) i / (float) auditSampleRate);
+            const auto sample = 0.5f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * (float) i / (float) auditSampleRate);
             buffer.setSample (0, i, sample);
             buffer.setSample (1, i, sample);
         }
@@ -151,16 +151,22 @@ void addSineClip (te::AudioTrack& track, const SineFile& sine)
     phazite::test::addAudioClip (track, "Sine", sine.getFile(), { 0_tp, 2_tp });
 }
 
-// Tracktion's tone generator, a sound that reads no files. Tracktion doesn't register it with the others.
-te::Plugin::Ptr createToneGenerator (te::Edit& edit)
+// A tone on a track for longer than a scenario plays: an audio clip of a sine wave, from the song's start.
+void addTone (te::AudioTrack& track)
 {
-    [[maybe_unused]] static const bool registered = [&edit]
-    {
-        edit.engine.getPluginManager().createBuiltInType<te::ToneGeneratorPlugin>();
-        return true;
-    }();
+    static const SineFile sine (8.0);
+    phazite::test::addAudioClip (track, "Tone", sine.getFile(), { 0_tp, 8_tp });
+}
 
-    return edit.getPluginCache().createNewPlugin (te::ToneGeneratorPlugin::xmlTypeName, {});
+// A device as Phazite's engine plays it, while it plays the device's project: what its editor's displays read and its
+// pads play (model/devices/DeviceHandle.h).
+phazite::engine::DeviceRunner& getPlayed (te::Plugin& device)
+{
+    auto* session = phazite::findPlayingSession (device.edit);
+    REQUIRE (session != nullptr);
+    auto* node = session->getPlayer().findDevice ((std::int64_t) device.itemID.getRawID());
+    REQUIRE (node != nullptr);
+    return node->getRunner();
 }
 
 //==============================================================================
@@ -174,9 +180,9 @@ struct Measurement
     float peakLevel = 0.0f;
 };
 
-// Plays the Edit from the start in real time on a separate "audio" thread, through Tracktion's hosted
-// audio device, and measures that thread. Like the app, the device has no inputs unless asked for.
-Measurement playAndMeasure (te::Edit& edit, int numInputChannels = 0)
+// Plays an Edit that is no project's (a preview's) from the start through Tracktion's engine, in real time on a separate
+// "audio" thread, through Tracktion's hosted audio device, and measures that thread.
+Measurement playTracktionAndMeasure (te::Edit& edit)
 {
     auto& deviceManager = edit.engine.getDeviceManager();
     auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
@@ -184,7 +190,7 @@ Measurement playAndMeasure (te::Edit& edit, int numInputChannels = 0)
     te::HostedAudioDeviceInterface::Parameters params;
     params.sampleRate = auditSampleRate;
     params.blockSize = auditBlockSize;
-    params.inputChannels = numInputChannels;
+    params.inputChannels = 0;
     audioIO.initialise (params);
     audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
     deviceManager.dispatchPendingUpdates();
@@ -250,18 +256,30 @@ Measurement playAndMeasure (te::Edit& edit, int numInputChannels = 0)
     return m;
 }
 
-// Plays the open project from its start through Phazite's own engine (docs/tracktion-migration.md, T2), in real time on
-// a separate "audio" thread, as playAndMeasure() plays Tracktion's, and measures that thread; a tone comes into the
-// device's two inputs. Recording, it records a take instead, while another thread plays a note every twentieth of a
-// second into a track live, as a MIDI driver would; stopping keeps the take.
-Measurement playPhaziteAndMeasure (phazite::ProjectContext& context, bool recording = false, phazite::TrackID liveTrack = {})
+// Plays the open project from its start through Phazite's engine as the app plays it, in real time on a separate "audio"
+// thread that drives Tracktion's hosted audio device, whose callbacks are Tracktion's, which plays nothing of the project,
+// and Phazite's (model/playback/internal/PlaybackHost.h), and measures that thread; a tone comes into the device's two
+// inputs. Recording, it records a take instead, while another thread plays a note every twentieth of a second into a
+// track live, as a MIDI driver would; stopping keeps the take.
+Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::function<void()>& before = {}, bool recording = false,
+                                   phazite::TrackID liveTrack = {})
 {
-    const phazite::test::EnginePlayback playback; // at the audit's rate and block size, with two inputs
-    static_assert (phazite::test::EnginePlayback::sampleRate == auditSampleRate
-                   && phazite::test::EnginePlayback::blockSize == auditBlockSize);
-
     auto& edit = *phazite::getEdit (context);
+    auto& deviceManager = edit.engine.getDeviceManager();
+    auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
+
+    te::HostedAudioDeviceInterface::Parameters params;
+    params.sampleRate = auditSampleRate;
+    params.blockSize = auditBlockSize;
+    params.inputChannels = 2;
+    audioIO.initialise (params);
+    audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
+    deviceManager.dispatchPendingUpdates();
+    phazite::test::dispatchPendingMessages(); // the song for the device's rate
     phazite::movePlayhead (edit, 0_tp);
+
+    if (before)
+        before();
 
     if (recording)
         phazite::startRecording (edit);
@@ -294,6 +312,8 @@ Measurement playPhaziteAndMeasure (phazite::ProjectContext& context, bool record
 
     Measurement m;
     juce::AudioBuffer<float> buffer (2, auditBlockSize); // allocated before the thread is marked as an audio thread
+    juce::MidiBuffer midi;
+    midi.ensureSize (4096);
     const auto blockDuration =
         std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
 
@@ -311,9 +331,12 @@ Measurement playPhaziteAndMeasure (phazite::ProjectContext& context, bool record
                 for (int i = 0; i < numBlocks; ++i)
                 {
                     const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
-                    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
-                    const float* inputs[] = { tone.getReadPointer (0), tone.getReadPointer (0) };
-                    engine.process (inputs, 2, channels, 2, auditBlockSize);
+
+                    for (int channel = 0; channel < 2; ++channel)
+                        buffer.copyFrom (channel, 0, tone, 0, 0, auditBlockSize);
+
+                    midi.clear();
+                    audioIO.processBlock (buffer, midi);
                     m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
                     std::this_thread::sleep_until (blockEnd);
                 }
@@ -335,217 +358,26 @@ Measurement playPhaziteAndMeasure (phazite::ProjectContext& context, bool record
     phazite::stopAndReturn (edit);
     m.callSites = AudioThreadMonitor::describeCallSites();
     m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
-    return m;
-}
 
-// Records onto the track live MIDI plays, measured as playAndMeasure() measures playback, while another thread plays
-// a note every tenth of a second into "All MIDI Ins", as a MIDI driver would. Stopping keeps the take.
-Measurement recordAndMeasure (te::Edit& edit)
-{
-    auto& deviceManager = edit.engine.getDeviceManager();
-    auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
-
-    te::HostedAudioDeviceInterface::Parameters params;
-    params.sampleRate = auditSampleRate;
-    params.blockSize = auditBlockSize;
-    params.inputChannels = 0;
-    audioIO.initialise (params);
-    audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
-    deviceManager.dispatchPendingUpdates();
-
-    // Tracktion's merged MIDI input, which it creates on a timer once asked to scan the MIDI devices.
-    if (phazite::getAllMidiInputs (edit.engine) == nullptr)
-    {
-        deviceManager.rescanMidiDeviceList();
-        phazite::test::runTimersUntil ([&edit] { return phazite::getAllMidiInputs (edit.engine) != nullptr; });
-    }
-
-    phazite::setCountInOn (edit, false);
-    phazite::routeLiveMidiInput (edit);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 200); // Tracktion rebuilds its graph with the input armed
-
-    Measurement m;
-    juce::AudioBuffer<float> buffer (params.outputChannels, auditBlockSize);
-    juce::MidiBuffer midi;
-    midi.ensureSize (4096);
-    const auto blockDuration =
-        std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
-    std::atomic<bool> measuring { true }, running { true }, notesBegun { false };
-
-    AudioThreadMonitor::reset();
-
-    std::thread audioThread (
-        [&]
-        {
-            const AudioThreadMonitor::ScopedAudioThread marker;
-
-            const auto processFor = [&] (double seconds)
-            {
-                const auto numBlocks = juce::roundToInt (seconds * auditSampleRate / auditBlockSize);
-
-                for (int i = 0; i < numBlocks; ++i)
-                {
-                    const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
-                    buffer.clear();
-                    midi.clear();
-                    audioIO.processBlock (buffer, midi);
-                    m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
-                    std::this_thread::sleep_until (blockEnd);
-                }
-            };
-
-            // The warm-up starts once recording has begun and the first note was played: what Tracktion allocates once,
-            // as a take starts, belongs to it however long a busy machine takes to get there.
-            while (! notesBegun.load())
-                processFor (0.01);
-
-            m.warmUpTaken = warmUp (processFor);
-            m.warmUp = AudioThreadMonitor::getCounts();
-            m.firstSteadyEvent = AudioThreadMonitor::getNumEvents();
-
-            processFor (steadySeconds);
-            const auto total = AudioThreadMonitor::getCounts();
-            m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
-            measuring = false;
-
-            // On, unmeasured, while recording stops.
-            while (running.load())
-                processFor (0.01);
-        });
-
-    // Tracktion waits for a block to go by before recording begins, so this starts once the audio thread runs.
-    phazite::startRecording (edit);
-
-    std::thread midiThread (
-        [&edit, &measuring, &notesBegun]
-        {
-            // A chord first. Tracktion's pooled MIDI buffers grow to the most messages a block has carried, and on a busy
-            // machine the notes this thread plays can bunch into one block late in the measured second: the chord grows
-            // them during the warm-up, to more than that.
-            constexpr int chordSize = 12;
-
-            for (int note = 0; note < chordSize; ++note)
-                phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOn (1, 72 + note, 0.8f));
-
-            std::this_thread::sleep_for (std::chrono::milliseconds (50));
-
-            for (int note = 0; note < chordSize; ++note)
-                phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOff (1, 72 + note));
-
-            for (int note = 0; measuring.load(); ++note)
-            {
-                phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOn (1, 48 + note % 24, 0.8f));
-                notesBegun = true;
-                std::this_thread::sleep_for (std::chrono::milliseconds (50));
-                phazite::playIntoAllMidiInputs (edit.engine, juce::MidiMessage::noteOff (1, 48 + note % 24));
-                std::this_thread::sleep_for (std::chrono::milliseconds (50));
-            }
-        });
-
-    midiThread.join(); // once the measuring is done
-    phazite::stopRecording (edit);
-    running = false;
-    audioThread.join();
-    m.callSites = AudioThreadMonitor::describeCallSites();
-    m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
-
+    // Remove the hosted device again, as Tracktion's own tests do, so later tests start without one.
     deviceManager.closeDevices();
     deviceManager.removeHostedAudioDeviceInterface();
     deviceManager.deviceManager.closeAudioDevice();
-
     return m;
 }
 
-// Records an armed track's input, heard as it comes in, measured once the take has begun as playAndMeasure() measures
-// playback: a tone played into the hosted device's inputs, as an audio interface brings a voice in (roadmap step 3.4).
-// Phazite's recorder copies it into its own buffer on the audio thread, which its thread writes into the file. Stopping
-// keeps the take.
-Measurement recordAudioAndMeasure (te::Edit& edit, te::AudioTrack& track)
+// Plays an Edit's song as a project plays it (playProjectAndMeasure()): opened in a project context of its own, with
+// what is to be done once Phazite's engine has it, before it plays, and after.
+Measurement playAndMeasure (te::Edit& edit, const std::function<void()>& before = {}, const std::function<void()>& after = {})
 {
-    auto& deviceManager = edit.engine.getDeviceManager();
-    auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, &edit);
+    auto m = playProjectAndMeasure (context, before);
 
-    te::HostedAudioDeviceInterface::Parameters params;
-    params.sampleRate = auditSampleRate;
-    params.blockSize = auditBlockSize;
-    params.inputChannels = 2;
-    audioIO.initialise (params);
-    audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
-    deviceManager.dispatchPendingUpdates();
+    if (after)
+        after();
 
-    phazite::setCountInOn (edit, false);
-    phazite::AudioRecorder recorder (edit);
-    recorder.setArmed (track, true);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 300); // Tracktion makes its inputs as the track needs them
-
-    Measurement m;
-    juce::AudioBuffer<float> buffer (std::max (params.inputChannels, params.outputChannels), auditBlockSize);
-    juce::MidiBuffer midi;
-    midi.ensureSize (4096);
-    const auto blockDuration =
-        std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
-    std::atomic<bool> running { true }, recording { false }, measured { false };
-
-    AudioThreadMonitor::reset();
-
-    std::thread audioThread (
-        [&]
-        {
-            const AudioThreadMonitor::ScopedAudioThread marker;
-            double phase = 0.0;
-
-            const auto processFor = [&] (double seconds)
-            {
-                const auto numBlocks = juce::roundToInt (seconds * auditSampleRate / auditBlockSize);
-
-                for (int i = 0; i < numBlocks; ++i)
-                {
-                    const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
-
-                    for (int frame = 0; frame < auditBlockSize;
-                         ++frame, phase += juce::MathConstants<double>::twoPi * 220.0 / auditSampleRate)
-                        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-                            buffer.setSample (channel, frame, 0.25f * (float) std::sin (phase));
-
-                    midi.clear();
-                    audioIO.processBlock (buffer, midi);
-                    m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
-                    std::this_thread::sleep_until (blockEnd);
-                }
-            };
-
-            // The warm-up starts once the take has begun.
-            while (! recording.load())
-                processFor (0.01);
-
-            m.warmUpTaken = warmUp (processFor);
-            m.warmUp = AudioThreadMonitor::getCounts();
-            m.firstSteadyEvent = AudioThreadMonitor::getNumEvents();
-
-            processFor (steadySeconds);
-            const auto total = AudioThreadMonitor::getCounts();
-            m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
-            measured = true;
-
-            // On, unmeasured, while recording stops.
-            while (running.load())
-                processFor (0.01);
-        });
-
-    // Tracktion waits for a block to go by before recording begins, so this starts once the audio thread runs.
-    phazite::startRecording (edit);
-    recording = true;
-    phazite::test::dispatchMessagesUntil ([&measured] { return measured.load(); }, 60000);
-    phazite::stopRecording (edit);
-    running = false;
-    audioThread.join();
-    m.callSites = AudioThreadMonitor::describeCallSites();
-    m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
-
-    deviceManager.closeDevices();
-    deviceManager.removeHostedAudioDeviceInterface();
-    deviceManager.deviceManager.closeAudioDevice();
-
+    setEdit (context, nullptr);
     return m;
 }
 
@@ -643,7 +475,7 @@ TEST_SUITE ("realtime-audit")
         phazite::test::TestSong song;
         song.addMidiClip (song.firstTrack, 0.0, 16.0);
         song.setSwitch ("transport.metronome", true);
-        const auto m = playPhaziteAndMeasure (song.context);
+        const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: the metronome", m);
         CHECK (m.peakLevel > 0.01f); // it clicks
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -660,7 +492,7 @@ TEST_SUITE ("realtime-audit")
         for (int beat = 0; beat < 16; ++beat)
             song.addChord (clip, { 48 + (beat % 2) * 5, 52, 55, 59 }, beat, 0.75);
 
-        const auto m = playPhaziteAndMeasure (song.context);
+        const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: chords on the synth", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -674,7 +506,7 @@ TEST_SUITE ("realtime-audit")
         phazite::fadeClipTo (song.context, first, true, phazite::BeatPosition::fromBeats (0.5));
         const auto second = song.addTrack ("Second");
         song.addAudioClip (second, tone, 1.0);
-        const auto m = playPhaziteAndMeasure (song.context);
+        const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: audio clips", m);
         CHECK (m.peakLevel > 0.01f); // they play
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -698,7 +530,7 @@ TEST_SUITE ("realtime-audit")
         for (int beat = 0; beat < 16; ++beat)
             song.addChord (clip, { 60, 64, 67 }, beat, 0.75);
 
-        const auto m = playPhaziteAndMeasure (song.context);
+        const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: automation", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -726,7 +558,7 @@ TEST_SUITE ("realtime-audit")
         for (int beat = 0; beat < 16; ++beat)
             song.addChord (clip, { 60 + beat % 3, 64, 67 }, beat, 0.75);
 
-        const auto m = playPhaziteAndMeasure (song.context);
+        const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: modulation", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -759,7 +591,7 @@ TEST_SUITE ("realtime-audit")
         phazite::setPreFader (song.context, phazite::getSends (song.context, kick).front().id, true);
         REQUIRE (phazite::duckUnder (song.context, keys, kick).isValid());
 
-        const auto m = playPhaziteAndMeasure (song.context);
+        const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: routing", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -784,7 +616,7 @@ TEST_SUITE ("realtime-audit")
         phazite::setArmed (song.context, voice, true);
         REQUIRE (phazite::isArmed (song.context, voice));
 
-        const auto m = playPhaziteAndMeasure (song.context, true, song.firstTrack);
+        const auto m = playProjectAndMeasure (song.context, {}, true, song.firstTrack);
         report ("Phazite's engine: recording", m);
         CHECK (m.peakLevel > 0.01f);                                           // the input is heard, and the notes
         CHECK (phazite::getClips (song.context, voice).size() == 1);           // the input's take
@@ -804,7 +636,7 @@ TEST_SUITE ("realtime-audit")
         for (int beat = 0; beat < 16; ++beat)
             song.addChord (clip, { 60 + beat % 3, 64, 67 }, beat, 0.75);
 
-        const auto m = playPhaziteAndMeasure (song.context);
+        const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: a plug-in", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -831,10 +663,10 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: a mix with a bus, a reverb return and the loudness meter")
     {
-        // Built with the functions the mixer uses (roadmap step 1.4), with a tone generator in place of a recording.
+        // Built with the functions the mixer uses (roadmap step 1.4), with a tone in place of a recording.
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& tone = getTrack (*edit, 0);
-        REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
+        addTone (tone);
 
         auto* folder = phazite::insertFolder (*edit, &tone, nullptr); // a bus, as every new folder is
         REQUIRE (folder != nullptr);
@@ -847,14 +679,11 @@ TEST_SUITE ("realtime-audit")
                  != nullptr);
         REQUIRE (phazite::addSend (tone, phazite::getReturnBus (*reverbReturn), false) != nullptr);
 
-        auto* meter = phazite::ensureLoudnessMeter (*edit);
-        REQUIRE (meter != nullptr);
-
         const auto m = playAndMeasure (*edit);
         report ("A tone through a bus, with a send to a reverb return, into the loudness meter", m);
         CHECK (m.peakLevel > 0.01f);
-        CHECK (meter->getReadings().momentaryValid); // it ran in the playback graph
-        CHECK (meter->getReadings().momentaryLufs > -40.0f);
+        const auto readings = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getLoudnessMeter().getReadings();
+        CHECK (readings.momentary.value_or (-100.0f) > -40.0f); // it measured what played
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
@@ -863,7 +692,7 @@ TEST_SUITE ("realtime-audit")
         using phazite::devices::Equalizer;
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
-        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+        addTone (track);
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Equalizer::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -880,16 +709,14 @@ TEST_SUITE ("realtime-audit")
         phazite::addPoint (*gain, { phazite::BeatPosition(), -12.0f, 0.0f });
         phazite::addPoint (*gain, { phazite::BeatPosition::fromBeats (2.0), 12.0f, 0.0f });
 
-        auto& tap = dynamic_cast<Equalizer&> (device->getProcessor()).getOutputTap();
-        tap.setListening (true);
+        const auto tap = [&plugin]() -> auto& { return dynamic_cast<Equalizer&> (getPlayed (*plugin).getProcessor()).getOutputTap(); };
+        std::vector<float> tapped (32768);
 
-        const auto m = playAndMeasure (*edit);
+        const auto m = playAndMeasure (
+            *edit, [&tap] { tap().setListening (true); }, [&tap, &tapped] { CHECK (tap().pull (tapped.data(), (int) tapped.size()) > 0); });
         report ("Phazite's EQ, every band on and one automated, with its analyzer listening", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
-
-        std::vector<float> tapped (32768);
-        CHECK (tap.pull (tapped.data(), (int) tapped.size()) > 0);
     }
 
     TEST_CASE ("Real-time audit: every kind of modulator, and a macro, moving Phazite's EQ")
@@ -897,7 +724,7 @@ TEST_SUITE ("realtime-audit")
         using phazite::devices::Equalizer;
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
-        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+        addTone (track);
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Equalizer::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -934,7 +761,7 @@ TEST_SUITE ("realtime-audit")
         using phazite::devices::Equalizer;
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
-        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+        addTone (track);
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Equalizer::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -962,7 +789,7 @@ TEST_SUITE ("realtime-audit")
         using phazite::devices::Equalizer;
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
-        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+        addTone (track);
 
         const auto eq = edit->getPluginCache().createNewPlugin (Equalizer::typeID, {});
         const auto compressor = edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {});
@@ -996,8 +823,8 @@ TEST_SUITE ("realtime-audit")
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         auto& source = getTrack (*edit, 1);
-        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
-        REQUIRE (phazite::insertDevice (source, createToneGenerator (*edit)) != nullptr);
+        addTone (track);
+        addTone (source);
         phazite::setTrackMuted (source, true); // still heard by the sidechain
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Compressor::typeID, {});
@@ -1011,14 +838,12 @@ TEST_SUITE ("realtime-audit")
         phazite::setSidechainSource (*device, &source);
         REQUIRE (phazite::getSidechainSource (*device) == &source);
 
-        auto& compressor = dynamic_cast<Compressor&> (device->getProcessor());
-        compressor.getReductionMeter().take();
-
-        const auto m = playAndMeasure (*edit);
+        const auto meter = [&plugin]() -> auto&
+        { return dynamic_cast<Compressor&> (getPlayed (*plugin).getProcessor()).getReductionMeter(); };
+        const auto m = playAndMeasure (*edit, [&meter] { meter().take(); }, [&meter] { CHECK (meter().take() > 1.0f); });
         report ("Phazite's compressor, ducked by another track at 70 % mix, with its meters read", m);
         CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
-        CHECK (compressor.getReductionMeter().take() > 1.0f);
     }
 
     TEST_CASE ("Real-time audit: Phazite's vocoder at 40 bands, its carrier another track through the sidechain")
@@ -1027,8 +852,8 @@ TEST_SUITE ("realtime-audit")
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& voice = getTrack (*edit, 0);
         auto& carrier = getTrack (*edit, 1);
-        REQUIRE (phazite::insertDevice (voice, createToneGenerator (*edit)) != nullptr);
-        REQUIRE (phazite::insertDevice (carrier, createToneGenerator (*edit)) != nullptr);
+        addTone (voice);
+        addTone (carrier);
         phazite::setTrackMuted (carrier, true); // still heard by the sidechain
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Vocoder::typeID, {});
@@ -1050,7 +875,7 @@ TEST_SUITE ("realtime-audit")
     {
         using phazite::devices::Limiter;
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        REQUIRE (phazite::insertDevice (getTrack (*edit, 0), createToneGenerator (*edit)) != nullptr);
+        addTone (getTrack (*edit, 0));
 
         const auto plugin = edit->getPluginCache().createNewPlugin (Limiter::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -1058,15 +883,12 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::insertMasterDevice (*edit, plugin) != nullptr);
         phazite::setDeviceValue (*device->findParameter ("gain"), 12.0f);
 
-        auto& limiter = dynamic_cast<Limiter&> (device->getProcessor());
-        limiter.getReductionMeter().take();
-
-        const auto m = playAndMeasure (*edit);
+        const auto meter = [&plugin]() -> auto& { return dynamic_cast<Limiter&> (getPlayed (*plugin).getProcessor()).getReductionMeter(); };
+        const auto m = playAndMeasure (*edit, [&meter] { meter().take(); }, [&meter] { CHECK (meter().take() > 1.0f); });
         report ("Phazite's limiter on the master, pushed 12 dB, with its meters read", m);
         CHECK (m.peakLevel > 0.01f);
         CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // its ceiling
         checkSteadyPlaybackDoesNotAllocate (m);
-        CHECK (limiter.getReductionMeter().take() > 1.0f);
     }
 
     TEST_CASE ("Real-time audit: MIDI into Phazite's synth, notes overlapping, with noise and its LFO")
@@ -1172,7 +994,7 @@ TEST_SUITE ("realtime-audit")
     {
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
-        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+        addTone (track);
 
         phazite::DevicePlugin* filter = nullptr;
 
@@ -1213,7 +1035,9 @@ TEST_SUITE ("realtime-audit")
         // Each device's scope (devices/core/DeviceScope.h) taking its sound in and out, and its peaks, as open editors have it.
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
-        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+        addTone (track);
+
+        std::vector<te::Plugin::Ptr> listening;
 
         for (const auto* type :
              { phazite::devices::Equalizer::typeID, phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID,
@@ -1221,13 +1045,16 @@ TEST_SUITE ("realtime-audit")
                phazite::devices::Reverb::typeID, phazite::devices::Phaser::typeID, phazite::devices::Limiter::typeID })
         {
             const auto plugin = edit->getPluginCache().createNewPlugin (type, {});
-            auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
-            REQUIRE (device != nullptr);
             REQUIRE (phazite::insertDevice (track, plugin) != nullptr);
-            device->getScope().setListening (true);
+            listening.push_back (plugin);
         }
 
-        const auto m = playAndMeasure (*edit);
+        const auto m = playAndMeasure (*edit,
+                                       [&listening]
+                                       {
+                                           for (const auto& plugin : listening)
+                                               getPlayed (*plugin).getScope().setListening (true);
+                                       });
         report ("Phazite's effects with their editors' displays listening", m);
         CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -1251,7 +1078,7 @@ TEST_SUITE ("realtime-audit")
         // The filter's Comb - on a tone, swept by a lane and ringing. On a track of its own: after an instrument, a lane
         // would make Tracktion pass the notes on in pieces of blocks, moving their arrays around more (finding 4).
         auto& tone = getTrack (*edit, 1);
-        REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
+        addTone (tone);
         const auto filter = edit->getPluginCache().createNewPlugin (phazite::devices::FilterEffect::typeID, {});
         REQUIRE (phazite::insertDevice (tone, filter) != nullptr);
         setDeviceValue (filter, "filterType", (float) phazite::devices::dsp::FilterMode::combMinus);
@@ -1304,7 +1131,7 @@ TEST_SUITE ("realtime-audit")
 
         // The filter's phaser on a tone, swept by a lane, on a track of its own (finding 4).
         auto& tone = getTrack (*edit, 1);
-        REQUIRE (phazite::insertDevice (tone, createToneGenerator (*edit)) != nullptr);
+        addTone (tone);
         const auto filter = edit->getPluginCache().createNewPlugin (phazite::devices::FilterEffect::typeID, {});
         REQUIRE (phazite::insertDevice (tone, filter) != nullptr);
         setDeviceValue (filter, "filterType", (float) phazite::devices::dsp::FilterMode::phaser);
@@ -1342,20 +1169,6 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: notes recorded from the computer keyboard onto Phazite's synth")
-    {
-        using phazite::devices::Synth;
-        auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        auto& track = getTrack (*edit, 0);
-        REQUIRE (phazite::setInstrument (track, edit->getPluginCache().createNewPlugin (Synth::typeID, {})) != nullptr);
-
-        const auto m = recordAndMeasure (*edit);
-        report ("Notes recorded from the computer keyboard onto Phazite's synth", m);
-        CHECK (m.peakLevel > 0.01f);          // heard as they are played
-        CHECK (track.getClips().size() == 1); // the take
-        checkSteadyPlaybackDoesNotAllocate (m);
-    }
-
     TEST_CASE ("Real-time audit: a beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor")
     {
         using phazite::devices::DrumSampler;
@@ -1380,9 +1193,9 @@ TEST_SUITE ("realtime-audit")
                 phazite::test::addMidiNote (*clip, eighth % 8 == 0 ? 36 : 38, at, te::BeatDuration::fromBeats (0.25), 110);
         }
 
-        device->getSampler().audition (3, 1.0f); // the clap, as a click on its pad plays it
-
-        const auto m = playAndMeasure (*edit);
+        const auto m = playAndMeasure (*edit, [&plugin] { // the clap, as a click on its pad plays it
+            dynamic_cast<DrumSampler&> (getPlayed (*plugin).getProcessor()).audition (3, 1.0f);
+        });
         report ("A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -1392,7 +1205,7 @@ TEST_SUITE ("realtime-audit")
     {
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
-        REQUIRE (phazite::insertDevice (track, createToneGenerator (*edit)) != nullptr);
+        addTone (track);
 
         const auto plugin = edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {});
         auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
@@ -1515,7 +1328,7 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::test::runTimersUntil ([&stretched] { return stretched->isComplete(); }, 60000));
         preview->getTransport().looping = true;
 
-        const auto m = playAndMeasure (*preview);
+        const auto m = playTracktionAndMeasure (*preview);
         report ("A loop at 120 BPM previewed at 100 BPM, stretched by Phazite as it starts", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -1543,31 +1356,5 @@ TEST_SUITE ("realtime-audit")
         const auto m = playAndMeasure (*edit);
         report ("Two tracks in a folder bus with a compressor", m);
         CHECK (m.peakLevel > 0.01f);
-    }
-
-    // Phazite opens an audio input only while a track is armed or always hears it; this shows what an input costs with
-    // nothing recording (the scenario after it records one).
-    TEST_CASE ("Real-time audit: two enabled audio inputs")
-    {
-        auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        const auto m = playAndMeasure (*edit, 2);
-        report ("One empty track, with two audio inputs enabled", m);
-    }
-
-    TEST_CASE ("Real-time audit: an audio input recorded onto an armed track, heard as it comes in")
-    {
-        phazite::test::TemporaryFolder temp;
-        auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        const auto file = temp.folder.getChildFile ("Audit.phazite"); // there, as a project's file always is
-        REQUIRE (file.create());
-        edit->editFileRetriever = [file] { return file; };
-        auto& track = getTrack (*edit, 0);
-        phazite::findTrackState (track).setProperty (phazite::schema::trackInput, "1", nullptr);
-
-        const auto m = recordAudioAndMeasure (*edit, track);
-        report ("An audio input recorded onto an armed track, heard as it comes in", m);
-        CHECK (m.peakLevel > 0.01f);          // heard as it comes in
-        CHECK (track.getClips().size() == 1); // the take
-        checkSteadyPlaybackDoesNotAllocate (m);
     }
 }

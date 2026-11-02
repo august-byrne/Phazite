@@ -10,56 +10,24 @@ PlaybackHost::PlaybackHost (te::Engine& e)
     : tracktion (e),
       taking (512)
 {
-    // As many threads as Tracktion's (model/engine/internal/EngineSetup.h), which plays nothing while Phazite's does.
+    // As many threads as Tracktion's (model/engine/internal/EngineSetup.h), which plays nothing of a project.
     engine.setNumThreads (tracktion.getEngineBehaviour().getNumberOfCPUsToUseForAudio());
+    tracktion.getDeviceManager().deviceManager.addAudioCallback (this); // which prepares the engine at once, if a device is open
+    startTimerHz (4);
 }
 
 PlaybackHost::~PlaybackHost()
 {
     jassert (sessions.empty()); // each project's session goes before the app's engine
-    setOn (false);
-}
-
-void PlaybackHost::setOn (bool shouldBeOn)
-{
-    if (on == shouldBeOn)
-        return;
-
-    on = shouldBeOn;
-    auto& devices = tracktion.getDeviceManager().deviceManager;
-
-    if (on)
-    {
-        // Tracktion's transport stops: what it played, Phazite's plays from now on. Its playback context stays, for what
-        // only it plays yet (live notes, recording).
-        if (auto* session = getPlayingSession())
-        {
-            auto& transport = session->getEdit().getTransport();
-
-            if (transport.isPlaying())
-                transport.stop (false, false);
-        }
-
-        devices.addAudioCallback (this); // which prepares the engine at once, if a device is open
-        startTimerHz (4);
-    }
-    else
-    {
-        stopTimer();
-        getPlayedEvents(); // what is left in the engine's queue too
-        played.clear();
-        // The device calls the engine no more: what it played goes at once (plug-ins among it, which their Edits own).
-        devices.removeAudioCallback (this);
-        engine.stop();
-        engine.dropPlans();
-    }
-
-    if (auto* session = getPlayingSession())
-        session->update();
+    stopTimer();
+    tracktion.getDeviceManager().deviceManager.removeAudioCallback (this);
+    engine.stop();
+    engine.dropPlans();
 }
 
 void PlaybackHost::add (PlaybackSession& session)
 {
+    forgetPlayed();
     sessions.push_back (&session);
 }
 
@@ -68,18 +36,40 @@ void PlaybackHost::remove (PlaybackSession& session)
     const auto wasPlaying = getPlayingSession() == &session;
     std::erase (sessions, &session);
 
-    // Off, what the engine played last goes with the project (plug-ins among it, which its Edit owns).
-    if (! on)
-        engine.dropPlans();
+    if (wasPlaying)
+    {
+        engine.stop();
+        forgetPlayed();
+    }
 
-    if (! wasPlaying)
-        return;
-
-    engine.stop();
-    engine.setPlan (nullptr);
+    letGoOfPlans();
 
     if (auto* next = getPlayingSession())
         next->update();
+}
+
+void PlaybackHost::letGoOfPlans()
+{
+    // While a device plays the engine, the audio thread may be in a block of a plan it was handed: once it has finished
+    // two blocks since it was handed none, it plays none of them. It lets go of them on the message thread.
+    engine.setPlan (nullptr);
+
+    if (running)
+    {
+        const auto from = engine.getBlocksPlayed().load();
+        const auto until = juce::Time::getMillisecondCounter() + 500;
+
+        while (running && engine.getBlocksPlayed().load() < from + 2 && juce::Time::getMillisecondCounter() < until)
+            juce::Thread::sleep (1);
+    }
+
+    engine.dropPlans();
+}
+
+void PlaybackHost::forgetPlayed()
+{
+    getPlayedEvents(); // what is left in the engine's queue too
+    played.clear();
 }
 
 PlaybackSession* PlaybackHost::getPlayingSession() const noexcept
@@ -89,6 +79,7 @@ PlaybackSession* PlaybackHost::getPlayingSession() const noexcept
 
 void PlaybackHost::prepare (double sampleRate, int maximumBlockSize, int deviceInputs, int deviceInputLatency)
 {
+    running = false; // the tests call the engine from the message thread
     engine.prepare (sampleRate, maximumBlockSize);
     numInputs = deviceInputs;
     inputLatency = deviceInputLatency;
@@ -115,6 +106,7 @@ void PlaybackHost::audioDeviceAboutToStart (juce::AudioIODevice* device)
     numInputs = device->getInputChannelNames().size();
     inputLatency = device->getInputLatencyInSamples();
     outputLatency = device->getOutputLatencyInSamples();
+    running = true;
 
     juce::MessageManager::callAsync (
         [host = juce::WeakReference<PlaybackHost> (this)]

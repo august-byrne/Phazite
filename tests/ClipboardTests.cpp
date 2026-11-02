@@ -15,6 +15,7 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 
 namespace
 {
@@ -46,7 +47,7 @@ struct Song
 
     ~Song() { setEdit (context, nullptr); }
 
-    void playheadAt (double beat) { edit->getTransport().setPosition (edit->tempoSequence.toTime (teBeats (beat))); }
+    void playheadAt (double beat) { phazite::movePlayhead (*edit, edit->tempoSequence.toTime (teBeats (beat))); }
 
     bool isEnabled (const char* id) const { return phazite::CommandRegistry::isEnabled (*registry.find (id)); }
 

@@ -578,8 +578,7 @@ TEST_SUITE ("golden")
         phazite::test::settle();
         phazite::test::checkGoldenRender (
             song.context,
-            golden ("mix", "two tones through a bus, a send to a reverb return, volume automation and pan.", 4.0, soundsLikeTheMix)
-                .on (phazite::test::OwnEngine::differs)); // its automation, pan law and reverb Phazite's engine's
+            golden ("mix", "two tones through a bus, a send to a reverb return, volume automation and pan.", 4.0, soundsLikeTheMix));
     }
 
     TEST_CASE ("Golden render: the First Beat example song, a beat on Phazite's drum sampler and an arpeggio on its synth")
@@ -589,8 +588,7 @@ TEST_SUITE ("golden")
         phazite::test::checkGoldenRender (song.context, golden ("first-beat",
                                                                 "the First Beat example song, a beat on Phazite's drum sampler and "
                                                                 "an arpeggio on its synth.",
-                                                                firstBeatSeconds, soundsLikeFirstBeat)
-                                                            .on (phazite::test::OwnEngine::matches));
+                                                                firstBeatSeconds, soundsLikeFirstBeat));
     }
 
     TEST_CASE ("Golden render: two chords on Phazite's wavetable synth, in unison, an envelope sweeping each note's table")
@@ -601,92 +599,80 @@ TEST_SUITE ("golden")
         phazite::test::checkGoldenRender (song.context, golden ("wavetable",
                                                                 "two chords on Phazite's wavetable synth, its two oscillators in "
                                                                 "unison, an envelope sweeping each note's table.",
-                                                                4.0, soundsLikeTheWavetable)
-                                                            .on (phazite::test::OwnEngine::matches));
+                                                                4.0, soundsLikeTheWavetable));
     }
 
     TEST_CASE ("Golden render: three chords on Phazite's synth as it is made")
     {
-        renders (addSynthSong, golden ("synth", "three chords on Phazite's synth as it is made, then their release.", 4.0, soundsLikeChords)
-                                   .on (phazite::test::OwnEngine::matches));
+        renders (addSynthSong,
+                 golden ("synth", "three chords on Phazite's synth as it is made, then their release.", 4.0, soundsLikeChords));
     }
 
     TEST_CASE ("Golden render: two bars of a beat on Phazite's drum sampler with its kit")
     {
         renders (addDrumSong,
-                 golden ("drums", "two bars of kick, snare and hi-hat on Phazite's drum sampler with its kit.", 4.0, soundsLikeTheDrums)
-                     .on (phazite::test::OwnEngine::matches));
+                 golden ("drums", "two bars of kick, snare and hi-hat on Phazite's drum sampler with its kit.", 4.0, soundsLikeTheDrums));
     }
 
     TEST_CASE ("Golden render: a tone played plain, then 6 dB quieter by its clip's gain")
     {
         renders (addClipGainSong,
-                 golden ("audio-gain", "a tone in an audio clip, then in another turned down 6 dB by its gain.", 4.0, soundsLikeClipGain)
-                     .on (phazite::test::OwnEngine::matches));
+                 golden ("audio-gain", "a tone in an audio clip, then in another turned down 6 dB by its gain.", 4.0, soundsLikeClipGain));
     }
 
     TEST_CASE ("Golden render: audio clips fading in and out, linear, convex, concave and S-curve")
     {
         renders (addFadesSong,
                  golden ("audio-fades", "four audio clips fading in and out over 0.3 s: linear, convex, concave and S-curve fades.", 4.0,
-                         soundsLikeFades)
-                     .on (phazite::test::OwnEngine::matches));
+                         soundsLikeFades));
     }
 
     TEST_CASE ("Golden render: a loop of clicks made at 120 BPM follows a song at 90 BPM")
     {
         renders (addStretchedSong,
                  golden ("audio-stretched", "a loop of clicks made at 120 BPM in a song at 90 BPM, stretched to follow its tempo.", 4.0,
-                         soundsLikeClicksAt90)
-                     .on (phazite::test::OwnEngine::matches));
+                         soundsLikeClicksAt90));
     }
 
     TEST_CASE ("Golden render: a tone pitched up an octave by its clip, as long as it was")
     {
         renders (addPitchedSong,
-                 golden ("audio-pitched", "a 220 Hz tone pitched up an octave by its audio clip.", 4.0, soundsLikeAnOctaveUp)
-                     .on (phazite::test::OwnEngine::matches));
+                 golden ("audio-pitched", "a 220 Hz tone pitched up an octave by its audio clip.", 4.0, soundsLikeAnOctaveUp));
     }
 
     TEST_CASE ("Golden render: a tone that dies away, played backwards by its clip")
     {
         renders (addReversedSong,
-                 golden ("audio-reversed", "a tone that dies away, played backwards by its audio clip.", 4.0, soundsLikeASwell)
-                     .on (phazite::test::OwnEngine::matches));
+                 golden ("audio-reversed", "a tone that dies away, played backwards by its audio clip.", 4.0, soundsLikeASwell));
     }
 
     TEST_CASE ("Golden render: an alias plays what its original does, a note added later too")
     {
         renders (addAliasSong,
-                 golden ("aliases", "a chord and a note on Phazite's synth, and an alias of their clip.", 4.0, soundsLikeAnAlias)
-                     .on (phazite::test::OwnEngine::matches));
+                 golden ("aliases", "a chord and a note on Phazite's synth, and an alias of their clip.", 4.0, soundsLikeAnAlias));
     }
 
     TEST_CASE ("Golden render: volume automation through bent lines, a hold and a jump")
     {
         renders (addAutomationSong, golden ("automation-volume", "a tone whose volume automation bends down and up, holds, then jumps.",
-                                            4.0, soundsLikeTheAutomation)
-                                        .on (phazite::test::OwnEngine::differs)); // the fader follows its lane exactly
+                                            4.0, soundsLikeTheAutomation));
     }
 
     TEST_CASE ("Golden render: pan automation from left to right")
     {
         renders (addPanAutomationSong,
-                 golden ("automation-pan", "a tone whose pan automation sweeps from left to right.", 4.0, soundsLikeAPanSweep)
-                     .on (phazite::test::OwnEngine::differs)); // the pan follows its lane exactly, by the constant-power law
+                 golden ("automation-pan", "a tone whose pan automation sweeps from left to right.", 4.0, soundsLikeAPanSweep));
     }
 
     TEST_CASE ("Golden render: a device's parameter automated, a filter opening on a chord")
     {
         renders (addDeviceAutomationSong,
                  golden ("automation-device", "a chord on Phazite's synth through its filter, whose cutoff automation opens it.", 4.0,
-                         soundsLikeAnOpeningFilter)
-                     .on (phazite::test::OwnEngine::differs)); // its cutoff moves on the song's control points
+                         soundsLikeAnOpeningFilter));
     }
 
     TEST_CASE ("Golden render: notes on the beats of a song at 90 BPM in 3/4")
     {
-        renders (addTempoSong, golden ("tempo", "a short note on every beat of a song at 90 BPM in 3/4.", 4.0, soundsLikeBeatsAt90)
-                                   .on (phazite::test::OwnEngine::matches));
+        renders (addTempoSong, golden ("tempo", "a short note on every beat of a song at 90 BPM in 3/4.", 4.0, soundsLikeBeatsAt90));
     }
 }

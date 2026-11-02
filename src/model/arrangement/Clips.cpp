@@ -310,19 +310,6 @@ namespace
         return (juce::int64) makeID (edit);
     }
 
-    // Where one of Tracktion's MIDI clips is, written into the song's element for it where that differs.
-    void adoptPlace (te::Edit& edit, juce::ValueTree clipState, const te::Clip& clip)
-    {
-        const auto range = fromTracktion (clip.getEditBeatRange());
-        const auto offset = range.getStart() - fromTracktion (clip.getContentStartBeat());
-        const auto isNear = [] (double a, double b) { return std::abs (a - b) < tinyBeats.inBeats(); };
-
-        if (! isNear (range.getStart().inBeats(), getClipRange (clipState).getStart().inBeats())
-            || ! isNear (range.getLength().inBeats(), getClipRange (clipState).getLength().inBeats())
-            || ! isNear (offset.inBeats(), getClipOffset (clipState).inBeats()))
-            setClipPlace (edit, clipState, range.getStart(), range.getLength(), offset);
-    }
-
     // A copy of the part of a clip that lies in a range, where that part is. The copy is cut at the range's edges as
     // Split cuts clips (an audio clip loses its fades where it is cut); the clip itself stays whole.
     te::Clip* copyPartOfClip (te::Clip& clip, te::BeatRange range)
@@ -592,71 +579,6 @@ juce::ValueTree adoptMidiClip (te::MidiClip& clip)
 
     mirror::reconcileClip (edit, getClipID (clipState));
     return clipState;
-}
-
-void adoptRecordedMidi (te::Edit& edit)
-{
-    for (auto* track : te::getAudioTracks (edit))
-    {
-        for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
-        {
-            auto* midi = dynamic_cast<te::MidiClip*> (clip);
-
-            if (midi == nullptr)
-                continue;
-
-            auto clipState = findClipState (*midi);
-
-            if (! clipState.isValid())
-            {
-                adoptMidiClip (*midi);
-                continue;
-            }
-
-            // The notes Overdub added have none of the song's IDs.
-            juce::Array<te::MidiNote*> added;
-
-            for (auto* note : midi->getSequence().getNotes())
-                if ((juce::int64) note->state[schema::phaziteNoteID] <= 0)
-                    added.add (note);
-
-            adoptPlace (edit, clipState, *midi);
-            const auto sameControls = haveSameControls (*midi, clipState);
-
-            if (added.isEmpty() && sameControls)
-                continue;
-
-            const auto aliases = getAliasStates (clipState);
-
-            for (auto* note : added)
-            {
-                const auto id = makeNoteID (edit);
-                adoptNote (clipState, *note, id, getUndo (edit));
-
-                for (auto alias : aliases)
-                    if (alias != clipState)
-                        alias.appendChild (clipState.getChild (clipState.getNumChildren() - 1).createCopy(), getUndo (edit));
-            }
-
-            // The controller events it recorded with them: those of Tracktion's clip, all of them, in each alias.
-            if (! sameControls)
-            {
-                for (auto alias : aliases)
-                {
-                    for (int i = alias.getNumChildren(); --i >= 0;)
-                        if (alias.getChild (i).hasType (schema::CONTROL))
-                            alias.removeChild (i, getUndo (edit));
-
-                    for (auto* event : midi->getSequence().getControllerEvents())
-                        if (const auto control = makeControlState (*event); control.isValid())
-                            alias.appendChild (control, getUndo (edit));
-                }
-            }
-
-            for (const auto& alias : aliases)
-                mirror::reconcileClip (edit, getClipID (alias));
-        }
-    }
 }
 
 //==============================================================================

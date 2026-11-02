@@ -202,6 +202,10 @@ void Take::close (bool keep)
     session.getEngine().setRecording (nullptr);
     recording = nullptr;
     session.keepPlayedFrom ({});
+
+    // What was armed or set to be heard meanwhile.
+    if (auto* recorder = AudioRecorder::findFor (session.getEdit()))
+        recorder->update();
 }
 
 void Take::finish()

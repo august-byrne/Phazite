@@ -34,16 +34,6 @@ PlaybackHost& getPlaybackHost (EngineContext& context)
     return context.getImpl().playback;
 }
 
-bool EngineContext::isPhaziteEngineOn() const
-{
-    return impl->playback.isOn();
-}
-
-void EngineContext::setPhaziteEngineOn (bool on)
-{
-    impl->playback.setOn (on);
-}
-
 EngineContext::EngineContext (std::unique_ptr<Impl> i)
     : impl (std::move (i))
 {
@@ -58,10 +48,7 @@ juce::AudioDeviceManager& EngineContext::getAudioDeviceManager()
 
 double EngineContext::getCpuUsage() const
 {
-    if (impl->playback.isOn())
-        return impl->playback.getEngine().getLoad();
-
-    return impl->engine.getDeviceManager().getCpuUsage();
+    return impl->playback.getEngine().getLoad();
 }
 
 EngineContext::AudioOutput EngineContext::getAudioOutput() const
