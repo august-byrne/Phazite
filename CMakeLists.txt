@@ -998,16 +998,23 @@ if(PHAZITE_BUILD_TESTS)
     get_target_property(_phazite_test_sources phazite_tests SOURCES)
     list(FILTER _phazite_test_sources INCLUDE REGEX "Tests\\.cpp$")
     set(_phazite_test_patterns "")
+    set(_phazite_test_names "")
 
     foreach(_phazite_source IN LISTS _phazite_test_sources)
         get_filename_component(_phazite_test_name "${_phazite_source}" NAME_WE)
         # doctest matches the whole path the compiler was given, with either slash: *tests?MixerTests.cpp leaves out
         # tests/GoldenMixerTests.cpp.
         string(REPLACE "/" "?" _phazite_pattern "*${_phazite_source}")
-        add_test(NAME ${_phazite_test_name} COMMAND phazite_tests "--source-file=${_phazite_pattern}")
+        add_test(NAME ${_phazite_test_name} COMMAND phazite_tests "--source-file=${_phazite_pattern}" --duration=true)
         list(APPEND _phazite_test_patterns "${_phazite_pattern}")
+        list(APPEND _phazite_test_names ${_phazite_test_name})
     endforeach()
 
     list(JOIN _phazite_test_patterns "," _phazite_test_patterns)
-    add_test(NAME OtherTestFiles COMMAND phazite_tests "--source-file-exclude=${_phazite_test_patterns}")
+    add_test(NAME OtherTestFiles COMMAND phazite_tests "--source-file-exclude=${_phazite_test_patterns}" --duration=true)
+
+    # A test file that hangs fails after 10 minutes (the slowest takes about 80 s in CI's slowest builds) rather than
+    # holding CI until its job's limit; what it printed (each test's duration as it ends, --duration) names the last test
+    # that ended, and the file's next one hung.
+    set_tests_properties(${_phazite_test_names} OtherTestFiles PROPERTIES TIMEOUT 600)
 endif()
