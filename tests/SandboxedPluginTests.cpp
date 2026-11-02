@@ -377,6 +377,26 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
 }
 #endif
 
+TEST_CASE ("A plug-in in a helper that listens to another track hears it on its sidechain bus")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto heard = addToneTrack (song, song.firstTrack, "Tone");
+    const auto listening = song.addTrack ("Listens");
+    const auto effect = song.addEffect (listening, "PhaziteTestSidechain"); // plays its sidechain in place of its sound
+    REQUIRE (phazite::hasSidechain (song.context, effect));
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+
+    // Listening to nothing: silence from it, the tone alone.
+    CHECK (levelOf (playback.play (0.6), 0, 0.2, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
+
+    // Listening to the tone's track: the tone from it too, twice as loud together.
+    phazite::setSidechainSource (song.context, effect, heard);
+    CHECK (levelOf (playback.play (0.6), 0, 0.2, 0.5) == doctest::Approx (toneLevel + 6.02f).epsilon (0.002));
+}
+
 TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, says it crashed, and reloads as it was")
 {
     SandboxedPlugins sandboxed;
