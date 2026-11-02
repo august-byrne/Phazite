@@ -29,7 +29,10 @@ void startAudioThread (juce::Thread& thread)
 #if JUCE_WINDOWS
     thread.startThread (juce::Thread::Priority::highest);
 #else
-    thread.startRealtimeThread (juce::Thread::RealtimeOptions {}.withPriority (10));
+    // A real-time thread where the system allows it; where it doesn't (Linux without real-time rights, as a user not in an
+    // audio group, or CI's runners), JUCE starts none at all, so a thread at the highest priority it allows.
+    if (! thread.startRealtimeThread (juce::Thread::RealtimeOptions {}.withPriority (10)))
+        thread.startThread (juce::Thread::Priority::highest);
 #endif
 }
 

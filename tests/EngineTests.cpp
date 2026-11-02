@@ -18,10 +18,12 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <optional>
 #include <set>
+#include <thread>
 #include <vector>
 
 namespace
@@ -1085,6 +1087,43 @@ TEST_CASE ("The engine's workers run each task of a job once, on the audio threa
         for (int i = 0; i < 64; ++i)
             REQUIRE (runs[(size_t) i].load() == (i < numTasks ? 1 : 0));
     }
+}
+
+TEST_CASE ("The engine's workers take a long job's tasks beside the thread that starts it, wherever real-time threads aren't allowed too")
+{
+    // Tasks of 20 microseconds each, long enough for a worker asleep to wake: some run on a worker. (On Linux without
+    // real-time rights, JUCE started no thread at all for a real-time one, and the audio thread took every task.)
+    engine::Workers workers;
+    workers.setNumThreads (4);
+
+    struct Job
+    {
+        std::thread::id caller;
+        std::atomic<int> elsewhere { 0 };
+    } job;
+
+    job.caller = std::this_thread::get_id();
+
+    for (int round = 0; round < 50; ++round)
+    {
+        workers.run (
+            64,
+            [] (void* context, int) noexcept
+            {
+                auto& running = *static_cast<Job*> (context);
+                const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds (20);
+
+                while (std::chrono::steady_clock::now() < until)
+                {
+                }
+
+                if (std::this_thread::get_id() != running.caller)
+                    running.elsewhere.fetch_add (1);
+            },
+            &job);
+    }
+
+    CHECK (job.elsewhere.load() > 0);
 }
 
 #if JUCE_WINDOWS
