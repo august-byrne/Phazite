@@ -134,6 +134,7 @@ namespace
         {
             auto* edit = getEdit (context);
             REQUIRE (edit != nullptr);
+            REQUIRE (renderMissingClipAudio (*edit)); // as an export does, and Tracktion's render here
             const auto samples = (int) std::lround (seconds * renderSampleRate);
             return renderWithOwnEngine (*edit, samples, renderSampleRate, renderBlockSize);
         }

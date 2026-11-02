@@ -2,6 +2,7 @@
 #include "internal/ClipRenders.h"
 #include "internal/AudioClips.h"
 #include "model/base/internal/Schema.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
@@ -109,8 +110,15 @@ bool renderMissingClipAudio (te::Edit& edit, const std::function<bool()>& should
         }
     }
 
+    // Renders newly made play: Tracktion makes its playback graph again for them, and Phazite's engine plays them from its
+    // next plan (docs/tracktion-migration.md, T2).
     if (anyNew && juce::MessageManager::existsAndIsCurrentThread())
+    {
         edit.restartPlayback();
+
+        if (auto* session = findSession (edit))
+            session->update();
+    }
 
     return allRendered;
 }
@@ -290,7 +298,12 @@ void ClipRenders::handleAsyncUpdate()
     }
 
     if (anyNew)
+    {
         edit.restartPlayback();
+
+        if (auto* session = findSession (edit))
+            session->update();
+    }
 
     update(); // starts what waited for one that stopped
 

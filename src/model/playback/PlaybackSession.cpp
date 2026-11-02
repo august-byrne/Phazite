@@ -37,6 +37,7 @@ PlaybackSession::PlaybackSession (te::Edit& e, PlaybackHost& h)
       editState (e.state)
 {
     liveMidi.playing = &host.getEngine();
+    player.readLive (host.getFileReader(), host.getEngine().getBlocksPlayed());
     editState.addListener (this);
     getSessions().push_back (this);
     host.add (*this);

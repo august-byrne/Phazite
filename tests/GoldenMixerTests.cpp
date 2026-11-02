@@ -220,7 +220,8 @@ TEST_SUITE ("golden")
                 CHECK_MESSAGE (leftSilent, "with the right track soloed and the middle one muted, the left side is silent");
                 CHECK_MESSAGE (rightPlays, "the soloed track plays");
                 return leftBefore && leftSilent && rightPlays;
-            });
+            },
+            phazite::test::OwnEngine::differs); // its tones panned hard left and right, by the pan law
     }
 
     TEST_CASE ("Golden render: delay compensation lines up a path through a device that looks ahead with one without")
@@ -242,7 +243,8 @@ TEST_SUITE ("golden")
                 const auto lined = ! differSomewhere (before, after, 0.2f);
                 CHECK_MESSAGE (lined, "the two paths' clicks should add up as they did without the limiter");
                 return lined;
-            });
+            },
+            phazite::test::OwnEngine::matches);
 
         // Both clicks come out together, as late as the limiter's: all of the song waits for it.
         const auto latency = phazite::getDelayCompensation (song.context).seconds;

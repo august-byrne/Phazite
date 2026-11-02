@@ -147,6 +147,12 @@ target_sources(phazite_core PRIVATE
     src/devices/wavetable/Wavetable.h
     src/devices/wavetable/WavetableSynth.cpp
     src/devices/wavetable/WavetableSynth.h
+    src/engine/audio/AudioFile.cpp
+    src/engine/audio/AudioFile.h
+    src/engine/audio/AudioRegion.cpp
+    src/engine/audio/AudioRegion.h
+    src/engine/audio/FileReader.cpp
+    src/engine/audio/FileReader.h
     src/engine/core/Engine.cpp
     src/engine/core/Engine.h
     src/engine/core/EventQueue.h

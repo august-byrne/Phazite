@@ -55,6 +55,10 @@ public:
     // How much of each block's time the engine takes, from 0 to 1, eased (any thread).
     double getLoad() const noexcept { return load.load (std::memory_order_relaxed); }
 
+    // How many blocks the audio thread has played: what it let go of before the count it read is no longer played
+    // (audio/AudioFile.h frees what it lets go of after it).
+    const std::atomic<std::uint64_t>& getBlocksPlayed() const noexcept { return blocksPlayed; }
+
     // The audio thread: plays a block into the outputs (every channel the same). Real-time safe.
     void process (float* const* outputs, int numOutputs, int numSamples) noexcept;
 
@@ -132,6 +136,7 @@ private:
     void takeLiveEvents (int numSamples) noexcept;
 
     std::atomic<double> load { 0.0 };
+    std::atomic<std::uint64_t> blocksPlayed { 0 };
 
     // The metronome: its two clicks (made in prepare()), and the one playing, where it is.
     juce::AudioBuffer<float> click, accentClick;

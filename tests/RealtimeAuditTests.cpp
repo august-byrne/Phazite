@@ -31,6 +31,7 @@
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Import.h"
@@ -625,6 +626,20 @@ TEST_SUITE ("realtime-audit")
         const auto m = playPhaziteAndMeasure (song.context);
         report ("Phazite's engine: chords on the synth", m);
         CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's own engine, audio clips read from their files as they play, faded, on two tracks")
+    {
+        phazite::test::TestSong song;
+        const auto tone = phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 8.0, 220.0, 0.25f);
+        const auto first = song.addAudioClip (song.firstTrack, tone, 0.0);
+        phazite::fadeClipTo (song.context, first, true, phazite::BeatPosition::fromBeats (0.5));
+        const auto second = song.addTrack ("Second");
+        song.addAudioClip (second, tone, 1.0);
+        const auto m = playPhaziteAndMeasure (song.context);
+        report ("Phazite's engine: audio clips", m);
+        CHECK (m.peakLevel > 0.01f); // they play
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

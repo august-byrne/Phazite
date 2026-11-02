@@ -6,9 +6,11 @@
 // session has one for its project (PlaybackSession.h), and a render one of its own. Message thread.
 #pragma once
 
+#include "engine/audio/FileReader.h"
 #include "engine/core/Plan.h"
 #include "model/base/internal/Tracktion.h"
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -25,6 +27,11 @@ public:
     // the metronome, live (a render plays the song once, from its start, without the metronome); and its tracks of Phazite's
     // devices (plug-ins, containers, folders as buses, returns and sends come with T2's later steps) into the master.
     std::unique_ptr<engine::Plan> compile (double sampleRate, int maximumBlockSize, bool isRender);
+
+    // Live, the audio files it plays are read ahead of the audio thread by a reading thread, and what the engine played long
+    // ago is let go of after the engine's blocks pass (engine/audio/AudioFile.h); without, as in a render, each is read as it
+    // is first needed and kept.
+    void readLive (engine::FileReader&, const std::atomic<std::uint64_t>& blocksPlayed);
 
     // Takes a change of the song that is a value set by hand into what plays at once; false for any other change, which
     // needs a new plan.
@@ -46,9 +53,22 @@ private:
     std::set<std::int64_t> used;                                        // the devices the plan being compiled plays
     bool lowLatency = false;                                            // as the plan being compiled sees it
 
+    // The audio files the plans play, by their paths, and each audio clip's place in its file, by its ID.
+    std::map<juce::String, std::shared_ptr<engine::AudioFile>> files;
+    std::map<std::int64_t, std::shared_ptr<engine::RegionState>> regions;
+    std::set<juce::String> usedFiles;
+    std::set<std::int64_t> usedRegions;
+    engine::FileReader* reader = nullptr;
+    const std::atomic<std::uint64_t>* blocks = nullptr;
+
+    std::shared_ptr<engine::AudioFile> getAudioFile (const juce::File&);
+    engine::AudioRegion makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile>);
+    void addAudio (engine::Plan::Strip&, const juce::ValueTree& trackState);
+    bool addFrozenFile (engine::Plan::Strip&, const juce::ValueTree& trackState);
+
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
     std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState);
-    void addDevices (engine::Plan::Strip&, const juce::ValueTree& channelState);
+    void addDevices (engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false);
     void setValues (engine::DeviceNode&, const juce::ValueTree& deviceState);
     void loadSounds (engine::DeviceNode&, const juce::ValueTree& deviceState);
     void setChannel (const juce::ValueTree& channelState, bool isMaster);

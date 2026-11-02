@@ -9,6 +9,7 @@ void StripState::prepare (double sampleRate, int maximumBlockSize)
 {
     buffer.setSize (2, maximumBlockSize);
     buffer.clear();
+    scratch.setSize (2, 9 * maximumBlockSize + 16);
     channel.prepare (sampleRate);
     sequence = nullptr;
     nextEvent = 0;

@@ -8,6 +8,7 @@
 #pragma once
 
 #include "TempoMap.h"
+#include "engine/audio/AudioRegion.h"
 #include "engine/nodes/DeviceNode.h"
 #include "engine/nodes/NoteSequence.h"
 #include "engine/nodes/Strip.h"
@@ -48,6 +49,7 @@ struct Plan
         std::int64_t id = 0; // the track's ID, 0 for the master
         std::shared_ptr<StripState> state;
         std::shared_ptr<const NoteSequence> notes;        // or none
+        std::vector<AudioRegion> audio;                   // its audio clips, which play beside its instrument
         std::vector<std::shared_ptr<DeviceNode>> devices; // in the order the sound goes through them, an instrument first
         bool hasInstrument = false;
         std::vector<Input> inputs;

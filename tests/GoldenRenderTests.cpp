@@ -617,33 +617,38 @@ TEST_SUITE ("golden")
     TEST_CASE ("Golden render: a tone played plain, then 6 dB quieter by its clip's gain")
     {
         renders (addClipGainSong,
-                 golden ("audio-gain", "a tone in an audio clip, then in another turned down 6 dB by its gain.", 4.0, soundsLikeClipGain));
+                 golden ("audio-gain", "a tone in an audio clip, then in another turned down 6 dB by its gain.", 4.0, soundsLikeClipGain)
+                     .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: audio clips fading in and out, linear, convex, concave and S-curve")
     {
         renders (addFadesSong,
                  golden ("audio-fades", "four audio clips fading in and out over 0.3 s: linear, convex, concave and S-curve fades.", 4.0,
-                         soundsLikeFades));
+                         soundsLikeFades)
+                     .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: a loop of clicks made at 120 BPM follows a song at 90 BPM")
     {
         renders (addStretchedSong,
                  golden ("audio-stretched", "a loop of clicks made at 120 BPM in a song at 90 BPM, stretched to follow its tempo.", 4.0,
-                         soundsLikeClicksAt90));
+                         soundsLikeClicksAt90)
+                     .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: a tone pitched up an octave by its clip, as long as it was")
     {
         renders (addPitchedSong,
-                 golden ("audio-pitched", "a 220 Hz tone pitched up an octave by its audio clip.", 4.0, soundsLikeAnOctaveUp));
+                 golden ("audio-pitched", "a 220 Hz tone pitched up an octave by its audio clip.", 4.0, soundsLikeAnOctaveUp)
+                     .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: a tone that dies away, played backwards by its clip")
     {
         renders (addReversedSong,
-                 golden ("audio-reversed", "a tone that dies away, played backwards by its audio clip.", 4.0, soundsLikeASwell));
+                 golden ("audio-reversed", "a tone that dies away, played backwards by its audio clip.", 4.0, soundsLikeASwell)
+                     .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: an alias plays what its original does, a note added later too")

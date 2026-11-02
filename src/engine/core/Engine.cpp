@@ -265,6 +265,7 @@ void Engine::process (float* const* outputs, int numOutputs, int numSamples) noe
     const auto seconds = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - startTicks);
     const auto share = numSamples > 0 ? seconds * sampleRate / numSamples : 0.0;
     load.store (load.load (std::memory_order_relaxed) * 0.95 + share * 0.05, std::memory_order_relaxed);
+    blocksPlayed.fetch_add (1, std::memory_order_release);
 }
 
 void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept
@@ -346,6 +347,18 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
 
             state.sortEvents();
 
+            // Its audio clips play into it before its effects, beside its instrument (after it, which plays into a cleared
+            // buffer).
+            const auto playAudio = [&]
+            {
+                if (transport.playing)
+                    for (const auto& region : strip.audio)
+                        region.play (channels, transport.sample, numSamples, sampleRate, rendering, state.scratch);
+            };
+
+            if (! strip.hasInstrument)
+                playAudio();
+
             for (size_t i = 0; i < strip.devices.size(); ++i)
             {
                 DeviceRunner::Block block;
@@ -358,6 +371,9 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
                     block.events = std::span (state.events.data(), (size_t) state.numEvents);
 
                 strip.devices[i]->process (state.buffer, offset, numSamples, block);
+
+                if (i == 0 && strip.hasInstrument)
+                    playAudio();
             }
         }
 

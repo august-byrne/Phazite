@@ -2,6 +2,7 @@
 #include "internal/SongPlayer.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -9,12 +10,14 @@
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/devices/internal/WavetablePlugin.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <vector>
 
@@ -78,6 +81,45 @@ namespace
 
         return std::make_shared<const engine::NoteSequence> (std::move (notes), std::move (controls));
     }
+
+    // A file's samples as JUCE's formats read them, for the engine's reading thread (or a render's).
+    class FormatReader final : public engine::SampleReader
+    {
+    public:
+        explicit FormatReader (std::unique_ptr<juce::AudioFormatReader> formatReader)
+            : reader (std::move (formatReader))
+        {
+        }
+
+        int getNumChannels() const override { return (int) reader->numChannels; }
+        double getSampleRate() const override { return reader->sampleRate; }
+        std::int64_t getLength() const override { return reader->lengthInSamples; }
+
+        bool read (juce::AudioBuffer<float>& buffer, std::int64_t start, int numSamples) override
+        {
+            return reader->read (&buffer, 0, numSamples, start, true, true);
+        }
+
+    private:
+        std::unique_ptr<juce::AudioFormatReader> reader;
+    };
+
+    // A fade's shape, by its name in the song (Schema.h: clipFadeInShape).
+    engine::FadeShape getEngineFadeShape (const juce::ValueTree& clipState, bool fadeIn)
+    {
+        const auto name = clipState[fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape].toString();
+
+        if (name == schema::fadeIsConvex)
+            return engine::FadeShape::convex;
+
+        if (name == schema::fadeIsConcave)
+            return engine::FadeShape::concave;
+
+        if (name == schema::fadeIsSCurve)
+            return engine::FadeShape::sCurve;
+
+        return engine::FadeShape::linear;
+    }
 } // namespace
 
 SongPlayer::SongPlayer (te::Edit& e)
@@ -122,17 +164,27 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // Each track that holds clips, through its devices.
     lowLatency = ! isRender && isLowLatency (edit.engine);
     used.clear();
+    usedFiles.clear();
+    usedRegions.clear();
 
     for (const auto& trackState : getTrackStates (edit))
     {
         if (isFolderState (trackState) || isReturnState (trackState))
             continue;
 
+        // A frozen track plays its frozen file, through the devices after its freeze point; any other its clips.
         engine::Plan::Strip strip;
         strip.id = getID (trackState, schema::trackID);
         strip.state = getStrip (strip.id);
-        strip.notes = compileNotes (trackState);
-        addDevices (strip, trackState);
+        const auto frozen = addFrozenFile (strip, trackState);
+
+        if (! frozen)
+        {
+            strip.notes = compileNotes (trackState);
+            addAudio (strip, trackState);
+        }
+
+        addDevices (strip, trackState, frozen);
         setChannel (trackState, false);
         plan->strips.push_back (std::move (strip));
     }
@@ -179,6 +231,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         tracks.insert (strip.id);
 
     std::erase_if (devices, [this] (const auto& device) { return used.count (device.first) == 0; });
+    std::erase_if (files, [this] (const auto& file) { return usedFiles.count (file.first) == 0; });
+    std::erase_if (regions, [this] (const auto& region) { return usedRegions.count (region.first) == 0; });
     std::erase_if (strips, [&tracks] (const auto& strip) { return tracks.count (strip.first) == 0; });
     std::erase_if (delays, [&tracks] (const auto& delay) { return tracks.count (delay.first) == 0; });
     return plan;
@@ -220,7 +274,7 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
     return node;
 }
 
-void SongPlayer::addDevices (engine::Plan::Strip& strip, const juce::ValueTree& channelState)
+void SongPlayer::addDevices (engine::Plan::Strip& strip, const juce::ValueTree& channelState, bool skipFrozen)
 {
     // While Low Latency is on, a device that looks ahead lets the sound through as it comes (model/engine/internal/EngineSetup.h).
     const auto lowLatencyLimit = (int) (lowLatencyLimitSeconds * preparedRate);
@@ -229,6 +283,12 @@ void SongPlayer::addDevices (engine::Plan::Strip& strip, const juce::ValueTree& 
     {
         if (! deviceState.hasType (schema::DEVICE))
             continue;
+
+        // A frozen track's devices before its freeze point are in its frozen file.
+        if (skipFrozen)
+            if (const auto plugin = te::findPluginForID (edit, toTracktion (getDeviceID (deviceState))))
+                if (isFrozenDevice (*plugin))
+                    continue;
 
         auto node = getDevice (deviceState);
 
@@ -366,6 +426,115 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
             node->setOn (! (bool) tree[schema::deviceOff]);
 
     return false;
+}
+
+//==============================================================================
+void SongPlayer::readLive (engine::FileReader& fileReader, const std::atomic<std::uint64_t>& blocksPlayed)
+{
+    reader = &fileReader;
+    blocks = &blocksPlayed;
+    files.clear();
+}
+
+std::shared_ptr<engine::AudioFile> SongPlayer::getAudioFile (const juce::File& file)
+{
+    const auto path = file.getFullPathName();
+    auto& kept = files[path];
+
+    if (kept == nullptr)
+    {
+        // A file that can't be read (gone, or a render not made yet) plays nothing until a plan finds it.
+        auto formatReader =
+            std::unique_ptr<juce::AudioFormatReader> (edit.engine.getAudioFileFormatManager().readFormatManager.createReaderFor (file));
+
+        if (formatReader == nullptr)
+        {
+            files.erase (path);
+            return nullptr;
+        }
+
+        kept = std::make_shared<engine::AudioFile> (std::make_unique<FormatReader> (std::move (formatReader)), blocks);
+
+        if (reader != nullptr)
+            reader->add (kept);
+    }
+
+    usedFiles.insert (path);
+    return kept;
+}
+
+engine::AudioRegion SongPlayer::makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile> file)
+{
+    engine::AudioRegion region;
+    region.file = std::move (file);
+    auto& state = regions[id];
+
+    if (state == nullptr)
+        state = std::make_shared<engine::RegionState>();
+
+    region.state = state;
+    usedRegions.insert (id);
+    return region;
+}
+
+void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& trackState)
+{
+    for (const auto& clip : getClipStates (trackState))
+    {
+        if (! isAudioState (clip) || (bool) clip[schema::clipMute])
+            continue;
+
+        // What Tracktion plays for it: its file, or Phazite's render of it, where it plays in seconds.
+        auto file = getAudioFile (getPlayedFile (edit, clip));
+
+        if (file == nullptr)
+            continue;
+
+        const auto position = getPlayedPosition (edit, clip);
+        auto region = makeRegion (getID (clip, schema::clipID), file);
+        region.start = std::llround (position.getStart().inSeconds() * preparedRate);
+        region.length = std::llround (position.getEnd().inSeconds() * preparedRate) - region.start;
+        region.fileStart = position.offset.inSeconds() * file->getSampleRate();
+        region.gain = juce::Decibels::decibelsToGain ((float) clip.getProperty (schema::clipGain, 0.0f));
+
+        // Its fades, scaled down together where they would overlap, as Tracktion fits them.
+        const auto seconds = position.getLength().inSeconds();
+        auto fadeIn = getClipFade (clip, true), fadeOut = getClipFade (clip, false);
+
+        if (fadeIn + fadeOut > seconds && fadeIn + fadeOut > 0.0)
+        {
+            const auto scale = seconds / (fadeIn + fadeOut);
+            fadeIn *= scale;
+            fadeOut *= scale;
+        }
+
+        region.fadeIn = (int) std::llround (fadeIn * preparedRate);
+        region.fadeOut = (int) std::llround (fadeOut * preparedRate);
+        region.fadeInShape = getEngineFadeShape (clip, true);
+        region.fadeOutShape = getEngineFadeShape (clip, false);
+        file->keep ((std::int64_t) region.fileStart);
+        strip.audio.push_back (std::move (region));
+    }
+}
+
+bool SongPlayer::addFrozenFile (engine::Plan::Strip& strip, const juce::ValueTree& trackState)
+{
+    // Frozen as Tracktion plays it (model/mixer/internal/Freeze.h): its file from the song's start, if it is there.
+    auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (trackState))));
+
+    if (! (bool) trackState[schema::trackFrozen] || track == nullptr)
+        return false;
+
+    auto file = getAudioFile (te::TemporaryFileManager::getFreezeFileForTrack (*track));
+
+    if (file == nullptr)
+        return false;
+
+    auto region = makeRegion (strip.id, file);
+    region.length = std::llround ((double) file->getLength() / file->getSampleRate() * preparedRate);
+    file->keep (0);
+    strip.audio.push_back (std::move (region));
+    return true;
 }
 
 engine::DeviceNode* SongPlayer::findDevice (std::int64_t id) const

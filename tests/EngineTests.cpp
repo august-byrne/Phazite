@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's own playback engine (src/engine/; docs/tracktion-migration.md, T2), tested on its own, without a project or
-// Tracktion: how the audio thread is handed what it plays, Phazite's devices as the engine plays them, the tempo map, and
-// the transport and its metronome, to the sample.
+// Tracktion: how the audio thread is handed what it plays, Phazite's devices as the engine plays them, the tempo map, the
+// transport and its metronome, to the sample, and audio files and the clips that play them.
 #include "TestHelpers.h"
 #include "devices/motion/Phaser.h"
 #include "devices/synth/Synth.h"
+#include "engine/audio/AudioRegion.h"
 #include "engine/core/Engine.h"
 #include "engine/core/Handover.h"
 #include "engine/core/TempoMap.h"
@@ -13,6 +14,8 @@
 #include "engine/transport/Click.h"
 
 #include <array>
+#include <atomic>
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -539,4 +542,181 @@ TEST_CASE ("A channel's pan keeps a sound's power, at its level in the middle")
         const auto gains = engine::getPanGains (pan);
         CHECK (gains.left * gains.left + gains.right * gains.right == doctest::Approx (2.0f));
     }
+}
+
+namespace
+{
+// A file's samples in memory: on its first channel the sample's number in a thousandths' cycle, on any other the same negated;
+// or one value throughout.
+struct MemoryReader final : engine::SampleReader
+{
+    MemoryReader (int channels, double sampleRate, std::int64_t samples, std::optional<float> constant = {})
+        : numChannels (channels),
+          fileRate (sampleRate),
+          length (samples),
+          value (constant)
+    {
+    }
+
+    int getNumChannels() const override { return numChannels; }
+    double getSampleRate() const override { return fileRate; }
+    std::int64_t getLength() const override { return length; }
+
+    static float at (int channel, std::int64_t sample) { return (channel == 0 ? 1.0f : -1.0f) * (float) (sample % 1000) / 1000.0f; }
+
+    bool read (juce::AudioBuffer<float>& buffer, std::int64_t start, int numSamples) override
+    {
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            for (int i = 0; i < numSamples; ++i)
+                buffer.setSample (channel, i, value.has_value() ? *value : at (channel, start + i));
+
+        return true;
+    }
+
+    int numChannels;
+    double fileRate;
+    std::int64_t length;
+    std::optional<float> value;
+};
+
+// What a region plays from a sample of the song for so many, a block at a time, as a render plays it.
+juce::AudioBuffer<float> playRegion (const engine::AudioRegion& region, std::int64_t from, int numSamples, double engineRate = rate)
+{
+    juce::AudioBuffer<float> out (2, numSamples), scratch (2, 8 * 64 + 16);
+    out.clear();
+
+    for (int done = 0; done < numSamples; done += 64)
+    {
+        const auto count = std::min (64, numSamples - done);
+        float* channels[] = { out.getWritePointer (0, done), out.getWritePointer (1, done) };
+        region.play (channels, from + done, count, engineRate, true, scratch);
+    }
+
+    return out;
+}
+
+engine::AudioRegion makeRegion (std::shared_ptr<engine::AudioFile> file, std::int64_t start, std::int64_t length)
+{
+    engine::AudioRegion region;
+    region.file = std::move (file);
+    region.state = std::make_shared<engine::RegionState>();
+    region.start = start;
+    region.length = length;
+    return region;
+}
+} // namespace
+
+TEST_CASE ("A fade's shapes start silent and end at their level: linear, convex quick at first, concave slow, S-curve between")
+{
+    using engine::FadeShape;
+
+    for (const auto shape : { FadeShape::linear, FadeShape::convex, FadeShape::concave, FadeShape::sCurve })
+    {
+        CHECK (engine::getFadeGain (shape, 0.0f) == doctest::Approx (0.0f));
+        CHECK (engine::getFadeGain (shape, 1.0f) == doctest::Approx (1.0f));
+    }
+
+    CHECK (engine::getFadeGain (FadeShape::linear, 0.5f) == doctest::Approx (0.5f));
+    CHECK (engine::getFadeGain (FadeShape::convex, 0.5f) == doctest::Approx (std::sqrt (0.5f)));
+    CHECK (engine::getFadeGain (FadeShape::concave, 0.5f) == doctest::Approx (1.0f - std::sqrt (0.5f)));
+    CHECK (engine::getFadeGain (FadeShape::sCurve, 0.5f) == doctest::Approx (0.5f));
+    CHECK (engine::getFadeGain (FadeShape::sCurve, 0.25f) < engine::getFadeGain (FadeShape::linear, 0.25f));
+    CHECK (engine::getFadeGain (FadeShape::sCurve, 0.75f) > engine::getFadeGain (FadeShape::linear, 0.75f));
+}
+
+TEST_CASE ("An audio region plays its part of a file on its samples, at its gain, through its fades, and nothing outside")
+{
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (2, rate, 1000), nullptr);
+    auto region = makeRegion (file, 100, 400);
+    region.fileStart = 200.0;
+    region.gain = 0.5f;
+    region.fadeIn = 100;
+    region.fadeOut = 100;
+    region.fadeOutShape = engine::FadeShape::convex;
+
+    const auto out = playRegion (region, 0, 600);
+    CHECK (out.getMagnitude (0, 100) == 0.0f);
+    CHECK (out.getMagnitude (500, 100) == 0.0f);
+
+    // In the middle, the file from its start in the file, on both channels.
+    for (const auto sample : { 200, 300, 399 })
+    {
+        const auto inFile = 200 + (sample - 100);
+        CHECK (out.getSample (0, sample) == doctest::Approx (0.5f * MemoryReader::at (0, inFile)));
+        CHECK (out.getSample (1, sample) == doctest::Approx (0.5f * MemoryReader::at (1, inFile)));
+    }
+
+    // Half way through the linear fade in and the convex fade out.
+    CHECK (out.getSample (0, 150) == doctest::Approx (0.5f * 0.5f * MemoryReader::at (0, 250)));
+    CHECK (out.getSample (0, 450) == doctest::Approx (0.5f * std::sqrt (0.5f) * MemoryReader::at (0, 550)));
+}
+
+TEST_CASE ("An audio region started inside fades in over 40 samples rather than click, and a mono file plays on both sides")
+{
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (1, rate, 1000, 0.8f), nullptr);
+    const auto region = makeRegion (file, 0, 1000);
+
+    const auto out = playRegion (region, 300, 200);
+    CHECK (out.getSample (0, 0) < 0.1f);
+    CHECK (out.getSample (0, 20) == doctest::Approx (0.8f * 21.0f / 40.0f));
+    CHECK (out.getSample (0, 40) == doctest::Approx (0.8f));
+    CHECK (out.getSample (1, 100) == doctest::Approx (0.8f));
+
+    // Played on from where it played to, it doesn't fade again.
+    const auto next = playRegion (region, 500, 64);
+    CHECK (next.getSample (0, 0) == doctest::Approx (0.8f));
+}
+
+TEST_CASE ("An audio region of a file at another rate plays it at its own speed")
+{
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (1, rate / 2.0, 1000, 0.6f), nullptr);
+    const auto region = makeRegion (file, 0, 2000);
+
+    const auto out = playRegion (region, 0, 1000);
+    CHECK (out.getSample (0, 500) == doctest::Approx (0.6f));
+    CHECK (out.getSample (0, 999) == doctest::Approx (0.6f));
+    CHECK (region.state->filePosition == doctest::Approx (500.0).epsilon (0.01));
+}
+
+TEST_CASE ("A long audio file is read ahead of where it plays, each clip's start kept, and what it played long ago let go of")
+{
+    // At 1 kHz, 200 s is 7 chunks, of which it reads one ahead.
+    std::atomic<std::uint64_t> blocks { 0 };
+    engine::AudioFile file (std::make_unique<MemoryReader> (1, 1000.0, 200000), &blocks);
+    const auto chunk = engine::AudioFile::chunkSamples;
+
+    auto count = 64;
+    CHECK (file.getSamples (0, 0, count) == nullptr); // not read yet: silence
+    CHECK (count == 64);
+
+    file.keep (3 * chunk + 10);
+    CHECK (file.readNext()); // the clip's start first
+    CHECK (file.readNext()); // then where it plays
+    CHECK (! file.readNext());
+
+    count = 64;
+    const auto* samples = file.getSamples (0, 3 * chunk + 10, count);
+    REQUIRE (samples != nullptr);
+    CHECK (samples[0] == doctest::Approx (MemoryReader::at (0, 3 * chunk + 10)));
+
+    count = 64;
+    REQUIRE (file.getSamples (0, 0, count) != nullptr);
+
+    // Played on to chunk 5: it reads that, and lets go of the first, which goes once the engine has played on.
+    count = 64;
+    CHECK (file.getSamples (0, 5 * chunk, count) == nullptr);
+    CHECK (file.readNext());
+    CHECK (! file.readNext());
+
+    count = 64;
+    CHECK (file.getSamples (0, 5 * chunk, count) != nullptr);
+    count = 64;
+    CHECK (file.getSamples (0, 3 * chunk + 10, count) != nullptr); // kept
+    count = 64;
+    CHECK (file.getSamples (0, 0, count) == nullptr);
+
+    // The last samples of a chunk: as many as are left of it.
+    count = 64;
+    file.getSamples (0, 6 * chunk - 10, count);
+    CHECK (count == 10);
 }

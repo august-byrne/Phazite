@@ -22,7 +22,8 @@ public:
     Channel& getChannel() noexcept { return channel; }
 
     // The audio thread's.
-    juce::AudioBuffer<float> buffer; // what it plays, on two channels
+    juce::AudioBuffer<float> buffer;  // what it plays, on two channels
+    juce::AudioBuffer<float> scratch; // what its audio clips read (AudioRegion::play())
 
     // Where its notes are: the sequence played last, its next event, the pitches sounding, and whether the notes sounding
     // where it plays from must start (after a jump, the loop's start, or playback starting).

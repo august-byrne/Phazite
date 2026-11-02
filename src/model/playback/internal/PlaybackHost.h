@@ -5,6 +5,7 @@
 // Tracktion's plays only what Phazite's doesn't yet (live notes, recording).
 #pragma once
 
+#include "engine/audio/FileReader.h"
 #include "engine/core/Engine.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -26,6 +27,7 @@ public:
     void setOn (bool);
 
     engine::Engine& getEngine() noexcept { return engine; }
+    engine::FileReader& getFileReader() noexcept { return fileReader; } // the audio files the engine plays, read ahead
 
     // The sessions of the projects open (model/playback/internal/PlaybackSession.h): the one added last plays, and the one
     // before it again when it goes (a test's second project).
@@ -40,6 +42,7 @@ public:
 private:
     te::Engine& tracktion;
     engine::Engine engine;
+    engine::FileReader fileReader;
     bool on = false;
     std::vector<PlaybackSession*> sessions;
 
