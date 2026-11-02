@@ -93,7 +93,7 @@ Threads share data only through lock-free FIFOs and `std::atomic` values. Trackt
 
 ## Tests
 
-`ctest --preset <preset>` runs `phazite_tests`, written with [doctest](https://github.com/doctest/doctest); it has passed when it prints `100% tests passed`. To run some tests only, call the executable directly, for example `build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-case="*save*"`.
+`ctest --preset <preset>` runs `phazite_tests`, written with [doctest](https://github.com/doctest/doctest), once for each test file (named after it), 4 at once; it has passed when it prints `100% tests passed`. `-R <name>` runs some files only, and `-j <n>` runs more at once. To run some tests only, call the executable directly, for example `build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-case="*save*"`.
 
 - **Every change comes with tests**, and a UI bug is reproduced in a test before it is fixed: `tests/UiTestHelpers.h` gives a window that isn't on any screen, with a mouse and keys that reach components the way JUCE delivers real events. A test that builds a song does it through the model, with `tests/TestSong.h`. Add each new test file to `target_sources(phazite_tests ...)` in `CMakeLists.txt`.
 - **The golden tests** (`--test-suite=golden`) compare what Phazite saves, plays and registers as commands with committed files in `tests/golden/`. A refactoring must leave them as they are. When a change is meant to alter them, run that suite with the environment variable `PHAZITE_UPDATE_GOLDEN=1`, read `git diff tests/golden` in full, and say in the commit message why they changed.

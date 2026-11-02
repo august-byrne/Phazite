@@ -38,9 +38,10 @@ juce::File getGoldenFolder();
 // of failing. Fails the test if the environment variable CI is set too: golden files are never updated in CI.
 bool isUpdatingGoldenFiles();
 
-// <temp>/PhaziteGoldenActual: where the golden tests write what Phazite made, to compare with a golden file that
-// doesn't match it. Other users may own it (on Linux, every user shares the temporary folder), so a copy that can't be
-// written there is reported instead of failing the test.
+// <temp>/PhaziteGoldenActual, in the system's temporary folder (getSystemTemporaryFolder()), which outlasts the run:
+// where the golden tests write what Phazite made, to compare with a golden file that doesn't match it. Other users may
+// own it (on Linux, every user shares the temporary folder), so a copy that can't be written there is reported instead
+// of failing the test.
 juce::File getActualFolder();
 
 // Delivers the messages and runs the timers that are due for some milliseconds, as the app's message loop would, so

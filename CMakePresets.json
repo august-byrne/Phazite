@@ -106,9 +106,9 @@
     {
       "name": "test-base",
       "hidden": true,
-      "description": "Runs phazite_tests (doctest) after a build of the same preset; prints a failing test's output.",
+      "description": "Runs phazite_tests (doctest) after a build of the same preset, once for each test file, 4 at once (as many as CI's runners have processors; -j <n> changes that); prints a failing test's output.",
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "execution": { "noTestsAction": "error", "jobs": 4 }
     },
     {
       "name": "windows-test-base",

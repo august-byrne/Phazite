@@ -68,6 +68,20 @@ namespace
         return TRUE;
     }
 
+    // Sets up the symbol handler once, and keeps it to the end of the run: the first name looked up after setting it up
+    // loads the test program's symbols, which in a Debug build takes seconds. JUCE's SystemStats::getStackBacktrace()
+    // sets it up the same way, and SymInitialize() fails if it already has: the symbols are there to use all the same.
+    bool hasSymbols (HANDLE process)
+    {
+        static const bool available = [process]
+        {
+            SymSetOptions (SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+            return SymInitialize (process, nullptr, TRUE) != FALSE || GetLastError() == ERROR_INVALID_PARAMETER;
+        }();
+
+        return available;
+    }
+
     juce::String getSymbolName (HANDLE process, void* address)
     {
         alignas (SYMBOL_INFO) char storage[sizeof (SYMBOL_INFO) + MAX_SYM_NAME];
@@ -139,13 +153,8 @@ juce::StringArray AudioThreadMonitor::describeCallSites ([[maybe_unused]] int fr
 
 #if PHAZITE_ALLOCATION_HOOK
     const auto process = GetCurrentProcess();
-    SymSetOptions (SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
 
-    // JUCE's SystemStats::getStackBacktrace() initialises the symbol handler without cleaning it up, and a second
-    // SymInitialize() then fails: the symbols are there to use, but aren't this function's to clean up.
-    const auto initialised = SymInitialize (process, nullptr, TRUE) != FALSE;
-
-    if (! initialised && GetLastError() != ERROR_INVALID_PARAMETER)
+    if (! hasSymbols (process))
         return { "(symbols unavailable)" };
 
     std::map<juce::String, int> sites;
@@ -167,9 +176,6 @@ juce::StringArray AudioThreadMonitor::describeCallSites ([[maybe_unused]] int fr
 
         ++sites[frames.joinIntoString (" <- ")];
     }
-
-    if (initialised)
-        SymCleanup (process);
 
     std::vector<std::pair<int, juce::String>> sorted;
 

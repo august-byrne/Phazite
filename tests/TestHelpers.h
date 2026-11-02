@@ -24,6 +24,11 @@ namespace phazite::test
 te::Engine& getEngine();
 EngineContext& getEngineContext(); // the Engine as the UI reaches it, as the app's services make it
 
+// The system's temporary folder, which other programs share. The tests' temporary folder (juce::File::tempDirectory) is
+// a folder in it of this test program's own, made by TestMain.cpp: CTest runs a test program for each test file, several
+// at once, and the tests give what they write there fixed names.
+juce::File getSystemTemporaryFolder();
+
 // The tests have no message loop, but some engine work happens on the message thread's timers (finding
 // MIDI devices, for example). This runs the timers that are due, as the loop would, until the
 // condition holds. Returns false if it still doesn't after timeoutMilliseconds.

@@ -935,5 +935,22 @@ if(PHAZITE_BUILD_TESTS)
     phazite_use_core(phazite_tests)
     target_link_libraries(phazite_tests PRIVATE phazite_app phazite_ui)
 
-    add_test(NAME phazite_tests COMMAND phazite_tests)
+    # A CTest test for each test file, which runs phazite_tests with that file's tests only, so that CTest can run them
+    # side by side (the test presets run 4 at once; -j <n> changes that). Each test program has a temporary folder of its
+    # own (tests/TestMain.cpp). OtherTestFiles runs the tests in every other file, so that no test is left out.
+    get_target_property(_phazite_test_sources phazite_tests SOURCES)
+    list(FILTER _phazite_test_sources INCLUDE REGEX "Tests\\.cpp$")
+    set(_phazite_test_patterns "")
+
+    foreach(_phazite_source IN LISTS _phazite_test_sources)
+        get_filename_component(_phazite_test_name "${_phazite_source}" NAME_WE)
+        # doctest matches the whole path the compiler was given, with either slash: *tests?MixerTests.cpp leaves out
+        # tests/GoldenMixerTests.cpp.
+        string(REPLACE "/" "?" _phazite_pattern "*${_phazite_source}")
+        add_test(NAME ${_phazite_test_name} COMMAND phazite_tests "--source-file=${_phazite_pattern}")
+        list(APPEND _phazite_test_patterns "${_phazite_pattern}")
+    endforeach()
+
+    list(JOIN _phazite_test_patterns "," _phazite_test_patterns)
+    add_test(NAME OtherTestFiles COMMAND phazite_tests "--source-file-exclude=${_phazite_test_patterns}")
 endif()

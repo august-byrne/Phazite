@@ -460,7 +460,7 @@ bool isUpdatingGoldenFiles()
 
 juce::File getActualFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("PhaziteGoldenActual");
+    return phazite::test::getSystemTemporaryFolder().getChildFile ("PhaziteGoldenActual"); // read after the run
 }
 
 void settle (int milliseconds)
