@@ -354,6 +354,12 @@ target_sources(phazite_core PRIVATE
     src/model/playback/internal/PlaybackSession.h
     src/model/playback/internal/PluginProcessor.h
     src/model/playback/internal/SongPlayer.h
+    src/model/plugins/PluginHost.cpp
+    src/model/plugins/SandboxedInstance.cpp
+    src/model/plugins/SandboxedProcessor.cpp
+    src/model/plugins/internal/PluginHost.h
+    src/model/plugins/internal/SandboxedInstance.h
+    src/model/plugins/internal/SandboxedProcessor.h
     src/model/presets/PresetModel.h
     src/model/presets/Presets.cpp
     src/model/presets/internal/Presets.h
@@ -997,6 +1003,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/ReverbTests.cpp
         tests/SandboxBenchmarks.cpp
         tests/SandboxTests.cpp
+        tests/SandboxedPluginTests.cpp
+        tests/SandboxedPlugins.h
         tests/SchemaTests.cpp
         tests/SectionTests.cpp
         tests/SelectionTests.cpp

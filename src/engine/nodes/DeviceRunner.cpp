@@ -109,6 +109,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
     devices::ProcessContext block;
     block.parameters = currentValues;
     block.isPlaying = in.isPlaying;
+    block.isRendering = in.isRendering;
     block.tempo = in.tempo;
     block.beat = in.beat;
 

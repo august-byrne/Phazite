@@ -13,5 +13,7 @@ AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
       library (*engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),
       previewer (createPreviewer (engine))
 {
+    // Plug-ins in helper processes, while T3 lasts a setting (docs/tracktion-migration.md).
+    engineContext->setPluginsSandboxed (settings.get (Settings::sandboxPlugins));
 }
 } // namespace phazite

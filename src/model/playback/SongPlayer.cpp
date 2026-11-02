@@ -16,6 +16,7 @@
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/plugins/internal/SandboxedProcessor.h"
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
@@ -349,14 +350,35 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::Val
 
     const auto id = getID (deviceState, schema::deviceID);
     auto& node = devices[id];
-    const auto* playing = node != nullptr ? dynamic_cast<const PluginProcessor*> (&node->getRunner().getProcessor()) : nullptr;
 
-    if (playing == nullptr || &playing->getPlugin() != plugin.get())
+    // One in a helper, through its channel, with its mix as the engine's (T3); one in Phazite's process through
+    // Tracktion's call.
+    if (auto* sandboxed = dynamic_cast<SandboxedInstance*> (external->getAudioPluginInstance()))
     {
-        auto processor = std::make_unique<PluginProcessor> (*plugin);
-        const auto& info = processor->getInfo();
-        node = std::make_shared<engine::DeviceNode> (info, std::move (processor));
-        node->getRunner().prepare (preparedRate, preparedBlockSize);
+        const auto* playing = node != nullptr ? dynamic_cast<const SandboxedProcessor*> (&node->getRunner().getProcessor()) : nullptr;
+
+        if (playing == nullptr || &playing->getPlugin() != plugin.get() || &playing->getInstance() != sandboxed)
+        {
+            auto processor = std::make_unique<SandboxedProcessor> (*plugin, *sandboxed);
+            const auto& info = processor->getInfo();
+            node = std::make_shared<engine::DeviceNode> (info, std::move (processor));
+            node->getRunner().prepare (preparedRate, preparedBlockSize);
+        }
+
+        if (const auto mix = devices::findParameter (node->getDeviceInfo(), devices::mixParameterID); mix >= 0)
+            node->setValue (mix, (float) deviceState.getProperty (schema::deviceMix, 1.0f));
+    }
+    else
+    {
+        const auto* playing = node != nullptr ? dynamic_cast<const PluginProcessor*> (&node->getRunner().getProcessor()) : nullptr;
+
+        if (playing == nullptr || &playing->getPlugin() != plugin.get())
+        {
+            auto processor = std::make_unique<PluginProcessor> (*plugin);
+            const auto& info = processor->getInfo();
+            node = std::make_shared<engine::DeviceNode> (info, std::move (processor));
+            node->getRunner().prepare (preparedRate, preparedBlockSize);
+        }
     }
 
     node->setOn (! (bool) deviceState[schema::deviceOff]);

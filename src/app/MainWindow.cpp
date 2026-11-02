@@ -309,6 +309,23 @@ void MainWindow::addCommands()
           .synonyms = { "vst", "vst3", "plugins", "instruments", "effects" },
           .perform = [this] { showPluginList(); } });
 
+    // While T3 lasts (docs/tracktion-migration.md), plug-ins in helper processes are a choice: the last step makes them
+    // the only way.
+    registry.add ({ .id = "options.sandboxPlugins",
+                    .name = "Host Plug-ins in Helper Processes",
+                    .category = "Options",
+                    .description = "Loads plug-ins into helper processes of Phazite's own, so that one that crashes can't take "
+                                   "Phazite down. For plug-ins loaded from now on: open the project again.",
+                    .synonyms = { "sandbox", "sandboxing", "crash protection", "bridge", "plugins", "vst3" },
+                    .perform =
+                        [this]
+                    {
+                        const auto on = ! services.engineContext->arePluginsSandboxed();
+                        services.engineContext->setPluginsSandboxed (on);
+                        services.settings.set (Settings::sandboxPlugins, on);
+                    },
+                    .isTicked = [this] { return services.engineContext->arePluginsSandboxed(); } });
+
     registry.add ({ .id = "options.keyboardShortcuts",
                     .name = "Keyboard Shortcuts",
                     .category = "Options",
@@ -876,7 +893,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
         case 4: // Options
         {
             add (menu, { "options.settings", "options.audioSettings", "options.midiSettings", "options.keyboardShortcuts",
-                         "options.scanPlugins" });
+                         "options.scanPlugins", "options.sandboxPlugins" });
             menu.addSeparator();
             add (menu, { "input.computerKeyboard" });
             menu.addSeparator();

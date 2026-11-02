@@ -5,6 +5,7 @@
 #include "internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/transport/internal/AudioRecorder.h"
 
 namespace phazite
@@ -13,6 +14,7 @@ struct EngineContext::Impl
 {
     te::Engine& engine;
     PlaybackHost playback { engine }; // Phazite's own engine (docs/tracktion-migration.md, T2)
+    PluginHost plugins { engine };    // plug-ins in helper processes (T3)
 
     // Whether the output last asked about is Bluetooth, which takes a look through Windows' devices to find out.
     juce::String checkedOutput {};
@@ -32,6 +34,21 @@ te::Engine& getEngine (EngineContext& context)
 PlaybackHost& getPlaybackHost (EngineContext& context)
 {
     return context.getImpl().playback;
+}
+
+PluginHost& getPluginHost (EngineContext& context)
+{
+    return context.getImpl().plugins;
+}
+
+bool EngineContext::arePluginsSandboxed() const
+{
+    return impl->plugins.isOn();
+}
+
+void EngineContext::setPluginsSandboxed (bool sandboxed)
+{
+    impl->plugins.setOn (sandboxed);
 }
 
 EngineContext::EngineContext (std::unique_ptr<Impl> i)

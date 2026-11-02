@@ -8,6 +8,7 @@
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/plugins/internal/PluginHost.h"
 
 #include <cstdlib>
 
@@ -144,6 +145,9 @@ int main (int argc, char** argv)
         testEngine = engine.get();
         const auto engineContext = phazite::createEngineContext (*engine);
         testEngineContext = engineContext.get();
+
+        // Plug-ins in helpers start the tests' helper, which hosts the tests' stand-ins too (host/TestPlugins.h).
+        phazite::getPluginHost (*engineContext).setHelperProgram (juce::File (PHAZITE_TEST_HOST));
 
         doctest::Context context (argc, argv);
         result = context.run();

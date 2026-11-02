@@ -78,7 +78,7 @@ undo_functions='beginNewTransaction|UndoStep'
 # The undo code: the model files that may call beginNewTransaction.
 undo_implementation='src/model/commands/Undo.cpp'
 # The model's areas whose Tracktion names are counted, each as a rule of its own (tracktion-AREA).
-tracktion_areas='arrangement automation base chords commands devices engine mirror mixer modulation notes playback presets project transport'
+tracktion_areas='arrangement automation base chords commands devices engine mirror mixer modulation notes playback plugins presets project transport'
 
 budget_file=tools/architecture-budget.txt
 awk=${AWK:-awk}
