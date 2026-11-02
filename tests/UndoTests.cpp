@@ -18,10 +18,11 @@ std::unique_ptr<te::Edit> createEdit()
     return edit;
 }
 
-// A change that goes through the Edit's undo manager.
+// A change to the song, as the model makes one: to its own element (a change to the Edit's root would make the root hold its
+// own undo history, and leak with it).
 void change (te::Edit& edit, const char* property, int value)
 {
-    edit.state.setProperty (property, value, &phazite::getSongUndoManager (edit));
+    phazite::getPhaziteState (edit).setProperty (property, value, &phazite::getSongUndoManager (edit));
 }
 } // namespace
 
@@ -49,9 +50,9 @@ TEST_CASE ("An undo step begun inside another for the same Edit joins it")
 
         // One undo reverts all of it.
         phazite::undo (*edit);
-        CHECK_FALSE (edit->state.hasProperty ("a"));
-        CHECK_FALSE (edit->state.hasProperty ("b"));
-        CHECK_FALSE (edit->state.hasProperty ("c"));
+        CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("a"));
+        CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("b"));
+        CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("c"));
         CHECK_FALSE (undo.canUndo());
     }
 
@@ -69,11 +70,11 @@ TEST_CASE ("An undo step begun inside another for the same Edit joins it")
 
         CHECK (undo.getUndoDescription() == juce::String ("Second"));
         phazite::undo (*edit);
-        CHECK (edit->state.hasProperty ("a"));
-        CHECK_FALSE (edit->state.hasProperty ("b"));
+        CHECK (phazite::getPhaziteState (*edit).hasProperty ("a"));
+        CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("b"));
         CHECK (undo.getUndoDescription() == juce::String ("First"));
         phazite::undo (*edit);
-        CHECK_FALSE (edit->state.hasProperty ("a"));
+        CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("a"));
         CHECK_FALSE (undo.canUndo());
     }
 
@@ -100,9 +101,9 @@ TEST_CASE ("An undo step begun inside another for the same Edit joins it")
         CHECK (phazite::getSongUndoManager (*other).getUndoDescription() == juce::String ("Inner"));
 
         phazite::undo (*other);
-        CHECK_FALSE (other->state.hasProperty ("b"));
-        CHECK (edit->state.hasProperty ("a")); // the other Edit's undo leaves this one alone
-        CHECK (edit->state.hasProperty ("c"));
+        CHECK_FALSE (phazite::getPhaziteState (*other).hasProperty ("b"));
+        CHECK (phazite::getPhaziteState (*edit).hasProperty ("a")); // the other Edit's undo leaves this one alone
+        CHECK (phazite::getPhaziteState (*edit).hasProperty ("c"));
     }
 }
 
@@ -130,7 +131,7 @@ TEST_CASE ("Undo and redo say what they would undo")
 
     // FL Studio's undo-or-redo undoes, then redoes what it undid.
     phazite::undoOrRedo (*edit);
-    CHECK_FALSE (edit->state.hasProperty ("testValue"));
+    CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("testValue"));
     CHECK_FALSE (phazite::canUndo (*edit));
     CHECK (phazite::canRedo (*edit));
     CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo"));
@@ -138,7 +139,7 @@ TEST_CASE ("Undo and redo say what they would undo")
     CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Redo Set Value"));
 
     phazite::undoOrRedo (*edit);
-    CHECK ((int) edit->state["testValue"] == 1);
+    CHECK ((int) phazite::getPhaziteState (*edit)["testValue"] == 1);
     CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Undo Set Value"));
 
     // Without an Edit.
@@ -222,11 +223,11 @@ TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back 
 
     CHECK (undo.getUndoDescription() == juce::String ("Drag"));
     phazite::undo (*edit);
-    CHECK_FALSE (edit->state.hasProperty ("a"));
-    CHECK_FALSE (edit->state.hasProperty ("b"));
+    CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("a"));
+    CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("b"));
     phazite::redo (*edit);
-    CHECK ((int) edit->state["a"] == 4);
-    CHECK ((int) edit->state["b"] == 3);
+    CHECK ((int) phazite::getPhaziteState (*edit)["a"] == 4);
+    CHECK ((int) phazite::getPhaziteState (*edit)["b"] == 3);
 
     // Rolled back, as Escape during a drag: as if it never happened, with nothing to redo.
     {
@@ -237,8 +238,8 @@ TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back 
         CHECK_FALSE (gesture.isOpen());
     }
 
-    CHECK ((int) edit->state["a"] == 4);
-    CHECK_FALSE (edit->state.hasProperty ("c"));
+    CHECK ((int) phazite::getPhaziteState (*edit)["a"] == 4);
+    CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("c"));
     CHECK (undo.getUndoDescription() == juce::String ("Drag"));
     CHECK_FALSE (phazite::canRedo (*edit));
 
@@ -249,5 +250,5 @@ TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back 
     }
 
     CHECK (undo.getUndoDescription() == juce::String ("Kept"));
-    CHECK ((int) edit->state["d"] == 7);
+    CHECK ((int) phazite::getPhaziteState (*edit)["d"] == 7);
 }

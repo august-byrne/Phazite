@@ -19,11 +19,11 @@ phazite::Command makeCommand (const juce::String& id, const juce::String& name, 
     return command;
 }
 
-// A change to the Edit that goes through its undo manager.
+// A change to the song that goes through its undo history, to its own element as the model's are.
 phazite::Command makeEditChange (const juce::String& id, const juce::String& name, te::Edit& edit, int value)
 {
-    auto command =
-        makeCommand (id, name, [&edit, value] { edit.state.setProperty ("testValue", value, &phazite::getSongUndoManager (edit)); });
+    auto command = makeCommand (id, name, [&edit, value]
+                                { phazite::getPhaziteState (edit).setProperty ("testValue", value, &phazite::getSongUndoManager (edit)); });
     command.undoTarget = [&edit] { return &phazite::getSongUndoManager (edit); };
     return command;
 }
@@ -32,7 +32,7 @@ phazite::Command makeEditChange (const juce::String& id, const juce::String& nam
 void setValueInOwnStep (te::Edit& edit, int value)
 {
     const phazite::UndoStep step (edit, "Set Value");
-    edit.state.setProperty ("testValue", value, &phazite::getSongUndoManager (edit));
+    phazite::getPhaziteState (edit).setProperty ("testValue", value, &phazite::getSongUndoManager (edit));
 }
 } // namespace
 
@@ -105,11 +105,11 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
     {
         REQUIRE (registry.addMacro ("test.both", "Set Twice", { "test.two", "test.one" }));
         REQUIRE (registry.invoke ("test.both"));
-        CHECK ((int) edit->state["testValue"] == 1);
+        CHECK ((int) phazite::getPhaziteState (*edit)["testValue"] == 1);
         CHECK (undo.getUndoDescription() == juce::String ("Set Twice"));
 
         REQUIRE (undo.undo());
-        CHECK ((int) edit->state["testValue"] == 1); // back to before the macro: "Set to One"
+        CHECK ((int) phazite::getPhaziteState (*edit)["testValue"] == 1); // back to before the macro: "Set to One"
         CHECK (undo.getUndoDescription() == juce::String ("Set to One"));
     }
 
@@ -120,11 +120,11 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
 
         REQUIRE (registry.invoke ("test.two"));
         REQUIRE (registry.invoke ("edit.undoOrRedo"));
-        CHECK ((int) edit->state["testValue"] == 1); // undone
+        CHECK ((int) phazite::getPhaziteState (*edit)["testValue"] == 1); // undone
         REQUIRE (registry.invoke ("edit.undoOrRedo"));
-        CHECK ((int) edit->state["testValue"] == 2); // redone
+        CHECK ((int) phazite::getPhaziteState (*edit)["testValue"] == 2); // redone
         REQUIRE (registry.invoke ("edit.undo"));
-        CHECK ((int) edit->state["testValue"] == 1);
+        CHECK ((int) phazite::getPhaziteState (*edit)["testValue"] == 1);
 
         selection.setEdit (nullptr);
         CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without an Edit
@@ -165,18 +165,18 @@ TEST_CASE ("A model function that begins its own undo step is part of the step o
 
     // Run by the command, both changes are the command's one step.
     REQUIRE (registry.invoke ("test.setTwice"));
-    CHECK ((int) edit->state["testValue"] == 2);
+    CHECK ((int) phazite::getPhaziteState (*edit)["testValue"] == 2);
     CHECK (undo.getUndoDescription() == juce::String ("Set Twice"));
 
     phazite::undo (*edit);
-    CHECK_FALSE (edit->state.hasProperty ("testValue"));
+    CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("testValue"));
     CHECK_FALSE (undo.canUndo());
 
     // Called on its own, the function is a step of its own.
     setValueInOwnStep (*edit, 3);
     CHECK (undo.getUndoDescription() == juce::String ("Set Value"));
     phazite::undo (*edit);
-    CHECK_FALSE (edit->state.hasProperty ("testValue"));
+    CHECK_FALSE (phazite::getPhaziteState (*edit).hasProperty ("testValue"));
 }
 
 TEST_CASE ("withEdit and ifEdit act only with an Edit")
