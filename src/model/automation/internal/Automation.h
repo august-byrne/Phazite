@@ -105,11 +105,9 @@ void setLaneCollapsed (te::Track&, const ParameterRef&, bool);
 void copyLanesAndCurves (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers = {});
 
 // A track's write mode, the song's (Schema.h: trackAutomationMode), which Tracktion's track mirrors: set without an undo
-// step. Tracktion puts a track that wrote into latch itself as a pass ends, and an undo of the pass back, which the song
-// takes in (adoptAutomationMode(): AutomationWatcher).
+// step.
 AutomationMode getAutomationMode (const te::Track&);
 void setAutomationMode (te::Track&, AutomationMode);
-void adoptAutomationMode (te::Track&);
 
 //==============================================================================
 // Automation points selected: one parameter's, by their indices, as the selection holds them (Selection: getPoints()), so
@@ -150,10 +148,8 @@ std::vector<ParameterPoint> getAutomationPointsIn (te::Edit&, BeatRange);
 void removeAutomationPointsIn (te::Edit&, BeatRange);
 void addAutomationPoints (te::Edit&, const std::vector<ParameterPoint>&);
 
-// Takes what Tracktion writes into its curves itself into the song: what it recorded, as recording automation stops (in
-// its undo step; until then, a curve it records is its own: mirror::reconcileCurve()); and the one point of a curve,
-// which it moves to its parameter's value as the value changes, unless it records (in the change's step).
-void adoptRecordedAutomation (te::Edit&);
+// Takes what Tracktion writes into its curves itself into the song: the one point of a curve, which it moves to its
+// parameter's value as the value changes (in the change's step).
 void adoptMovedPoint (te::AutomatableParameter&);
 
 // Forgets the curves of devices the song hasn't any more (the song keeps them while an undo can bring the device back), as
@@ -161,18 +157,11 @@ void adoptMovedPoint (te::AutomatableParameter&);
 void forgetCurvesOfGoneDevices (te::Edit&);
 
 //==============================================================================
-// Watches an open Edit's automation: remembers the parameter last changed by hand (not by its automation), and holds a
-// "Record Automation" undo step (Undo.h: RecordingStep) from when playback starts while a track writes automation until
-// it stops, so that what Tracktion records joins that step rather than the change before it, and the song takes it in
-// as the step ends. A control's own drag (ParameterHandle) begins a step of its own, which what is recorded meanwhile
-// joins. The song takes in what else Tracktion writes itself as it does: a curve's one point that a control moved, and
-// a track's write mode.
-class RecordingStep;
-
+// Watches an open Edit's automation: remembers the parameter last changed by hand (not by its automation), and takes
+// into the song a curve's one point that Tracktion moved as a control turned. Touch, latch and write are Phazite's
+// engine's (model/playback/internal/AutomationWriter.h): Tracktion's transport plays no project, so it records nothing.
 class AutomationWatcher : private te::ParameterChangeHandler::Listener,
-                          private juce::ChangeListener,
-                          private juce::AsyncUpdater,
-                          private juce::ValueTree::Listener
+                          private juce::AsyncUpdater
 {
 public:
     explicit AutomationWatcher (te::Edit&);
@@ -180,22 +169,15 @@ public:
 
     ParameterRef getLastTouched() const { return lastTouched; }
 
-    // A track's write mode changed: a track that writes now, while the song plays, starts the step.
-    void writingChanged();
-
 private:
     static constexpr size_t maxTouchedAtOnce = 2; // an EQ band's dot moves two parameters at once
 
     te::SafeSelectable<te::Edit> edit; // the context can outlive it
     ParameterRef lastTouched;
     std::vector<ParameterRef> changedAtOnce; // in this round of messages
-    std::unique_ptr<RecordingStep> recording;
-    bool wasPlaying = false, stopRecording = false;
 
     void pluginParameterChanged (te::AutomatableParameter&, bool isFollowingAutomation) override;
-    void changeListenerCallback (juce::ChangeBroadcaster*) override; // the transport
     void handleAsyncUpdate() override;
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override; // Tracktion's tracks' write modes
 
     JUCE_DECLARE_NON_COPYABLE (AutomationWatcher)
 };

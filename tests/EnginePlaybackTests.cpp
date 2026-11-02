@@ -275,7 +275,7 @@ TEST_CASE ("Phazite's engine plays a fader's automation, which the fader shows, 
     CHECK (volume.getValue() == doctest::Approx (top).epsilon (0.001));
 }
 
-TEST_CASE ("On Phazite's engine, touch writes what a control does while it is held, from the lane's value, as one undo step")
+TEST_CASE ("Touch writes what a control does while it is held, from the lane's value, as one undo step")
 {
     TestSong song;
     song.setTempo (120.0);
@@ -316,7 +316,7 @@ TEST_CASE ("On Phazite's engine, touch writes what a control does while it is he
     CHECK (phazite::getAutomationPoints (song.context, lane).size() == 2);
 }
 
-TEST_CASE ("On Phazite's engine, latch writes from a control's first move until playback stops, and write puts its track in latch")
+TEST_CASE ("Latch writes from a control's first move until playback stops, and write puts its track in latch")
 {
     TestSong song;
     song.setTempo (120.0);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Playing in real time for tests that need the song to play as the app plays it: recording MIDI (RecordingTests.cpp) and
-// audio (AudioRecordingTests.cpp), and writing automation (AutomationModelTests.cpp).
+// Playing in real time through Tracktion's hosted device, for the tests that need an audio device with inputs, which the
+// device's own thread plays: a track's input, and a recording's correction for the inputs' delay (AudioRecordingTests.cpp).
 #pragma once
 
 #include "UiTestHelpers.h"

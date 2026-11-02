@@ -36,10 +36,6 @@ namespace
     // and those missing are added where they go.
     void reconcileCurveOf (te::AutomatableParameter& parameter, const juce::ValueTree& curveState)
     {
-        // Tracktion's while it records it, until the song takes in what it recorded (adoptRecordedAutomation()).
-        if (parameter.isCurrentlyRecording())
-            return;
-
         auto& curve = parameter.getCurve();
         auto* undo = &parameter.getEdit().getUndoManager();
         const auto wanted = getTracktionPoints (parameter.getEdit().tempoSequence, curveState);

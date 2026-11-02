@@ -28,7 +28,7 @@ cmake-sources                  0
 # off Tracktion (docs/tracktion-migration.md) lowers them, area by area, and new code adds none. A phase that moves code to
 # Tracktion's side on purpose (T1's mirror) raises one, saying why.
 tracktion-arrangement        891
-tracktion-automation         179
+tracktion-automation         165
 tracktion-base                70
 tracktion-chords              73
 tracktion-commands            31
@@ -45,4 +45,4 @@ tracktion-transport          248
 tracktion-other                0
 tracktion-services             0
 tracktion-app                 46
-tracktion-tests              951
+tracktion-tests              948

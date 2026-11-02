@@ -2,7 +2,6 @@
 #include "internal/Automation.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Containers.h"
@@ -417,22 +416,6 @@ namespace
             default:
                 state.removeProperty (schema::trackAutomationMode, nullptr);
                 break;
-        }
-    }
-
-    AutomationMode fromTracktion (te::AutomationMode mode)
-    {
-        switch (mode)
-        {
-            case te::AutomationMode::touch:
-                return AutomationMode::touch;
-            case te::AutomationMode::latch:
-                return AutomationMode::latch;
-            case te::AutomationMode::write:
-                return AutomationMode::write;
-            case te::AutomationMode::read:
-            default:
-                return AutomationMode::read;
         }
     }
 
@@ -1054,62 +1037,14 @@ void addAutomationPoints (te::Edit& edit, const std::vector<ParameterPoint>& poi
     }
 }
 
-void adoptRecordedAutomation (te::Edit& edit)
-{
-    const auto& tempo = edit.tempoSequence;
-
-    for (auto* device : te::getAllPlugins (edit, true))
-    {
-        for (auto* parameter : device->getAutomatableParameters())
-        {
-            // What Tracktion recorded is in its curves, which it never leaves empty; those it recorded nothing in are
-            // the song's.
-            const auto& recorded = parameter->getCurve();
-
-            if (recorded.getNumPoints() == 0)
-                continue;
-
-            SongCurve curve (*parameter);
-            const auto isSame = [&] (int i)
-            {
-                return juce::exactlyEqual (tempo.toTime (toTracktion (curve.getPointBeat (i))).inSeconds(),
-                                           te::toTime (recorded.getPointPosition (i), tempo).inSeconds())
-                       && juce::exactlyEqual (curve.getPointValue (i), recorded.getPointValue (i))
-                       && juce::exactlyEqual (curve.getPointCurve (i), recorded.getPointCurve (i));
-            };
-
-            auto same = curve.getNumPoints() == recorded.getNumPoints();
-
-            for (int i = 0; same && i < curve.getNumPoints(); ++i)
-                same = isSame (i);
-
-            if (same)
-                continue;
-
-            // Tracktion's points in place of the song's, at their beats.
-            std::vector<AutomationPoint> points;
-
-            for (int i = 0; i < recorded.getNumPoints(); ++i)
-                points.push_back ({ fromTracktion (te::toBeats (recorded.getPointPosition (i), tempo)), recorded.getPointValue (i),
-                                    recorded.getPointCurve (i) });
-
-            for (auto i = curve.getNumPoints(); --i >= 0;)
-                curve.removePoint (i);
-
-            for (const auto& point : points)
-                curve.addPoint (point.beat, point.value, point.curve);
-        }
-    }
-}
-
 void adoptMovedPoint (te::AutomatableParameter& parameter)
 {
-    // Tracktion moves a curve's one point to its parameter's value as the value changes, unless it records it
-    // (AutomatableParameter::setParameterValue()), in the step of the change; but not as the mirror sets a value from the song
+    // Tracktion moves a curve's one point to its parameter's value as the value changes, in the step of the change
+    // (AutomatableParameter::setParameterValue()); but not as the mirror sets a value from the song
     // (mirror::setValueSetByHand(), after an undo or a redo), which plays the song's curve again.
     const auto& moved = parameter.getCurve();
 
-    if (moved.getNumPoints() != 1 || parameter.isCurrentlyRecording() || mirror::isSettingValues())
+    if (moved.getNumPoints() != 1 || mirror::isSettingValues())
         return;
 
     if (SongCurve curve (parameter); curve.getNumPoints() == 1 && ! juce::exactlyEqual (curve.getPointValue (0), moved.getPointValue (0)))
@@ -1257,12 +1192,6 @@ void setAutomationMode (te::Track& track, AutomationMode mode)
     }
 }
 
-void adoptAutomationMode (te::Track& track)
-{
-    if (auto state = findTrackState (track); state.isValid() && readAutomationMode (state) != fromTracktion (track.automationMode.get()))
-        writeAutomationMode (state, fromTracktion (track.automationMode.get()));
-}
-
 bool isWritingAutomation (const te::Edit& edit)
 {
     auto states = getTrackStates (edit);
@@ -1345,29 +1274,16 @@ void selectPoints (Selection& selection, const te::AutomatableParameter& paramet
 
 //==============================================================================
 AutomationWatcher::AutomationWatcher (te::Edit& e)
-    : edit (e),
-      wasPlaying (e.getTransport().isPlaying())
+    : edit (e)
 {
     e.getParameterChangeHandler().addListener (*this);
-    e.getTransport().addChangeListener (this);
-    e.state.addListener (this);
 }
 
 AutomationWatcher::~AutomationWatcher()
 {
-    // The Edit may have gone first: then so have its transport and its parameters' listeners.
+    // The Edit may have gone first: then so have its parameters' listeners.
     if (auto* e = edit.get())
-    {
-        e->state.removeListener (this);
-        e->getTransport().removeChangeListener (this);
         e->getParameterChangeHandler().removeListener (*this);
-    }
-}
-
-void AutomationWatcher::writingChanged()
-{
-    if (auto* e = edit.get(); e != nullptr && wasPlaying && recording == nullptr && isWritingAutomation (*e))
-        recording = std::make_unique<RecordingStep> (*e, "Record Automation");
 }
 
 void AutomationWatcher::pluginParameterChanged (te::AutomatableParameter& parameter, bool isFollowingAutomation)
@@ -1386,28 +1302,6 @@ void AutomationWatcher::pluginParameterChanged (te::AutomatableParameter& parame
     }
 }
 
-void AutomationWatcher::changeListenerCallback (juce::ChangeBroadcaster*)
-{
-    const auto playing = edit != nullptr && edit->getTransport().isPlaying();
-
-    if (playing == wasPlaying)
-        return;
-
-    wasPlaying = playing;
-
-    if (playing)
-    {
-        writingChanged();
-    }
-    else
-    {
-        // Tracktion writes what it recorded last as it hears of the stop, in this same round of messages: the step ends
-        // after it.
-        stopRecording = true;
-        triggerAsyncUpdate();
-    }
-}
-
 void AutomationWatcher::handleAsyncUpdate()
 {
     // Many parameters changed at once (a device made, a preset loaded) are no one's touch.
@@ -1415,23 +1309,5 @@ void AutomationWatcher::handleAsyncUpdate()
         lastTouched = changedAtOnce.back();
 
     changedAtOnce.clear();
-
-    // What Tracktion recorded becomes the song's, in the step.
-    if (std::exchange (stopRecording, false) && ! wasPlaying)
-    {
-        if (recording != nullptr && edit != nullptr)
-            adoptRecordedAutomation (*edit);
-
-        recording = nullptr;
-    }
-}
-
-void AutomationWatcher::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
-{
-    if (property != te::IDs::automationMode || edit == nullptr)
-        return;
-
-    if (auto* track = te::findTrackForState (*edit, tree))
-        adoptAutomationMode (*track);
 }
 } // namespace phazite

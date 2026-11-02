@@ -41,8 +41,7 @@ void reconcileClip (te::Edit&, ClipID);
 
 // The automation (model/automation/internal/Automation.h): the curve of each device's parameter gets the song's points
 // for it, each in seconds from its beat, as the tempo map has them now, with its value and its curve; Tracktion's curves
-// that the song hasn't are emptied. Not those of devices the song keeps curves for while an undo can bring them back, and
-// not a curve Tracktion records, until it stops (adoptRecordedAutomation()).
+// that the song hasn't are emptied. Not those of devices the song keeps curves for while an undo can bring them back.
 void reconcileAutomation (te::Edit&);
 
 // The same for one parameter's curve, after a change to it alone.

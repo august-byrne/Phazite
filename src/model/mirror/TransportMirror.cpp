@@ -17,10 +17,6 @@ void reconcileTransport (te::Edit& edit)
 {
     auto& transport = edit.getTransport();
 
-    // A recording loops as it records (model/transport/internal/Recording.h) and gets the song's loop back as it stops.
-    if (transport.isRecording())
-        return;
-
     if (const auto on = isLoopOn (edit); transport.looping.get() != on)
         transport.looping = on;
 

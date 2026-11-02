@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Automation by IDs and plain values (src/model/automation/AutomationModel.h): the parameters a track offers, the lanes it
 // shows as view state, points and their edits as named undo steps, shapes, automation that keeps its beats when the
-// tempo changes, the write modes and what touch records, the selected points' commands, and the parameter touched last.
+// tempo changes, the write modes (what they write, on Phazite's engine: EnginePlaybackTests.cpp), the selected points'
+// commands, and the parameter touched last.
 #include "GoldenFiles.h"
-#include "RealTimePlayback.h"
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/internal/Selection.h"
@@ -23,7 +24,6 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
-#include <cmath>
 
 namespace
 {
@@ -402,11 +402,6 @@ TEST_CASE ("Write modes are each track's, the song's, which Tracktion's tracks m
     CHECK (phazite::isWritingAutomation (*song.edit));
     CHECK_FALSE (phazite::getSongUndoManager (*song.edit).canUndo());
 
-    // Tracktion puts a track that wrote into latch itself as a pass ends, which the song takes in.
-    song.a->automationMode = te::AutomationMode::latch;
-    CHECK (phazite::getAutomationMode (context, a) == AutomationMode::latch);
-    phazite::setAutomationMode (context, a, AutomationMode::touch);
-
     // The commands set the selected tracks' modes.
     phazite::CommandRegistry registry;
     phazite::addAutomationCommands (registry, context);
@@ -422,43 +417,6 @@ TEST_CASE ("Write modes are each track's, the song's, which Tracktion's tracks m
 
     REQUIRE (registry.invoke ("automation.read"));
     CHECK_FALSE (phazite::isWritingAutomation (*song.edit));
-}
-
-TEST_CASE ("Touch writes what a control does while it is held, as one undo step")
-{
-    Song song;
-    auto& context = song.context;
-    const auto a = idOf (*song.a);
-    const phazite::test::RealTimePlayback playback (phazite::test::getEngine());
-    phazite::setAutomationMode (context, a, AutomationMode::touch);
-    auto volume = phazite::getVolume (context, a);
-
-    // Once the song plays (later in a slow build, such as ThreadSanitizer's).
-    auto& transport = song.edit->getTransport();
-    transport.setPosition (te::TimePosition());
-    transport.play (false);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&transport] { return transport.getPosition() > te::TimePosition::fromSeconds (0.2); },
-                                                   10000));
-
-    volume.beginGesture();
-    volume.setValue (0.3f);
-    phazite::test::RealTimePlayback::wait (300);
-    volume.setValue (0.6f);
-    phazite::test::RealTimePlayback::wait (300);
-    volume.endGesture();
-    phazite::test::RealTimePlayback::wait (200);
-    transport.stop (false, false);
-    phazite::test::RealTimePlayback::wait (300);
-
-    // It wrote the moves, from where the control was grabbed: the value before, then where it went.
-    const auto points = phazite::getAutomationPoints (context, song.volume());
-    REQUIRE (points.size() >= 2);
-    CHECK (points.front().beat.inBeats() > 0.0);
-    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.6f) < 0.01f; }));
-
-    // One step takes it all back.
-    phazite::undo (*song.edit);
-    CHECK (phazite::getAutomationPoints (context, song.volume()).empty());
 }
 
 TEST_CASE ("The parameter touched last is a control's, not automation's or a device's many at once")

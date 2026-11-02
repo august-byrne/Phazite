@@ -305,12 +305,7 @@ AutomationMode getAutomationMode (const ProjectContext& context, TrackID id)
 void setAutomationMode (ProjectContext& context, TrackID id, AutomationMode mode)
 {
     if (auto* track = findTrack (context, id))
-    {
         setAutomationMode (*track, mode);
-
-        if (auto* watcher = getAutomationWatcher (context))
-            watcher->writingChanged();
-    }
 }
 
 std::optional<ParameterRef> getLastTouchedParameter (const ProjectContext& context)
