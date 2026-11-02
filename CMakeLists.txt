@@ -147,6 +147,9 @@ target_sources(phazite_core PRIVATE
     src/devices/wavetable/Wavetable.h
     src/devices/wavetable/WavetableSynth.cpp
     src/devices/wavetable/WavetableSynth.h
+    src/engine/core/Handover.h
+    src/engine/nodes/DeviceRunner.cpp
+    src/engine/nodes/DeviceRunner.h
     src/model/arrangement/Arrangement.cpp
     src/model/arrangement/AudioClipModel.cpp
     src/model/arrangement/AudioClipModel.h
@@ -834,6 +837,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DrumSamplerTests.cpp
         tests/DspTests.cpp
         tests/EngineSetupTests.cpp
+        tests/EngineTests.cpp
         tests/EffectDeviceTests.cpp
         tests/EffectEditorTests.cpp
         tests/EqEditorTests.cpp

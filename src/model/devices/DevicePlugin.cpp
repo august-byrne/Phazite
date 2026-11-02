@@ -53,23 +53,12 @@ namespace
 
         return tempo / 60.0 / numerator * rate / te::ModifierCommon::getBarFraction (rateType) / sampleRate;
     }
-
-    // Counts a block as it ends, however the plug-in leaves it.
-    struct BlockCount
-    {
-        std::atomic<std::uint64_t>& blocks;
-        ~BlockCount() { blocks.fetch_add (1, std::memory_order_release); }
-    };
-
-    static_assert (std::atomic<std::uint64_t>::is_always_lock_free);
 } // namespace
 
 DevicePlugin::DevicePlugin (te::PluginCreationInfo creation, const devices::DeviceInfo& info, std::unique_ptr<devices::Processor> dsp)
     : te::Plugin (creation),
-      deviceInfo (info),
-      processor (std::move (dsp))
+      runner (info, std::move (dsp))
 {
-    jassert (devices::isValid (info));
     auto* undoManager = getUndoManager();
 
     for (const auto& description : info.parameters)
@@ -82,17 +71,8 @@ DevicePlugin::DevicePlugin (te::PluginCreationInfo creation, const devices::Devi
         auto* parameter = addParam (id, toString (description.name), devices::getRange (description));
         parameter->attachToCurrentValue (*stored);
         parameters.push_back (parameter);
-        currentValues.push_back (description.defaultValue);
-        targetValues.push_back (description.defaultValue);
-        previousValues.push_back (description.defaultValue);
-        glides.push_back (description.unit != devices::Unit::choice && description.unit != devices::Unit::toggle);
-        ranges.push_back (devices::getRange (description));
-        offsets.push_back (0.0f);
+        values.push_back (description.defaultValue);
     }
-
-    // An effect's mix, which this applies (an instrument has none).
-    if (info.kind == devices::DeviceKind::effect)
-        mixIndex = devices::findParameter (info, devices::mixParameterID);
 }
 
 DevicePlugin::~DevicePlugin()
@@ -105,18 +85,18 @@ DevicePlugin::~DevicePlugin()
 
 te::AutomatableParameter* DevicePlugin::findParameter (std::string_view id) const
 {
-    const auto index = devices::findParameter (deviceInfo, id);
+    const auto index = devices::findParameter (getDeviceInfo(), id);
     return index >= 0 ? parameters[(size_t) index].get() : nullptr;
 }
 
 juce::String DevicePlugin::getName() const
 {
-    return toString (deviceInfo.name);
+    return toString (getDeviceInfo().name);
 }
 
 juce::String DevicePlugin::getPluginType()
 {
-    return toString (deviceInfo.typeID);
+    return toString (getDeviceInfo().typeID);
 }
 
 juce::String DevicePlugin::getShortName (int)
@@ -131,12 +111,12 @@ juce::String DevicePlugin::getSelectableDescription()
 
 bool DevicePlugin::takesMidiInput()
 {
-    return deviceInfo.kind == devices::DeviceKind::instrument;
+    return runner.isInstrument();
 }
 
 bool DevicePlugin::isSynth()
 {
-    return deviceInfo.kind == devices::DeviceKind::instrument;
+    return runner.isInstrument();
 }
 
 bool DevicePlugin::producesAudioWhenNoAudioInput()
@@ -151,7 +131,7 @@ bool DevicePlugin::noTail()
 
 double DevicePlugin::getTailLength() const
 {
-    return processor->getTailSeconds();
+    return runner.getTailSeconds();
 }
 
 double DevicePlugin::getLatencySeconds()
@@ -171,7 +151,7 @@ void DevicePlugin::getChannelNames (juce::StringArray* ins, juce::StringArray* o
 
     // A sidechain comes in as two more inputs, which Tracktion fills from the source track: picking one wires the
     // source's two channels to them (te::Plugin::guessSidechainRouting()).
-    if (ins != nullptr && deviceInfo.hasSidechain)
+    if (ins != nullptr && getDeviceInfo().hasSidechain)
         ins->addArray (juce::StringArray { "Sidechain Left", "Sidechain Right" });
 }
 
@@ -183,27 +163,9 @@ te::Plugin::BusLayout DevicePlugin::getBusses() const
 
 void DevicePlugin::initialise (const te::PluginInitialisationInfo& info)
 {
-    processor->prepare (info.sampleRate, info.blockSizeSamples);
-    const auto stretch = std::max (info.blockSizeSamples, 512);
-    stereo.setSize (2, stretch);
+    runner.prepare (info.sampleRate, info.blockSizeSamples);
     tempoPosition.emplace (te::createPosition (edit.tempoSequence));
-    latencySamples = processor->getLatencySamples();
-    latencySeconds = latencySamples / info.sampleRate;
-    scope.setSampleRate (info.sampleRate);
-    sleepAfterSamples = std::max ((int) (sleepAfterSeconds * info.sampleRate), 2 * latencySamples);
-    silentSamples = 0;
-    asleep = false;
-    hasPreviousValues = false;
-
-    if (mixIndex >= 0)
-    {
-        dry.setSize (2, stretch);
-        appliedMix = currentValues[(size_t) mixIndex];
-
-        for (auto& delay : dryDelays)
-            delay.prepare (std::max (latencySamples, 1));
-    }
-
+    latencySeconds = runner.getLatencySamples() / info.sampleRate;
     updateSidechain();
 }
 
@@ -215,18 +177,13 @@ void DevicePlugin::initialiseWithoutStopping (const te::PluginInitialisationInfo
 void DevicePlugin::updateSidechain()
 {
     // On the message thread, as a new playback graph is built: Tracktion builds one when the source changes.
-    sidechainConnected.store (deviceInfo.hasSidechain && getSidechainSourceID().isValid() && getNumWires() > 0, std::memory_order_relaxed);
+    sidechainConnected.store (getDeviceInfo().hasSidechain && getSidechainSourceID().isValid() && getNumWires() > 0,
+                              std::memory_order_relaxed);
 }
 
 void DevicePlugin::reset()
 {
-    processor->reset();
-    silentSamples = 0;
-    asleep = false;
-    hasPreviousValues = false;
-
-    for (auto& delay : dryDelays)
-        delay.reset();
+    runner.reset();
 }
 
 int DevicePlugin::collectEvents (const te::PluginRenderContext& context)
@@ -246,7 +203,7 @@ int DevicePlugin::collectEvents (const te::PluginRenderContext& context)
 
     for (const auto& message : *midi)
     {
-        if (count == maximumEvents)
+        if (count == (int) events.size())
             break;
 
         const auto sample =
@@ -261,31 +218,27 @@ int DevicePlugin::collectEvents (const te::PluginRenderContext& context)
 
 void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
 {
-    const BlockCount count { blocksPlayed };
+    const engine::Handover<DeviceModulation>::Block held { modulations };
 
     // A device that looks ahead lets the sound through as it comes while low latency is on (model/engine/internal/EngineSetup.h).
     if (context.destBuffer == nullptr || context.bufferNumSamples <= 0 || isBypassedForLowLatency())
         return;
 
-    // Each parameter's value now. A continuous one that moved since the last block glides there over this one, in stretches
-    // of smoothingStep, rather than jumping, so automation and modulation don't step (docs/performance-audit.md, A7). One
-    // the device modulates itself starts from its value without Tracktion's modulation.
-    auto* plan = playingModulation.load (std::memory_order_acquire);
-    auto gliding = false;
+    // Each parameter's value now: one the device modulates itself without Tracktion's modulation.
+    auto* plan = held.get();
 
     for (size_t i = 0; i < parameters.size(); ++i)
     {
         const auto& parameter = *parameters[i];
-        const auto value = plan != nullptr && plan->isModulated[i] ? parameter.getCurrentBaseValue() : parameter.getCurrentValue();
-        targetValues[i] = devices::constrain (deviceInfo.parameters[i], value);
-        currentValues[i] = targetValues[i];
-        gliding = gliding || (glides[i] && hasPreviousValues && ! juce::exactlyEqual (previousValues[i], targetValues[i]));
+        values[i] = plan != nullptr && plan->plan.isModulated[i] ? parameter.getCurrentBaseValue() : parameter.getCurrentValue();
     }
 
-    const auto numEvents = collectEvents (context);
-    devices::ProcessContext block;
-    block.parameters = currentValues;
+    engine::DeviceRunner::Block block;
+    block.values = values;
+    block.events = std::span (events.data(), (size_t) collectEvents (context));
     block.isPlaying = context.isPlaying;
+    block.isRendering = edit.isRendering();
+    block.hasSidechain = sidechainConnected.load (std::memory_order_relaxed);
 
     auto numerator = 4;
 
@@ -297,190 +250,37 @@ void DevicePlugin::applyToBuffer (const te::PluginRenderContext& context)
         numerator = tempoPosition->getTimeSignature().numerator;
     }
 
-    // Modulated, it plays in stretches too, each with its modulators where it is.
     if (plan != nullptr)
+    {
         startModulation (*plan, block.tempo, numerator, context.isPlaying);
-
-    const auto inStretches = gliding || (plan != nullptr && ! plan->routes.empty());
-
-    auto& buffer = *context.destBuffer;
-    const auto start = context.bufferStartSample, numSamples = context.bufferNumSamples;
-    const auto isMono = buffer.getNumChannels() < 2;
-    const auto targetMix = mixIndex >= 0 ? targetValues[(size_t) mixIndex] : 1.0f;
-
-    // The sidechain's sound, after the device's own two channels. A graph built before the source changed may still
-    // play a block or two without it.
-    const auto hasSidechain = sidechainConnected.load (std::memory_order_relaxed) && buffer.getNumChannels() >= 4;
-
-    if (isSynth()) // its own channels, not a sidechain's
-        for (int channel = 0; channel < std::min (2, buffer.getNumChannels()); ++channel)
-            buffer.clear (channel, start, numSamples);
-
-    // Nothing to play: no events, nothing waiting in the device (a pad its editor played), and silence in (on its own
-    // channels and its sidechain's).
-    const auto isQuiet = [&buffer, start, numSamples] (int firstChannel, int numChannels)
-    {
-        for (int channel = firstChannel; channel < firstChannel + numChannels; ++channel)
-            if (buffer.getMagnitude (channel, start, numSamples) > silence)
-                return false;
-
-        return true;
-    };
-
-    const auto quietIn = numEvents == 0 && ! processor->isWaitingToPlay()
-                         && (isSynth() || isQuiet (0, std::min (2, buffer.getNumChannels()))) && (! hasSidechain || isQuiet (2, 2));
-
-    if (asleep && quietIn && ! edit.isRendering())
-    {
-        for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
-            buffer.clear (channel, start, numSamples);
-
-        keepValues();
-        return;
+        block.modulation = &plan->plan;
     }
 
-    asleep = false;
-
-    // What comes in, for the editor's displays: an effect's sound (an instrument's channels were cleared for it to play into).
-    const auto* inLeft = buffer.getReadPointer (0, start);
-    const auto* inRight = isMono ? inLeft : buffer.getReadPointer (1, start);
-
-    if (! isSynth())
-        scope.pushInput (inLeft, inRight, numSamples);
-
-    const float* sidechain[2] = {};
-
-    if (hasSidechain)
-    {
-        block.sidechain = sidechain;
-        block.numSidechainChannels = 2;
-    }
-
-    // A stretch at a time, as long as the scratch buffers prepared beforehand. A mono channel plays in stereo, through
-    // a scratch buffer, and gets the average of the two sides back.
-    int nextEvent = 0;
-
-    for (int done = 0; done < numSamples;)
-    {
-        const auto length = std::min (numSamples - done, inStretches ? smoothingStep : stereo.getNumSamples());
-
-        if (inStretches)
-            setStretchValues (plan, done, length, numSamples);
-
-        float* channels[2];
-
-        if (isMono)
-        {
-            const auto* mono = buffer.getReadPointer (0, start + done);
-            stereo.copyFrom (0, 0, mono, length);
-            stereo.copyFrom (1, 0, mono, length);
-            channels[0] = stereo.getWritePointer (0);
-            channels[1] = stereo.getWritePointer (1);
-        }
-        else
-        {
-            channels[0] = buffer.getWritePointer (0, start + done);
-            channels[1] = buffer.getWritePointer (1, start + done);
-        }
-
-        if (mixIndex >= 0) // what comes in, for the mix
-            for (int channel = 0; channel < 2; ++channel)
-                dry.copyFrom (channel, 0, channels[channel], length);
-
-        // This stretch's events, counted from its start.
-        const auto firstEvent = nextEvent;
-
-        while (nextEvent < numEvents && events[(size_t) nextEvent].sample < done + length)
-            events[(size_t) nextEvent++].sample -= done;
-
-        block.channels = channels;
-        block.numChannels = 2;
-        block.numSamples = length;
-        block.events = { events.data() + firstEvent, (size_t) (nextEvent - firstEvent) };
-
-        if (hasSidechain)
-        {
-            sidechain[0] = buffer.getReadPointer (2, start + done);
-            sidechain[1] = buffer.getReadPointer (3, start + done);
-        }
-
-        processor->process (block);
-
-        // Its mix, unless it plays something else for now (a compressor's key, to listen to); modulated, as it is now.
-        if (mixIndex >= 0)
-        {
-            const auto isMixModulated = plan != nullptr && plan->isModulated[(size_t) mixIndex];
-            mixWithDry (channels, length, processor->overridesMix() ? 1.0f : isMixModulated ? currentValues[(size_t) mixIndex] : targetMix);
-        }
-
-        if (isMono)
-        {
-            auto* mono = buffer.getWritePointer (0, start + done);
-
-            for (int i = 0; i < length; ++i)
-                mono[i] = 0.5f * (channels[0][i] + channels[1][i]);
-        }
-
-        done += length;
-    }
-
-    scope.pushOutput (buffer.getReadPointer (0, start), isMono ? buffer.getReadPointer (0, start) : buffer.getReadPointer (1, start),
-                      numSamples);
-    keepValues();
-
-    // Silent in and out long enough: asleep from the next block.
-    if (quietIn && isQuiet (0, std::min (2, buffer.getNumChannels())))
-    {
-        silentSamples = std::min (silentSamples + numSamples, sleepAfterSamples);
-        asleep = silentSamples >= sleepAfterSamples && ! edit.isRendering();
-    }
-    else
-    {
-        silentSamples = 0;
-    }
-
-    for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
-        buffer.clear (channel, start, numSamples);
-}
-
-void DevicePlugin::keepValues() noexcept
-{
-    std::copy (targetValues.begin(), targetValues.end(), previousValues.begin());
-    hasPreviousValues = true;
+    runner.process (*context.destBuffer, context.bufferStartSample, context.bufferNumSamples, block);
 }
 
 //==============================================================================
 void DevicePlugin::setModulation (std::unique_ptr<DeviceModulation> newModulation)
 {
-    // Those replaced before the audio thread last started a block that has since ended are no longer played.
-    const auto played = blocksPlayed.load (std::memory_order_acquire);
-    std::erase_if (replacedModulations, [played] (const auto& replaced) { return played >= replaced.second; });
-
-    playingModulation.store (newModulation.get(), std::memory_order_release);
-
-    if (modulation != nullptr)
-        replacedModulations.emplace_back (std::move (modulation), blocksPlayed.load (std::memory_order_acquire) + 2);
-
-    modulation = std::move (newModulation);
+    modulations.give (std::move (newModulation));
 }
 
-void DevicePlugin::startModulation (DeviceModulation& plan, double tempo, int numerator, bool isPlaying)
+void DevicePlugin::startModulation (DeviceModulation& modulation, double tempo, int numerator, bool isPlaying)
 {
     // Each source as the block starts: Tracktion has moved its modulators on to it, and its parameters' macros.
-    for (auto& source : plan.sources)
+    for (size_t i = 0; i < modulation.sources.size(); ++i)
     {
-        const auto value = source.macro != nullptr ? source.macro->getCurrentValue() : source.modifier->getCurrentValue();
-        source.isOn = source.macro != nullptr || source.modifier->enabledParam->getCurrentValue() >= 0.5f;
-        source.previous = source.started ? source.now : value;
-        source.now = value;
-        source.started = true;
+        const auto& tracktion = modulation.sources[i];
+        auto& source = modulation.plan.sources[i];
+        source.value = tracktion.macro != nullptr ? tracktion.macro->getCurrentValue() : tracktion.modifier->getCurrentValue();
+        source.isOn = tracktion.macro != nullptr || tracktion.modifier->enabledParam->getCurrentValue() >= 0.5f;
         source.followsWave = false;
 
-        if (source.lfo == nullptr)
+        if (tracktion.lfo == nullptr)
             continue;
 
         // An LFO with a wave of its cycle alone is followed through the block from where Tracktion's cycle is now.
-        const auto& lfo = *source.lfo;
+        const auto& lfo = *tracktion.lfo;
         const auto wave = static_cast<devices::LfoWave> (juce::roundToInt (lfo.waveParam->getCurrentValue()));
 
         if (! devices::isPeriodic (wave))
@@ -491,78 +291,6 @@ void DevicePlugin::startModulation (DeviceModulation& plan, double tempo, int nu
                          lfo.bipolarParam->getCurrentValue() >= 0.5f };
         source.phase = lfo.getCurrentPhase();
         source.cyclesPerSample = getCyclesPerSample (lfo, tempo, numerator, sampleRate, isPlaying);
-    }
-}
-
-void DevicePlugin::setStretchValues (const DeviceModulation* plan, int done, int length, int numSamples)
-{
-    // A continuous parameter that moved since the last block glides there, as far as the stretch's end.
-    const auto along = (float) (done + length) / (float) numSamples;
-
-    for (size_t i = 0; i < currentValues.size(); ++i)
-        currentValues[i] =
-            glides[i] && hasPreviousValues ? previousValues[i] + (targetValues[i] - previousValues[i]) * along : targetValues[i];
-
-    if (plan == nullptr)
-        return;
-
-    // Then a modulated one is moved by its sources where the stretch is: an LFO by its wave at the stretch's middle, a
-    // modulator or a macro by its value gliding as far as the stretch's end.
-    std::fill (offsets.begin(), offsets.end(), 0.0f);
-    const auto middle = done + length / 2;
-
-    for (const auto& route : plan->routes)
-    {
-        const auto& source = plan->sources[(size_t) route.source];
-
-        if (! source.isOn)
-            continue;
-
-        const auto value = source.followsWave
-                               ? devices::getLfoValue (source.shape, devices::movePhase (source.phase, middle * source.cyclesPerSample))
-                               : source.previous + (source.now - source.previous) * along;
-        offsets[(size_t) route.parameter] += route.amount * value;
-    }
-
-    for (size_t i = 0; i < currentValues.size(); ++i)
-        if (plan->isModulated[i])
-            currentValues[i] = devices::modulate (deviceInfo.parameters[i], ranges[i], currentValues[i], offsets[i]);
-}
-
-void DevicePlugin::mixWithDry (float* const* wet, int length, float targetMix)
-{
-    // The dry sound, delayed as much as the effect delays its own, so that the two line up.
-    if (latencySamples > 0)
-    {
-        for (int channel = 0; channel < 2; ++channel)
-        {
-            auto* samples = dry.getWritePointer (channel);
-            auto& delay = dryDelays[(size_t) channel];
-
-            for (int i = 0; i < length; ++i)
-            {
-                delay.push (samples[i]);
-                samples[i] = delay.read (latencySamples);
-            }
-        }
-    }
-
-    // Ramped from the mix the last stretch ended with, so a moving knob doesn't click; nothing to do at 100 %.
-    const auto from = appliedMix;
-    appliedMix = targetMix;
-
-    if (from >= 1.0f && targetMix >= 1.0f)
-        return;
-
-    for (int channel = 0; channel < 2; ++channel)
-    {
-        const auto* drySamples = dry.getReadPointer (channel);
-
-        for (int i = 0; i < length; ++i)
-        {
-            const auto mix = from + (targetMix - from) * (float) (i + 1) / (float) length;
-            wet[channel][i] = mix * wet[channel][i] + (1.0f - mix) * drySamples[i];
-        }
     }
 }
 

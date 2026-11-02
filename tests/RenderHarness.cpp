@@ -353,6 +353,33 @@ bool swings (const Fingerprint& fingerprint, size_t first, size_t end, float dec
     return is;
 }
 
+Difference getDifference (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b, double sampleRate)
+{
+    const auto length = std::min (a.getNumSamples(), b.getNumSamples());
+    auto loudest = 0.0f;
+    auto where = 0;
+
+    for (int channel = 0; channel < renderChannels; ++channel)
+    {
+        const auto* x = a.getReadPointer (std::min (channel, a.getNumChannels() - 1));
+        const auto* y = b.getReadPointer (std::min (channel, b.getNumChannels() - 1));
+
+        for (int i = 0; i < length; ++i)
+        {
+            if (const auto difference = std::abs (x[i] - y[i]); difference > loudest)
+            {
+                loudest = difference;
+                where = i;
+            }
+        }
+    }
+
+    if (a.getNumSamples() != b.getNumSamples())
+        return { 0.0f, length / sampleRate };
+
+    return { juce::Decibels::gainToDecibels (loudest, -100.0f), where / sampleRate };
+}
+
 double estimateFrequency (const juce::AudioBuffer<float>& audio, int channel, double sampleRate, double startSeconds, double seconds)
 {
     const auto start = (int) (startSeconds * sampleRate);
@@ -418,7 +445,10 @@ void checkGoldenRender (ProjectContext& context, const GoldenRender& golden)
     if (! differences.isEmpty())
         keepRender (candidateAudio, renderSampleRate, golden.name + "-" + candidate->getName());
 
-    INFO (("The candidate engine plays " + golden.name + " otherwise than the reference engine:\n  " + differences.joinIntoString ("\n  "))
+    const auto apart = getDifference (referenceAudio, candidateAudio, renderSampleRate);
+    INFO (("The candidate engine plays " + golden.name + " otherwise than the reference engine (sample by sample, up to "
+           + formatLevel (apart.peakDb) + " dBFS apart, at " + juce::String (apart.seconds, 4) + " s):\n  "
+           + differences.joinIntoString ("\n  "))
               .toStdString());
     CHECK (differences.isEmpty());
 }

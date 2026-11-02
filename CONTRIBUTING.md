@@ -51,6 +51,7 @@ Build Phazite first, as [docs/building.md](docs/building.md) describes: on Windo
 | `src/ui/` | What you see and touch, by area: the theme and design tokens, base controls, keys and keymaps, device editors, and one folder per view (playlist, piano roll, audio clip editor, mixer, browser, and the window's shell) |
 | `src/services/` | What the app keeps outside a project: settings, recent projects, the browser's library and the Phazite Sounds download |
 | `src/model/` | The project model, by area (commands, engine, project, transport, arrangement, notes, chords, mixer, automation, modulation, presets), without window code; the only code that uses Tracktion Engine |
+| `src/engine/` | Phazite's own playback engine, which plays what the model compiles from the song, without Tracktion (being built: [tracktion-migration.md](docs/tracktion-migration.md), T2) |
 | `src/devices/` | The DSP of Phazite's own instruments and effects, using JUCE's core and DSP modules only, so that a device could run on another engine |
 | `resources/` | Keymaps, song outlines, chord progressions, presets, icons and the Inter font |
 | `tests/` | The unit, golden and real-time tests, and the benchmarks (`phazite_tests`, with doctest) |
@@ -65,7 +66,7 @@ Build Phazite first, as [docs/building.md](docs/building.md) describes: on Windo
 
 The code is layered so that the UI can change without touching the rules of editing, every edit can be tested without a window, and parts of the engine could be replaced later ([design, section 24](docs/design.md#24-code-structure)):
 
-- **Dependencies point down:** the app uses the UI, the UI uses the services and the model, the services may use the model, and never the other way round. Every layer may use `src/devices/`, which uses none of them.
+- **Dependencies point down:** the app uses the UI, the UI uses the services and the model, the services may use the model, the model may use the engine (`src/engine/`), and never the other way round. Every layer may use `src/devices/`, which uses none of them.
 - **No window code below the UI**, and **Tracktion stays in the model**: the UI calls model functions that take and return Phazite's own types (IDs and plain values), never Tracktion's.
 - **The UI decides nothing about the project:** it runs a command or calls a model function, and every change to a project is one named undo step.
 - **Every user action is a command**, with a stable id such as `edit.undo`, a name and a description; default shortcuts go in the keymaps in `resources/keymaps/`, not in code.

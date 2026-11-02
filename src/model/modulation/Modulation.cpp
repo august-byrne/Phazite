@@ -666,11 +666,12 @@ namespace
         const auto sameSource = [] (const DeviceModulation::Source& x, const DeviceModulation::Source& y)
         { return x.modifier == y.modifier && x.macro == y.macro; };
 
-        const auto sameRoute = [] (const DeviceModulation::Route& x, const DeviceModulation::Route& y)
+        const auto sameRoute = [] (const engine::Modulation::Route& x, const engine::Modulation::Route& y)
         { return x.parameter == y.parameter && x.source == y.source && juce::exactlyEqual (x.amount, y.amount); };
 
+        const auto& routes = a.plan.routes;
         return std::equal (a.sources.begin(), a.sources.end(), b.sources.begin(), b.sources.end(), sameSource)
-               && std::equal (a.routes.begin(), a.routes.end(), b.routes.begin(), b.routes.end(), sameRoute);
+               && std::equal (routes.begin(), routes.end(), b.plan.routes.begin(), b.plan.routes.end(), sameRoute);
     }
 
     // Whether a modulation adds its source's value times its amount, as Phazite makes them: no offset or curve, and a
@@ -687,7 +688,8 @@ void updateDeviceModulation (DevicePlugin& device)
 {
     const auto& info = device.getDeviceInfo();
     auto modulation = std::make_unique<DeviceModulation>();
-    modulation->isModulated.assign (info.parameters.size(), false);
+    auto& plan = modulation->plan;
+    plan.isModulated.assign (info.parameters.size(), false);
 
     for (size_t i = 0; i < info.parameters.size(); ++i)
     {
@@ -718,14 +720,15 @@ void updateDeviceModulation (DevicePlugin& device)
                 added.macro = modulator.macro;
                 added.lfo = dynamic_cast<te::LFOModifier*> (modulator.modifier.get());
                 source = sources.insert (sources.end(), std::move (added));
+                plan.sources.emplace_back();
             }
 
-            modulation->routes.push_back ({ (int) i, (int) std::distance (sources.begin(), source), each.assignment->value.get() });
-            modulation->isModulated[i] = true;
+            plan.routes.push_back ({ (int) i, (int) std::distance (sources.begin(), source), each.assignment->value.get() });
+            plan.isModulated[i] = true;
         }
     }
 
-    if (modulation->routes.empty())
+    if (plan.routes.empty())
         modulation = nullptr;
 
     // As it was: left playing, rather than started again.

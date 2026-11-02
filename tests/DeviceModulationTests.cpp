@@ -242,13 +242,15 @@ TEST_CASE ("What modulates each of the project's devices follows its modulation 
 
     const auto* first = device.getModulation();
     REQUIRE (first != nullptr);
-    REQUIRE (first->routes.size() == 2);
+    const auto& plan = first->plan;
+    REQUIRE (plan.routes.size() == 2);
     REQUIRE (first->sources.size() == 2);
-    CHECK (first->isModulated[0]);
-    CHECK_FALSE (first->isModulated[1]); // the mode
-    CHECK (first->sources[(size_t) first->routes[0].source].lfo != nullptr);
-    CHECK (first->sources[(size_t) first->routes[1].source].macro != nullptr);
-    CHECK (first->routes[1].amount == doctest::Approx (-0.5f));
+    REQUIRE (plan.sources.size() == 2);
+    CHECK (plan.isModulated[0]);
+    CHECK_FALSE (plan.isModulated[1]); // the mode
+    CHECK (first->sources[(size_t) plan.routes[0].source].lfo != nullptr);
+    CHECK (first->sources[(size_t) plan.routes[1].source].macro != nullptr);
+    CHECK (plan.routes[1].amount == doctest::Approx (-0.5f));
 
     // Asked again with nothing changed, it plays on as it was.
     phazite::updateDeviceModulation (*edit);
@@ -258,7 +260,7 @@ TEST_CASE ("What modulates each of the project's devices follows its modulation 
     phazite::setModulation (*lfo, gain, -0.75f);
     phazite::test::dispatchPendingMessages();
     REQUIRE (device.getModulation() != nullptr);
-    CHECK (device.getModulation()->routes[0].amount == doctest::Approx (-0.75f));
+    CHECK (device.getModulation()->plan.routes[0].amount == doctest::Approx (-0.75f));
 
     phazite::removeModulation (*lfo, gain);
     phazite::removeModulation (*macro, gain);

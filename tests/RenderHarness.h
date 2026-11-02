@@ -78,6 +78,17 @@ bool isLouder (const Fingerprint&, size_t louder, size_t quieter, float decibels
 bool isBetween (const Fingerprint&, size_t block, float low, float high, const juce::String& why);
 bool swings (const Fingerprint&, size_t first, size_t end, float decibels, const juce::String& why);
 
+// How far apart two renders are, sample by sample: the loudest difference between them on either side, in dBFS, -100 for
+// none (which a fingerprint can't tell: a shift of a few samples, a change of phase), and where it is, in seconds. Renders
+// of different lengths differ at the shorter one's end.
+struct Difference
+{
+    float peakDb = -100.0f;
+    double seconds = 0.0;
+};
+
+Difference getDifference (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b, double sampleRate);
+
 // The frequency of a tone in a stretch of a side of audio, in hertz, from how often it crosses zero.
 double estimateFrequency (const juce::AudioBuffer<float>&, int channel, double sampleRate, double startSeconds, double seconds);
 

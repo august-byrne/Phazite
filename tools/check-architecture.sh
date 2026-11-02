@@ -24,25 +24,28 @@
 #   sh tools/check-architecture.sh --self-test   check the counting and the budget logic on built-in examples
 #                                                (every other mode does this first)
 # The rules (the layers: src/app uses src/ui, src/ui uses src/services and src/model, src/services uses
-# src/model, and src/model uses src/devices, the devices' engine-neutral DSP):
+# src/model, src/model uses src/engine, Phazite's engine-neutral playback engine, and src/engine uses
+# src/devices, the devices' engine-neutral DSP, which the layers above may use too):
 #   upward-includes           includes from model or services into ui or app, from model into services, from
-#                             ui into app, or from devices into model, services, ui or app
+#                             ui into app, from engine into model, services, ui or app, or from devices into
+#                             engine, model, services, ui or app
 #   model-window-includes     JUCE window modules (juce_gui_basics, juce_gui_extra, juce_opengl, juce_video)
-#                             included in model, services or devices
+#                             included in model, services, engine or devices
 #   model-window-references   JUCE window classes (juce::Component, juce::KeyPress...) named in model,
-#                             services or devices
+#                             services, engine or devices
 #   model-tracktion-includes  Tracktion included in model or services outside the prelude
 #   model-undo-steps          beginNewTransaction in model or services outside the undo code
 #   model-include-loops       model and services files whose includes lead back to themselves
 #   devices-tracktion         Tracktion, or the model's prelude, included in devices, and te:: and
 #                             tracktion:: names there
+#   engine-tracktion          the same in engine
 #   ui-tracktion-includes     Tracktion, the model's prelude or its internal/ headers (each area's Tracktion
 #                             side), included in ui
 #   ui-tracktion-references   te:: and tracktion:: names in ui
 #   ui-tracktion-aliases      using-declarations, aliases and typedefs in ui that would hide Tracktion names
 #   ui-undo-steps             calls that begin an undo step, in ui and app
-#   flat-files                C/C++ files directly in src/model, src/ui or src/devices instead of an area's
-#                             folder
+#   flat-files                C/C++ files directly in src/model, src/ui, src/engine or src/devices instead of
+#                             an area's folder
 #   unresolved-includes       #include "..." lines in src/, tests/ and tools/ that name no file with its exact
 #                             case (next to the including file, else from src/)
 #   cmake-sources             source paths in CMakeLists.txt that name no file exactly, and C/C++ files in src/
@@ -52,7 +55,7 @@
 #                             (docs/tracktion-migration.md); tracktion-other counts them in a model area that
 #                             isn't listed yet, and tracktion-services, tracktion-app and tracktion-tests in
 #                             src/services, src/app and tests/
-# Comments and the text of string and character literals don't count. A C/C++ file in src/ outside the five
+# Comments and the text of string and character literals don't count. A C/C++ file in src/ outside the six
 # layers fails the check whatever the budgets.
 # Exit codes: 0 = every count equals its budget (and every raise checked says why); 1 = a count differs from
 # its budget, or a file is in no layer; 2 = it couldn't run; 3 = the counts match, but a budget went up
@@ -131,7 +134,8 @@ function setup(    i, n, s, parts) {
     BUDGETS = "tools/architecture-budget.txt"
 
     ruleNames = "upward-includes model-window-includes model-window-references model-tracktion-includes"
-    ruleNames = ruleNames " model-undo-steps model-include-loops devices-tracktion ui-tracktion-includes ui-tracktion-references"
+    ruleNames = ruleNames " model-undo-steps model-include-loops devices-tracktion engine-tracktion ui-tracktion-includes"
+    ruleNames = ruleNames " ui-tracktion-references"
     ruleNames = ruleNames " ui-tracktion-aliases ui-undo-steps flat-files unresolved-includes cmake-sources"
     n = split(areas, parts, " ")
     for (i = 1; i <= n; i++) {
@@ -177,10 +181,10 @@ function setup(    i, n, s, parts) {
     split("", baseFrom)
 
     # What each rule counts, and what to do instead.
-    what["upward-includes"] = "includes from model or services into ui or app, from model into services, from ui into app, or from devices into model, services, ui or app"
-    instead["upward-includes"] = "dependencies point down (app -> ui -> services -> model -> devices): move what both need down a layer, or have the upper layer pass it in."
-    what["model-window-includes"] = "JUCE window modules or classes in src/model, src/services or src/devices (Tracktion" q "s headers bring them in without an include)"
-    instead["model-window-includes"] = "move window and key code to src/ui or src/app; the model uses juce_core, juce_events, juce_data_structures, juce_audio_basics, and juce_graphics for colours, and devices use juce_core, juce_audio_basics and juce_dsp."
+    what["upward-includes"] = "includes from model or services into ui or app, from model into services, from ui into app, from engine into model, services, ui or app, or from devices into engine, model, services, ui or app"
+    instead["upward-includes"] = "dependencies point down (app -> ui -> services -> model -> engine -> devices): move what both need down a layer, or have the upper layer pass it in."
+    what["model-window-includes"] = "JUCE window modules or classes in src/model, src/services, src/engine or src/devices (Tracktion" q "s headers bring them in without an include)"
+    instead["model-window-includes"] = "move window and key code to src/ui or src/app; the model uses juce_core, juce_events, juce_data_structures, juce_audio_basics, and juce_graphics for colours, and the engine and devices use juce_core, juce_audio_basics and juce_dsp."
     what["model-window-references"] = what["model-window-includes"]
     instead["model-window-references"] = instead["model-window-includes"]
     what["model-tracktion-includes"] = "Tracktion includes in model or services outside the prelude"
@@ -191,6 +195,8 @@ function setup(    i, n, s, parts) {
     instead["model-include-loops"] = "move what both need into a lower header, or split the file."
     what["devices-tracktion"] = "Tracktion or the prelude included in src/devices, and te:: and tracktion:: names there"
     instead["devices-tracktion"] = "keep a device" q "s DSP engine-neutral: its thin Tracktion plug-in in src/model/devices passes it what the engine gives."
+    what["engine-tracktion"] = "Tracktion or the prelude included in src/engine, and te:: and tracktion:: names there"
+    instead["engine-tracktion"] = "keep Phazite" q "s engine engine-neutral: the model (src/model/playback) compiles what it plays and hands Tracktion" q "s objects to it behind an interface of the engine" q "s own."
     what["ui-tracktion-includes"] = "Tracktion, the prelude or the model" q "s internal/ headers included in src/ui"
     instead["ui-tracktion-includes"] = "include the model header outside internal/ that offers what the UI needs, or add a model function that takes and returns Phazite" q "s own types."
     what["ui-tracktion-references"] = "te:: and tracktion:: in src/ui"
@@ -199,7 +205,7 @@ function setup(    i, n, s, parts) {
     instead["ui-tracktion-aliases"] = "write them out with te::."
     what["ui-undo-steps"] = "calls starting an undo step in src/ui and src/app"
     instead["ui-undo-steps"] = "a command with an undoTarget, or a model function that starts its own step."
-    what["flat-files"] = "C/C++ files directly in src/model, src/ui or src/devices"
+    what["flat-files"] = "C/C++ files directly in src/model, src/ui, src/engine or src/devices"
     instead["flat-files"] = "put it in its area" q "s folder."
     what["unresolved-includes"] = "#include " DQ "..." DQ " in src/, tests/ or tools/ naming no file exactly"
     instead["unresolved-includes"] = "give the path from src/ (or a same-folder bare name) with its exact case."
@@ -358,6 +364,7 @@ function layerOf(path) {
     if (index(path, "src/services/") == 1) return "services"
     if (index(path, "src/ui/") == 1) return "ui"
     if (index(path, "src/app/") == 1) return "app"
+    if (index(path, "src/engine/") == 1) return "engine"
     if (index(path, "src/devices/") == 1) return "devices"
     return ""
 }
@@ -380,10 +387,10 @@ function treeLine(line,    path, lineno, text, s) {
     s = strip(text)
     if (s ~ reInclude) takeInclude(path, lineno, text, s)
     if (curTracktion != "" && index(s, "::")) hitLine(curTracktion, path, lineno, text, count(s, reTracktionName))
-    if (curLayer == "model" || curLayer == "services" || curLayer == "devices") {
+    if (curLayer == "model" || curLayer == "services" || curLayer == "engine" || curLayer == "devices") {
         if (index(s, "juce::")) hitLine("model-window-references", path, lineno, text, count(s, reWindowClass))
-        if (curLayer == "devices") {
-            if (index(s, "::")) hitLine("devices-tracktion", path, lineno, text, count(s, reTracktionName))
+        if (curLayer == "engine" || curLayer == "devices") {
+            if (index(s, "::")) hitLine(curLayer "-tracktion", path, lineno, text, count(s, reTracktionName))
         }
         else if (index(s, "beginNewTransaction") && !(path in isUndoCode))
             hitLine("model-undo-steps", path, lineno, text, count(s, reModelUndo))
@@ -413,11 +420,11 @@ function takeInclude(path, lineno, text, s,    delim, rest, k, target, res) {
         if (delim == DQ && (index(res, "src/model/") == 1 || index(res, "src/services/") == 1))
             addEdge(component(path), component(res))
     }
-    else if (curLayer == "devices") {
+    else if (curLayer == "engine" || curLayer == "devices") {
         # The prelude counts as Tracktion only, though it is in the model too.
         if (target ~ reWindowModule) hitLine("model-window-includes", path, lineno, text, 1)
-        if (target ~ reTracktionModule || (res in isPrelude)) hitLine("devices-tracktion", path, lineno, text, 1)
-        else if (index(res, "src/model/") == 1 || index(res, "src/services/") == 1 || index(res, "src/ui/") == 1 || index(res, "src/app/") == 1)
+        if (target ~ reTracktionModule || (res in isPrelude)) hitLine(curLayer "-tracktion", path, lineno, text, 1)
+        else if (index(res, "src/model/") == 1 || index(res, "src/services/") == 1 || index(res, "src/ui/") == 1 || index(res, "src/app/") == 1 || (curLayer == "devices" && index(res, "src/engine/") == 1))
             hitLine("upward-includes", path, lineno, text, 1)
     }
     else if (curLayer == "ui") {
@@ -547,7 +554,7 @@ function countLoops(    c, list, n, i) {
     }
 }
 
-# Files in no layer, and files directly in src/model, src/ui or src/devices.
+# Files in no layer, and files directly in src/model, src/ui, src/engine or src/devices.
 function countFiles(    i, f, rest) {
     for (i = 1; i <= nfiles; i++) {
         f = files[i]
@@ -556,6 +563,7 @@ function countFiles(    i, f, rest) {
         rest = ""
         if (index(f, "src/model/") == 1) rest = substr(f, 11)
         else if (index(f, "src/ui/") == 1) rest = substr(f, 8)
+        else if (index(f, "src/engine/") == 1) rest = substr(f, 12)
         else if (index(f, "src/devices/") == 1) rest = substr(f, 13)
         if (rest == "" || index(rest, "/") > 0) continue
         hit("flat-files", f, 1)
@@ -809,7 +817,7 @@ function underBlock(r, n) {
 
 function noLayerBlock(    i) {
     blank()
-    say("These C/C++ files are in no layer the architecture rules know (src/app, src/ui, src/services, src/model, src/devices):")
+    say("These C/C++ files are in no layer the architecture rules know (src/app, src/ui, src/services, src/model, src/engine, src/devices):")
     for (i = 1; i <= nnolayer; i++) {
         say("    " noLayer[i])
         if (gha) say("::error file=" noLayer[i] ",title=Architecture layers::This file is in no layer the architecture rules know.")
@@ -948,7 +956,14 @@ src/devices/x/Dsp.h:5:#  include <juce_gui_basics/juce_gui_basics.h>
 src/devices/x/Dsp.cpp:1:#include "Dsp.h"
 src/devices/x/Dsp.cpp:2:te::Edit* e; juce::Component* c; juce::AudioBuffer<float> b; // tracktion::Edit
 src/devices/x/Dsp.cpp:3:s.beginNewTransaction ("x"); auto t = "te::Edit";
+src/devices/x/Dsp.h:6:#include "engine/x/Eng.h"
 src/devices/Flat.h:1:// a file outside an area's folder
+src/engine/x/Eng.h:1:#include "devices/x/Dsp.h"
+src/engine/x/Eng.h:2:#include <tracktion_graph/tracktion_graph.h>
+src/engine/x/Eng.h:3:#include "model/b/One.h"
+src/engine/x/Eng.cpp:1:#include "Eng.h"
+src/engine/x/Eng.cpp:2:te::Edit* e; juce::KeyPress k; juce::AudioBuffer<float> b; // tracktion::Edit
+src/engine/Flat.cpp:1:int y;
 src/Fixture.cpp:1:int x;
 src/ui/Fixture.txt:1:te::NotCxx
 tests/Fixture.cpp:1:#include "TestHelpers.h"
@@ -970,6 +985,7 @@ target_sources(fixture PRIVATE
     src/services/Fixture.cpp "src/ui/Fixture.cpp" src/ui/Fixture2.cpp src/ui/views/Fixture3.cpp
     src/app/Fixture.cpp src/app/MainWindow.h src/Fixture.cpp
     src/devices/x/Dsp.h src/devices/x/Dsp.cpp src/devices/Flat.h
+    src/engine/x/Eng.h src/engine/x/Eng.cpp src/engine/Flat.cpp
     src/ui/fixture.cpp # src/ui/Commented.cpp
     "a # inside quotes" src/ui/Gone.cpp)
 target_sources(fixture_tests PRIVATE tests/Fixture.cpp tests/TestHelpers.h) # tools/ needs no listing
@@ -978,18 +994,19 @@ CMAKE
 
 fixture_expectations() {
     cat <<'EXPECT'
-@expect upward-includes 6
+@expect upward-includes 8
 @expect model-window-includes 3
-@expect model-window-references 4
+@expect model-window-references 5
 @expect model-tracktion-includes 1
 @expect model-undo-steps 1
 @expect model-include-loops 2
 @expect devices-tracktion 3
+@expect engine-tracktion 2
 @expect ui-tracktion-includes 4
 @expect ui-tracktion-references 8
 @expect ui-tracktion-aliases 3
 @expect ui-undo-steps 2
-@expect flat-files 5
+@expect flat-files 6
 @expect unresolved-includes 5
 @expect cmake-sources 3
 @expect tracktion-a 2
