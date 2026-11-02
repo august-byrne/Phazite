@@ -106,10 +106,13 @@ juce::String WavetablePlugin::getTableName (int osc) const
 
 void WavetablePlugin::loadTable (int osc)
 {
-    auto& synth = getSynth();
+    loadOscillatorTable (getSynth(), edit, state, osc);
+}
 
+void loadOscillatorTable (devices::WavetableSynth& synth, const te::Edit& edit, const juce::ValueTree& state, int osc)
+{
     // A file that is gone or can't be read leaves the oscillator on its factory table.
-    if (const auto file = getTableFile (osc); file.existsAsFile())
+    if (const auto file = findProjectFile (edit, state[schema::getOscillatorWavetableFile (osc)].toString()); file.existsAsFile())
     {
         if (auto table = readWavetable (edit.engine, file))
         {

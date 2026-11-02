@@ -12,6 +12,7 @@
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -185,6 +186,21 @@ ParameterHandle getPan (ProjectContext& context, TrackID id)
     return fader != nullptr ? makeParameterHandle (fader, fader->panParam->paramID, "Change Pan") : ParameterHandle();
 }
 
+namespace
+{
+    // A channel's meter (a track's by its ID, the master's by 0) in Phazite's own engine, while it plays the project.
+    engine::LevelMeter* findOwnMeter (ProjectContext& context, std::int64_t id)
+    {
+        auto* edit = getEdit (context);
+
+        if (auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr)
+            if (auto* strip = session->getPlayer().findStrip (id))
+                return &strip->getChannel().getMeter();
+
+        return nullptr;
+    }
+} // namespace
+
 LevelSource getLevel (ProjectContext& context, TrackID id)
 {
     if (getEdit (context) == nullptr || ! id.isValid())
@@ -200,7 +216,8 @@ LevelSource getLevel (ProjectContext& context, TrackID id)
 
             auto* t = track.get();
             return t != nullptr ? getLevelMeasurer (*t) : nullptr;
-        });
+        },
+        [&context, id] { return findOwnMeter (context, (std::int64_t) id.getRaw()); });
 }
 
 ParameterHandle getMasterVolume (ProjectContext& context)
@@ -219,7 +236,8 @@ LevelSource getMasterLevel (ProjectContext& context)
             auto* e = edit.get();
             auto* playback = e != nullptr ? e->getCurrentPlaybackContext() : nullptr;
             return playback != nullptr ? &playback->masterLevels : nullptr;
-        });
+        },
+        [&context] { return findOwnMeter (context, 0); });
 }
 
 std::optional<MuteSolo> getMuteSolo (const ProjectContext& context, TrackID id)

@@ -8,6 +8,7 @@
 #include "engine/core/Engine.h"
 #include "engine/core/Handover.h"
 #include "engine/core/TempoMap.h"
+#include "engine/nodes/Channel.h"
 #include "engine/nodes/DeviceRunner.h"
 #include "engine/transport/Click.h"
 
@@ -378,7 +379,7 @@ TEST_CASE ("A new plan with another tempo leaves the playhead on its beat")
     engine::Engine player;
     player.prepare (rate, 256);
     player.setPlan (makeClickPlan());
-    player.render (36032); // to sample 36032, beat 1.5013
+    player.render (141 * 256); // to sample 36096, beat 1.504: a render plays whole blocks
 
     // At 60 BPM a beat is a second: from beat 1.5, the next click is half a second on.
     player.setPlan (makeClickPlan ({}, 60.0));
@@ -392,6 +393,150 @@ TEST_CASE ("A new plan with another tempo leaves the playhead on its beat")
             first = i;
 
     // The click's first sample is silent (its attack starts at 0): its second is the first heard.
-    // Beat 1.5013 is at sample 72064 at 60 BPM, and beat 2 at 96000.
-    CHECK (first - 1 == 96000 - 72064);
+    // Beat 1.504 is at sample 72192 at 60 BPM, and beat 2 at 96000.
+    CHECK (first - 1 == 96000 - 72192);
+}
+
+//==============================================================================
+namespace
+{
+// An instrument that plays a single sample of 0.5 for each note it is played, as many samples late as it says it looks ahead.
+class Ticker final : public dev::Processor
+{
+public:
+    static inline const dev::DeviceInfo info { .typeID = "testTicker", .name = "Ticker", .kind = dev::DeviceKind::instrument };
+
+    explicit Ticker (int lookAhead)
+        : latency (lookAhead)
+    {
+    }
+
+    void prepare (double, int) override {}
+    void reset() override { numDue = 0; }
+    int getLatencySamples() const override { return latency; }
+
+    void process (const dev::ProcessContext& context) override
+    {
+        for (const auto& event : context.events)
+            if (event.type == dev::NoteEvent::Type::noteOn && numDue < (int) due.size())
+                due[(size_t) numDue++] = event.sample + latency;
+
+        for (int i = 0; i < numDue;)
+        {
+            if (due[(size_t) i] < context.numSamples)
+            {
+                for (int channel = 0; channel < context.numChannels; ++channel)
+                    context.channels[channel][due[(size_t) i]] += 0.5f;
+
+                due[(size_t) i] = due[(size_t) --numDue];
+            }
+            else
+            {
+                due[(size_t) i++] -= context.numSamples;
+            }
+        }
+    }
+
+private:
+    int latency = 0;
+    std::array<int, 64> due {};
+    int numDue = 0;
+};
+
+// A track of a plan: its notes, into one instrument, which is made and prepared for it.
+engine::Plan::Strip makeTrack (std::int64_t id, const dev::DeviceInfo& info, std::unique_ptr<dev::Processor> instrument,
+                               std::vector<engine::NoteSequence::Note> notes, int maximumBlockSize)
+{
+    engine::Plan::Strip strip;
+    strip.id = id;
+    strip.state = std::make_shared<engine::StripState>();
+    strip.state->prepare (rate, maximumBlockSize);
+    strip.notes = std::make_shared<const engine::NoteSequence> (std::move (notes), std::vector<engine::NoteSequence::Control> {});
+    auto node = std::make_shared<engine::DeviceNode> (info, std::move (instrument));
+    node->getRunner().prepare (rate, maximumBlockSize);
+    strip.latency = node->getRunner().getLatencySamples();
+    strip.devices.push_back (std::move (node));
+    strip.hasInstrument = true;
+    return strip;
+}
+
+// The master of a plan's tracks, each delayed to line up with the latest.
+engine::Plan::Strip makeMaster (const engine::Plan& plan, int maximumBlockSize)
+{
+    engine::Plan::Strip master;
+    master.state = std::make_shared<engine::StripState>();
+    master.state->prepare (rate, maximumBlockSize);
+
+    for (const auto& strip : plan.strips)
+        master.latency = std::max (master.latency, strip.latency);
+
+    for (int i = 0; i < (int) plan.strips.size(); ++i)
+    {
+        const auto delay = master.latency - plan.strips[(size_t) i].latency;
+        master.inputs.push_back ({ i, delay > 0 ? std::make_shared<engine::Delay> (delay) : nullptr });
+    }
+
+    return master;
+}
+} // namespace
+
+TEST_CASE ("The engine plays a track's notes on their samples, and ends what sounds at the loop's end and starts it again")
+{
+    auto plan = makeClickPlan (engine::Plan::BeatRange { 1.0, 2.0 });
+    plan->metronome = false;
+
+    // A note from beat 0.5 to 3, around the loop's start and end; at 120 BPM a beat is 24000 samples.
+    plan->strips.push_back (makeTrack (1, HeldLevel::info, std::make_unique<HeldLevel>(), { { 0.5, 3.0, 60, 0.8f } }, blockSize));
+    plan->strips.push_back (makeMaster (*plan, blockSize));
+
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (std::move (plan));
+    const auto played = player.render (24000 * 3);
+
+    CHECK (played.getSample (0, 11999) == 0.0f);
+    CHECK (played.getSample (0, 12000) == 0.5f); // the note starts
+    CHECK (played.getSample (0, 47998) == 0.5f);
+    CHECK (played.getSample (0, 47999) == 0.0f); // the loop's last sample: the note ends there
+    CHECK (played.getSample (0, 48000) == 0.5f); // and starts again with the loop
+    CHECK (played.getSample (1, 48000) == 0.5f);
+}
+
+TEST_CASE ("The engine's master lines its tracks up, each delayed as much as the latest is late")
+{
+    auto plan = makeClickPlan();
+    plan->metronome = false;
+
+    // A note on beat 1 on two tracks, one of whose instruments plays 100 samples late.
+    plan->strips.push_back (makeTrack (1, Ticker::info, std::make_unique<Ticker> (100), { { 1.0, 1.5, 60, 0.8f } }, blockSize));
+    plan->strips.push_back (makeTrack (2, Ticker::info, std::make_unique<Ticker> (0), { { 1.0, 1.5, 60, 0.8f } }, blockSize));
+    plan->strips.push_back (makeMaster (*plan, blockSize));
+    REQUIRE (engine::Engine::getOutputLatency (*plan) == 100);
+
+    // A render plays ahead by the master's latency, so both ticks land together on the beat's sample.
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (std::move (plan));
+    const auto played = player.render (48000);
+
+    CHECK (played.getSample (0, 23999) == 0.0f);
+    CHECK (played.getSample (0, 24000) == 1.0f);
+    CHECK (played.getSample (0, 24001) == 0.0f);
+}
+
+TEST_CASE ("A channel's pan keeps a sound's power, at its level in the middle")
+{
+    const auto middle = engine::getPanGains (0.0f);
+    CHECK (middle.left == doctest::Approx (1.0f));
+    CHECK (middle.right == doctest::Approx (1.0f));
+
+    const auto right = engine::getPanGains (1.0f);
+    CHECK (right.left == doctest::Approx (0.0f).epsilon (1.0e-6));
+    CHECK (right.right == doctest::Approx (std::sqrt (2.0f)));
+
+    for (const auto pan : { -0.8f, -0.3f, 0.25f, 0.6f })
+    {
+        const auto gains = engine::getPanGains (pan);
+        CHECK (gains.left * gains.left + gains.right * gains.right == doctest::Approx (2.0f));
+    }
 }

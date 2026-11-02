@@ -322,6 +322,10 @@ void SongFollower::timerCallback()
 
         if (! recording)
             mirror::reconcileTransport (edit);
+
+        // Tracktion plays live MIDI while it records, and Phazite's own engine again after (T2 step 9 changes that).
+        if (auto* session = findSession (edit))
+            session->followLiveMidi();
     }
 
     if (! isSongPlaying (edit) || isLoopOn (edit) || transport.isRecording())

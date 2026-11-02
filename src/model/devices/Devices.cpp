@@ -52,6 +52,60 @@ std::span<const devices::DeviceInfo* const> getOwnDevices()
     return own;
 }
 
+namespace
+{
+    template <typename Device>
+    std::unique_ptr<devices::Processor> make()
+    {
+        return std::make_unique<Device>();
+    }
+
+    struct OwnDevice
+    {
+        const devices::DeviceInfo* info;
+        std::unique_ptr<devices::Processor> (*create)();
+    };
+
+    const OwnDevice ownDevices[] = {
+        { &devices::Synth::info, make<devices::Synth> },
+        { &devices::WavetableSynth::info, make<devices::WavetableSynth> },
+        { &devices::DrumSampler::info, make<devices::DrumSampler> },
+        { &devices::Equalizer::info, make<devices::Equalizer> },
+        { &devices::FilterEffect::info, make<devices::FilterEffect> },
+        { &devices::Compressor::info, make<devices::Compressor> },
+        { &devices::Multiband::info, make<devices::Multiband> },
+        { &devices::Limiter::info, make<devices::Limiter> },
+        { &devices::Saturator::info, make<devices::Saturator> },
+        { &devices::Delay::info, make<devices::Delay> },
+        { &devices::Reverb::info, make<devices::Reverb> },
+        { &devices::Phaser::info, make<devices::Phaser> },
+        { &devices::Flanger::info, make<devices::Flanger> },
+        { &devices::Vocoder::info, make<devices::Vocoder> },
+        { &devices::StereoExpander::info, make<devices::StereoExpander> },
+    };
+
+    const OwnDevice* findOwn (std::string_view typeID)
+    {
+        for (const auto& device : ownDevices)
+            if (device.info->typeID == typeID)
+                return &device;
+
+        return nullptr;
+    }
+} // namespace
+
+const devices::DeviceInfo* findOwnDevice (std::string_view typeID)
+{
+    const auto* device = findOwn (typeID);
+    return device != nullptr ? device->info : nullptr;
+}
+
+std::unique_ptr<devices::Processor> createOwnDevice (std::string_view typeID)
+{
+    const auto* device = findOwn (typeID);
+    return device != nullptr ? device->create() : nullptr;
+}
+
 bool isInstrument (te::Plugin& device)
 {
     return device.isSynth() && dynamic_cast<te::RackInstance*> (&device) == nullptr;

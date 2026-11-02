@@ -58,6 +58,9 @@ juce::AudioDeviceManager& EngineContext::getAudioDeviceManager()
 
 double EngineContext::getCpuUsage() const
 {
+    if (impl->playback.isOn())
+        return impl->playback.getEngine().getLoad();
+
     return impl->engine.getDeviceManager().getCpuUsage();
 }
 

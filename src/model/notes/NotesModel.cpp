@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -388,6 +389,13 @@ TrackID auditionNotes (ProjectContext& context, ClipID id, const std::vector<int
     if (track == nullptr || ! hasInstrument (*track))
         return {};
 
+    // Through Phazite's own engine while it plays the project (docs/tracktion-migration.md, T2).
+    if (auto* session = findPlayingSession (clip->edit))
+    {
+        session->playGuideNotes ((juce::int64) track->itemID.getRawID(), pitches, velocity);
+        return getTrackID (*track);
+    }
+
     // Guide notes go into the track as live MIDI does, so the playback graph has to be running.
     clip->edit.getTransport().ensureContextAllocated();
     const auto channel = clip->getMidiChannel().isValid() ? clip->getMidiChannel() : te::MidiChannel (1);
@@ -401,7 +409,12 @@ TrackID auditionNotes (ProjectContext& context, ClipID id, const std::vector<int
 void stopAuditioning (ProjectContext& context, TrackID id)
 {
     if (auto* track = findAudioTrack (context, id))
+    {
+        if (auto* session = findSession (track->edit))
+            session->stopGuideNotes ((juce::int64) track->itemID.getRawID());
+
         track->turnOffGuideNotes();
+    }
 }
 
 //==============================================================================

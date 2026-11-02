@@ -4,6 +4,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceStates.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -120,6 +121,21 @@ namespace
             auto audio = renderEdit (*copy, seconds);
             setEdit (opened, nullptr);
             return audio;
+        }
+    };
+
+    // Phazite's own engine (docs/tracktion-migration.md, T2), playing the song of the open project.
+    class OwnEngineRender final : public RenderEngine
+    {
+    public:
+        juce::String getName() const override { return "phazite"; }
+
+        juce::AudioBuffer<float> render (ProjectContext& context, double seconds) override
+        {
+            auto* edit = getEdit (context);
+            REQUIRE (edit != nullptr);
+            const auto samples = (int) std::lround (seconds * renderSampleRate);
+            return renderWithOwnEngine (*edit, samples, renderSampleRate, renderBlockSize);
         }
     };
 
@@ -430,14 +446,29 @@ std::unique_ptr<RenderEngine> makeCandidateEngine()
     return std::make_unique<TracktionOnACopy>();
 }
 
+std::unique_ptr<RenderEngine> makeOwnEngine()
+{
+    return std::make_unique<OwnEngineRender>();
+}
+
 void checkGoldenRender (ProjectContext& context, const GoldenRender& golden)
 {
+    // Played otherwise by Phazite's engine on purpose: its render is the golden one.
+    if (golden.ownEngine == OwnEngine::differs)
+    {
+        const auto own = makeOwnEngine();
+        const auto audio = own->render (context, golden.seconds);
+        const auto text = checkRender (audio, renderSampleRate, golden, golden.name + "-" + own->getName());
+        compareWithGolden (text, audio, renderSampleRate, golden, golden.name + "-" + own->getName());
+        return;
+    }
+
     const auto reference = makeReferenceEngine();
     const auto referenceAudio = reference->render (context, golden.seconds);
     const auto referenceText = checkRender (referenceAudio, renderSampleRate, golden, golden.name + "-" + reference->getName());
     compareWithGolden (referenceText, referenceAudio, renderSampleRate, golden, golden.name + "-" + reference->getName());
 
-    const auto candidate = makeCandidateEngine();
+    const auto candidate = golden.ownEngine == OwnEngine::matches ? makeOwnEngine() : makeCandidateEngine();
     const auto candidateAudio = candidate->render (context, golden.seconds);
     const auto candidateText = checkRender (candidateAudio, renderSampleRate, golden, golden.name + "-" + candidate->getName());
     const auto differences = compareFingerprints (referenceText, candidateText);

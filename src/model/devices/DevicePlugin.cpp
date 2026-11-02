@@ -13,30 +13,6 @@ namespace
         return juce::String (text.data(), text.size());
     }
 
-    // A MIDI message as a device's event, or nothing for the messages devices don't use. The channel doesn't matter.
-    std::optional<devices::NoteEvent> toNoteEvent (const juce::MidiMessage& message, int sample)
-    {
-        using Type = devices::NoteEvent::Type;
-
-        if (message.isNoteOn())
-            return devices::NoteEvent { Type::noteOn, sample, message.getNoteNumber(), message.getFloatVelocity() };
-
-        if (message.isNoteOff()) // a note-on of velocity 0 too
-            return devices::NoteEvent { Type::noteOff, sample, message.getNoteNumber(), message.getFloatVelocity() };
-
-        if (message.isAllNotesOff() || message.isAllSoundOff())
-            return devices::NoteEvent { Type::allNotesOff, sample, 0, 0.0f };
-
-        if (message.isPitchWheel())
-            return devices::NoteEvent { Type::pitchBend, sample, 0, (float) (message.getPitchWheelValue() - 8192) / 8192.0f };
-
-        if (message.isController())
-            return devices::NoteEvent { Type::controller, sample, message.getControllerNumber(),
-                                        (float) message.getControllerValue() / 127.0f };
-
-        return {};
-    }
-
     // How far an LFO's cycle moves in a sample, as Tracktion's LFO moves it from block to block (its LFOModifierTimer):
     // its rate in hertz, or in parts of a bar at the tempo. One that follows the song's position stands still while the
     // song doesn't play.
@@ -209,7 +185,7 @@ int DevicePlugin::collectEvents (const te::PluginRenderContext& context)
         const auto sample =
             juce::jlimit (0, lastSample, juce::roundToInt ((message.getTimeStamp() + context.midiBufferOffset) * sampleRate));
 
-        if (const auto event = toNoteEvent (message, sample))
+        if (const auto event = engine::toNoteEvent (message, sample))
             events[(size_t) count++] = *event;
     }
 

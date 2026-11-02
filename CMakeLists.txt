@@ -149,12 +149,23 @@ target_sources(phazite_core PRIVATE
     src/devices/wavetable/WavetableSynth.h
     src/engine/core/Engine.cpp
     src/engine/core/Engine.h
+    src/engine/core/EventQueue.h
     src/engine/core/Handover.h
     src/engine/core/Plan.h
     src/engine/core/TempoMap.cpp
     src/engine/core/TempoMap.h
+    src/engine/nodes/Channel.cpp
+    src/engine/nodes/Channel.h
+    src/engine/nodes/DeviceNode.cpp
+    src/engine/nodes/DeviceNode.h
     src/engine/nodes/DeviceRunner.cpp
     src/engine/nodes/DeviceRunner.h
+    src/engine/nodes/LevelMeter.cpp
+    src/engine/nodes/LevelMeter.h
+    src/engine/nodes/NoteSequence.cpp
+    src/engine/nodes/NoteSequence.h
+    src/engine/nodes/Strip.cpp
+    src/engine/nodes/Strip.h
     src/engine/transport/Click.cpp
     src/engine/transport/Click.h
     src/model/arrangement/Arrangement.cpp
@@ -315,8 +326,10 @@ target_sources(phazite_core PRIVATE
     src/model/notes/internal/Notes.h
     src/model/playback/PlaybackHost.cpp
     src/model/playback/PlaybackSession.cpp
+    src/model/playback/SongPlayer.cpp
     src/model/playback/internal/PlaybackHost.h
     src/model/playback/internal/PlaybackSession.h
+    src/model/playback/internal/SongPlayer.h
     src/model/presets/PresetModel.h
     src/model/presets/Presets.cpp
     src/model/presets/internal/Presets.h

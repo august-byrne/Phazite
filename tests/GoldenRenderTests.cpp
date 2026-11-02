@@ -597,19 +597,21 @@ TEST_SUITE ("golden")
         phazite::test::checkGoldenRender (song.context, golden ("wavetable",
                                                                 "two chords on Phazite's wavetable synth, its two oscillators in "
                                                                 "unison, an envelope sweeping each note's table.",
-                                                                4.0, soundsLikeTheWavetable));
+                                                                4.0, soundsLikeTheWavetable)
+                                                            .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: three chords on Phazite's synth as it is made")
     {
-        renders (addSynthSong,
-                 golden ("synth", "three chords on Phazite's synth as it is made, then their release.", 4.0, soundsLikeChords));
+        renders (addSynthSong, golden ("synth", "three chords on Phazite's synth as it is made, then their release.", 4.0, soundsLikeChords)
+                                   .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: two bars of a beat on Phazite's drum sampler with its kit")
     {
         renders (addDrumSong,
-                 golden ("drums", "two bars of kick, snare and hi-hat on Phazite's drum sampler with its kit.", 4.0, soundsLikeTheDrums));
+                 golden ("drums", "two bars of kick, snare and hi-hat on Phazite's drum sampler with its kit.", 4.0, soundsLikeTheDrums)
+                     .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: a tone played plain, then 6 dB quieter by its clip's gain")
@@ -647,7 +649,8 @@ TEST_SUITE ("golden")
     TEST_CASE ("Golden render: an alias plays what its original does, a note added later too")
     {
         renders (addAliasSong,
-                 golden ("aliases", "a chord and a note on Phazite's synth, and an alias of their clip.", 4.0, soundsLikeAnAlias));
+                 golden ("aliases", "a chord and a note on Phazite's synth, and an alias of their clip.", 4.0, soundsLikeAnAlias)
+                     .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: volume automation through bent lines, a hold and a jump")
@@ -671,6 +674,7 @@ TEST_SUITE ("golden")
 
     TEST_CASE ("Golden render: notes on the beats of a song at 90 BPM in 3/4")
     {
-        renders (addTempoSong, golden ("tempo", "a short note on every beat of a song at 90 BPM in 3/4.", 4.0, soundsLikeBeatsAt90));
+        renders (addTempoSong, golden ("tempo", "a short note on every beat of a song at 90 BPM in 3/4.", 4.0, soundsLikeBeatsAt90)
+                                   .on (phazite::test::OwnEngine::matches));
     }
 }

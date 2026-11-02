@@ -3,10 +3,14 @@
 // from the song, and the transport the model's commands drive through it while it plays the project.
 #include "EnginePlayback.h"
 #include "TestSong.h"
+#include "devices/synth/Synth.h"
 #include "engine/transport/Click.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/mixer/LevelSource.h"
+#include "model/mixer/MixerModel.h"
+#include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
@@ -60,7 +64,8 @@ TEST_CASE ("The engine's tempo map places beats where Tracktion's tempo sequence
         map.appendChild (signature, nullptr);
         phazite::mirror::reconcileTempoMap (edit);
 
-        const auto plan = phazite::compilePlan (edit, { .sampleRate = 48000.0, .isRender = true });
+        phazite::SongPlayer player (edit);
+        const auto plan = player.compile (48000.0, 512, true);
 
         for (auto at = 0.0; at < beat + 8.0; at += 0.37)
         {
@@ -141,4 +146,53 @@ TEST_CASE ("Phazite's engine clicks the metronome on each beat's sample, and Tra
     // Clicks at 0 and half a second, each heard from its second sample (its first is silent).
     CHECK (findFirstSound (played) == 1);
     CHECK (findFirstSound (played, 12000) == 24000 + 1);
+}
+
+TEST_CASE ("Phazite's engine plays a track's notes through Phazite's synth, which the track's meter and the master's show")
+{
+    TestSong song;
+    song.setTempo (120.0);
+    song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 4.0);
+    song.addChord (clip, { 60, 64, 67 }, 0.0, 2.0);
+    EnginePlayback playback;
+    auto level = phazite::getLevel (song.context, song.firstTrack);
+    auto master = phazite::getMasterLevel (song.context);
+
+    song.run ("transport.playStop");
+    const auto played = playback.play (0.5);
+    CHECK (played.getMagnitude (0, 0, played.getNumSamples()) > 0.01f);
+
+    // Its meters read Phazite's engine.
+    level.refresh();
+    master.refresh();
+    REQUIRE (level.isMeasuring());
+    CHECK (level.getAndClearLevel (0) > -40.0f);
+    CHECK (master.getAndClearLevel (1) > -40.0f);
+
+    // A value set by hand reaches what plays at once, with no new plan: the track turned all the way down is silent once its
+    // fader has eased there.
+    song.setVolume (song.firstTrack, -100.0f);
+    playback.play (0.05);
+    const auto quiet = playback.play (0.2);
+    CHECK (quiet.getMagnitude (0, 0, quiet.getNumSamples()) == 0.0f);
+}
+
+TEST_CASE ("The piano roll's guide notes play through Phazite's engine while the song is stopped")
+{
+    TestSong song;
+    song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 4.0);
+    EnginePlayback playback;
+    playback.play (0.05);
+
+    const auto track = phazite::auditionNotes (song.context, clip, { 60 }, 100);
+    REQUIRE (track == song.firstTrack);
+    const auto sounding = playback.play (0.2);
+    CHECK (sounding.getMagnitude (0, 0, sounding.getNumSamples()) > 0.01f);
+
+    phazite::stopAuditioning (song.context, track);
+    playback.play (2.0); // its release
+    const auto after = playback.play (0.2);
+    CHECK (after.getMagnitude (0, 0, after.getNumSamples()) < 0.001f);
 }

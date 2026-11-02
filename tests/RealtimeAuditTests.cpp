@@ -611,6 +611,23 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords on Phazite's synth through a track's EQ and fader into the master")
+    {
+        phazite::test::TestSong song;
+        song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+        song.addEffect (song.firstTrack, phazite::devices::Equalizer::typeID);
+        song.setPan (song.firstTrack, 0.3f);
+        const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (clip, { 48 + (beat % 2) * 5, 52, 55, 59 }, beat, 0.75);
+
+        const auto m = playPhaziteAndMeasure (song.context);
+        report ("Phazite's engine: chords on the synth", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: volume automation and an LFO on pan")
     {
         auto edit = phazite::createSongEdit (phazite::test::getEngine());

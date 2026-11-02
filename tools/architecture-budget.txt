@@ -32,13 +32,13 @@ tracktion-automation         179
 tracktion-base                70
 tracktion-chords              73
 tracktion-commands            31
-tracktion-devices            170
+tracktion-devices            175
 tracktion-engine             166
 tracktion-mirror             242
 tracktion-mixer              651
 tracktion-modulation         122
 tracktion-notes              155
-tracktion-playback            11
+tracktion-playback            23
 tracktion-presets             83
 tracktion-project            122
 tracktion-transport          287

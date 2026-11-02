@@ -6,6 +6,7 @@
 // device's callback; a render makes an engine of its own and calls it in a loop (render()).
 #pragma once
 
+#include "EventQueue.h"
 #include "Handover.h"
 #include "Plan.h"
 
@@ -46,12 +47,24 @@ public:
     // thread). Before the first block after a locate, where it was asked to be.
     double getPlayheadBeat() const noexcept;
 
+    // A note or controller played live into a track's instrument (the computer keyboard, a MIDI input, the piano roll's
+    // guide notes), from any thread: it plays in the audio thread's next block, as far into it as it came after the last
+    // block started, so that live notes keep their timing (at a block's delay). Dropped if 1024 wait already.
+    void playLive (std::int64_t track, devices::NoteEvent) noexcept;
+
+    // How much of each block's time the engine takes, from 0 to 1, eased (any thread).
+    double getLoad() const noexcept { return load.load (std::memory_order_relaxed); }
+
     // The audio thread: plays a block into the outputs (every channel the same). Real-time safe.
     void process (float* const* outputs, int numOutputs, int numSamples) noexcept;
 
     // A render (on the thread that calls it, not in real time): plays numSamples, from where the playhead is, playing,
     // into a stereo buffer that it makes, in blocks of the prepared size. The plan must have been given.
     juce::AudioBuffer<float> render (int numSamples);
+
+    // How late the master's sound comes out, in samples, for a plan: its devices' and its tracks' latency (delay
+    // compensation), which a render plays ahead of so that its sound starts on time.
+    static int getOutputLatency (const Plan&) noexcept;
 
 private:
     double sampleRate = 44100.0;
@@ -85,16 +98,40 @@ private:
 
     // The audio thread's transport: where the playhead is, in samples from the song's start, and in beats (to stay on its
     // beat when a plan with another tempo comes); and the plan it last played.
+    // Whether every track's notes stop (playback stopped or jumped) and those sounding where it plays from start, at the
+    // next stretch played.
     struct Transport
     {
         bool playing = false;
         std::int64_t sample = 0;
         double beat = 0.0;
         const Plan* plan = nullptr;
+        bool notesOff = false, chase = true;
     } transport;
+
+    bool rendering = false;
 
     void takeCommands (const Plan&) noexcept;
     void playSpan (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
+    void playStrips (const Plan&, int offset, int numSamples) noexcept;
+    void addNotes (const Plan::Strip&, const Plan&, int numSamples) noexcept;
+    bool endsAtLoop = false; // the stretch played ends at the loop's end
+
+    // Live notes: those waiting, from any thread; and those of the block played, each at its sample.
+    struct LiveEvent
+    {
+        std::int64_t track = 0;
+        devices::NoteEvent event {};
+        double milliseconds = 0.0;
+    };
+
+    EventQueue<LiveEvent, 1024> liveQueue;
+    std::array<LiveEvent, 256> liveEvents {};
+    int numLiveEvents = 0;
+    double lastBlockMilliseconds = 0.0;
+    void takeLiveEvents (int numSamples) noexcept;
+
+    std::atomic<double> load { 0.0 };
 
     // The metronome: its two clicks (made in prepare()), and the one playing, where it is.
     juce::AudioBuffer<float> click, accentClick;

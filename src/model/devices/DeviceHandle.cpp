@@ -6,6 +6,7 @@
 #include "internal/ParameterHandle.h"
 #include "internal/Wavetables.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
@@ -118,10 +119,29 @@ bool DeviceHandle::setWavetableFile (int osc, const juce::File& file) const
     return device != nullptr && phazite::setWavetableFile (*device, osc, file);
 }
 
+namespace
+{
+    // The device as Phazite's own engine plays it, while it plays the project (docs/tracktion-migration.md, T2): what its
+    // editor shows and plays is that one's.
+    engine::DeviceRunner* findOwnRunner (te::Plugin& device)
+    {
+        if (auto* session = findPlayingSession (device.edit))
+            if (auto* node = session->getPlayer().findDevice ((juce::int64) device.itemID.getRawID()))
+                return &node->getRunner();
+
+        return nullptr;
+    }
+} // namespace
+
 devices::DeviceScope* DeviceHandle::getScope() const
 {
     if (auto* device = dynamic_cast<DevicePlugin*> (pluginOf (impl)))
+    {
+        if (auto* own = findOwnRunner (*device))
+            return &own->getScope();
+
         return &device->getScope();
+    }
 
     return nullptr;
 }
@@ -129,7 +149,12 @@ devices::DeviceScope* DeviceHandle::getScope() const
 devices::Processor* DeviceHandle::getProcessorBase() const
 {
     if (auto* device = dynamic_cast<DevicePlugin*> (pluginOf (impl)))
+    {
+        if (auto* own = findOwnRunner (*device))
+            return &own->getProcessor();
+
         return &device->getProcessor();
+    }
 
     return nullptr;
 }

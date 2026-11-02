@@ -121,16 +121,36 @@ Fingerprint renderFingerprint (ProjectContext&, double seconds);
 std::unique_ptr<RenderEngine> makeReferenceEngine();
 std::unique_ptr<RenderEngine> makeCandidateEngine();
 
+// Phazite's own engine, rendering the open project's song (model/playback/internal/PlaybackSession.h: renderWithOwnEngine()).
+std::unique_ptr<RenderEngine> makeOwnEngine();
+
 //==============================================================================
 // A golden render: the open project's song rendered for some seconds, whose render is checked before it is compared with
 // its golden file, so that a broken render (silent, or with the feature it shows not working) fails there and never
 // becomes the golden file: check() says whether it sounds as it should, with CHECK_MESSAGEs that say why not.
+// How Phazite's own engine plays a golden render (docs/tracktion-migration.md, T2): not yet, while it doesn't play all the
+// song holds (the candidate is then Tracktion's, on a copy of the song); as Tracktion does, its render the candidate compared
+// with Tracktion's; or otherwise, on purpose, as T2's table says, its render then the golden one, Tracktion's not compared.
+enum class OwnEngine
+{
+    notYet,
+    matches,
+    differs
+};
+
 struct GoldenRender
 {
     juce::String name;  // its golden file: tests/golden/renders/<name>.json
     juce::String about; // what it plays, which the golden file says
     double seconds = 4.0;
     std::function<bool (const Fingerprint&, const juce::AudioBuffer<float>&)> check;
+    OwnEngine ownEngine = OwnEngine::notYet;
+
+    GoldenRender on (OwnEngine how) &&
+    {
+        ownEngine = how;
+        return std::move (*this);
+    }
 };
 
 // Renders the song through the reference engine, checks the render and compares it with the golden file (which

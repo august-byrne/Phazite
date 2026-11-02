@@ -4,6 +4,7 @@
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/notes/internal/Notes.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
@@ -122,12 +123,19 @@ bool setLiveMidiTrack (te::AudioTrack& track)
     if (! instance->isRecordingEnabled (track.itemID))
         instance->setRecordingEnabled (track.itemID, true);
 
+    // Phazite's own engine plays it, while it plays the project (docs/tracktion-migration.md, T2).
+    if (auto* session = findSession (edit))
+        session->followLiveMidi();
+
     return true;
 }
 
 void routeLiveMidiInput (te::Edit& edit)
 {
     edit.getTransport().ensureContextAllocated();
+
+    if (auto* session = findSession (edit))
+        session->followLiveMidi();
 
     // Capture's seconds: Tracktion gives every input the same length, which Phazite leaves at none for audio inputs.
     if (const auto input = getAllMidiInputs (edit.engine))

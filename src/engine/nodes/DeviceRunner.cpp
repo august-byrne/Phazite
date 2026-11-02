@@ -5,6 +5,29 @@
 
 namespace phazite::engine
 {
+std::optional<devices::NoteEvent> toNoteEvent (const juce::MidiMessage& message, int sample)
+{
+    using Type = devices::NoteEvent::Type;
+
+    if (message.isNoteOn())
+        return devices::NoteEvent { Type::noteOn, sample, message.getNoteNumber(), message.getFloatVelocity() };
+
+    if (message.isNoteOff()) // a note-on of velocity 0 too
+        return devices::NoteEvent { Type::noteOff, sample, message.getNoteNumber(), message.getFloatVelocity() };
+
+    if (message.isAllNotesOff() || message.isAllSoundOff())
+        return devices::NoteEvent { Type::allNotesOff, sample, 0, 0.0f };
+
+    if (message.isPitchWheel())
+        return devices::NoteEvent { Type::pitchBend, sample, 0, (float) (message.getPitchWheelValue() - 8192) / 8192.0f };
+
+    if (message.isController())
+        return devices::NoteEvent { Type::controller, sample, message.getControllerNumber(),
+                                    (float) message.getControllerValue() / 127.0f };
+
+    return {};
+}
+
 DeviceRunner::DeviceRunner (const devices::DeviceInfo& deviceInfo, std::unique_ptr<devices::Processor> dsp)
     : info (deviceInfo),
       processor (std::move (dsp))

@@ -32,7 +32,11 @@ protected:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
 
 private:
-    int getFactorySound (int pad) const; // the factory sound it names, or its own in the default kit
     void loadPad (int pad);
 };
+
+// Loads what a pad plays into a drum sampler, from a state that names it as the plug-in's does (its own, or the song's SOUNDS
+// of its device, which Phazite's engine plays: Schema.h): its file, if it can be read, or else the factory sound it names,
+// or its own in the default kit.
+void loadPadSound (devices::DrumSampler&, const te::Edit&, const juce::ValueTree& state, int pad);
 } // namespace phazite

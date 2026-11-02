@@ -17,6 +17,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -56,6 +57,9 @@ struct Modulation
     std::vector<Route> routes;
     std::vector<bool> isModulated; // by the parameter's index
 };
+
+// A MIDI message as a device's event at a sample, or nothing for the messages devices don't use. The channel doesn't matter.
+std::optional<devices::NoteEvent> toNoteEvent (const juce::MidiMessage&, int sample);
 
 class DeviceRunner
 {

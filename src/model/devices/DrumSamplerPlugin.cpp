@@ -30,6 +30,13 @@ namespace
 
         return sound;
     }
+
+    // The factory sound a pad's state names, or the pad's own in the default kit.
+    int getFactorySound (const juce::ValueTree& state, int pad)
+    {
+        const auto index = devices::findFactoryDrum (state[schema::getPadSound (pad)].toString().toStdString());
+        return index >= 0 ? index : pad;
+    }
 } // namespace
 
 DrumSamplerPlugin::DrumSamplerPlugin (te::PluginCreationInfo creation)
@@ -49,27 +56,24 @@ juce::File DrumSamplerPlugin::getPadFile (int pad) const
     return findProjectFile (edit, state[schema::getPadSoundFile (pad)].toString());
 }
 
-int DrumSamplerPlugin::getFactorySound (int pad) const
-{
-    const auto index = devices::findFactoryDrum (state[schema::getPadSound (pad)].toString().toStdString());
-    return index >= 0 ? index : pad;
-}
-
 juce::String DrumSamplerPlugin::getPadName (int pad) const
 {
     if (const auto file = getPadFile (pad); file != juce::File())
         return file.getFileNameWithoutExtension();
 
-    const auto name = devices::getFactoryDrumNames()[(size_t) getFactorySound (pad)];
+    const auto name = devices::getFactoryDrumNames()[(size_t) getFactorySound (state, pad)];
     return juce::String (name.data(), name.size());
 }
 
 void DrumSamplerPlugin::loadPad (int pad)
 {
-    auto& sampler = getSampler();
+    loadPadSound (getSampler(), edit, state, pad);
+}
 
+void loadPadSound (devices::DrumSampler& sampler, const te::Edit& edit, const juce::ValueTree& state, int pad)
+{
     // A file that is gone or can't be read leaves the pad with its factory sound.
-    if (const auto file = getPadFile (pad); file.existsAsFile())
+    if (const auto file = findProjectFile (edit, state[schema::getPadSoundFile (pad)].toString()); file.existsAsFile())
     {
         if (auto sound = readSound (edit.engine, file))
         {
@@ -78,7 +82,7 @@ void DrumSamplerPlugin::loadPad (int pad)
         }
     }
 
-    const auto index = getFactorySound (pad);
+    const auto index = getFactorySound (state, pad);
     sampler.setSound (pad, index != pad ? devices::getFactoryDrum (index) : nullptr);
 }
 

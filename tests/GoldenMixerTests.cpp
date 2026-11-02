@@ -48,9 +48,9 @@ juce::String aboutGolden (const juce::String& about)
 }
 
 void checkChange (TestSong& song, const std::function<void()>& change, const char* name, const juce::String& about,
-                  const phazite::test::ChangeCheck& check)
+                  const phazite::test::ChangeCheck& check, phazite::test::OwnEngine ownEngine = phazite::test::OwnEngine::notYet)
 {
-    phazite::test::checkGoldenChange (song.context, change, { name, aboutGolden (about), 4.0, {} }, check);
+    phazite::test::checkGoldenChange (song.context, change, { name, aboutGolden (about), 4.0, {}, ownEngine }, check);
 }
 
 juce::File writeTone (TestSong& song, const char* name, double frequency)
@@ -103,7 +103,7 @@ void addEffectSource (TestSong& song)
 
 // One of Phazite's effects on the master, as it is made but for the settings given, which make it audible on the source.
 void checkEffect (const char* typeID, const char* name, std::initializer_list<std::pair<const char*, float>> settings,
-                  const juce::String& about)
+                  const juce::String& about, phazite::test::OwnEngine ownEngine = phazite::test::OwnEngine::differs)
 {
     TestSong song;
     addEffectSource (song);
@@ -122,7 +122,8 @@ void checkEffect (const char* typeID, const char* name, std::initializer_list<st
             const auto changes = differSomewhere (before, after, 1.0f);
             CHECK_MESSAGE (changes, "the effect should change the sound somewhere by more than 1 dB");
             return isBetween (after, 1, -60.0f, 6.0f, "the song plays through it") && changes;
-        });
+        },
+        ownEngine);
 }
 
 // Reads the first seconds of a WAV file in stereo (a mono file on both sides).
