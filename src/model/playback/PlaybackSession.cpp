@@ -41,6 +41,9 @@ PlaybackSession::PlaybackSession (te::Edit& e, PlaybackHost& h)
 {
     liveMidi.playing = &host.getEngine();
     player.readLive (host.getFileReader(), host.getEngine().getBlocksPlayed());
+    player.setPluginGestureListener ([this] (const ParameterRef& parameter, bool starting)
+                                     { writer.pluginGestureChanged (parameter, starting); });
+    edit.getParameterChangeHandler().addListener (*this);
     editState.addListener (this);
     getSessions().push_back (this);
     host.add (*this);
@@ -60,6 +63,8 @@ PlaybackSession::~PlaybackSession()
             instance->removeConsumer (&liveMidi);
 
         holdTracktion (false);
+        edit.getParameterChangeHandler().removeListener (*this);
+        player.letGoOfPlugins();
     }
 
     host.remove (*this);
@@ -77,6 +82,15 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
     // A value set by hand plays at once; anything else, in a new plan.
     if (isInSong (tree) && ! player.takeValue (tree, property))
         triggerAsyncUpdate();
+}
+
+void PlaybackSession::pluginParameterChanged (te::AutomatableParameter& parameter, bool isFollowingAutomation)
+{
+    // A plug-in's value set by hand (as Tracktion keeps it) plays at once too.
+    if (! isFollowingAutomation)
+        player.takeValueSetByHand (getParameterRef (parameter), parameter.getCurrentExplicitValue());
+
+    writer.parameterChanged (parameter, isFollowingAutomation);
 }
 
 bool PlaybackSession::isPlayingProject() const

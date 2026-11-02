@@ -823,6 +823,93 @@ TEST_CASE ("A device's automation moves its parameter on the song's control poin
 
 namespace
 {
+// A device that takes its blocks whole (as a plug-in in its helper does), and keeps the changes it was given, each at its
+// sample from the song's start.
+class WholeBlocks final : public dev::Processor
+{
+public:
+    static inline const dev::ParameterInfo parameters[] = { { .id = "a", .name = "A", .defaultValue = 0.5f },
+                                                            { .id = "b", .name = "B", .defaultValue = 0.5f } };
+    static inline const dev::DeviceInfo info { .typeID = "testWholeBlocks", .name = "Whole Blocks", .parameters = parameters };
+
+    std::vector<dev::ParameterChange> changes;
+    int calls = 0;
+
+    void prepare (double, int) override { changes.reserve (4096); }
+    void reset() override {}
+    bool takesWholeBlocks() const noexcept override { return true; }
+
+    void process (const dev::ProcessContext& context) override
+    {
+        ++calls;
+
+        for (const auto& change : context.changes)
+            changes.push_back ({ change.parameter, (int) played + change.sample, change.value });
+
+        played += context.numSamples;
+    }
+
+private:
+    std::int64_t played = 0;
+};
+} // namespace
+
+TEST_CASE ("A device that takes its blocks whole gets each in one call, its automation's values on the song's control points as changes")
+{
+    auto device = std::make_unique<WholeBlocks>();
+    auto& whole = *device;
+    engine::DeviceNode node (WholeBlocks::info, std::move (device));
+    node.getRunner().prepare (rate, 512);
+    node.setValue (0, 0.25f);
+    const auto curve = std::make_shared<const engine::Curve> (std::vector<engine::CurvePoint> { { 0.0, 0.0f, 0.0f }, { 1.0, 1.0f, 0.0f } });
+    const engine::ParameterCurve automation[] = { { 0, curve } };
+    juce::AudioBuffer<float> buffer (2, 512);
+    constexpr double samplesPerBeat = 24000.0;
+    std::int64_t sample = 0;
+
+    const auto play = [&] (int numSamples, std::span<const engine::ParameterCurve> automated)
+    {
+        engine::DeviceRunner::Block block;
+        block.isPlaying = true;
+        block.sample = sample;
+        block.automationBeat = block.beat = sample / samplesPerBeat;
+        block.beatsPerSample = 1.0 / samplesPerBeat;
+        buffer.clear();
+        node.process (buffer, 0, numSamples, block, automated);
+        sample += numSamples;
+    };
+
+    // Blocks of any size, each in one call: A at its curve's value on the control point at or before each block's start,
+    // then on each control point after, where the curve rises.
+    for (const auto samplesInBlock : { 100, 37, 512, 1, 64, 300 })
+        play (samplesInBlock, automation);
+
+    CHECK (whole.calls == 6);
+    std::set<int> samples;
+
+    for (const auto& change : whole.changes)
+    {
+        CHECK (change.parameter == 0);
+        const auto point = change.sample / engine::controlPointSpacing * engine::controlPointSpacing;
+        CHECK (change.value == doctest::Approx (curve->getValueAt (point / samplesPerBeat)));
+        samples.insert (change.sample);
+    }
+
+    for (int point = engine::controlPointSpacing; point < sample; point += engine::controlPointSpacing)
+        CHECK (samples.contains (point));
+
+    // Without its automation, A goes back to its value set by hand, once; B, never moved, never goes.
+    whole.changes.clear();
+    play (256, {});
+    play (256, {});
+    REQUIRE (whole.changes.size() == 1);
+    CHECK (whole.changes[0].parameter == 0);
+    CHECK (whole.changes[0].sample == (int) sample - 512);
+    CHECK (whole.changes[0].value == doctest::Approx (0.25f));
+}
+
+namespace
+{
 // A modulator's parameters at their defaults, with some set.
 std::vector<float> getModulatorValues (dev::ModulatorKind kind, std::initializer_list<std::pair<std::string_view, float>> set = {})
 {

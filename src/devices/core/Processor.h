@@ -28,6 +28,14 @@ struct NoteEvent
     float value = 0.0f; // a note's velocity (from 0 to 1), or the bend's or controller's value
 };
 
+// A parameter's value from a sample of the block on, for a device that takes its blocks whole (takesWholeBlocks()).
+struct ParameterChange
+{
+    int parameter = 0;  // its index in the device's DeviceInfo
+    int sample = 0;     // within the block, from 0
+    float value = 0.0f; // in its range
+};
+
 // One block to process.
 struct ProcessContext
 {
@@ -42,6 +50,11 @@ struct ProcessContext
 
     std::span<const NoteEvent> events {}; // in time order
     std::span<const float> parameters {}; // each parameter's value now, in the order and ranges of the device's DeviceInfo
+
+    // For a device that takes its blocks whole: the values of the parameters that automation or modulation moves, each at
+    // the block's start and on each control point after where it changes, and each that they move no more at its value
+    // again, in time order; nothing for those set by hand alone, which reach it otherwise.
+    std::span<const ParameterChange> changes {};
 
     double tempo = 120.0;     // beats per minute at the block's start, for rates in time with the song
     double beat = 0.0;        // where the song is at the block's start, in beats (quarter notes), for sweeps in time with it
@@ -73,6 +86,11 @@ public:
     // Whether its thin plug-in may let it sleep once what comes in and what it plays have been silent a while: not a
     // plug-in, which may play with nothing coming in (an arpeggiator's own pattern, a drone).
     virtual bool sleepsOnSilence() const noexcept { return true; }
+
+    // Whether it takes a block whole, with its moved parameters' values as changes at their samples (ProcessContext::
+    // changes), rather than a stretch at a time with their values: a plug-in in a helper process, to which each call is a
+    // round trip.
+    virtual bool takesWholeBlocks() const noexcept { return false; }
 
     // Whether something came in other than as a note or sound and waits for its next block, such as a pad its editor
     // played: its thin plug-in, asleep on silence, wakes for it. Real-time safe.

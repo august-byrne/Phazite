@@ -2,8 +2,9 @@
 // A project as Phazite's own engine plays it (docs/tracktion-migration.md, T2): its song compiled into what the engine plays
 // (SongPlayer.h), given again as the song changes, at most once a turn of the message loop, a value set by hand at once;
 // the transport the model's functions use while Phazite's engine plays the project (model/transport/internal/Playback.h),
-// in the song's beats; the notes played live into it; the automation written by hand while it plays (AutomationWriter.h);
-// and the take it records (model/transport/internal/Take.h).
+// in the song's beats; the notes played live into it; the automation written by hand while it plays (AutomationWriter.h),
+// which gets the parameters' changes and a plug-in's window's gestures from it; and the take it records
+// (model/transport/internal/Take.h).
 // ProjectContext makes one for each Edit it holds, which joins the app's PlaybackHost.
 #pragma once
 
@@ -27,6 +28,7 @@ class PlaybackHost;
 class Take;
 
 class PlaybackSession : private juce::ValueTree::Listener,
+                        private te::ParameterChangeHandler::Listener,
                         private juce::AsyncUpdater
 {
 public:
@@ -113,6 +115,10 @@ private:
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent); }
     void handleAsyncUpdate() override { update(); }
+
+    // A parameter changed in Tracktion's Edit (by hand, by a plug-in itself or by its automation): for what plays a
+    // plug-in, and for the automation written by hand.
+    void pluginParameterChanged (te::AutomatableParameter&, bool isFollowingAutomation) override;
 
     JUCE_DECLARE_NON_COPYABLE (PlaybackSession)
 };

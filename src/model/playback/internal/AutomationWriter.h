@@ -20,11 +20,11 @@ namespace phazite
 {
 class PlaybackSession;
 
-class AutomationWriter : private te::ParameterChangeHandler::Listener
+class AutomationWriter
 {
 public:
     AutomationWriter (te::Edit&, PlaybackSession&);
-    ~AutomationWriter() override;
+    ~AutomationWriter();
 
     // The session's transport, as it starts and before it stops.
     void playbackStarted();
@@ -33,6 +33,13 @@ public:
     // A control grabbed, and let go (model/devices/ParameterHandle.h), while the session plays the project.
     void gestureBegan (te::AutomatableParameter&);
     void gestureEnded (te::AutomatableParameter&);
+
+    // The same by a plug-in's own window (the session tells it): what it writes as it is let go is one "Record
+    // Automation" step, as no control's drag holds one.
+    void pluginGestureChanged (const ParameterRef&, bool starting);
+
+    // A parameter changed in Tracktion's Edit, by hand or by its automation (the session tells it).
+    void parameterChanged (te::AutomatableParameter&, bool isFollowingAutomation);
 
 private:
     struct Pass
@@ -45,8 +52,7 @@ private:
         std::vector<AutomationPoint> points; // from where it punched in, or the loop's start
     };
 
-    te::Edit& edit;
-    te::SafeSelectable<te::Edit> exists; // the Edit can go before the session does
+    te::Edit& edit; // the session's, which can go before the session does (PlaybackSession::hasEdit())
     PlaybackSession& session;
     std::vector<Pass> passes;
     bool settingValue = false; // as a pass starts from its lane's value
@@ -56,7 +62,6 @@ private:
     void record (Pass&, float value);
     void punchOut (const Pass&); // writes it: the caller forgets it
     void write (const Pass&, std::vector<AutomationPoint>, BeatPosition end);
-    void pluginParameterChanged (te::AutomatableParameter&, bool isFollowingAutomation) override;
 
     JUCE_DECLARE_NON_COPYABLE (AutomationWriter)
 };

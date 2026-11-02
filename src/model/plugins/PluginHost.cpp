@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PluginHost.h"
+#include "engine/nodes/DeviceRunner.h"
 #include "sandbox/client/Helper.h"
 
 #include <algorithm>
@@ -141,6 +142,7 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juc
 
     sandbox::BlockChannel::Limits limits;
     limits.maxSamples = std::max (smallestChannel, blockSize);
+    limits.maxChanges = engine::DeviceRunner::maximumChanges; // what Phazite's engine moves in a block
     auto remote = sandbox::RemoteInstance::open (*running->helper, toXml (description), {}, sampleRate > 0.0 ? sampleRate : 44100.0, limits,
                                                  error, loadMilliseconds);
 

@@ -2,8 +2,9 @@
 // The song as Phazite's own engine plays it (docs/tracktion-migration.md, T2): compiled into plans (engine/core/Plan.h),
 // with what each plan points at and sounds on from one to the next (each track's strip and channel, each of Phazite's
 // devices) kept by the song's IDs, and made anew for another sample rate or block size. Values set by hand (a device's
-// parameter or switch, a channel's volume, pan, mute and solo) reach what plays at once, without a new plan. A playback
-// session has one for its project (PlaybackSession.h), and a render one of its own. Message thread.
+// parameter or switch, a channel's volume, pan, mute and solo, and a plug-in's parameter, by hand or by the plug-in
+// itself) reach what plays at once, without a new plan. A playback session has one for its project (PlaybackSession.h),
+// and a render one of its own. Message thread.
 #pragma once
 
 #include "engine/audio/FileReader.h"
@@ -13,11 +14,13 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -60,6 +63,17 @@ public:
     // Whether a parameter plays its value set by hand rather than its automation, while automation is written by hand
     // (AutomationWriter.h). It stays so from plan to plan, until it is written no more.
     void setWriting (const ParameterRef&, bool);
+
+    // A plug-in's parameter set by hand, or by the plug-in itself (which Tracktion takes in as set by hand): the value its
+    // modulation moves from, and which it plays while it is written by hand.
+    void takeValueSetByHand (const ParameterRef&, float value);
+
+    // What a plug-in's own window grabs and lets go of (in a helper: SandboxedInstance.h), for the automation written by
+    // hand; told nothing once this has gone.
+    void setPluginGestureListener (std::function<void (const ParameterRef&, bool starting)>);
+
+    // The plug-ins it plays told that nothing of them moves now, before it goes while their Edit stays.
+    void letGoOfPlugins();
 
 private:
     te::Edit& edit;
@@ -109,6 +123,14 @@ private:
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
     std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState);
     std::shared_ptr<engine::DeviceNode> getPluginDevice (const juce::ValueTree& deviceState);
+    static int findParameter (const engine::DeviceNode&, const juce::String& id); // its index, or -1
+
+    // A plug-in in a helper: the parameters whose values the engine sends it with each block, which the plan's automation
+    // (but while written by hand) and modulation move; and where its window's gestures go, which its instance holds as
+    // long as it lives.
+    void tellWhatMoves (const engine::Plan::Strip&);
+    std::vector<int> moved; // the plug-in's being told
+    std::shared_ptr<std::function<void (const ParameterRef&, bool)>> pluginGestures;
     // A track, a bus or a return: where its sound goes (a bus's ID, or 0 for the master), what it takes in (its tracks, what
     // sends to it, what its sidechains listen to), and what of that it refuses, which would feed itself round a loop.
     struct ChannelInfo

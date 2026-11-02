@@ -28,6 +28,7 @@ public:
     DeviceNode (const devices::DeviceInfo&, std::unique_ptr<devices::Processor>);
 
     DeviceRunner& getRunner() noexcept { return runner; }
+    const DeviceRunner& getRunner() const noexcept { return runner; }
     const devices::DeviceInfo& getDeviceInfo() const noexcept { return runner.getDeviceInfo(); }
 
     // Message thread: a parameter's value set by hand (kept to its range), by its index; and the device's switch.
@@ -39,6 +40,7 @@ public:
     // Message thread: whether a parameter is written by hand now (automation's touch, latch and write modes), so that it
     // plays its value set by hand rather than its automation.
     void setWriting (int parameter, bool) noexcept;
+    bool isWriting (int parameter) const noexcept;
 
     // Any thread: a parameter's value as the device played it last, and without its modulation.
     float getPlayedValue (int parameter) const noexcept;

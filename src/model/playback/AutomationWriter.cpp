@@ -47,22 +47,18 @@ namespace
 
 AutomationWriter::AutomationWriter (te::Edit& e, PlaybackSession& s)
     : edit (e),
-      exists (&e),
       session (s)
 {
-    edit.getParameterChangeHandler().addListener (*this);
 }
 
 AutomationWriter::~AutomationWriter()
 {
-    if (exists.get() == nullptr)
+    if (! session.hasEdit())
         return;
 
     for (const auto& pass : passes)
         if (const auto parameter = findParameter (edit, pass.parameter))
             parameter->resetRecordingStatus();
-
-    edit.getParameterChangeHandler().removeListener (*this);
 }
 
 void AutomationWriter::playbackStarted()
@@ -212,10 +208,27 @@ void AutomationWriter::write (const Pass& pass, std::vector<AutomationPoint> poi
     replacePoints (*parameter, BeatRange (start, end), points);
 }
 
-void AutomationWriter::pluginParameterChanged (te::AutomatableParameter& parameter, bool isFollowingAutomation)
+void AutomationWriter::pluginGestureChanged (const ParameterRef& ref, bool starting)
+{
+    const auto parameter = findParameter (edit, ref);
+
+    if (parameter == nullptr || ! session.isPlayingProject())
+        return;
+
+    if (starting)
+    {
+        gestureBegan (*parameter);
+        return;
+    }
+
+    const RecordingStep step (edit, "Record Automation");
+    gestureEnded (*parameter);
+}
+
+void AutomationWriter::parameterChanged (te::AutomatableParameter& parameter, bool isFollowingAutomation)
 {
     // A control moved by hand: written if its pass is on, or if its track is in latch or write (touch needs it grabbed).
-    if (isFollowingAutomation || settingValue || ! session.isPlaying() || exists.get() == nullptr)
+    if (isFollowingAutomation || settingValue || ! session.isPlaying() || ! session.hasEdit())
         return;
 
     auto* pass = findPass (getParameterRef (parameter));

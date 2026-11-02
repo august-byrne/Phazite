@@ -152,8 +152,21 @@ namespace
 } // namespace
 
 SongPlayer::SongPlayer (te::Edit& e)
-    : edit (e)
+    : edit (e),
+      pluginGestures (std::make_shared<std::function<void (const ParameterRef&, bool)>>())
 {
+}
+
+void SongPlayer::setPluginGestureListener (std::function<void (const ParameterRef&, bool starting)> listener)
+{
+    *pluginGestures = std::move (listener);
+}
+
+void SongPlayer::letGoOfPlugins()
+{
+    for (const auto& [id, node] : devices)
+        if (auto* processor = dynamic_cast<SandboxedProcessor*> (&node->getRunner().getProcessor()))
+            processor->getInstance().setMovedByEngine (std::span<const int>());
 }
 
 std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximumBlockSize, bool isRender)
@@ -258,6 +271,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
         addFaderAutomation (strip, channel.state, false);
         addModulation (strip, channel.state, deviceIDs);
+        tellWhatMoves (strip);
         setChannel (channel.state, false);
         places[channel.id] = (int) plan->strips.size();
         plan->strips.push_back (std::move (strip));
@@ -279,14 +293,21 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     const auto masterDeviceIDs = addDevices (*plan, places, {}, master, masterState);
     addFaderAutomation (master, masterState, true);
     addModulation (master, masterState, masterDeviceIDs);
+    tellWhatMoves (master);
     setChannel (masterState, true);
     plan->strips.push_back (std::move (master));
 
-    // What the song doesn't hold any more goes with the last plan that plays it.
+    // What the song doesn't hold any more goes with the last plan that plays it (a plug-in told that nothing of it moves
+    // now, as it lives on in its track's freeze, or in the undo history).
     std::set<std::int64_t> tracks;
 
     for (const auto& strip : plan->strips)
         tracks.insert (strip.id);
+
+    for (const auto& [id, node] : devices)
+        if (auto* processor = dynamic_cast<SandboxedProcessor*> (&node->getRunner().getProcessor());
+            processor != nullptr && ! used.contains (id))
+            processor->getInstance().setMovedByEngine (std::span<const int>());
 
     std::erase_if (devices, [this] (const auto& device) { return used.count (device.first) == 0; });
     std::erase_if (modulators, [this] (const auto& modulator) { return usedModulators.count (modulator.first) == 0; });
@@ -360,9 +381,23 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::Val
         if (playing == nullptr || &playing->getPlugin() != plugin.get() || &playing->getInstance() != sandboxed)
         {
             auto processor = std::make_unique<SandboxedProcessor> (*plugin, *sandboxed);
-            const auto& info = processor->getInfo();
-            node = std::make_shared<engine::DeviceNode> (info, std::move (processor));
+            const auto* made = processor.get();
+            node = std::make_shared<engine::DeviceNode> (made->getInfo(), std::move (processor));
             node->getRunner().prepare (preparedRate, preparedBlockSize);
+
+            // Its parameters' values set by hand, which its modulation moves from (takeValueSetByHand() keeps them); and
+            // what its own window grabs, for the automation written by hand (Tracktion names its parameters by their
+            // places).
+            for (const auto* parameter : plugin->getAutomatableParameters())
+                if (const auto index = made->findParameter (parameter->paramID); index >= 0)
+                    node->setValue (index, parameter->getCurrentExplicitValue());
+
+            sandboxed->onGesture =
+                [listener = std::weak_ptr (pluginGestures), device = getDeviceID (deviceState)] (int parameter, bool starting)
+            {
+                if (const auto told = listener.lock(); told != nullptr && *told != nullptr)
+                    (*told) ({ device, juce::String (parameter) }, starting);
+            };
         }
 
         if (const auto mix = devices::findParameter (node->getDeviceInfo(), devices::mixParameterID); mix >= 0)
@@ -422,14 +457,14 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
         if (strip.devices.empty() && node->getDeviceInfo().kind == devices::DeviceKind::instrument)
             strip.hasInstrument = true;
 
-        // Its parameters' automation, as late as its sound comes.
+        // Its parameters' automation, as late as its sound comes: the song's curves of the device (a plug-in can have
+        // thousands of parameters, few automated).
         engine::Plan::Device device { std::move (node), {}, strip.latency };
         const auto id = getDeviceID (deviceState).getRaw();
-        const auto& parameters = device.node->getDeviceInfo().parameters;
 
-        for (size_t i = 0; i < parameters.size(); ++i)
-            if (auto curve = findCurve (id, juce::String (parameters[i].id.data(), parameters[i].id.size())))
-                device.automation.push_back ({ (int) i, std::move (curve) });
+        for (auto curve = curves.lower_bound ({ id, juce::String() }); curve != curves.end() && curve->first.first == id; ++curve)
+            if (const auto index = findParameter (*device.node, curve->first.second); index >= 0)
+                device.automation.push_back ({ index, curve->second });
 
         // What its sidechain listens to, lined up with its sound where it can be (a track that comes later than the device
         // can't be heard earlier).
@@ -717,7 +752,7 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTre
 
             auto& entry = strip.devices[(size_t) (place - deviceIDs.begin())];
             const auto& info = entry.node->getDeviceInfo();
-            const auto index = devices::findParameter (info, target.parameter.toStdString());
+            const auto index = findParameter (*entry.node, target.parameter);
 
             if (index < 0)
                 continue;
@@ -733,6 +768,50 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTre
             entry.modulation->isModulated[(size_t) index] = true;
         }
     }
+}
+
+void SongPlayer::tellWhatMoves (const engine::Plan::Strip& strip)
+{
+    for (const auto& device : strip.devices)
+    {
+        auto* processor = dynamic_cast<SandboxedProcessor*> (&device.node->getRunner().getProcessor());
+
+        if (processor == nullptr)
+            continue;
+
+        moved.clear();
+
+        for (const auto& automated : device.automation)
+            if (! device.node->isWriting (automated.parameter))
+                moved.push_back (automated.parameter);
+
+        if (device.modulation != nullptr)
+            for (const auto& route : device.modulation->routes)
+                moved.push_back (route.parameter);
+
+        processor->getInstance().setMovedByEngine (moved);
+    }
+}
+
+int SongPlayer::findParameter (const engine::DeviceNode& node, const juce::String& id)
+{
+    // A plug-in's by its place, at once; one of Phazite's own devices' by its ID.
+    if (auto* processor = dynamic_cast<const SandboxedProcessor*> (&node.getRunner().getProcessor()))
+        return processor->findParameter (id);
+
+    return devices::findParameter (node.getDeviceInfo(), id.toStdString());
+}
+
+void SongPlayer::takeValueSetByHand (const ParameterRef& parameter, float value)
+{
+    // Only a plug-in in a helper: Phazite's own devices take theirs from the song (takeValue()).
+    auto* node = findDevice ((std::int64_t) parameter.device.getRaw());
+
+    if (node == nullptr || dynamic_cast<const SandboxedProcessor*> (&node->getRunner().getProcessor()) == nullptr)
+        return;
+
+    if (const auto index = findParameter (*node, parameter.parameter); index >= 0)
+        node->setValue (index, value);
 }
 
 engine::ModulatorNode* SongPlayer::findModulator (std::int64_t id) const
@@ -1108,7 +1187,7 @@ std::optional<float> SongPlayer::getPlayedValue (const ParameterRef& parameter, 
 
     if (const auto* node = findDevice (id))
     {
-        if (const auto index = devices::findParameter (node->getDeviceInfo(), parameter.parameter.toStdString()); index >= 0)
+        if (const auto index = findParameter (*node, parameter.parameter); index >= 0)
             return withModulation ? node->getPlayedValue (index) : node->getPlayedBaseValue (index);
 
         return {};
@@ -1135,7 +1214,15 @@ void SongPlayer::setWriting (const ParameterRef& parameter, bool isWriting)
 
     if (auto* node = findDevice (id))
     {
-        node->setWriting (devices::findParameter (node->getDeviceInfo(), parameter.parameter.toStdString()), isWriting);
+        const auto index = findParameter (*node, parameter.parameter);
+        node->setWriting (index, isWriting);
+
+        // A plug-in's written by hand plays its value set by hand, which goes to it at once as it is set, unless modulated.
+        if (auto* processor = dynamic_cast<SandboxedProcessor*> (&node->getRunner().getProcessor()))
+            processor->getInstance().setMovedByEngine (index,
+                                                       (! isWriting && findCurve (parameter) != nullptr)
+                                                           || modulated.contains ({ parameter.device.getRaw(), parameter.parameter }));
+
         return;
     }
 

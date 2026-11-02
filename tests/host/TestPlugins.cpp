@@ -147,13 +147,14 @@ namespace
                 done = metadata.samplePosition;
                 const auto message = metadata.getMessage();
 
-                // Note 127: its own Level to 0.75, in a gesture, as a control of its window turns it.
+                // Note 127: its own Level to 0.75, in a gesture held while the note is, as a control of its window turns it.
                 if (message.isNoteOn() && message.getNoteNumber() == 127)
                 {
                     level->beginChangeGesture();
                     level->setValueNotifyingHost (0.75f);
-                    level->endChangeGesture();
                 }
+                else if (message.isNoteOff() && message.getNoteNumber() == 127)
+                    level->endChangeGesture();
                 else if (message.isNoteOn())
                     start (message.getNoteNumber());
                 else if (message.isNoteOff() || message.isAllNotesOff())

@@ -16,7 +16,7 @@ struct TestPlugins
     {
         effect,    // scales its sound by its Gain ("1"), and has a Tone ("0") that does nothing; keeps both as its state
         synth,     // a sine for each note held, at its Level ("10"); note 127 turns its Level to 0.75 itself, in a gesture
-                   // (as a control of its window would)
+                   // held while the note is (as a control of its window would)
         crash,     // an effect that crashes as it plays a block while its Crash ("20") is on
         hang,      // an effect that plays nothing back while its Hang ("30") is on: it loops for ever
         latency,   // delays its sound by 64 samples, or 128 while its Latency ("40") is on, and says so

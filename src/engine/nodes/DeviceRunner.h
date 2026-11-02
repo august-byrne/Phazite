@@ -4,8 +4,10 @@
 // plug-in, model/devices/internal/DevicePlugin.h) or Phazite's own. It glides each continuous parameter from one block's
 // value to the next and moves the modulated and automated ones itself, in stretches of a block, each starting on the
 // song's control points, one every 32 samples from its start (docs/performance-audit.md, A7; docs/design.md, section 10),
-// so that a song sounds the same at any block size; it applies an effect's mix, with what came in delayed as much as the
-// effect delays its sound; it plays a mono channel in stereo; and it sleeps on silence (docs/performance-audit.md, A1).
+// so that a song sounds the same at any block size (a device that takes its blocks whole, a plug-in in its helper, gets
+// a block in one call, with its moved parameters' values on those points as changes at their samples); it applies an
+// effect's mix, with what came in delayed as much as the effect delays its sound; it plays a mono channel in stereo; and
+// it sleeps on silence (docs/performance-audit.md, A1).
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -71,12 +73,14 @@ class DeviceRunner
 {
 public:
     static constexpr int maximumEvents = 1024;                // more in one block are dropped
+    static constexpr int maximumChanges = 4096;               // for a device that takes its blocks whole; more are dropped
     static constexpr int smoothingStep = controlPointSpacing; // the stretch a parameter glides, is modulated and automated in
 
     DeviceRunner (const devices::DeviceInfo&, std::unique_ptr<devices::Processor>);
 
     const devices::DeviceInfo& getDeviceInfo() const noexcept { return info; }
     devices::Processor& getProcessor() noexcept { return *processor; }
+    const devices::Processor& getProcessor() const noexcept { return *processor; }
 
     // What goes into it and comes out, after its mix, for its editor's displays (devices/core/DeviceScope.h).
     devices::DeviceScope& getScope() noexcept { return scope; }
@@ -143,7 +147,28 @@ private:
     bool hasPreviousValues = false;
     void keepValues() noexcept;
     void startModulation (Modulation&) noexcept;
-    void setStretchValues (const Block&, bool automationMoves, int controlPoint, int stretch, int done, int length, int numSamples);
+    void setStretchValues (const Block&, bool automationMoves, int controlPoint, int stretch, int done, int length, int numSamples,
+                           const std::vector<int>* only = nullptr); // those alone, or every parameter
+
+    // For a processor that takes its blocks whole (devices::Processor::takesWholeBlocks(), which a plug-in can have
+    // thousands of parameters for): the parameters automation or modulation moves in this block and in the last, by their
+    // indices, with the block each was last moved in; those it works out the stretches' values of (with the mix, if that
+    // moves); the values it last sent; and a chunk's changes, with each of its stretches' mix.
+    struct StretchMix
+    {
+        int start = 0, length = 0;
+        float mix = 1.0f;
+    };
+
+    std::vector<int> movedNow, movedBefore, stretchParameters;
+    std::vector<std::uint64_t> movedIn;
+    std::uint64_t blocksStarted = 0;
+    std::vector<float> sentValues;
+    std::vector<devices::ParameterChange> changes;
+    std::vector<StretchMix> stretchMixes;
+    void startWholeBlock (const Block&, bool isMixMoved) noexcept;
+    int gatherChanges (const Block&, bool automationMoves, bool isMixMoved, int sinceControlPoint, int stretch, int from, int length,
+                       int numSamples); // the next stretch's index
 
     juce::AudioBuffer<float> stereo; // for a mono channel: sized in prepare(), as long as the stretches played at once
     int latencySamples = 0;
@@ -153,7 +178,7 @@ private:
     float appliedMix = 1.0f; // where the last stretch's ramp ended
     juce::AudioBuffer<float> dry;
     std::array<devices::dsp::DelayLine, 2> dryDelays;
-    void mixWithDry (float* const* wet, int length, float targetMix);
+    void mixWithDry (float* const* wet, int dryStart, int length, float targetMix); // dry from so far into its buffer
 
     // Asleep: once what comes in and what it plays have been silent for sleepAfterSeconds (and longer than its latency),
     // with nothing to play, it skips its work until sound, a note or an event comes in, or something waits in the device to

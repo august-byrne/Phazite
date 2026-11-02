@@ -55,17 +55,35 @@ SandboxedProcessor::SandboxedProcessor (te::Plugin& p, SandboxedInstance& sandbo
       typeID ("plugin"),
       name (p.getName().toStdString())
 {
-    mix.id = devices::mixParameterID;
-    mix.name = "Mix";
-    mix.defaultValue = 1.0f;
     info.typeID = typeID;
     info.name = name;
     info.kind =
         instance.acceptsMidi() && instance.getTotalNumInputChannels() == 0 ? devices::DeviceKind::instrument : devices::DeviceKind::effect;
 
-    // An effect's mix with what came in, which the engine applies; an instrument has none.
+    // The plug-in's parameters by their places, then an effect's mix with what came in, which the engine applies (an
+    // instrument has none). The names and IDs are made first: the descriptions point into them.
+    const auto& own = instance.getRemote().getInfo().parameters;
+
+    for (size_t i = 0; i < own.size(); ++i)
+    {
+        ids.push_back (std::to_string (i));
+        names.push_back (own[i].name.toStdString());
+    }
+
+    for (size_t i = 0; i < own.size(); ++i)
+        parameters.push_back ({ .id = ids[i], .name = names[i], .defaultValue = juce::jlimit (0.0f, 1.0f, own[i].defaultValue) });
+
     if (info.kind == devices::DeviceKind::effect)
-        info.parameters = std::span (&mix, 1);
+        parameters.push_back ({ .id = devices::mixParameterID, .name = "Mix", .defaultValue = 1.0f });
+
+    info.parameters = parameters;
+}
+
+int SandboxedProcessor::findParameter (const juce::String& tracktionID) const noexcept
+{
+    // Tracktion names each by its place: "0", "1"...
+    const auto index = tracktionID.getIntValue();
+    return juce::isPositiveAndBelow (index, (int) ids.size()) && tracktionID == juce::String (index) ? index : -1;
 }
 
 void SandboxedProcessor::prepare (double sampleRate, int maximumBlockSize)
@@ -128,8 +146,19 @@ void SandboxedProcessor::process (const devices::ProcessContext& context)
             ++block.numEvents;
     }
 
+    // Values set while a block played (none, unless a render set them), then what the engine moves, at their samples.
     block.numChanges = 0;
     instance.takeChanges (block, channel.getChanges(), limits.maxChanges);
+
+    for (const auto& change : context.changes)
+    {
+        if (block.numChanges >= limits.maxChanges)
+            break;
+
+        if (change.parameter < (int) ids.size())
+            channel.getChanges()[block.numChanges++] = { change.parameter, change.sample, change.value };
+    }
+
     block.tempo = context.tempo;
     block.beat = context.beat;
     block.sample = (std::int64_t) (context.beat * 60.0 / std::max (1.0, context.tempo) * rate);

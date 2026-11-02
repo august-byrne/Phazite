@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <thread>
+#include <utility>
 
 namespace phazite
 {
@@ -27,9 +28,9 @@ juce::AudioProcessor::BusesProperties SandboxedInstance::getBuses (const sandbox
     return buses.withOutput ("Output", juce::AudioChannelSet::stereo(), true);
 }
 
-// A parameter of the plug-in's, by its own ID: a value set from the message thread goes to the helper at once, one set
-// while a block plays (automation, as Tracktion's renders play it) joins the next block's changes; one the plug-in set
-// itself comes back without going to it again.
+// A parameter of the plug-in's, by its own ID: a value set from the message thread goes to the helper at once (unless
+// Phazite's engine moves it, and sends it with its blocks), one set while a block plays (automation, as Tracktion's
+// renders play it) joins the next block's changes; one the plug-in set itself comes back without going to it again.
 class SandboxedInstance::Parameter final : public juce::HostedAudioProcessorParameter
 {
 public:
@@ -56,14 +57,18 @@ public:
 
         if (juce::MessageManager::existsAndIsCurrentThread())
         {
-            owner.remote->setParameter (index, newValue);
+            if (! movedByEngine)
+                owner.remote->setParameter (index, newValue);
         }
         else
         {
             pending.store (newValue, std::memory_order_relaxed);
             isPending.store (true, std::memory_order_release);
+            owner.anyPending.store (true, std::memory_order_release);
         }
     }
+
+    bool movedByEngine = false; // message thread
 
     // What the plug-in set itself: told to Tracktion, not to the helper again (message thread).
     void setFromPlugin (float newValue)
@@ -174,9 +179,37 @@ void SandboxedInstance::helperLost()
 
 void SandboxedInstance::takeChanges (sandbox::BlockInfo& info, sandbox::ParameterChange* changes, int maxChanges) noexcept
 {
+    // Rarely any: a plug-in can have thousands of parameters, looked through only when one was set.
+    if (! anyPending.exchange (false, std::memory_order_acquire))
+        return;
+
     for (size_t i = 0; i < parameters.size() && info.numChanges < maxChanges; ++i)
         if (float value = 0.0f; parameters[i]->takePending (value))
             changes[info.numChanges++] = { (int) i, 0, value };
+}
+
+void SandboxedInstance::setMovedByEngine (std::span<const int> moved)
+{
+    for (const auto parameter : movedByEngine)
+        parameters[(size_t) parameter]->movedByEngine = false;
+
+    movedByEngine.clear();
+
+    for (const auto parameter : moved)
+        setMovedByEngine (parameter, true);
+}
+
+void SandboxedInstance::setMovedByEngine (int parameter, bool isMoved)
+{
+    if (! juce::isPositiveAndBelow (parameter, (int) parameters.size()) || parameters[(size_t) parameter]->movedByEngine == isMoved)
+        return;
+
+    parameters[(size_t) parameter]->movedByEngine = isMoved;
+
+    if (isMoved)
+        movedByEngine.push_back (parameter);
+    else
+        std::erase (movedByEngine, parameter);
 }
 
 std::int64_t SandboxedInstance::getDeadlineNanoseconds (int numSamples, double sampleRate) noexcept
@@ -393,33 +426,48 @@ void SandboxedInstance::handleAsyncUpdate()
         samples = latency;
     }
 
-    // As the helper told them: the gestures that begin, the values, the gestures that end.
-    const auto tellGestures = [this, &gestures] (bool starting)
+    // As the helper told them: the gestures that begin, the values, then (a message later, once Tracktion has the values)
+    // the gestures that end.
+    for (const auto& [index, starting] : gestures)
     {
-        for (const auto& [index, isStart] : gestures)
+        if (! juce::isPositiveAndBelow (index, (int) parameters.size()))
+            continue;
+
+        if (starting)
         {
-            if (isStart != starting || ! juce::isPositiveAndBelow (index, (int) parameters.size()))
-                continue;
+            parameters[(size_t) index]->beginChangeGesture();
 
-            if (starting)
-                parameters[(size_t) index]->beginChangeGesture();
-            else
-                parameters[(size_t) index]->endChangeGesture();
+            if (onGesture != nullptr)
+                onGesture (index, true);
         }
-    };
-
-    tellGestures (true);
+        else
+        {
+            gesturesToEnd.push_back (index);
+        }
+    }
 
     for (const auto& [index, value] : changes)
         if (juce::isPositiveAndBelow (index, (int) parameters.size()))
             parameters[(size_t) index]->setFromPlugin (value);
 
-    tellGestures (false);
+    if (! gesturesToEnd.empty())
+        endedGestures.triggerAsyncUpdate();
 
     if (newLatency)
         setLatencySamples (samples);
 
     if (newState || lost)
         updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
+}
+
+void SandboxedInstance::endGestures()
+{
+    for (const auto index : std::exchange (gesturesToEnd, {}))
+    {
+        parameters[(size_t) index]->endChangeGesture();
+
+        if (onGesture != nullptr)
+            onGesture (index, false);
+    }
 }
 } // namespace phazite

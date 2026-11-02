@@ -42,6 +42,11 @@ void DeviceNode::setWriting (int parameter, bool isWriting) noexcept
         writing[(size_t) parameter].store (isWriting, std::memory_order_relaxed);
 }
 
+bool DeviceNode::isWriting (int parameter) const noexcept
+{
+    return juce::isPositiveAndBelow (parameter, (int) blockValues.size()) && writing[(size_t) parameter].load (std::memory_order_relaxed);
+}
+
 float DeviceNode::getPlayedValue (int parameter) const noexcept
 {
     return juce::isPositiveAndBelow (parameter, (int) blockValues.size()) ? played[(size_t) parameter].load (std::memory_order_relaxed)

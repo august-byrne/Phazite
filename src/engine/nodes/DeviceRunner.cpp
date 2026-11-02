@@ -48,6 +48,17 @@ DeviceRunner::DeviceRunner (const devices::DeviceInfo& deviceInfo, std::unique_p
     // An effect's mix, which this applies (an instrument has none).
     if (info.kind == devices::DeviceKind::effect)
         mixIndex = devices::findParameter (info, devices::mixParameterID);
+
+    // Room for whole blocks' changes, made now.
+    if (processor->takesWholeBlocks())
+    {
+        for (auto* list : { &movedNow, &movedBefore, &stretchParameters })
+            list->reserve (info.parameters.size());
+
+        movedIn.assign (info.parameters.size(), 0);
+        sentValues.assign (info.parameters.size(), 0.0f);
+        changes.reserve ((size_t) maximumChanges);
+    }
 }
 
 void DeviceRunner::prepare (double rate, int maximumBlockSize)
@@ -55,6 +66,7 @@ void DeviceRunner::prepare (double rate, int maximumBlockSize)
     processor->prepare (rate, maximumBlockSize);
     const auto stretch = std::max (maximumBlockSize, 512);
     stereo.setSize (2, stretch);
+    stretchMixes.reserve ((size_t) (stretch / smoothingStep + 2));
     latencySamples = processor->getLatencySamples();
     scope.setSampleRate (rate);
     sleepAfterSamples = std::max ((int) (sleepAfterSeconds * rate), 2 * latencySamples);
@@ -158,6 +170,12 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
 
     asleep = false;
 
+    // Taken whole, it gets the values of what moves as changes: those it moves now, and those it moved in the last block.
+    const auto whole = processor->takesWholeBlocks();
+
+    if (whole)
+        startWholeBlock (in, isMixMoved);
+
     // What comes in, for the editor's displays: an effect's sound (an instrument's channels were cleared for it to play into).
     const auto* inLeft = buffer.getReadPointer (0, start);
     const auto* inRight = isMono ? inLeft : buffer.getReadPointer (1, start);
@@ -174,19 +192,30 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
     }
 
     // A stretch at a time, as long as the scratch buffers prepared beforehand, the first of smoothingStep ending on the
-    // song's next control point. A mono channel plays in stereo, through a scratch buffer, and gets the average of the two
-    // sides back.
+    // song's next control point; or taken whole, as long as those buffers, each ending on a control point but the block's
+    // last. A mono channel plays in stereo, through a scratch buffer, and gets the average of the two sides back.
     int nextEvent = 0;
     const auto sinceControlPoint = (int) (((in.sample % smoothingStep) + smoothingStep) % smoothingStep);
     const auto toControlPoint = smoothingStep - sinceControlPoint;
+    const auto longest = stereo.getNumSamples();
 
-    for (int done = 0, stretch = 0; done < numSamples; ++stretch)
+    for (int done = 0, stretch = 0; done < numSamples;)
     {
         const auto length =
-            std::min (numSamples - done, inStretches ? (done == 0 ? toControlPoint : smoothingStep) : stereo.getNumSamples());
+            whole ? (numSamples - done <= longest ? numSamples - done : longest - (done + sinceControlPoint + longest) % smoothingStep)
+                  : std::min (numSamples - done, inStretches ? (done == 0 ? toControlPoint : smoothingStep) : longest);
 
-        if (inStretches)
-            setStretchValues (in, automationMoves, done == 0 ? -sinceControlPoint : done, stretch, done, length, numSamples);
+        if (whole)
+        {
+            stretch = gatherChanges (in, automationMoves, isMixMoved, sinceControlPoint, stretch, done, length, numSamples);
+        }
+        else
+        {
+            if (inStretches)
+                setStretchValues (in, automationMoves, done == 0 ? -sinceControlPoint : done, stretch, done, length, numSamples);
+
+            ++stretch;
+        }
 
         float* channels[2];
 
@@ -218,6 +247,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         block.numChannels = 2;
         block.numSamples = length;
         block.events = in.events.subspan ((size_t) firstEvent, (size_t) (nextEvent - firstEvent));
+        block.changes = changes;
 
         if (hasSidechain)
         {
@@ -227,9 +257,20 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
 
         processor->process (block);
 
-        // Its mix, unless it plays something else for now (a compressor's key, to listen to); modulated, as it is now.
-        if (mixIndex >= 0)
-            mixWithDry (channels, length, processor->overridesMix() ? 1.0f : isMixMoved ? currentValues[(size_t) mixIndex] : targetMix);
+        // Its mix, unless it plays something else for now (a compressor's key, to listen to); modulated, as it is now (taken
+        // whole, as it was in each stretch).
+        if (mixIndex >= 0 && whole && isMixMoved && ! processor->overridesMix())
+        {
+            for (const auto& part : stretchMixes)
+            {
+                float* const wet[] = { channels[0] + part.start, channels[1] + part.start };
+                mixWithDry (wet, part.start, part.length, part.mix);
+            }
+        }
+        else if (mixIndex >= 0)
+        {
+            mixWithDry (channels, 0, length, processor->overridesMix() ? 1.0f : isMixMoved ? currentValues[(size_t) mixIndex] : targetMix);
+        }
 
         if (isMono)
         {
@@ -285,16 +326,29 @@ void DeviceRunner::startModulation (Modulation& plan) noexcept
 }
 
 void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int controlPoint, int stretch, int done, int length,
-                                     int numSamples)
+                                     int numSamples, const std::vector<int>* only)
 {
+    const auto forEach = [this, only] (auto&& apply)
+    {
+        if (only != nullptr)
+            for (const auto parameter : *only)
+                apply ((size_t) parameter);
+        else
+            for (size_t i = 0; i < currentValues.size(); ++i)
+                apply (i);
+    };
+
     // A continuous parameter that moved since the last block glides there, as far as the stretch's end; an automated one
     // is at its curve's value on the stretch's control point (where it starts, or before the block for the rest of the
     // last block's last stretch), whatever the block's size.
     const auto along = (float) (done + length) / (float) numSamples;
 
-    for (size_t i = 0; i < currentValues.size(); ++i)
-        currentValues[i] =
-            glides[i] && hasPreviousValues ? previousValues[i] + (targetValues[i] - previousValues[i]) * along : targetValues[i];
+    forEach (
+        [this, along] (size_t i)
+        {
+            currentValues[i] =
+                glides[i] && hasPreviousValues ? previousValues[i] + (targetValues[i] - previousValues[i]) * along : targetValues[i];
+        });
 
     if (automationMoves)
         for (const auto& automated : in.automation)
@@ -302,7 +356,7 @@ void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int 
                 devices::constrain (info.parameters[(size_t) automated.parameter],
                                     automated.curve->getValueAt (in.automationBeat + controlPoint * in.beatsPerSample));
 
-    std::copy (currentValues.begin(), currentValues.end(), baseValues.begin());
+    forEach ([this] (size_t i) { baseValues[i] = currentValues[i]; });
     const auto* plan = in.modulation;
 
     if (plan == nullptr)
@@ -311,7 +365,7 @@ void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int 
     // Then a modulated one is moved by its sources where the stretch is: by their values on its control point, in Phazite's
     // engine; or an LFO by its wave at the stretch's middle, a modulator or a macro by its value gliding as far as the
     // stretch's end.
-    std::fill (offsets.begin(), offsets.end(), 0.0f);
+    forEach ([this] (size_t i) { offsets[i] = 0.0f; });
     const auto middle = done + length / 2;
 
     for (const auto& route : plan->routes)
@@ -328,19 +382,102 @@ void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int 
         offsets[(size_t) route.parameter] += route.amount * value;
     }
 
-    for (size_t i = 0; i < currentValues.size(); ++i)
-        if (plan->isModulated[i])
-            currentValues[i] = devices::modulate (info.parameters[i], ranges[i], currentValues[i], offsets[i]);
+    forEach (
+        [this, plan] (size_t i)
+        {
+            if (plan->isModulated[i])
+                currentValues[i] = devices::modulate (info.parameters[i], ranges[i], currentValues[i], offsets[i]);
+        });
 }
 
-void DeviceRunner::mixWithDry (float* const* wet, int length, float targetMix)
+void DeviceRunner::startWholeBlock (const Block& in, bool isMixMoved) noexcept
+{
+    // What automation and modulation move in this block (not the mix, which the runner applies), and what they moved in
+    // the last; and what of them each stretch's values are worked out for.
+    std::swap (movedNow, movedBefore);
+    movedNow.clear();
+    ++blocksStarted;
+
+    const auto add = [this] (int parameter)
+    {
+        if (parameter != mixIndex && movedIn[(size_t) parameter] != blocksStarted)
+        {
+            movedIn[(size_t) parameter] = blocksStarted;
+            movedNow.push_back (parameter);
+        }
+    };
+
+    for (const auto& automated : in.automation)
+        add (automated.parameter);
+
+    if (in.modulation != nullptr)
+        for (const auto& route : in.modulation->routes)
+            add (route.parameter);
+
+    stretchParameters.assign (movedNow.begin(), movedNow.end());
+
+    if (isMixMoved)
+        stretchParameters.push_back (mixIndex);
+}
+
+int DeviceRunner::gatherChanges (const Block& in, bool automationMoves, bool isMixMoved, int sinceControlPoint, int stretch, int from,
+                                 int length, int numSamples)
+{
+    changes.clear();
+    stretchMixes.clear();
+
+    const auto add = [this] (int parameter, int sample, float value)
+    {
+        if (changes.size() < changes.capacity())
+            changes.push_back ({ parameter, sample, value });
+    };
+
+    // As the block starts, each moved in the last block and no more goes back to its value set by hand.
+    if (from == 0)
+        for (const auto parameter : movedBefore)
+            if (movedIn[(size_t) parameter] != blocksStarted)
+                add (parameter, 0, targetValues[(size_t) parameter]);
+
+    if (stretchParameters.empty())
+        return stretch + 1;
+
+    // Each moved at its value on each control point, as a stretch would play it: at the block's start whatever it was (so
+    // that nothing else keeps it from there), then where it changes.
+    const auto toControlPoint = smoothingStep - sinceControlPoint;
+
+    for (int done = from; done < from + length; ++stretch)
+    {
+        const auto stretchLength = std::min (from + length - done, done == 0 ? toControlPoint : smoothingStep);
+        setStretchValues (in, automationMoves, done == 0 ? -sinceControlPoint : done, stretch, done, stretchLength, numSamples,
+                          &stretchParameters);
+
+        for (const auto parameter : movedNow)
+        {
+            const auto value = currentValues[(size_t) parameter];
+
+            if (done == 0 || ! juce::exactlyEqual (value, sentValues[(size_t) parameter]))
+                add (parameter, done - from, value);
+
+            sentValues[(size_t) parameter] = value;
+        }
+
+        if (isMixMoved)
+            stretchMixes.push_back ({ done - from, stretchLength, currentValues[(size_t) mixIndex] });
+
+        done += stretchLength;
+    }
+
+    return stretch;
+}
+
+void DeviceRunner::mixWithDry (float* const* wet, int dryStart, int length, float targetMix)
 {
     // The dry sound, delayed as much as the effect delays its own, so that the two line up.
     if (latencySamples > 0)
     {
         for (int channel = 0; channel < 2; ++channel)
         {
-            auto* samples = dry.getWritePointer (channel);
+            auto* samples = dry.getWritePointer (channel, dryStart);
             auto& delay = dryDelays[(size_t) channel];
 
             for (int i = 0; i < length; ++i)
@@ -360,7 +497,7 @@ void DeviceRunner::mixWithDry (float* const* wet, int length, float targetMix)
 
     for (int channel = 0; channel < 2; ++channel)
     {
-        const auto* drySamples = dry.getReadPointer (channel);
+        const auto* drySamples = dry.getReadPointer (channel, dryStart);
 
         for (int i = 0; i < length; ++i)
         {

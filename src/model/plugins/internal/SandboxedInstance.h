@@ -17,6 +17,8 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <span>
+#include <vector>
 
 namespace phazite
 {
@@ -46,6 +48,16 @@ public:
     // The values set since the last block, as the block's changes at its start (on the thread that plays it, the channel
     // held).
     void takeChanges (sandbox::BlockInfo&, sandbox::ParameterChange*, int maxChanges) noexcept;
+
+    // The parameters (by their places) whose values Phazite's engine sends with each block, as its automation and
+    // modulation move them (SandboxedProcessor.h): a value set by hand of one of them goes with the engine's blocks rather
+    // than to the helper at once, so that it never comes between them. Message thread.
+    void setMovedByEngine (std::span<const int> parameters);
+    void setMovedByEngine (int parameter, bool);
+
+    // What the plug-in's own window grabs and lets go of, by the parameter's place, after Tracktion is told (message
+    // thread): for the automation Phazite's engine writes by hand.
+    std::function<void (int parameter, bool starting)> onGesture;
 
     // How long a block may take in real time before it is late: as long as it lasts.
     static std::int64_t getDeadlineNanoseconds (int numSamples, double sampleRate) noexcept;
@@ -86,8 +98,10 @@ private:
     std::unique_ptr<sandbox::RemoteInstance> remote;
     const juce::PluginDescription description;
     std::atomic<bool> crashed { false }, held { false };
-    juce::MemoryBlock lastState; // as it was last taken or given: what a plug-in whose helper has gone keeps
+    std::atomic<bool> anyPending { false }; // a value set while a block played, for the next
+    juce::MemoryBlock lastState;            // as it was last taken or given: what a plug-in whose helper has gone keeps
     std::vector<Parameter*> parameters;
+    std::vector<int> movedByEngine;
     double preparedRate = 0.0;
     int preparedBlockSize = 0;
 
@@ -97,6 +111,23 @@ private:
     std::vector<std::pair<int, bool>> gesturesByPlugin;
     bool latencyCame = false, stateCame = false, lossCame = false;
     int latency = 0;
+
+    // The gestures the plug-in ended, told a message after the values that came with them, which Tracktion takes in a
+    // message later (so that a pass of touch has them before it ends).
+    struct EndedGestures final : juce::AsyncUpdater
+    {
+        explicit EndedGestures (SandboxedInstance& o)
+            : owner (o)
+        {
+        }
+
+        void handleAsyncUpdate() override { owner.endGestures(); }
+        SandboxedInstance& owner;
+    };
+
+    EndedGestures endedGestures { *this };
+    std::vector<int> gesturesToEnd;
+    void endGestures();
 
     void parameterChanged (int index, float value) override;
     void gestureChanged (int index, bool starting) override;

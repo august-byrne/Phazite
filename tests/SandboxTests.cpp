@@ -264,10 +264,13 @@ TEST_CASE ("An instrument in a helper plays its notes from their samples, and te
     CHECK (played[31] == 0.0f);
     CHECK (std::abs (played[40]) > 0.0f);
 
-    // Note 127 makes the stand-in turn its own Level to 0.75, in a gesture, as a control of its window would.
+    // Note 127 makes the stand-in turn its own Level to 0.75, in a gesture held while the note is, as a control of its
+    // window would.
     Told told;
     synth->setListener (&told);
     addNote (*synth, 0, 127, true);
+    REQUIRE (playBlock (*synth, 128, 0.0f) == sandbox::BlockChannel::Played::done);
+    addNote (*synth, 0, 127, false);
     REQUIRE (playBlock (*synth, 128, 0.0f) == sandbox::BlockChannel::Played::done);
     REQUIRE (waitFor (
         [&]
