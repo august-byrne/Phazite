@@ -9,13 +9,16 @@
 #include "TestSong.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/automation/AutomationModel.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixHandle.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/plugins/internal/SandboxedInstance.h"
+#include "model/presets/PresetModel.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -206,6 +209,80 @@ TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the paramete
     // One step takes it back.
     phazite::undo (*phazite::getEdit (song.context));
     CHECK (phazite::getAutomationPoints (song.context, level).empty());
+}
+
+TEST_CASE ("A plug-in in a helper keeps its settings and program through copies, undo, presets and its project opened again")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
+    const auto effect = song.addEffect (track, "PhaziteTestEffect");
+    auto playback = std::make_unique<EnginePlayback>();
+    song.run ("transport.playStop");
+    const auto levelNow = [&playback] { return levelOf (playback->play (0.6), 0, 0.2, 0.5); };
+    const auto half = toneLevel - 6.02f;
+
+    // Its programs, as the helper told them, the one it has, and another chosen: Half sets its Gain to half.
+    auto* instance = &getSandboxed (song, effect);
+    REQUIRE (instance->getNumPrograms() == 2);
+    CHECK (instance->getProgramName (1) == "Half");
+    CHECK (instance->getCurrentProgram() == 0);
+    instance->setCurrentProgram (1);
+    CHECK (instance->getCurrentProgram() == 1);
+    CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));
+
+    // The project opened again: the plug-in in a new helper, the old one gone, with its program and its settings.
+    playback = nullptr;
+    song.reopen();
+    CHECK (phazite::findDeviceState (*phazite::getEdit (song.context), effect)[phazite::schema::pluginProgram] == juce::var (1));
+    instance = &getSandboxed (song, effect);
+    CHECK (instance->getCurrentProgram() == 1);
+    CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
+    playback = std::make_unique<EnginePlayback>();
+    song.run ("transport.playStop");
+    CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));
+
+    // Its track duplicated: the copy's plug-in, another instance in the same helper, plays at its settings too (the two
+    // together twice as loud as one).
+    song.context.getSongSelection().selectOnly (track);
+    song.run ("edit.duplicate");
+    REQUIRE (phazite::getMixerChannels (song.context).tracks.size() == 2);
+    const auto copy = phazite::getMixerChannels (song.context).tracks[1];
+    REQUIRE (phazite::getEffects (song.context, copy).size() == 1);
+    CHECK (&getSandboxed (song, phazite::getEffects (song.context, copy)[0].id) != instance);
+    CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
+    CHECK (levelNow() == doctest::Approx (half + 6.02f).epsilon (0.002));
+    phazite::undo (*phazite::getEdit (song.context));
+
+    // Taken away, and back by undo, as it was.
+    phazite::removeDevice (song.context, effect);
+    CHECK (levelNow() == doctest::Approx (toneLevel).epsilon (0.002));
+    phazite::undo (*phazite::getEdit (song.context));
+    CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));
+
+    // A preset of it, saved at half and loaded into it again at full.
+    const auto preset = song.getSoundsFolder().getChildFile (juce::String ("Half") + phazite::presetExtension);
+    REQUIRE (phazite::saveDevicePreset (song.context, effect, preset));
+    song.setParameter (effect, "0", 1.0f);
+    CHECK (levelNow() == doctest::Approx (toneLevel).epsilon (0.002));
+    REQUIRE (phazite::loadPresetInto (song.context, effect, preset));
+    CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));
+}
+
+TEST_CASE ("What a plug-in in a helper changes itself is an unsaved change of its project")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    REQUIRE (song.getProject().save().wasOk());
+    CHECK_FALSE (song.getProject().hasUnsavedChanges());
+
+    // Another program, as its own window would choose: its Gain changes with it.
+    getSandboxed (song, effect).setCurrentProgram (1);
+    auto gain = phazite::getParameter (song.context, { effect, "0" });
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return song.getProject().hasUnsavedChanges() && juce::exactlyEqual (gain.getValue(), 0.5f); }, 20000));
 }
 
 TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effect lets its sound through")

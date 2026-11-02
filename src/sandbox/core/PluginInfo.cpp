@@ -39,6 +39,12 @@ void write (MessageWriter& out, const PluginInfo& info)
     out.add (info.name).add (info.isInstrument).add ((std::int32_t) info.latencySamples).add (info.tailSeconds);
     out.add ((std::int32_t) info.numInputChannels).add ((std::int32_t) info.numOutputChannels).add (info.hasSidechain);
     write (out, info.parameters);
+    out.add ((std::int32_t) info.programs.size());
+
+    for (const auto& program : info.programs)
+        out.add (program);
+
+    out.add ((std::int32_t) info.program);
 }
 
 PluginInfo readPluginInfo (MessageReader& in)
@@ -52,6 +58,12 @@ PluginInfo readPluginInfo (MessageReader& in)
     info.numOutputChannels = in.readInt();
     info.hasSidechain = in.readBool();
     info.parameters = readParameters (in);
+    info.programs.resize ((size_t) std::max (0, in.readInt()));
+
+    for (auto& program : info.programs)
+        program = in.readString();
+
+    info.program = in.readInt();
     return info;
 }
 } // namespace phazite::sandbox

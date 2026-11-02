@@ -10,6 +10,7 @@ namespace
 {
     constexpr std::int64_t checkForExitNanoseconds = 100'000'000; // how long the thread sleeps before it checks it should end
     constexpr int maximumChannels = 32;                           // a plug-in's channels the thread plays at most
+    constexpr int maximumPrograms = 1024;                         // the programs' names Phazite is told at most
 
     // Its main buses in stereo, a stereo sidechain as its second input where it takes one, and no others; failing that,
     // without the sidechain; failing that, its main buses as they are.
@@ -128,6 +129,12 @@ sandbox::PluginInfo Instance::describe() const
         info.parameters.push_back (described);
     }
 
+    // Its programs, but the one every plug-in has that has none of its own (JUCE counts one).
+    if (const auto numPrograms = plugin->getNumPrograms(); numPrograms > 1 || plugin->getProgramName (0).isNotEmpty())
+        for (int i = 0; i < std::min (numPrograms, maximumPrograms); ++i)
+            info.programs.push_back (plugin->getProgramName (i));
+
+    info.program = plugin->getCurrentProgram();
     return info;
 }
 
@@ -169,6 +176,16 @@ void Instance::setState (const juce::MemoryBlock& state)
     // Not while a block plays: the plug-in's lock, which the audio thread holds as it plays.
     const juce::ScopedLock held (plugin->getCallbackLock());
     plugin->setStateInformation (state.getData(), (int) state.getSize());
+}
+
+void Instance::setProgram (int index)
+{
+    // As a state is given, not while a block plays.
+    if (! juce::isPositiveAndBelow (index, plugin->getNumPrograms()))
+        return;
+
+    const juce::ScopedLock held (plugin->getCallbackLock());
+    plugin->setCurrentProgram (index);
 }
 
 void Instance::setParameter (int index, float value)
@@ -234,7 +251,7 @@ void Instance::takeNotices (const std::function<void (sandbox::MessageWriter&)>&
     if (stateChanged.exchange (false))
     {
         MessageWriter message (MessageType::stateChanged, 0);
-        message.add (id);
+        message.add (id).add ((std::int32_t) plugin->getCurrentProgram());
         send (message);
     }
 

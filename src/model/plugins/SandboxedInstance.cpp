@@ -350,6 +350,28 @@ void SandboxedInstance::playBlock (juce::AudioBuffer<float>& buffer, const juce:
         buffer.copyFrom (i, 0, channel.getChannel (i), numSamples);
 }
 
+int SandboxedInstance::getNumPrograms()
+{
+    return std::max (1, (int) remote->getInfo().programs.size());
+}
+
+int SandboxedInstance::getCurrentProgram()
+{
+    return juce::jlimit (0, getNumPrograms() - 1, remote->getProgram());
+}
+
+void SandboxedInstance::setCurrentProgram (int index)
+{
+    if (! hasCrashed() && juce::isPositiveAndBelow (index, (int) remote->getInfo().programs.size()))
+        remote->setProgram (index, stateMilliseconds);
+}
+
+const juce::String SandboxedInstance::getProgramName (int index)
+{
+    const auto& programs = remote->getInfo().programs;
+    return juce::isPositiveAndBelow (index, (int) programs.size()) ? programs[(size_t) index] : juce::String();
+}
+
 void SandboxedInstance::getStateInformation (juce::MemoryBlock& state)
 {
     if (! hasCrashed())

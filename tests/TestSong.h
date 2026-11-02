@@ -45,6 +45,9 @@ public:
     Project& getProject() const;
     juce::File getSoundsFolder() const; // for the test's sound files, outside the project
 
+    // Saves the project, closes it and opens it again from its file in the same context, as the app opens one.
+    void reopen();
+
     // Runs a command on what is selected, as a menu or a key does; it must be there and enabled. And a switch's command
     // (one menus tick, such as transport.metronome), run if it isn't on or off as asked.
     void run (const juce::String& commandID);

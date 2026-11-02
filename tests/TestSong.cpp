@@ -58,6 +58,19 @@ juce::File TestSong::getSoundsFolder() const
     return folder.getChildFile ("Sounds");
 }
 
+void TestSong::reopen()
+{
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    setEdit (context, nullptr);
+    project = nullptr;
+
+    juce::String error;
+    project = Project::open (getEngine(), file, false, error);
+    REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+    setEdit (context, &project->getEdit());
+}
+
 void TestSong::run (const juce::String& commandID)
 {
     REQUIRE_MESSAGE (commands.invoke (commandID), (commandID + " is unknown or greyed out").toStdString());

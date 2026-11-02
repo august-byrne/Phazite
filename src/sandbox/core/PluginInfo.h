@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What a helper tells Phazite of a plug-in it hosts (docs/tracktion-migration.md, T3): its name and kind, its latency and
-// tail, its buses, and its parameters, each by the plug-in's own ID (a VST3's number, never its place in the list), as
-// the control channel carries them (Messages.h).
+// tail, its buses, its parameters, each by the plug-in's own ID (a VST3's number, never its place in the list), and its
+// programs, as the control channel carries them (Messages.h).
 #pragma once
 
 #include "Messages.h"
@@ -28,6 +28,8 @@ struct PluginInfo
     int numInputChannels = 0, numOutputChannels = 0;
     bool hasSidechain = false; // a sidechain bus of two channels, after the main ones
     std::vector<ParameterInfo> parameters {};
+    std::vector<juce::String> programs {}; // its programs' names (none for a plug-in without programs of its own)
+    int program = 0;                       // the one it has
 };
 
 void write (MessageWriter&, const PluginInfo&);

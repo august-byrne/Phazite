@@ -37,6 +37,7 @@ public:
     void prepare (std::unique_ptr<sandbox::BlockChannel>, double sampleRate); // a new channel, for another rate or size
     juce::MemoryBlock getState();
     void setState (const juce::MemoryBlock&);
+    void setProgram (int index);
     void setParameter (int index, float value);
     juce::String getParameterText (int index, float value) const;
 

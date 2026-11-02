@@ -63,6 +63,7 @@ std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const juce
 
     instance->info = readPluginInfo (reader);
     instance->latency = instance->info.latencySamples;
+    instance->program = instance->info.program;
     return instance;
 }
 
@@ -122,6 +123,18 @@ bool RemoteInstance::setState (const juce::MemoryBlock& state, int timeoutMillis
     return helper.request (message, timeoutMilliseconds).has_value();
 }
 
+bool RemoteInstance::setProgram (int index, int timeoutMilliseconds)
+{
+    auto message = helper.makeRequest (MessageType::setProgram);
+    message.add (id).add ((std::int32_t) index);
+
+    if (! helper.request (message, timeoutMilliseconds).has_value())
+        return false;
+
+    program = index;
+    return true;
+}
+
 void RemoteInstance::setParameter (int index, float value)
 {
     MessageWriter message (MessageType::setParameter, 0);
@@ -146,9 +159,12 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
 {
     auto* told = listener.load();
 
-    // Its latency, kept whoever listens.
+    // Its latency and program, kept whoever listens.
     if (type == MessageType::latencyChanged && told == nullptr)
         latency = notice.readInt();
+
+    if (type == MessageType::stateChanged && told == nullptr)
+        program = notice.readInt();
 
     if (told == nullptr)
         return;
@@ -178,6 +194,7 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         }
 
         case MessageType::stateChanged:
+            program = notice.readInt();
             told->stateChanged();
             break;
 
@@ -194,6 +211,7 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         case MessageType::setState:
         case MessageType::parameterText:
         case MessageType::stats:
+        case MessageType::setProgram:
         case MessageType::quit:
         case MessageType::setParameter:
         case MessageType::reply:

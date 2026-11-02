@@ -142,6 +142,11 @@ void Host::handle (const juce::MemoryBlock& message)
             answer.add (getProcessCpuSeconds()).add (getProcessMemoryBytes());
             break;
 
+        case MessageType::setProgram:
+            if (auto* instance = findInstance (reader.readInt64()))
+                instance->setProgram (reader.readInt());
+            break;
+
         // Notices: nothing to answer.
         case MessageType::setParameter:
             if (auto* instance = findInstance (reader.readInt64()))

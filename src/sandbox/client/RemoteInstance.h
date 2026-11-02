@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A plug-in instance in a helper, as Phazite holds it (docs/tracktion-migration.md, T3): the channel Phazite made for its
 // blocks, the helper's instance on it, opened from the plug-in's description and state and closed as it goes, what it
-// is (PluginInfo.h), and what Phazite asks of it besides blocks: its state, a value set by hand, how it writes a value,
-// another channel for another sample rate. What the plug-in changes itself comes as the helper's notices for it, which
-// the helper's owner hands it by its ID (handleNotice()), and it to its listener, on the pipe's thread.
+// is (PluginInfo.h), and what Phazite asks of it besides blocks: its state, its program, a value set by hand, how it
+// writes a value, another channel for another sample rate. What the plug-in changes itself comes as the helper's notices
+// for it, which the helper's owner hands it by its ID (handleNotice()), and it to its listener, on the pipe's thread.
 #pragma once
 
 #include "Helper.h"
@@ -52,6 +52,10 @@ public:
     std::optional<juce::MemoryBlock> getState (int timeoutMilliseconds);
     bool setState (const juce::MemoryBlock&, int timeoutMilliseconds);
 
+    // Its program (one of getInfo().programs): as it opened, then as it was set or the helper last told (any thread).
+    int getProgram() const noexcept { return program.load (std::memory_order_relaxed); }
+    bool setProgram (int index, int timeoutMilliseconds);
+
     // A value set by hand, from 0 to 1 (Phazite doesn't wait for it), and how the plug-in writes a value of a parameter.
     void setParameter (int index, float value);
     std::optional<juce::String> getParameterText (int index, float value, int timeoutMilliseconds);
@@ -75,7 +79,7 @@ private:
     const std::int64_t id;
     std::unique_ptr<BlockChannel> channel;
     PluginInfo info;
-    std::atomic<int> latency { 0 };
+    std::atomic<int> latency { 0 }, program { 0 };
     std::atomic<Listener*> listener { nullptr };
 };
 } // namespace phazite::sandbox

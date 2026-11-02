@@ -121,8 +121,21 @@ namespace
 
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (gain->getValue()); }
 
+        // Its programs, Full and Half, set its Gain, and tell the host so, as a plug-in's programs do.
+        int getNumPrograms() override { return 2; }
+        int getCurrentProgram() override { return program; }
+        const juce::String getProgramName (int index) override { return index == 0 ? "Full" : index == 1 ? "Half" : ""; }
+
+        void setCurrentProgram (int index) override
+        {
+            program = juce::jlimit (0, 1, index);
+            gain->setValueNotifyingHost (program == 0 ? 1.0f : 0.5f);
+            updateHostDisplay (ChangeDetails().withProgramChanged (true));
+        }
+
     private:
         StandInParameter* gain = nullptr;
+        int program = 0;
     };
 
     class TestSynth final : public StandIn

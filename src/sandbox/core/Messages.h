@@ -14,7 +14,7 @@ namespace phazite::sandbox
 // The program's argument that names the pipe it connects to ("--PhaziteSandbox:<pipe>"), and the messages' version,
 // which both sides must have.
 inline constexpr const char* helperProcessID = "PhaziteSandbox";
-inline constexpr std::int32_t protocolVersion = 1;
+inline constexpr std::int32_t protocolVersion = 2;
 
 enum class MessageType : std::int32_t
 {
@@ -29,6 +29,7 @@ enum class MessageType : std::int32_t
     setState,        // instance, state -> nothing (once it took it)
     parameterText,   // instance, parameter, value -> how the plug-in writes that value
     stats,           // nothing -> the helper's CPU seconds and its memory in bytes
+    setProgram,      // instance, program -> nothing (once it has it)
 
     // Phazite's notices.
     quit = 50,    // the helper ends
@@ -38,7 +39,7 @@ enum class MessageType : std::int32_t
     parameterChanged = 70, // instance, parameter, value: the plug-in changed it itself (its window, a program of its own)
     gesture,               // instance, parameter, whether it begins: a control of the plug-in's window grabbed or let go
     latencyChanged,        // instance, samples
-    stateChanged,          // instance: something besides its parameters changed in it
+    stateChanged,          // instance, its program: something besides its parameters changed in it (its program, perhaps)
     parametersChanged,     // instance, its parameters (PluginInfo.h): their list changed
 
     reply = 100 // an answer: its fields are the request's
