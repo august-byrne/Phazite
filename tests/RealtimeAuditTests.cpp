@@ -263,6 +263,10 @@ Measurement playPhaziteAndMeasure (phazite::ProjectContext& context)
     phazite::test::dispatchPendingMessages();
     auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
 
+    // On one thread, so that the monitor counts every allocation (the workers play the same strips' code, T2 step 8).
+    const auto threads = engine.getNumThreads();
+    engine.setNumThreads (1);
+
     Measurement m;
     juce::AudioBuffer<float> buffer (2, auditBlockSize); // allocated before the thread is marked as an audio thread
     const auto blockDuration =
@@ -298,6 +302,7 @@ Measurement playPhaziteAndMeasure (phazite::ProjectContext& context)
             m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
         });
     audioThread.join();
+    engine.setNumThreads (threads);
 
     phazite::stopAndReturn (edit);
     m.callSites = AudioThreadMonitor::describeCallSites();

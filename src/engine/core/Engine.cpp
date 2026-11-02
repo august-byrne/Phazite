@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <thread>
 
 namespace phazite::engine
 {
@@ -305,20 +306,60 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
 
 void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
 {
-    const auto beat = plan.tempo.toBeats ((double) transport.sample);
-    const auto tempo = plan.tempo.getTempoAt (beat);
+    // Where the song is for the stretch of the block. Where automation is: moving with the song while it plays; at the
+    // playhead while the song is stopped. The control points it and modulation move on are the song's while it plays,
+    // time's while it is stopped.
+    Span span { this, &plan, offset, numSamples };
+    span.beat = plan.tempo.toBeats ((double) transport.sample);
+    span.tempo = plan.tempo.getTempoAt (span.beat);
+    span.beatsPerSample = transport.playing && numSamples > 0
+                              ? (plan.tempo.toBeats ((double) (transport.sample + numSamples)) - span.beat) / numSamples
+                              : 0.0;
+    span.gridSample = transport.playing ? transport.sample : clock + offset;
+    span.pass = ++passes;
+    findControlPoints (plan, span.gridSample, numSamples);
 
-    // Where automation is: moving with the song while it plays, as late as the sound it moves comes (so that it lines up
-    // with it); at the playhead while the song is stopped. The control points it and modulation move on are the song's while
-    // it plays, time's while it is stopped.
-    const auto beatsPerSample =
-        transport.playing && numSamples > 0 ? (plan.tempo.toBeats ((double) (transport.sample + numSamples)) - beat) / numSamples : 0.0;
+    // Each strip a task, in the plan's order, on the audio thread and the workers; each waits for what it takes in, done
+    // in tasks before it, and adds it up in the plan's order, so that the sound is the same to the last bit on one thread
+    // or many. A track and the master alone can't play side by side: the audio thread plays them without waking anyone.
+    if (plan.strips.size() <= 2)
+    {
+        for (size_t i = 0; i < plan.strips.size(); ++i)
+            playStrip (span, i);
+
+        return;
+    }
+
+    workers.run ((int) plan.strips.size(), [] (void* context, int index) noexcept
+                 { static_cast<Span*> (context)->engine->playStrip (*static_cast<Span*> (context), (size_t) index); }, &span);
+}
+
+void Engine::playStrip (const Span& span, size_t index) noexcept
+{
+    const auto& plan = *span.plan;
+    const auto& strip = plan.strips[index];
+    const auto offset = span.offset, numSamples = span.numSamples;
+    const auto beat = span.beat, tempo = span.tempo, beatsPerSample = span.beatsPerSample;
+    const auto gridSample = span.gridSample;
     const auto getAutomationBeat = [this, &plan, beat] (int latency)
     { return transport.playing && latency > 0 ? plan.tempo.toBeats ((double) (transport.sample - latency)) : beat; };
-    const auto gridSample = transport.playing ? transport.sample : clock + offset;
-    findControlPoints (plan, gridSample, numSamples);
 
-    for (const auto& strip : plan.strips)
+    // What it takes in, done first: what it adds up, and what its devices' sidechains listen to.
+    const auto waitFor = [&plan, &span] (int other)
+    {
+        const auto& done = plan.strips[(size_t) other].state->donePass;
+
+        while (done.load (std::memory_order_acquire) != span.pass)
+            std::this_thread::yield();
+    };
+
+    for (const auto& input : strip.inputs)
+        waitFor (input.strip);
+
+    for (const auto& device : strip.devices)
+        if (device.sidechain >= 0)
+            waitFor (device.sidechain);
+
     {
         auto& state = *strip.state;
         float* channels[] = { state.buffer.getWritePointer (0, offset), state.buffer.getWritePointer (1, offset) };
@@ -463,6 +504,8 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
         // An envelope follower listens to its track after the fader, for the next block.
         for (const auto& modulator : strip.modulators)
             modulator->listen (channels, 2, numSamples);
+
+        state.donePass.store (span.pass, std::memory_order_release);
     }
 }
 

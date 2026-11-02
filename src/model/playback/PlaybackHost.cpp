@@ -9,6 +9,8 @@ namespace phazite
 PlaybackHost::PlaybackHost (te::Engine& e)
     : tracktion (e)
 {
+    // As many threads as Tracktion's (model/engine/internal/EngineSetup.h), which plays nothing while Phazite's does.
+    engine.setNumThreads (tracktion.getEngineBehaviour().getNumberOfCPUsToUseForAudio());
 }
 
 PlaybackHost::~PlaybackHost()

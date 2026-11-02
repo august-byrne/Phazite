@@ -9,6 +9,7 @@
 #include "EventQueue.h"
 #include "Handover.h"
 #include "Plan.h"
+#include "Workers.h"
 #include "engine/nodes/LoudnessMeter.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -65,6 +66,11 @@ public:
     // How many blocks the audio thread has played: what it let go of before the count it read is no longer played
     // (audio/AudioFile.h frees what it lets go of after it).
     const std::atomic<std::uint64_t>& getBlocksPlayed() const noexcept { return blocksPlayed; }
+
+    // Message thread, while the engine is stopped or not yet given to the audio device: so many threads play each block,
+    // the audio thread one of them (docs/tracktion-migration.md, T2 step 8).
+    void setNumThreads (int count) { workers.setNumThreads (count); }
+    int getNumThreads() const noexcept { return workers.getNumThreads(); }
 
     // How loud what goes out is (any thread reads it, and resets its integrated loudness and held peak).
     LoudnessMeter& getLoudnessMeter() noexcept { return loudness; }
@@ -128,6 +134,22 @@ private:
     void takeCommands (const Plan&) noexcept;
     void playSpan (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
     void playStrips (const Plan&, int offset, int numSamples) noexcept;
+
+    // A stretch of a block that the strips play, which each strip's task reads; the strips' work on the audio thread and
+    // the workers, each pass numbered, so that a strip knows when what it takes in is done.
+    struct Span
+    {
+        Engine* engine = nullptr;
+        const Plan* plan = nullptr;
+        int offset = 0, numSamples = 0;
+        double beat = 0.0, tempo = 120.0, beatsPerSample = 0.0;
+        std::int64_t gridSample = 0;
+        std::uint64_t pass = 0;
+    };
+
+    Workers workers;
+    std::uint64_t passes = 0;
+    void playStrip (const Span&, size_t index) noexcept;
     void addNotes (const Plan::Strip&, const Plan&, int numSamples) noexcept;
 
     // The control points of a stretch of a block that modulators play on (ModulatorNode.h), the samples counted since the

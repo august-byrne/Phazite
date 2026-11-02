@@ -164,6 +164,8 @@ target_sources(phazite_core PRIVATE
     src/engine/core/Plan.h
     src/engine/core/TempoMap.cpp
     src/engine/core/TempoMap.h
+    src/engine/core/Workers.cpp
+    src/engine/core/Workers.h
     src/engine/modulation/ModulatorNode.cpp
     src/engine/modulation/ModulatorNode.h
     src/engine/nodes/Channel.cpp

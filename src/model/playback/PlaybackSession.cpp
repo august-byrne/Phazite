@@ -258,9 +258,10 @@ std::optional<float> getPlayedValue (const te::AutomatableParameter& parameter, 
     return {};
 }
 
-juce::AudioBuffer<float> renderWithOwnEngine (te::Edit& edit, int numSamples, double sampleRate, int blockSize)
+juce::AudioBuffer<float> renderWithOwnEngine (te::Edit& edit, int numSamples, double sampleRate, int blockSize, int numThreads)
 {
     engine::Engine engine;
+    engine.setNumThreads (numThreads);
     engine.prepare (sampleRate, blockSize);
     SongPlayer player (edit);
     engine.setPlan (player.compile (sampleRate, blockSize, true));

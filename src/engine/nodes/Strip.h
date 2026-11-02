@@ -51,6 +51,9 @@ public:
     std::vector<ModulatorNode::NoteStart> noteStarts;
     std::vector<float> volumeModulation, panModulation;
 
+    // The engine's pass it has played last (Engine.h), which the strips that take it in wait for.
+    std::atomic<std::uint64_t> donePass { 0 };
+
 private:
     Channel channel;
 };

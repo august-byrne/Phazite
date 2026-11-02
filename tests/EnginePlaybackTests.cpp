@@ -24,6 +24,7 @@
 #include "model/transport/TransportModel.h"
 
 #include <cmath>
+#include <cstring>
 
 using phazite::test::EnginePlayback;
 using phazite::test::TestSong;
@@ -508,4 +509,23 @@ TEST_CASE ("Phazite's engine plays a plug-in from the instance Tracktion loaded,
     phazite::setDeviceOn (song.context, effect, false);
     audio = playback.play (0.6);
     CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("Phazite's engine renders the First Beat example the same to the last bit on one thread or four")
+{
+    TestSong song (TestSong::Start::firstBeat);
+    phazite::test::dispatchPendingMessages();
+    auto& edit = *phazite::getEdit (song.context);
+    const auto one = phazite::renderWithOwnEngine (edit, 48000 * 4, 48000.0, 256, 1);
+    const auto four = phazite::renderWithOwnEngine (edit, 48000 * 4, 48000.0, 256, 4);
+    REQUIRE (one.getMagnitude (0, 0, one.getNumSamples()) > 0.01f);
+
+    auto same = true;
+
+    for (int channel = 0; channel < 2; ++channel)
+        same = same
+               && std::memcmp (one.getReadPointer (channel), four.getReadPointer (channel), sizeof (float) * (size_t) one.getNumSamples())
+                      == 0;
+
+    CHECK (same);
 }

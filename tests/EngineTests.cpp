@@ -10,6 +10,7 @@
 #include "engine/core/Engine.h"
 #include "engine/core/Handover.h"
 #include "engine/core/TempoMap.h"
+#include "engine/core/Workers.h"
 #include "engine/nodes/Channel.h"
 #include "engine/nodes/DeviceRunner.h"
 #include "engine/nodes/LoudnessMeter.h"
@@ -1051,4 +1052,37 @@ TEST_CASE ("The engine's loudness meter reads a sine as EBU R128 does, gates sil
     REQUIRE (after.truePeak.has_value());
     CHECK (*after.integrated == doctest::Approx (-30.0f).epsilon (0.005));
     CHECK (*after.truePeak == doctest::Approx (-30.0f).epsilon (0.01));
+}
+
+TEST_CASE ("The engine's workers run each task of a job once, on the audio thread and themselves, job after job")
+{
+    engine::Workers workers;
+    workers.setNumThreads (4);
+    std::array<std::atomic<int>, 64> runs {};
+
+    struct Job
+    {
+        std::array<std::atomic<int>, 64>* runs;
+        std::atomic<int> total { 0 };
+    } job { &runs };
+
+    for (int round = 0; round < 2000; ++round)
+    {
+        for (auto& count : runs)
+            count.store (0);
+
+        const auto numTasks = 1 + round % 64;
+        workers.run (
+            numTasks,
+            [] (void* context, int index) noexcept
+            {
+                auto& running = *static_cast<Job*> (context);
+                (*running.runs)[(size_t) index].fetch_add (1);
+                running.total.fetch_add (1);
+            },
+            &job);
+
+        for (int i = 0; i < 64; ++i)
+            REQUIRE (runs[(size_t) i].load() == (i < numTasks ? 1 : 0));
+    }
 }

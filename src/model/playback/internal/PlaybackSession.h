@@ -106,6 +106,7 @@ PlaybackSession* findPlayingSession (const te::Edit&);
 std::optional<float> getPlayedValue (const te::AutomatableParameter&, bool withModulation);
 
 // The song rendered by Phazite's own engine, offline, from its start: so many samples at a rate, in blocks of a size, in
-// stereo, through the master's devices, as an export renders it (T5) and the golden renders' harness compares it.
-juce::AudioBuffer<float> renderWithOwnEngine (te::Edit&, int numSamples, double sampleRate, int blockSize);
+// stereo, through the master's devices, as an export renders it (T5) and the golden renders' harness compares it; on so
+// many threads, the same to the last bit however many.
+juce::AudioBuffer<float> renderWithOwnEngine (te::Edit&, int numSamples, double sampleRate, int blockSize, int numThreads = 1);
 } // namespace phazite
