@@ -69,6 +69,10 @@ public:
     // How long its sound goes on after its input stops, in seconds (a reverb's tail).
     virtual double getTailSeconds() const { return 0.0; }
 
+    // Whether its thin plug-in may let it sleep once what comes in and what it plays have been silent a while: not a
+    // plug-in, which may play with nothing coming in (an arpeggiator's own pattern, a drone).
+    virtual bool sleepsOnSilence() const noexcept { return true; }
+
     // Whether something came in other than as a note or sound and waits for its next block, such as a pad its editor
     // played: its thin plug-in, asleep on silence, wakes for it. Real-time safe.
     virtual bool isWaitingToPlay() const noexcept { return false; }

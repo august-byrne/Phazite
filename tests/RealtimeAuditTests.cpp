@@ -14,6 +14,7 @@
 #include "EnginePlayback.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
@@ -727,6 +728,24 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playPhaziteAndMeasure (song.context);
         report ("Phazite's engine: routing", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords through a plug-in (the tests' stand-in) after Phazite's synth")
+    {
+        phazite::test::TestPlugin testPlugin;
+        phazite::test::TestSong song;
+        const auto track = song.firstTrack;
+        song.setInstrument (track, phazite::devices::Synth::typeID);
+        song.addEffect (track, "PhaziteTestEffect");
+        const auto clip = song.addMidiClip (track, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (clip, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        const auto m = playPhaziteAndMeasure (song.context);
+        report ("Phazite's engine: a plug-in", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
     }

@@ -38,6 +38,9 @@ public:
     // Message thread: what was given last, or nullptr.
     T* get() const noexcept { return given.get(); }
 
+    // Message thread, while the audio thread can't be in a block (it has stopped): frees what was replaced at once.
+    void freeReplaced() { replaced.clear(); }
+
     // The audio thread's hold on what it plays in a block: what was given last as the block starts, until the block ends
     // (as it goes out of scope, however the block ends). Real-time safe.
     class Block

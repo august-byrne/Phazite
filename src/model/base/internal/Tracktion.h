@@ -18,6 +18,7 @@
 // what the optimiser makes of the whole file, not on anything the file uses.
 JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Warray-bounds")
 #include <tracktion_engine/tracktion_engine.h>
+#include <tracktion_graph/tracktion_graph.h> // its playback graph's nodes, which Phazite's engine holds silent (PlaybackSession.h)
 JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
 namespace phazite

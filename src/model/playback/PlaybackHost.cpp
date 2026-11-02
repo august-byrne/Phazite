@@ -41,8 +41,10 @@ void PlaybackHost::setOn (bool shouldBeOn)
     }
     else
     {
+        // The device calls the engine no more: what it played goes at once (plug-ins among it, which their Edits own).
         devices.removeAudioCallback (this);
         engine.stop();
+        engine.dropPlans();
     }
 
     if (auto* session = getPlayingSession())
@@ -58,6 +60,10 @@ void PlaybackHost::remove (PlaybackSession& session)
 {
     const auto wasPlaying = getPlayingSession() == &session;
     std::erase (sessions, &session);
+
+    // Off, what the engine played last goes with the project (plug-ins among it, which its Edit owns).
+    if (! on)
+        engine.dropPlans();
 
     if (! wasPlaying)
         return;

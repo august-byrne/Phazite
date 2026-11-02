@@ -81,6 +81,7 @@ private:
     std::set<std::int64_t> usedSends, usedContainers;
     std::set<std::int64_t> used; // the devices the plan being compiled plays
     bool lowLatency = false;     // as the plan being compiled sees it
+    bool compilingRender = false;
 
     // The audio files the plans play, by their paths, and each audio clip's place in its file, by its ID.
     std::map<juce::String, std::shared_ptr<engine::AudioFile>> files;
@@ -104,6 +105,7 @@ private:
 
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
     std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState);
+    std::shared_ptr<engine::DeviceNode> getPluginDevice (const juce::ValueTree& deviceState);
     // A track, a bus or a return: where its sound goes (a bus's ID, or 0 for the master), what it takes in (its tracks, what
     // sends to it, what its sidechains listen to), and what of that it refuses, which would feed itself round a loop.
     struct ChannelInfo

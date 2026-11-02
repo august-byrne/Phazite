@@ -255,7 +255,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
     if (quietIn && isQuiet (0, std::min (2, buffer.getNumChannels())))
     {
         silentSamples = std::min (silentSamples + numSamples, sleepAfterSamples);
-        asleep = silentSamples >= sleepAfterSamples && ! in.isRendering;
+        asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence();
     }
     else
     {

@@ -9,6 +9,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
@@ -66,10 +67,19 @@ void startRecording (te::Edit& edit)
     if (recorder != nullptr)
         recorder->prepareRecordings();
 
+    // Tracktion's graph plays while it records (T2 step 9 records through Phazite's engine).
+    auto* session = findSession (edit);
+
+    if (session != nullptr)
+        session->holdTracktion (false);
+
     transport.record (false, true);
 
     if (recorder != nullptr && ! transport.isRecording())
         recorder->discardRecordings();
+
+    if (session != nullptr && ! transport.isRecording())
+        session->followLiveMidi();
 }
 
 void stopRecording (te::Edit& edit)

@@ -2,6 +2,7 @@
 #include "internal/SongPlayer.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "internal/PluginProcessor.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -190,6 +191,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     // Each track that holds clips, through its devices.
     lowLatency = ! isRender && isLowLatency (edit.engine);
+    compilingRender = isRender;
     used.clear();
     usedFiles.clear();
     usedRegions.clear();
@@ -306,7 +308,11 @@ std::shared_ptr<engine::StripState> SongPlayer::getStrip (std::int64_t id)
 
 std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree& deviceState)
 {
-    // Phazite's own devices; a plug-in or a container plays nothing yet (T2 steps 6 and 7).
+    // A plug-in, live: the instance Tracktion loaded (a render plays plug-ins from T5, which renders on Phazite's engine).
+    if (deviceState[schema::deviceType].toString() == schema::deviceIsPlugin)
+        return compilingRender ? nullptr : getPluginDevice (deviceState);
+
+    // Phazite's own devices.
     const auto* info = findOwnDevice (deviceState[schema::deviceType].toString().toStdString());
 
     if (info == nullptr)
@@ -323,6 +329,32 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
     }
 
     setValues (*node, deviceState);
+    used.insert (id);
+    return node;
+}
+
+std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::ValueTree& deviceState)
+{
+    // One that is loaded (not one missing on this computer), kept by its ID while Tracktion keeps the same plug-in.
+    const auto plugin = te::findPluginForID (edit, toTracktion (getDeviceID (deviceState)));
+    auto* external = dynamic_cast<te::ExternalPlugin*> (plugin.get());
+
+    if (external == nullptr || external->getAudioPluginInstance() == nullptr)
+        return nullptr;
+
+    const auto id = getID (deviceState, schema::deviceID);
+    auto& node = devices[id];
+    const auto* playing = node != nullptr ? dynamic_cast<const PluginProcessor*> (&node->getRunner().getProcessor()) : nullptr;
+
+    if (playing == nullptr || &playing->getPlugin() != plugin.get())
+    {
+        auto processor = std::make_unique<PluginProcessor> (*plugin);
+        const auto& info = processor->getInfo();
+        node = std::make_shared<engine::DeviceNode> (info, std::move (processor));
+        node->getRunner().prepare (preparedRate, preparedBlockSize);
+    }
+
+    node->setOn (! (bool) deviceState[schema::deviceOff]);
     used.insert (id);
     return node;
 }

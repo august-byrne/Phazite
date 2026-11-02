@@ -43,6 +43,12 @@ void Engine::setPlan (std::unique_ptr<Plan> plan)
     plans.give (std::move (plan));
 }
 
+void Engine::dropPlans()
+{
+    plans.give (nullptr);
+    plans.freeReplaced();
+}
+
 //==============================================================================
 void Engine::push (Command command)
 {

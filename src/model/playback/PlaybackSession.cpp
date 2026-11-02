@@ -53,8 +53,12 @@ PlaybackSession::~PlaybackSession()
 
     // The Edit may have gone first (it is deleted while a context still holds it), and its inputs with it.
     if (exists.get() != nullptr)
+    {
         if (auto* instance = findLiveMidiInput (edit))
             instance->removeConsumer (&liveMidi);
+
+        holdTracktion (false);
+    }
 
     host.remove (*this);
     std::erase (getSessions(), this);
@@ -135,6 +139,8 @@ void PlaybackSession::followLiveMidi()
             instance->removeConsumer (&liveMidi);
     }
 
+    holdTracktion (playing);
+
     // Tracktion plays live MIDI only while Phazite's engine doesn't (the project it plays decides).
     if (const auto input = getAllMidiInputs (edit.engine); input != nullptr && host.getPlayingSession() == this)
     {
@@ -172,6 +178,54 @@ void PlaybackSession::update()
         engine.setPlan (player.compile (engine.getSampleRate(), engine.getMaximumBlockSize(), false));
 
     followLiveMidi();
+}
+
+void PlaybackSession::holdTracktion (bool hold)
+{
+    // A node that plays silence, holding Tracktion's graph without preparing it (so its plug-ins aren't prepared or
+    // played by it), until Tracktion builds another.
+    struct Held final : te::graph::Node
+    {
+        explicit Held (std::unique_ptr<te::graph::Node> graph)
+            : held (std::move (graph))
+        {
+        }
+
+        te::graph::NodeProperties getNodeProperties() override
+        {
+            te::graph::NodeProperties properties;
+            properties.hasAudio = true;
+            properties.hasMidi = true;
+            properties.numberOfChannels = 2;
+            properties.nodeID = (size_t) reinterpret_cast<std::uintptr_t> (this);
+            return properties;
+        }
+
+        bool isReadyToProcess() override { return true; }
+
+        void process (ProcessContext& context) override
+        {
+            context.buffers.audio.clear();
+            context.buffers.midi.clear();
+        }
+
+        std::unique_ptr<te::graph::Node> held;
+    };
+
+    auto* context = exists.get() != nullptr ? edit.getTransport().getCurrentPlaybackContext() : nullptr;
+
+    if (context == nullptr || (context == heldContext) == hold)
+        return;
+
+    if (hold)
+        context->setInsertOptionalLastStageNodeForDeviceCallback (
+            [] (te::OutputDevice&, const te::CreateNodeParams&, std::unique_ptr<te::graph::Node> graph) -> std::unique_ptr<te::graph::Node>
+            { return std::make_unique<Held> (std::move (graph)); });
+    else
+        context->setInsertOptionalLastStageNodeForDeviceCallback ({});
+
+    heldContext = hold ? context : nullptr;
+    edit.restartPlayback();
 }
 
 //==============================================================================

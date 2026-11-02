@@ -53,6 +53,11 @@ public:
     // inputs are made again, this takes them in again.
     void followLiveMidi();
 
+    // While Phazite's engine plays the project, Tracktion's playback graph plays nothing: it is held, never prepared, in a
+    // silent node, so that a plug-in, which both reach, only ever plays through Phazite's engine. followLiveMidi() holds it
+    // or lets it go as the engine that plays changes; recording lets it go first, while Tracktion records.
+    void holdTracktion (bool);
+
     // The piano roll's guide notes into a track, through Phazite's engine; and their ends.
     void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity);
     void stopGuideNotes (std::int64_t track);
@@ -77,6 +82,8 @@ private:
     } liveMidi;
 
     std::vector<std::pair<std::int64_t, int>> guideNotes; // each track's sounding
+
+    te::EditPlaybackContext* heldContext = nullptr; // the context whose graph is held, or none
 
     void changed (const juce::ValueTree& tree, const juce::ValueTree& child = {});
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;

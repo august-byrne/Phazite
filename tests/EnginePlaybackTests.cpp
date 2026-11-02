@@ -2,6 +2,7 @@
 // The song as Phazite's own engine plays it (model/playback/; docs/tracktion-migration.md, T2): the plan the model compiles
 // from the song, and the transport the model's commands drive through it while it plays the project.
 #include "EnginePlayback.h"
+#include "TestPlugin.h"
 #include "TestSong.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
@@ -479,4 +480,32 @@ TEST_CASE ("Phazite's engine mixes a container's devices with what comes into it
     auto mix = phazite::getMix (song.context, container);
     mix.setValue (0.0f);
     CHECK (levelOf (renderOwn (song), 0) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("Phazite's engine plays a plug-in from the instance Tracktion loaded, as the plug-in is set")
+{
+    phazite::test::TestPlugin testPlugin;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    const auto effect = song.addEffect (track, "PhaziteTestEffect");
+    auto* plugin =
+        dynamic_cast<te::ExternalPlugin*> (te::findPluginForID (*phazite::getEdit (song.context), phazite::toTracktion (effect)).get());
+    REQUIRE (plugin != nullptr);
+    EnginePlayback playback;
+
+    // Its gain at 1: the tone as it is.
+    song.run ("transport.playStop");
+    auto audio = playback.play (0.6);
+    CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
+
+    // Turned down as its editor turns it, at half: 6 dB quieter.
+    phazite::test::TestPlugin::setGain (*plugin, 0.5f);
+    audio = playback.play (0.6);
+    CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel - 6.02f).epsilon (0.002));
+
+    // Switched off, it passes the tone as it came.
+    phazite::setDeviceOn (song.context, effect, false);
+    audio = playback.play (0.6);
+    CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
 }

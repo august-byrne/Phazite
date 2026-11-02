@@ -37,6 +37,10 @@ public:
 
     // Message thread: what it plays from its next block on; or nothing (silence).
     void setPlan (std::unique_ptr<Plan>);
+
+    // Message thread, while no audio thread calls the engine (it is off): lets go of its plan, and of those it replaced,
+    // at once.
+    void dropPlans();
     const Plan* getPlan() const noexcept { return plans.get(); }
 
     // The transport, as the message thread asks for it: each takes effect at the start of the audio thread's next

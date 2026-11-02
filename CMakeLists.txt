@@ -341,10 +341,12 @@ target_sources(phazite_core PRIVATE
     src/model/playback/AutomationWriter.cpp
     src/model/playback/PlaybackHost.cpp
     src/model/playback/PlaybackSession.cpp
+    src/model/playback/PluginProcessor.cpp
     src/model/playback/SongPlayer.cpp
     src/model/playback/internal/AutomationWriter.h
     src/model/playback/internal/PlaybackHost.h
     src/model/playback/internal/PlaybackSession.h
+    src/model/playback/internal/PluginProcessor.h
     src/model/playback/internal/SongPlayer.h
     src/model/presets/PresetModel.h
     src/model/presets/Presets.cpp
