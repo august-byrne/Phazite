@@ -2,6 +2,7 @@
 #include "Workers.h"
 #include "devices/core/AudioThreads.h"
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
@@ -102,11 +103,12 @@ void Workers::run (int count, Task newTask, void* newContext) noexcept
         return;
     }
 
+    jassert (count <= maximumTasks);
+    count = std::min (count, maximumTasks);
     task.store (newTask, std::memory_order_relaxed);
     context.store (newContext, std::memory_order_relaxed);
-    numTasks.store (count, std::memory_order_relaxed);
     doneTasks.store (0, std::memory_order_relaxed);
-    next.store (((next.load (std::memory_order_relaxed) >> 32) + 1) << 32, std::memory_order_release);
+    next.store ((((next.load (std::memory_order_relaxed) >> 32) + 1) << 32) | ((std::uint64_t) count << 16), std::memory_order_release);
     generation.fetch_add (1, std::memory_order_acq_rel);
     generation.notify_all();
 
@@ -121,12 +123,13 @@ void Workers::takeTasks() noexcept
 {
     for (;;)
     {
-        // The job read after which job it is: a task taken only if neither changed meanwhile.
+        // The job read after which job it is, with its count: a task taken only if neither changed meanwhile. (A job's task
+        // and context change only after all its tasks are done, which they can't be while one is still to take.)
         auto taken = next.load (std::memory_order_acquire);
-        const auto count = numTasks.load (std::memory_order_acquire);
+        const auto count = (int) ((taken >> 16) & 0xffffu);
         const auto run = task.load (std::memory_order_acquire);
         auto* const with = context.load (std::memory_order_acquire);
-        const auto index = (int) (taken & 0xffffffffu);
+        const auto index = (int) (taken & 0xffffu);
 
         if (index >= count)
             return;

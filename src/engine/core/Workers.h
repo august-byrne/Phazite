@@ -37,12 +37,14 @@ private:
     class Worker;
     std::vector<std::unique_ptr<Worker>> threads;
 
-    // The job, which the audio thread sets before it starts it; and which job it is with the next task not taken yet, in
-    // one value (the job's number above, the task's below), so that a thread takes a task of the job it read the job of,
-    // or none. The generation wakes the workers.
+    // The job, which the audio thread sets before it starts it; and which job it is, how many tasks it has and the next
+    // not taken yet, in one value (the job's number in the top 32 bits, then the count, then the index, 16 bits each), so
+    // that a thread takes a task of the job it read the count of, or none: read apart, a worker late from the last job
+    // could read the next job's count with the last's index, and take a task twice. The generation wakes the workers.
+    static constexpr int maximumTasks = 0xffff;
     std::atomic<Task> task { nullptr };
     std::atomic<void*> context { nullptr };
-    std::atomic<int> numTasks { 0 }, doneTasks { 0 };
+    std::atomic<int> doneTasks { 0 };
     std::atomic<std::uint64_t> next { 0 };
     std::atomic<std::uint32_t> generation { 0 };
     std::atomic<bool> quitting { false };
