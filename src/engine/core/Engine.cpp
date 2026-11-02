@@ -448,13 +448,13 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
     workers.run ((int) (plan.earlyStrips.size() + plan.strips.size()),
                  [] (void* context, int index) noexcept
                  {
-                     const auto& played = *static_cast<Span*> (context);
-                     const auto& early = played.plan->earlyStrips;
+                     const auto& job = *static_cast<Span*> (context);
+                     const auto& early = job.plan->earlyStrips;
 
                      if (index < (int) early.size())
-                         played.engine->startStrip (played, (size_t) early[(size_t) index]);
+                         job.engine->startStrip (job, (size_t) early[(size_t) index]);
                      else
-                         played.engine->playStrip (played, (size_t) index - early.size());
+                         job.engine->playStrip (job, (size_t) index - early.size());
                  },
                  &span);
 }
