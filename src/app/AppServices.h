@@ -37,6 +37,12 @@ struct AppServices
     Library library;                      // what the browser and the plug-in picker show
     std::unique_ptr<Previewer> previewer; // the browser's
 
+    // The plug-ins that crashed their helpers as they loaded, kept off, at the next start too: kept in the settings as the
+    // plug-in host's list of them changes.
+    struct CrashedPlugins;
+    std::unique_ptr<CrashedPlugins> crashedPlugins;
+    ~AppServices();
+
     JUCE_DECLARE_NON_COPYABLE (AppServices)
 };
 } // namespace phazite

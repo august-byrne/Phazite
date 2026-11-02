@@ -97,10 +97,14 @@ enum class DevicePlace
 };
 
 // A device's menu, as its slot and its panel in the Devices view show it, for the selected devices (this one alone,
-// unless it is one of them): a plug-in's window, On, Automate, moving it among its neighbours (it is index of count; left
-// and right where they show in a row, up and down in a strip), grouping effects into a container or ungrouping one, a
-// preset, and Remove; for an instrument, Replace instead of the moves. changed() runs after an edit, so that what shows
-// the device shows it at once.
+// unless it is one of them): Reload for a plug-in that crashed, a plug-in's window, On, Automate, moving it among its
+// neighbours (it is index of count; left and right where they show in a row, up and down in a strip), grouping effects
+// into a container or ungrouping one, a preset, and Remove; for an instrument, Replace instead of the moves. changed()
+// runs after an edit, so that what shows the device shows it at once.
 void showDeviceMenu (ProjectContext&, CommandBridge&, const DeviceSlot&, DevicePlace, TrackID track, int index, int count, bool inRow,
                      juce::Component& target, std::function<void()> changed);
+
+// A plug-in that crashed (DeviceSlot::crashed) reloaded, as its slot's click and its menu's Reload do; one that didn't
+// load says why, over the target.
+void reloadDevice (ProjectContext&, DeviceID, juce::Component& target);
 } // namespace phazite::ui

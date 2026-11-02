@@ -14,6 +14,7 @@
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/transport/internal/AudioRecorder.h"
 
 namespace phazite
@@ -28,16 +29,24 @@ namespace
 
     //==============================================================================
     // Listens to the open Edit's state and tells the context's listeners which groups changed, once per turn of the message
-    // loop. What Tracktion writes as it plays (the transport, the input devices) is no change to the song.
+    // loop. What Tracktion writes as it plays (the transport, the input devices) is no change to the song. A plug-in whose
+    // helper went, or that was reloaded, changes what its device shows (model/plugins/internal/PluginHost.h).
     struct SongWatcher : private juce::ValueTree::Listener,
+                         private juce::ChangeListener,
                          private juce::AsyncUpdater
     {
-        explicit SongWatcher (juce::ListenerList<ProjectContext::Listener>& l)
-            : listeners (l)
+        SongWatcher (juce::ListenerList<ProjectContext::Listener>& l, PluginHost& host)
+            : listeners (l),
+              plugins (host)
         {
+            plugins.addChangeListener (this);
         }
 
-        ~SongWatcher() override { setState ({}); }
+        ~SongWatcher() override
+        {
+            plugins.removeChangeListener (this);
+            setState ({});
+        }
 
         void setState (juce::ValueTree newState)
         {
@@ -53,9 +62,16 @@ namespace
 
     private:
         juce::ListenerList<ProjectContext::Listener>& listeners;
+        PluginHost& plugins;
         juce::ValueTree state;
         SongChanges pending;
         int version = 0; // ProjectContext::getSongVersion()
+
+        void changeListenerCallback (juce::ChangeBroadcaster*) override
+        {
+            if (state.isValid())
+                add (pending.devices);
+        }
 
         // The group a change to this element, or to something in it, belongs to.
         void mark (const juce::ValueTree& changed)
@@ -218,7 +234,7 @@ struct ProjectContext::Impl
           selection (getEngine (engine)),
           songSelection (createSongSelection (selection)),
           songRange (createSongRange (rangeSelection, selection)),
-          songWatcher (std::make_unique<SongWatcher> (listeners))
+          songWatcher (std::make_unique<SongWatcher> (listeners, getPluginHost (engine)))
     {
     }
 

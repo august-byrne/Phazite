@@ -14,6 +14,7 @@
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -86,6 +87,7 @@ DeviceSlot makeDeviceSlot (te::Plugin& device)
              .popsOut = popsOut (device),
              .windowOpen = popsOut (device) && isWindowOpen (device),
              .frozen = isFrozenDevice (device),
+             .crashed = hasCrashed (device),
              .hasSidechain = hasSidechain (device),
              .sidechain = describeSidechainSource (device) };
 }
@@ -374,6 +376,19 @@ void removeDevice (ProjectContext& context, DeviceID id)
 {
     if (auto* device = findDevice (context, id))
         phazite::removeDevice (*device);
+}
+
+std::optional<juce::String> reloadDevice (ProjectContext& context, DeviceID id)
+{
+    auto* device = findDevice (context, id);
+
+    if (device == nullptr || ! hasCrashed (*device))
+        return {};
+
+    if (juce::String error; ! reload (*device, error))
+        return error.isNotEmpty() ? error : juce::String ("It didn't load.");
+
+    return {};
 }
 
 void showDeviceWindow (ProjectContext& context, DeviceID id)

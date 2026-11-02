@@ -3,12 +3,20 @@
 
 #include <array>
 #include <cmath>
+#include <functional>
 
 namespace phazite::test
 {
 namespace
 {
     using Kind = TestPlugins::Kind;
+
+    // As a plug-in that crashes does: an access to memory that isn't there.
+    void crashNow()
+    {
+        volatile int* nowhere = nullptr;
+        *nowhere = 1;
+    }
 
     // A parameter as a plug-in format hosts one (a VST3's): with the plug-in's own ID for it.
     class StandInParameter final : public juce::HostedAudioProcessorParameter
@@ -24,7 +32,16 @@ namespace
 
         juce::String getParameterID() const override { return id; }
         float getValue() const override { return value.load(); }
-        void setValue (float newValue) override { value = newValue; }
+
+        void setValue (float newValue) override
+        {
+            value = newValue;
+
+            if (whenSet != nullptr)
+                whenSet (newValue);
+        }
+
+        std::function<void (float)> whenSet; // what a stand-in does as it is set
         float getDefaultValue() const override { return initial; }
         juce::String getName (int maximumLength) const override { return name.substring (0, maximumLength); }
         juce::String getLabel() const override { return {}; }
@@ -114,8 +131,8 @@ namespace
                                private juce::Timer
     {
     public:
-        EffectEditor (juce::AudioProcessor& processor, const StandInParameter& toneParameter)
-            : juce::AudioProcessorEditor (processor),
+        EffectEditor (juce::AudioProcessor& plugin, const StandInParameter& toneParameter)
+            : juce::AudioProcessorEditor (plugin),
               tone (toneParameter)
         {
             setSize (300, 200);
@@ -266,12 +283,8 @@ namespace
         using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override
         {
-            // As a plug-in that crashes does: an access to memory that isn't there.
             if (crash->getValue() > 0.5f)
-            {
-                volatile int* nowhere = nullptr;
-                *nowhere = 1;
-            }
+                crashNow();
         }
 
     private:
@@ -285,6 +298,13 @@ namespace
             : StandIn (Kind::hang, stereoEffect())
         {
             hang = add ("30", "Hang", 0.0f);
+
+            // Turned on, it stops the thread that set it for ever: the helper's message thread, set by hand.
+            add ("31", "Stall", 0.0f)->whenSet = [] (float value)
+            {
+                while (value > 0.5f)
+                    juce::Thread::sleep (1);
+            };
         }
 
         using StandIn::processBlock;
@@ -393,6 +413,8 @@ namespace
                 return { "Test Latency", "PhaziteTestLatency", 0x7e5711, false };
             case Kind::sidechain:
                 return { "Test Sidechain", "PhaziteTestSidechain", 0x7e5751 + 1, false };
+            case Kind::crashLoading:
+                return { "Test Crash Loading", "PhaziteTestCrashLoading", 0x7e57c2, false };
         }
 
         return { "Test Effect", "PhaziteTestEffect", 0x7e57e5, false };
@@ -476,6 +498,9 @@ std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind)
             return std::make_unique<TestLatency>();
         case Kind::sidechain:
             return std::make_unique<TestSidechain>();
+        case Kind::crashLoading:
+            crashNow(); // as a plug-in that crashes as it loads does
+            return nullptr;
     }
 
     return nullptr;

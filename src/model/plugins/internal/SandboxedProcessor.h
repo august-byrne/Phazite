@@ -3,7 +3,8 @@
 // through the channel of its instance (SandboxedInstance.h), one round trip with a deadline of the block's own length in
 // real time (none in a render), so that a plug-in that hangs makes its own blocks late and never the song's. A block the
 // helper hasn't answered in time, one a render holds the channel for, and every block of a plug-in whose helper has gone
-// let an effect's sound through, and are silent for an instrument. Its mix with what came in is the engine's, as for
+// let an effect's sound through, and are silent for an instrument; a block kept for seconds is a hang, which its helper
+// is ended for (sandbox/client/Helper.h). Its mix with what came in is the engine's, as for
 // Phazite's own devices. Its parameters are the plug-in's, by their places as Tracktion names them ("0", "1"...), so that
 // the song's automation, modulators and macros move them on Phazite's engine as they move its own devices': the block
 // goes whole, with their values on each control point as its changes (devices/core/Processor.h), which the helper plays
@@ -51,5 +52,6 @@ private:
     std::vector<devices::ParameterInfo> parameters;
     devices::DeviceInfo info;
     double rate = 44100.0;
+    std::int64_t busySince = 0; // the audio thread's: when it found the channel still on a block, in high-resolution ticks
 };
 } // namespace phazite

@@ -33,10 +33,10 @@ class Editor::Holder final : public juce::Component,
                              private juce::KeyListener
 {
 public:
-    Holder (juce::AudioPluginInstance& plugin, std::function<void (int, int)> resized,
-            std::function<void (bool, const juce::KeyPress&)> key)
-        : resizedByPlugin (std::move (resized)),
-          keyCaught (std::move (key)),
+    Holder (juce::AudioPluginInstance& plugin, std::function<void (int, int)> onResized,
+            std::function<void (bool, const juce::KeyPress&)> onKey)
+        : resizedByPlugin (std::move (onResized)),
+          keyCaught (std::move (onKey)),
           editor (plugin.createEditorAndMakeActive())
     {
         setOpaque (true);

@@ -76,6 +76,7 @@ public:
     static constexpr BoolSetting exportStems { "phaziteExportStems", false, SaveTiming::now };              // the song, or its stems
     static constexpr ListSetting pluginsGettingAllKeys { "phazitePluginsGettingAllKeys", SaveTiming::now }; // plug-ins, by identity
     static constexpr BoolSetting sandboxPlugins { "phaziteSandboxPlugins", false, SaveTiming::now };        // while T3 lasts
+    static constexpr ListSetting pluginsCrashedLoading { "phazitePluginsCrashedLoading", SaveTiming::now }; // kept off, by identity
     static constexpr BoolSetting guide { "phaziteGuide", true, SaveTiming::now };
     static constexpr ListSetting guideStepsDone { "phaziteGuideStepsDone", SaveTiming::now }; // the guide's steps, by name
     static constexpr ListSetting lessonsDone { "phaziteLessonsDone", SaveTiming::now };       // the lessons finished, by id

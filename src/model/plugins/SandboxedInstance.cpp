@@ -178,6 +178,42 @@ void SandboxedInstance::helperLost()
     triggerAsyncUpdate();
 }
 
+void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> newRemote, std::shared_ptr<void> keep,
+                                       std::function<void()> gone)
+{
+    // No block plays while it changes (the engine skips them; a render waits).
+    hold();
+
+    if (onGone != nullptr)
+        onGone();
+
+    remote->setListener (nullptr);
+    auto old = std::exchange (remote, std::move (newRemote));
+    auto oldHelper = std::exchange (keepHelper, std::move (keep));
+    onGone = std::move (gone);
+
+    {
+        const juce::ScopedLock locked (lock);
+        latency = remote->getLatencySamples();
+        lossCame = false;
+    }
+
+    remote->setListener (this);
+    crashed.store (false, std::memory_order_release);
+    let();
+
+    // Its values as the plug-in has them now, as if it had set them itself; and its latency.
+    const auto& reopened = remote->getInfo().parameters;
+
+    for (size_t i = 0; i < std::min (parameters.size(), reopened.size()); ++i)
+        if (! juce::exactlyEqual (parameters[i]->getValue(), reopened[i].value))
+            parameters[i]->setFromPlugin (reopened[i].value);
+
+    setLatencySamples (remote->getLatencySamples());
+    old = nullptr;       // closed in its helper, which has gone
+    oldHelper = nullptr; // and that let go of
+}
+
 void SandboxedInstance::takeChanges (sandbox::BlockInfo& info, sandbox::ParameterChange* changes, int maxChanges) noexcept
 {
     // Rarely any: a plug-in can have thousands of parameters, looked through only when one was set.
@@ -341,8 +377,14 @@ void SandboxedInstance::playBlock (juce::AudioBuffer<float>& buffer, const juce:
 
     info.isRendering = 1;
 
-    if (channel.play (0, -1) != sandbox::BlockChannel::Played::done)
+    // As long as the plug-in takes, but for a block kept so long that it is a hang, which its helper is ended for.
+    const auto hangNanoseconds = (std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000;
+
+    if (channel.play (0, hangNanoseconds) != sandbox::BlockChannel::Played::done)
     {
+        if (channel.isBusy())
+            remote->getHelper().reportHung();
+
         buffer.clear();
         return;
     }
@@ -521,8 +563,12 @@ void SandboxedInstance::handleAsyncUpdate()
     if (newLatency)
         setLatencySamples (samples);
 
-    if (newState || lost)
+    if (newState)
         updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
+
+    // Its helper gone: no change of its own, which would be an unsaved one; the views are told (the plug-in host's).
+    if (lost && hasCrashed() && onLost != nullptr)
+        onLost();
 }
 
 void SandboxedInstance::endGestures()

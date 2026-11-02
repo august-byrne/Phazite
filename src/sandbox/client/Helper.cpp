@@ -13,6 +13,7 @@ namespace
     constexpr int pipeTimeoutMilliseconds = -1;
     constexpr int quitMilliseconds = 1000;
     constexpr int watchMilliseconds = 200;
+    constexpr double heartbeatMilliseconds = 1000.0; // how often the message thread is asked whether it answers
 } // namespace
 
 class Helper::Pipe final : public juce::InterprocessConnection
@@ -51,6 +52,8 @@ private:
 
     void run() override
     {
+        auto beatSent = juce::Time::getMillisecondCounterHiRes();
+
         while (! threadShouldExit())
         {
             if (! owner.process.isRunning())
@@ -59,8 +62,50 @@ private:
                 return;
             }
 
+            if (owner.running && looksHung (beatSent))
+            {
+                owner.endedForHanging = true;
+                owner.kill(); // which the next look tells of
+            }
+
             wait (watchMilliseconds);
         }
+    }
+
+    // An audio thread told to have kept a block too long; or the message thread not answering the heartbeat, sent a
+    // second after it last answered, for as long as it may (its clock started again while a request waits for its own
+    // answer, which the message thread may be busy with).
+    bool looksHung (double& beatSent)
+    {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+
+        if (owner.hung.exchange (false))
+            return true;
+
+        {
+            const juce::ScopedLock held (owner.lock);
+
+            if (! owner.waiting.empty())
+            {
+                beatSent = now;
+                return false;
+            }
+        }
+
+        if (owner.heartbeat.load() == 0)
+        {
+            if (now - beatSent >= heartbeatMilliseconds)
+            {
+                auto beat = owner.makeRequest (MessageType::heartbeat);
+                owner.heartbeat = beat.getRequest();
+                beatSent = now;
+                owner.post (beat);
+            }
+
+            return false;
+        }
+
+        return now - beatSent > owner.messageLimit.load();
     }
 };
 
@@ -163,12 +208,25 @@ void Helper::kill()
     stopWaiting();
 }
 
+void Helper::setHangLimits (int messageThreadMilliseconds, int audioThreadMilliseconds) noexcept
+{
+    messageLimit = messageThreadMilliseconds;
+    audioLimit = audioThreadMilliseconds;
+}
+
 void Helper::received (const juce::MemoryBlock& message)
 {
     MessageReader reader (message);
 
     if (reader.getType() == MessageType::reply)
     {
+        // The heartbeat answered: the message thread is alive.
+        if (auto beat = heartbeat.load(); beat != 0 && reader.getRequest() == beat)
+        {
+            heartbeat.compare_exchange_strong (beat, 0);
+            return;
+        }
+
         const juce::ScopedLock held (lock);
 
         for (auto* wait : waiting)

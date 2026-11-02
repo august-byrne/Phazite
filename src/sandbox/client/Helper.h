@@ -3,8 +3,11 @@
 // Phazite's (JUCE's InterprocessConnection), the requests sent to it, each answered within a time limit or not at all,
 // and what it tells unasked. A thread of its own watches the process, a fifth of a second at a time (JUCE's pipe, on
 // Windows, waits for another to connect when the helper goes, rather than saying so): a helper that crashes is lost
-// then; one that stops answering is ended by its owner, from any thread (kill()). The pipe's thread delivers the
-// answers and the notices, the watching thread the loss; requests may come from any other.
+// then. One that hangs is ended (kill()), so that nothing of Phazite's waits for it: by the watching thread, when its
+// message thread hasn't answered the heartbeat it sends each second for a while, but while a request waits for its own
+// answer (a plug-in loading, its state); or when an audio thread of its has kept a block too long, which the engine
+// tells it without waiting (reportHung()). The pipe's thread delivers the answers and the notices, the watching thread
+// the loss; requests may come from any other.
 #pragma once
 
 #include "sandbox/core/Messages.h"
@@ -44,6 +47,15 @@ public:
     // Ends the helper at once, as a hang asks. Not on the pipe's thread.
     void kill();
 
+    // How long its message thread may go without answering the heartbeat, and an audio thread of its keep a block,
+    // before it is taken for hung and ended (shorter in the tests); and a block kept that long, told from any thread, the
+    // audio thread's included (it waits for nothing).
+    static constexpr int messageHangMilliseconds = 10000, audioHangMilliseconds = 5000;
+    void setHangLimits (int messageThreadMilliseconds, int audioThreadMilliseconds) noexcept;
+    int getAudioHangMilliseconds() const noexcept { return audioLimit.load (std::memory_order_relaxed); }
+    void reportHung() noexcept { hung.store (true, std::memory_order_relaxed); }
+    bool wasEndedForHanging() const noexcept { return endedForHanging.load(); }
+
     // What the helper tells unasked (on the pipe's thread), and its loss (a crash, or kill()), once (on the watching
     // thread): set before start().
     std::function<void (MessageReader&)> onNotice;
@@ -67,8 +79,10 @@ private:
     juce::ChildProcess process;
     std::unique_ptr<Pipe> pipe;
     std::unique_ptr<Watch> watch; // stopped before the process and the pipe go
-    std::atomic<bool> running { false }, lost { false };
+    std::atomic<bool> running { false }, lost { false }, hung { false }, endedForHanging { false };
     std::atomic<std::int64_t> nextRequest { 1 };
+    std::atomic<int> messageLimit { messageHangMilliseconds }, audioLimit { audioHangMilliseconds };
+    std::atomic<std::int64_t> heartbeat { 0 }; // the heartbeat's request not answered yet, or 0
     juce::CriticalSection lock;
     std::vector<Waiting*> waiting;
 

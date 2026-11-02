@@ -25,6 +25,7 @@
 #include "ui/input/KeyDispatcher.h"
 #include "ui/input/Keymap.h"
 #include "ui/input/PluginKeys.h"
+#include "ui/mixer/ChannelStrip.h"
 
 // Last, so that its macros can't change the headers above.
 #if JUCE_WINDOWS
@@ -376,6 +377,144 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
 }
 #endif
 
+TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, says it crashed, and reloads as it was")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
+    const auto hanging = song.addEffect (track, "PhaziteTestHang");
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+    CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
+
+    // Its Hang on (Tracktion's first parameter of it): its blocks come late, the tone through, until its helper is ended,
+    // a second of late blocks after.
+    song.setParameter (hanging, "0", 1.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            playback.play (0.05);
+            return getSandboxed (song, hanging).hasCrashed();
+        },
+        20000));
+    CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
+    CHECK (SandboxedPlugins::getHost().getNumHelpers() == 0);
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getEffects (song.context, track)[0].crashed);
+
+    // Reloaded: the same instance in a new helper, from the state it last had (none taken: the plug-in's own, its Hang
+    // off), its value as the plug-in has it.
+    auto* instance = &getSandboxed (song, hanging);
+    CHECK_FALSE (phazite::reloadDevice (song.context, hanging).has_value());
+    CHECK (&getSandboxed (song, hanging) == instance);
+    CHECK_FALSE (instance->hasCrashed());
+    CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (phazite::getEffects (song.context, track)[0].crashed);
+    CHECK (phazite::getParameter (song.context, { hanging, "0" }).getValue() == doctest::Approx (0.0f));
+    CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("A plug-in whose helper's message thread stops answering is ended for it, and nothing of Phazite's waits")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
+    const auto stalling = song.addEffect (track, "PhaziteTestHang");
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+
+    // Its Stall on (its second parameter), which stops the helper's message thread: the heartbeat goes unanswered, and
+    // the helper is ended two seconds after, the song playing on meanwhile.
+    const auto stalledAt = juce::Time::getMillisecondCounterHiRes();
+    song.setParameter (stalling, "1", 1.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            playback.play (0.05);
+            return getSandboxed (song, stalling).hasCrashed();
+        },
+        20000));
+    CHECK (juce::Time::getMillisecondCounterHiRes() - stalledAt >= SandboxedPlugins::messageHangMilliseconds);
+    CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("A plug-in that crashes its helper as it loads stays off, another of it too, until it is reloaded")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto identity =
+        phazite::test::TestPlugins::getDescription (phazite::test::TestPlugins::Kind::crashLoading).createIdentifierString();
+
+    // Added, it crashes its helper as it loads: its slot says so, and the plug-in host keeps it off from then on (the app
+    // keeps the list in its settings, for the next start).
+    const auto crashing = song.addEffect (song.firstTrack, "PhaziteTestCrashLoading");
+    CHECK (phazite::getEffects (song.context, song.firstTrack)[0].crashed);
+    CHECK (SandboxedPlugins::getHost().getCrashedWhileLoading().contains (identity));
+    CHECK (SandboxedPlugins::getHost().getNumHelpers() == 0);
+
+    // Another of it isn't loaded at all: its helper isn't started.
+    song.addEffect (song.firstTrack, "PhaziteTestCrashLoading");
+    CHECK (phazite::getEffects (song.context, song.firstTrack)[1].crashed);
+    CHECK (SandboxedPlugins::getHost().getNumHelpers() == 0);
+
+    // Reloaded, it loads again, crashes again, and says so.
+    const auto problem = phazite::reloadDevice (song.context, crashing);
+    REQUIRE (problem.has_value());
+    CHECK (problem->contains ("crashed"));
+    CHECK (SandboxedPlugins::getHost().getCrashedWhileLoading().contains (identity));
+    CHECK (phazite::getEffects (song.context, song.firstTrack)[0].crashed);
+}
+
+TEST_CASE ("A crashed plug-in's slot in the mixer says so, and reloads at a click")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
+    const auto crashing = song.addEffect (track, "PhaziteTestCrash");
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::ChannelStrip strip { commands, song.context };
+    phazite::test::TestWindow window { strip, phazite::ui::ChannelStrip::width, 700 };
+    strip.setTrack (track);
+
+    const auto effectButton = [&strip]() -> juce::TextButton*
+    {
+        if (auto* group = phazite::test::findComponentWithTitle (strip, "Effects"))
+            for (auto* button : phazite::test::findAll<juce::TextButton> (*group))
+                if (button->isVisible() && button->getButtonText().startsWith ("Test Crash"))
+                    return button;
+
+        return nullptr;
+    };
+
+    REQUIRE (effectButton() != nullptr);
+    CHECK (effectButton()->getButtonText() == "Test Crash");
+
+    // It crashes as it plays: its slot says so.
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+    song.setParameter (crashing, "0", 1.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            playback.play (0.05);
+            return effectButton() != nullptr && effectButton()->getButtonText() == "Test Crash - Crashed";
+        },
+        20000));
+
+    // A click reloads it (its Crash off again, as the plug-in has it): its slot shows its name again.
+    song.run ("transport.playStop");
+    phazite::test::Mouse mouse (*effectButton());
+    mouse.click (effectButton()->getLocalBounds().getCentre());
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return effectButton() != nullptr && effectButton()->getButtonText() == "Test Crash"; }));
+    CHECK_FALSE (getSandboxed (song, crashing).hasCrashed());
+}
+
 TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effect lets its sound through")
 {
     SandboxedPlugins sandboxed;
@@ -400,8 +539,11 @@ TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effe
     CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 0); // its helper has gone
 
-    // What it keeps: the state it last had, at once (none taken before).
+    // What it keeps: the state it last had, at once (none taken before); and the project saves as it would.
     juce::MemoryBlock state;
     getSandboxed (song, crashing).getStateInformation (state);
     CHECK (state.isEmpty());
+    const auto savedAt = juce::Time::getMillisecondCounterHiRes();
+    REQUIRE (song.getProject().save().wasOk());
+    CHECK (juce::Time::getMillisecondCounterHiRes() - savedAt < 2000.0);
 }

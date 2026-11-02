@@ -48,9 +48,20 @@ public:
     void hold() noexcept;
     void let() noexcept;
 
-    // Whether its helper has gone (any thread), and its being told so (by the plug-in host, on any thread).
+    // Whether its helper has gone (any thread), and its being told so (by the plug-in host, on any thread); then what it
+    // calls on the message thread (the plug-in host's, which tells the views).
     bool hasCrashed() const noexcept { return crashed.load (std::memory_order_acquire); }
     void helperLost();
+    std::function<void()> onLost;
+
+    // Its plug-in opened again in another helper, in place of the one whose helper went, with what keeps that helper and
+    // what it calls as it goes: Tracktion's plug-in, what the engine plays and its window keep this instance (the plug-in
+    // host's reload()). The engine skips its blocks meanwhile. What it reopens from: its plug-in, the state it last had, its
+    // program and its sample rate.
+    void replaceRemote (std::unique_ptr<sandbox::RemoteInstance>, std::shared_ptr<void> keepHelper, std::function<void()> onGone);
+    const juce::PluginDescription& getDescription() const noexcept { return description; }
+    const juce::MemoryBlock& getLastState() const noexcept { return lastState; }
+    double getPreparedRate() const noexcept { return preparedRate; }
 
     // The values set since the last block, as the block's changes at its start (on the thread that plays it, the channel
     // held).

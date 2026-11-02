@@ -73,6 +73,8 @@ struct DeviceSlots::Slot : public juce::Component
                 owner.showSlotMenu (shown);
             else if (mods.isCommandDown() || mods.isShiftDown())
                 owner.select (shown, mods);
+            else if (shown.crashed)
+                reloadDevice (owner.context, shown.id, *this);
             else
                 showDevice (owner.context, owner.commands, shown);
         };
@@ -120,6 +122,23 @@ struct DeviceSlots::Slot : public juce::Component
     void show (const DeviceSlot& device)
     {
         shown = device;
+
+        // A plug-in that crashed says so, and reloads at a click (design section 19).
+        if (device.crashed)
+        {
+            nameButton.setButtonText (device.name + " - Crashed");
+            nameButton.setTitle (device.name + ", crashed");
+            nameButton.setTooltip ("Crashed (or stopped answering, and was ended): it plays nothing, and an effect lets its sound "
+                                   "through. Click to reload it as it was; right-click for its other actions");
+            nameButton.setColour (juce::TextButton::textColourOffId, getPalette (*this).danger);
+            power.setToggleState (device.isOn, juce::dontSendNotification);
+            power.setEnabled (true);
+            nameButton.setAlpha (1.0f);
+            repaint();
+            return;
+        }
+
+        nameButton.removeColour (juce::TextButton::textColourOffId);
         nameButton.setButtonText (device.name);
         nameButton.setTitle (device.name);
 
@@ -439,6 +458,20 @@ int getPlacesMoved (const std::vector<DeviceID>& order, DeviceID device, int ins
 }
 
 //==============================================================================
+void reloadDevice (ProjectContext& context, DeviceID device, juce::Component& target)
+{
+    // What shows the device shows it loaded as the plug-in host tells (ProjectContext's devices); one that didn't load says
+    // why.
+    if (const auto problem = phazite::reloadDevice (context, device))
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                          .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                          .withTitle ("The plug-in didn't reload")
+                                          .withMessage (*problem)
+                                          .withButton ("OK")
+                                          .withAssociatedComponent (&target),
+                                      nullptr);
+}
+
 void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const DeviceSlot& device, DevicePlace place, TrackID track,
                      int index, int count, bool inRow, juce::Component& target, std::function<void()> changed)
 {
@@ -463,6 +496,17 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
 
     auto& projectContext = context;
     juce::PopupMenu menu;
+
+    if (device.crashed)
+    {
+        menu.addItem ("Reload",
+                      [&projectContext, id, safeTarget]
+                      {
+                          if (safeTarget != nullptr)
+                              reloadDevice (projectContext, id, *safeTarget);
+                      });
+        menu.addSeparator();
+    }
 
     if (device.opensWindow)
         menu.addItem ("Open Window", [&projectContext, id] { showDeviceWindow (projectContext, id); });

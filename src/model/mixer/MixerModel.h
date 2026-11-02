@@ -112,6 +112,10 @@ struct DeviceSlot
     // is unfrozen.
     bool frozen = false;
 
+    // A plug-in whose helper went (a crash, or a hang it was ended for), or that crashed its helper as it loaded: it plays
+    // nothing (an effect lets its sound through) until it is reloaded (reloadDevice()).
+    bool crashed = false;
+
     // It can listen to another track (a sidechain): the one it does, if any, with its name and colour.
     bool hasSidechain = false;
     SidechainChoice sidechain {};
@@ -135,6 +139,10 @@ void removeDevice (ProjectContext&, DeviceID);
 // (its close button puts it back into the Devices view). Nothing for a device without one.
 void showDeviceWindow (ProjectContext&, DeviceID);
 bool isDeviceWindowOpen (const ProjectContext&, DeviceID);
+
+// A crashed plug-in (DeviceSlot::crashed) loaded again, in a new helper, from the state it last had, as it was: not an
+// undo step, as nothing of the song changes. Returns why it didn't load, or nothing if it did.
+std::optional<juce::String> reloadDevice (ProjectContext&, DeviceID);
 
 // One of Phazite's own devices, for its editor (model/devices/DeviceHandle.h); a handle of nothing for another device.
 DeviceHandle getDeviceHandle (ProjectContext&, DeviceID);

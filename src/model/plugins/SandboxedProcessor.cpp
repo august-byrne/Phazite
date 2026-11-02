@@ -109,6 +109,22 @@ void SandboxedProcessor::process (const devices::ProcessContext& context)
     auto& channel = instance.getRemote().getChannel();
     const auto& limits = channel.getLimits();
 
+    // Still on a block it was late with: one kept too long is a hang, which its helper is ended for (told without waiting).
+    if (! instance.hasCrashed() && channel.isBusy())
+    {
+        const auto now = juce::Time::getHighResolutionTicks();
+
+        if (busySince == 0)
+            busySince = now;
+        else if (juce::Time::highResolutionTicksToSeconds (now - busySince) * 1000.0
+                 > instance.getRemote().getHelper().getAudioHangMilliseconds())
+            instance.getRemote().getHelper().reportHung();
+    }
+    else
+    {
+        busySince = 0;
+    }
+
     if (instance.hasCrashed() || channel.isBusy() || context.numSamples > limits.maxSamples)
     {
         instance.let();
