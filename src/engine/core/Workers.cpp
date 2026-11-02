@@ -8,6 +8,39 @@ namespace phazite::engine
 namespace
 {
     constexpr int spins = 4000; // a moment's checks for the next job before a worker sleeps
+
+#if JUCE_WINDOWS
+    // MMCSS's "Pro Audio" task for the thread that makes it, while it lives, as JUCE's WASAPI thread joins it
+    // (juce_WASAPI_windows.cpp, which loads avrt.dll the same way).
+    class ProAudioTask
+    {
+    public:
+        ProAudioTask()
+        {
+            if (auto* join = reinterpret_cast<Join> (avrt.getFunction ("AvSetMmThreadCharacteristicsW")))
+            {
+                unsigned long index = 0;
+                task = join (L"Pro Audio", &index);
+            }
+        }
+
+        ~ProAudioTask()
+        {
+            if (task != nullptr)
+                if (auto* leave = reinterpret_cast<Leave> (avrt.getFunction ("AvRevertMmThreadCharacteristics")))
+                    leave (task);
+        }
+
+    private:
+        using Join = void*(__stdcall*) (const wchar_t*, unsigned long*);
+        using Leave = int (__stdcall*) (void*);
+
+        juce::DynamicLibrary avrt { "avrt.dll" };
+        void* task = nullptr;
+
+        JUCE_DECLARE_NON_COPYABLE (ProAudioTask)
+    };
+#endif
 } // namespace
 
 class Workers::Worker final : private juce::Thread
@@ -17,7 +50,14 @@ public:
         : juce::Thread ("Phazite engine worker"),
           workers (w)
     {
+#if JUCE_WINDOWS
+        // Not JUCE's real-time thread, which on Windows puts the whole process in the real-time priority class (the high
+        // one without an administrator's rights), every thread of the app above other programs'; the thread joins MMCSS's
+        // Pro Audio task itself (run()).
+        startThread (juce::Thread::Priority::highest);
+#else
         startRealtimeThread (juce::Thread::RealtimeOptions {}.withPriority (10));
+#endif
     }
 
     ~Worker() override
@@ -31,6 +71,9 @@ private:
 
     void run() override
     {
+#if JUCE_WINDOWS
+        const ProAudioTask proAudio;
+#endif
         auto seen = workers.generation.load (std::memory_order_acquire);
 
         while (! threadShouldExit() && ! workers.quitting.load (std::memory_order_acquire))

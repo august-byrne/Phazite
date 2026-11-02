@@ -1086,3 +1086,18 @@ TEST_CASE ("The engine's workers run each task of a job once, on the audio threa
             REQUIRE (runs[(size_t) i].load() == (i < numTasks ? 1 : 0));
     }
 }
+
+#if JUCE_WINDOWS
+extern "C" __declspec (dllimport) void* __stdcall GetCurrentProcess();
+extern "C" __declspec (dllimport) unsigned long __stdcall GetPriorityClass (void*);
+
+TEST_CASE ("The engine's workers leave the app's priority class as it is, so that none of its other threads plays above other programs")
+{
+    constexpr unsigned long high = 0x80, realtime = 0x100; // HIGH_PRIORITY_CLASS, REALTIME_PRIORITY_CLASS
+    engine::Workers workers;
+    workers.setNumThreads (4);
+    const auto priorityClass = GetPriorityClass (GetCurrentProcess());
+    CHECK (priorityClass != high);
+    CHECK (priorityClass != realtime);
+}
+#endif

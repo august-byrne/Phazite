@@ -3,7 +3,8 @@
 // them a job of tasks, numbered, which it and they take in their order, each the next not taken yet, until all are done.
 // A task waits for what it needs itself (its strip's inputs, done in tasks before it). The workers spin a moment for the
 // next job, then sleep until it comes; the audio thread neither waits on a lock nor allocates, and wakes them without one
-// (std::atomic's wait and notify). The workers are real-time threads, as the audio thread is.
+// (std::atomic's wait and notify). The workers play at the audio thread's priority, never raising the whole process's: on
+// Windows in MMCSS's Pro Audio task, as JUCE's WASAPI thread does; elsewhere as real-time threads.
 #pragma once
 
 #include <juce_core/juce_core.h>
