@@ -8,8 +8,10 @@
 #include "AppScreen.h"
 #include "GoldenFiles.h"
 #include "HostedDevice.h"
+#include "SandboxedPlugins.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -437,6 +439,40 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
             setEdit (context, nullptr);
             edit = nullptr;
             phazite::test::settle (300);
+        }
+    }
+
+    // 20 tracks, each a plug-in synth in a helper (the tests' stand-in, all its instances in one helper, each with an audio
+    // thread of its own), chords: what the round trips to helpers cost a project (docs/tracktion-migration.md, T3).
+    {
+        phazite::test::SandboxedPlugins sandboxed;
+
+        for (const auto numThreads : { 1, 4 })
+        {
+            playing.setNumThreads (numThreads);
+            phazite::test::TestSong song;
+
+            for (int i = 0; i < 20; ++i)
+            {
+                const auto track = i == 0 ? song.firstTrack : song.addTrack ("Synth " + juce::String (i + 1));
+                song.setInstrument (track, "PhaziteTestSynth");
+                const auto clip = song.addMidiClip (track, 0.0, 32.0);
+
+                for (int beat = 0; beat < 32; ++beat)
+                    song.addChord (clip, { 48, 52, 55, 59 }, beat, 0.9);
+            }
+
+            phazite::test::settle (800);
+            const auto stopped = device.percentOfRealTime (500);
+            song.run ("transport.playStop");
+            phazite::test::settle (500);
+            const auto played = device.percentOfRealTime (500);
+            const auto processCpu = processCpuInRealTime (400);
+            song.run ("transport.playStop");
+            phazite::test::settle (300);
+            report << "| 20 tracks, each a plug-in synth in a helper (the tests' stand-in), chords | " << numThreads << " | "
+                   << juce::String (stopped, 2) << " % | " << juce::String (played, 2) << " % | " << juce::String (processCpu, 1)
+                   << " % |\n";
         }
     }
 

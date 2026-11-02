@@ -31,9 +31,9 @@ namespace
     }
 
     // Each Engine's host, for what reaches it from a device (message thread).
-    std::map<const te::Engine*, PluginHost*>& getHosts()
+    std::map<const te::Engine*, std::weak_ptr<PluginHost>>& getHosts()
     {
-        static std::map<const te::Engine*, PluginHost*> hosts;
+        static std::map<const te::Engine*, std::weak_ptr<PluginHost>> hosts;
         return hosts;
     }
 } // namespace
@@ -66,15 +66,16 @@ PluginHost::PluginHost (te::Engine& e)
       messageHangMilliseconds (sandbox::Helper::messageHangMilliseconds),
       audioHangMilliseconds (sandbox::Helper::audioHangMilliseconds)
 {
-    getHosts().try_emplace (&engine, this); // the first an Engine has (the tests make a second with the app's services)
+    // Every plug-in Tracktion makes from now on, in a helper.
+    auto& plugins = engine.getPluginManager();
+    tracktions = plugins.createPluginInstance;
+    plugins.createPluginInstance = [this] (const juce::PluginDescription& description, double rate, int blockSize, juce::String& error)
+    { return createInstance (description, rate, blockSize, error); };
 }
 
 PluginHost::~PluginHost()
 {
-    setOn (false);
-
-    if (const auto found = getHosts().find (&engine); found != getHosts().end() && found->second == this)
-        getHosts().erase (found);
+    engine.getPluginManager().createPluginInstance = tracktions;
 
     // Instances that outlive it tell it nothing more.
     for (const auto& [key, weak] : helpers)
@@ -89,10 +90,16 @@ PluginHost::~PluginHost()
     }
 }
 
-PluginHost* PluginHost::find (const te::Engine& engine)
+std::shared_ptr<PluginHost> PluginHost::getFor (te::Engine& engine)
 {
-    const auto found = getHosts().find (&engine);
-    return found != getHosts().end() ? found->second : nullptr;
+    auto& kept = getHosts()[&engine];
+
+    if (auto host = kept.lock())
+        return host;
+
+    auto host = std::make_shared<PluginHost> (engine);
+    kept = host;
+    return host;
 }
 
 void PluginHost::setHelperProgram (const juce::File& helperProgram)
@@ -109,27 +116,6 @@ void PluginHost::setHangLimits (int messageThreadMilliseconds, int audioThreadMi
 {
     messageHangMilliseconds = messageThreadMilliseconds;
     audioHangMilliseconds = audioThreadMilliseconds;
-}
-
-void PluginHost::setOn (bool shouldBeOn)
-{
-    if (shouldBeOn == on)
-        return;
-
-    on = shouldBeOn;
-    auto& plugins = engine.getPluginManager();
-
-    if (on)
-    {
-        tracktions = plugins.createPluginInstance;
-        plugins.createPluginInstance = [this] (const juce::PluginDescription& description, double rate, int blockSize, juce::String& error)
-        { return createInstance (description, rate, blockSize, error); };
-    }
-    else
-    {
-        plugins.createPluginInstance = tracktions;
-        tracktions = nullptr;
-    }
 }
 
 juce::String PluginHost::getHelperKey (const juce::PluginDescription& description)
@@ -307,14 +293,14 @@ bool hasCrashed (const te::Plugin& device)
     if (const auto* sandboxed = dynamic_cast<const SandboxedInstance*> (plugin->getAudioPluginInstance()))
         return sandboxed->hasCrashed();
 
-    const auto* host = PluginHost::find (device.engine);
+    const auto host = PluginHost::getFor (device.engine);
     return plugin->getAudioPluginInstance() == nullptr && host != nullptr && host->hasCrashedWhileLoading (plugin->desc);
 }
 
 bool reload (te::Plugin& device, juce::String& error)
 {
     auto* plugin = dynamic_cast<te::ExternalPlugin*> (&device);
-    auto* host = plugin != nullptr ? PluginHost::find (device.engine) : nullptr;
+    const auto host = plugin != nullptr ? PluginHost::getFor (device.engine) : nullptr;
 
     if (host == nullptr || ! hasCrashed (device))
         return false;

@@ -4,12 +4,13 @@
 // started as its first instance opens and quitting as its last goes; a helper that goes takes only its own plug-in's
 // instances with it. Each instance is JUCE's plug-in instance that Tracktion's te::ExternalPlugin wraps
 // (SandboxedInstance.h), made through Tracktion's own way of making plug-ins (te::PluginManager::createPluginInstance),
-// which the host takes over while it is on (the setting while T3 lasts). The helpers' notices go to their instances by
-// their IDs, and a helper's loss to every instance in it. A helper that hangs is ended (sandbox/client/Helper.h), and its
-// instances are crashed as a crashed helper's are, until each is reloaded. A plug-in that crashes its helper as it loads
-// is kept off from then on, at the next start too (the app keeps the list in its settings), until it is reloaded by hand,
-// so that it can't take time from every project that holds it. It tells its listeners (a change message) as an
-// instance's helper goes, as one is reloaded, and as that list changes. Message thread, but for the helpers' own threads.
+// which the host takes over for as long as it lives: Phazite hosts plug-ins so only. The helpers' notices go to their
+// instances by their IDs, and a helper's loss to every instance in it. A helper that hangs is ended
+// (sandbox/client/Helper.h), and its instances are crashed as a crashed helper's are, until each is reloaded. A plug-in
+// that crashes its helper as it loads is kept off from then on, at the next start too (the app keeps the list in its
+// settings), until it is reloaded by hand, so that it can't take time from every project that holds it. It tells its
+// listeners (a change message) as an instance's helper goes, as one is reloaded, and as that list changes. Message
+// thread, but for the helpers' own threads.
 #pragma once
 
 #include "SandboxedInstance.h"
@@ -31,10 +32,6 @@ public:
     // The helper program it starts: PhaziteHost next to the app, unless given another (the tests' helper).
     void setHelperProgram (const juce::File&);
     const juce::File& getHelperProgram() const noexcept { return program; }
-
-    // Whether Tracktion makes plug-ins through it: those it makes from now on.
-    void setOn (bool);
-    bool isOn() const noexcept { return on; }
 
     // What makes the editors of the instances it makes from now on: a window of the app's (app/SandboxedEditor.h), which
     // the app sets as it starts. Without one, a plug-in shows no editor.
@@ -65,15 +62,15 @@ public:
     // How many helpers run now (not those that have gone, which their plug-ins' instances still hold).
     int getNumHelpers();
 
-    // The host of an Engine's plug-ins, if one was made for it.
-    static PluginHost* find (const te::Engine&);
+    // The host of an Engine's plug-ins: one for each Engine, which every engine context of it shares (the app has one; the
+    // tests' services and sessions make more), made as the first asks and gone with the last.
+    static std::shared_ptr<PluginHost> getFor (te::Engine&);
 
 private:
     struct Running;
 
     te::Engine& engine;
     juce::File program;
-    bool on = false;
     SandboxedInstance::EditorMaker editorMaker;
     int messageHangMilliseconds, audioHangMilliseconds;
     std::function<std::unique_ptr<juce::AudioPluginInstance> (const juce::PluginDescription&, double, int, juce::String&)> tracktions;

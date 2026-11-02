@@ -45,8 +45,8 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     CHECK (handle.getRange().end == doctest::Approx (1.0f));
     CHECK (handle.getDefaultValue().value_or (-1.0f) == doctest::Approx (0.5f));
     CHECK (handle.getValue() == doctest::Approx (0.5f));
-    CHECK (handle.getText (0.25f).startsWith ("0.25")); // as the plug-in writes it
-    CHECK_FALSE (handle.getInfo().has_value());         // not one of Phazite's own devices
+    CHECK (handle.getText (0.25f) == juce::String ("25 %")); // as the plug-in writes it, in its helper
+    CHECK_FALSE (handle.getInfo().has_value());              // not one of Phazite's own devices
 
     // When the project closes, the handle finds nothing and changes nothing.
     plugin = nullptr;

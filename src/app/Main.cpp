@@ -27,9 +27,9 @@ public:
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
 
     // One Phazite at a time: a second start brings the first forward instead (two would autosave the same project, and the
-    // first to close would delete its autosave: docs/performance-audit.md, R6). The out-of-process scanner runs this exe
-    // again with "--PluginScan:<pipe>", which must start.
-    bool moreThanOneInstanceAllowed() override { return getCommandLineParameters().contains ("--PluginScan"); }
+    // first to close would delete its autosave: docs/performance-audit.md, R6). Plug-ins are hosted and scanned in its
+    // helper program, PhaziteHost, never in another copy of this one.
+    bool moreThanOneInstanceAllowed() override { return false; }
 
     void anotherInstanceStarted (const juce::String&) override
     {
@@ -40,27 +40,15 @@ public:
         }
     }
 
-    void initialise (const juce::String& commandLine) override
+    void initialise (const juce::String&) override
     {
-        // Running as the plug-in-scan child: serve scan requests only, no Engine and no window.
-        if (te::PluginManager::startChildProcessPluginScan (commandLine))
-            return;
-
-        // Started as a scan child, but the parent had already given up on it (e.g. the machine was busy):
-        // quit rather than open a second Phazite with its own window and audio device.
-        if (commandLine.trim().startsWith ("--PluginScan:"))
-        {
-            quit();
-            return;
-        }
-
         // A log of what happened, for a report of what went wrong (%APPDATA%\Phazite\Phazite.log), kept short: JUCE trims
         // the start of an old one (docs/performance-audit.md, R7).
         logger.reset (juce::FileLogger::createDefaultAppLogger ("Phazite", "Phazite.log", "Phazite " + getApplicationVersion()));
         juce::Logger::setCurrentLogger (logger.get());
 
-        // The Engine opens the default audio device and loads the saved plug-in list (settings live in
-        // %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in a child copy of this exe (see above).
+        // The Engine opens the default audio device, and the services load the plug-in list Phazite keeps (settings live in
+        // %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in its helper program.
         engine = createEngine ({ .uiBehaviour = std::make_unique<AppUIBehaviour>() });
         runMarker = std::make_unique<RunMarker> (engine->getPropertyStorage().getAppPrefsFolder().getChildFile ("Running"));
         logAudioOutput();

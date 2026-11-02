@@ -2,7 +2,6 @@
 #include "internal/SongPlayer.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/wavetable/WavetableSynth.h"
-#include "internal/PluginProcessor.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -362,59 +361,43 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
 
 std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::ValueTree& deviceState)
 {
-    // One that is loaded (not one missing on this computer), kept by its ID while Tracktion keeps the same plug-in.
+    // One that is loaded (not one missing on this computer), in its helper (T3), kept by its ID while Tracktion keeps the
+    // same plug-in: through its channel, with its mix as the engine's.
     const auto plugin = te::findPluginForID (edit, toTracktion (getDeviceID (deviceState)));
     auto* external = dynamic_cast<te::ExternalPlugin*> (plugin.get());
+    auto* sandboxed = external != nullptr ? dynamic_cast<SandboxedInstance*> (external->getAudioPluginInstance()) : nullptr;
 
-    if (external == nullptr || external->getAudioPluginInstance() == nullptr)
+    if (sandboxed == nullptr)
         return nullptr;
 
     const auto id = getID (deviceState, schema::deviceID);
     auto& node = devices[id];
+    const auto* playing = node != nullptr ? dynamic_cast<const SandboxedProcessor*> (&node->getRunner().getProcessor()) : nullptr;
 
-    // One in a helper, through its channel, with its mix as the engine's (T3); one in Phazite's process through
-    // Tracktion's call.
-    if (auto* sandboxed = dynamic_cast<SandboxedInstance*> (external->getAudioPluginInstance()))
+    if (playing == nullptr || &playing->getPlugin() != plugin.get() || &playing->getInstance() != sandboxed)
     {
-        const auto* playing = node != nullptr ? dynamic_cast<const SandboxedProcessor*> (&node->getRunner().getProcessor()) : nullptr;
+        auto processor = std::make_unique<SandboxedProcessor> (*plugin, *sandboxed);
+        const auto* made = processor.get();
+        node = std::make_shared<engine::DeviceNode> (made->getInfo(), std::move (processor));
+        node->getRunner().prepare (preparedRate, preparedBlockSize);
 
-        if (playing == nullptr || &playing->getPlugin() != plugin.get() || &playing->getInstance() != sandboxed)
+        // Its parameters' values set by hand, which its modulation moves from (takeValueSetByHand() keeps them); and
+        // what its own window grabs, for the automation written by hand (Tracktion names its parameters by their
+        // places).
+        for (const auto* parameter : plugin->getAutomatableParameters())
+            if (const auto index = made->findParameter (parameter->paramID); index >= 0)
+                node->setValue (index, parameter->getCurrentExplicitValue());
+
+        sandboxed->onGesture =
+            [listener = std::weak_ptr (pluginGestures), device = getDeviceID (deviceState)] (int parameter, bool starting)
         {
-            auto processor = std::make_unique<SandboxedProcessor> (*plugin, *sandboxed);
-            const auto* made = processor.get();
-            node = std::make_shared<engine::DeviceNode> (made->getInfo(), std::move (processor));
-            node->getRunner().prepare (preparedRate, preparedBlockSize);
-
-            // Its parameters' values set by hand, which its modulation moves from (takeValueSetByHand() keeps them); and
-            // what its own window grabs, for the automation written by hand (Tracktion names its parameters by their
-            // places).
-            for (const auto* parameter : plugin->getAutomatableParameters())
-                if (const auto index = made->findParameter (parameter->paramID); index >= 0)
-                    node->setValue (index, parameter->getCurrentExplicitValue());
-
-            sandboxed->onGesture =
-                [listener = std::weak_ptr (pluginGestures), device = getDeviceID (deviceState)] (int parameter, bool starting)
-            {
-                if (const auto told = listener.lock(); told != nullptr && *told != nullptr)
-                    (*told) ({ device, juce::String (parameter) }, starting);
-            };
-        }
-
-        if (const auto mix = devices::findParameter (node->getDeviceInfo(), devices::mixParameterID); mix >= 0)
-            node->setValue (mix, (float) deviceState.getProperty (schema::deviceMix, 1.0f));
+            if (const auto told = listener.lock(); told != nullptr && *told != nullptr)
+                (*told) ({ device, juce::String (parameter) }, starting);
+        };
     }
-    else
-    {
-        const auto* playing = node != nullptr ? dynamic_cast<const PluginProcessor*> (&node->getRunner().getProcessor()) : nullptr;
 
-        if (playing == nullptr || &playing->getPlugin() != plugin.get())
-        {
-            auto processor = std::make_unique<PluginProcessor> (*plugin);
-            const auto& info = processor->getInfo();
-            node = std::make_shared<engine::DeviceNode> (info, std::move (processor));
-            node->getRunner().prepare (preparedRate, preparedBlockSize);
-        }
-    }
+    if (const auto mix = devices::findParameter (node->getDeviceInfo(), devices::mixParameterID); mix >= 0)
+        node->setValue (mix, (float) deviceState.getProperty (schema::deviceMix, 1.0f));
 
     node->setOn (! (bool) deviceState[schema::deviceOff]);
     used.insert (id);

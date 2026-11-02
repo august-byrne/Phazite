@@ -75,7 +75,6 @@ public:
     static constexpr NumberSetting exportTruePeakCeiling { "phaziteExportTruePeakCeiling", -1.0, SaveTiming::now }; // dBTP
     static constexpr BoolSetting exportStems { "phaziteExportStems", false, SaveTiming::now };              // the song, or its stems
     static constexpr ListSetting pluginsGettingAllKeys { "phazitePluginsGettingAllKeys", SaveTiming::now }; // plug-ins, by identity
-    static constexpr BoolSetting sandboxPlugins { "phaziteSandboxPlugins", false, SaveTiming::now };        // while T3 lasts
     static constexpr ListSetting pluginsCrashedLoading { "phazitePluginsCrashedLoading", SaveTiming::now }; // kept off, by identity
     static constexpr TextSetting knownPlugins { "phaziteKnownPlugins", "", SaveTiming::soon };              // the scan's list, JUCE's XML
     static constexpr BoolSetting guide { "phaziteGuide", true, SaveTiming::now };

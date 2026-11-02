@@ -45,11 +45,6 @@ public:
     // Whether the Low Latency switch is on (the command transport.lowLatency; model/engine/internal/EngineSetup.h).
     bool isLowLatency() const;
 
-    // Whether plug-ins load into helper processes of Phazite's own, sandboxed (docs/tracktion-migration.md, T3): those
-    // loaded from now on, as a project opens. The setting while T3 lasts (the command options.sandboxPlugins).
-    bool arePluginsSandboxed() const;
-    void setPluginsSandboxed (bool);
-
     // The correction for recordings, in milliseconds (model/transport/internal/AudioRecorder.h): how much earlier what the
     // audio inputs record goes than the delays their driver reports put it, for a driver that reports them wrongly; 0 at
     // first, and best left so.

@@ -36,8 +36,11 @@ struct TestPlugins
     static constexpr const char* hangsScanned = "PhaziteTestHangScanned";
     static constexpr const char* crashesScanned = "PhaziteTestCrashScanned";
 
-    // One made in the tests' own process, as the format makes it (for tests that play it here to compare).
-    static std::unique_ptr<juce::AudioPluginInstance> create (Kind);
+    // One made in the tests' own process, as the format makes it (for tests that play it here to compare), in a version of
+    // it (the effect's: 1, Gain and Tone; 2, Tone, Gain and Drive; 3, Tone alone), which the format takes from the
+    // description's version ("2.0"), as an update of the plug-in would change it.
+    static std::unique_ptr<juce::AudioPluginInstance> create (Kind, int version = 1);
+    static int getVersion (const juce::PluginDescription&);
 
     // The format, for a format manager.
     static std::unique_ptr<juce::AudioPluginFormat> createFormat();

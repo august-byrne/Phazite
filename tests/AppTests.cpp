@@ -275,6 +275,7 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     plugins.sendChangeMessage();
     CHECK (phazite::test::dispatchMessagesUntil (
         [&] { return services.settings.get (phazite::Settings::pluginsCrashedLoading) == juce::StringArray { "Crashed" }; }));
+    plugins.setCrashedWhileLoading ({}); // the host is the Engine's, which the other tests share
 
     // The library indexes on its own thread; it is done before the services go.
     CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 10000));

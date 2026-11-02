@@ -154,15 +154,34 @@ namespace
     class TestEffect final : public StandIn
     {
     public:
-        TestEffect()
+        // In one of its versions (TestPlugins::getVersion()): 1, Gain and Tone; 2, Tone, Gain and a new Drive, which
+        // does nothing; 3, Tone alone.
+        explicit TestEffect (int version)
             : StandIn (Kind::effect, stereoEffect())
         {
-            gain = add ("1", "Gain", 1.0f);
+            if (version <= 1)
+            {
+                gain = add ("1", "Gain", 1.0f);
+                tone = add ("0", "Tone", 0.5f);
+                return;
+            }
+
             tone = add ("0", "Tone", 0.5f);
+
+            if (version == 2)
+            {
+                gain = add ("1", "Gain", 1.0f);
+                add ("2", "Drive", 0.0f);
+            }
         }
 
         using StandIn::processBlock;
-        void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (gain->getValue()); }
+        void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+        {
+            if (gain != nullptr)
+                buffer.applyGain (gain->getValue());
+        }
+
         juce::AudioProcessorEditor* createEditor() override { return new EffectEditor (*this, *tone); }
 
         // Its programs, Full and Half, set its Gain, and tell the host so, as a plug-in's programs do.
@@ -173,12 +192,48 @@ namespace
         void setCurrentProgram (int index) override
         {
             program = juce::jlimit (0, 1, index);
-            gain->setValueNotifyingHost (program == 0 ? 1.0f : 0.5f);
+
+            if (gain != nullptr)
+                gain->setValueNotifyingHost (program == 0 ? 1.0f : 0.5f);
+
             updateHostDisplay (ChangeDetails().withProgramChanged (true));
         }
 
+        // Its state, in every version: its Gain (1 in one without it), then its Tone. A third value of 1 after them makes it
+        // take them as its own window would set them, telling the host (TestPlugin::setGain()).
+        void getStateInformation (juce::MemoryBlock& data) override
+        {
+            juce::MemoryOutputStream out (data, false);
+            out.writeFloat (gain != nullptr ? gain->getValue() : 1.0f);
+            out.writeFloat (tone->getValue());
+        }
+
+        void setStateInformation (const void* data, int size) override
+        {
+            if (size < 8)
+                return;
+
+            juce::MemoryInputStream in (data, (size_t) size, false);
+            const auto gainValue = in.readFloat();
+            const auto toneValue = in.readFloat();
+            const auto asItsOwn = in.getNumBytesRemaining() >= 4 && in.readFloat() > 0.5f;
+            const auto set = [asItsOwn] (StandInParameter& parameter, float value)
+            {
+                if (asItsOwn)
+                    parameter.setValueNotifyingHost (value);
+                else
+                    parameter.setValue (value);
+            };
+
+            if (gain != nullptr)
+                set (*gain, gainValue);
+
+            set (*tone, toneValue);
+        }
+
     private:
-        StandInParameter *gain = nullptr, *tone = nullptr;
+        StandInParameter* gain = nullptr; // none in version 3
+        StandInParameter* tone = nullptr;
         int program = 0;
     };
 
@@ -464,7 +519,7 @@ namespace
         {
             for (const auto kind : TestPlugins::kinds)
                 if (description.fileOrIdentifier == describe (kind).file)
-                    return callback (TestPlugins::create (kind), {});
+                    return callback (TestPlugins::create (kind, TestPlugins::getVersion (description)), {});
 
             callback (nullptr, "No such test plug-in.");
         }
@@ -489,12 +544,17 @@ juce::PluginDescription TestPlugins::getDescription (Kind kind)
     return description;
 }
 
-std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind)
+int TestPlugins::getVersion (const juce::PluginDescription& description)
+{
+    return std::max (1, description.version.getIntValue());
+}
+
+std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind, int version)
 {
     switch (kind)
     {
         case Kind::effect:
-            return std::make_unique<TestEffect>();
+            return std::make_unique<TestEffect> (version);
         case Kind::synth:
             return std::make_unique<TestSynth>();
         case Kind::crash:

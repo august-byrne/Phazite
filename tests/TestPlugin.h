@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A stand-in for a plug-in (a VST3 or the like) in tests: an effect made in this process, which Tracktion's
-// te::ExternalPlugin wraps as it wraps a plug-in it loaded, so that tests reach what Phazite does with plug-ins (their
-// windows, menus and presets, their mix and key controls, their parameters through updates) without one installed. It
-// scales its sound by its Gain, has a Tone that does nothing, keeps both as its state, and has an editor: a knob for each.
-// Its parameters are as a VST3's are: each has an ID of the plug-in's own, and Tracktion knows them by their places.
+// A stand-in for a plug-in (a VST3 or the like) in tests: the tests' effect (host/TestPlugins.h), hosted in the tests'
+// helper program as Phazite hosts every plug-in (model/plugins/internal/PluginHost.h), which Tracktion's te::ExternalPlugin
+// wraps, so that tests reach what Phazite does with plug-ins (their windows, menus and presets, their mix and key controls,
+// their parameters through updates) without one installed. It scales its sound by its Gain, has a Tone that does
+// nothing, and keeps both as its state. Its parameters are as a VST3's are: each has an ID of the plug-in's own, and
+// Tracktion knows them by their places.
 #pragma once
 
 #include "TestHelpers.h"
 
-#include <functional>
-
 namespace phazite::test
 {
 // While one is alive, the test engine knows the stand-in, as if a scan had found it: its known plug-ins list it (so the
-// device lists offer it, "Test Effect" by "Phazite Tests"), and Tracktion makes it when an Edit asks. Make it before the
-// Edits that hold one, and let it go after them.
+// device lists offer it, "Test Effect" by "Phazite Tests"), and Tracktion makes it, in a helper, when an Edit asks. Make
+// it before the Edits that hold one, and let it go after them.
 class TestPlugin
 {
 public:
@@ -40,14 +39,15 @@ public:
     // new Drive, which does nothing; 3, Tone alone.
     void setVersion (int);
 
-    // Its gain as the plug-in itself has it, set as its editor sets it. (Tracktion's parameter follows a change the plug-in
-    // makes once the message loop runs.)
+    // Its gain as the plug-in itself has it (in its helper), and set as its editor sets it: Tracktion's parameter follows
+    // once the helper has told, which this waits for.
     static float getGain (const te::ExternalPlugin&);
     static void setGain (te::ExternalPlugin&, float);
 
 private:
-    std::function<std::unique_ptr<juce::AudioPluginInstance> (const juce::PluginDescription&, double, int, juce::String&)> previous;
     int version = 1;
+
+    static juce::PluginDescription describe (int version);
 
     JUCE_DECLARE_NON_COPYABLE (TestPlugin)
 };

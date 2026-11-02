@@ -13,8 +13,8 @@ namespace phazite
 struct EngineContext::Impl
 {
     te::Engine& engine;
-    PlaybackHost playback { engine }; // Phazite's own engine (docs/tracktion-migration.md, T2)
-    PluginHost plugins { engine };    // plug-ins in helper processes (T3)
+    PlaybackHost playback { engine };                                  // Phazite's own engine (docs/tracktion-migration.md, T2)
+    std::shared_ptr<PluginHost> plugins = PluginHost::getFor (engine); // plug-ins in helper processes (T3): the Engine's one
 
     // Whether the output last asked about is Bluetooth, which takes a look through Windows' devices to find out.
     juce::String checkedOutput {};
@@ -38,17 +38,7 @@ PlaybackHost& getPlaybackHost (EngineContext& context)
 
 PluginHost& getPluginHost (EngineContext& context)
 {
-    return context.getImpl().plugins;
-}
-
-bool EngineContext::arePluginsSandboxed() const
-{
-    return impl->plugins.isOn();
-}
-
-void EngineContext::setPluginsSandboxed (bool sandboxed)
-{
-    impl->plugins.setOn (sandboxed);
+    return *context.getImpl().plugins;
 }
 
 EngineContext::EngineContext (std::unique_ptr<Impl> i)

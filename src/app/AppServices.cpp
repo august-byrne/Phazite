@@ -54,9 +54,8 @@ AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
       library (*engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),
       previewer (createPreviewer (engine))
 {
-    // Plug-ins in helper processes, while T3 lasts a setting (docs/tracktion-migration.md), with their editors in the
-    // app's windows; the scan's list, and those that crashed as they loaded kept off.
-    engineContext->setPluginsSandboxed (settings.get (Settings::sandboxPlugins));
+    // Plug-ins in helper processes (docs/tracktion-migration.md, T3), with their editors in the app's windows; the scan's
+    // list, and those that crashed as they loaded kept off.
     useSandboxedEditors (getPluginHost (*engineContext));
     pluginLists = std::make_unique<PluginLists> (engine.getPluginManager().knownPluginList, getPluginHost (*engineContext), settings);
 }

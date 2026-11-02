@@ -101,7 +101,7 @@ TEST_CASE ("Recordings go into the project's Audio folder")
 
 TEST_CASE ("Edit limits leave room for one-shot-heavy projects")
 {
-    phazite::EngineBehaviour behaviour ({ .openAudioDevice = false, .scanPluginsOutOfProcess = false });
+    phazite::EngineBehaviour behaviour ({ .openAudioDevice = false });
     const auto limits = behaviour.getEditLimits();
 
     CHECK (limits.maxPluginsOnTrack >= 64);

@@ -49,7 +49,7 @@ graph, were in this table's history.
 | Phazite's engine: chords through a filter whose cutoff is automated, with the volume and the pan automated too | 0 | 0 |
 | Phazite's engine: chords through a filter that an LFO, a note follower and a breakpoint envelope move, the pan and the volume by an envelope follower, steps, a random source and a macro | 0 | 0 |
 | Phazite's engine: chords in a bus with a container, sends before and after the fader to returns, a sidechain and the loudness meter | 0 | 0 |
-| Phazite's engine: chords through a plug-in (the tests' stand-in) after Phazite's synth | 0 | 0 |
+| Phazite's engine: chords through a plug-in in its helper (the tests' stand-in) after Phazite's synth | 0 | 0 |
 | Phazite's engine recording a take: an armed track's input, heard and recorded, and notes played live from another thread | 0 | 0 |
 | Volume automation and an LFO on pan | 0 | 0 |
 | A tone through a bus, with a send to Phazite's reverb on a return, into the loudness meter | 0 | 0 |
@@ -135,7 +135,7 @@ and frees a second at 48 kHz with two inputs, which the audit found once its sce
 - **What:**
   - each plug-in's processing holds a lock that the message thread also takes when it initialises, resets or bypasses the plug-in;
   - every call also takes the crash tracer's global spin lock.
-- **Action:** this matches how JUCE itself hosts plug-ins. Watch it during plug-in work (step 2.12) and sandboxing (after v1). Report upstream.
+- **Action:** this matches how JUCE itself hosts plug-ins. Since 2026-11-02 (T3, [tracktion-migration.md](tracktion-migration.md)) every plug-in plays in a helper process of Phazite's (`model/plugins/internal/SandboxedProcessor.h`): Phazite's audio thread takes no lock of a plug-in's and no crash tracer; it hands the block to the helper through shared memory and waits for the answer, asleep, until a deadline of the block's own length, and the helper's audio thread holds the plug-in's lock as it plays, as any host's does. The guarded scenario with a plug-in plays the tests' stand-in through its helper and allocates nothing in steady playback. Tracktion's renders (exports, stems, freezing, bouncing, until T5) still call plug-ins through Tracktion's te::ExternalPlugin, with its lock and crash tracer, which hands each block to the plug-in's helper in turn; they run off the audio thread.
 
 **10. Modulator timing** (source): the Edit takes a lock once per block to update its modulators, and the MIDI tracker modulator takes a spin lock. Report upstream; measure in step 3.5.
 

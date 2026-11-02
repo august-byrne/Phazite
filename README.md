@@ -22,14 +22,14 @@ What works today, on Windows:
 
 - **Arrange:** a playlist of tracks, folders and clips, song sections and outlines, a chord lane with 40 progressions, automation lanes, and Cut, Copy, Paste and Undo throughout.
 - **Write:** a piano roll with a drum mode, keys and scales, chord stamps and transforms; audio clips that follow the tempo, change pitch or play backwards.
-- **Sound:** Phazite's own instruments (Synth, Wavetable, Drum Sampler) and effects (EQ, Filter, Compressor, Multiband, Limiter, Saturator, Delay, Reverb, Phaser, Flanger, Stereo Expander, Vocoder), and your VST3 plug-ins.
+- **Sound:** Phazite's own instruments (Synth, Wavetable, Drum Sampler) and effects (EQ, Filter, Compressor, Multiband, Limiter, Saturator, Delay, Reverb, Phaser, Flanger, Stereo Expander, Vocoder), and your VST3 plug-ins, each plug-in in a process of its own: one that crashes or hangs says so in its slot, with Reload, and Phazite plays on.
 - **Mix:** a mixer with buses, sends, sidechains, effect containers, modulators and macros, freeze and bounce in place, and a loudness meter.
 - **Record:** MIDI from a keyboard or the computer keyboard, audio from an interface (ASIO®) with count-in and punch-in, and Capture, which turns what you just played into a clip.
 - **Finish:** export the song, or its stems, to WAV or FLAC, normalized to a loudness if you like.
 
-Since November 2026 the song plays and records through Phazite's own engine; Tracktion Engine still hosts plug-ins and renders exports while the [move off it](docs/tracktion-migration.md) goes on.
+Since November 2026 the song plays and records through Phazite's own engine, and plug-ins run in Phazite's own helper processes; Tracktion Engine still renders exports while the [move off it](docs/tracktion-migration.md) goes on.
 
-Next come chord suggestions, the sound generator, plug-ins in their own processes (so that a crashing plug-in can't take Phazite down), and passes on performance and accessibility; then an installer and version 1. The [roadmap](docs/roadmap.md) has the plan step by step.
+Next come chord suggestions, the sound generator, and passes on performance and accessibility; then an installer and version 1. The [roadmap](docs/roadmap.md) has the plan step by step.
 
 | Platform | Status |
 |---|---|

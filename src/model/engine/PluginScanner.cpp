@@ -119,7 +119,7 @@ namespace
 
             if (helper == nullptr || ! helper->isRunning())
             {
-                auto* host = PluginHost::find (engine);
+                const auto host = PluginHost::getFor (engine);
                 helper = host != nullptr ? std::make_unique<sandbox::Helper> (host->getHelperProgram()) : nullptr;
 
                 if (helper != nullptr && ! helper->start (startMilliseconds))

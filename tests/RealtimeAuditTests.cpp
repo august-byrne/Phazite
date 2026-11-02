@@ -624,7 +624,7 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's own engine, chords through a plug-in (the tests' stand-in) after Phazite's synth")
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords through a plug-in in its helper (the tests' stand-in) after Phazite's synth")
     {
         phazite::test::TestPlugin testPlugin;
         phazite::test::TestSong song;
@@ -637,7 +637,7 @@ TEST_SUITE ("realtime-audit")
             song.addChord (clip, { 60 + beat % 3, 64, 67 }, beat, 0.75);
 
         const auto m = playProjectAndMeasure (song.context);
-        report ("Phazite's engine: a plug-in", m);
+        report ("Phazite's engine: a plug-in in its helper", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
     }

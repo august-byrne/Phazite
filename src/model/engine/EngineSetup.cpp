@@ -7,18 +7,6 @@
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/PluginParameters.h"
 
-// ThreadSanitizer builds (linux-tsan preset): GCC defines __SANITIZE_THREAD__, Clang has a feature check.
-#if defined(__SANITIZE_THREAD__)
- #define PHAZITE_TSAN 1
-#elif defined(__has_feature)
- #if __has_feature(thread_sanitizer)
-  #define PHAZITE_TSAN 1
- #endif
-#endif
-#ifndef PHAZITE_TSAN
- #define PHAZITE_TSAN 0
-#endif
-
 namespace phazite
 {
 namespace
@@ -74,15 +62,6 @@ EngineBehaviour::EngineBehaviour (Options o)
 bool EngineBehaviour::autoInitialiseDeviceManager()
 {
     return options.openAudioDevice;
-}
-
-// Scan plug-ins in a child copy of the app, so a crashing plug-in can't take Phazite down. Needs the
-// startChildProcessPluginScan() check at the top of the app's initialise(). Off under ThreadSanitizer:
-// Tracktion's scan coordinator shares some state between threads without locks, which would bury real
-// reports.
-bool EngineBehaviour::canScanPluginsOutOfProcess()
-{
-    return options.scanPluginsOutOfProcess && ! PHAZITE_TSAN;
 }
 
 // Tracktion processes audio on the audio callback's thread plus (this number - 1) worker threads, which it wakes every
@@ -330,9 +309,8 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
 
     auto engine = std::make_unique<te::Engine> (std::move (storage), std::move (ui), std::make_unique<EngineBehaviour> (o.behaviour));
 
-    // Plug-ins scanned in a child copy, with a time limit for each.
-    if (engine->getPluginManager().usesSeparateProcessForScanning())
-        usePluginScannerWithTimeLimit (*engine);
+    // Plug-ins scanned in Phazite's helper program, with a time limit for each.
+    usePluginScannerWithTimeLimit (*engine);
 
     // Phazite's own plug-in types, which projects can hold, and the browser's player of stretched loops.
     engine->getPluginManager().createBuiltInType<LoudnessMeterPlugin>();

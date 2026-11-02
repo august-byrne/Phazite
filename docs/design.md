@@ -877,7 +877,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - a plug-in that crashed while loading is disabled on the next start and reported.
 
 **Before v1 (the owner, 2026-10-16, [question 7](#25-open-questions)): sandboxed hosting, on by default,** unless measurements show that it costs a lot of performance; then it is a choice per plug-in.
-- Plug-ins run in helper processes. If one crashes, its slot shows "Plug-in crashed — Reload" instead of Phazite closing.
+- Plug-ins run in helper processes. If one crashes, or hangs and is ended, its slot shows its name with "Crashed" instead of Phazite closing, and a click on it (or Reload in its menu) loads it again from the state it last had; one that crashes as it loads stays off, at the next start too, until it is reloaded (done 2026-11-02, T3).
 - Grouping options trade memory for isolation, as in Bitwig: all together, by vendor, or one per plug-in ([B31](#appendix-b-sources)). **Decided 2026-11-02 from T3 step 0's measurement ([performance-audit.md](performance-audit.md), section 10):** one helper for each plug-in by default, every instance of it in that helper with an audio thread of its own, as Bitwig's default; a round trip to a helper costs about 28 microseconds a block (1 % of a 128-sample block for each plug-in in a chain), and nothing measurable when the engine plays tracks side by side, so sandboxing is on and the only way Phazite hosts plug-ins.
 - *Why on by default:* Waveform's sandboxing is off by default, and a MusicTech reviewer lost the whole app to one plug-in ([B9](#appendix-b-sources)).
 

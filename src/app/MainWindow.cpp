@@ -301,30 +301,13 @@ void MainWindow::addCommands()
                     .perform = [this] { computerKeyboard.setEnabled (! computerKeyboard.isEnabled()); },
                     .isTicked = [this] { return computerKeyboard.isEnabled(); } });
 
-    registry.add (
-        { .id = "options.scanPlugins",
-          .name = "Scan for Plug-ins",
-          .category = "Options",
-          .description = "Finds your VST3 plug-ins. Scanning runs in a separate process, so a crashing plug-in can't take Phazite down.",
-          .synonyms = { "vst", "vst3", "plugins", "instruments", "effects" },
-          .perform = [this] { showPluginList(); } });
-
-    // While T3 lasts (docs/tracktion-migration.md), plug-ins in helper processes are a choice: the last step makes them
-    // the only way.
-    registry.add ({ .id = "options.sandboxPlugins",
-                    .name = "Host Plug-ins in Helper Processes",
+    registry.add ({ .id = "options.scanPlugins",
+                    .name = "Scan for Plug-ins",
                     .category = "Options",
-                    .description = "Loads plug-ins into helper processes of Phazite's own, so that one that crashes can't take "
-                                   "Phazite down. For plug-ins loaded from now on: open the project again.",
-                    .synonyms = { "sandbox", "sandboxing", "crash protection", "bridge", "plugins", "vst3" },
-                    .perform =
-                        [this]
-                    {
-                        const auto on = ! services.engineContext->arePluginsSandboxed();
-                        services.engineContext->setPluginsSandboxed (on);
-                        services.settings.set (Settings::sandboxPlugins, on);
-                    },
-                    .isTicked = [this] { return services.engineContext->arePluginsSandboxed(); } });
+                    .description = "Finds your VST3 plug-ins. Scanning runs in a helper process, so a plug-in that crashes or hangs can't "
+                                   "take Phazite down.",
+                    .synonyms = { "vst", "vst3", "plugins", "instruments", "effects" },
+                    .perform = [this] { showPluginList(); } });
 
     registry.add ({ .id = "options.keyboardShortcuts",
                     .name = "Keyboard Shortcuts",
@@ -620,8 +603,7 @@ void MainWindow::showPluginList()
                                                 &engine.getPropertyStorage().getPropertiesFile(),
                                                 true); // allow plug-ins that load asynchronously (AUv3)
 
-    // One scanning thread (JUCE's default here): Tracktion's scanner talks to its one child process
-    // without a lock, so a second thread would race it.
+    // One scanning thread (JUCE's default here): the scanner has one helper, which scans a file at a time.
     list->setNumberOfThreadsForScanning (1);
     list->setSize (800, 600);
 
@@ -893,7 +875,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
         case 4: // Options
         {
             add (menu, { "options.settings", "options.audioSettings", "options.midiSettings", "options.keyboardShortcuts",
-                         "options.scanPlugins", "options.sandboxPlugins" });
+                         "options.scanPlugins" });
             menu.addSeparator();
             add (menu, { "input.computerKeyboard" });
             menu.addSeparator();

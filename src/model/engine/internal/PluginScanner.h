@@ -16,8 +16,7 @@ namespace phazite
 inline constexpr int pluginScanSecondsEach = 60;
 
 // The scanner, for a test to drive a file at a time (findPluginTypesFor()), with the time each may take; and the
-// scanner put in place of Tracktion's, with Tracktion's Abort pointing at it, which createEngine() does when plug-ins are
-// scanned out of Phazite's process.
+// scanner put in place of Tracktion's, with Tracktion's Abort pointing at it, which createEngine() does.
 std::unique_ptr<juce::KnownPluginList::CustomScanner> createPluginScanner (te::Engine&, int secondsEach = pluginScanSecondsEach);
 void usePluginScannerWithTimeLimit (te::Engine&);
 } // namespace phazite
