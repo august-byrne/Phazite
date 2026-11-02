@@ -16,6 +16,7 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        endQuietlyOnCrashes();
         host = std::make_unique<Host>();
 
         // Started by anything else than Phazite: nothing to do.

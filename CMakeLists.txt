@@ -401,6 +401,8 @@ target_sources(phazite_core PRIVATE
     src/sandbox/core/BlockChannel.h
     src/sandbox/core/Messages.cpp
     src/sandbox/core/Messages.h
+    src/sandbox/core/PluginInfo.cpp
+    src/sandbox/core/PluginInfo.h
     src/sandbox/core/SharedMemory.cpp
     src/sandbox/core/SharedMemory.h
     # services: what the whole app shares (they use the model; the model never uses them)
@@ -820,7 +822,7 @@ target_sources(phazite_host PRIVATE
     src/host/core/Host.h
     src/host/core/Instance.cpp
     src/host/core/Instance.h
-    src/host/core/ProcessStats.cpp)
+    src/host/core/Platform.cpp)
 phazite_use_core(phazite_host WITHOUT_TRACKTION)
 
 juce_add_gui_app(PhaziteHost
@@ -1034,6 +1036,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/WavetableTests.cpp
         tests/WelcomeTests.cpp
         tests/WindowKeysTests.cpp
+        tests/host/SandboxTestHelpers.h
         tests/host/TestPlugins.cpp
         tests/host/TestPlugins.h
         tests/host/ThreadCpu.cpp

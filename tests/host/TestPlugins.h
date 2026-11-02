@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tests' stand-ins for plug-ins (a VST3 or the like), as the tests' helper hosts them (docs/tracktion-migration.md,
+// The tests' stand-ins for plug-ins (VST3s or the like), as the tests' helper hosts them (docs/tracktion-migration.md,
 // T3): made in the helper's process by a format of their own, "Test", so that tests reach what Phazite does with
-// plug-ins through its host without one installed. The effect scales its sound by its Gain and has a Tone that does
-// nothing; its parameters have IDs of the plug-in's own, as a VST3's have.
+// plug-ins through its host without one installed. Their parameters have IDs of the plug-in's own, as a VST3's have.
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -12,12 +11,24 @@ namespace phazite::test
 struct TestPlugins
 {
     static constexpr const char* formatName = "Test";
-    static constexpr const char* effectID = "PhaziteTestEffect"; // its "file" in the format
 
-    static juce::PluginDescription getEffectDescription();
+    enum class Kind
+    {
+        effect,    // scales its sound by its Gain ("1"), and has a Tone ("0") that does nothing; keeps both as its state
+        synth,     // a sine for each note held, at its Level ("10"); note 127 turns its Level to 0.75 itself, in a gesture
+                   // (as a control of its window would)
+        crash,     // an effect that crashes as it plays a block while its Crash ("20") is on
+        hang,      // an effect that plays nothing back while its Hang ("30") is on: it loops for ever
+        latency,   // delays its sound by 64 samples, or 128 while its Latency ("40") is on, and says so
+        sidechain, // plays what comes into its sidechain bus in place of its sound
+    };
 
-    // The effect itself, as the format makes it (for tests that play it in their own process to compare).
-    static std::unique_ptr<juce::AudioPluginInstance> createEffect();
+    static constexpr Kind kinds[] = { Kind::effect, Kind::synth, Kind::crash, Kind::hang, Kind::latency, Kind::sidechain };
+
+    static juce::PluginDescription getDescription (Kind);
+
+    // One made in the tests' own process, as the format makes it (for tests that play it here to compare).
+    static std::unique_ptr<juce::AudioPluginInstance> create (Kind);
 
     // The format, for a format manager.
     static std::unique_ptr<juce::AudioPluginFormat> createFormat();

@@ -9,6 +9,11 @@ using sandbox::MessageReader;
 using sandbox::MessageType;
 using sandbox::MessageWriter;
 
+namespace
+{
+    constexpr int noticesPerSecond = 30;
+} // namespace
+
 class Host::Pipe final : public juce::InterprocessConnection
 {
 public:
@@ -34,6 +39,17 @@ private:
     void messageReceived (const juce::MemoryBlock& message) override { owner.received (message); }
 };
 
+sandbox::BlockChannel::Limits readLimits (MessageReader& reader)
+{
+    sandbox::BlockChannel::Limits limits;
+    limits.maxSamples = reader.readInt();
+    limits.maxChannels = reader.readInt();
+    limits.maxSidechainChannels = reader.readInt();
+    limits.maxEvents = reader.readInt();
+    limits.maxChanges = reader.readInt();
+    return limits;
+}
+
 Host::Host()
 {
     addPluginFormats (formats);
@@ -41,6 +57,7 @@ Host::Host()
 
 Host::~Host()
 {
+    stopTimer();
     instances.clear(); // their threads stopped, before the pipe goes
     pipe = nullptr;
 }
@@ -56,13 +73,24 @@ bool Host::connect (const juce::String& commandLine)
     // Its reads wait for as long as it takes (JUCE takes one that times out for the pipe's loss): the pipe is quiet while
     // a song plays, and breaks at once if Phazite goes.
     pipe = std::make_unique<Pipe> (*this);
-    return pipe->connectToPipe (argument, -1);
+
+    if (! pipe->connectToPipe (argument, -1))
+        return false;
+
+    startTimerHz (noticesPerSecond);
+    return true;
 }
 
 void Host::received (const juce::MemoryBlock& message)
 {
     // On the pipe's thread: handled on the message thread, in the order they came.
     juce::MessageManager::callAsync ([this, message] { handle (message); });
+}
+
+Instance* Host::findInstance (std::int64_t id) const
+{
+    const auto found = instances.find (id);
+    return found != instances.end() ? found->second.get() : nullptr;
 }
 
 void Host::handle (const juce::MemoryBlock& message)
@@ -88,80 +116,117 @@ void Host::handle (const juce::MemoryBlock& message)
             instances.erase (reader.readInt64());
             break;
 
+        case MessageType::prepareInstance:
+            prepareInstance (reader, answer);
+            break;
+
+        case MessageType::getState:
+            if (auto* instance = findInstance (reader.readInt64()))
+                answer.add (instance->getState());
+            break;
+
+        case MessageType::setState:
+            if (auto* instance = findInstance (reader.readInt64()))
+                instance->setState (reader.readBlock());
+            break;
+
+        case MessageType::parameterText:
+            if (auto* instance = findInstance (reader.readInt64()))
+            {
+                const auto index = reader.readInt();
+                answer.add (instance->getParameterText (index, (float) reader.readDouble()));
+            }
+            break;
+
         case MessageType::stats:
             answer.add (getProcessCpuSeconds()).add (getProcessMemoryBytes());
             break;
+
+        // Notices: nothing to answer.
+        case MessageType::setParameter:
+            if (auto* instance = findInstance (reader.readInt64()))
+            {
+                const auto index = reader.readInt();
+                instance->setParameter (index, (float) reader.readDouble());
+            }
+            return;
 
         case MessageType::quit:
             juce::JUCEApplicationBase::quit();
             return;
 
+        case MessageType::parameterChanged:
+        case MessageType::gesture:
+        case MessageType::latencyChanged:
+        case MessageType::stateChanged:
+        case MessageType::parametersChanged:
         case MessageType::reply:
             return;
     }
 
-    reply (answer);
+    send (answer);
 }
 
-void Host::reply (MessageWriter& answer)
+void Host::send (MessageWriter& message)
 {
     if (pipe != nullptr)
-        pipe->sendMessage (answer.take());
+        pipe->sendMessage (message.take());
+}
+
+void Host::timerCallback()
+{
+    for (auto& [id, instance] : instances)
+        instance->takeNotices ([this] (MessageWriter& notice) { send (notice); });
 }
 
 void Host::openInstance (MessageReader& reader, MessageWriter& answer)
 {
     const auto id = reader.readInt64();
     const auto channelName = reader.readString();
-    sandbox::BlockChannel::Limits limits;
-    limits.maxSamples = reader.readInt();
-    limits.maxChannels = reader.readInt();
-    limits.maxSidechainChannels = reader.readInt();
-    limits.maxEvents = reader.readInt();
-    limits.maxChanges = reader.readInt();
+    const auto limits = readLimits (reader);
     const auto sampleRate = reader.readDouble();
-    const auto format = reader.readString();
-    const auto file = reader.readString();
-    const auto name = reader.readString();
+    const auto descriptionXml = reader.readString();
+    const auto state = reader.readBlock();
 
-    juce::String error;
+    const auto refuse = [&answer] (const juce::String& why) { answer.add (false).add (why); };
+    juce::PluginDescription description;
+
+    if (const auto xml = juce::parseXML (descriptionXml); xml == nullptr || ! description.loadFromXml (*xml))
+        return refuse ("The plug-in's description didn't come whole.");
+
     auto channel = sandbox::BlockChannel::open (channelName.toStdString(), limits);
-    auto plugin = channel != nullptr ? makePlugin (format, file, name, sampleRate, limits.maxSamples, error) : nullptr;
 
     if (channel == nullptr)
-        error = "The helper couldn't open the plug-in's channel.";
+        return refuse ("The helper couldn't open the plug-in's channel.");
+
+    juce::String error;
+    auto plugin = formats.createPluginInstance (description, sampleRate, limits.maxSamples, error);
 
     if (plugin == nullptr)
-    {
-        answer.add (false).add (error.isNotEmpty() ? error : juce::String ("The plug-in didn't load.")).add (0);
-        return;
-    }
+        return refuse (error.isNotEmpty() ? error : "The plug-in didn't load.");
 
-    auto instance = std::make_unique<Instance> (std::move (plugin), std::move (channel), sampleRate);
-    const auto latency = instance->getPlugin().getLatencySamples();
+    // Its settings as the song keeps them, before it plays.
+    if (! state.isEmpty())
+        plugin->setStateInformation (state.getData(), (int) state.getSize());
+
+    auto instance = std::make_unique<Instance> (id, std::move (plugin), std::move (channel), sampleRate);
+    answer.add (true).add (juce::String());
+    sandbox::write (answer, instance->describe());
     instances[id] = std::move (instance);
-    answer.add (true).add (juce::String()).add (latency);
 }
 
-std::unique_ptr<juce::AudioPluginInstance> Host::makePlugin (const juce::String& formatName, const juce::String& file,
-                                                             const juce::String& name, double sampleRate, int blockSize,
-                                                             juce::String& error)
+void Host::prepareInstance (MessageReader& reader, MessageWriter& answer)
 {
-    for (auto* format : formats.getFormats())
-    {
-        if (format->getName() != formatName)
-            continue;
+    auto* instance = findInstance (reader.readInt64());
+    const auto channelName = reader.readString();
+    const auto limits = readLimits (reader);
+    const auto sampleRate = reader.readDouble();
+    auto channel = instance != nullptr ? sandbox::BlockChannel::open (channelName.toStdString(), limits) : nullptr;
+    const auto opened = channel != nullptr;
 
-        // The type in the file by its name, or its first.
-        juce::OwnedArray<juce::PluginDescription> types;
-        format->findAllTypesForFile (types, file);
+    if (opened)
+        instance->prepare (std::move (channel), sampleRate);
 
-        for (const auto* type : types)
-            if (name.isEmpty() || type->name == name)
-                return format->createInstanceFromDescription (*type, sampleRate, blockSize, error);
-    }
-
-    error = "No plug-in " + name + " in " + file + ".";
-    return nullptr;
+    answer.add (opened);
 }
 } // namespace phazite::host

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The helper program's side of Phazite (docs/tracktion-migration.md, T3): the pipe Phazite made, which it connects to,
 // Phazite's requests, each handled on the helper's message thread (where plug-ins are made, as their formats ask) and
-// answered with the request's number, and the instances it hosts. It quits when Phazite asks or the pipe goes (Phazite
-// closed or crashed).
+// answered with the request's number, the instances it hosts, and what they change themselves, told to Phazite thirty
+// times a second at most. It quits when Phazite asks or the pipe goes (Phazite closed or crashed).
 #pragma once
 
 #include "Instance.h"
@@ -19,11 +19,11 @@ namespace phazite::host
 // stand-ins (tests/host/TestFormats.cpp).
 void addPluginFormats (juce::AudioPluginFormatManager&);
 
-class Host final
+class Host final : private juce::Timer
 {
 public:
     Host();
-    ~Host();
+    ~Host() override;
 
     // Connects to the pipe named by the program's command line ("--PhaziteSandbox:<pipe>"); false if there is none.
     bool connect (const juce::String& commandLine);
@@ -37,14 +37,20 @@ private:
 
     void received (const juce::MemoryBlock&);
     void handle (const juce::MemoryBlock&); // on the message thread
-    void reply (sandbox::MessageWriter&);
+    void send (sandbox::MessageWriter&);
+    void timerCallback() override;
 
+    Instance* findInstance (std::int64_t id) const;
     void openInstance (sandbox::MessageReader&, sandbox::MessageWriter& answer);
-    std::unique_ptr<juce::AudioPluginInstance> makePlugin (const juce::String& format, const juce::String& file, const juce::String& name,
-                                                           double sampleRate, int blockSize, juce::String& error);
+    void prepareInstance (sandbox::MessageReader&, sandbox::MessageWriter& answer);
 };
 
-// The helper process's CPU time so far, in seconds, and its memory: what of it is in memory and no other process's, in bytes.
+// The helper process ends at once when a plug-in crashes it, rather than with the operating system's dialog. Its CPU
+// time so far, in seconds, and its memory: what of it is in memory and no other process's, in bytes.
+void endQuietlyOnCrashes();
 double getProcessCpuSeconds();
 std::int64_t getProcessMemoryBytes();
+
+// A channel's limits as a request carries them.
+sandbox::BlockChannel::Limits readLimits (sandbox::MessageReader&);
 } // namespace phazite::host

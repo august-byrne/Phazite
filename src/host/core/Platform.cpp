@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The helper process's CPU time and memory (Host.h), from the operating system: what step 0 of T3 measures.
+// What the helper process asks of the operating system (Host.h): to end quietly when a plug-in crashes it, and its CPU
+// time and memory, which T3's measurement reads.
 #include "Host.h"
 
 #if defined(_WIN32)
@@ -21,6 +22,15 @@
 
 namespace phazite::host
 {
+void endQuietlyOnCrashes()
+{
+#if defined(_WIN32)
+    // No dialog of Windows' for a crash (a plug-in's), which would keep the helper waiting for a click: it ends, and
+    // Phazite says so in the plug-in's slot.
+    SetErrorMode (SetErrorMode (0) | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+#endif
+}
+
 double getProcessCpuSeconds()
 {
 #if defined(_WIN32)

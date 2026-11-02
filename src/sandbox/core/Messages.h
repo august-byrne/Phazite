@@ -19,14 +19,27 @@ inline constexpr std::int32_t protocolVersion = 1;
 enum class MessageType : std::int32_t
 {
     // Phazite's requests, each answered by a reply with its number.
-    hello = 1,     // the protocol's version -> the helper's
-    heartbeat,     // nothing -> nothing, from the helper's message thread
-    openInstance,  // instance, channel name, limits, sample rate, the plug-in's format and file -> ok, error, latency
-    closeInstance, // instance -> nothing
-    stats,         // nothing -> the helper's CPU seconds and its memory in bytes
+    hello = 1,       // the protocol's version -> the helper's
+    heartbeat,       // nothing -> nothing, from the helper's message thread
+    openInstance,    // instance, channel name, limits, sample rate, the plug-in's description (JUCE's XML), its state (or none)
+                     // -> ok, why not, and what it is (PluginInfo.h)
+    closeInstance,   // instance -> nothing
+    prepareInstance, // instance, channel name, limits, sample rate -> ok: it plays the new channel from now on
+    getState,        // instance -> its state
+    setState,        // instance, state -> nothing (once it took it)
+    parameterText,   // instance, parameter, value -> how the plug-in writes that value
+    stats,           // nothing -> the helper's CPU seconds and its memory in bytes
 
     // Phazite's notices.
-    quit = 50, // the helper ends
+    quit = 50,    // the helper ends
+    setParameter, // instance, parameter, value: a value set by hand
+
+    // The helper's notices.
+    parameterChanged = 70, // instance, parameter, value: the plug-in changed it itself (its window, a program of its own)
+    gesture,               // instance, parameter, whether it begins: a control of the plug-in's window grabbed or let go
+    latencyChanged,        // instance, samples
+    stateChanged,          // instance: something besides its parameters changed in it
+    parametersChanged,     // instance, its parameters (PluginInfo.h): their list changed
 
     reply = 100 // an answer: its fields are the request's
 };

@@ -10,6 +10,12 @@ namespace
     {
         return "c" + juce::String::toHexString (juce::Random::getSystemRandom().nextInt64()).substring (0, 14).toStdString();
     }
+
+    void write (MessageWriter& message, const std::string& name, const BlockChannel::Limits& limits, double sampleRate)
+    {
+        message.add (juce::String (name)).add (limits.maxSamples).add (limits.maxChannels).add (limits.maxSidechainChannels);
+        message.add (limits.maxEvents).add (limits.maxChanges).add (sampleRate);
+    }
 } // namespace
 
 RemoteInstance::RemoteInstance (Helper& h, std::int64_t instanceID, std::unique_ptr<BlockChannel> blockChannel)
@@ -19,8 +25,9 @@ RemoteInstance::RemoteInstance (Helper& h, std::int64_t instanceID, std::unique_
 {
 }
 
-std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const Plugin& plugin, double sampleRate,
-                                                      const BlockChannel::Limits& limits, juce::String& error, int timeoutMilliseconds)
+std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const juce::String& descriptionXml, const juce::MemoryBlock& state,
+                                                      double sampleRate, const BlockChannel::Limits& limits, juce::String& error,
+                                                      int timeoutMilliseconds)
 {
     const auto name = makeChannelName();
     auto channel = BlockChannel::create (name, limits);
@@ -33,8 +40,9 @@ std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const Plug
 
     std::unique_ptr<RemoteInstance> instance (new RemoteInstance (helper, helper.makeNumber(), std::move (channel)));
     auto message = helper.makeRequest (MessageType::openInstance);
-    message.add (instance->id).add (juce::String (name)).add (limits.maxSamples).add (limits.maxChannels).add (limits.maxSidechainChannels);
-    message.add (limits.maxEvents).add (limits.maxChanges).add (sampleRate).add (plugin.format).add (plugin.file).add (plugin.name);
+    message.add (instance->id);
+    write (message, name, limits, sampleRate);
+    message.add (descriptionXml).add (state);
     const auto answer = helper.request (message, timeoutMilliseconds);
 
     if (! answer.has_value())
@@ -44,15 +52,17 @@ std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const Plug
     }
 
     MessageReader reader (*answer);
+    const auto opened = reader.readBool();
+    const auto why = reader.readString();
 
-    if (! reader.readBool())
+    if (! opened)
     {
-        error = reader.readString();
+        error = why;
         return nullptr;
     }
 
-    reader.readString();
-    instance->latency = reader.readInt();
+    instance->info = readPluginInfo (reader);
+    instance->latency = instance->info.latencySamples;
     return instance;
 }
 
@@ -64,6 +74,130 @@ RemoteInstance::~RemoteInstance()
         auto message = helper.makeRequest (MessageType::closeInstance);
         message.add (id);
         helper.request (message, 2000);
+    }
+}
+
+bool RemoteInstance::prepare (double sampleRate, const BlockChannel::Limits& limits, int timeoutMilliseconds)
+{
+    const auto name = makeChannelName();
+    auto newChannel = BlockChannel::create (name, limits);
+
+    if (newChannel == nullptr)
+        return false;
+
+    auto message = helper.makeRequest (MessageType::prepareInstance);
+    message.add (id);
+    write (message, name, limits, sampleRate);
+    const auto answer = helper.request (message, timeoutMilliseconds);
+
+    if (! answer.has_value())
+        return false;
+
+    MessageReader reader (*answer);
+
+    if (! reader.readBool())
+        return false;
+
+    channel = std::move (newChannel);
+    return true;
+}
+
+std::optional<juce::MemoryBlock> RemoteInstance::getState (int timeoutMilliseconds)
+{
+    auto message = helper.makeRequest (MessageType::getState);
+    message.add (id);
+    const auto answer = helper.request (message, timeoutMilliseconds);
+
+    if (! answer.has_value())
+        return {};
+
+    MessageReader reader (*answer);
+    return reader.readBlock();
+}
+
+bool RemoteInstance::setState (const juce::MemoryBlock& state, int timeoutMilliseconds)
+{
+    auto message = helper.makeRequest (MessageType::setState);
+    message.add (id).add (state);
+    return helper.request (message, timeoutMilliseconds).has_value();
+}
+
+void RemoteInstance::setParameter (int index, float value)
+{
+    MessageWriter message (MessageType::setParameter, 0);
+    message.add (id).add ((std::int32_t) index).add ((double) value);
+    helper.post (message);
+}
+
+std::optional<juce::String> RemoteInstance::getParameterText (int index, float value, int timeoutMilliseconds)
+{
+    auto message = helper.makeRequest (MessageType::parameterText);
+    message.add (id).add ((std::int32_t) index).add ((double) value);
+    const auto answer = helper.request (message, timeoutMilliseconds);
+
+    if (! answer.has_value())
+        return {};
+
+    MessageReader reader (*answer);
+    return reader.readString();
+}
+
+void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
+{
+    auto* told = listener.load();
+
+    // Its latency, kept whoever listens.
+    if (type == MessageType::latencyChanged && told == nullptr)
+        latency = notice.readInt();
+
+    if (told == nullptr)
+        return;
+
+    switch (type)
+    {
+        case MessageType::parameterChanged:
+        {
+            const auto index = notice.readInt();
+            told->parameterChanged (index, (float) notice.readDouble());
+            break;
+        }
+
+        case MessageType::gesture:
+        {
+            const auto index = notice.readInt();
+            told->gestureChanged (index, notice.readBool());
+            break;
+        }
+
+        case MessageType::latencyChanged:
+        {
+            const auto samples = notice.readInt();
+            latency = samples;
+            told->latencyChanged (samples);
+            break;
+        }
+
+        case MessageType::stateChanged:
+            told->stateChanged();
+            break;
+
+        case MessageType::parametersChanged:
+            told->parametersChanged (readParameters (notice));
+            break;
+
+        case MessageType::hello:
+        case MessageType::heartbeat:
+        case MessageType::openInstance:
+        case MessageType::closeInstance:
+        case MessageType::prepareInstance:
+        case MessageType::getState:
+        case MessageType::setState:
+        case MessageType::parameterText:
+        case MessageType::stats:
+        case MessageType::quit:
+        case MessageType::setParameter:
+        case MessageType::reply:
+            break;
     }
 }
 } // namespace phazite::sandbox

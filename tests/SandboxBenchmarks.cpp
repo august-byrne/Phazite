@@ -7,7 +7,7 @@
 // (--test-suite=benchmark --no-skip); ctest skips it.
 #include "TestHelpers.h"
 #include "engine/core/Workers.h"
-#include "host/TestPlugins.h"
+#include "host/SandboxTestHelpers.h"
 #include "host/ThreadCpu.h"
 #include "sandbox/client/Helper.h"
 #include "sandbox/client/RemoteInstance.h"
@@ -166,17 +166,15 @@ struct Case
 {
     juce::String name;
     std::function<std::unique_ptr<juce::AudioPluginInstance>()> makeHere;
-    sandbox::RemoteInstance::Plugin plugin;
+    juce::PluginDescription description;
     bool isSynth = false;
 };
 
 std::vector<Case> getCases (juce::VST3PluginFormat& vst3)
 {
     std::vector<Case> cases;
-    cases.push_back ({ "Test Effect (a gain)",
-                       [] { return phazite::test::TestPlugins::createEffect(); },
-                       { phazite::test::TestPlugins::formatName, phazite::test::TestPlugins::effectID, "Test Effect" },
-                       false });
+    cases.push_back ({ "Test Effect (a gain)", [] { return phazite::test::TestPlugins::create (phazite::test::TestPlugins::Kind::effect); },
+                       phazite::test::TestPlugins::getDescription (phazite::test::TestPlugins::Kind::effect), false });
 
     const juce::File folder ("C:\\Program Files\\Common Files\\VST3\\Surge Synth Team");
 
@@ -201,8 +199,7 @@ std::vector<Case> getCases (juce::VST3PluginFormat& vst3)
                                juce::String error;
                                return vst3.createInstanceFromDescription (description, rate, blockSize, error);
                            },
-                           { "VST3", path.getFullPathName(), description.name },
-                           isSynth });
+                           description, isSynth });
     }
 
     return cases;
@@ -235,7 +232,7 @@ TEST_CASE ("Benchmark: a sandboxed plug-in's round trip at 128 samples" * doctes
             sandbox::BlockChannel::Limits limits;
             limits.maxSamples = blockSize;
             juce::String error;
-            auto instance = sandbox::RemoteInstance::open (helper, c.plugin, rate, limits, error, 60000);
+            auto instance = sandbox::RemoteInstance::open (helper, phazite::test::toXml (c.description), {}, rate, limits, error, 60000);
             REQUIRE_MESSAGE (instance != nullptr, error);
             const auto before = getStats (helper);
             auto& channel = instance->getChannel();
@@ -363,8 +360,8 @@ TEST_CASE ("Benchmark: eight sandboxed synths in a block at 128 samples" * docte
             for (int i = 0; i < count; ++i)
             {
                 juce::String error;
-                instances.push_back (
-                    sandbox::RemoteInstance::open (*helpers[shared ? 0 : (size_t) i], c.plugin, rate, limits, error, 60000));
+                instances.push_back (sandbox::RemoteInstance::open (*helpers[shared ? 0 : (size_t) i], phazite::test::toXml (c.description),
+                                                                    {}, rate, limits, error, 60000));
                 REQUIRE_MESSAGE (instances.back() != nullptr, error);
             }
 
