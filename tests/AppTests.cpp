@@ -4,6 +4,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "UiTestHelpers.h"
 #include "app/AppServices.h"
 #include "app/ProjectSession.h"
 #include "app/RunMarker.h"
@@ -14,6 +15,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "services/RecentProjects.h"
@@ -256,6 +258,23 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     REQUIRE (project.create().wasOk());
     services.recentProjects.add (project);
     CHECK (services.settings.get (phazite::Settings::recentProjects) == juce::StringArray { project.getFullPathName() });
+
+    // So are the plug-ins a scan found, and those that crashed as they loaded.
+    auto& known = engine.getPluginManager().knownPluginList;
+    juce::PluginDescription scanned;
+    scanned.name = "Scanned";
+    scanned.pluginFormatName = "VST3";
+    scanned.fileOrIdentifier = temp.folder.getChildFile ("Scanned.vst3").getFullPathName();
+    known.addType (scanned);
+    CHECK (phazite::test::dispatchMessagesUntil (
+        [&] { return services.settings.get (phazite::Settings::knownPlugins).contains (scanned.fileOrIdentifier); }));
+    known.removeType (scanned);
+
+    auto& plugins = phazite::getPluginHost (*services.engineContext);
+    plugins.setCrashedWhileLoading ({ "Crashed" });
+    plugins.sendChangeMessage();
+    CHECK (phazite::test::dispatchMessagesUntil (
+        [&] { return services.settings.get (phazite::Settings::pluginsCrashedLoading) == juce::StringArray { "Crashed" }; }));
 
     // The library indexes on its own thread; it is done before the services go.
     CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 10000));

@@ -2,8 +2,8 @@
 // The helper program's side of Phazite (docs/tracktion-migration.md, T3): the pipe Phazite made, which it connects to,
 // Phazite's requests, each handled on the helper's message thread (where plug-ins are made, as their formats ask) and
 // answered with the request's number, the instances it hosts with their editors (Editor.h), and what they change
-// themselves, told to Phazite thirty times a second at most (a key Phazite takes over an editor at once). It quits when
-// Phazite asks or the pipe goes (Phazite closed or crashed).
+// themselves, told to Phazite thirty times a second at most (a key Phazite takes over an editor at once); and the plug-in
+// scan, a file at a time. It quits when Phazite asks or the pipe goes (Phazite closed or crashed).
 #pragma once
 
 #include "Editor.h"
@@ -47,6 +47,7 @@ private:
     void openInstance (sandbox::MessageReader&, sandbox::MessageWriter& answer);
     void prepareInstance (sandbox::MessageReader&, sandbox::MessageWriter& answer);
     void openEditor (std::int64_t id, sandbox::MessageWriter& answer);
+    void scan (sandbox::MessageReader&, sandbox::MessageWriter& answer);
     void placeEditor (sandbox::MessageReader&);
     void setEditorKeys (sandbox::MessageReader&);
 };

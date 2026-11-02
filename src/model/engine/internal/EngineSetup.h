@@ -25,6 +25,11 @@ public:
     // buffer of 30 seconds on the audio thread as it is enabled (docs/realtime-audit.md, finding 1): Phazite records and
     // captures what comes in itself (model/transport/internal/Take.h, Capture.h).
     juce::var getProperty (te::SettingID, const juce::var& defaultValue) override;
+
+    // The plug-ins scanning found are Phazite's to keep, in its own settings (the app's services: Settings::knownPlugins),
+    // not Tracktion's: Tracktion's list is neither read nor written here.
+    std::unique_ptr<juce::XmlElement> getXmlProperty (te::SettingID) override;
+    void setXmlProperty (te::SettingID, const juce::XmlElement&) override;
 };
 
 //==============================================================================

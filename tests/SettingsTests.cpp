@@ -59,6 +59,8 @@ TEST_CASE ("Settings have their defaults, and are stored as plain values")
     CHECK (settings.get (Settings::exportTruePeakCeiling) == doctest::Approx (-1.0));
     CHECK_FALSE (settings.get (Settings::exportStems));
     CHECK (settings.get (Settings::pluginsGettingAllKeys).isEmpty());
+    CHECK (settings.get (Settings::pluginsCrashedLoading).isEmpty());
+    CHECK (settings.get (Settings::knownPlugins).isEmpty());
     CHECK (settings.get (Settings::guide));
     CHECK (settings.get (Settings::guideStepsDone).isEmpty());
     CHECK (settings.getKeyChanges ("FL Studio").isEmpty());

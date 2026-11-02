@@ -427,6 +427,13 @@ namespace
 
         void findAllTypesForFile (juce::OwnedArray<juce::PluginDescription>& results, const juce::String& file) override
         {
+            // Files that hang and crash as they are scanned (TestPlugins::hangsScanned, crashesScanned).
+            while (file == TestPlugins::hangsScanned)
+                juce::Thread::sleep (1);
+
+            if (file == TestPlugins::crashesScanned)
+                crashNow();
+
             for (const auto kind : TestPlugins::kinds)
                 if (file == describe (kind).file)
                     results.add (new juce::PluginDescription (TestPlugins::getDescription (kind)));

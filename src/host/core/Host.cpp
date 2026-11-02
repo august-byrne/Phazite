@@ -163,6 +163,10 @@ void Host::handle (const juce::MemoryBlock& message)
             editors.erase (reader.readInt64());
             break;
 
+        case MessageType::scan:
+            scan (reader, answer);
+            break;
+
         // Notices: nothing to answer.
         case MessageType::setParameter:
             if (auto* instance = findInstance (reader.readInt64()))
@@ -283,6 +287,23 @@ void Host::openEditor (std::int64_t id, MessageWriter& answer)
 
     answer.add (true).add ((std::int32_t) editor->getBounds().getWidth()).add ((std::int32_t) editor->getBounds().getHeight());
     answer.add (editor->isResizable());
+}
+
+void Host::scan (MessageReader& reader, MessageWriter& answer)
+{
+    // What the file holds, as its format finds it: a crash or a hang here is the helper's, which Phazite ends.
+    const auto formatName = reader.readString();
+    const auto file = reader.readString();
+    juce::OwnedArray<juce::PluginDescription> found;
+
+    for (auto* format : formats.getFormats())
+        if (format->getName() == formatName)
+            format->findAllTypesForFile (found, file);
+
+    answer.add ((std::int32_t) found.size());
+
+    for (const auto* description : found)
+        answer.add (description->createXml()->toString (juce::XmlElement::TextFormat().withoutHeader().singleLine()));
 }
 
 void Host::placeEditor (MessageReader& reader)

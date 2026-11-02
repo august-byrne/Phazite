@@ -37,10 +37,10 @@ struct AppServices
     Library library;                      // what the browser and the plug-in picker show
     std::unique_ptr<Previewer> previewer; // the browser's
 
-    // The plug-ins that crashed their helpers as they loaded, kept off, at the next start too: kept in the settings as the
-    // plug-in host's list of them changes.
-    struct CrashedPlugins;
-    std::unique_ptr<CrashedPlugins> crashedPlugins;
+    // The plug-ins the scan found, and those that crashed their helpers as they loaded, kept off, at the next start too:
+    // read from the settings as the services start, and kept there as they change.
+    struct PluginLists;
+    std::unique_ptr<PluginLists> pluginLists;
     ~AppServices();
 
     JUCE_DECLARE_NON_COPYABLE (AppServices)

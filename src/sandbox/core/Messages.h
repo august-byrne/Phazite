@@ -32,6 +32,8 @@ enum class MessageType : std::int32_t
     setProgram,      // instance, program -> nothing (once it has it)
     openEditor,      // instance -> ok, its width and height, whether it can be resized: the plug-in's editor made, not shown
     closeEditor,     // instance -> nothing (once it has gone)
+    scan,            // a plug-in format's name, a file (or identifier) -> how many plug-ins it holds, and each one's
+                     // description (JUCE's XML for it): a plug-in scan, which loads the plug-in's code in the helper
 
     // Phazite's notices.
     quit = 50,     // the helper ends

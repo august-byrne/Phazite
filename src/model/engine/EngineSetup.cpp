@@ -21,6 +21,15 @@
 
 namespace phazite
 {
+namespace
+{
+    // Tracktion's list of the plug-ins scanning found, which Phazite keeps in its own settings.
+    bool isPluginList (te::SettingID setting)
+    {
+        return setting == te::SettingID::knownPluginList || setting == te::SettingID::knownPluginList64;
+    }
+} // namespace
+
 //==============================================================================
 PropertyStorage::PropertyStorage (juce::StringRef applicationName)
     : te::PropertyStorage (applicationName)
@@ -43,6 +52,17 @@ juce::var PropertyStorage::getProperty (te::SettingID setting, const juce::var& 
         return 0.0;
 
     return te::PropertyStorage::getProperty (setting, defaultValue);
+}
+
+std::unique_ptr<juce::XmlElement> PropertyStorage::getXmlProperty (te::SettingID setting)
+{
+    return isPluginList (setting) ? nullptr : te::PropertyStorage::getXmlProperty (setting);
+}
+
+void PropertyStorage::setXmlProperty (te::SettingID setting, const juce::XmlElement& xml)
+{
+    if (! isPluginList (setting))
+        te::PropertyStorage::setXmlProperty (setting, xml);
 }
 
 //==============================================================================

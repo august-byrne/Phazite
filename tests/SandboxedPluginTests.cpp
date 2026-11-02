@@ -11,6 +11,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/PluginScanner.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixHandle.h"
 #include "model/mixer/MixerModel.h"
@@ -533,6 +534,38 @@ TEST_CASE ("A crashed plug-in's slot in the mixer says so, and reloads at a clic
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&] { return effectButton() != nullptr && effectButton()->getButtonText() == "Test Crash"; }));
     CHECK_FALSE (getSandboxed (song, crashing).hasCrashed());
+}
+
+TEST_CASE ("The plug-in scan finds what a file holds in a helper, and leaves out one that hangs or crashes it, each in its time")
+{
+    using phazite::test::TestPlugins;
+    constexpr int secondsEach = 2;
+    auto scanner = phazite::createPluginScanner (phazite::test::getEngine(), secondsEach);
+    const auto format = TestPlugins::createFormat(); // its name, which the helper scans with
+    juce::OwnedArray<juce::PluginDescription> found;
+
+    // A file's plug-ins, found in the helper.
+    CHECK (scanner->findPluginTypesFor (*format, found, "PhaziteTestEffect"));
+    REQUIRE (found.size() == 1);
+    CHECK (found[0]->name == "Test Effect");
+
+    // One that hangs its scan is left out (blacklisted) once its time is up, the helper ended with it.
+    found.clear();
+    const auto hungAt = juce::Time::getMillisecondCounterHiRes();
+    CHECK_FALSE (scanner->findPluginTypesFor (*format, found, TestPlugins::hangsScanned));
+    const auto took = juce::Time::getMillisecondCounterHiRes() - hungAt;
+    CHECK (took >= secondsEach * 1000.0);
+    CHECK (took < secondsEach * 4000.0);
+    CHECK (found.isEmpty());
+
+    // One that crashes its helper, twice (once more in a fresh helper), is left out too.
+    CHECK_FALSE (scanner->findPluginTypesFor (*format, found, TestPlugins::crashesScanned));
+    CHECK (found.isEmpty());
+
+    // The next file scans as ever, in another helper.
+    CHECK (scanner->findPluginTypesFor (*format, found, "PhaziteTestSynth"));
+    REQUIRE (found.size() == 1);
+    CHECK (found[0]->name == "Test Synth");
 }
 
 TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effect lets its sound through")

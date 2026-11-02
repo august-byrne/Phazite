@@ -32,6 +32,10 @@ struct TestPlugins
 
     static juce::PluginDescription getDescription (Kind);
 
+    // Files of the format that hang for ever and crash as they are scanned, which hold no plug-in.
+    static constexpr const char* hangsScanned = "PhaziteTestHangScanned";
+    static constexpr const char* crashesScanned = "PhaziteTestCrashScanned";
+
     // One made in the tests' own process, as the format makes it (for tests that play it here to compare).
     static std::unique_ptr<juce::AudioPluginInstance> create (Kind);
 

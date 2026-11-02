@@ -1,114 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PluginScanner.h"
+#include "model/plugins/internal/PluginHost.h"
+#include "sandbox/client/Helper.h"
 
 #include <atomic>
-#include <functional>
+#include <mutex>
 
 namespace phazite
 {
 namespace
 {
-    // What the child (Tracktion's PluginScanChildProcess, which the app starts for "--PluginScan:") reads: an element as
-    // one line of XML.
-    juce::MemoryBlock toMessage (const juce::XmlElement& xml)
-    {
-        juce::MemoryOutputStream stream;
-        xml.writeTo (stream, juce::XmlElement::TextFormat().withoutHeader().singleLine());
-        return stream.getMemoryBlock();
-    }
-
-    // The child copy that scans: a request for each file, answered with what it found. Destroyed, it stops the child.
-    class Coordinator : private juce::ChildProcessCoordinator
-    {
-    public:
-        enum class Reply
-        {
-            found,
-            crashed,
-            timedOut,
-            cancelled
-        };
-
-        bool launch()
-        {
-            if (! launched)
-                launched = launchWorkerProcess (juce::File::getSpecialLocation (juce::File::currentExecutableFile), "PluginScan", 0, 0);
-
-            return launched;
-        }
-
-        bool request (juce::AudioPluginFormat& format, const juce::String& fileOrIdentifier, int id)
-        {
-            juce::XmlElement scan ("SCAN");
-            scan.setAttribute ("id", id);
-            scan.setAttribute ("type", format.getName());
-            scan.setAttribute ("file", fileOrIdentifier);
-            return sendMessageToWorker (toMessage (scan));
-        }
-
-        Reply waitForReply (int id, juce::OwnedArray<juce::PluginDescription>& result, const std::function<bool()>& shouldAbort)
-        {
-            const auto start = juce::Time::getMillisecondCounter();
-
-            for (;;)
-            {
-                if (const auto reply = takeReply (id))
-                {
-                    for (const auto* element : reply->getChildIterator())
-                        if (juce::PluginDescription description; description.loadFromXml (*element))
-                            result.add (new juce::PluginDescription (description));
-
-                    return Reply::found;
-                }
-
-                if (crashed)
-                    return Reply::crashed;
-
-                if (shouldAbort() || ! launched)
-                    return Reply::cancelled;
-
-                if (juce::Time::getMillisecondCounter() - start > (juce::uint32) pluginScanSecondsEach * 1000)
-                    return Reply::timedOut;
-
-                juce::Thread::sleep (10);
-            }
-        }
-
-        bool hasCrashed() const noexcept { return crashed; }
-
-    private:
-        std::atomic<bool> launched { false }, crashed { false };
-        juce::OwnedArray<juce::XmlElement> replies;
-        juce::CriticalSection lock;
-
-        std::unique_ptr<juce::XmlElement> takeReply (int id)
-        {
-            const juce::ScopedLock held (lock);
-
-            for (int i = replies.size(); --i >= 0;)
-                if (replies.getUnchecked (i)->getIntAttribute ("id") == id)
-                    return std::unique_ptr<juce::XmlElement> (replies.removeAndReturn (i));
-
-            return {};
-        }
-
-        void handleMessageFromWorker (const juce::MemoryBlock& message) override
-        {
-            if (auto xml = juce::parseXML (message.toString()); xml != nullptr && xml->hasTagName ("FOUND"))
-            {
-                const juce::ScopedLock held (lock);
-                replies.add (xml.release());
-            }
-        }
-
-        void handleConnectionLost() override { crashed = true; }
-    };
+    constexpr int startMilliseconds = 20000; // how long a helper may take to start and answer
 
     class Scanner : public juce::KnownPluginList::CustomScanner
     {
     public:
-        explicit Scanner (te::Engine& e)
-            : engine (e)
+        Scanner (te::Engine& e, int seconds)
+            : engine (e),
+              secondsEach (seconds)
         {
         }
 
@@ -125,17 +34,31 @@ namespace
         void scanFinished() override
         {
             abort = false;
-            coordinator = nullptr;
+
+            {
+                const std::lock_guard held (lock);
+                helper = nullptr;
+            }
 
             if (auto callback = engine.getPluginManager().scanCompletedCallback)
                 callback();
         }
 
-        void cancel() { abort = true; }
+        // From another thread: the helper ended, so that the file it is on answers at once.
+        void cancel()
+        {
+            abort = true;
+            const std::lock_guard held (lock);
+
+            if (helper != nullptr)
+                helper->kill();
+        }
 
     private:
         te::Engine& engine;
-        std::unique_ptr<Coordinator> coordinator;
+        const int secondsEach;
+        std::mutex lock; // the helper, which a cancel ends from another thread
+        std::unique_ptr<sandbox::Helper> helper;
         std::atomic<bool> abort { false };
 
         bool shouldAbort() const { return abort || shouldExit(); }
@@ -143,59 +66,73 @@ namespace
         bool findTypes (juce::AudioPluginFormat& format, juce::OwnedArray<juce::PluginDescription>& result,
                         const juce::String& fileOrIdentifier)
         {
-            // As Tracktion: the formats that load code, which can crash or hang, in the child; the others here.
-            if (const auto name = format.getName(); ! (name.containsIgnoreCase ("VST") || name.containsIgnoreCase ("LADSPA")))
-            {
-                format.findAllTypesForFile (result, fileOrIdentifier);
-                return true;
-            }
-
-            // A crash: once more with a fresh child, in case the plug-in scanned before was to blame.
+            // A crash: once more with a fresh helper, in case the plug-in scanned before was to blame.
             for (int attempt = 0; attempt < 2; ++attempt)
             {
-                if (coordinator == nullptr || coordinator->hasCrashed())
-                    coordinator = std::make_unique<Coordinator>();
+                if (shouldAbort())
+                    return true;
 
-                // A child that can't start: here, as Tracktion falls back to.
-                if (! coordinator->launch())
+                auto* scanning = getHelper();
+
+                if (scanning == nullptr)
+                    return true; // no helper to scan in: nothing found, and nothing blacklisted
+
+                auto request = scanning->makeRequest (sandbox::MessageType::scan);
+                request.add (format.getName()).add (fileOrIdentifier);
+
+                if (const auto answer = scanning->request (request, secondsEach * 1000))
                 {
-                    coordinator = nullptr;
-                    format.findAllTypesForFile (result, fileOrIdentifier);
+                    sandbox::MessageReader reader (*answer);
+
+                    for (auto count = reader.readInt(); --count >= 0;)
+                        if (const auto xml = juce::parseXML (reader.readString()))
+                            if (juce::PluginDescription description; description.loadFromXml (*xml))
+                                result.add (new juce::PluginDescription (description));
+
                     return true;
                 }
 
                 if (shouldAbort())
                     return true;
 
-                // A child that doesn't take the request has gone, as in a crash.
-                const auto id = juce::Random().nextInt();
-
-                if (! coordinator->request (format, fileOrIdentifier, id))
+                // Still running without an answer: stuck in the plug-in, which is left out, and the helper with it.
+                if (scanning->isRunning())
                 {
-                    coordinator = nullptr;
-                    continue;
+                    juce::Logger::writeToLog ("Plug-in scan: " + fileOrIdentifier + " took longer than " + juce::String (secondsEach)
+                                              + " seconds, and is left out");
+                    dropHelper();
+                    return false;
                 }
 
-                switch (coordinator->waitForReply (id, result, [this] { return shouldAbort(); }))
-                {
-                    case Coordinator::Reply::found:
-                    case Coordinator::Reply::cancelled:
-                        return true;
-
-                    case Coordinator::Reply::timedOut:
-                        juce::Logger::writeToLog ("Plug-in scan: " + fileOrIdentifier + " took longer than "
-                                                  + juce::String (pluginScanSecondsEach) + " seconds, and is left out");
-                        coordinator = nullptr; // stops the child, which is stuck in it
-                        return false;
-
-                    case Coordinator::Reply::crashed:
-                        juce::Logger::writeToLog ("Plug-in scan: crashed on " + fileOrIdentifier);
-                        coordinator = nullptr;
-                        break;
-                }
+                juce::Logger::writeToLog ("Plug-in scan: crashed on " + fileOrIdentifier);
+                dropHelper();
             }
 
             return false;
+        }
+
+        // The helper the scan uses, started as the first file comes and again after one that went; none without the
+        // helper program.
+        sandbox::Helper* getHelper()
+        {
+            const std::lock_guard held (lock);
+
+            if (helper == nullptr || ! helper->isRunning())
+            {
+                auto* host = PluginHost::find (engine);
+                helper = host != nullptr ? std::make_unique<sandbox::Helper> (host->getHelperProgram()) : nullptr;
+
+                if (helper != nullptr && ! helper->start (startMilliseconds))
+                    helper = nullptr;
+            }
+
+            return helper.get();
+        }
+
+        void dropHelper()
+        {
+            const std::lock_guard held (lock);
+            helper = nullptr; // ended, if it still runs
         }
 
         // As Tracktion's scanner: a plug-in described as it was before keeps the time it was described then, rather than
@@ -211,10 +148,15 @@ namespace
     };
 } // namespace
 
+std::unique_ptr<juce::KnownPluginList::CustomScanner> createPluginScanner (te::Engine& engine, int secondsEach)
+{
+    return std::make_unique<Scanner> (engine, secondsEach);
+}
+
 void usePluginScannerWithTimeLimit (te::Engine& engine)
 {
     auto& plugins = engine.getPluginManager();
-    auto scanner = std::make_unique<Scanner> (engine);
+    auto scanner = std::make_unique<Scanner> (engine, pluginScanSecondsEach);
     plugins.abortCurrentPluginScan = [current = scanner.get()] { current->cancel(); };
     plugins.knownPluginList.setCustomScanner (std::move (scanner));
 }

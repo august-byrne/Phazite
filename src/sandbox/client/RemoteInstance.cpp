@@ -275,6 +275,7 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         case MessageType::setProgram:
         case MessageType::openEditor:
         case MessageType::closeEditor:
+        case MessageType::scan:
         case MessageType::quit:
         case MessageType::setParameter:
         case MessageType::placeEditor:
