@@ -7,11 +7,18 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
 namespace
 {
+    // Where playback starts, in the song's beats.
+    BeatPosition getPlayStartBeat (const te::Edit& edit)
+    {
+        return BeatPosition::fromBeats ((double) findPhaziteState (edit).getProperty (schema::playStart, 0.0));
+    }
+
     // Written only when it changes, so a project that never looped anything else has nothing new to save.
     void setLoopFollowsSong (te::Edit& edit, bool follows)
     {
@@ -45,6 +52,12 @@ namespace
     // Stops playback. A recording that stops with it is kept as one undo step, "Record" (Recording.h).
     void stopPlaying (te::Edit& edit)
     {
+        if (auto* session = findPlayingSession (edit))
+        {
+            session->stop();
+            return;
+        }
+
         auto& transport = edit.getTransport();
 
         if (transport.isRecording())
@@ -172,8 +185,7 @@ void loopSections (te::Edit& edit, const std::vector<Section>& sections)
 
 te::TimePosition getPlayStart (const te::Edit& edit)
 {
-    const auto beat = (double) findPhaziteState (edit).getProperty (schema::playStart, 0.0);
-    return edit.tempoSequence.toTime (toTracktion (BeatPosition::fromBeats (beat)));
+    return edit.tempoSequence.toTime (toTracktion (getPlayStartBeat (edit)));
 }
 
 void movePlayhead (te::Edit& edit, te::TimePosition position)
@@ -185,7 +197,11 @@ void movePlayhead (te::Edit& edit, te::TimePosition position)
         state.removeProperty (schema::playStart, nullptr);
 
     mirror::reconcileTransport (edit);
-    edit.getTransport().setPosition (position);
+
+    if (auto* session = findPlayingSession (edit))
+        session->locate (fromTracktion (edit.tempoSequence.toBeats (position)));
+    else
+        edit.getTransport().setPosition (position);
 }
 
 void goToStart (te::Edit& edit)
@@ -200,27 +216,41 @@ void goToEnd (te::Edit& edit)
 
 void playOrStop (te::Edit& edit)
 {
-    auto& transport = edit.getTransport();
-
-    if (transport.isPlaying())
+    if (isSongPlaying (edit))
+    {
         stopAndReturn (edit);
+    }
+    else if (auto* session = findPlayingSession (edit))
+    {
+        session->locate (getPlayStartBeat (edit));
+        session->play();
+    }
     else
-        transport.playFromStart (false);
+    {
+        edit.getTransport().playFromStart (false);
+    }
 }
 
 void playOrPause (te::Edit& edit)
 {
-    auto& transport = edit.getTransport();
-
-    if (transport.isPlaying())
+    if (isSongPlaying (edit))
         stopPlaying (edit);
+    else if (auto* session = findPlayingSession (edit))
+        session->play();
     else
-        transport.play (false);
+        edit.getTransport().play (false);
 }
 
 void stopAndReturn (te::Edit& edit)
 {
     stopPlaying (edit);
+
+    if (auto* session = findPlayingSession (edit))
+    {
+        session->locate (getPlayStartBeat (edit));
+        return;
+    }
+
     auto& transport = edit.getTransport();
     const auto start = getPlayStart (edit);
     const auto alreadyThere = transport.getPosition() == start;
@@ -230,6 +260,22 @@ void stopAndReturn (te::Edit& edit)
     // changes nothing, and the playhead would stay where it stopped: the change is sent anyway.
     if (alreadyThere)
         transport.state.sendPropertyChangeMessage (te::IDs::position);
+}
+
+bool isSongPlaying (const te::Edit& edit)
+{
+    if (const auto* session = findPlayingSession (edit))
+        return session->isPlaying();
+
+    return edit.getTransport().isPlaying();
+}
+
+te::TimePosition getPlayheadTime (const te::Edit& edit)
+{
+    if (const auto* session = findPlayingSession (edit))
+        return edit.tempoSequence.toTime (toTracktion (session->getPlayhead()));
+
+    return edit.getTransport().getPosition();
 }
 
 bool isLowLatencyOn (const te::Edit& edit)
@@ -278,14 +324,14 @@ void SongFollower::timerCallback()
             mirror::reconcileTransport (edit);
     }
 
-    if (! transport.isPlaying() || isLoopOn (edit) || transport.isRecording())
+    if (! isSongPlaying (edit) || isLoopOn (edit) || transport.isRecording())
     {
         lastPosition.reset();
         return;
     }
 
     // Only when the playhead crosses the end: playback started past it plays on, there being nothing to cut short.
-    const auto position = transport.getPosition();
+    const auto position = getPlayheadTime (edit);
 
     if (lastPosition.has_value() && *lastPosition < songEnd && position >= songEnd)
     {

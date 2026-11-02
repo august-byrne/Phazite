@@ -12,6 +12,8 @@
 #include "model/mixer/internal/Freeze.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
+#include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/transport/internal/AudioRecorder.h"
 
 namespace phazite
@@ -210,15 +212,17 @@ namespace
 //==============================================================================
 struct ProjectContext::Impl
 {
-    Impl (te::Engine& engine, UIBehaviour* tracktionFocus)
-        : focus (tracktionFocus),
-          selection (engine),
+    Impl (EngineContext& engine, UIBehaviour* tracktionFocus)
+        : playbackHost (getPlaybackHost (engine)),
+          focus (tracktionFocus),
+          selection (getEngine (engine)),
           songSelection (createSongSelection (selection)),
           songRange (createSongRange (rangeSelection, selection)),
           songWatcher (std::make_unique<SongWatcher> (listeners))
     {
     }
 
+    PlaybackHost& playbackHost; // Phazite's own engine, the app's
     UIBehaviour* const focus;
     Selection selection;                          // what is selected, by IDs
     std::unique_ptr<SongSelection> songSelection; // the UI's view of selection
@@ -230,19 +234,21 @@ struct ProjectContext::Impl
     std::unique_ptr<ClipRenders> clipRenders;                 // renders what the clips play stretched, pitched or reversed
     std::unique_ptr<AudioRecorder> recorder;                  // records the armed tracks' audio inputs
     std::unique_ptr<AutomationWatcher> automation;            // the parameter touched last, and recorded automation's undo steps
+    std::unique_ptr<PlaybackSession> playback;                // the song as Phazite's own engine plays it
     Clipboard clipboard;                                      // what Cut and Copy keep for Paste
     std::unique_ptr<SongWatcher> songWatcher;
     int projectNumber = 0;
 };
 
 ProjectContext::ProjectContext (EngineContext& engine, UIBehaviour* tracktionFocus)
-    : impl (std::make_unique<Impl> (getEngine (engine), tracktionFocus))
+    : impl (std::make_unique<Impl> (engine, tracktionFocus))
 {
 }
 
 ProjectContext::~ProjectContext()
 {
     impl->songWatcher = nullptr;
+    impl->playback = nullptr;
     impl->automation = nullptr;
     impl->recorder = nullptr;
     impl->clipRenders = nullptr;
@@ -357,7 +363,8 @@ void setEdit (ProjectContext& context, te::Edit* edit)
     impl.songSelection->setNoteClips ({}); // the editors show the new project's clips, or none
     impl.rangeSelection.clear();
     impl.selection.setEdit (edit);   // nothing of the previous one selected
-    impl.automation = nullptr;       // before the Edit it watches goes
+    impl.playback = nullptr;         // before the Edit it plays goes
+    impl.automation = nullptr;       // likewise
     impl.deviceModulation = nullptr; // likewise
     impl.freezes = nullptr;          // likewise
     impl.recorder = nullptr;         // likewise, any recording dropped
@@ -367,6 +374,7 @@ void setEdit (ProjectContext& context, te::Edit* edit)
     impl.clipRenders = edit != nullptr ? std::make_unique<ClipRenders> (*edit) : nullptr;
     impl.recorder = edit != nullptr ? std::make_unique<AudioRecorder> (*edit) : nullptr;
     impl.automation = edit != nullptr ? std::make_unique<AutomationWatcher> (*edit) : nullptr;
+    impl.playback = edit != nullptr ? std::make_unique<PlaybackSession> (*edit, impl.playbackHost) : nullptr;
     impl.songWatcher->setState (edit != nullptr ? edit->state : juce::ValueTree());
 
     if (impl.focus != nullptr)

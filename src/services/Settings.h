@@ -80,6 +80,7 @@ public:
     static constexpr ListSetting lessonsDone { "phaziteLessonsDone", SaveTiming::now };       // the lessons finished, by id
     static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon };  // ui/shell/PanelLayout.h
     static constexpr TextSetting viewPlaces { "phaziteViewPlaces", "", SaveTiming::soon };    // ui/shell/Panels.h: ViewPlaces
+    static constexpr BoolSetting ownEngine { "phaziteOwnEngine", false, SaveTiming::now };    // while T2 builds it (EngineContext.h)
 
     // Kept in that file (the Engine's, which must outlive this), or, without one, in memory (tests). The parameter
     // isn't named 'file': it would hide the member (C4458, -Wshadow).

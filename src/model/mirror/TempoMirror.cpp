@@ -4,6 +4,12 @@
 
 namespace phazite::mirror
 {
+namespace
+{
+    // A Tracktion tempo's curve that holds it until the next starts, as the song's tempos do.
+    constexpr float stepCurve = 1.0f;
+} // namespace
+
 void reconcileTempoMap (te::Edit& edit)
 {
     auto& sequence = edit.tempoSequence;
@@ -17,9 +23,10 @@ void reconcileTempoMap (te::Edit& edit)
         const auto& change = tempos[(size_t) i];
         const auto beat = toTracktion (change.beat);
 
+        // Each tempo holds until the next starts: Tracktion's curve of 1 (one of 0 would ramp to the next).
         if (i >= sequence.getNumTempos())
         {
-            sequence.insertTempo (beat, change.bpm, 0.0f);
+            sequence.insertTempo (beat, change.bpm, stepCurve);
             continue;
         }
 
@@ -27,6 +34,9 @@ void reconcileTempoMap (te::Edit& edit)
 
         if (tempo->getStartBeat() != beat)
             tempo->setStartBeat (beat);
+
+        if (! juce::exactlyEqual (tempo->getCurve(), stepCurve))
+            tempo->setCurve (stepCurve);
 
         // Through setBpm(), which keeps Tracktion's clips and automation on their beats.
         if (! juce::exactlyEqual (tempo->getBpm(), change.bpm))

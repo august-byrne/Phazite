@@ -84,6 +84,11 @@ void playOrPause (te::Edit&);
 // Stops playback and puts the playhead back where playback starts.
 void stopAndReturn (te::Edit&);
 
+// Whether the song plays, and where its playhead is: Tracktion's transport, or Phazite's engine while it plays the project
+// (model/playback/internal/PlaybackSession.h; docs/tracktion-migration.md, T2), which every function here uses.
+bool isSongPlaying (const te::Edit&);
+te::TimePosition getPlayheadTime (const te::Edit&);
+
 // The Low Latency switch, for the session (model/engine/internal/EngineSetup.h: setLowLatency()).
 bool isLowLatencyOn (const te::Edit&);
 void toggleLowLatency (te::Edit&);

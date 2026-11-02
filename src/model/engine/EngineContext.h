@@ -45,6 +45,11 @@ public:
     // Whether the Low Latency switch is on (the command transport.lowLatency; model/engine/internal/EngineSetup.h).
     bool isLowLatency() const;
 
+    // Whether the song plays through Phazite's own engine rather than Tracktion's, while T2 builds it
+    // (docs/tracktion-migration.md): what it plays so far, the rest through Tracktion's. Off at first.
+    bool isPhaziteEngineOn() const;
+    void setPhaziteEngineOn (bool);
+
     // The correction for recordings, in milliseconds (model/transport/internal/AudioRecorder.h): how much earlier what the
     // audio inputs record goes than the delays their driver reports put it, for a driver that reports them wrongly; 0 at
     // first, and best left so.

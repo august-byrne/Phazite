@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Golden renders of the metronome and the count-in (tests/golden/renders, RenderHarness.h; docs/tracktion-migration.md,
-// T0), which only sound in real time: the song played through Tracktion's hosted audio device (RealTimePlayback.h), what
-// it played kept from its first click on, as where that lands depends on when playback started, not on the song. Both
-// start between beats: from a stop, Tracktion now and then skips the first block it should play (docs/known-bugs.md,
-// bug 4).
+// T0), which sound only as the song plays live, what played kept from its first click on: the metronome through Phazite's
+// own engine, driven a block at a time (EnginePlayback.h; T2 step 1); the count-in, which recording plays, through
+// Tracktion's hosted audio device in real time (RealTimePlayback.h) until recording is Phazite's engine's (T2 step 9),
+// where that lands depending on when playback started, not on the song. Both start between beats: from a stop, Tracktion
+// now and then skips the first block it should play (docs/known-bugs.md, bug 4).
+#include "EnginePlayback.h"
 #include "RealTimePlayback.h"
 #include "RenderHarness.h"
 #include "TestSong.h"
@@ -15,6 +17,7 @@
 
 #include <cmath>
 
+using phazite::test::EnginePlayback;
 using phazite::test::Fingerprint;
 using phazite::test::RealTimePlayback;
 using phazite::test::TestSong;
@@ -66,18 +69,17 @@ TEST_SUITE ("golden")
         song.addMidiClip (song.firstTrack, 0.0, 12.0); // a silent song of four bars: playback stops at the song's end
         phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (2.5)); // the clicks: beat 3 (a bar's first), 4, 5, 6 (one)
 
+        // Phazite's engine plays the metronome (docs/tracktion-migration.md, T2 step 1), with a click of its own.
         juce::AudioBuffer<float> played;
         {
-            RealTimePlayback playback (phazite::test::getEngine(), RealTimePlayback::Input::silence, 5.0);
-            playback.startCapture();
+            EnginePlayback playback;
             song.run ("transport.playStop");
-            RealTimePlayback::wait (3500);
+            played = playback.play (3.5);
             song.run ("transport.playStop");
-            played = playback.stopCapture();
         }
 
         // A beat is 0.667 s: the clicks at 0 (a bar's first), 0.667, 1.333 and 2.0 s (a bar's first again).
-        phazite::test::checkGoldenAudio (fromFirstClick (played), RealTimePlayback::sampleRate,
+        phazite::test::checkGoldenAudio (fromFirstClick (played), EnginePlayback::sampleRate,
                                          { "metronome", aboutGolden ("the metronome on every beat at 90 BPM in 3/4."), clickSeconds,
                                            [] (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
                                            {

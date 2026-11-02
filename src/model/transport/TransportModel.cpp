@@ -6,13 +6,14 @@
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 
 namespace phazite
 {
 bool isPlaying (const ProjectContext& context)
 {
     auto* edit = getEdit (context);
-    return edit != nullptr && edit->getTransport().isPlaying();
+    return edit != nullptr && isSongPlaying (*edit);
 }
 
 bool isLoopOn (const ProjectContext& context)

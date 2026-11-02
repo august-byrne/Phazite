@@ -38,6 +38,7 @@ The first column covers the warm-up after playback starts (about 0.5 s); the sec
 |---|---|---|
 | One empty track | 3 allocations | 0 |
 | The metronome, clicking louder on each bar's first beat | 2 allocations | 0 |
+| Phazite's own engine (docs/tracktion-migration.md, T2), its transport and its metronome (2026-11-02) | 0 | 0 |
 | Volume automation and an LFO on pan | 2 allocations | 0 |
 | A tone through a bus, with a send to Phazite's reverb on a return, into the loudness meter | 7 allocations | 0 |
 | Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |

@@ -728,7 +728,7 @@ void AutosaveTimer::timerCallback()
     // Due once changes have waited; while the song plays, once it stops, unless it plays on for too long.
     const auto wait = (juce::uint32) (autosavedOnce ? intervalSeconds : firstDelaySeconds) * 1000;
     const auto waited = now - changedSince;
-    const auto playing = project.getEdit().getTransport().isPlaying();
+    const auto playing = isSongPlaying (project.getEdit());
 
     if (recordingEnded || (waited >= wait && (! playing || waited >= wait + (juce::uint32) maxWaitWhilePlayingSeconds * 1000)))
     {

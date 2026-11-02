@@ -10,6 +10,7 @@
 #include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 #include <optional>
@@ -32,7 +33,7 @@ namespace
 
     te::BeatPosition getPlayhead (const te::Edit& edit)
     {
-        return edit.tempoSequence.toBeats (edit.getTransport().getPosition());
+        return edit.tempoSequence.toBeats (getPlayheadTime (edit));
     }
 
     // A clip made from what Copy kept, where it was, on a track: a copy, in no alias group, with an ID of its own.

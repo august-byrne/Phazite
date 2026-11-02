@@ -7,6 +7,7 @@
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 
@@ -38,10 +39,10 @@ namespace
     // While the song doesn't play, a parameter shows its value as modulated where the playhead is.
     void followModulation (te::AutomatableParameter& parameter)
     {
-        auto& transport = parameter.getEdit().getTransport();
+        auto& edit = parameter.getEdit();
 
-        if (! transport.isPlaying())
-            parameter.updateToFollowCurve (transport.getPosition());
+        if (! isSongPlaying (edit))
+            parameter.updateToFollowCurve (getPlayheadTime (edit));
     }
 
     // A channel's element in the song: a track's TRACK, or the master track's MASTER.

@@ -11,8 +11,10 @@
 // docs/realtime-audit.md lists the findings and what Phazite does about each.
 
 #include "AudioThreadMonitor.h"
+#include "EnginePlayback.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/dynamics/Compressor.h"
@@ -46,9 +48,12 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Metronome.h"
+#include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -236,6 +241,62 @@ Measurement playAndMeasure (te::Edit& edit, int numInputChannels = 0)
     deviceManager.removeHostedAudioDeviceInterface();
     deviceManager.deviceManager.closeAudioDevice();
 
+    return m;
+}
+
+// Plays the open project from its start through Phazite's own engine (docs/tracktion-migration.md, T2), in real time on
+// a separate "audio" thread, as playAndMeasure() plays Tracktion's, and measures that thread.
+Measurement playPhaziteAndMeasure (phazite::ProjectContext& context)
+{
+    const phazite::test::EnginePlayback playback; // at the audit's rate and block size
+    static_assert (phazite::test::EnginePlayback::sampleRate == auditSampleRate
+                   && phazite::test::EnginePlayback::blockSize == auditBlockSize);
+
+    auto& edit = *phazite::getEdit (context);
+    phazite::movePlayhead (edit, 0_tp);
+    phazite::playOrStop (edit);
+    phazite::test::dispatchPendingMessages();
+    auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+
+    Measurement m;
+    juce::AudioBuffer<float> buffer (2, auditBlockSize); // allocated before the thread is marked as an audio thread
+    const auto blockDuration =
+        std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
+
+    AudioThreadMonitor::reset();
+
+    std::thread audioThread (
+        [&]
+        {
+            const AudioThreadMonitor::ScopedAudioThread marker;
+
+            const auto processFor = [&] (double seconds)
+            {
+                const auto numBlocks = juce::roundToInt (seconds * auditSampleRate / auditBlockSize);
+
+                for (int i = 0; i < numBlocks; ++i)
+                {
+                    const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
+                    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+                    engine.process (channels, 2, auditBlockSize);
+                    m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
+                    std::this_thread::sleep_until (blockEnd);
+                }
+            };
+
+            m.warmUpTaken = warmUp (processFor);
+            m.warmUp = AudioThreadMonitor::getCounts();
+            m.firstSteadyEvent = AudioThreadMonitor::getNumEvents();
+
+            processFor (steadySeconds);
+            const auto total = AudioThreadMonitor::getCounts();
+            m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
+        });
+    audioThread.join();
+
+    phazite::stopAndReturn (edit);
+    m.callSites = AudioThreadMonitor::describeCallSites();
+    m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
     return m;
 }
 
@@ -535,6 +596,17 @@ TEST_SUITE ("realtime-audit")
         phazite::setMetronomeOn (*edit, true);
         const auto m = playAndMeasure (*edit);
         report ("The metronome", m);
+        CHECK (m.peakLevel > 0.01f); // it clicks
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's own engine, its transport and its metronome")
+    {
+        phazite::test::TestSong song;
+        song.addMidiClip (song.firstTrack, 0.0, 16.0);
+        song.setSwitch ("transport.metronome", true);
+        const auto m = playPhaziteAndMeasure (song.context);
+        report ("Phazite's engine: the metronome", m);
         CHECK (m.peakLevel > 0.01f); // it clicks
         checkSteadyPlaybackDoesNotAllocate (m);
     }

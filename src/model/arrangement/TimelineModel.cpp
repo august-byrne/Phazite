@@ -120,7 +120,7 @@ void saveGridSettings (ProjectContext& context, GridOwner owner, const GridSetti
 BeatPosition getPlayheadBeat (const ProjectContext& context)
 {
     auto* edit = getEdit (context);
-    return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (edit->getTransport().getPosition())) : BeatPosition();
+    return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (getPlayheadTime (*edit))) : BeatPosition();
 }
 
 void movePlayhead (ProjectContext& context, BeatPosition beat)

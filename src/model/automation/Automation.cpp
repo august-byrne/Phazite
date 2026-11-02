@@ -7,6 +7,7 @@
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 #include <limits>
@@ -40,10 +41,10 @@ namespace
     // that controls show it.
     void followCurve (te::AutomatableParameter& parameter)
     {
-        auto& transport = parameter.getEdit().getTransport();
+        auto& edit = parameter.getEdit();
 
-        if (! transport.isPlaying())
-            parameter.updateToFollowCurve (transport.getPosition());
+        if (! isSongPlaying (edit))
+            parameter.updateToFollowCurve (getPlayheadTime (edit));
     }
 
     //==========================================================================

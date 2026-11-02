@@ -4,6 +4,7 @@
 #include "internal/EngineContext.h"
 #include "internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/transport/internal/AudioRecorder.h"
 
 namespace phazite
@@ -11,6 +12,7 @@ namespace phazite
 struct EngineContext::Impl
 {
     te::Engine& engine;
+    PlaybackHost playback { engine }; // Phazite's own engine (docs/tracktion-migration.md, T2)
 
     // Whether the output last asked about is Bluetooth, which takes a look through Windows' devices to find out.
     juce::String checkedOutput {};
@@ -25,6 +27,21 @@ std::unique_ptr<EngineContext> createEngineContext (te::Engine& engine)
 te::Engine& getEngine (EngineContext& context)
 {
     return context.getImpl().engine;
+}
+
+PlaybackHost& getPlaybackHost (EngineContext& context)
+{
+    return context.getImpl().playback;
+}
+
+bool EngineContext::isPhaziteEngineOn() const
+{
+    return impl->playback.isOn();
+}
+
+void EngineContext::setPhaziteEngineOn (bool on)
+{
+    impl->playback.setOn (on);
 }
 
 EngineContext::EngineContext (std::unique_ptr<Impl> i)

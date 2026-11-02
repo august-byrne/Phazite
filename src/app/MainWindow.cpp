@@ -301,6 +301,23 @@ void MainWindow::addCommands()
                     .perform = [this] { computerKeyboard.setEnabled (! computerKeyboard.isEnabled()); },
                     .isTicked = [this] { return computerKeyboard.isEnabled(); } });
 
+    // While T2 builds Phazite's own engine (docs/tracktion-migration.md), to hear what it plays so far.
+    registry.add ({ .id = "options.ownEngine",
+                    .name = "Play Through Phazite's Own Engine",
+                    .category = "Options",
+                    .description = "Plays the song through Phazite's own engine, which is being built, instead of Tracktion's: so far "
+                                   "the transport, the loop and the metronome, the rest still through Tracktion's.",
+                    .synonyms = { "engine", "playback engine", "tracktion", "experimental" },
+                    .perform =
+                        [this]
+                    {
+                        auto& engine = *services.engineContext;
+                        engine.setPhaziteEngineOn (! engine.isPhaziteEngineOn());
+                        services.settings.set (Settings::ownEngine, engine.isPhaziteEngineOn());
+                        menuItemsChanged();
+                    },
+                    .isTicked = [this] { return services.engineContext->isPhaziteEngineOn(); } });
+
     registry.add (
         { .id = "options.scanPlugins",
           .name = "Scan for Plug-ins",

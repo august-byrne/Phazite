@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's own playback engine (src/engine/; docs/tracktion-migration.md, T2), tested on its own, without a project or
-// Tracktion: how the audio thread is handed what it plays, and Phazite's devices as the engine plays them.
+// Tracktion: how the audio thread is handed what it plays, Phazite's devices as the engine plays them, the tempo map, and
+// the transport and its metronome, to the sample.
 #include "TestHelpers.h"
 #include "devices/motion/Phaser.h"
 #include "devices/synth/Synth.h"
+#include "engine/core/Engine.h"
 #include "engine/core/Handover.h"
+#include "engine/core/TempoMap.h"
 #include "engine/nodes/DeviceRunner.h"
+#include "engine/transport/Click.h"
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace
@@ -241,4 +246,152 @@ TEST_CASE ("A device's runner sleeps after a quarter of a second of silence, and
         runner.process (buffer, 0, blockSize, block);
 
     CHECK (counting.blocksPlayed == played + 2 + quarter + 10);
+}
+
+//==============================================================================
+TEST_CASE ("The tempo map places each beat in samples, beats of the time signature's own at a tempo in quarter notes")
+{
+    const engine::TempoMap plain ({ { 0.0, 120.0 } }, { { 0.0, 4, 4 } }, rate);
+    CHECK (plain.toSamples (1.0) == doctest::Approx (24000.0));
+    CHECK (plain.toBeats (36000.0) == doctest::Approx (1.5));
+    CHECK (plain.getTempoAt (3.0) == doctest::Approx (120.0));
+    CHECK (plain.getBarStart (5.5) == doctest::Approx (4.0));
+    CHECK (plain.toSamples (-1.0) == doctest::Approx (-24000.0)); // before the song's start, as its first tempo goes on
+
+    // A tempo change: the beats after it are as long as it says.
+    const engine::TempoMap slower ({ { 0.0, 120.0 }, { 4.0, 60.0 } }, {}, rate);
+    CHECK (slower.toSamples (5.0) == doctest::Approx (4 * 24000.0 + 48000.0));
+    CHECK (slower.toBeats (4 * 24000.0 + 24000.0) == doctest::Approx (4.5));
+    CHECK (slower.getSamplesPerBeat (3.0) == doctest::Approx (24000.0));
+    CHECK (slower.getSamplesPerBeat (4.0) == doctest::Approx (48000.0));
+
+    // In 6/8 a beat is an eighth, half a quarter note; in 3/4 a bar has three.
+    const engine::TempoMap eighths ({ { 0.0, 120.0 } }, { { 0.0, 6, 8 } }, rate);
+    CHECK (eighths.toSamples (1.0) == doctest::Approx (12000.0));
+    CHECK (eighths.getBarStart (7.0) == doctest::Approx (6.0));
+
+    const engine::TempoMap waltz ({ { 0.0, 90.0 } }, { { 0.0, 3, 4 } }, rate);
+    CHECK (waltz.getBarStart (4.5) == doctest::Approx (3.0));
+    CHECK (waltz.toSamples (1.0) == doctest::Approx (32000.0));
+}
+
+namespace
+{
+// A plan at 120 BPM in 4/4 at the test's rate, with the metronome on.
+std::unique_ptr<engine::Plan> makeClickPlan (std::optional<engine::Plan::BeatRange> loop = {}, double bpm = 120.0)
+{
+    auto plan = std::make_unique<engine::Plan>();
+    plan->tempo = engine::TempoMap ({ { 0.0, bpm } }, { { 0.0, 4, 4 } }, rate);
+    plan->loop = loop;
+    plan->metronome = true;
+    return plan;
+}
+
+// What the metronome should play: a click starting at each of these samples (an accented one at those marked).
+juce::AudioBuffer<float> expectClicks (int numSamples, std::initializer_list<std::pair<int, bool>> clicks)
+{
+    juce::AudioBuffer<float> expected (2, numSamples);
+    expected.clear();
+    const auto click = engine::makeClick (rate, false), accent = engine::makeClick (rate, true);
+
+    for (const auto& [start, accented] : clicks)
+    {
+        const auto& sound = accented ? accent : click;
+        const auto length = std::min (sound.getNumSamples(), numSamples - start);
+
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            // A click stops where the next starts.
+            expected.clear (channel, start, numSamples - start);
+            expected.copyFrom (channel, start, sound, 0, 0, length);
+        }
+    }
+
+    return expected;
+}
+
+void requireSame (const juce::AudioBuffer<float>& actual, const juce::AudioBuffer<float>& expected)
+{
+    REQUIRE (actual.getNumSamples() == expected.getNumSamples());
+
+    for (int channel = 0; channel < 2; ++channel)
+        for (int i = 0; i < actual.getNumSamples(); ++i)
+            if (actual.getSample (channel, i) != expected.getSample (channel, i))
+                FAIL ("sample " << i << " on channel " << channel << ": " << actual.getSample (channel, i) << ", expected "
+                                << expected.getSample (channel, i));
+}
+} // namespace
+
+TEST_CASE ("The engine's metronome clicks on each beat's sample, a bar's first louder, whatever the block size")
+{
+    for (const auto blocks : { 64, 256, 1000 })
+    {
+        CAPTURE (blocks);
+        engine::Engine player;
+        player.prepare (rate, blocks);
+        player.setPlan (makeClickPlan());
+
+        // Two seconds at 120 BPM: four beats, the first a bar's.
+        requireSame (player.render (96000), expectClicks (96000, { { 0, true }, { 24000, false }, { 48000, false }, { 72000, false } }));
+    }
+}
+
+TEST_CASE ("The engine's loop starts again at its start on the sample its end is on")
+{
+    engine::Engine player;
+    player.prepare (rate, 256);
+
+    // A loop of beats 2 to 3: from 1.5, it clicks on beat 2, then on each start again.
+    player.setPlan (makeClickPlan (engine::Plan::BeatRange { 2.0, 3.0 }));
+    player.locate (1.5);
+    requireSame (player.render (12000 + 3 * 24000),
+                 expectClicks (12000 + 3 * 24000, { { 12000, false }, { 36000, false }, { 60000, false } }));
+
+    // Past its end, it starts at the loop's start.
+    player.stop();
+    player.locate (7.0);
+    requireSame (player.render (24000), expectClicks (24000, { { 0, false } }));
+}
+
+TEST_CASE ("The engine stops and locates as the message thread asks, at its next block")
+{
+    engine::Engine player;
+    player.prepare (rate, 256);
+    player.setPlan (makeClickPlan());
+
+    // A locate between beats: the next beat, a bar's first, clicks half a beat later.
+    player.locate (3.5);
+    CHECK (player.getPlayheadBeat() == doctest::Approx (3.5)); // shown at once
+    requireSame (player.render (24000), expectClicks (24000, { { 12000, true } }));
+    CHECK (player.isPlaying());
+
+    player.stop();
+    CHECK_FALSE (player.isPlaying());
+    juce::AudioBuffer<float> silence (2, 1024);
+    float* channels[] = { silence.getWritePointer (0), silence.getWritePointer (1) };
+    player.process (channels, 2, 1024);
+    CHECK (silence.getMagnitude (0, 1024) == 0.0f);
+}
+
+TEST_CASE ("A new plan with another tempo leaves the playhead on its beat")
+{
+    engine::Engine player;
+    player.prepare (rate, 256);
+    player.setPlan (makeClickPlan());
+    player.render (36032); // to sample 36032, beat 1.5013
+
+    // At 60 BPM a beat is a second: from beat 1.5, the next click is half a second on.
+    player.setPlan (makeClickPlan ({}, 60.0));
+    player.stop();
+    const auto after = player.render (48000);
+
+    auto first = -1;
+
+    for (int i = 0; i < after.getNumSamples() && first < 0; ++i)
+        if (after.getSample (0, i) != 0.0f)
+            first = i;
+
+    // The click's first sample is silent (its attack starts at 0): its second is the first heard.
+    // Beat 1.5013 is at sample 72064 at 60 BPM, and beat 2 at 96000.
+    CHECK (first - 1 == 96000 - 72064);
 }

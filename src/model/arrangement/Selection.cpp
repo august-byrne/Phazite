@@ -10,6 +10,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
+#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 #include <vector>
@@ -220,7 +221,7 @@ void splitSelection (const Selection& selection, const RangeSelection& range)
     if (! range.isEmpty())
         splitClipsAtEdges (range.getTracks(), range.getRange());
     else
-        splitClips (getSelectedClips (selection), edit->tempoSequence.toBeats (edit->getTransport().getPosition()));
+        splitClips (getSelectedClips (selection), edit->tempoSequence.toBeats (getPlayheadTime (*edit)));
 }
 
 void selectAllClipsOrTracks (Selection& selection, RangeSelection& range)
