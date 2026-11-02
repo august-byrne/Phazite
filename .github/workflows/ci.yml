@@ -1,10 +1,11 @@
 # Phazite's continuous integration: on every push and pull request, check the repository (secrets,
 # formatting, whitespace, architecture budgets), build every preset on Windows and Linux with warnings
-# as errors, and run the tests (phazite_tests, through CTest). The problem matchers in
+# as errors, and run the tests (phazite_tests, through CTest, a test file in each, 4 at once). The problem matchers in
 # .github/problem-matchers turn compiler messages, failed tests and sanitizer reports into annotations on the run,
 # which the public API serves without signing in, unlike the logs. Builds keep going after
-# a failure (ninja -k 0) to report every problem at once. Actions are pinned to full commit hashes, so a
-# moved tag can't change what runs.
+# a failure (ninja -k 0) to report every problem at once. Every compile goes through ccache, whose cache each preset
+# keeps from its last run on the branch (or on main), so that a build compiles only what changed since. Actions are
+# pinned to full commit hashes, so a moved tag can't change what runs.
 name: CI
 
 on:
@@ -57,10 +58,34 @@ jobs:
       fail-fast: false
       matrix:
         preset: [windows-debug, windows-release]
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache # every compile, JUCE's juceaide helper's in the configure step too
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DEPEND: "true" # a miss compiles at once, without a run of the preprocessor first
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive # checkout fetches JUCE over HTTPS, though Tracktion lists it with an SSH URL
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ matrix.preset }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-${{ matrix.preset }}-
+
+      - name: Compiler cache (ccache 4.14.2)
+        run: |
+          $zip = "$env:RUNNER_TEMP\ccache.zip"
+          Invoke-WebRequest https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-windows-x86_64.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne "6993ce645e53192cec592ee23186200b574ac4c59097ecde8d9cfd681b47ae84") {
+              throw "The ccache download doesn't have the SHA-256 it should."
+          }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\ccache-4.14.2-windows-x86_64" >> $env:GITHUB_PATH
+          "CCACHE_DIR=$env:RUNNER_TEMP\ccache" >> $env:GITHUB_ENV
+          "PHAZITE_CCACHE_START=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" >> $env:GITHUB_ENV
+          & "$env:RUNNER_TEMP\ccache-4.14.2-windows-x86_64\ccache.exe" --dir "$env:RUNNER_TEMP\ccache" --zero-stats
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_LINK_WARNING_AS_ERROR=ON
@@ -69,6 +94,20 @@ jobs:
         run: |
           echo "::add-matcher::.github/problem-matchers/msvc.json"
           cmake --build --preset ${{ matrix.preset }} -- -k 0
+
+      # What this run's compiles didn't use goes (a hit renews an entry's time), so that the cache kept is one build's.
+      - name: Compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: |
+          ccache --evict-older-than "$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long] $env:PHAZITE_CCACHE_START)s"
+          ccache --show-stats
+
+      - name: Save the compiler cache # before the tests, so that the next run has it whatever they find
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ matrix.preset }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Test
         run: |
@@ -82,10 +121,31 @@ jobs:
       fail-fast: false
       matrix:
         preset: [linux-debug, linux-release, linux-asan, linux-tsan]
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache # every compile, JUCE's juceaide helper's in the configure step too
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DEPEND: "true" # a miss compiles at once, without a run of the preprocessor first
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ matrix.preset }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-${{ matrix.preset }}-
+
+      - name: Compiler cache (ccache 4.14.2)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/ccache.tar.xz" https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-linux-x86_64-glibc.tar.xz
+          echo "bd1313f5316f594443dcb4113a4191c666ac6450e0cf016ff8cb8b080f46c160  $RUNNER_TEMP/ccache.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/ccache.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-glibc" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+          echo "PHAZITE_CCACHE_START=$(date +%s)" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-glibc/ccache" --dir "$RUNNER_TEMP/ccache" --zero-stats
 
       - name: Install JUCE's Linux build dependencies
         run: |
@@ -100,6 +160,20 @@ jobs:
         run: |
           echo "::add-matcher::.github/problem-matchers/gcc.json"
           cmake --build --preset ${{ matrix.preset }} -- -k 0
+
+      # What this run's compiles didn't use goes (a hit renews an entry's time), so that the cache kept is one build's.
+      - name: Compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: |
+          ccache --evict-older-than "$(( $(date +%s) - PHAZITE_CCACHE_START ))s"
+          ccache --show-stats
+
+      - name: Save the compiler cache # before the tests, so that the next run has it whatever they find
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ matrix.preset }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       # GitHub's Ubuntu 24.04 runners randomise memory mappings with 32 bits of entropy, which the
       # sanitizer runtimes of GCC 13 can't handle ("unexpected memory mapping"); 28 bits works.

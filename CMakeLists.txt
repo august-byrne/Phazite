@@ -21,6 +21,9 @@ endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Debug info inside each .obj (/Z7) instead of one shared .pdb that parallel compiles queue up for.
 set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
+# Phazite uses no C++20 modules, so its files aren't scanned for them: the scan reads each file through the preprocessor
+# once more before compiling it, and without the compiler cache that CI uses (ccache).
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 if(MSVC)
     message(STATUS "Phazite: MSVC ${CMAKE_CXX_COMPILER_VERSION} from ${VS_INSTALLATION_PATH}, "
