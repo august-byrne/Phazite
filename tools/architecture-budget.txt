@@ -38,11 +38,11 @@ tracktion-mirror             242
 tracktion-mixer              651
 tracktion-modulation         122
 tracktion-notes              155
-tracktion-playback            27
+tracktion-playback            44
 tracktion-presets             83
 tracktion-project            122
 tracktion-transport          287
 tracktion-other                0
 tracktion-services             0
 tracktion-app                 46
-tracktion-tests              991
+tracktion-tests              996

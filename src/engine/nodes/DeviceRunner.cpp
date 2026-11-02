@@ -39,6 +39,7 @@ DeviceRunner::DeviceRunner (const devices::DeviceInfo& deviceInfo, std::unique_p
         currentValues.push_back (description.defaultValue);
         targetValues.push_back (description.defaultValue);
         previousValues.push_back (description.defaultValue);
+        baseValues.push_back (description.defaultValue);
         glides.push_back (description.unit != devices::Unit::choice && description.unit != devices::Unit::toggle);
         ranges.push_back (devices::getRange (description));
         offsets.push_back (0.0f);
@@ -84,15 +85,23 @@ void DeviceRunner::reset()
 
 void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int numSamples, const Block& in)
 {
-    // Each parameter's value now. A continuous one that moved since the last block glides there over this one, in stretches
-    // of smoothingStep, rather than jumping, so automation and modulation don't step (docs/performance-audit.md, A7).
+    // Each parameter's value now, an automated one's where the song is. A continuous one that moved since the last block
+    // glides there over this one, in stretches of smoothingStep, rather than jumping, so values set by hand and modulation
+    // don't step (docs/performance-audit.md, A7); while the song plays, automation moves its parameters a stretch at a time.
     auto* plan = in.modulation;
     auto gliding = false;
+    const auto automationMoves = in.beatsPerSample > 0.0 && ! in.automation.empty();
+
+    for (size_t i = 0; i < targetValues.size(); ++i)
+        targetValues[i] = devices::constrain (info.parameters[i], in.values[i]);
+
+    for (const auto& automated : in.automation)
+        targetValues[(size_t) automated.parameter] =
+            devices::constrain (info.parameters[(size_t) automated.parameter], automated.curve->getValueAt (in.automationBeat));
 
     for (size_t i = 0; i < targetValues.size(); ++i)
     {
-        targetValues[i] = devices::constrain (info.parameters[i], in.values[i]);
-        currentValues[i] = targetValues[i];
+        currentValues[i] = baseValues[i] = targetValues[i];
         gliding = gliding || (glides[i] && hasPreviousValues && ! juce::exactlyEqual (previousValues[i], targetValues[i]));
     }
 
@@ -107,10 +116,15 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
     if (plan != nullptr)
         startModulation (*plan);
 
-    const auto inStretches = gliding || (plan != nullptr && ! plan->routes.empty());
+    const auto inStretches = gliding || automationMoves || (plan != nullptr && ! plan->routes.empty());
 
     const auto isMono = buffer.getNumChannels() < 2;
     const auto targetMix = mixIndex >= 0 ? targetValues[(size_t) mixIndex] : 1.0f;
+    const auto isMixMoved = mixIndex >= 0
+                            && ((plan != nullptr && plan->isModulated[(size_t) mixIndex])
+                                || (automationMoves
+                                    && std::any_of (in.automation.begin(), in.automation.end(),
+                                                    [this] (const Automated& automated) { return automated.parameter == mixIndex; })));
     const auto hasSidechain = in.hasSidechain && buffer.getNumChannels() >= 4;
     const auto isSynth = isInstrument();
 
@@ -158,16 +172,20 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         block.numSidechainChannels = 2;
     }
 
-    // A stretch at a time, as long as the scratch buffers prepared beforehand. A mono channel plays in stereo, through
-    // a scratch buffer, and gets the average of the two sides back.
+    // A stretch at a time, as long as the scratch buffers prepared beforehand, the first of smoothingStep ending on the
+    // song's next control point. A mono channel plays in stereo, through a scratch buffer, and gets the average of the two
+    // sides back.
     int nextEvent = 0;
+    const auto sinceControlPoint = (int) (((in.sample % smoothingStep) + smoothingStep) % smoothingStep);
+    const auto toControlPoint = smoothingStep - sinceControlPoint;
 
     for (int done = 0; done < numSamples;)
     {
-        const auto length = std::min (numSamples - done, inStretches ? smoothingStep : stereo.getNumSamples());
+        const auto length =
+            std::min (numSamples - done, inStretches ? (done == 0 ? toControlPoint : smoothingStep) : stereo.getNumSamples());
 
         if (inStretches)
-            setStretchValues (plan, done, length, numSamples);
+            setStretchValues (in, automationMoves, done == 0 ? -sinceControlPoint : done, done, length, numSamples);
 
         float* channels[2];
 
@@ -210,10 +228,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
 
         // Its mix, unless it plays something else for now (a compressor's key, to listen to); modulated, as it is now.
         if (mixIndex >= 0)
-        {
-            const auto isMixModulated = plan != nullptr && plan->isModulated[(size_t) mixIndex];
-            mixWithDry (channels, length, processor->overridesMix() ? 1.0f : isMixModulated ? currentValues[(size_t) mixIndex] : targetMix);
-        }
+            mixWithDry (channels, length, processor->overridesMix() ? 1.0f : isMixMoved ? currentValues[(size_t) mixIndex] : targetMix);
 
         if (isMono)
         {
@@ -228,6 +243,12 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
 
     scope.pushOutput (buffer.getReadPointer (0, start), isMono ? buffer.getReadPointer (0, start) : buffer.getReadPointer (1, start),
                       numSamples);
+
+    // An automated parameter goes on from where its automation left it.
+    if (automationMoves)
+        for (const auto& automated : in.automation)
+            targetValues[(size_t) automated.parameter] = baseValues[(size_t) automated.parameter];
+
     keepValues();
 
     // Silent in and out long enough: asleep from the next block.
@@ -262,14 +283,25 @@ void DeviceRunner::startModulation (Modulation& plan) noexcept
     }
 }
 
-void DeviceRunner::setStretchValues (const Modulation* plan, int done, int length, int numSamples)
+void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int controlPoint, int done, int length, int numSamples)
 {
-    // A continuous parameter that moved since the last block glides there, as far as the stretch's end.
+    // A continuous parameter that moved since the last block glides there, as far as the stretch's end; an automated one
+    // is at its curve's value on the stretch's control point (where it starts, or before the block for the rest of the
+    // last block's last stretch), whatever the block's size.
     const auto along = (float) (done + length) / (float) numSamples;
 
     for (size_t i = 0; i < currentValues.size(); ++i)
         currentValues[i] =
             glides[i] && hasPreviousValues ? previousValues[i] + (targetValues[i] - previousValues[i]) * along : targetValues[i];
+
+    if (automationMoves)
+        for (const auto& automated : in.automation)
+            currentValues[(size_t) automated.parameter] =
+                devices::constrain (info.parameters[(size_t) automated.parameter],
+                                    automated.curve->getValueAt (in.automationBeat + controlPoint * in.beatsPerSample));
+
+    std::copy (currentValues.begin(), currentValues.end(), baseValues.begin());
+    const auto* plan = in.modulation;
 
     if (plan == nullptr)
         return;

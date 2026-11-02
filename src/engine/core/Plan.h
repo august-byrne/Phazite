@@ -42,18 +42,29 @@ struct Plan
         std::shared_ptr<Delay> delay;
     };
 
+    // A device, with the parameters its automation moves, which follow the song as late as the sound comes into it (from
+    // the devices before it, and for the master's, from the tracks it adds up), so that they line up with its sound.
+    struct Device
+    {
+        std::shared_ptr<DeviceNode> node;
+        std::vector<ParameterCurve> automation;
+        int latency = 0;
+    };
+
     // A track, or the master: what it plays (its notes into its instrument, or the strips it adds up), through its devices
-    // and its channel.
+    // and its channel, whose volume (in the fader's positions) and pan may follow their automation.
     struct Strip
     {
         std::int64_t id = 0; // the track's ID, 0 for the master
         std::shared_ptr<StripState> state;
-        std::shared_ptr<const NoteSequence> notes;        // or none
-        std::vector<AudioRegion> audio;                   // its audio clips, which play beside its instrument
-        std::vector<std::shared_ptr<DeviceNode>> devices; // in the order the sound goes through them, an instrument first
+        std::shared_ptr<const NoteSequence> notes; // or none
+        std::vector<AudioRegion> audio;            // its audio clips, which play beside its instrument
+        std::vector<Device> devices;               // in the order the sound goes through them, an instrument first
         bool hasInstrument = false;
         std::vector<Input> inputs;
-        int latency = 0; // how late its sound comes out, in samples, from its devices and what it adds up
+        int latency = 0; // how late its sound comes out, in samples, from its devices and what it adds up, as its fader's
+                         // automation follows the song
+        std::shared_ptr<const Curve> volume, pan; // or none
     };
 
     // In the order they play: each after the strips it adds up. The master last, whose sound goes out; none in a plan of

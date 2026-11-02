@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A channel's own controls as Phazite's engine plays them (docs/tracktion-migration.md, T2): its fader's volume and pan,
 // whether it is heard (its mute, and the solos, which the model works out), and its meter. The message thread sets each,
-// one at a time, without building anything; the audio thread eases to them. Kept by the track's ID from one plan to the
-// next.
+// one at a time, without building anything; the audio thread eases to them, or follows the volume's and pan's automation.
+// Kept by the track's ID from one plan to the next.
 #pragma once
 
 #include "LevelMeter.h"
+#include "engine/automation/Curve.h"
 
 #include <juce_core/juce_core.h>
 
 #include <atomic>
+#include <cstdint>
 
 namespace phazite::engine
 {
@@ -22,6 +24,10 @@ struct PanGains
 };
 
 PanGains getPanGains (float pan) noexcept;
+
+// The fader's travel, as automation draws it: a position from 0 to 1 is 20 ln (position) + 6 decibels, 0 dB at about 0.74
+// and +6 dB at the top, as Tracktion's faders go (Tracktion's volumeFaderPositionToDB()); 0 is silence.
+float faderPositionToDecibels (float position) noexcept;
 
 class Channel
 {
@@ -43,15 +49,37 @@ public:
     // needn't play.
     bool isSilenced() const noexcept { return started && fading == 0 && juce::exactlyEqual (heard, 0.0f) && ! isAudible(); }
 
-    // Audio thread: turns two channels (or one, the same on both sides) by the fader, easing to a new volume or pan over
-    // 15 ms and fading in or out over 5 ms as the channel is heard or not; then measures what comes out.
-    void process (float* const* channels, int numChannels, int numSamples) noexcept;
+    // Message thread: whether the volume or the pan is written by hand now (automation's touch, latch and write modes), so
+    // that it plays its value set by hand rather than its automation.
+    void setVolumeWriting (bool isWriting) noexcept { volumeWriting.store (isWriting, std::memory_order_relaxed); }
+    void setPanWriting (bool isWriting) noexcept { panWriting.store (isWriting, std::memory_order_relaxed); }
+
+    // Any thread: the volume, in decibels, and pan it played last, its automation's or the values set by hand.
+    float getPlayedVolume() const noexcept { return playedVolume.load (std::memory_order_relaxed); }
+    float getPlayedPan() const noexcept { return playedPan.load (std::memory_order_relaxed); }
+
+    // A block's automation of the volume (in the fader's positions) and the pan, either of them none, and where the song
+    // is: while it plays, the fader follows them exactly, at their values on the song's control points and in a straight
+    // line between; stopped, it eases to their values where the song is, as to a value set by hand.
+    struct Automation
+    {
+        const Curve* volume = nullptr;
+        const Curve* pan = nullptr;
+        double beat = 0.0;
+        double beatsPerSample = 0.0; // 0 while the song is stopped
+        std::int64_t sample = 0;     // the song's sample at the block's start
+    };
+
+    // Audio thread: turns two channels (or one, the same on both sides) by the fader, easing to a new volume or pan set
+    // by hand over 15 ms, following its automation, and fading in or out over 5 ms as the channel is heard or not; then
+    // measures what comes out.
+    void process (float* const* channels, int numChannels, int numSamples, const Automation& = {}) noexcept;
 
     LevelMeter& getMeter() noexcept { return meter; }
 
 private:
-    std::atomic<float> volume { 0.0f }, pan { 0.0f };
-    std::atomic<bool> audible { true };
+    std::atomic<float> volume { 0.0f }, pan { 0.0f }, playedVolume { 0.0f }, playedPan { 0.0f };
+    std::atomic<bool> audible { true }, volumeWriting { false }, panWriting { false };
 
     // The audio thread's: each side's gain now and where it eases to, how many samples are left to get there and how much it
     // moves in each; and the mute's fade, likewise.

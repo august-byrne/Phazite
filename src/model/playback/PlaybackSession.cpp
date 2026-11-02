@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PlaybackSession.h"
 #include "internal/PlaybackHost.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/LiveInput.h"
 
@@ -34,6 +35,7 @@ PlaybackSession::PlaybackSession (te::Edit& e, PlaybackHost& h)
       exists (&e),
       host (h),
       player (e),
+      writer (e, *this),
       editState (e.state)
 {
     liveMidi.playing = &host.getEngine();
@@ -85,10 +87,12 @@ void PlaybackSession::play()
 {
     update(); // what it plays as the song is now, should a change still be on its way
     host.getEngine().play();
+    writer.playbackStarted();
 }
 
 void PlaybackSession::stop()
 {
+    writer.playbackStopped(); // where the playhead is as it stops
     host.getEngine().stop();
 }
 
@@ -182,6 +186,17 @@ PlaybackSession* findPlayingSession (const te::Edit& edit)
             return session;
 
     return nullptr;
+}
+
+std::optional<float> getPlayedValue (const te::AutomatableParameter& parameter, bool withModulation)
+{
+    const auto* session = findPlayingSession (parameter.getEdit());
+    const auto ref = getParameterRef (parameter);
+
+    if (session != nullptr && session->getPlayer().findCurve (ref) != nullptr)
+        return session->getPlayer().getPlayedValue (ref, withModulation);
+
+    return {};
 }
 
 juce::AudioBuffer<float> renderWithOwnEngine (te::Edit& edit, int numSamples, double sampleRate, int blockSize)

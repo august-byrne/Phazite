@@ -2,9 +2,10 @@
 // One of Phazite's own devices as an engine plays it (docs/tracktion-migration.md, T2): its engine-neutral DSP
 // (src/devices/) with what every device gets around it, whichever engine plays it, Tracktion's (through the device's thin
 // plug-in, model/devices/internal/DevicePlugin.h) or Phazite's own. It glides each continuous parameter from one block's
-// value to the next and moves the modulated ones itself, in stretches of a block (docs/performance-audit.md, A7; docs/
-// design.md, section 10); it applies an effect's mix, with what came in delayed as much as the effect delays its sound;
-// it plays a mono channel in stereo; and it sleeps on silence (docs/performance-audit.md, A1).
+// value to the next and moves the modulated and automated ones itself, in stretches of a block, each starting on the
+// song's control points, one every 32 samples from its start (docs/performance-audit.md, A7; docs/design.md, section 10),
+// so that a song sounds the same at any block size; it applies an effect's mix, with what came in delayed as much as the
+// effect delays its sound; it plays a mono channel in stereo; and it sleeps on silence (docs/performance-audit.md, A1).
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -12,10 +13,12 @@
 #include "devices/core/Processor.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/modulation/Modulation.h"
+#include "engine/automation/Curve.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -64,8 +67,8 @@ std::optional<devices::NoteEvent> toNoteEvent (const juce::MidiMessage&, int sam
 class DeviceRunner
 {
 public:
-    static constexpr int maximumEvents = 1024; // more in one block are dropped
-    static constexpr int smoothingStep = 32;   // the stretch a parameter glides and is modulated in
+    static constexpr int maximumEvents = 1024;                // more in one block are dropped
+    static constexpr int smoothingStep = controlPointSpacing; // the stretch a parameter glides, is modulated and automated in
 
     DeviceRunner (const devices::DeviceInfo&, std::unique_ptr<devices::Processor>);
 
@@ -85,6 +88,13 @@ public:
     // Silences what sounds, and forgets the last block's values, so that the next block's start where they are.
     void reset();
 
+    // A parameter its automation moves, by its index among the device's.
+    struct Automated
+    {
+        int parameter = 0;
+        const Curve* curve = nullptr;
+    };
+
     // What a block plays besides its audio.
     struct Block
     {
@@ -96,28 +106,41 @@ public:
         bool isPlaying = false;               // whether the song plays
         bool isRendering = false;             // a render, which never sleeps: it plays everything as the song has it
         bool hasSidechain = false;            // the buffer's third and fourth channels hold the sidechain's sound
+
+        // The parameters automation moves, in place of their values: while the song plays, each at its curve's value on
+        // each control point; stopped, at its value where the song is, gliding there as a value set by hand does. Where
+        // the automation is as the block starts, in beats and in samples (from which control points are counted): the
+        // song's place, less how late the sound comes into the device, so that its automation lines up with its sound.
+        std::span<const Automated> automation;
+        double automationBeat = 0.0;
+        std::int64_t sample = 0;
+        double beatsPerSample = 0.0; // how far the song moves in a sample: 0 while it is stopped
     };
 
     // Plays a block: numSamples of the buffer from startSample, in place, on its first two channels (or its first alone,
     // played in stereo), any after them cleared. Real-time safe: no locks, no allocation.
     void process (juce::AudioBuffer<float>&, int startSample, int numSamples, const Block&);
 
+    // Each parameter's value as the last block ended, and without its modulation (the audio thread's).
+    std::span<const float> getValues() const noexcept { return currentValues; }
+    std::span<const float> getBaseValues() const noexcept { return baseValues; }
+
 private:
     const devices::DeviceInfo& info;
     std::unique_ptr<devices::Processor> processor;
     devices::DeviceScope scope;
 
-    // Each parameter's value now (what the DSP reads), and as the block went and the last one did (which a continuous one
-    // glides from, a stretch at a time); which are continuous, rather than choices and switches; each one's range, in
-    // which modulation moves it; and each one's modulation in a stretch.
-    std::vector<float> currentValues, targetValues, previousValues;
+    // Each parameter's value now (what the DSP reads), and before its modulation; as the block went and the last one did
+    // (which a continuous one glides from, a stretch at a time); which are continuous, rather than choices and switches; each
+    // one's range, in which modulation moves it; and each one's modulation in a stretch.
+    std::vector<float> currentValues, targetValues, previousValues, baseValues;
     std::vector<bool> glides;
     std::vector<juce::NormalisableRange<float>> ranges;
     std::vector<float> offsets;
     bool hasPreviousValues = false;
     void keepValues() noexcept;
     void startModulation (Modulation&) noexcept;
-    void setStretchValues (const Modulation*, int done, int length, int numSamples);
+    void setStretchValues (const Block&, bool automationMoves, int controlPoint, int done, int length, int numSamples);
 
     juce::AudioBuffer<float> stereo; // for a mono channel: sized in prepare(), as long as the stretches played at once
     int latencySamples = 0;

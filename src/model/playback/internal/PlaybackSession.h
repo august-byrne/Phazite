@@ -2,10 +2,11 @@
 // A project as Phazite's own engine plays it (docs/tracktion-migration.md, T2): its song compiled into what the engine plays
 // (SongPlayer.h), given again as the song changes, at most once a turn of the message loop, a value set by hand at once;
 // the transport the model's functions use while Phazite's engine plays the project (model/transport/internal/Playback.h),
-// in the song's beats; and the notes played live into it. ProjectContext makes one for each Edit it holds, which joins the
-// app's PlaybackHost.
+// in the song's beats; the notes played live into it; and the automation written by hand while it plays (AutomationWriter.h).
+// ProjectContext makes one for each Edit it holds, which joins the app's PlaybackHost.
 #pragma once
 
+#include "AutomationWriter.h"
 #include "SongPlayer.h"
 #include "engine/core/Engine.h"
 #include "model/base/Beats.h"
@@ -13,6 +14,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -30,6 +32,8 @@ public:
     te::Edit& getEdit() const noexcept { return edit; }
     bool hasEdit() const noexcept { return exists.get() != nullptr; } // false once the Edit has gone
     SongPlayer& getPlayer() noexcept { return player; }
+    const SongPlayer& getPlayer() const noexcept { return player; }
+    AutomationWriter& getWriter() noexcept { return writer; }
 
     // Whether Phazite's engine plays this project now: the host is on, this is the project it plays, and Tracktion isn't
     // recording (until T2 step 9 records through Phazite's engine).
@@ -60,6 +64,7 @@ private:
     te::SafeSelectable<te::Edit> exists; // until the Edit goes, which can be before this does
     PlaybackHost& host;
     SongPlayer player;
+    AutomationWriter writer;
     juce::ValueTree editState; // the song is its PHAZITE element, which a bare Edit gets when something is first written
 
     // What takes live MIDI in from Tracktion's input, on its MIDI threads, for the track it goes to.
@@ -86,6 +91,11 @@ private:
 // (isPlayingProject()), or nullptr while Tracktion's does.
 PlaybackSession* findSession (const te::Edit&);
 PlaybackSession* findPlayingSession (const te::Edit&);
+
+// A parameter's value as Phazite's engine played it last, while the engine plays the parameter's project and its automation
+// moves it (SongPlayer::getPlayedValue()), with its modulation or without; nothing otherwise, while its value is the one
+// set by hand.
+std::optional<float> getPlayedValue (const te::AutomatableParameter&, bool withModulation);
 
 // The song rendered by Phazite's own engine, offline, from its start: so many samples at a rate, in blocks of a size, in
 // stereo, through the master's devices, as an export renders it (T5) and the golden renders' harness compares it.

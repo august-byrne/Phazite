@@ -294,6 +294,12 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
     const auto beat = plan.tempo.toBeats ((double) transport.sample);
     const auto tempo = plan.tempo.getTempoAt (beat);
 
+    // Where automation is: moving with the song while it plays, as late as the sound it moves comes (so that it lines up
+    // with it); at the playhead while the song is stopped.
+    const auto beatsPerSample =
+        transport.playing && numSamples > 0 ? (plan.tempo.toBeats ((double) (transport.sample + numSamples)) - beat) / numSamples : 0.0;
+    const auto getAutomationSample = [this] (int latency) { return transport.sample - (transport.playing ? latency : 0); };
+
     for (const auto& strip : plan.strips)
     {
         auto& state = *strip.state;
@@ -340,7 +346,7 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
             if (state.wasSilenced)
             {
                 for (const auto& device : strip.devices)
-                    device->getRunner().reset();
+                    device.node->getRunner().reset();
 
                 state.wasSilenced = false;
             }
@@ -366,18 +372,35 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
                 block.beat = beat;
                 block.isPlaying = transport.playing;
                 block.isRendering = rendering;
+                block.beatsPerSample = beatsPerSample;
+
+                if (! strip.devices[i].automation.empty())
+                {
+                    block.sample = getAutomationSample (strip.devices[i].latency);
+                    block.automationBeat = plan.tempo.toBeats ((double) block.sample);
+                }
 
                 if (i == 0 && strip.hasInstrument)
                     block.events = std::span (state.events.data(), (size_t) state.numEvents);
 
-                strip.devices[i]->process (state.buffer, offset, numSamples, block);
+                strip.devices[i].node->process (state.buffer, offset, numSamples, block, strip.devices[i].automation);
 
                 if (i == 0 && strip.hasInstrument)
                     playAudio();
             }
         }
 
-        state.getChannel().process (channels, 2, numSamples);
+        Channel::Automation faderAutomation;
+        faderAutomation.volume = strip.volume.get();
+        faderAutomation.pan = strip.pan.get();
+        faderAutomation.beatsPerSample = beatsPerSample;
+
+        if (strip.volume != nullptr || strip.pan != nullptr)
+        {
+            faderAutomation.sample = getAutomationSample (strip.latency);
+            faderAutomation.beat = plan.tempo.toBeats ((double) faderAutomation.sample);
+        }
+        state.getChannel().process (channels, 2, numSamples, faderAutomation);
     }
 }
 

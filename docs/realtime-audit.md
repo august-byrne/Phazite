@@ -41,6 +41,7 @@ The first column covers the warm-up after playback starts (about 0.5 s); the sec
 | Phazite's own engine (docs/tracktion-migration.md, T2), its transport and its metronome (2026-11-02) | 0 | 0 |
 | Phazite's own engine: chords on Phazite's synth through a track's EQ and fader into the master (2026-11-02) | 0 | 0 |
 | Phazite's own engine: audio clips on two tracks, one faded in, read from their files as they play (2026-11-02) | 0 | 0 |
+| Phazite's own engine: chords through a filter whose cutoff is automated, with the volume and the pan automated too (2026-11-02) | 0 | 0 |
 | Volume automation and an LFO on pan | 2 allocations | 0 |
 | A tone through a bus, with a send to Phazite's reverb on a return, into the loudness meter | 7 allocations | 0 |
 | Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |

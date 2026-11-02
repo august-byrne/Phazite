@@ -408,8 +408,9 @@ bool soundsLikeAnAlias (const Fingerprint& fingerprint, const juce::AudioBuffer<
 }
 
 //==============================================================================
-// A tone at 120 BPM whose volume is automated through each kind of line: from 0 dB down to -24 dB at 1 s bending one
-// way, back up to 0 dB at 2 s bending the other, holding there until 3 s and jumping down to -12 dB.
+// A tone at 120 BPM whose volume is automated through each kind of line: from 0 dB down to -24 dB at 1 s bent as far as a
+// line bends (staying high, then falling), back up to 0 dB at 2 s bent the other way (rising at once), holding there until
+// 3 s and jumping down to -12 dB. Played as the lane draws it (Tracktion played a bend half as bent).
 void addAutomationSong (TestSong& song)
 {
     song.setTempo (120.0);
@@ -426,10 +427,11 @@ void addAutomationSong (TestSong& song)
 
 bool soundsLikeTheAutomation (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
 {
-    auto ok = isLouder (fingerprint, 0, 9, 15.0f, "the volume falls to -24 dB at 1 s");
-    ok = isLouder (fingerprint, 19, 11, 10.0f, "it comes back up to 0 dB at 2 s") && ok;
-
     const auto held = getPower (fingerprint[22]);
+    auto ok = isBetween (fingerprint, 5, held - 2.5f, held + 0.5f, "bent, the volume stays near 0 dB half way to 1 s");
+    ok = isLouder (fingerprint, 0, 9, 9.0f, "then it falls toward -24 dB at 1 s") && ok;
+    ok = isLouder (fingerprint, 19, 10, 9.0f, "it comes back up to 0 dB at 2 s") && ok;
+    ok = isBetween (fingerprint, 14, held - 2.5f, held + 0.5f, "bent the other way, it is near 0 dB again half way back") && ok;
     ok = isBetween (fingerprint, 28, held - 0.5f, held + 0.5f, "it holds at 0 dB until 3 s") && ok;
     return isBetween (fingerprint, 33, held - 12.5f, held - 11.5f, "then it jumps down to -12 dB") && ok;
 }
@@ -661,20 +663,23 @@ TEST_SUITE ("golden")
     TEST_CASE ("Golden render: volume automation through bent lines, a hold and a jump")
     {
         renders (addAutomationSong, golden ("automation-volume", "a tone whose volume automation bends down and up, holds, then jumps.",
-                                            4.0, soundsLikeTheAutomation));
+                                            4.0, soundsLikeTheAutomation)
+                                        .on (phazite::test::OwnEngine::differs)); // the fader follows its lane exactly
     }
 
     TEST_CASE ("Golden render: pan automation from left to right")
     {
         renders (addPanAutomationSong,
-                 golden ("automation-pan", "a tone whose pan automation sweeps from left to right.", 4.0, soundsLikeAPanSweep));
+                 golden ("automation-pan", "a tone whose pan automation sweeps from left to right.", 4.0, soundsLikeAPanSweep)
+                     .on (phazite::test::OwnEngine::differs)); // the pan follows its lane exactly, by the constant-power law
     }
 
     TEST_CASE ("Golden render: a device's parameter automated, a filter opening on a chord")
     {
         renders (addDeviceAutomationSong,
                  golden ("automation-device", "a chord on Phazite's synth through its filter, whose cutoff automation opens it.", 4.0,
-                         soundsLikeAnOpeningFilter));
+                         soundsLikeAnOpeningFilter)
+                     .on (phazite::test::OwnEngine::differs)); // its cutoff moves on the song's control points
     }
 
     TEST_CASE ("Golden render: notes on the beats of a song at 90 BPM in 3/4")

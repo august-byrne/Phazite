@@ -9,11 +9,13 @@
 #include "engine/audio/FileReader.h"
 #include "engine/core/Plan.h"
 #include "model/base/internal/Tracktion.h"
+#include "model/devices/ParameterRef.h"
 
 #include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 
 namespace phazite
@@ -25,7 +27,8 @@ public:
 
     // What the engine plays of the song now, at a rate and in blocks of up to so many samples: the tempo map; the loop and
     // the metronome, live (a render plays the song once, from its start, without the metronome); and its tracks of Phazite's
-    // devices (plug-ins, containers, folders as buses, returns and sends come with T2's later steps) into the master.
+    // devices, with their automation and the faders' (plug-ins, containers, folders as buses, returns and sends come with
+    // T2's later steps), into the master.
     std::unique_ptr<engine::Plan> compile (double sampleRate, int maximumBlockSize, bool isRender);
 
     // Live, the audio files it plays are read ahead of the audio thread by a reading thread, and what the engine played long
@@ -41,6 +44,15 @@ public:
     // editors' displays); nullptr for none.
     engine::DeviceNode* findDevice (std::int64_t id) const;
     engine::StripState* findStrip (std::int64_t id) const;
+
+    // A parameter's automation as the plan has it, or nullptr; and its value as the engine played it last, with its
+    // modulation or without (nothing for one it doesn't play). A fader's volume is in its positions, as its automation is.
+    const engine::Curve* findCurve (const ParameterRef&) const;
+    std::optional<float> getPlayedValue (const ParameterRef&, bool withModulation) const;
+
+    // Whether a parameter plays its value set by hand rather than its automation, while automation is written by hand
+    // (AutomationWriter.h). It stays so from plan to plan, until it is written no more.
+    void setWriting (const ParameterRef&, bool);
 
 private:
     te::Edit& edit;
@@ -60,6 +72,13 @@ private:
     std::set<std::int64_t> usedRegions;
     engine::FileReader* reader = nullptr;
     const std::atomic<std::uint64_t>* blocks = nullptr;
+
+    // The song's automation, each curve by its device's ID and its parameter's, read again for each plan.
+    std::map<std::pair<std::uint64_t, juce::String>, std::shared_ptr<const engine::Curve>> curves;
+    std::map<std::uint64_t, std::int64_t> faders; // each fader's track, by the fader's ID (the master's under 0)
+    void readCurves();
+    std::shared_ptr<const engine::Curve> findCurve (std::uint64_t device, const juce::String& parameter) const;
+    void addFaderAutomation (engine::Plan::Strip&, const juce::ValueTree& channelState, bool isMaster);
 
     std::shared_ptr<engine::AudioFile> getAudioFile (const juce::File&);
     engine::AudioRegion makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile>);

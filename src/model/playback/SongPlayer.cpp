@@ -5,11 +5,13 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/devices/internal/WavetablePlugin.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Metronome.h"
@@ -166,6 +168,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     used.clear();
     usedFiles.clear();
     usedRegions.clear();
+    readCurves();
 
     for (const auto& trackState : getTrackStates (edit))
     {
@@ -185,6 +188,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         }
 
         addDevices (strip, trackState, frozen);
+        addFaderAutomation (strip, trackState, false);
         setChannel (trackState, false);
         plan->strips.push_back (std::move (strip));
     }
@@ -192,16 +196,18 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     updateAudibility();
 
     // The master adds them up, each delayed to come out as late as the latest (delay compensation), through its devices.
-    engine::Plan::Strip master;
-    master.state = getStrip (0);
-    const auto masterState = findPhaziteState (edit).getChildWithName (schema::MASTER);
-    addDevices (master, masterState);
-    setChannel (masterState, true);
-
     auto latest = 0;
 
     for (const auto& strip : plan->strips)
         latest = std::max (latest, strip.latency);
+
+    engine::Plan::Strip master;
+    master.state = getStrip (0);
+    master.latency = latest;
+    const auto masterState = findPhaziteState (edit).getChildWithName (schema::MASTER);
+    addDevices (master, masterState);
+    addFaderAutomation (master, masterState, true);
+    setChannel (masterState, true);
 
     for (int i = 0; i < (int) plan->strips.size(); ++i)
     {
@@ -221,7 +227,6 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         master.inputs.push_back (std::move (input));
     }
 
-    master.latency += latest;
     plan->strips.push_back (std::move (master));
 
     // What the song doesn't hold any more goes with the last plan that plays it.
@@ -303,9 +308,52 @@ void SongPlayer::addDevices (engine::Plan::Strip& strip, const juce::ValueTree& 
         if (strip.devices.empty() && node->getDeviceInfo().kind == devices::DeviceKind::instrument)
             strip.hasInstrument = true;
 
+        // Its parameters' automation, as late as its sound comes.
+        engine::Plan::Device device { std::move (node), {}, strip.latency };
+        const auto id = getDeviceID (deviceState).getRaw();
+        const auto& parameters = device.node->getDeviceInfo().parameters;
+
+        for (size_t i = 0; i < parameters.size(); ++i)
+            if (auto curve = findCurve (id, juce::String (parameters[i].id.data(), parameters[i].id.size())))
+                device.automation.push_back ({ (int) i, std::move (curve) });
+
         strip.latency += latency;
-        strip.devices.push_back (std::move (node));
+        strip.devices.push_back (std::move (device));
     }
+}
+
+void SongPlayer::readCurves()
+{
+    curves.clear();
+    faders.clear();
+
+    for (const auto& state : getCurveStates (edit))
+    {
+        std::vector<engine::CurvePoint> points;
+
+        for (const auto& point : state)
+            if (point.hasType (schema::POINT))
+                points.push_back ({ (double) point[schema::pointBeat], (float) point[schema::pointValue],
+                                    (float) point.getProperty (schema::pointCurve, 0.0f) });
+
+        if (const auto parameter = getCurveParameter (state); ! points.empty())
+            curves[{ parameter.device.getRaw(), parameter.parameter }] = std::make_shared<const engine::Curve> (std::move (points));
+    }
+}
+
+std::shared_ptr<const engine::Curve> SongPlayer::findCurve (std::uint64_t device, const juce::String& parameter) const
+{
+    const auto found = curves.find ({ device, parameter });
+    return found != curves.end() ? found->second : nullptr;
+}
+
+void SongPlayer::addFaderAutomation (engine::Plan::Strip& strip, const juce::ValueTree& channelState, bool isMaster)
+{
+    // The fader's volume and pan, by its parameters' IDs (the master's are its own).
+    const auto fader = (std::uint64_t) getID (channelState, schema::channelFader);
+    faders[fader] = strip.id;
+    strip.volume = findCurve (fader, isMaster ? "master volume" : "volume");
+    strip.pan = findCurve (fader, isMaster ? "master pan" : "pan");
 }
 
 void SongPlayer::setValues (engine::DeviceNode& node, const juce::ValueTree& deviceState)
@@ -535,6 +583,59 @@ bool SongPlayer::addFrozenFile (engine::Plan::Strip& strip, const juce::ValueTre
     file->keep (0);
     strip.audio.push_back (std::move (region));
     return true;
+}
+
+const engine::Curve* SongPlayer::findCurve (const ParameterRef& parameter) const
+{
+    return findCurve (parameter.device.getRaw(), parameter.parameter).get();
+}
+
+std::optional<float> SongPlayer::getPlayedValue (const ParameterRef& parameter, bool withModulation) const
+{
+    const auto id = (std::int64_t) parameter.device.getRaw();
+
+    if (const auto* node = findDevice (id))
+    {
+        if (const auto index = devices::findParameter (node->getDeviceInfo(), parameter.parameter.toStdString()); index >= 0)
+            return withModulation ? node->getPlayedValue (index) : node->getPlayedBaseValue (index);
+
+        return {};
+    }
+
+    const auto fader = faders.find (parameter.device.getRaw());
+    auto* strip = fader != faders.end() ? findStrip (fader->second) : nullptr;
+
+    if (strip == nullptr)
+        return {};
+
+    if (parameter.parameter == "volume" || parameter.parameter == "master volume")
+        return decibelsToFaderPosition (strip->getChannel().getPlayedVolume());
+
+    if (parameter.parameter == "pan" || parameter.parameter == "master pan")
+        return strip->getChannel().getPlayedPan();
+
+    return {};
+}
+
+void SongPlayer::setWriting (const ParameterRef& parameter, bool isWriting)
+{
+    const auto id = (std::int64_t) parameter.device.getRaw();
+
+    if (auto* node = findDevice (id))
+    {
+        node->setWriting (devices::findParameter (node->getDeviceInfo(), parameter.parameter.toStdString()), isWriting);
+        return;
+    }
+
+    const auto fader = faders.find (parameter.device.getRaw());
+
+    if (auto* strip = fader != faders.end() ? findStrip (fader->second) : nullptr)
+    {
+        if (parameter.parameter == "volume" || parameter.parameter == "master volume")
+            strip->getChannel().setVolumeWriting (isWriting);
+        else if (parameter.parameter == "pan" || parameter.parameter == "master pan")
+            strip->getChannel().setPanWriting (isWriting);
+    }
 }
 
 engine::DeviceNode* SongPlayer::findDevice (std::int64_t id) const

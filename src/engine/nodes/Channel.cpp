@@ -27,6 +27,11 @@ PanGains getPanGains (float pan) noexcept
              (float) (juce::MathConstants<double>::sqrt2 * std::sin (angle)) };
 }
 
+float faderPositionToDecibels (float position) noexcept
+{
+    return position > 0.0f ? 20.0f * std::log (position) + 6.0f : Channel::silenceDb;
+}
+
 void Channel::prepare (double rate) noexcept
 {
     sampleRate = rate;
@@ -35,35 +40,47 @@ void Channel::prepare (double rate) noexcept
     fading = 0;
 }
 
-void Channel::process (float* const* channels, int numChannels, int numSamples) noexcept
+void Channel::process (float* const* channels, int numChannels, int numSamples, const Automation& automation) noexcept
 {
-    // Where the fader is now: from where it is, eased there over 15 ms; at once as the channel first plays.
-    const auto volumeNow = getVolume(), panNow = getPan();
+    // Where the fader is set: by hand, or by its automation where the song is (but what is written by hand now).
+    const auto* volumeCurve = volumeWriting.load (std::memory_order_relaxed) ? nullptr : automation.volume;
+    const auto* panCurve = panWriting.load (std::memory_order_relaxed) ? nullptr : automation.pan;
+    const auto follows = automation.beatsPerSample > 0.0 && (volumeCurve != nullptr || panCurve != nullptr);
+    const auto volumeAt = [this, volumeCurve] (double beat)
+    { return volumeCurve != nullptr ? faderPositionToDecibels (volumeCurve->getValueAt (beat)) : getVolume(); };
+    const auto panAt = [this, panCurve] (double beat)
+    { return panCurve != nullptr ? std::clamp (panCurve->getValueAt (beat), -1.0f, 1.0f) : getPan(); };
+    const auto getGains = [] (float decibels, float panned, float* sides)
+    {
+        const auto gain = toGain (decibels);
+        const auto pans = getPanGains (panned);
+        sides[0] = gain * pans.left;
+        sides[1] = gain * pans.right;
+    };
 
-    if (! started || ! juce::exactlyEqual (volumeNow, targetVolume) || ! juce::exactlyEqual (panNow, targetPan))
+    // Set: from where it is, eased there over 15 ms; at once as the channel first plays.
+    const auto volumeNow = volumeAt (automation.beat), panNow = panAt (automation.beat);
+
+    if (! started)
+    {
+        getGains (volumeNow, panNow, gains);
+        targetVolume = volumeNow;
+        targetPan = panNow;
+        easing = 0;
+        heard = heardTarget = isAudible() ? 1.0f : 0.0f;
+        fading = 0;
+        started = true;
+    }
+    else if (! follows && (! juce::exactlyEqual (volumeNow, targetVolume) || ! juce::exactlyEqual (panNow, targetPan)))
     {
         targetVolume = volumeNow;
         targetPan = panNow;
-        const auto gain = toGain (volumeNow);
-        const auto sides = getPanGains (panNow);
-        const float targets[2] = { gain * sides.left, gain * sides.right };
+        float targets[2];
+        getGains (volumeNow, panNow, targets);
+        easing = std::max (1, (int) (easeSeconds * sampleRate));
 
-        if (! started)
-        {
-            gains[0] = targets[0];
-            gains[1] = targets[1];
-            easing = 0;
-            heard = heardTarget = isAudible() ? 1.0f : 0.0f;
-            fading = 0;
-            started = true;
-        }
-        else
-        {
-            easing = std::max (1, (int) (easeSeconds * sampleRate));
-
-            for (int side = 0; side < 2; ++side)
-                steps[side] = (targets[side] - gains[side]) / (float) easing;
-        }
+        for (int side = 0; side < 2; ++side)
+            steps[side] = (targets[side] - gains[side]) / (float) easing;
     }
 
     // Muted or heard again: a fade over 5 ms, from where it is.
@@ -76,7 +93,55 @@ void Channel::process (float* const* channels, int numChannels, int numSamples) 
 
     float* sides[2] = { channels[0], numChannels > 1 ? channels[1] : nullptr };
 
-    if (easing == 0 && fading == 0)
+    if (follows)
+    {
+        // Its automation: a straight line to its value on each control point, the first the song's next, from where the
+        // line was as the block started, whatever the block's size.
+        easing = 0;
+        const auto toControlPoint =
+            controlPointSpacing - (int) (((automation.sample % controlPointSpacing) + controlPointSpacing) % controlPointSpacing);
+
+        for (int done = 0; done < numSamples;)
+        {
+            const auto toPoint = done == 0 ? toControlPoint : controlPointSpacing;
+            const auto length = std::min (numSamples - done, toPoint);
+            const auto beat = automation.beat + (done + toPoint) * automation.beatsPerSample;
+            targetVolume = volumeAt (beat);
+            targetPan = panAt (beat);
+            float ends[2];
+            getGains (targetVolume, targetPan, ends);
+
+            for (int side = 0; side < 2; ++side)
+                steps[side] = (ends[side] - gains[side]) / (float) toPoint;
+
+            for (int i = done; i < done + length; ++i)
+            {
+                gains[0] += steps[0];
+                gains[1] += steps[1];
+
+                if (fading > 0)
+                {
+                    heard += heardStep;
+
+                    if (--fading == 0)
+                        heard = heardTarget;
+                }
+
+                for (int side = 0; side < 2; ++side)
+                    if (sides[side] != nullptr)
+                        sides[side][i] *= gains[side] * heard;
+            }
+
+            if (length == toPoint)
+            {
+                gains[0] = ends[0];
+                gains[1] = ends[1];
+            }
+
+            done += length;
+        }
+    }
+    else if (easing == 0 && fading == 0)
     {
         for (int side = 0; side < 2; ++side)
             if (sides[side] != nullptr)
@@ -114,6 +179,8 @@ void Channel::process (float* const* channels, int numChannels, int numSamples) 
         }
     }
 
+    playedVolume.store (targetVolume, std::memory_order_relaxed);
+    playedPan.store (targetPan, std::memory_order_relaxed);
     meter.measure (channels, std::min (numChannels, 2), numSamples);
 }
 } // namespace phazite::engine

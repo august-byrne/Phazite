@@ -643,6 +643,30 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords through a filter whose cutoff is automated, the volume and pan too")
+    {
+        using phazite::BeatPosition;
+        phazite::test::TestSong song;
+        const auto track = song.firstTrack;
+        song.setInstrument (track, phazite::devices::Synth::typeID);
+        const auto filter = song.addEffect (track, phazite::devices::FilterEffect::typeID);
+        song.addAutomation ({ filter, "cutoff" }, { { BeatPosition(), 200.0f, 0.3f },
+                                                    { BeatPosition::fromBeats (1.0), 8000.0f, -0.8f },
+                                                    { BeatPosition::fromBeats (2.0), 500.0f, 1.0f },
+                                                    { BeatPosition::fromBeats (3.0), 3000.0f } });
+        song.addAutomation (song.getVolumeParameter (track), { { BeatPosition(), 0.5f, 0.4f }, { BeatPosition::fromBeats (2.0), 0.8f } });
+        song.addAutomation (song.getPanParameter (track), { { BeatPosition(), -0.5f }, { BeatPosition::fromBeats (3.0), 0.5f } });
+        const auto clip = song.addMidiClip (track, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (clip, { 60, 64, 67 }, beat, 0.75);
+
+        const auto m = playPhaziteAndMeasure (song.context);
+        report ("Phazite's engine: automation", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: volume automation and an LFO on pan")
     {
         auto edit = phazite::createSongEdit (phazite::test::getEngine());

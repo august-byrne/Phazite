@@ -458,7 +458,7 @@ engine::Plan::Strip makeTrack (std::int64_t id, const dev::DeviceInfo& info, std
     auto node = std::make_shared<engine::DeviceNode> (info, std::move (instrument));
     node->getRunner().prepare (rate, maximumBlockSize);
     strip.latency = node->getRunner().getLatencySamples();
-    strip.devices.push_back (std::move (node));
+    strip.devices.push_back ({ std::move (node), {} });
     strip.hasInstrument = true;
     return strip;
 }
@@ -719,4 +719,98 @@ TEST_CASE ("A long audio file is read ahead of where it plays, each clip's start
     count = 64;
     file.getSamples (0, 6 * chunk - 10, count);
     CHECK (count == 10);
+}
+
+TEST_CASE ("A fader follows its automation on the song's control points and in a line between, the same at any block size")
+{
+    // Three beats at 120 BPM in 4/4 (24000 samples a beat): a bent line, one bent past half way, and a hold with a jump.
+    const engine::Curve curve (
+        { { 0.0, 0.2f, 0.0f }, { 1.0, 1.0f, 0.3f }, { 2.0, 0.5f, -0.8f }, { 2.5, 0.9f, 1.0f }, { 3.0, 0.3f, 0.0f } });
+    constexpr int length = 72000;
+    constexpr double samplesPerBeat = 24000.0;
+
+    const auto playThrough = [&curve] (int samplesInBlock)
+    {
+        engine::Channel channel;
+        channel.prepare (rate);
+        juce::AudioBuffer<float> audio (2, length);
+
+        for (int channelIndex = 0; channelIndex < 2; ++channelIndex)
+            juce::FloatVectorOperations::fill (audio.getWritePointer (channelIndex), 1.0f, length);
+
+        for (int done = 0; done < length; done += samplesInBlock)
+        {
+            engine::Channel::Automation automation;
+            automation.volume = &curve;
+            automation.sample = done;
+            automation.beat = done / samplesPerBeat;
+            automation.beatsPerSample = 1.0 / samplesPerBeat;
+            float* channels[] = { audio.getWritePointer (0, done), audio.getWritePointer (1, done) };
+            channel.process (channels, 2, std::min (samplesInBlock, length - done), automation);
+        }
+
+        return audio;
+    };
+
+    const auto reference = playThrough (256);
+
+    for (const auto samplesInBlock : { 32, 100, 517 })
+    {
+        const auto other = playThrough (samplesInBlock);
+        auto largest = 0.0f;
+
+        for (int i = 0; i < length; ++i)
+            largest = std::max (largest, std::abs (other.getSample (0, i) - reference.getSample (0, i)));
+
+        CHECK (largest < 1.0e-5f);
+    }
+
+    // On each control point, exactly the lane's level (its positions on the fader's travel).
+    for (const auto point : { 4800, 24000, 30016, 54016, 61984 })
+    {
+        const auto position = curve.getValueAt (point / samplesPerBeat);
+        const auto gain = juce::Decibels::decibelsToGain (engine::faderPositionToDecibels (position), engine::Channel::silenceDb);
+        CHECK (reference.getSample (0, point - 1) == doctest::Approx (gain).epsilon (1.0e-4));
+    }
+}
+
+TEST_CASE ("A device's automation moves its parameter on the song's control points, wherever its blocks start, but while it is written")
+{
+    const auto& info = dev::Phaser::info;
+    const auto depth = dev::findParameter (info, "depth");
+    REQUIRE (depth >= 0);
+    engine::DeviceNode node (info, std::make_unique<dev::Phaser>());
+    node.getRunner().prepare (rate, 512);
+    const auto curve = std::make_shared<const engine::Curve> (std::vector<engine::CurvePoint> { { 0.0, 0.0f, 0.0f }, { 1.0, 1.0f, 0.0f } });
+    const engine::ParameterCurve automation[] = { { depth, curve } };
+    juce::AudioBuffer<float> buffer (2, 512);
+    constexpr double samplesPerBeat = 24000.0;
+    std::int64_t sample = 0;
+
+    for (const auto samplesInBlock : { 100, 37, 512, 1, 64, 300 })
+    {
+        buffer.clear();
+        engine::DeviceRunner::Block block;
+        block.isPlaying = true;
+        block.sample = sample;
+        block.automationBeat = block.beat = sample / samplesPerBeat;
+        block.beatsPerSample = 1.0 / samplesPerBeat;
+        node.process (buffer, 0, samplesInBlock, block, automation);
+        sample += samplesInBlock;
+
+        // Its last stretch's: on the control point at or before the block's last sample.
+        const auto point = (sample - 1) / engine::controlPointSpacing * engine::controlPointSpacing;
+        CHECK (node.getPlayedBaseValue (depth) == doctest::Approx (curve->getValueAt (point / samplesPerBeat)));
+    }
+
+    // Written by hand, it plays its value set by hand.
+    node.setValue (depth, 0.25f);
+    node.setWriting (depth, true);
+    engine::DeviceRunner::Block block;
+    block.isPlaying = true;
+    block.sample = sample;
+    block.automationBeat = block.beat = sample / samplesPerBeat;
+    block.beatsPerSample = 1.0 / samplesPerBeat;
+    node.process (buffer, 0, 512, block, automation);
+    CHECK (node.getPlayedBaseValue (depth) == doctest::Approx (0.25f));
 }

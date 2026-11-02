@@ -4,6 +4,7 @@
 #include "internal/ParameterHandle.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
@@ -233,8 +234,9 @@ std::optional<float> ParameterHandle::getDefaultValue() const
 
 float ParameterHandle::getValue() const
 {
+    // While Phazite's engine plays the project, an automated parameter's value is the one it played.
     if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
-        return parameter->getCurrentValue();
+        return getPlayedValue (*parameter, true).value_or (parameter->getCurrentValue());
 
     return impl != nullptr && impl->create != nullptr ? impl->rangeUntilMade.start : 0.0f; // the start of the range until made
 }
@@ -242,7 +244,7 @@ float ParameterHandle::getValue() const
 float ParameterHandle::getBaseValue() const
 {
     if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
-        return parameter->getCurrentBaseValue();
+        return getPlayedValue (*parameter, false).value_or (parameter->getCurrentBaseValue());
 
     return impl != nullptr && impl->create != nullptr ? impl->rangeUntilMade.start : 0.0f; // the start of the range until made
 }
@@ -299,7 +301,10 @@ void ParameterHandle::beginGesture()
         impl->gesture = std::make_unique<Gesture> (
             parameter->getEdit(), impl->undoName.isNotEmpty() ? impl->undoName : "Change " + parameter->getParameterName());
 
-    parameter->parameterChangeGestureBegin(); // for automation recording
+    parameter->parameterChangeGestureBegin(); // for automation recording, Tracktion's
+
+    if (auto* session = findPlayingSession (parameter->getEdit())) // and Phazite's engine's
+        session->getWriter().gestureBegan (*parameter);
 }
 
 void ParameterHandle::setValue (float value)
@@ -345,7 +350,12 @@ void ParameterHandle::makeAndSet (float value)
         return;
 
     if (isInGesture())
+    {
         parameter->parameterChangeGestureBegin();
+
+        if (auto* session = findPlayingSession (parameter->getEdit()))
+            session->getWriter().gestureBegan (*parameter);
+    }
 
     setDeviceValue (*parameter, value);
 }
@@ -356,7 +366,12 @@ void ParameterHandle::endGesture()
         return;
 
     if (const auto parameter = impl->find())
+    {
         parameter->parameterChangeGestureEnd();
+
+        if (auto* session = findPlayingSession (parameter->getEdit())) // what it wrote joins the gesture's step
+            session->getWriter().gestureEnded (*parameter);
+    }
 
     if (impl->gesture != nullptr)
     {
