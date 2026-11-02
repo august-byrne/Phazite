@@ -43,6 +43,19 @@ bool KeyDispatcher::runsOverPlugins (const juce::KeyPress& key) const
     return command != nullptr && command->overPlugins;
 }
 
+std::vector<juce::KeyPress> KeyDispatcher::getKeysOverPlugins() const
+{
+    std::vector<juce::KeyPress> keys;
+    const auto& registry = commands.getRegistry();
+
+    for (int i = 0; i < registry.getNumCommands(); ++i)
+        if (const auto& command = *registry.getCommand (i); command.overPlugins)
+            for (const auto& key : commands.getKeyPresses (command.id))
+                keys.push_back (key);
+
+    return keys;
+}
+
 bool KeyDispatcher::keyPressedOverPlugin (const juce::KeyPress& key)
 {
     if (const auto* command = findCommandForKey (key); command != nullptr && command->overPlugins)

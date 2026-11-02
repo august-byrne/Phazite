@@ -30,6 +30,7 @@ struct PluginInfo
     std::vector<ParameterInfo> parameters {};
     std::vector<juce::String> programs {}; // its programs' names (none for a plug-in without programs of its own)
     int program = 0;                       // the one it has
+    bool hasEditor = false;                // a window of its own (MessageType::openEditor)
 };
 
 void write (MessageWriter&, const PluginInfo&);

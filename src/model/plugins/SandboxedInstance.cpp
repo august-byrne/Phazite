@@ -117,10 +117,11 @@ private:
 };
 
 SandboxedInstance::SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance> instance, const juce::PluginDescription& described,
-                                      std::shared_ptr<void> keep, std::function<void()> gone)
+                                      std::shared_ptr<void> keep, std::function<void()> gone, EditorMaker editorMaker)
     : juce::AudioPluginInstance (getBuses (instance->getInfo())),
       keepHelper (std::move (keep)),
       onGone (std::move (gone)),
+      makeEditor (std::move (editorMaker)),
       remote (std::move (instance)),
       description (described),
       latency (remote->getLatencySamples())
@@ -431,10 +432,42 @@ void SandboxedInstance::stateChanged()
     triggerAsyncUpdate();
 }
 
+void SandboxedInstance::editorResized (int width, int height)
+{
+    {
+        const juce::ScopedLock locked (lock);
+        editorSize = std::pair (width, height);
+    }
+
+    triggerAsyncUpdate();
+}
+
+void SandboxedInstance::editorKey (bool isDown, int keyCode, int modifiers)
+{
+    {
+        const juce::ScopedLock locked (lock);
+        editorKeys.push_back ({ isDown, keyCode, modifiers });
+    }
+
+    triggerAsyncUpdate();
+}
+
+bool SandboxedInstance::hasEditor() const
+{
+    return makeEditor != nullptr && remote->getInfo().hasEditor;
+}
+
+juce::AudioProcessorEditor* SandboxedInstance::createEditor()
+{
+    return hasEditor() && ! hasCrashed() ? makeEditor (*this) : nullptr;
+}
+
 void SandboxedInstance::handleAsyncUpdate()
 {
     std::vector<std::pair<int, float>> changes;
     std::vector<std::pair<int, bool>> gestures;
+    std::vector<EditorKey> keys;
+    std::optional<std::pair<int, int>> newEditorSize;
     bool newLatency = false, newState = false, lost = false;
     int samples = 0;
 
@@ -442,11 +475,21 @@ void SandboxedInstance::handleAsyncUpdate()
         const juce::ScopedLock locked (lock);
         changes.swap (changedByPlugin);
         gestures.swap (gesturesByPlugin);
+        keys.swap (editorKeys);
+        std::swap (newEditorSize, editorSize);
         std::swap (newLatency, latencyCame);
         std::swap (newState, stateCame);
         std::swap (lost, lossCame);
         samples = latency;
     }
+
+    // Its editor's keys first, as they came: they play.
+    for (const auto& key : keys)
+        if (onEditorKey != nullptr)
+            onEditorKey (key.isDown, key.keyCode, key.modifiers);
+
+    if (newEditorSize.has_value() && onEditorResized != nullptr)
+        onEditorResized (newEditorSize->first, newEditorSize->second);
 
     // As the helper told them: the gestures that begin, the values, then (a message later, once Tracktion has the values)
     // the gestures that end.

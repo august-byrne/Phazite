@@ -32,6 +32,10 @@ public:
     void setOn (bool);
     bool isOn() const noexcept { return on; }
 
+    // What makes the editors of the instances it makes from now on: a window of the app's (app/SandboxedEditor.h), which
+    // the app sets as it starts. Without one, a plug-in shows no editor.
+    void setEditorMaker (SandboxedInstance::EditorMaker);
+
     // A plug-in opened in its helper as a plug-in instance Tracktion can play, or nullptr with why.
     std::unique_ptr<juce::AudioPluginInstance> createInstance (const juce::PluginDescription&, double sampleRate, int blockSize,
                                                                juce::String& error);
@@ -48,6 +52,7 @@ private:
     te::Engine& engine;
     juce::File program;
     bool on = false;
+    SandboxedInstance::EditorMaker editorMaker;
     std::function<std::unique_ptr<juce::AudioPluginInstance> (const juce::PluginDescription&, double, int, juce::String&)> tracktions;
     std::map<juce::String, std::weak_ptr<Running>> helpers; // each kept alive by the instances in it
 

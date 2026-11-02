@@ -794,7 +794,9 @@ target_sources(phazite_app PRIVATE
     src/app/ProjectSession.cpp
     src/app/ProjectSession.h
     src/app/RunMarker.cpp
-    src/app/RunMarker.h)
+    src/app/RunMarker.h
+    src/app/SandboxedEditor.cpp
+    src/app/SandboxedEditor.h)
 
 phazite_use_core(phazite_app)
 target_link_libraries(phazite_app PRIVATE phazite_ui)
@@ -824,6 +826,8 @@ target_link_libraries(Phazite PRIVATE phazite_app phazite_ui)
 # which the tests' helper links too. It goes next to the app, which starts it. ---
 add_library(phazite_host STATIC)
 target_sources(phazite_host PRIVATE
+    src/host/core/Editor.cpp
+    src/host/core/Editor.h
     src/host/core/Host.cpp
     src/host/core/Host.h
     src/host/core/Instance.cpp

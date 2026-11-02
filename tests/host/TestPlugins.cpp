@@ -109,6 +109,31 @@ namespace
         const Kind kind;
     };
 
+    // The effect's editor: 300 by 200, and 360 by 240 while its Tone is above 0.9, as a plug-in resizes its own.
+    class EffectEditor final : public juce::AudioProcessorEditor,
+                               private juce::Timer
+    {
+    public:
+        EffectEditor (juce::AudioProcessor& processor, const StandInParameter& toneParameter)
+            : juce::AudioProcessorEditor (processor),
+              tone (toneParameter)
+        {
+            setSize (300, 200);
+            startTimerHz (30);
+        }
+
+    private:
+        const StandInParameter& tone;
+
+        void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::darkgrey); }
+
+        void timerCallback() override
+        {
+            const auto large = tone.getValue() > 0.9f;
+            setSize (large ? 360 : 300, large ? 240 : 200);
+        }
+    };
+
     class TestEffect final : public StandIn
     {
     public:
@@ -116,10 +141,12 @@ namespace
             : StandIn (Kind::effect, stereoEffect())
         {
             gain = add ("1", "Gain", 1.0f);
-            add ("0", "Tone", 0.5f);
+            tone = add ("0", "Tone", 0.5f);
         }
 
+        using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (gain->getValue()); }
+        juce::AudioProcessorEditor* createEditor() override { return new EffectEditor (*this, *tone); }
 
         // Its programs, Full and Half, set its Gain, and tell the host so, as a plug-in's programs do.
         int getNumPrograms() override { return 2; }
@@ -134,7 +161,7 @@ namespace
         }
 
     private:
-        StandInParameter* gain = nullptr;
+        StandInParameter *gain = nullptr, *tone = nullptr;
         int program = 0;
     };
 
@@ -149,6 +176,7 @@ namespace
 
         void prepareToPlay (double sampleRate, int) override { rate = sampleRate; }
 
+        using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override
         {
             buffer.clear();
@@ -235,6 +263,7 @@ namespace
             crash = add ("20", "Crash", 0.0f);
         }
 
+        using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override
         {
             // As a plug-in that crashes does: an access to memory that isn't there.
@@ -258,6 +287,7 @@ namespace
             hang = add ("30", "Hang", 0.0f);
         }
 
+        using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override
         {
             while (hang->getValue() > 0.5f)
@@ -278,6 +308,7 @@ namespace
             setLatencySamples (64);
         }
 
+        using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
         {
             const auto latency = longer->getValue() > 0.5f ? 128 : 64;
@@ -321,6 +352,7 @@ namespace
                        || layout.inputBuses[1].isDisabled());
         }
 
+        using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
         {
             // What came into its sidechain, in place of its sound (silence without one).

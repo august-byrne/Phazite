@@ -6,6 +6,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <array>
+#include <vector>
 
 namespace phazite::ui
 {
@@ -42,6 +43,7 @@ public:
     // Whether a key is one it plays notes with or changes the octave or velocity with, while it is enabled: a layout
     // key without Shift, Ctrl, Alt or Cmd.
     bool takesKey (const juce::KeyPress&) const;
+    std::vector<juce::KeyPress> getKeys() const; // those keys, without modifiers: none while it is off
 
     std::function<void()> onChange;     // isEnabled(), the octave or the velocity changed
     std::function<void()> onNotePlayed; // a note started, after its note-on was sent

@@ -2,7 +2,7 @@
 // A plug-in instance in a helper, as Phazite holds it (docs/tracktion-migration.md, T3): the channel Phazite made for its
 // blocks, the helper's instance on it, opened from the plug-in's description and state and closed as it goes, what it
 // is (PluginInfo.h), and what Phazite asks of it besides blocks: its state, its program, a value set by hand, how it
-// writes a value, another channel for another sample rate. What the plug-in changes itself comes as the helper's notices
+// writes a value, another channel for another sample rate, its editor. What the plug-in changes itself comes as the helper's notices
 // for it, which the helper's owner hands it by its ID (handleNotice()), and it to its listener, on the pipe's thread.
 #pragma once
 
@@ -12,6 +12,8 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace phazite::sandbox
 {
@@ -27,6 +29,8 @@ public:
         virtual void latencyChanged (int samples) = 0;
         virtual void stateChanged() = 0;
         virtual void parametersChanged (const std::vector<ParameterInfo>&) = 0;
+        virtual void editorResized (int width, int height) = 0;
+        virtual void editorKey (bool isDown, int keyCode, int modifiers) = 0;
     };
 
     // Opened in the helper, from the plug-in's description (JUCE's XML for it) and state (empty for its own defaults), at
@@ -55,6 +59,21 @@ public:
     // Its program (one of getInfo().programs): as it opened, then as it was set or the helper last told (any thread).
     int getProgram() const noexcept { return program.load (std::memory_order_relaxed); }
     bool setProgram (int index, int timeoutMilliseconds);
+
+    // Its editor, a window of the helper's (getInfo().hasEditor): made, with its size and whether it can be resized, or
+    // none; shown in a window of Phazite's (by its native handle) at a place in its pixels, or hidden with no window (no
+    // waiting); and closed. And the keys Phazite takes over it, by their codes and modifiers (JUCE's), which the helper
+    // hands back as the listener's editorKey(), unless the plug-in gets every key.
+    struct EditorSize
+    {
+        int width = 0, height = 0;
+        bool isResizable = false;
+    };
+
+    std::optional<EditorSize> openEditor (int timeoutMilliseconds);
+    void placeEditor (std::int64_t window, int x, int y, int width, int height);
+    void closeEditor (int timeoutMilliseconds);
+    void setEditorKeys (bool getsEveryKey, const std::vector<std::pair<int, int>>& keys);
 
     // A value set by hand, from 0 to 1 (Phazite doesn't wait for it), and how the plug-in writes a value of a parameter.
     void setParameter (int index, float value);

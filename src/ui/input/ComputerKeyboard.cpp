@@ -159,6 +159,22 @@ bool ComputerKeyboard::takesKey (const juce::KeyPress& key) const
     return std::any_of (noteKeys, noteKeys + numNoteKeys, isCharacter) || std::any_of (controlKeys.begin(), controlKeys.end(), isCharacter);
 }
 
+std::vector<juce::KeyPress> ComputerKeyboard::getKeys() const
+{
+    std::vector<juce::KeyPress> keys;
+
+    if (! enabled)
+        return keys;
+
+    for (int i = 0; i < numNoteKeys; ++i)
+        keys.emplace_back ((int) noteKeys[i]);
+
+    for (const auto key : controlKeys)
+        keys.emplace_back ((int) key);
+
+    return keys;
+}
+
 bool ComputerKeyboard::keyStateChanged (bool, juce::Component*)
 {
     return update (wasKeyDown, juce::ModifierKeys::getCurrentModifiersRealtime());

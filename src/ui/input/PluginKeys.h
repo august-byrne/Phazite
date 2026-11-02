@@ -32,8 +32,10 @@ public:
     PluginKeys (KeyDispatcher&, ComputerKeyboard&);
     ~PluginKeys() override;
 
-    // Whether a key goes to Phazite rather than to the plug-in.
+    // Whether a key goes to Phazite rather than to the plug-in; and those keys, for a plug-in's window in a helper
+    // process, which catches them there (app/SandboxedEditor.h): they change as the computer keyboard is switched.
     bool wants (const juce::KeyPress&) const;
+    std::vector<juce::KeyPress> getWantedKeys() const;
 
     // Listens to a plug-in's window and everything in it (call it again when the window's content changes), or
     // stops.

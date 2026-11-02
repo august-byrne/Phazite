@@ -3,6 +3,9 @@
 
 #include <juce_events/juce_events.h>
 
+#include <algorithm>
+#include <vector>
+
 namespace phazite::host
 {
 using sandbox::MessageReader;
@@ -58,6 +61,7 @@ Host::Host()
 Host::~Host()
 {
     stopTimer();
+    editors.clear();   // before their plug-ins
     instances.clear(); // their threads stopped, before the pipe goes
     pipe = nullptr;
 }
@@ -113,8 +117,12 @@ void Host::handle (const juce::MemoryBlock& message)
             break;
 
         case MessageType::closeInstance:
-            instances.erase (reader.readInt64());
+        {
+            const auto id = reader.readInt64();
+            editors.erase (id);
+            instances.erase (id);
             break;
+        }
 
         case MessageType::prepareInstance:
             prepareInstance (reader, answer);
@@ -147,6 +155,14 @@ void Host::handle (const juce::MemoryBlock& message)
                 instance->setProgram (reader.readInt());
             break;
 
+        case MessageType::openEditor:
+            openEditor (reader.readInt64(), answer);
+            break;
+
+        case MessageType::closeEditor:
+            editors.erase (reader.readInt64());
+            break;
+
         // Notices: nothing to answer.
         case MessageType::setParameter:
             if (auto* instance = findInstance (reader.readInt64()))
@@ -154,6 +170,14 @@ void Host::handle (const juce::MemoryBlock& message)
                 const auto index = reader.readInt();
                 instance->setParameter (index, (float) reader.readDouble());
             }
+            return;
+
+        case MessageType::placeEditor:
+            placeEditor (reader);
+            return;
+
+        case MessageType::setEditorKeys:
+            setEditorKeys (reader);
             return;
 
         case MessageType::quit:
@@ -165,6 +189,8 @@ void Host::handle (const juce::MemoryBlock& message)
         case MessageType::latencyChanged:
         case MessageType::stateChanged:
         case MessageType::parametersChanged:
+        case MessageType::editorResized:
+        case MessageType::editorKey:
         case MessageType::reply:
             return;
     }
@@ -218,6 +244,74 @@ void Host::openInstance (MessageReader& reader, MessageWriter& answer)
     answer.add (true).add (juce::String());
     sandbox::write (answer, instance->describe());
     instances[id] = std::move (instance);
+}
+
+void Host::openEditor (std::int64_t id, MessageWriter& answer)
+{
+    // The plug-in's own, made once (asked again, the one there is), not shown until Phazite places it.
+    auto* instance = findInstance (id);
+    auto& editor = editors[id];
+
+    if (instance != nullptr && editor == nullptr)
+    {
+        const auto resized = [this, id] (int width, int height)
+        {
+            MessageWriter notice (MessageType::editorResized, 0);
+            notice.add (id).add ((std::int32_t) width).add ((std::int32_t) height);
+            send (notice);
+        };
+
+        const auto key = [this, id] (bool isDown, const juce::KeyPress& pressed)
+        {
+            MessageWriter notice (MessageType::editorKey, 0);
+            notice.add (id)
+                .add (isDown)
+                .add ((std::int32_t) pressed.getKeyCode())
+                .add ((std::int32_t) pressed.getModifiers().getRawFlags());
+            send (notice);
+        };
+
+        editor = std::make_unique<Editor> (instance->getPlugin(), resized, key);
+    }
+
+    if (editor == nullptr || ! editor->isOpen())
+    {
+        editors.erase (id);
+        answer.add (false);
+        return;
+    }
+
+    answer.add (true).add ((std::int32_t) editor->getBounds().getWidth()).add ((std::int32_t) editor->getBounds().getHeight());
+    answer.add (editor->isResizable());
+}
+
+void Host::placeEditor (MessageReader& reader)
+{
+    const auto id = reader.readInt64();
+    const auto window = reader.readInt64();
+    const auto x = reader.readInt();
+    const auto y = reader.readInt();
+    const auto width = reader.readInt();
+    const auto height = reader.readInt();
+
+    if (const auto found = editors.find (id); found != editors.end())
+        found->second->place (window, { x, y, width, height });
+}
+
+void Host::setEditorKeys (MessageReader& reader)
+{
+    const auto id = reader.readInt64();
+    const auto getsEveryKey = reader.readBool();
+    std::vector<juce::KeyPress> keys ((size_t) std::max (0, reader.readInt()));
+
+    for (auto& key : keys)
+    {
+        const auto code = reader.readInt();
+        key = juce::KeyPress (code, juce::ModifierKeys (reader.readInt()), 0);
+    }
+
+    if (const auto found = editors.find (id); found != editors.end())
+        found->second->setKeys (getsEveryKey, std::move (keys));
 }
 
 void Host::prepareInstance (MessageReader& reader, MessageWriter& answer)

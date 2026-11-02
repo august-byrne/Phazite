@@ -7,7 +7,9 @@
 // the plug-in for as long as it takes. One block at a time goes through the channel: the engine never waits for a render
 // to be done with it, and skips the block instead. What the plug-in changes itself (its parameters, with the gestures
 // around them, its latency, its state) comes in on the message thread, as a plug-in in Phazite's process would tell it.
-// If its helper goes (a crash, or ended for a hang), it is crashed: it plays nothing, and keeps the state it last had.
+// Its editor is a window of the helper's, which a window of the app's shows (app/SandboxedEditor.h), made by the maker the
+// plug-in host was given. If its helper goes (a crash, or ended for a hang), it is crashed: it plays nothing, shows no
+// editor, and keeps the state it last had.
 #pragma once
 
 #include "sandbox/client/RemoteInstance.h"
@@ -17,7 +19,9 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -27,10 +31,13 @@ class SandboxedInstance final : public juce::AudioPluginInstance,
                                 private juce::AsyncUpdater
 {
 public:
+    // What makes the editor of a plug-in in a helper, a window of the app's (app/SandboxedEditor.h), or nothing.
+    using EditorMaker = std::function<juce::AudioProcessorEditor*(SandboxedInstance&)>;
+
     // The instance opened in a helper, which this owns from now on, as the plug-in described; what keeps its helper (which
-    // it keeps until the instance has closed there), and what it calls first as it goes.
+    // it keeps until the instance has closed there), what it calls first as it goes, and what makes its editor.
     SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance>, const juce::PluginDescription&, std::shared_ptr<void> keepHelper,
-                       std::function<void()> onGone);
+                       std::function<void()> onGone, EditorMaker);
     ~SandboxedInstance() override;
 
     sandbox::RemoteInstance& getRemote() noexcept { return *remote; }
@@ -59,6 +66,11 @@ public:
     // thread): for the automation Phazite's engine writes by hand.
     std::function<void (int parameter, bool starting)> onGesture;
 
+    // What its editor in the helper tells (message thread), for the editor's window in Phazite: its new size, as the
+    // plug-in resized it; and a key Phazite takes over it, down or let go, by its code and modifiers (JUCE's).
+    std::function<void (int width, int height)> onEditorResized;
+    std::function<void (bool isDown, int keyCode, int modifiers)> onEditorKey;
+
     // How long a block may take in real time before it is late: as long as it lasts.
     static std::int64_t getDeadlineNanoseconds (int numSamples, double sampleRate) noexcept;
 
@@ -76,8 +88,8 @@ public:
     double getTailLengthSeconds() const override;
     bool acceptsMidi() const override;
     bool producesMidi() const override { return false; }
-    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
-    bool hasEditor() const override { return false; }
+    juce::AudioProcessorEditor* createEditor() override;
+    bool hasEditor() const override;
 
     // The plug-in's programs as the helper told them (one without a name for a plug-in that has none), the one it has,
     // and another chosen, within the time a state takes.
@@ -97,6 +109,7 @@ private:
 
     std::shared_ptr<void> keepHelper; // let go of after the instance has closed in it
     std::function<void()> onGone;
+    EditorMaker makeEditor;
     std::unique_ptr<sandbox::RemoteInstance> remote;
     const juce::PluginDescription description;
     std::atomic<bool> crashed { false }, held { false };
@@ -113,6 +126,15 @@ private:
     std::vector<std::pair<int, bool>> gesturesByPlugin;
     bool latencyCame = false, stateCame = false, lossCame = false;
     int latency = 0;
+
+    struct EditorKey
+    {
+        bool isDown = false;
+        int keyCode = 0, modifiers = 0;
+    };
+
+    std::vector<EditorKey> editorKeys;
+    std::optional<std::pair<int, int>> editorSize;
 
     // The gestures the plug-in ended, told a message after the values that came with them, which Tracktion takes in a
     // message later (so that a pass of touch has them before it ends).
@@ -136,6 +158,8 @@ private:
     void latencyChanged (int samples) override;
     void stateChanged() override;
     void parametersChanged (const std::vector<sandbox::ParameterInfo>&) override {}
+    void editorResized (int width, int height) override;
+    void editorKey (bool isDown, int keyCode, int modifiers) override;
     void handleAsyncUpdate() override;
 
     void playBlock (juce::AudioBuffer<float>&, const juce::MidiBuffer&);

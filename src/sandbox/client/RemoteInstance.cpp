@@ -135,6 +135,52 @@ bool RemoteInstance::setProgram (int index, int timeoutMilliseconds)
     return true;
 }
 
+std::optional<RemoteInstance::EditorSize> RemoteInstance::openEditor (int timeoutMilliseconds)
+{
+    auto message = helper.makeRequest (MessageType::openEditor);
+    message.add (id);
+    const auto answer = helper.request (message, timeoutMilliseconds);
+
+    if (! answer.has_value())
+        return {};
+
+    MessageReader reader (*answer);
+
+    if (! reader.readBool())
+        return {};
+
+    EditorSize size;
+    size.width = reader.readInt();
+    size.height = reader.readInt();
+    size.isResizable = reader.readBool();
+    return size;
+}
+
+void RemoteInstance::placeEditor (std::int64_t window, int x, int y, int width, int height)
+{
+    MessageWriter message (MessageType::placeEditor, 0);
+    message.add (id).add (window).add ((std::int32_t) x).add ((std::int32_t) y).add ((std::int32_t) width).add ((std::int32_t) height);
+    helper.post (message);
+}
+
+void RemoteInstance::closeEditor (int timeoutMilliseconds)
+{
+    auto message = helper.makeRequest (MessageType::closeEditor);
+    message.add (id);
+    helper.request (message, timeoutMilliseconds);
+}
+
+void RemoteInstance::setEditorKeys (bool getsEveryKey, const std::vector<std::pair<int, int>>& keys)
+{
+    MessageWriter message (MessageType::setEditorKeys, 0);
+    message.add (id).add (getsEveryKey).add ((std::int32_t) keys.size());
+
+    for (const auto& [code, modifiers] : keys)
+        message.add ((std::int32_t) code).add ((std::int32_t) modifiers);
+
+    helper.post (message);
+}
+
 void RemoteInstance::setParameter (int index, float value)
 {
     MessageWriter message (MessageType::setParameter, 0);
@@ -202,6 +248,21 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
             told->parametersChanged (readParameters (notice));
             break;
 
+        case MessageType::editorResized:
+        {
+            const auto width = notice.readInt();
+            told->editorResized (width, notice.readInt());
+            break;
+        }
+
+        case MessageType::editorKey:
+        {
+            const auto isDown = notice.readBool();
+            const auto code = notice.readInt();
+            told->editorKey (isDown, code, notice.readInt());
+            break;
+        }
+
         case MessageType::hello:
         case MessageType::heartbeat:
         case MessageType::openInstance:
@@ -212,8 +273,12 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         case MessageType::parameterText:
         case MessageType::stats:
         case MessageType::setProgram:
+        case MessageType::openEditor:
+        case MessageType::closeEditor:
         case MessageType::quit:
         case MessageType::setParameter:
+        case MessageType::placeEditor:
+        case MessageType::setEditorKeys:
         case MessageType::reply:
             break;
     }

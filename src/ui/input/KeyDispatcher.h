@@ -31,6 +31,7 @@ public:
     // (overPlugins), and running it. The plug-in gets the other keys.
     bool runsOverPlugins (const juce::KeyPress&) const;
     bool keyPressedOverPlugin (const juce::KeyPress&);
+    std::vector<juce::KeyPress> getKeysOverPlugins() const; // every key of those commands, enabled or not
 
     // Forgets the held keys, as if they were let go: when the window loses the keyboard, their release goes
     // elsewhere.

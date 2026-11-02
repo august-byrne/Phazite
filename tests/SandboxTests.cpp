@@ -81,6 +81,8 @@ struct Told final : sandbox::RemoteInstance::Listener
     void latencyChanged (int samples) override { latency = samples; }
     void stateChanged() override { ++states; }
     void parametersChanged (const std::vector<sandbox::ParameterInfo>&) override {}
+    void editorResized (int, int) override {}
+    void editorKey (bool, int, int) override {}
 };
 
 bool waitFor (const std::function<bool()>& condition, int milliseconds = 5000)

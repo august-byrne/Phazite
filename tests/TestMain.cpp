@@ -5,6 +5,7 @@
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "TestHelpers.h"
+#include "app/SandboxedEditor.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/EngineSetup.h"
@@ -146,8 +147,10 @@ int main (int argc, char** argv)
         const auto engineContext = phazite::createEngineContext (*engine);
         testEngineContext = engineContext.get();
 
-        // Plug-ins in helpers start the tests' helper, which hosts the tests' stand-ins too (host/TestPlugins.h).
+        // Plug-ins in helpers start the tests' helper, which hosts the tests' stand-ins too (host/TestPlugins.h), with their
+        // editors in the app's windows.
         phazite::getPluginHost (*engineContext).setHelperProgram (juce::File (PHAZITE_TEST_HOST));
+        phazite::useSandboxedEditors (phazite::getPluginHost (*engineContext));
 
         doctest::Context context (argc, argv);
         result = context.run();

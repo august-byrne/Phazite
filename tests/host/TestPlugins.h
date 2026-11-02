@@ -14,8 +14,8 @@ struct TestPlugins
 
     enum class Kind
     {
-        effect,    // scales its sound by its Gain ("1"), and has a Tone ("0") that does nothing; keeps both as its state; its
-                   // programs, Full and Half, set its Gain
+        effect,    // scales its sound by its Gain ("1"), and has a Tone ("0") that does nothing but make its editor larger
+                   // (300 by 200, 360 by 240 above 0.9); keeps both as its state; its programs, Full and Half, set its Gain
         synth,     // a sine for each note held, at its Level ("10"); note 127 turns its Level to 0.75 itself, in a gesture
                    // held while the note is (as a control of its window would)
         crash,     // an effect that crashes as it plays a block while its Crash ("20") is on

@@ -157,6 +157,14 @@ bool PluginKeys::wants (const juce::KeyPress& key) const
     return shortcuts.runsOverPlugins (key) || computerKeyboard.takesKey (key);
 }
 
+std::vector<juce::KeyPress> PluginKeys::getWantedKeys() const
+{
+    auto keys = shortcuts.getKeysOverPlugins();
+    const auto playing = computerKeyboard.getKeys();
+    keys.insert (keys.end(), playing.begin(), playing.end());
+    return keys;
+}
+
 void PluginKeys::watch (juce::Component& window)
 {
     // A component's key listeners hear a key before the component itself, so the editor can't take these keys first.

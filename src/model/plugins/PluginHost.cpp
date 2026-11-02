@@ -57,6 +57,11 @@ void PluginHost::setHelperProgram (const juce::File& helperProgram)
     program = helperProgram;
 }
 
+void PluginHost::setEditorMaker (SandboxedInstance::EditorMaker maker)
+{
+    editorMaker = std::move (maker);
+}
+
 void PluginHost::setOn (bool shouldBeOn)
 {
     if (shouldBeOn == on)
@@ -151,12 +156,14 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juc
 
     const auto id = remote->getID();
     auto* raw = running.get();
-    auto instance = std::make_unique<SandboxedInstance> (std::move (remote), description, running,
-                                                         [raw, id]
-                                                         {
-                                                             const std::lock_guard held (raw->lock);
-                                                             raw->instances.erase (id);
-                                                         });
+    auto instance = std::make_unique<SandboxedInstance> (
+        std::move (remote), description, running,
+        [raw, id]
+        {
+            const std::lock_guard held (raw->lock);
+            raw->instances.erase (id);
+        },
+        editorMaker);
 
     const std::lock_guard held (running->lock);
     running->instances[id] = instance.get();

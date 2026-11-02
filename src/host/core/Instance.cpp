@@ -135,6 +135,7 @@ sandbox::PluginInfo Instance::describe() const
             info.programs.push_back (plugin->getProgramName (i));
 
     info.program = plugin->getCurrentProgram();
+    info.hasEditor = plugin->hasEditor();
     return info;
 }
 

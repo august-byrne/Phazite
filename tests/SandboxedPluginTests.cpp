@@ -21,6 +21,21 @@
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/input/ComputerKeyboard.h"
+#include "ui/input/KeyDispatcher.h"
+#include "ui/input/Keymap.h"
+#include "ui/input/PluginKeys.h"
+
+// Last, so that its macros can't change the headers above.
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+#endif
 
 using phazite::test::EnginePlayback;
 using phazite::test::SandboxedPlugins;
@@ -284,6 +299,82 @@ TEST_CASE ("What a plug-in in a helper changes itself is an unsaved change of it
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&] { return song.getProject().hasUnsavedChanges() && juce::exactlyEqual (gain.getValue(), 0.5f); }, 20000));
 }
+
+#if JUCE_WINDOWS
+TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large as it makes it, and hands back play over it")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+
+    // The app's keys over plug-ins: Space plays.
+    int plays = 0;
+    phazite::CommandRegistry registry;
+    registry.add ({ .id = "transport.playStop", .name = "Play / Stop", .perform = [&plays] { ++plays; }, .overPlugins = true });
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::Keymap keymap;
+    keymap.name = "Test";
+    keymap.keys["transport.playStop"] = { "spacebar" };
+    commands.setKeymap (keymap);
+    phazite::ui::KeyDispatcher shortcutKeys { commands };
+    phazite::ui::ComputerKeyboard computerKeyboard { [] (const juce::MidiMessage&) {} };
+    phazite::ui::PluginKeys keys { shortcutKeys, computerKeyboard };
+    phazite::ui::setPluginKeys (&keys);
+
+    // Its editor, as a plug-in window makes it, as large as the plug-in's own, in a window on the screen.
+    std::unique_ptr<juce::AudioProcessorEditor> editor (getSandboxed (song, effect).createEditorAndMakeActive());
+    REQUIRE (editor != nullptr);
+    CHECK (editor->getWidth() == 300);
+    CHECK (editor->getHeight() == 200);
+    juce::Component window;
+    window.setSize (400, 300);
+    window.addAndMakeVisible (*editor);
+    window.addToDesktop (0);
+    window.setVisible (true);
+    keys.watch (window);
+
+    // The helper's window for it: a child of this one, of another process.
+    const auto parent = static_cast<HWND> (window.getPeer()->getNativeHandle());
+    HWND child = nullptr;
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            child = FindWindowExW (parent, nullptr, nullptr, nullptr);
+            return child != nullptr;
+        },
+        20000));
+    DWORD process = 0;
+    GetWindowThreadProcessId (child, &process);
+    CHECK (process != GetCurrentProcessId());
+
+    // The plug-in makes its editor larger: Phazite's follows.
+    song.setParameter (effect, "1", 1.0f); // its Tone
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return editor->getWidth() == 360; }, 20000));
+    CHECK (editor->getHeight() == 240);
+
+    // Space pressed in the plug-in's window plays, as the helper hands it back (pressed again until the helper knows the
+    // keys Phazite takes, which it is told as the editor shows).
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            PostMessageW (child, WM_KEYDOWN, VK_SPACE, 0);
+            return phazite::test::dispatchMessagesUntil ([&] { return plays > 0; }, 100);
+        },
+        20000));
+
+    // With Send All Keys to the Plug-in on, the plug-in gets it.
+    keys.setSendsAllKeys (window, true);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 600); // the editor tells the helper
+    const auto before = plays;
+    PostMessageW (child, WM_KEYDOWN, VK_SPACE, 0);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 500);
+    CHECK (plays == before);
+
+    keys.unwatch (window);
+    editor = nullptr;
+    phazite::ui::setPluginKeys (nullptr);
+}
+#endif
 
 TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effect lets its sound through")
 {

@@ -30,10 +30,16 @@ enum class MessageType : std::int32_t
     parameterText,   // instance, parameter, value -> how the plug-in writes that value
     stats,           // nothing -> the helper's CPU seconds and its memory in bytes
     setProgram,      // instance, program -> nothing (once it has it)
+    openEditor,      // instance -> ok, its width and height, whether it can be resized: the plug-in's editor made, not shown
+    closeEditor,     // instance -> nothing (once it has gone)
 
     // Phazite's notices.
-    quit = 50,    // the helper ends
-    setParameter, // instance, parameter, value: a value set by hand
+    quit = 50,     // the helper ends
+    setParameter,  // instance, parameter, value: a value set by hand
+    placeEditor,   // instance, a window of Phazite's (its native handle; 0 to hide it), x, y, width, height: the editor shown
+                   // in it there, in the window's pixels (as the screen counts them)
+    setEditorKeys, // instance, whether the plug-in gets every key, how many keys, and each key's code and modifiers: the
+                   // keys Phazite takes over the plug-in's editor
 
     // The helper's notices.
     parameterChanged = 70, // instance, parameter, value: the plug-in changed it itself (its window, a program of its own)
@@ -41,6 +47,8 @@ enum class MessageType : std::int32_t
     latencyChanged,        // instance, samples
     stateChanged,          // instance, its program: something besides its parameters changed in it (its program, perhaps)
     parametersChanged,     // instance, its parameters (PluginInfo.h): their list changed
+    editorResized,         // instance, width, height: the plug-in resized its editor itself
+    editorKey,             // instance, whether it went down, its code and modifiers: a key Phazite takes, in the editor
 
     reply = 100 // an answer: its fields are the request's
 };

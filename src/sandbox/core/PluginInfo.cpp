@@ -44,7 +44,7 @@ void write (MessageWriter& out, const PluginInfo& info)
     for (const auto& program : info.programs)
         out.add (program);
 
-    out.add ((std::int32_t) info.program);
+    out.add ((std::int32_t) info.program).add (info.hasEditor);
 }
 
 PluginInfo readPluginInfo (MessageReader& in)
@@ -64,6 +64,7 @@ PluginInfo readPluginInfo (MessageReader& in)
         program = in.readString();
 
     info.program = in.readInt();
+    info.hasEditor = in.readBool();
     return info;
 }
 } // namespace phazite::sandbox
