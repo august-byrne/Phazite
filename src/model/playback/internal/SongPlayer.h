@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <utility>
 
 namespace phazite
 {
@@ -70,9 +71,16 @@ private:
     std::set<std::int64_t> usedModulators;
     std::set<std::pair<std::uint64_t, juce::String>> modulated;         // the parameters the plan being compiled modulates
     std::map<std::int64_t, std::shared_ptr<engine::StripState>> strips; // the master's under 0
-    std::map<std::int64_t, std::shared_ptr<engine::Delay>> delays;      // each track's into the master
-    std::set<std::int64_t> used;                                        // the devices the plan being compiled plays
-    bool lowLatency = false;                                            // as the plan being compiled sees it
+    // What joins paths, kept by where they join: each delay by what it delays into what (a strip's ID, or a device's for
+    // its sidechain, then the strip it takes in: twice its ID, plus one before its fader); each send's level and each
+    // container's mix by their IDs.
+    std::map<std::pair<std::int64_t, std::int64_t>, std::shared_ptr<engine::Delay>> delays;
+    std::map<std::int64_t, std::shared_ptr<engine::SendLevel>> sendLevels;
+    std::map<std::int64_t, std::shared_ptr<engine::ContainerState>> containers;
+    std::set<std::pair<std::int64_t, std::int64_t>> usedDelays;
+    std::set<std::int64_t> usedSends, usedContainers;
+    std::set<std::int64_t> used; // the devices the plan being compiled plays
+    bool lowLatency = false;     // as the plan being compiled sees it
 
     // The audio files the plans play, by their paths, and each audio clip's place in its file, by its ID.
     std::map<juce::String, std::shared_ptr<engine::AudioFile>> files;
@@ -96,7 +104,24 @@ private:
 
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
     std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState);
-    std::vector<std::int64_t> addDevices (engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false); // their IDs
+    // A track, a bus or a return: where its sound goes (a bus's ID, or 0 for the master), what it takes in (its tracks, what
+    // sends to it, what its sidechains listen to), and what of that it refuses, which would feed itself round a loop.
+    struct ChannelInfo
+    {
+        juce::ValueTree state;
+        std::int64_t id = 0, output = 0;
+        std::vector<std::int64_t> needs;
+        std::set<std::int64_t> refused;
+
+        bool refuses (std::int64_t other) const { return refused.contains (other); }
+    };
+
+    std::vector<ChannelInfo> getChannels() const; // in an order in which each comes after what it takes in
+    void addInputs (engine::Plan&, engine::Plan::Strip&, std::vector<engine::Plan::Input>);
+    std::shared_ptr<engine::Delay> getDelay (std::pair<std::int64_t, std::int64_t> key, int length); // none for none
+    std::shared_ptr<engine::SendLevel> getSendLevel (const juce::ValueTree& sendState);
+    std::vector<std::int64_t> addDevices (engine::Plan&, const std::map<std::int64_t, int>& places, const ChannelInfo&,
+                                          engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false); // their IDs
     std::shared_ptr<engine::ModulatorNode> getModulator (const juce::ValueTree& modulatorState);
     void setModulatorValues (engine::ModulatorNode&, const juce::ValueTree& modulatorState);
     void addModulation (engine::Plan::Strip&, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs);

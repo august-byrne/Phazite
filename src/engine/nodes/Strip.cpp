@@ -7,8 +7,12 @@ namespace phazite::engine
 {
 void StripState::prepare (double sampleRate, int maximumBlockSize)
 {
-    buffer.setSize (2, maximumBlockSize);
+    buffer.setSize (4, maximumBlockSize);
     buffer.clear();
+    beforeFader.setSize (2, maximumBlockSize);
+    beforeFader.clear();
+    beforeMute.setSize (2, maximumBlockSize);
+    beforeMute.clear();
     scratch.setSize (2, 9 * maximumBlockSize + 16);
     noteStarts.reserve ((size_t) DeviceRunner::maximumEvents);
     volumeModulation.assign ((size_t) (maximumBlockSize / controlPointSpacing + 3), 0.0f);
@@ -51,12 +55,27 @@ Delay::Delay (int samples)
     line.clear();
 }
 
-void Delay::addDelayed (const float* const* inputs, float* const* outputs, int numSamples) noexcept
+void Delay::addDelayed (const float* const* inputs, float* const* outputs, int numSamples, float startGain, float endGain) noexcept
 {
+    // At a gain: a straight line from one to the other over the block.
+    const auto add = [numSamples, startGain, endGain] (float* to, const float* from, int offset, int count)
+    {
+        if (juce::exactlyEqual (startGain, 1.0f) && juce::exactlyEqual (endGain, 1.0f))
+        {
+            juce::FloatVectorOperations::add (to, from, count);
+            return;
+        }
+
+        const auto step = (endGain - startGain) / (float) numSamples;
+
+        for (int i = 0; i < count; ++i)
+            to[i] += from[i] * (startGain + step * (float) (offset + i));
+    };
+
     if (length == 0)
     {
         for (int channel = 0; channel < 2; ++channel)
-            juce::FloatVectorOperations::add (outputs[channel], inputs[channel], numSamples);
+            add (outputs[channel], inputs[channel], 0, numSamples);
 
         return;
     }
@@ -69,12 +88,74 @@ void Delay::addDelayed (const float* const* inputs, float* const* outputs, int n
         for (int channel = 0; channel < 2; ++channel)
         {
             auto* kept = line.getWritePointer (channel, position);
-            juce::FloatVectorOperations::add (outputs[channel] + done, kept, part);
+            add (outputs[channel] + done, kept, done, part);
             juce::FloatVectorOperations::copy (kept, inputs[channel] + done, part);
         }
 
         position = (position + part) % length;
         done += part;
+    }
+}
+
+//==============================================================================
+void SendLevel::setDecibels (float decibels) noexcept
+{
+    gain.store (decibels <= Channel::silenceDb ? 0.0f : juce::Decibels::decibelsToGain (decibels, Channel::silenceDb),
+                std::memory_order_relaxed);
+}
+
+std::pair<float, float> SendLevel::moveOn() noexcept
+{
+    const auto now = gain.load (std::memory_order_relaxed);
+    const auto from = applied < 0.0f ? now : applied;
+    applied = now;
+    return { from, now };
+}
+
+//==============================================================================
+ContainerState::ContainerState (int maximumBlockSize, int samples)
+    : latency (std::max (0, samples)),
+      dry (2, std::max (1, maximumBlockSize)),
+      delay (std::make_unique<Delay> (samples))
+{
+    dry.clear();
+}
+
+void ContainerState::setMix (float mix) noexcept
+{
+    mixValue.store (juce::jlimit (0.0f, 1.0f, mix), std::memory_order_relaxed);
+}
+
+void ContainerState::keepDry (const float* const* channels, int numSamples) noexcept
+{
+    // What comes in, delayed as much as the container's devices delay their sound.
+    float* kept[] = { dry.getWritePointer (0), dry.getWritePointer (1) };
+    juce::FloatVectorOperations::clear (kept[0], numSamples);
+    juce::FloatVectorOperations::clear (kept[1], numSamples);
+    delay->addDelayed (channels, kept, numSamples);
+}
+
+void ContainerState::mix (float* const* channels, int numSamples) noexcept
+{
+    // The devices' sound by the mix, what came in by the rest of it: a straight line from the last block's mix.
+    const auto now = mixValue.load (std::memory_order_relaxed);
+    const auto from = applied < 0.0f ? now : applied;
+    applied = now;
+
+    if (juce::exactlyEqual (from, 1.0f) && juce::exactlyEqual (now, 1.0f))
+        return;
+
+    const auto step = (now - from) / (float) numSamples;
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        const auto* kept = dry.getReadPointer (channel);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto wet = from + step * (float) i;
+            channels[channel][i] = channels[channel][i] * wet + kept[i] * (1.0f - wet);
+        }
     }
 }
 } // namespace phazite::engine

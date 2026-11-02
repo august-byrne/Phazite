@@ -85,8 +85,10 @@ public:
 
     // Audio thread: turns two channels (or one, the same on both sides) by the fader, easing to a new volume or pan set
     // by hand over 15 ms, following its automation, and fading in or out over 5 ms as the channel is heard or not; then
-    // measures what comes out.
-    void process (float* const* channels, int numChannels, int numSamples, const Automation& = {}) noexcept;
+    // measures what comes out. What the fader gives before the mute goes to two more channels too, if given (a sidechain
+    // hears a muted track).
+    void process (float* const* channels, int numChannels, int numSamples, const Automation& = {},
+                  float* const* beforeMute = nullptr) noexcept;
 
     LevelMeter& getMeter() noexcept { return meter; }
 

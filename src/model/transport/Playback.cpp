@@ -286,6 +286,10 @@ bool isLowLatencyOn (const te::Edit& edit)
 void toggleLowLatency (te::Edit& edit)
 {
     setLowLatency (edit.engine, ! isLowLatency (edit.engine));
+
+    // Phazite's engine takes it in with its next plan, without stopping.
+    if (auto* session = findSession (edit))
+        session->update();
 }
 
 //==============================================================================

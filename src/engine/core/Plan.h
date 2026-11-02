@@ -35,11 +35,14 @@ struct Plan
     // Whether the metronome clicks on each beat while the song plays.
     bool metronome = false;
 
-    // A strip whose sound another adds up, lined up with the others there by a delay (none when it needs none).
+    // A strip whose sound another adds up: after its fader, or before it (a send before the fader); at a send's level (or
+    // as it is); lined up with the others there by a delay (none when it needs none).
     struct Input
     {
         int strip = 0;
         std::shared_ptr<Delay> delay;
+        bool beforeFader = false;
+        std::shared_ptr<SendLevel> level;
     };
 
     // A device, with the parameters its automation moves, which follow the song as late as the sound comes into it (from
@@ -52,6 +55,18 @@ struct Plan
         std::vector<ParameterCurve> automation;
         int latency = 0;
         std::shared_ptr<Modulation> modulation;
+
+        // The strip its sidechain listens to (after that strip's fader and before its mute), lined up with its sound by a
+        // delay (none when it needs none); or none.
+        int sidechain = -1;
+        std::shared_ptr<Delay> sidechainDelay;
+    };
+
+    // A container of effects among a strip's devices: from its first to its last, and its mix with what came in.
+    struct Container
+    {
+        int first = 0, last = 0;
+        std::shared_ptr<ContainerState> state;
     };
 
     // A modulator moving a fader's volume or pan, by its place among its strip's, by an amount from -1 to 1.
@@ -77,10 +92,15 @@ struct Plan
         std::shared_ptr<const Curve> volume, pan;               // or none
         std::vector<std::shared_ptr<ModulatorNode>> modulators; // its modulators and macros, kept by their IDs
         std::vector<Route> volumeModulation, panModulation;
+        std::vector<Container> containers; // in their order among its devices
+
+        // Whether another strip takes its sound before its fader (a send), or after its fader and before its mute (a
+        // sidechain), which it then plays even while it is muted.
+        bool feedsBeforeFader = false, feedsSidechain = false;
     };
 
-    // In the order they play: each after the strips it adds up. The master last, whose sound goes out; none in a plan of
-    // the transport alone.
+    // In the order they play: each after the strips it adds up, those that send to it and those its devices' sidechains
+    // listen to. The master last, whose sound goes out; none in a plan of the transport alone.
     std::vector<Strip> strips;
 };
 } // namespace phazite::engine

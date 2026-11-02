@@ -45,7 +45,8 @@ void Channel::prepare (double rate) noexcept
     fading = 0;
 }
 
-void Channel::process (float* const* channels, int numChannels, int numSamples, const Automation& automation) noexcept
+void Channel::process (float* const* channels, int numChannels, int numSamples, const Automation& automation,
+                       float* const* beforeMute) noexcept
 {
     // Where the fader is set: by hand, or by its automation where the song is (but what is written by hand now); then moved
     // by its modulation on a control point, as parts of its range (the volume's travel, the pan's from left to right).
@@ -112,6 +113,15 @@ void Channel::process (float* const* channels, int numChannels, int numSamples, 
 
     float* sides[2] = { channels[0], numChannels > 1 ? channels[1] : nullptr };
 
+    // A sample by the fader, and its sound before its mute, for a sidechain.
+    const auto apply = [&sides, beforeMute, this] (int side, int i)
+    {
+        if (beforeMute != nullptr)
+            beforeMute[side][i] = sides[side][i] * gains[side];
+
+        sides[side][i] *= gains[side] * heard;
+    };
+
     if (follows)
     {
         // Its automation and modulation: a straight line to its value on each control point, the first the song's next,
@@ -149,7 +159,7 @@ void Channel::process (float* const* channels, int numChannels, int numSamples, 
 
                 for (int side = 0; side < 2; ++side)
                     if (sides[side] != nullptr)
-                        sides[side][i] *= gains[side] * heard;
+                        apply (side, i);
             }
 
             if (length == toPoint)
@@ -164,8 +174,15 @@ void Channel::process (float* const* channels, int numChannels, int numSamples, 
     else if (easing == 0 && fading == 0)
     {
         for (int side = 0; side < 2; ++side)
-            if (sides[side] != nullptr)
-                juce::FloatVectorOperations::multiply (sides[side], gains[side] * heard, numSamples);
+        {
+            if (sides[side] == nullptr)
+                continue;
+
+            if (beforeMute != nullptr)
+                juce::FloatVectorOperations::multiply (beforeMute[side], sides[side], gains[side], numSamples);
+
+            juce::FloatVectorOperations::multiply (sides[side], gains[side] * heard, numSamples);
+        }
     }
     else
     {
@@ -195,7 +212,7 @@ void Channel::process (float* const* channels, int numChannels, int numSamples, 
 
             for (int side = 0; side < 2; ++side)
                 if (sides[side] != nullptr)
-                    sides[side][i] *= gains[side] * heard;
+                    apply (side, i);
         }
     }
 

@@ -9,6 +9,7 @@
 #include "EventQueue.h"
 #include "Handover.h"
 #include "Plan.h"
+#include "engine/nodes/LoudnessMeter.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -60,6 +61,9 @@ public:
     // How many blocks the audio thread has played: what it let go of before the count it read is no longer played
     // (audio/AudioFile.h frees what it lets go of after it).
     const std::atomic<std::uint64_t>& getBlocksPlayed() const noexcept { return blocksPlayed; }
+
+    // How loud what goes out is (any thread reads it, and resets its integrated loudness and held peak).
+    LoudnessMeter& getLoudnessMeter() noexcept { return loudness; }
 
     // The audio thread: plays a block into the outputs (every channel the same). Real-time safe.
     void process (float* const* outputs, int numOutputs, int numSamples) noexcept;
@@ -128,6 +132,8 @@ private:
     std::vector<ModulatorNode::Point> controlPoints;
     int numControlPoints = 0;
     std::int64_t clock = 0;
+    Delay noDelay { 0 }; // joins what needs no delay, at a gain
+    LoudnessMeter loudness;
     void findControlPoints (const Plan&, std::int64_t gridSample, int numSamples) noexcept;
     void playModulators (const Plan::Strip&) noexcept;
     std::span<const float> getFaderModulation (const Plan::Strip&, const std::vector<Plan::Route>&, std::vector<float>& offsets) noexcept;

@@ -3,6 +3,8 @@
 // from the song, and the transport the model's commands drive through it while it plays the project.
 #include "EnginePlayback.h"
 #include "TestSong.h"
+#include "devices/eq/Equalizer.h"
+#include "devices/filter/FilterEffect.h"
 #include "devices/synth/Synth.h"
 #include "engine/transport/Click.h"
 #include "model/arrangement/TimelineModel.h"
@@ -11,6 +13,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/mixer/ContainerModel.h"
 #include "model/mixer/LevelSource.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
@@ -387,4 +390,93 @@ TEST_CASE ("Phazite's engine plays a track's LFO on its volume, which the LFO's 
     song.setMacroValue (macro, 1.0f);
     playback.play (0.1);
     CHECK (volume.getValue() == doctest::Approx (std::max (0.0f, before - 0.5f)).epsilon (0.01));
+}
+
+namespace
+{
+// The song as Phazite's engine renders it from its start, and the level of a side of it over a stretch, in dBFS.
+juce::AudioBuffer<float> renderOwn (TestSong& song, double seconds = 1.0)
+{
+    phazite::test::dispatchPendingMessages();
+    return phazite::renderWithOwnEngine (*phazite::getEdit (song.context), (int) (seconds * 48000.0), 48000.0, 256);
+}
+
+float levelOf (const juce::AudioBuffer<float>& audio, int side, double from = 0.25, double to = 0.75)
+{
+    const auto start = (int) (from * 48000.0);
+    return juce::Decibels::gainToDecibels (audio.getRMSLevel (side, start, (int) (to * 48000.0) - start));
+}
+
+// A 440 Hz tone, at a quarter of full scale, on a track from the song's start.
+phazite::TrackID addToneTrack (TestSong& song, phazite::TrackID track, const char* name)
+{
+    song.addAudioClip (
+        track, phazite::test::writeSound (song.getSoundsFolder().getChildFile (juce::String (name) + ".wav"), 2.0, 440.0, 0.25f), 0.0);
+    return track;
+}
+
+constexpr float toneLevel = -18.05f; // the tone's RMS through the master's -3 dB
+} // namespace
+
+TEST_CASE ("Phazite's engine sends to a return before or after the fader, at the send's level, and a muted track sends nothing")
+{
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    song.addReturn (track, phazite::devices::Equalizer::typeID, -6.0f); // a flat EQ: the return passes what it is sent
+    const auto send = phazite::getSends (song.context, track).front().id;
+    song.setVolume (track, -100.0f);
+
+    // After the fader, down: nothing. Before it: the tone, on both sides, 6 dB down.
+    CHECK (levelOf (renderOwn (song), 0) < -90.0f);
+    phazite::setPreFader (song.context, send, true);
+    auto audio = renderOwn (song);
+    CHECK (levelOf (audio, 0) == doctest::Approx (toneLevel - 6.0f).epsilon (0.002));
+    CHECK (levelOf (audio, 1) == doctest::Approx (toneLevel - 6.0f).epsilon (0.002));
+
+    // Its level is taken in at once; a muted track sends nothing.
+    phazite::getSendLevel (song.context, send).setValue (phazite::decibelsToFaderPosition (0.0f));
+    CHECK (levelOf (renderOwn (song), 0) == doctest::Approx (toneLevel).epsilon (0.002));
+    phazite::toggleMute (song.context, track);
+    CHECK (levelOf (renderOwn (song), 0) < -90.0f);
+}
+
+TEST_CASE ("Phazite's engine plays a bus's tracks through its fader, a soloed track in it alone, and a plain folder turns its tracks")
+{
+    TestSong song;
+    song.setTempo (120.0);
+    const auto first = addToneTrack (song, song.firstTrack, "First");
+    const auto second = addToneTrack (song, song.addTrack ("Second"), "Second");
+    const auto bus = song.addBus ("Bus", { first, second });
+    song.setVolume (bus, -6.0f);
+
+    // Both tones, 6 dB louder together, through the bus's -6 dB.
+    CHECK (levelOf (renderOwn (song), 0) == doctest::Approx (toneLevel).epsilon (0.002));
+
+    // One soloed: the bus plays it alone.
+    phazite::toggleSolo (song.context, first);
+    CHECK (levelOf (renderOwn (song), 0) == doctest::Approx (toneLevel - 6.0f).epsilon (0.002));
+    phazite::toggleSolo (song.context, first);
+
+    // A plain folder (a VCA) turns its tracks by its volume, without a fader of its own.
+    phazite::setMixedAsBus (song.context, bus, false);
+    song.setVolume (bus, -12.0f);
+    CHECK (levelOf (renderOwn (song), 0) == doctest::Approx (toneLevel + 6.0f - 12.0f).epsilon (0.002));
+}
+
+TEST_CASE ("Phazite's engine mixes a container's devices with what comes into it, by its mix")
+{
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    const auto filter = song.addEffect (track, phazite::devices::FilterEffect::typeID);
+    song.setParameter (filter, "cutoff", 40.0f); // a low-pass far below the tone: all but silent
+    const auto container = phazite::groupIntoContainer (song.context, { filter });
+    REQUIRE (container.isValid());
+    CHECK (levelOf (renderOwn (song), 0) < toneLevel - 30.0f);
+
+    // At no mix, the tone as it came in.
+    auto mix = phazite::getMix (song.context, container);
+    mix.setValue (0.0f);
+    CHECK (levelOf (renderOwn (song), 0) == doctest::Approx (toneLevel).epsilon (0.002));
 }

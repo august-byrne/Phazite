@@ -740,6 +740,14 @@ std::vector<Connection> getConnections (const ProjectContext& context)
 std::optional<Loudness> getLoudness (const ProjectContext& context)
 {
     auto* edit = getEdit (context);
+
+    // Phazite's engine's own meter, while it plays the project.
+    if (auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr)
+    {
+        const auto readings = session->getEngine().getLoudnessMeter().getReadings();
+        return Loudness { readings.momentary, readings.shortTerm, readings.integrated, readings.truePeak };
+    }
+
     auto* meter = edit != nullptr ? findLoudnessMeter (*edit) : nullptr;
 
     if (meter == nullptr)
@@ -755,8 +763,13 @@ std::optional<Loudness> getLoudness (const ProjectContext& context)
 void resetLoudness (ProjectContext& context)
 {
     if (auto* edit = getEdit (context))
+    {
+        if (auto* session = findPlayingSession (*edit))
+            session->getEngine().getLoudnessMeter().reset();
+
         if (auto* meter = findLoudnessMeter (*edit))
             meter->resetReadings();
+    }
 }
 
 //==============================================================================

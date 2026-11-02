@@ -78,6 +78,11 @@ bool PlaybackSession::isPlayingProject() const
     return exists.get() != nullptr && host.isOn() && host.getPlayingSession() == this && ! edit.getTransport().isRecording();
 }
 
+engine::Engine& PlaybackSession::getEngine() noexcept
+{
+    return host.getEngine();
+}
+
 bool PlaybackSession::isPlaying() const
 {
     return host.getEngine().isPlaying();

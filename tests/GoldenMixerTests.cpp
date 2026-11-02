@@ -165,7 +165,8 @@ TEST_SUITE ("golden")
             {
                 auto ok = changesLevel (before, after, 10, -3.0f, "the tone ducks as the kick hits");
                 return isLouder (after, 8, 10, 3.0f, "the tone comes back up between the kicks") && ok;
-            });
+            },
+            phazite::test::OwnEngine::matches);
     }
 
     TEST_CASE ("Golden render: a send before the fader feeds its return with the fader down")
@@ -186,7 +187,8 @@ TEST_SUITE ("golden")
             {
                 auto ok = isBetween (before, 20, -100.0f, floorDb, "after the fader, the send sends nothing");
                 return isBetween (after, 20, -40.0f, 6.0f, "before the fader, it sends the tone to the reverb") && ok;
-            });
+            },
+            phazite::test::OwnEngine::differs); // a mono clip sent on both sides, where Tracktion's sent one channel
     }
 
     TEST_CASE ("Golden render: a soloed track plays alone, and a muted one never")

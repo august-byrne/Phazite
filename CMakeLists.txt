@@ -174,6 +174,8 @@ target_sources(phazite_core PRIVATE
     src/engine/nodes/DeviceRunner.h
     src/engine/nodes/LevelMeter.cpp
     src/engine/nodes/LevelMeter.h
+    src/engine/nodes/LoudnessMeter.cpp
+    src/engine/nodes/LoudnessMeter.h
     src/engine/nodes/NoteSequence.cpp
     src/engine/nodes/NoteSequence.h
     src/engine/nodes/Strip.cpp

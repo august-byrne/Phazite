@@ -34,6 +34,7 @@ public:
     SongPlayer& getPlayer() noexcept { return player; }
     const SongPlayer& getPlayer() const noexcept { return player; }
     AutomationWriter& getWriter() noexcept { return writer; }
+    engine::Engine& getEngine() noexcept; // the host's, which plays it
 
     // Whether Phazite's engine plays this project now: the host is on, this is the project it plays, and Tracktion isn't
     // recording (until T2 step 9 records through Phazite's engine).

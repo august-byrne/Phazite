@@ -578,7 +578,8 @@ TEST_SUITE ("golden")
         phazite::test::settle();
         phazite::test::checkGoldenRender (
             song.context,
-            golden ("mix", "two tones through a bus, a send to a reverb return, volume automation and pan.", 4.0, soundsLikeTheMix));
+            golden ("mix", "two tones through a bus, a send to a reverb return, volume automation and pan.", 4.0, soundsLikeTheMix)
+                .on (phazite::test::OwnEngine::differs)); // its automation, pan law and reverb Phazite's engine's
     }
 
     TEST_CASE ("Golden render: the First Beat example song, a beat on Phazite's drum sampler and an arpeggio on its synth")
@@ -588,7 +589,8 @@ TEST_SUITE ("golden")
         phazite::test::checkGoldenRender (song.context, golden ("first-beat",
                                                                 "the First Beat example song, a beat on Phazite's drum sampler and "
                                                                 "an arpeggio on its synth.",
-                                                                firstBeatSeconds, soundsLikeFirstBeat));
+                                                                firstBeatSeconds, soundsLikeFirstBeat)
+                                                            .on (phazite::test::OwnEngine::matches));
     }
 
     TEST_CASE ("Golden render: two chords on Phazite's wavetable synth, in unison, an envelope sweeping each note's table")

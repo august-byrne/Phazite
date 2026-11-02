@@ -17,6 +17,7 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
+#include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/dynamics/Multiband.h"
@@ -45,6 +46,8 @@
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/engine/internal/Preview.h"
 #include "model/engine/internal/PreviewLoop.h"
+#include "model/mixer/ContainerModel.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
@@ -691,6 +694,39 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playPhaziteAndMeasure (song.context);
         report ("Phazite's engine: modulation", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords in a bus, sends before and after the fader to returns, a sidechain, "
+               "a container and the loudness meter")
+    {
+        phazite::test::TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto filter = song.addEffect (keys, phazite::devices::FilterEffect::typeID);
+        const auto saturator = song.addEffect (keys, phazite::devices::Saturator::typeID);
+        REQUIRE (phazite::groupIntoContainer (song.context, { filter, saturator }).isValid());
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        const auto kick = song.addTrack ("Kick");
+        song.setInstrument (kick, phazite::devices::DrumSampler::typeID);
+        const auto beats = song.addMidiClip (kick, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addNote (beats, 36, beat, 0.25);
+
+        song.addBus ("Bus", { keys });
+        song.addReturn (keys, phazite::devices::Reverb::typeID, -6.0f);
+        song.addReturn (kick, phazite::devices::Delay::typeID, -10.0f);
+        phazite::setPreFader (song.context, phazite::getSends (song.context, kick).front().id, true);
+        REQUIRE (phazite::duckUnder (song.context, keys, kick).isValid());
+
+        const auto m = playPhaziteAndMeasure (song.context);
+        report ("Phazite's engine: routing", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
     }

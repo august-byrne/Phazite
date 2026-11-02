@@ -207,7 +207,7 @@ TEST_SUITE ("golden")
             "a container of a filter, closed at 200 Hz, and a saturator on a high chord, its first macro opening the filter.",
             [] (const Fingerprint& before, const Fingerprint& after)
             { return changesLevel (before, after, 20, 10.0f, "the macro opens the filter on the chord"); },
-            phazite::test::OwnEngine::notYet); // containers play on Phazite's engine from T2 step 6
+            phazite::test::OwnEngine::matches);
     }
 }
 

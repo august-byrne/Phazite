@@ -12,6 +12,7 @@
 #include "engine/core/TempoMap.h"
 #include "engine/nodes/Channel.h"
 #include "engine/nodes/DeviceRunner.h"
+#include "engine/nodes/LoudnessMeter.h"
 #include "engine/transport/Click.h"
 
 #include <array>
@@ -998,4 +999,56 @@ TEST_CASE ("A modulator moves a fader on the song's control points, the same at 
 
         CHECK (largest < 1.0e-5f);
     }
+}
+
+TEST_CASE ("The engine's loudness meter reads a sine as EBU R128 does, gates silence out, and starts again when reset")
+{
+    // A 997 Hz sine at a tenth of full scale on both channels is -20 LUFS (BS.1770's K-weighting is +0.69 dB there,
+    // which its -0.691 takes back), its true peak -20 dBTP.
+    engine::LoudnessMeter meter;
+    meter.prepare (rate, 512);
+    juce::AudioBuffer<float> sine (2, 512);
+    const auto play = [&meter, &sine] (double seconds, float amplitude, int& sample)
+    {
+        for (int done = 0; done < (int) (seconds * rate); done += 512)
+        {
+            for (int i = 0; i < 512; ++i, ++sample)
+                for (int channel = 0; channel < 2; ++channel)
+                    sine.setSample (channel, i, amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * 997.0 * sample / rate));
+
+            meter.process (sine.getArrayOfReadPointers(), 2, 512);
+        }
+    };
+
+    int sample = 0;
+    CHECK_FALSE (meter.getReadings().momentary.has_value());
+    play (4.0, 0.1f, sample);
+    const auto loud = meter.getReadings();
+    REQUIRE (loud.momentary.has_value());
+    REQUIRE (loud.shortTerm.has_value());
+    REQUIRE (loud.integrated.has_value());
+    REQUIRE (loud.truePeak.has_value());
+    CHECK (*loud.momentary == doctest::Approx (-20.0f).epsilon (0.005));
+    CHECK (*loud.shortTerm == doctest::Approx (-20.0f).epsilon (0.005));
+    CHECK (*loud.integrated == doctest::Approx (-20.0f).epsilon (0.005));
+    CHECK (*loud.truePeak == doctest::Approx (-20.0f).epsilon (0.01));
+
+    // Silence below the gate leaves the integrated loudness as it was, but for the gating blocks that overlap the sine's
+    // end, which R128 counts; and 10 dB quieter for as long as it was loud, it counts (it is within 10 LU of the rest),
+    // between the two.
+    play (2.0, 0.0f, sample);
+    CHECK (*meter.getReadings().integrated == doctest::Approx (-20.0f).epsilon (0.01));
+    play (4.0, 0.0316f, sample);
+    const auto between = *meter.getReadings().integrated;
+    CHECK (between < -20.5f);
+    CHECK (between > -29.5f);
+
+    // Reset: only what it hears after it counts, the loud start long gone.
+    meter.reset();
+    play (4.0, 0.0316f, sample);
+    const auto after = meter.getReadings();
+    REQUIRE (after.integrated.has_value());
+    REQUIRE (after.truePeak.has_value());
+    CHECK (*after.integrated == doctest::Approx (-30.0f).epsilon (0.005));
+    CHECK (*after.truePeak == doctest::Approx (-30.0f).epsilon (0.01));
 }

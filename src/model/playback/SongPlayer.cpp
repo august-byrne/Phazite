@@ -197,65 +197,81 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     modulated.clear();
     readCurves();
 
-    for (const auto& trackState : getTrackStates (edit))
+    // The song's channels, each a strip: its tracks, its buses (folders with faders of their own: a plain folder's VCA
+    // turns its tracks) and its returns, in an order in which each comes after what it takes in.
+    usedDelays.clear();
+    const auto channels = getChannels();
+    std::map<std::int64_t, int> places; // each channel's strip, by its ID
+
+    for (const auto& channel : channels)
     {
-        if (isFolderState (trackState) || isReturnState (trackState))
-            continue;
-
-        // A frozen track plays its frozen file, through the devices after its freeze point; any other its clips.
         engine::Plan::Strip strip;
-        strip.id = getID (trackState, schema::trackID);
+        strip.id = channel.id;
         strip.state = getStrip (strip.id);
-        const auto frozen = addFrozenFile (strip, trackState);
 
-        if (! frozen)
+        // A bus adds up its tracks; a return what is sent to it.
+        std::vector<engine::Plan::Input> inputs;
+
+        for (const auto& other : channels)
         {
-            strip.notes = compileNotes (trackState);
-            addAudio (strip, trackState);
+            if (! places.contains (other.id) || channel.refuses (other.id))
+                continue;
+
+            if (other.output == channel.id && ! isReturnState (channel.state))
+                inputs.push_back ({ places[other.id], nullptr });
+
+            for (const auto& send : other.state)
+            {
+                if (send.hasType (schema::SEND) && getID (send, schema::sendTo) == channel.id && isReturnState (channel.state))
+                {
+                    const auto beforeFader = (bool) send[schema::sendPreFader];
+                    inputs.push_back ({ places[other.id], nullptr, beforeFader, getSendLevel (send) });
+                    plan->strips[(size_t) places[other.id]].feedsBeforeFader |= beforeFader;
+                }
+            }
         }
 
-        const auto deviceIDs = addDevices (strip, trackState, frozen);
-        addFaderAutomation (strip, trackState, false);
-        addModulation (strip, trackState, deviceIDs);
-        setChannel (trackState, false);
+        addInputs (*plan, strip, std::move (inputs));
+
+        // A frozen track plays its frozen file, through the devices after its freeze point; any other its clips.
+        auto frozen = false;
+
+        if (! isFolderState (channel.state) && ! isReturnState (channel.state))
+        {
+            frozen = addFrozenFile (strip, channel.state);
+
+            if (! frozen)
+            {
+                strip.notes = compileNotes (channel.state);
+                addAudio (strip, channel.state);
+            }
+        }
+
+        const auto deviceIDs = addDevices (*plan, places, channel, strip, channel.state, frozen);
+        addFaderAutomation (strip, channel.state, false);
+        addModulation (strip, channel.state, deviceIDs);
+        setChannel (channel.state, false);
+        places[channel.id] = (int) plan->strips.size();
         plan->strips.push_back (std::move (strip));
     }
 
     updateAudibility();
 
-    // The master adds them up, each delayed to come out as late as the latest (delay compensation), through its devices.
-    auto latest = 0;
-
-    for (const auto& strip : plan->strips)
-        latest = std::max (latest, strip.latency);
-
+    // The master adds up what goes to it: the tracks and buses in no bus, and the returns.
     engine::Plan::Strip master;
     master.state = getStrip (0);
-    master.latency = latest;
+    std::vector<engine::Plan::Input> inputs;
+
+    for (const auto& channel : channels)
+        if (channel.output == 0 && places.contains (channel.id))
+            inputs.push_back ({ places[channel.id], nullptr });
+
+    addInputs (*plan, master, std::move (inputs));
     const auto masterState = findPhaziteState (edit).getChildWithName (schema::MASTER);
-    const auto masterDeviceIDs = addDevices (master, masterState);
+    const auto masterDeviceIDs = addDevices (*plan, places, {}, master, masterState);
     addFaderAutomation (master, masterState, true);
     addModulation (master, masterState, masterDeviceIDs);
     setChannel (masterState, true);
-
-    for (int i = 0; i < (int) plan->strips.size(); ++i)
-    {
-        const auto& strip = plan->strips[(size_t) i];
-        engine::Plan::Input input { i, nullptr };
-
-        if (const auto delay = latest - strip.latency; delay > 0)
-        {
-            auto& kept = delays[strip.id];
-
-            if (kept == nullptr || kept->getLength() != delay)
-                kept = std::make_shared<engine::Delay> (delay);
-
-            input.delay = kept;
-        }
-
-        master.inputs.push_back (std::move (input));
-    }
-
     plan->strips.push_back (std::move (master));
 
     // What the song doesn't hold any more goes with the last plan that plays it.
@@ -269,7 +285,9 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::erase_if (files, [this] (const auto& file) { return usedFiles.count (file.first) == 0; });
     std::erase_if (regions, [this] (const auto& region) { return usedRegions.count (region.first) == 0; });
     std::erase_if (strips, [&tracks] (const auto& strip) { return tracks.count (strip.first) == 0; });
-    std::erase_if (delays, [&tracks] (const auto& delay) { return tracks.count (delay.first) == 0; });
+    std::erase_if (delays, [this] (const auto& delay) { return usedDelays.count (delay.first) == 0; });
+    std::erase_if (sendLevels, [this] (const auto& level) { return usedSends.count (level.first) == 0; });
+    std::erase_if (containers, [this] (const auto& container) { return usedContainers.count (container.first) == 0; });
     return plan;
 }
 
@@ -309,33 +327,38 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
     return node;
 }
 
-std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan::Strip& strip, const juce::ValueTree& channelState, bool skipFrozen)
+std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std::map<std::int64_t, int>& places, const ChannelInfo& channel,
+                                                  engine::Plan::Strip& strip, const juce::ValueTree& channelState, bool skipFrozen)
 {
     std::vector<std::int64_t> ids;
 
     // While Low Latency is on, a device that looks ahead lets the sound through as it comes (model/engine/internal/EngineSetup.h).
     const auto lowLatencyLimit = (int) (lowLatencyLimitSeconds * preparedRate);
 
-    for (const auto& deviceState : channelState)
+    // A frozen track's devices before its freeze point are in its frozen file.
+    const auto isFrozen = [this, skipFrozen] (const juce::ValueTree& state)
     {
-        if (! deviceState.hasType (schema::DEVICE))
-            continue;
-
-        // A frozen track's devices before its freeze point are in its frozen file.
         if (skipFrozen)
-            if (const auto plugin = te::findPluginForID (edit, toTracktion (getDeviceID (deviceState))))
-                if (isFrozenDevice (*plugin))
-                    continue;
+            if (const auto plugin = te::findPluginForID (edit, toTracktion (getDeviceID (state))))
+                return isFrozenDevice (*plugin);
+
+        return false;
+    };
+
+    const auto add = [&] (const juce::ValueTree& deviceState)
+    {
+        if (isFrozen (deviceState))
+            return;
 
         auto node = getDevice (deviceState);
 
         if (node == nullptr)
-            continue;
+            return;
 
         const auto latency = node->isOn() ? node->getRunner().getLatencySamples() : 0;
 
         if (lowLatency && latency > lowLatencyLimit)
-            continue;
+            return;
 
         if (strip.devices.empty() && node->getDeviceInfo().kind == devices::DeviceKind::instrument)
             strip.hasInstrument = true;
@@ -349,12 +372,177 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan::Strip& strip, co
             if (auto curve = findCurve (id, juce::String (parameters[i].id.data(), parameters[i].id.size())))
                 device.automation.push_back ({ (int) i, std::move (curve) });
 
+        // What its sidechain listens to, lined up with its sound where it can be (a track that comes later than the device
+        // can't be heard earlier).
+        if (const auto source = (std::int64_t) getID (deviceState, schema::deviceSidechain);
+            source != 0 && places.contains (source) && ! channel.refuses (source))
+        {
+            auto& heard = plan.strips[(size_t) places.at (source)];
+            heard.feedsSidechain = true;
+            device.sidechain = places.at (source);
+            device.sidechainDelay = getDelay ({ (std::int64_t) id, source }, strip.latency - heard.latency);
+        }
+
         strip.latency += latency;
         strip.devices.push_back (std::move (device));
         ids.push_back ((std::int64_t) id);
+    };
+
+    for (const auto& deviceState : channelState)
+    {
+        if (deviceState.hasType (schema::DEVICE))
+        {
+            add (deviceState);
+        }
+        else if (deviceState.hasType (schema::CONTAINER) && ! (bool) deviceState[schema::deviceOff] && ! isFrozen (deviceState))
+        {
+            // A container: its devices, then its mix of their sound with what came in, delayed as much as they delay it.
+            const auto first = (int) strip.devices.size();
+            const auto latencyBefore = strip.latency;
+
+            for (const auto& inside : deviceState)
+                if (inside.hasType (schema::DEVICE))
+                    add (inside);
+
+            if ((int) strip.devices.size() > first)
+            {
+                const auto id = getID (deviceState, schema::deviceID);
+                auto& kept = containers[id];
+
+                if (kept == nullptr || kept->getLatency() != strip.latency - latencyBefore)
+                    kept = std::make_shared<engine::ContainerState> (preparedBlockSize, strip.latency - latencyBefore);
+
+                kept->setMix ((float) deviceState.getProperty (schema::deviceMix, 1.0f));
+                usedContainers.insert (id);
+                strip.containers.push_back ({ first, (int) strip.devices.size() - 1, kept });
+            }
+        }
     }
 
     return ids;
+}
+
+std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
+{
+    // Each track's, bus's and return's: where it goes (the bus it is in, or the master), and what it takes in.
+    std::vector<ChannelInfo> infos;
+
+    for (const auto& state : getTrackStates (edit))
+    {
+        if (isFolderState (state) && ! state.hasProperty (schema::channelFader))
+            continue; // a plain folder's VCA turns its tracks (setChannel())
+
+        ChannelInfo info { state, getID (state, schema::trackID) };
+
+        if (! isReturnState (state))
+            for (auto parent = state.getParent(); parent.hasType (schema::TRACK) && info.output == 0; parent = parent.getParent())
+                if (parent.hasProperty (schema::channelFader))
+                    info.output = getID (parent, schema::trackID);
+
+        infos.push_back (std::move (info));
+    }
+
+    for (auto& info : infos)
+    {
+        for (const auto& other : infos)
+        {
+            if (other.output == info.id && ! isReturnState (info.state))
+                info.needs.push_back (other.id);
+
+            for (const auto& send : other.state)
+                if (send.hasType (schema::SEND) && getID (send, schema::sendTo) == info.id && isReturnState (info.state))
+                    info.needs.push_back (other.id);
+        }
+
+        const auto addSidechains = [&info] (const juce::ValueTree& chain, auto& addInside) -> void
+        {
+            for (const auto& device : chain)
+            {
+                if (const auto source = getID (device, schema::deviceSidechain); device.hasType (schema::DEVICE) && source != 0)
+                    info.needs.push_back (source);
+                else if (device.hasType (schema::CONTAINER))
+                    addInside (device, addInside);
+            }
+        };
+
+        addSidechains (info.state, addSidechains);
+    }
+
+    // In an order in which each comes after what it takes in; what would feed itself (a sidechain or a send round a loop)
+    // is refused.
+    std::vector<ChannelInfo> ordered;
+    std::map<std::int64_t, int> marks; // 1 while visiting, 2 once placed
+    std::map<std::int64_t, size_t> indices;
+
+    for (size_t i = 0; i < infos.size(); ++i)
+        indices[infos[i].id] = i;
+
+    const auto visit = [&] (size_t index, auto& visitNext) -> void
+    {
+        auto& info = infos[index];
+        marks[info.id] = 1;
+
+        for (const auto need : info.needs)
+        {
+            if (! indices.contains (need))
+                continue;
+
+            if (marks[need] == 1)
+                info.refused.insert (need);
+            else if (marks[need] == 0)
+                visitNext (indices[need], visitNext);
+        }
+
+        marks[info.id] = 2;
+        ordered.push_back (info);
+    };
+
+    for (size_t i = 0; i < infos.size(); ++i)
+        if (marks[infos[i].id] == 0)
+            visit (i, visit);
+
+    return ordered;
+}
+
+void SongPlayer::addInputs (engine::Plan& plan, engine::Plan::Strip& strip, std::vector<engine::Plan::Input> inputs)
+{
+    // Each lined up with the latest (delay compensation): the strip's own sound comes in as late as that.
+    for (const auto& input : inputs)
+        strip.latency = std::max (strip.latency, plan.strips[(size_t) input.strip].latency);
+
+    for (auto& input : inputs)
+    {
+        const auto& from = plan.strips[(size_t) input.strip];
+        input.delay = getDelay ({ strip.id, from.id * 2 + (input.beforeFader ? 1 : 0) }, strip.latency - from.latency);
+        strip.inputs.push_back (std::move (input));
+    }
+}
+
+std::shared_ptr<engine::Delay> SongPlayer::getDelay (std::pair<std::int64_t, std::int64_t> key, int length)
+{
+    if (length <= 0)
+        return nullptr;
+
+    auto& kept = delays[key];
+
+    if (kept == nullptr || kept->getLength() != length)
+        kept = std::make_shared<engine::Delay> (length);
+
+    usedDelays.insert (key);
+    return kept;
+}
+
+std::shared_ptr<engine::SendLevel> SongPlayer::getSendLevel (const juce::ValueTree& sendState)
+{
+    const auto id = getID (sendState, schema::sendID);
+    auto& kept = sendLevels[id];
+
+    if (kept == nullptr)
+        kept = std::make_shared<engine::SendLevel>();
+
+    kept->setDecibels ((float) sendState.getProperty (schema::sendLevel, 0.0f));
+    usedSends.insert (id);
+    return kept;
 }
 
 //==============================================================================
@@ -414,20 +602,30 @@ void SongPlayer::setModulatorValues (engine::ModulatorNode& node, const juce::Va
 
 void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs)
 {
-    // Its modulators and macros, in their order, and what each moves: its devices' parameters and its fader.
+    // Its modulators and macros, in their order, then its containers' macros, and what each moves: its devices' parameters
+    // (a container's macros those in it) and its fader.
     std::vector<juce::ValueTree> sources;
 
-    for (const auto& child : channelState)
+    const auto addSources = [this, &strip, &sources] (const juce::ValueTree& parent)
     {
-        if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
+        for (const auto& child : parent)
         {
-            if (auto node = getModulator (child))
+            if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
             {
-                strip.modulators.push_back (std::move (node));
-                sources.push_back (child);
+                if (auto node = getModulator (child))
+                {
+                    strip.modulators.push_back (std::move (node));
+                    sources.push_back (child);
+                }
             }
         }
-    }
+    };
+
+    addSources (channelState);
+
+    for (const auto& child : channelState)
+        if (child.hasType (schema::CONTAINER))
+            addSources (child);
 
     const auto fader = (std::int64_t) getID (channelState, schema::channelFader);
 
@@ -559,8 +757,15 @@ void SongPlayer::setChannel (const juce::ValueTree& channelState, bool isMaster)
 {
     if (auto* strip = findStrip (isMaster ? 0 : getID (channelState, schema::trackID)))
     {
+        // Its fader, turned by the VCAs of the plain folders it is in.
+        auto volume = (float) channelState.getProperty (schema::channelVolume, isMaster ? defaultMasterVolume : 0.0f);
+
+        for (auto parent = channelState.getParent(); ! isMaster && parent.hasType (schema::TRACK); parent = parent.getParent())
+            if (isFolderState (parent) && ! parent.hasProperty (schema::channelFader))
+                volume += (float) parent.getProperty (schema::channelVolume, 0.0f);
+
         auto& channel = strip->getChannel();
-        channel.setVolume ((float) channelState.getProperty (schema::channelVolume, isMaster ? defaultMasterVolume : 0.0f));
+        channel.setVolume (std::max (volume, engine::Channel::silenceDb));
         channel.setPan ((float) channelState.getProperty (schema::channelPan, 0.0f));
     }
 }
@@ -572,6 +777,16 @@ void SongPlayer::updateAudibility()
     const auto trackStates = getTrackStates (edit);
     const auto anySoloed =
         std::any_of (trackStates.begin(), trackStates.end(), [] (const auto& state) { return (bool) state[schema::trackSolo]; });
+
+    // A bus carries a soloed track in it.
+    const auto holdsSoloed = [] (const juce::ValueTree& folder, auto& holdsNext) -> bool
+    {
+        for (const auto& child : folder)
+            if (child.hasType (schema::TRACK) && ((bool) child[schema::trackSolo] || holdsNext (child, holdsNext)))
+                return true;
+
+        return false;
+    };
 
     for (const auto& state : trackStates)
     {
@@ -588,6 +803,7 @@ void SongPlayer::updateAudibility()
             soloed = soloed || (bool) track[schema::trackSolo];
         }
 
+        soloed = soloed || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
         strip->getChannel().setAudible (! muted && (! anySoloed || soloed || isReturnState (state)));
     }
 }
@@ -614,6 +830,43 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
 
     if (tree.hasType (schema::MACRO) && property == schema::macroName)
         return true;
+
+    // A send's level, and a container's mix: at once.
+    if (tree.hasType (schema::SEND) && property == schema::sendLevel)
+    {
+        if (const auto found = sendLevels.find (getID (tree, schema::sendID)); found != sendLevels.end())
+            found->second->setDecibels ((float) tree.getProperty (schema::sendLevel, 0.0f));
+
+        return true;
+    }
+
+    if (tree.hasType (schema::CONTAINER) && property == schema::deviceMix)
+    {
+        if (const auto found = containers.find (getID (tree, schema::deviceID)); found != containers.end())
+            found->second->setMix ((float) tree.getProperty (schema::deviceMix, 1.0f));
+
+        return true;
+    }
+
+    // A plain folder's VCA turns the tracks in it.
+    if (tree.hasType (schema::TRACK) && isFolderState (tree) && ! tree.hasProperty (schema::channelFader)
+        && property == schema::channelVolume)
+    {
+        const auto turn = [this] (const juce::ValueTree& folder, auto& turnNext) -> void
+        {
+            for (const auto& child : folder)
+            {
+                if (child.hasType (schema::TRACK))
+                {
+                    setChannel (child, false);
+                    turnNext (child, turnNext);
+                }
+            }
+        };
+
+        turn (tree, turn);
+        return true;
+    }
 
     // A parameter's value set by hand, or its default again.
     if (tree.hasType (schema::VALUES))

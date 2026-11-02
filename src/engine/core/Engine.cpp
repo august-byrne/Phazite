@@ -35,6 +35,7 @@ void Engine::prepare (double rate, int blockSize)
     transport.plan = nullptr; // a plan for another rate: the playhead stays on its beat
     controlPoints.assign ((size_t) (maximumBlockSize / controlPointSpacing + 3), {});
     numControlPoints = 0;
+    loudness.prepare (sampleRate, maximumBlockSize);
 }
 
 void Engine::setPlan (std::unique_ptr<Plan> plan)
@@ -283,6 +284,10 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
         for (int channel = 0; channel < std::min (numOutputs, 2); ++channel)
             if (outputs[channel] != nullptr)
                 juce::FloatVectorOperations::add (outputs[channel] + offset, master.buffer.getReadPointer (channel, offset), numSamples);
+
+        // How loud it is.
+        const float* out[] = { master.buffer.getReadPointer (0, offset), master.buffer.getReadPointer (1, offset) };
+        loudness.process (out, 2, numSamples);
     }
 
     transport.notesOff = false;
@@ -314,17 +319,15 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
         juce::FloatVectorOperations::clear (channels[0], numSamples);
         juce::FloatVectorOperations::clear (channels[1], numSamples);
 
-        // What it adds up, each lined up with the others.
+        // What it adds up, each lined up with the others: strips after their faders, or before them (sends), at their sends'
+        // levels.
         for (const auto& input : strip.inputs)
         {
             const auto& from = *plan.strips[(size_t) input.strip].state;
-            const float* sound[] = { from.buffer.getReadPointer (0, offset), from.buffer.getReadPointer (1, offset) };
-
-            if (input.delay != nullptr)
-                input.delay->addDelayed (sound, channels, numSamples);
-            else
-                for (int channel = 0; channel < 2; ++channel)
-                    juce::FloatVectorOperations::add (channels[channel], sound[channel], numSamples);
+            const auto& sound = input.beforeFader ? from.beforeFader : from.buffer;
+            const float* sides[] = { sound.getReadPointer (0, offset), sound.getReadPointer (1, offset) };
+            const auto [startGain, endGain] = input.level != nullptr ? input.level->moveOn() : std::pair (1.0f, 1.0f);
+            (input.delay != nullptr ? *input.delay : noDelay).addDelayed (sides, channels, numSamples, startGain, endGain);
         }
 
         // What its instrument plays: its notes, and what is played live into it.
@@ -346,8 +349,9 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
         state.sortEvents();
         playModulators (strip);
 
-        // A channel muted (or soloed out) plays nothing, and its devices start from silence when it is heard again.
-        if (state.getChannel().isSilenced())
+        // A channel muted (or soloed out) plays nothing, and its devices start from silence when it is heard again; but one
+        // a sidechain listens to plays on, which hears it before its mute.
+        if (state.getChannel().isSilenced() && ! strip.feedsSidechain)
         {
             state.wasSilenced = true;
         }
@@ -399,12 +403,45 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
                 if (i == 0 && strip.hasInstrument)
                     block.events = std::span (state.events.data(), (size_t) state.numEvents);
 
+                // What its sidechain listens to: another strip after its fader and before its mute, lined up with its sound.
+                if (const auto& device = strip.devices[i]; device.sidechain >= 0)
+                {
+                    const auto& heard = plan.strips[(size_t) device.sidechain].state->beforeMute;
+                    const float* from[] = { heard.getReadPointer (0, offset), heard.getReadPointer (1, offset) };
+                    float* into[] = { state.buffer.getWritePointer (2, offset), state.buffer.getWritePointer (3, offset) };
+                    juce::FloatVectorOperations::clear (into[0], numSamples);
+                    juce::FloatVectorOperations::clear (into[1], numSamples);
+                    (device.sidechainDelay != nullptr ? *device.sidechainDelay : noDelay).addDelayed (from, into, numSamples);
+                    block.hasSidechain = true;
+                }
+
+                // A container keeps what comes into its first device, to mix with what its last puts out.
+                for (const auto& container : strip.containers)
+                    if (container.first == (int) i)
+                        container.state->keepDry (channels, numSamples);
+
                 strip.devices[i].node->process (state.buffer, offset, numSamples, block, strip.devices[i].automation);
+
+                for (const auto& container : strip.containers)
+                    if (container.last == (int) i)
+                        container.state->mix (channels, numSamples);
 
                 if (i == 0 && strip.hasInstrument)
                     playAudio();
             }
         }
+
+        // What it sends before its fader (nothing while it is muted).
+        if (strip.feedsBeforeFader)
+            for (int channel = 0; channel < 2; ++channel)
+            {
+                auto* kept = state.beforeFader.getWritePointer (channel, offset);
+
+                if (state.getChannel().isSilenced())
+                    juce::FloatVectorOperations::clear (kept, numSamples);
+                else
+                    juce::FloatVectorOperations::copy (kept, channels[channel], numSamples);
+            }
 
         Channel::Automation faderAutomation;
         faderAutomation.volume = strip.volume.get();
@@ -414,7 +451,8 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
         faderAutomation.beat = strip.volume != nullptr || strip.pan != nullptr ? getAutomationBeat (strip.latency) : beat;
         faderAutomation.volumeModulation = getFaderModulation (strip, strip.volumeModulation, state.volumeModulation);
         faderAutomation.panModulation = getFaderModulation (strip, strip.panModulation, state.panModulation);
-        state.getChannel().process (channels, 2, numSamples, faderAutomation);
+        float* beforeMute[] = { state.beforeMute.getWritePointer (0, offset), state.beforeMute.getWritePointer (1, offset) };
+        state.getChannel().process (channels, 2, numSamples, faderAutomation, strip.feedsSidechain ? beforeMute : nullptr);
 
         // An envelope follower listens to its track after the fader, for the next block.
         for (const auto& modulator : strip.modulators)
