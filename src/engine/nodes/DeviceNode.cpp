@@ -64,8 +64,7 @@ void DeviceNode::setOn (bool shouldBeOn) noexcept
     on.store (shouldBeOn, std::memory_order_relaxed);
 }
 
-void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSamples, DeviceRunner::Block block,
-                          std::span<const ParameterCurve> automation) noexcept
+bool DeviceNode::takeBlock (DeviceRunner::Block& block, std::span<const ParameterCurve> automation) noexcept
 {
     const auto isOnNow = isOn();
 
@@ -75,7 +74,7 @@ void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSa
     wasOn = isOnNow;
 
     if (! isOnNow)
-        return;
+        return false;
 
     for (size_t i = 0; i < blockValues.size(); ++i)
         blockValues[i] = values[i].load (std::memory_order_relaxed);
@@ -90,6 +89,32 @@ void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSa
 
     block.values = blockValues;
     block.automation = automated;
+    return true;
+}
+
+void DeviceNode::start (juce::AudioBuffer<float>& buffer, int start, int numSamples, DeviceRunner::Block block,
+                        std::span<const ParameterCurve> automation) noexcept
+{
+    started = takeBlock (block, automation);
+
+    if (started)
+        runner.start (buffer, start, numSamples, block);
+}
+
+void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSamples, DeviceRunner::Block block,
+                          std::span<const ParameterCurve> automation) noexcept
+{
+    // Started (start()), with the values and automation it took then; or as it is now.
+    if (std::exchange (started, false))
+    {
+        block.values = blockValues;
+        block.automation = automated;
+    }
+    else if (! takeBlock (block, automation))
+    {
+        return;
+    }
+
     runner.process (buffer, start, numSamples, block);
 
     // What it played, for the controls.

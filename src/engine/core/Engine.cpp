@@ -42,7 +42,27 @@ void Engine::prepare (double rate, int blockSize)
 
 void Engine::setPlan (std::unique_ptr<Plan> plan)
 {
+    if (plan != nullptr)
+        findEarlyStarts (*plan);
+
     plans.give (std::move (plan));
+}
+
+void Engine::findEarlyStarts (Plan& plan)
+{
+    // An instrument handed its blocks early (a plug-in in its helper), but one whose sidechain listens to another strip,
+    // which it would wait for.
+    plan.earlyStrips.clear();
+
+    for (size_t i = 0; i < plan.strips.size(); ++i)
+    {
+        auto& strip = plan.strips[i];
+        strip.startsEarly = strip.hasInstrument && ! strip.devices.empty() && strip.devices.front().sidechain < 0
+                            && strip.devices.front().node->getRunner().getProcessor().startsEarly();
+
+        if (strip.startsEarly)
+            plan.earlyStrips.push_back ((int) i);
+    }
 }
 
 void Engine::dropPlans()
@@ -413,7 +433,9 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
 
     // Each strip a task, in the plan's order, on the audio thread and the workers; each waits for what it takes in, done
     // in tasks before it, and adds it up in the plan's order, so that the sound is the same to the last bit on one thread
-    // or many. A track and the master alone can't play side by side: the audio thread plays them without waking anyone.
+    // or many. Before them, a task for each instrument handed its blocks early (a plug-in in its helper), which then plays
+    // beside the others while the strips before its own play. A track and the master alone can't play side by side: the
+    // audio thread plays them without waking anyone.
     if (plan.strips.size() <= 2)
     {
         for (size_t i = 0; i < plan.strips.size(); ++i)
@@ -422,8 +444,115 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
         return;
     }
 
-    workers.run ((int) plan.strips.size(), [] (void* context, int index) noexcept
-                 { static_cast<Span*> (context)->engine->playStrip (*static_cast<Span*> (context), (size_t) index); }, &span);
+    span.startsEarly = true;
+    workers.run ((int) (plan.earlyStrips.size() + plan.strips.size()),
+                 [] (void* context, int index) noexcept
+                 {
+                     const auto& played = *static_cast<Span*> (context);
+                     const auto& early = played.plan->earlyStrips;
+
+                     if (index < (int) early.size())
+                         played.engine->startStrip (played, (size_t) early[(size_t) index]);
+                     else
+                         played.engine->playStrip (played, (size_t) index - early.size());
+                 },
+                 &span);
+}
+
+void Engine::startStrip (const Span& span, size_t index) noexcept
+{
+    // Its notes, what is played live into it and its modulators, then its instrument handed the block, unless it plays
+    // nothing in it; its own task takes what it played (playStrip()).
+    const auto& strip = span.plan->strips[index];
+    auto& state = *strip.state;
+    takeEvents (span, strip);
+    state.startedSilent = isSilent (strip);
+
+    if (! state.startedSilent)
+    {
+        const auto& instrument = strip.devices.front();
+        instrument.node->start (state.buffer, span.offset, span.numSamples, getDeviceBlock (span, strip, 0), instrument.automation);
+    }
+
+    state.startedPass.store (span.pass, std::memory_order_release);
+}
+
+void Engine::takeEvents (const Span& span, const Plan::Strip& strip) noexcept
+{
+    // What its instrument plays: its notes, and what is played live into it.
+    auto& state = *strip.state;
+    state.numEvents = 0;
+    addNotes (strip, *span.plan, span.numSamples);
+
+    for (int i = 0; i < numLiveEvents; ++i)
+    {
+        const auto& live = liveEvents[(size_t) i];
+
+        if (live.track == strip.id && live.event.sample >= span.offset && live.event.sample < span.offset + span.numSamples)
+        {
+            auto event = live.event;
+            event.sample -= span.offset;
+            state.addEvent (event);
+        }
+    }
+
+    state.sortEvents();
+    playModulators (strip);
+}
+
+bool Engine::isSilent (const Plan::Strip& strip) noexcept
+{
+    // A channel muted (or soloed out) plays nothing, and its devices start from silence when it is heard again; but one a
+    // sidechain listens to plays on, which hears it before its mute.
+    auto& state = *strip.state;
+
+    if (state.getChannel().isSilenced() && ! strip.feedsSidechain)
+    {
+        state.wasSilenced = true;
+        return true;
+    }
+
+    if (state.wasSilenced)
+    {
+        for (const auto& device : strip.devices)
+            device.node->getRunner().reset();
+
+        state.wasSilenced = false;
+    }
+
+    return false;
+}
+
+DeviceRunner::Block Engine::getDeviceBlock (const Span& span, const Plan::Strip& strip, size_t index) noexcept
+{
+    const auto& device = strip.devices[index];
+    DeviceRunner::Block block;
+    block.tempo = span.tempo;
+    block.beat = span.beat;
+    block.isPlaying = transport.playing;
+    block.isRendering = rendering;
+    block.beatsPerSample = span.beatsPerSample;
+    block.sample = span.gridSample;
+    block.automationBeat = transport.playing && device.latency > 0 && ! device.automation.empty()
+                               ? span.plan->tempo.toBeats ((double) (transport.sample - device.latency))
+                               : span.beat;
+
+    // What modulates it: its strip's modulators, on the block's control points.
+    if (auto* modulation = device.modulation.get())
+    {
+        for (size_t source = 0; source < modulation->sources.size() && source < strip.modulators.size(); ++source)
+        {
+            modulation->sources[source].points = strip.modulators[source]->getValues();
+            modulation->sources[source].isOn = strip.modulators[source]->isOn();
+        }
+
+        block.modulation = modulation;
+    }
+
+    if (index == 0 && strip.hasInstrument)
+        block.events = std::span (strip.state->events.data(), (size_t) strip.state->numEvents);
+
+    return block;
 }
 
 void Engine::playStrip (const Span& span, size_t index) noexcept
@@ -431,26 +560,30 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
     const auto& plan = *span.plan;
     const auto& strip = plan.strips[index];
     const auto offset = span.offset, numSamples = span.numSamples;
-    const auto beat = span.beat, tempo = span.tempo, beatsPerSample = span.beatsPerSample;
+    const auto beat = span.beat, beatsPerSample = span.beatsPerSample;
     const auto gridSample = span.gridSample;
     const auto getAutomationBeat = [this, &plan, beat] (int latency)
     { return transport.playing && latency > 0 ? plan.tempo.toBeats ((double) (transport.sample - latency)) : beat; };
 
-    // What it takes in, done first: what it adds up, and what its devices' sidechains listen to.
-    const auto waitFor = [&plan, &span] (int other)
+    // What it takes in, done first: what it adds up, and what its devices' sidechains listen to; and its instrument's
+    // block handed over early, in a task before.
+    const auto waitFor = [&span] (const std::atomic<std::uint64_t>& done)
     {
-        const auto& done = plan.strips[(size_t) other].state->donePass;
-
         while (done.load (std::memory_order_acquire) != span.pass)
             std::this_thread::yield();
     };
 
     for (const auto& input : strip.inputs)
-        waitFor (input.strip);
+        waitFor (plan.strips[(size_t) input.strip].state->donePass);
 
     for (const auto& device : strip.devices)
         if (device.sidechain >= 0)
-            waitFor (device.sidechain);
+            waitFor (plan.strips[(size_t) device.sidechain].state->donePass);
+
+    const auto startedEarly = span.startsEarly && strip.startsEarly;
+
+    if (startedEarly)
+        waitFor (strip.state->startedPass);
 
     {
         auto& state = *strip.state;
@@ -469,41 +602,12 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
             (input.delay != nullptr ? *input.delay : noDelay).addDelayed (sides, channels, numSamples, startGain, endGain);
         }
 
-        // What its instrument plays: its notes, and what is played live into it.
-        state.numEvents = 0;
-        addNotes (strip, plan, numSamples);
+        // Its events and modulators, unless they were taken as its instrument was handed its block.
+        if (! startedEarly)
+            takeEvents (span, strip);
 
-        for (int i = 0; i < numLiveEvents; ++i)
+        if (! (startedEarly ? state.startedSilent : isSilent (strip)))
         {
-            const auto& live = liveEvents[(size_t) i];
-
-            if (live.track == strip.id && live.event.sample >= offset && live.event.sample < offset + numSamples)
-            {
-                auto event = live.event;
-                event.sample -= offset;
-                state.addEvent (event);
-            }
-        }
-
-        state.sortEvents();
-        playModulators (strip);
-
-        // A channel muted (or soloed out) plays nothing, and its devices start from silence when it is heard again; but one
-        // a sidechain listens to plays on, which hears it before its mute.
-        if (state.getChannel().isSilenced() && ! strip.feedsSidechain)
-        {
-            state.wasSilenced = true;
-        }
-        else
-        {
-            if (state.wasSilenced)
-            {
-                for (const auto& device : strip.devices)
-                    device.node->getRunner().reset();
-
-                state.wasSilenced = false;
-            }
-
             // Its audio clips play into it before its effects, beside its instrument (after it, which plays into a cleared
             // buffer).
             const auto playAudio = [&]
@@ -521,29 +625,7 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
 
             for (size_t i = 0; i < strip.devices.size(); ++i)
             {
-                DeviceRunner::Block block;
-                block.tempo = tempo;
-                block.beat = beat;
-                block.isPlaying = transport.playing;
-                block.isRendering = rendering;
-                block.beatsPerSample = beatsPerSample;
-                block.sample = gridSample;
-                block.automationBeat = strip.devices[i].automation.empty() ? beat : getAutomationBeat (strip.devices[i].latency);
-
-                // What modulates it: its strip's modulators, on the block's control points.
-                if (auto* modulation = strip.devices[i].modulation.get())
-                {
-                    for (size_t source = 0; source < modulation->sources.size() && source < strip.modulators.size(); ++source)
-                    {
-                        modulation->sources[source].points = strip.modulators[source]->getValues();
-                        modulation->sources[source].isOn = strip.modulators[source]->isOn();
-                    }
-
-                    block.modulation = modulation;
-                }
-
-                if (i == 0 && strip.hasInstrument)
-                    block.events = std::span (state.events.data(), (size_t) state.numEvents);
+                auto block = getDeviceBlock (span, strip, i);
 
                 // What its sidechain listens to: another strip after its fader and before its mute, lined up with its sound.
                 if (const auto& device = strip.devices[i]; device.sidechain >= 0)

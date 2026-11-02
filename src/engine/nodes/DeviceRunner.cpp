@@ -2,6 +2,7 @@
 #include "DeviceRunner.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite::engine
 {
@@ -73,6 +74,7 @@ void DeviceRunner::prepare (double rate, int maximumBlockSize)
     silentSamples = 0;
     asleep = false;
     hasPreviousValues = false;
+    startedEarly = false;
 
     if (mixIndex >= 0)
     {
@@ -95,14 +97,39 @@ void DeviceRunner::reset()
         delay.reset();
 }
 
-void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int numSamples, const Block& in)
+namespace
+{
+    // Whether a buffer's channels are silent there.
+    bool isQuiet (const juce::AudioBuffer<float>& buffer, int start, int numSamples, int firstChannel, int numChannels, float silence)
+    {
+        for (int channel = firstChannel; channel < firstChannel + numChannels; ++channel)
+            if (buffer.getMagnitude (channel, start, numSamples) > silence)
+                return false;
+
+        return true;
+    }
+
+    // The events before a sample.
+    std::span<devices::NoteEvent> getEventsBefore (std::span<devices::NoteEvent> events, int sample) noexcept
+    {
+        size_t count = 0;
+
+        while (count < events.size() && events[count].sample < sample)
+            ++count;
+
+        return events.first (count);
+    }
+} // namespace
+
+DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int start, int numSamples, const Block& in)
 {
     // Each parameter's value now, an automated one's where the song is. A continuous one that moved since the last block
     // glides there over this one, in stretches of smoothingStep, rather than jumping, so values set by hand and modulation
     // don't step (docs/performance-audit.md, A7); while the song plays, automation moves its parameters a stretch at a time.
+    Begun begun;
     auto* plan = in.modulation;
     auto gliding = false;
-    const auto automationMoves = in.beatsPerSample > 0.0 && ! in.automation.empty();
+    begun.automationMoves = in.beatsPerSample > 0.0 && ! in.automation.empty();
 
     for (size_t i = 0; i < targetValues.size(); ++i)
         targetValues[i] = devices::constrain (info.parameters[i], in.values[i]);
@@ -117,28 +144,18 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         gliding = gliding || (glides[i] && hasPreviousValues && ! juce::exactlyEqual (previousValues[i], targetValues[i]));
     }
 
-    const auto numEvents = (int) in.events.size();
-    devices::ProcessContext block;
-    block.parameters = currentValues;
-    block.isPlaying = in.isPlaying;
-    block.isRendering = in.isRendering;
-    block.tempo = in.tempo;
-    block.beat = in.beat;
-
     // Modulated, it plays in stretches too, each with its modulators where it is.
     if (plan != nullptr)
         startModulation (*plan);
 
-    const auto inStretches = gliding || automationMoves || (plan != nullptr && ! plan->routes.empty());
-
-    const auto isMono = buffer.getNumChannels() < 2;
-    const auto targetMix = mixIndex >= 0 ? targetValues[(size_t) mixIndex] : 1.0f;
-    const auto isMixMoved = mixIndex >= 0
-                            && ((plan != nullptr && plan->isModulated[(size_t) mixIndex])
-                                || (automationMoves
-                                    && std::any_of (in.automation.begin(), in.automation.end(),
-                                                    [this] (const Automated& automated) { return automated.parameter == mixIndex; })));
-    const auto hasSidechain = in.hasSidechain && buffer.getNumChannels() >= 4;
+    begun.inStretches = gliding || begun.automationMoves || (plan != nullptr && ! plan->routes.empty());
+    begun.targetMix = mixIndex >= 0 ? targetValues[(size_t) mixIndex] : 1.0f;
+    begun.isMixMoved = mixIndex >= 0
+                       && ((plan != nullptr && plan->isModulated[(size_t) mixIndex])
+                           || (begun.automationMoves
+                               && std::any_of (in.automation.begin(), in.automation.end(),
+                                               [this] (const Automated& automated) { return automated.parameter == mixIndex; })));
+    begun.hasSidechain = in.hasSidechain && buffer.getNumChannels() >= 4;
     const auto isSynth = isInstrument();
 
     if (isSynth) // its own channels, not a sidechain's
@@ -147,45 +164,136 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
 
     // Nothing to play: no events, nothing waiting in the device (a pad its editor played), and silence in (on its own
     // channels and its sidechain's).
-    const auto isQuiet = [&buffer, start, numSamples] (int firstChannel, int numChannels)
-    {
-        for (int channel = firstChannel; channel < firstChannel + numChannels; ++channel)
-            if (buffer.getMagnitude (channel, start, numSamples) > silence)
-                return false;
+    begun.quietIn = in.events.empty() && ! processor->isWaitingToPlay()
+                    && (isSynth || isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence))
+                    && (! begun.hasSidechain || isQuiet (buffer, start, numSamples, 2, 2, silence));
 
-        return true;
-    };
-
-    const auto quietIn = numEvents == 0 && ! processor->isWaitingToPlay() && (isSynth || isQuiet (0, std::min (2, buffer.getNumChannels())))
-                         && (! hasSidechain || isQuiet (2, 2));
-
-    if (asleep && quietIn && ! in.isRendering)
+    if (asleep && begun.quietIn && ! in.isRendering)
     {
         for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
             buffer.clear (channel, start, numSamples);
 
         keepValues();
-        return;
+        begun.slept = true;
+        return begun;
     }
 
     asleep = false;
 
     // Taken whole, it gets the values of what moves as changes: those it moves now, and those it moved in the last block.
-    const auto whole = processor->takesWholeBlocks();
-
-    if (whole)
-        startWholeBlock (in, isMixMoved);
+    if (processor->takesWholeBlocks())
+        startWholeBlock (in, begun.isMixMoved);
 
     // What comes in, for the editor's displays: an effect's sound (an instrument's channels were cleared for it to play into).
-    const auto* inLeft = buffer.getReadPointer (0, start);
-    const auto* inRight = isMono ? inLeft : buffer.getReadPointer (1, start);
-
     if (! isSynth)
-        scope.pushInput (inLeft, inRight, numSamples);
+        scope.pushInput (buffer.getReadPointer (0, start), buffer.getReadPointer (std::min (1, buffer.getNumChannels() - 1), start),
+                         numSamples);
 
+    return begun;
+}
+
+void DeviceRunner::end (juce::AudioBuffer<float>& buffer, int start, int numSamples, const Block& in, const Begun& begun)
+{
+    scope.pushOutput (buffer.getReadPointer (0, start), buffer.getReadPointer (std::min (1, buffer.getNumChannels() - 1), start),
+                      numSamples);
+
+    // An automated parameter goes on from where its automation left it.
+    if (begun.automationMoves)
+        for (const auto& automated : in.automation)
+            targetValues[(size_t) automated.parameter] = baseValues[(size_t) automated.parameter];
+
+    keepValues();
+
+    // Silent in and out long enough: asleep from the next block.
+    if (begun.quietIn && isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence))
+    {
+        silentSamples = std::min (silentSamples + numSamples, sleepAfterSamples);
+        asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence();
+    }
+    else
+    {
+        silentSamples = 0;
+    }
+
+    for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
+        buffer.clear (channel, start, numSamples);
+}
+
+devices::ProcessContext DeviceRunner::makeContext (const Block& in) const noexcept
+{
+    devices::ProcessContext block;
+    block.parameters = currentValues;
+    block.isPlaying = in.isPlaying;
+    block.isRendering = in.isRendering;
+    block.tempo = in.tempo;
+    block.beat = in.beat;
+    return block;
+}
+
+void DeviceRunner::start (juce::AudioBuffer<float>& buffer, int start, int numSamples, const Block& in)
+{
+    // An instrument that takes its block whole in one call, on its own two channels, without a sidechain: the block as
+    // process() would hand it over, which then only takes what it played.
+    startedEarly = processor->startsEarly() && isInstrument() && buffer.getNumChannels() >= 2 && ! in.hasSidechain
+                   && numSamples <= stereo.getNumSamples();
+
+    if (! startedEarly)
+        return;
+
+    early = begin (buffer, start, numSamples, in);
+
+    if (early.slept)
+        return;
+
+    const auto sinceControlPoint = (int) (((in.sample % smoothingStep) + smoothingStep) % smoothingStep);
+    gatherChanges (in, early.automationMoves, false, sinceControlPoint, 0, 0, numSamples, numSamples);
+    float* channels[] = { buffer.getWritePointer (0, start), buffer.getWritePointer (1, start) };
+    auto block = makeContext (in);
+    block.channels = channels;
+    block.numChannels = 2;
+    block.numSamples = numSamples;
+    block.events = getEventsBefore (in.events, numSamples);
+    block.changes = changes;
+    processor->start (block);
+}
+
+void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int numSamples, const Block& in)
+{
+    // A block started early (start()): only what it played to take, into its channels.
+    if (std::exchange (startedEarly, false))
+    {
+        if (early.slept)
+            return;
+
+        // Its channels cleared again, as they were for it to play into (what the strip put there since is no sound of
+        // an instrument's).
+        for (int channel = 0; channel < 2; ++channel)
+            buffer.clear (channel, start, numSamples);
+
+        float* channels[] = { buffer.getWritePointer (0, start), buffer.getWritePointer (1, start) };
+        auto block = makeContext (in);
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = numSamples;
+        block.events = getEventsBefore (in.events, numSamples);
+        block.changes = changes;
+        processor->process (block);
+        end (buffer, start, numSamples, in, early);
+        return;
+    }
+
+    const auto begun = begin (buffer, start, numSamples, in);
+
+    if (begun.slept)
+        return;
+
+    const auto whole = processor->takesWholeBlocks();
+    const auto isMono = buffer.getNumChannels() < 2;
+    const auto numEvents = (int) in.events.size();
+    auto block = makeContext (in);
     const float* sidechain[2] = {};
 
-    if (hasSidechain)
+    if (begun.hasSidechain)
     {
         block.sidechain = sidechain;
         block.numSidechainChannels = 2;
@@ -203,16 +311,16 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
     {
         const auto length =
             whole ? (numSamples - done <= longest ? numSamples - done : longest - (done + sinceControlPoint + longest) % smoothingStep)
-                  : std::min (numSamples - done, inStretches ? (done == 0 ? toControlPoint : smoothingStep) : longest);
+                  : std::min (numSamples - done, begun.inStretches ? (done == 0 ? toControlPoint : smoothingStep) : longest);
 
         if (whole)
         {
-            stretch = gatherChanges (in, automationMoves, isMixMoved, sinceControlPoint, stretch, done, length, numSamples);
+            stretch = gatherChanges (in, begun.automationMoves, begun.isMixMoved, sinceControlPoint, stretch, done, length, numSamples);
         }
         else
         {
-            if (inStretches)
-                setStretchValues (in, automationMoves, done == 0 ? -sinceControlPoint : done, stretch, done, length, numSamples);
+            if (begun.inStretches)
+                setStretchValues (in, begun.automationMoves, done == 0 ? -sinceControlPoint : done, stretch, done, length, numSamples);
 
             ++stretch;
         }
@@ -249,7 +357,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         block.events = in.events.subspan ((size_t) firstEvent, (size_t) (nextEvent - firstEvent));
         block.changes = changes;
 
-        if (hasSidechain)
+        if (begun.hasSidechain)
         {
             sidechain[0] = buffer.getReadPointer (2, start + done);
             sidechain[1] = buffer.getReadPointer (3, start + done);
@@ -259,7 +367,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
 
         // Its mix, unless it plays something else for now (a compressor's key, to listen to); modulated, as it is now (taken
         // whole, as it was in each stretch).
-        if (mixIndex >= 0 && whole && isMixMoved && ! processor->overridesMix())
+        if (mixIndex >= 0 && whole && begun.isMixMoved && ! processor->overridesMix())
         {
             for (const auto& part : stretchMixes)
             {
@@ -269,7 +377,10 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         }
         else if (mixIndex >= 0)
         {
-            mixWithDry (channels, 0, length, processor->overridesMix() ? 1.0f : isMixMoved ? currentValues[(size_t) mixIndex] : targetMix);
+            mixWithDry (channels, 0, length,
+                        processor->overridesMix() ? 1.0f
+                        : begun.isMixMoved        ? currentValues[(size_t) mixIndex]
+                                                  : begun.targetMix);
         }
 
         if (isMono)
@@ -283,29 +394,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         done += length;
     }
 
-    scope.pushOutput (buffer.getReadPointer (0, start), isMono ? buffer.getReadPointer (0, start) : buffer.getReadPointer (1, start),
-                      numSamples);
-
-    // An automated parameter goes on from where its automation left it.
-    if (automationMoves)
-        for (const auto& automated : in.automation)
-            targetValues[(size_t) automated.parameter] = baseValues[(size_t) automated.parameter];
-
-    keepValues();
-
-    // Silent in and out long enough: asleep from the next block.
-    if (quietIn && isQuiet (0, std::min (2, buffer.getNumChannels())))
-    {
-        silentSamples = std::min (silentSamples + numSamples, sleepAfterSamples);
-        asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence();
-    }
-    else
-    {
-        silentSamples = 0;
-    }
-
-    for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
-        buffer.clear (channel, start, numSamples);
+    end (buffer, start, numSamples, in, begun);
 }
 
 void DeviceRunner::keepValues() noexcept

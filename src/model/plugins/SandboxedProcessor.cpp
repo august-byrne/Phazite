@@ -2,6 +2,7 @@
 #include "internal/SandboxedProcessor.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite
 {
@@ -92,19 +93,70 @@ void SandboxedProcessor::prepare (double sampleRate, int maximumBlockSize)
     instance.prepareToPlay (sampleRate, maximumBlockSize);
 }
 
+void SandboxedProcessor::start (const devices::ProcessContext& context)
+{
+    started = true;
+    handed = handOver (context);
+    handedAt = juce::Time::getHighResolutionTicks();
+}
+
 void SandboxedProcessor::process (const devices::ProcessContext& context)
 {
-    const auto isSynth = info.kind == devices::DeviceKind::instrument;
-    const auto silence = [&context, isSynth]
+    // Handed over as the block started (start()): only its answer to wait for, for what is left of its deadline.
+    if (std::exchange (started, false))
     {
-        if (isSynth)
-            for (int i = 0; i < context.numChannels; ++i)
-                juce::FloatVectorOperations::clear (context.channels[i], context.numSamples);
-    };
+        if (handed)
+            collect (context, handedAt);
 
+        return;
+    }
+
+    if (handOver (context))
+        collect (context, juce::Time::getHighResolutionTicks());
+}
+
+void SandboxedProcessor::silence (const devices::ProcessContext& context) const noexcept
+{
+    // An instrument plays nothing; an effect lets its sound through.
+    if (info.kind == devices::DeviceKind::instrument)
+        for (int i = 0; i < context.numChannels; ++i)
+            juce::FloatVectorOperations::clear (context.channels[i], context.numSamples);
+}
+
+void SandboxedProcessor::collect (const devices::ProcessContext& context, std::int64_t since) noexcept
+{
+    // As long as a block's own length in real time from when it was handed over (none in a render).
+    auto& channel = instance.getRemote().getChannel();
+    auto deadline = std::int64_t (-1);
+
+    if (! context.isRendering)
+    {
+        const auto waited =
+            (std::int64_t) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - since) * 1.0e9);
+        deadline = std::max<std::int64_t> (0, SandboxedInstance::getDeadlineNanoseconds (context.numSamples, rate) - waited);
+    }
+
+    if (channel.waitForAnswer (0, deadline) == sandbox::BlockChannel::Played::done)
+    {
+        for (int i = 0; i < channel.getInfo().numChannels; ++i)
+            juce::FloatVectorOperations::copy (context.channels[i], channel.getChannel (i), context.numSamples);
+
+        instance.let();
+        return;
+    }
+
+    instance.let();
+    silence (context);
+}
+
+bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexcept
+{
     // The channel, unless a render has it: never waited for here.
     if (! instance.tryHold())
-        return silence();
+    {
+        silence (context);
+        return false;
+    }
 
     auto& channel = instance.getRemote().getChannel();
     const auto& limits = channel.getLimits();
@@ -128,7 +180,8 @@ void SandboxedProcessor::process (const devices::ProcessContext& context)
     if (instance.hasCrashed() || channel.isBusy() || context.numSamples > limits.maxSamples)
     {
         instance.let();
-        return silence();
+        silence (context);
+        return false;
     }
 
     auto& block = channel.getInfo();
@@ -181,19 +234,12 @@ void SandboxedProcessor::process (const devices::ProcessContext& context)
     block.isPlaying = context.isPlaying ? 1 : 0;
     block.isRendering = context.isRendering ? 1 : 0;
 
-    const auto deadline = context.isRendering ? -1 : SandboxedInstance::getDeadlineNanoseconds (context.numSamples, rate);
-
-    if (channel.play (0, deadline) == sandbox::BlockChannel::Played::done)
-    {
-        for (int i = 0; i < block.numChannels; ++i)
-            juce::FloatVectorOperations::copy (context.channels[i], channel.getChannel (i), context.numSamples);
-
-        instance.let();
-        return;
-    }
+    if (channel.handOver())
+        return true;
 
     instance.let();
-    silence();
+    silence (context);
+    return false;
 }
 
 int SandboxedProcessor::getLatencySamples() const

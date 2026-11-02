@@ -5,7 +5,8 @@
 // value to the next and moves the modulated and automated ones itself, in stretches of a block, each starting on the
 // song's control points, one every 32 samples from its start (docs/performance-audit.md, A7; docs/design.md, section 10),
 // so that a song sounds the same at any block size (a device that takes its blocks whole, a plug-in in its helper, gets
-// a block in one call, with its moved parameters' values on those points as changes at their samples); it applies an
+// a block in one call, with its moved parameters' values on those points as changes at their samples, and an instrument
+// of them may be handed it early, to play beside the others: start()); it applies an
 // effect's mix, with what came in delayed as much as the effect delays its sound; it plays a mono channel in stereo; and
 // it sleeps on silence (docs/performance-audit.md, A1).
 #pragma once
@@ -128,6 +129,11 @@ public:
     // played in stereo), any after them cleared. Real-time safe: no locks, no allocation.
     void process (juce::AudioBuffer<float>&, int startSample, int numSamples, const Block&);
 
+    // Starts a block early, for an instrument that is handed its blocks so (devices::Processor::startsEarly()), without a
+    // sidechain: as process() would hand it over, before what comes before it in the engine has played, so that it plays
+    // meanwhile. The next process(), of the same block, then only takes what it played into its channels. Real-time safe.
+    void start (juce::AudioBuffer<float>&, int startSample, int numSamples, const Block&);
+
     // Each parameter's value as the last block ended, and without its modulation (the audio thread's).
     std::span<const float> getValues() const noexcept { return currentValues; }
     std::span<const float> getBaseValues() const noexcept { return baseValues; }
@@ -169,6 +175,21 @@ private:
     void startWholeBlock (const Block&, bool isMixMoved) noexcept;
     int gatherChanges (const Block&, bool automationMoves, bool isMixMoved, int sinceControlPoint, int stretch, int from, int length,
                        int numSamples); // the next stretch's index
+
+    // What a block's start finds (begin()), for its end (end()); and a block started early (start()), whose process() only
+    // takes what it played.
+    struct Begun
+    {
+        bool slept = false; // asleep, it played nothing
+        bool automationMoves = false, inStretches = false, isMixMoved = false, hasSidechain = false, quietIn = false;
+        float targetMix = 1.0f;
+    };
+
+    Begun begin (juce::AudioBuffer<float>&, int start, int numSamples, const Block&);
+    void end (juce::AudioBuffer<float>&, int start, int numSamples, const Block&, const Begun&);
+    devices::ProcessContext makeContext (const Block&) const noexcept;
+    bool startedEarly = false;
+    Begun early;
 
     juce::AudioBuffer<float> stereo; // for a mono channel: sized in prepare(), as long as the stretches played at once
     int latencySamples = 0;

@@ -11,6 +11,7 @@
 #include <atomic>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace phazite::engine
@@ -51,6 +52,11 @@ public:
     void process (juce::AudioBuffer<float>&, int startSample, int numSamples, DeviceRunner::Block,
                   std::span<const ParameterCurve> automation = {}) noexcept;
 
+    // Audio thread: starts a block early, for an instrument that is handed its blocks so (DeviceRunner::start()), if it is
+    // on; the next process(), of the same block, takes what it played, the switch as it was found here.
+    void start (juce::AudioBuffer<float>&, int startSample, int numSamples, DeviceRunner::Block,
+                std::span<const ParameterCurve> automation = {}) noexcept;
+
 private:
     DeviceRunner runner;
     std::unique_ptr<std::atomic<float>[]> values, played, playedBase;
@@ -58,7 +64,9 @@ private:
     std::vector<float> blockValues;                 // as a block starts, for the runner
     std::vector<DeviceRunner::Automated> automated; // the audio thread's, for each block: as long as there are parameters
     std::atomic<bool> on { true };
-    bool wasOn = true; // the audio thread's
+    bool wasOn = true;                                                                          // the audio thread's
+    bool started = false;                                                                       // the audio thread's: a block started, on
+    bool takeBlock (DeviceRunner::Block&, std::span<const ParameterCurve> automation) noexcept; // false while it is off
     static_assert (std::atomic<float>::is_always_lock_free);
 
     DeviceNode (const DeviceNode&) = delete;

@@ -411,3 +411,23 @@ instance of it in that helper with an audio thread of its own, as Bitwig's defau
 crashes takes only its own instances with it, at a fraction of a helper for each instance's memory; Phazite's audio
 thread waits asleep at once; and the engine hands each plug-in instrument's block over as the block starts, so that the
 instruments of every track play side by side.
+
+**In a project (2026-11-02, T3 step 9):** the benchmark of a project's CPU (`tests/Benchmarks.cpp`, `windows-profile`,
+480 samples, 10 ms at 48 kHz) plays 20 tracks, each the tests' stand-in synth in a helper (one helper, an audio thread
+for each instance) playing chords. Each block's time on Phazite's engine, as a share of the block, and the process's CPU
+while it plays (Phazite's process alone, not the helper's):
+
+| 20 plug-in synths in a helper | Threads | Stopped | Playing | The process's CPU playing |
+|---|---|---|---|---|
+| Each handed its block as its track played | 1 | 3.47 % | 6.34 % | 5.1 % of a core |
+| | 4 | 1.24 % | 1.80 % | 5.9 % |
+| Each handed its block as the engine's block starts (two runs) | 1 | 0.80 / 0.77 % | 1.11 / 1.10 % | 5.1 / 2.7 % |
+| | 4 | 0.79 / 0.81 % | 1.18 / 1.15 % | 13.3 / 10.2 % |
+
+Handed over as its track played, each plug-in's round trip added to its thread's: about 32 microseconds a plug-in on
+one thread. Handed over first, as the engine's block starts (a task for each before the tracks' tasks,
+`engine/core/Engine.h`; `devices::Processor::startsEarly()`), the helpers play side by side while the engine plays the
+rest, and a block takes a sixth as long on one thread and two thirds as long on four. On four threads the process takes
+a few percent of a core more meanwhile: the master's task, taken sooner, waits for the last helpers by yielding, as the
+engine's tasks wait for what they take in (T2 step 8); that column moves by as much from run to run (the 20 empty
+tracks on four threads took 10.2 % and 6.2 % of a core with nothing changed between).

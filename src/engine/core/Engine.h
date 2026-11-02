@@ -186,7 +186,8 @@ private:
     void playStrips (const Plan&, int offset, int numSamples) noexcept;
 
     // A stretch of a block that the strips play, which each strip's task reads; the strips' work on the audio thread and
-    // the workers, each pass numbered, so that a strip knows when what it takes in is done.
+    // the workers, each pass numbered, so that a strip knows when what it takes in is done. Played side by side, the
+    // instruments handed their blocks early are handed them first, each a task (startStrip()), before the strips' tasks.
     struct Span
     {
         Engine* engine = nullptr;
@@ -195,11 +196,17 @@ private:
         double beat = 0.0, tempo = 120.0, beatsPerSample = 0.0;
         std::int64_t gridSample = 0;
         std::uint64_t pass = 0;
+        bool startsEarly = false;
     };
 
     Workers workers;
     std::uint64_t passes = 0;
+    static void findEarlyStarts (Plan&);
+    void startStrip (const Span&, size_t index) noexcept;
     void playStrip (const Span&, size_t index) noexcept;
+    void takeEvents (const Span&, const Plan::Strip&) noexcept; // its instrument's notes and live notes, then its modulators
+    bool isSilent (const Plan::Strip&) noexcept;                // and its devices reset as it is heard again
+    DeviceRunner::Block getDeviceBlock (const Span&, const Plan::Strip&, size_t device) noexcept;
     void addInput (const Plan::Strip&, float* const* channels, int offset, int numSamples) noexcept;
     void addNotes (const Plan::Strip&, const Plan&, int numSamples) noexcept;
 

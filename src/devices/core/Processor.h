@@ -92,6 +92,13 @@ public:
     // round trip.
     virtual bool takesWholeBlocks() const noexcept { return false; }
 
+    // Whether an instrument that takes its blocks whole may be handed a block early, before the engine plays the tracks,
+    // so that it plays meanwhile beside the others (a plug-in instrument, in its helper process): start() takes the block
+    // as process() would, and the next process(), of the same block, only takes what it played into its channels.
+    // Real-time safe.
+    virtual bool startsEarly() const noexcept { return false; }
+    virtual void start (const ProcessContext&) {}
+
     // Whether something came in other than as a note or sound and waits for its next block, such as a pad its editor
     // played: its thin plug-in, asleep on silence, wakes for it. Real-time safe.
     virtual bool isWaitingToPlay() const noexcept { return false; }

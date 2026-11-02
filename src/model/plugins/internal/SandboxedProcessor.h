@@ -44,6 +44,11 @@ public:
     bool sleepsOnSilence() const noexcept override { return false; }
     bool takesWholeBlocks() const noexcept override { return true; }
 
+    // An instrument is handed its block as the engine's block starts, so that the plug-in instruments of every track play
+    // side by side in their helpers (docs/performance-audit.md, section 10).
+    bool startsEarly() const noexcept override { return info.kind == devices::DeviceKind::instrument; }
+    void start (const devices::ProcessContext&) override;
+
 private:
     te::Plugin::Ptr plugin; // which keeps the instance
     SandboxedInstance& instance;
@@ -53,5 +58,13 @@ private:
     devices::DeviceInfo info;
     double rate = 44100.0;
     std::int64_t busySince = 0; // the audio thread's: when it found the channel still on a block, in high-resolution ticks
+
+    // The audio thread's: a block started early (start()), whether it was handed over, and when, in high-resolution ticks.
+    bool started = false, handed = false;
+    std::int64_t handedAt = 0;
+
+    bool handOver (const devices::ProcessContext&) noexcept;                    // held and handed over, or silent
+    void collect (const devices::ProcessContext&, std::int64_t since) noexcept; // its answer, then the channel let go
+    void silence (const devices::ProcessContext&) const noexcept;
 };
 } // namespace phazite

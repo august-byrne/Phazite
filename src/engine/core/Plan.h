@@ -101,10 +101,17 @@ struct Plan
         // Whether another strip takes its sound before its fader (a send), or after its fader and before its mute (a
         // sidechain), which it then plays even while it is muted.
         bool feedsBeforeFader = false, feedsSidechain = false;
+
+        // Whether its instrument is handed its blocks early (devices::Processor::startsEarly(), without a sidechain), its
+        // notes and modulators taken first: the engine's, as it is given the plan.
+        bool startsEarly = false;
     };
 
     // In the order they play: each after the strips it adds up, those that send to it and those its devices' sidechains
     // listen to. The master last, whose sound goes out; none in a plan of the transport alone.
     std::vector<Strip> strips;
+
+    // The strips whose instruments are handed their blocks early, in their order: the engine's, as it is given the plan.
+    std::vector<int> earlyStrips;
 };
 } // namespace phazite::engine

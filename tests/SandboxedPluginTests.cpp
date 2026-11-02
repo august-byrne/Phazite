@@ -182,6 +182,32 @@ TEST_CASE ("A plug-in in a helper follows its automation and its modulators on P
     CHECK (levelOf (audio, 0, 0.2, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
 }
 
+TEST_CASE ("Plug-in instruments in helpers, handed their blocks as the engine's block starts, play their notes and automation")
+{
+    // Three tracks of the stand-in synth, which the engine plays side by side, each handed its block before the tracks
+    // play: each plays 440 Hz in turn for a second, at its Level (a quarter), the third's automated to half.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        const auto track = i == 0 ? song.firstTrack : song.addTrack ("Synth " + juce::String (i + 1));
+        const auto synth = song.setInstrument (track, "PhaziteTestSynth");
+        song.addNote (song.addMidiClip (track, 0.0, 8.0), 69, 2.0 * i, 2.0);
+
+        if (i == 2)
+            song.addAutomation ({ synth, "0" }, { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (8.0), 0.5f } });
+    }
+
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+    const auto audio = playback.play (3.2);
+    CHECK (levelOf (audio, 0, 0.1, 0.9) == doctest::Approx (toneLevel).epsilon (0.002));
+    CHECK (levelOf (audio, 0, 1.1, 1.9) == doctest::Approx (toneLevel).epsilon (0.002));
+    CHECK (levelOf (audio, 0, 2.1, 2.9) == doctest::Approx (toneLevel + 6.02f).epsilon (0.002));
+}
+
 TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the parameter last touched, which touch writes while it is grabbed")
 {
     SandboxedPlugins sandboxed;

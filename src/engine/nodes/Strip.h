@@ -51,8 +51,11 @@ public:
     std::vector<ModulatorNode::NoteStart> noteStarts;
     std::vector<float> volumeModulation, panModulation;
 
-    // The engine's pass it has played last (Engine.h), which the strips that take it in wait for.
-    std::atomic<std::uint64_t> donePass { 0 };
+    // The engine's pass it has played last (Engine.h), which the strips that take it in wait for; and for one whose
+    // instrument is handed its blocks early, the pass whose block it was last handed, which the strip's own task waits for,
+    // and whether it plays nothing in it.
+    std::atomic<std::uint64_t> donePass { 0 }, startedPass { 0 };
+    bool startedSilent = false;
 
 private:
     Channel channel;

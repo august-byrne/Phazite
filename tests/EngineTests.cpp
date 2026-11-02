@@ -23,7 +23,9 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -906,6 +908,133 @@ TEST_CASE ("A device that takes its blocks whole gets each in one call, its auto
     CHECK (whole.changes[0].parameter == 0);
     CHECK (whole.changes[0].sample == (int) sample - 512);
     CHECK (whole.changes[0].value == doctest::Approx (0.25f));
+}
+
+namespace
+{
+// An instrument that takes its blocks whole and may be handed them early, as a plug-in instrument in its helper is: it
+// plays a level while a note is held, worked out as it is handed the block, and notes what it was asked when.
+class EarlyLevel final : public dev::Processor
+{
+public:
+    static inline const dev::DeviceInfo info { .typeID = "testEarlyLevel", .name = "Early Level", .kind = dev::DeviceKind::instrument };
+
+    EarlyLevel (bool handedEarly, float playedLevel, int trackNumber, std::vector<std::string>* calls)
+        : early (handedEarly),
+          level (playedLevel),
+          track (trackNumber),
+          log (calls)
+    {
+    }
+
+    void prepare (double, int maximumBlockSize) override { played.setSize (2, maximumBlockSize); }
+    void reset() override { held = 0; }
+    bool takesWholeBlocks() const noexcept override { return true; }
+    bool startsEarly() const noexcept override { return early; }
+
+    void start (const dev::ProcessContext& context) override
+    {
+        note ("start");
+        play (context);
+        started = true;
+    }
+
+    void process (const dev::ProcessContext& context) override
+    {
+        note ("process");
+
+        if (! std::exchange (started, false))
+            play (context);
+
+        for (int channel = 0; channel < context.numChannels; ++channel)
+            juce::FloatVectorOperations::copy (context.channels[channel], played.getReadPointer (channel), context.numSamples);
+    }
+
+private:
+    const bool early;
+    const float level;
+    const int track;
+    std::vector<std::string>* log;
+    juce::AudioBuffer<float> played;
+    int held = 0;
+    bool started = false;
+
+    void note (const char* what)
+    {
+        if (log != nullptr)
+            log->push_back (what + std::string (" ") + std::to_string (track));
+    }
+
+    void play (const dev::ProcessContext& context)
+    {
+        int done = 0;
+
+        for (const auto& event : context.events)
+        {
+            fill (done, event.sample);
+            done = event.sample;
+            held += event.type == dev::NoteEvent::Type::noteOn ? 1 : event.type == dev::NoteEvent::Type::noteOff ? -1 : 0;
+        }
+
+        fill (done, context.numSamples);
+    }
+
+    void fill (int from, int to)
+    {
+        for (int channel = 0; channel < 2; ++channel)
+            juce::FloatVectorOperations::fill (played.getWritePointer (channel) + from, held > 0 ? level : 0.0f, to - from);
+    }
+};
+} // namespace
+
+TEST_CASE ("Instruments handed their blocks early get each before the tracks play, and sound as they would one after another")
+{
+    // Three tracks of the instrument, each its notes, and the master: played by one thread and by four, handed their
+    // blocks early and not.
+    const auto render = [] (bool early, int numThreads, std::vector<std::string>* log)
+    {
+        auto plan = makeClickPlan();
+        plan->metronome = false;
+
+        for (int track = 1; track <= 3; ++track)
+            plan->strips.push_back (makeTrack (track, EarlyLevel::info,
+                                               std::make_unique<EarlyLevel> (early, 0.1f * (float) track, track, log),
+                                               { { 0.5, 1.5, 60, 0.8f }, { 1.0 + 0.25 * track, 2.5, 64, 0.8f } }, blockSize));
+
+        plan->strips.push_back (makeMaster (*plan, blockSize));
+        engine::Engine player;
+        player.prepare (rate, blockSize);
+        player.setNumThreads (numThreads);
+        player.setPlan (std::move (plan));
+        return player.render (24000 * 3);
+    };
+
+    // Each block, every instrument handed it first, in the tracks' order; then each track takes what its instrument played.
+    std::vector<std::string> log;
+    log.reserve (6 * (24000 * 3 / blockSize + 1));
+    const auto early = render (true, 1, &log);
+    REQUIRE (log.size() >= 12);
+    CHECK (log.size() % 6 == 0);
+
+    for (size_t block = 0; block < 2; ++block)
+        for (size_t i = 0; i < 6; ++i)
+            CHECK (log[block * 6 + i] == (i < 3 ? "start " : "process ") + std::to_string (i % 3 + 1));
+
+    // The same to the last bit as one after another, on one thread or four.
+    const auto inTurn = render (false, 1, nullptr);
+    const auto onFour = render (true, 4, nullptr);
+    CHECK (early.getMagnitude (0, 0, early.getNumSamples()) > 0.1f); // they play
+
+    for (const auto* other : { &inTurn, &onFour })
+    {
+        auto differing = 0;
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 0; i < early.getNumSamples(); ++i)
+                differing += juce::exactlyEqual (early.getSample (channel, i), other->getSample (channel, i)) ? 0 : 1;
+
+        CHECK (differing == 0);
+    }
 }
 
 namespace

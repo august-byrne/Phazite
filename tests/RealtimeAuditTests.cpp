@@ -11,6 +11,7 @@
 // docs/realtime-audit.md lists the findings and what Phazite does about each.
 
 #include "AudioThreadMonitor.h"
+#include "SandboxedPlugins.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -639,6 +640,27 @@ TEST_SUITE ("realtime-audit")
         const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: a plug-in in its helper", m);
         CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords on three plug-in synths in their helpers, handed their blocks early")
+    {
+        phazite::test::SandboxedPlugins sandboxed;
+        phazite::test::TestSong song;
+
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto track = i == 0 ? song.firstTrack : song.addTrack ("Synth " + juce::String (i + 1));
+            song.setInstrument (track, "PhaziteTestSynth");
+            const auto clip = song.addMidiClip (track, 0.0, 16.0);
+
+            for (int beat = 0; beat < 16; ++beat)
+                song.addChord (clip, { 48 + 12 * i + beat % 3, 52 + 12 * i, 55 + 12 * i }, beat, 0.75);
+        }
+
+        const auto m = playProjectAndMeasure (song.context);
+        report ("Phazite's engine: plug-in synths handed their blocks early", m);
+        CHECK (m.peakLevel > 0.01f); // they play
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
