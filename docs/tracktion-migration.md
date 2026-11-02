@@ -1,6 +1,6 @@
 # Migrating off Tracktion Engine
 
-*Status: written 2026-10-30 at the owner's request; T0 and T1 done (2026-10-30), on the owner's go-ahead of 2026-10-30.* It takes stock of what Phazite still uses Tracktion Engine for, lays out the phases that would move each part to code of Phazite's own, and lists the Tracktion-isms that go with them. Sizes are relative effort, S < M < L < XL, as in the [roadmap](roadmap.md); they are not dates.
+*Status: written 2026-10-30 at the owner's request; T0 and T1 done (2026-10-30), on the owner's go-ahead of 2026-10-30; T2 under way, on the owner's go-ahead of 2026-11-02, with recording moved into it from T4.* It takes stock of what Phazite still uses Tracktion Engine for, lays out the phases that would move each part to code of Phazite's own, and lists the Tracktion-isms that go with them. Sizes are relative effort, S < M < L < XL, as in the [roadmap](roadmap.md); they are not dates.
 
 **How this sits with the earlier decision.** Design decision 1 (2026-10-14, [design section 23](design.md#23-tracktion-engine-what-it-gives-and-what-we-build)) kept Tracktion and allowed replacing a part only after a dated decision for that part; the stretching of audio clips (2026-10-28) and the five parts decided on 2026-10-30 ([roadmap](roadmap.md#architecture-track) A5) were the first. This plan lays out the whole path (architecture phase A6), so that each part's decision is made with the rest in view. Each phase still starts on the owner's go-ahead, dated in the [decision log](design.md#26-decision-log).
 
@@ -64,13 +64,13 @@ Snapshot of 2026-10-30 (Phazite at `a613ff7`, Tracktion 3.5.0 at `bb38617`). Onl
 |---|---|---|---|
 | T0 | Safety nets: golden renders of everything that plays, a harness for two engines, tests that build projects through the model | M | — |
 | T1 | The project: Phazite's own document, file and undo; Tracktion's Edit a mirror of it | XL | T0 |
-| T2 | The sound: Phazite's own playback engine, side by side with Tracktion's until they agree | XL | T1 |
+| T2 | The sound: Phazite's own playback engine, side by side with Tracktion's until it plays and records everything, then the default | XL | T1 |
 | T3 | Plug-ins: hosting of Phazite's own, sandboxed (A5 part 5, step 3.3) | XL | T0; T2 to play through it |
-| T4 | Inputs and recording: audio devices, MIDI inputs, live playing, recording and Capture | L | T2 |
+| T4 | Devices: the audio devices and MIDI inputs of Phazite's own, and their settings out of Tracktion's file | M | T2 |
 | T5 | Rendering: export and stems, freeze and bounce, previews | M | T2, T3 |
 | T6 | Tracktion removed: the mirror, the workarounds and the submodule go | M | all |
 
-T3 can start beside T1: hosting doesn't depend on who owns the project, and its first step is a measurement.
+T3 can start beside T1: hosting doesn't depend on who owns the project, and its first step is a measurement. T5 is small once T2 renders offline, which its golden renders need from its first steps.
 
 ### T0. Safety nets (M)
 
@@ -135,19 +135,61 @@ Phazite's project becomes the truth, and Tracktion's Edit becomes a mirror that 
 
 ### T2. The sound of Phazite's own (XL)
 
-A playback engine of Phazite's own, in a new engine-neutral layer, `src/engine/`, beside `src/devices/` and below the model, which feeds it from the document.
-- **A plan compiled on the message thread and swapped in whole:** the model turns the document into an immutable plan of what plays (nodes and their connections, clips, automation, modulation), and hands it to the audio thread as `DeviceModulation` is handed over: an atomic pointer, the old plan freed on the message thread once the audio thread has let go of it. Editing never locks the audio thread.
-- **What it plays,** each part checked against Tracktion's renders before it plays by default:
-  1. the transport in beats: play, stop, loop and locate, sample-accurate at the loop's end, through the tempo map;
-  2. MIDI clips into Phazite's instruments, with aliases and loops, and the piano roll's guide notes;
-  3. audio clips, streamed from disk by a reading thread ahead of the audio thread, Phazite's renders of stretched, pitched and reversed clips (`ClipRenders`), and fades;
-  4. Phazite's devices directly, with no Tracktion plug-in around them, with automation and modulation in every stretch, and for each note once the instruments take it (design section 10): the modulators become engine-neutral DSP (`src/devices/modulation/`), all six kinds;
-  5. the mixer: volume and pan, mute and solo, meters, sends and returns, buses with outputs of their own, sidechains, the master and its loudness meter;
-  6. delay compensation across the whole graph, from each device's reported latency;
-  7. processing on several cores: the graph's independent parts on a pool of real-time threads (Windows' "Pro Audio" scheduling, macOS's audio workgroups);
-  8. the metronome and the count-in.
-- **Side by side:** a switch picks the engine; the harness of T0 runs every golden render through both.
-- *Done when:* every golden render matches Tracktion's within the fingerprints' tolerance; the real-time audit's guarded scenarios allocate nothing on Phazite's engine; the benchmarks are as fast or faster ([performance-audit.md](performance-audit.md)); and the app plays through Phazite's engine by default.
+A playback engine of Phazite's own, in a new engine-neutral layer, `src/engine/`, beside `src/devices/` and below the model, which compiles the song into what it plays. It plays beside Tracktion's while T2 lasts, one part after another, and becomes the default at its end, recording too (moved here from T4 on 2026-11-02, so that the default never records through one engine while it plays through the other).
+
+**How it is built (planned 2026-11-02, by Claude; the owner's go-ahead of the same day):**
+- **The layers.** `src/engine/` uses JUCE's `juce_core`, `juce_audio_basics` and `juce_dsp` and the devices' DSP, and nothing of Tracktion or of the model, so it is tested with plans built by hand, without a project; the architecture check keeps Tracktion out of it as it does of `src/devices/`. The model's new area `src/model/playback/` holds a `PlaybackSession` for each open project: it compiles the song, keeps the values current and points the model's transport, meters and live input at the engine while it plays; its only Tracktion is what plays Tracktion's plug-ins until T3, in its `internal/` folder. The mirror stays: Tracktion still loads plug-ins (T3), exports, freezes, bounces and previews (T5).
+- **Beside Tracktion.** Phazite's engine is a second callback on the audio device (JUCE adds the callbacks' outputs); while it plays, Tracktion's playback context is freed. Tracktion's input devices still hand their audio and MIDI to their consumers, which the engine is until T4 opens the devices itself. A setting picks the engine while T2 lasts; the harness of T0 renders each golden song through both.
+- **The plan, the state and the values.** The plan is what plays, built on the message thread and never changed once built: the tempo map in samples; the tracks in the order they play, each a short program (its clips, its devices, its fader, its sends, where it goes), with what each waits for; the delays that line up paths of different latency; each clip's notes or audio and each curve's points, as shared pieces that never change. It reaches the audio thread whole, through one atomic pointer. The state is what sounds on and is kept by Phazite's IDs: each device's DSP, the faders' easing, delay lines, modulators, clips' places in their files, meters. A new plan finds the same state, so an edit never resets the sound: a reverb rings on, nothing clicks. The values are an atomic slot for each value set by hand (parameters, volume, pan, sends, macros, mute, solo, a device's switch): turning a knob, undoing it or muting a track is one store, and builds nothing.
+- **Changes.** The session listens to the song: a value goes to its slot at once; a clip's notes or a curve rebuild that piece; a change of what plays where rebuilds the order, at most once a turn of the message loop, the unchanged pieces shared with the plan before. A replaced plan is freed on the message thread once the audio thread has finished a block since it let go of it, as `DevicePlugin` frees its modulation; the audio thread never frees, allocates or waits.
+- **Its threads:** the audio callback; worker threads (step 8); a thread that reads audio files ahead of the playhead; the MIDI inputs, through lock-free queues; and the message thread, which compiles, prepares and frees.
+
+**Made to be light:**
+- **Work only where there is sound.** A buffer knows when it is silent; devices sleep on silence as they do now; a track with no clip under the playhead, its devices asleep and nothing coming in costs a branch. A song stopped and silent costs nearly nothing, its worker threads asleep (Tracktion wakes its workers every block, stopped too: [performance audit](performance-audit.md) A2).
+- **Nothing rebuilt for a value.** A device's switch (reset as it comes back on, which fixes [known bug](known-bugs.md) 5), arming, Low Latency, mute and solo are values, where each rebuilds Tracktion's graph.
+- **The same time every block.** Clips' and curves' places move on from block to block, searched for only after a jump; the tempo map and the curves are prepared as segments; IDs become indexes as a plan is built, so the audio thread looks nothing up.
+- **One control rate,** a point every 32 samples, counted from the song's start: parameters, automation and modulation are worked out there, for Phazite's devices, the mixer and plug-ins alike, so the song sounds the same at any buffer size, and rendered as it plays.
+- **Sums in a fixed order.** Each track writes its own buffer, and a bus, a return or the master adds its inputs in the plan's order in its own task: the same result to the last bit on one thread or eight, with no lock on any buffer. Paths of different latency are lined up by delaying the shorter where they join.
+- **Compact data:** the plan in flat arrays in the order it plays; event buffers of a fixed size; gain and metering in one pass; JUCE's vector operations.
+- **Audio files:** a short file whole in memory, a longer one read ahead of the playhead, with the start of each clip and of the loop kept, so that a jump or a loop starts at once; a render waits for what it reads rather than drop it.
+- **Several cores:** each track a task, those that hold up the most work first, the next ready task taken on the same thread; workers that spin a moment, then sleep; one thread when a block's work wouldn't pay for waking another; Windows' "Pro Audio" scheduling and macOS's audio workgroups.
+- **Live notes** stamped as they come in and played in the next block at the same delay every time: not at a block's start, 0 to 10 ms late as Tracktion plays them, and none dropped (the [real-time audit](realtime-audit.md)'s findings 22 and 23).
+- **The real-time rules from the first line,** each part with a guarded scenario in the real-time audit before its step ends, and the benchmarks run before and after.
+
+**Built as Phazite means it to play, from the start (the owner's decision, 2026-11-02).** Where Tracktion plays a song right, Phazite's engine plays it the same way and the golden renders still match Tracktion's: about 32 of the 44, the devices, MIDI, audio clips, routing, latency, frozen tracks and aliases. Where it doesn't, the engine plays it better in the step that builds that part, rather than copying Tracktion first and changing it afterwards; the golden renders that change are regenerated there, read in full and explained in the commit, and each render's own check (that a modulator moves the sound, that a fade fades) still passes. Tracktion stays the check of the maths: Phazite's curves, modulators' waves, fader and fade shapes are compared with Tracktion's own functions on thousands of random inputs, and tests to the sample check the timing. What Tracktion does that Phazite's engine doesn't, found in Tracktion's source on 2026-11-02:
+
+| Tracktion | Phazite's engine | Step | Golden renders it changes |
+|---|---|---|---|
+| A render starts 44 blocks early, its modulators running from 0.51 s before the song's start and its playhead from 0.26 s before it (at 44.1 kHz and 512 samples), so a free-running modulator starts the song wherever that left it | A render starts at the song's start, every modulator from its own start | 1, 5 | free-running modulators' |
+| Modulators move once a block (512 samples in a render, one callback live), and an automated plug-in plays in pieces of 128 samples, so the sound changes with the buffer size | One control rate for everything (above) | 4, 5 | modulation, a device's automation |
+| The fader eases 15 ms towards each new value, again every 128 samples, so its automation lags about 13 ms | The fader follows its automation exactly, easing only a jump of a value set by hand | 4 | volume and pan automation |
+| The metronome plays Tracktion's two click samples | A click of Phazite's own, synthesized, since no sounds go in this repository | 1 | metronome, count-in |
+| A linear pan law: a hard pan doubles one side (+6 dB), and a sound grows 3 dB louder as it pans out | Constant power, 0 dB at the centre and +3 dB on its side at a hard pan ([design section 8](design.md#8-the-mixer)) | 2 | those panned off the centre |
+| The random source unseeded | Seeded, so a render is the same every time | 5 | none (it has no golden render) |
+
+What Tracktion does right, and Phazite's engine does the same: a MIDI note ends a tenth of a millisecond before its clip's end, and the notes sounding at a clip's start or after a jump start again; an audio clip plays its file's samples as they are at the song's rate, through 5-point Lagrange interpolation at another, cut off at its edges, with a 40-sample crossfade after a jump; the four fade shapes; the fader's travel (decibels = 20 ln(position) + 6, automation drawn in positions); a path's automation shifted by the latency before it; a sidechain taken after its track's fader and before its mute; a folder mixing its sub-folders, then its tracks; an envelope follower listening after the fader.
+
+**The steps,** each a commit that builds, passes every test and can be tried with the setting, with what to listen for:
+
+| Step | What | Golden renders it plays | Size |
+|---|---|---|---|
+| 0. Foundations | The `src/engine/` layer and its rules. What `DevicePlugin` does each block (its parameters' glides, its stretches, its mix with the dry sound delayed, mono, sleep, events) moved into an engine-neutral `DeviceRunner` that both engines play Phazite's devices with, every render unchanged to the bit. The hand-over of what the audio thread plays, and its freeing. The harness renders a song through Phazite's engine where its step says so, and measures how far apart two renders are sample by sample beside their fingerprints | none change | M |
+| 1. The transport | Play, stop, locate and the loop, a block split at the loop's end; the tempo map in samples, checked against Tracktion's on random maps; the metronome and the count-in; renders offline; the `PlaybackSession`; the engine on the audio device beside Tracktion's, and the setting; the playhead drawn every frame | metronome, count-in | M |
+| 2. Tracks, MIDI and Phazite's devices | MIDI clips (aliases sharing their notes, notes started again at a clip's start and after a jump, ended at clips' and the loop's ends), Phazite's instruments and effects, volume, pan, mute and solo, the master, delay compensation at the master; meters, the devices' displays, the CPU; the computer keyboard, the piano roll's guide notes and the MIDI inputs into the engine | synth, wavetable, drums, 11 effects, aliases, mute and solo, tempo, latency | L |
+| 3. Audio clips | Files read ahead of the playhead; Phazite's renders of stretched, pitched and reversed clips, taken in by a new plan as they are ready (no restart of playback); gain, fades, edges, other rates; takes; frozen tracks | 5 audio clips', frozen | L |
+| 4. Automation | Curves in beats, worked out by Phazite (Tracktion's lines, Bézier curves and holds), for Phazite's devices, the mixer and plug-ins; controls showing the engine's values; touch, latch and write written into the song by the model, from the controls' gestures at the engine's playhead | 3 automation renders | M |
+| 5. Modulation | The six modulators and the macros as engine-neutral DSP (`src/devices/modulation/`), moving Phazite's devices, the mixer and plug-ins; their editors' histories from the engine; `DeviceModulation` without Tracktion | 6 modulation renders | L |
+| 6. Routing | Sends before and after the fader, returns, folders as buses and as VCAs, sidechains (a loop refused), containers with their mix lined up and their macros, a loudness meter of Phazite's own on the master, delay compensation where every kind of path joins, and Low Latency without a restart | mix, a send before the fader, sidechain, vocoder, a container's macro, First Beat | L |
+| 7. Plug-ins | A plug-in as a node of the engine (`ExternalProcessor`), played from the instance Tracktion loaded, which keeps loading plug-ins, their state and their windows; T3's sandboxed host is another of the same | the test plug-in's tests; Surge XT by hand | M |
+| 8. Several cores | The worker threads and the order above | every render, the same to the bit as on one thread; ThreadSanitizer | M |
+| 9. Recording | The audio inputs and their monitoring from Phazite's callback, a take's start known to the sample (so [known bug](known-bugs.md) 4 can't happen); MIDI recording and overdub into the song; Capture from the engine's own 30 seconds; punch-in; takes round a loop of any length; the count-in | the recording, audio recording and Capture tests on Phazite's engine | M |
+| 10. The default | Every guarded scenario of the real-time audit at 0 on Phazite's engine; the benchmarks as fast or faster; the app plays and records through Phazite's engine, and the setting goes | every render | M |
+
+The three stems renders stay with Tracktion's export until T5.
+
+**How each step is checked:** tests of the engine on plans built by hand (a loop's end, a note, a latency to the sample; curves and modulators against Tracktion's own functions; nothing freed on the audio thread); the harness, through both engines, for the step's golden renders; the real-time audit's scenario for the part, guarded; the benchmarks before and after ([performance-audit.md](performance-audit.md)); and the owner's ears, with the setting.
+
+- *Done when:* every golden render matches Tracktion's within the fingerprints' tolerance, or differs as the table above says, read and explained; the real-time audit's guarded scenarios allocate nothing on Phazite's engine; the benchmarks are as fast or faster; and the app plays and records through Phazite's engine by default.
 
 ### T3. Plug-ins hosted by Phazite, sandboxed (XL; A5 part 5, step 3.3)
 
@@ -157,12 +199,12 @@ A playback engine of Phazite's own, in a new engine-neutral layer, `src/engine/`
 - **Into the engine:** a plug-in is a node of T2's graph that sends its audio to its helper and waits for it, with a deadline; a helper that crashes leaves its slot saying so, with Reload. Until T2, the node is a thin Tracktion plug-in, as A5 planned.
 - *Done when:* step 3.3's check passes (a deliberately hanging or crashing test plug-in can't stall the scan, crash Phazite or lose the project), and presets, automation, modulation, windows and sidechains work for plug-ins through Phazite's host.
 
-### T4. Inputs and recording (L)
+### T4. The devices (M)
 
+Recording, its timing, monitoring, Capture and live notes timestamped by the engine moved into T2 (2026-11-02), which records through Phazite's engine before it becomes the default; what is left is opening the devices without Tracktion.
 - **Audio devices:** `juce::AudioDeviceManager` directly, as `model/engine/AudioDevices.h` already describes them, with the first run's low-latency setup and ASIO on Windows; the audio setup kept in Phazite's settings.
-- **MIDI inputs:** JUCE's MIDI inputs with hot-plugging, and the computer keyboard as an input of its own; live notes timestamped by the engine as they come, so that none is dropped after a busy UI thread (audit findings 22 and 23); the MIDI input's options (overdub, quantize) as Phazite's own settings.
-- **Recording:** Phazite already writes audio recordings itself (`AudioRecorder`); it takes its inputs, monitoring and timing from Phazite's engine. MIDI recording, and Capture with a buffer of its own of what came in, write into the document.
-- *Done when:* the recording tests pass without Tracktion, known bug 4 can't happen, and recording works with an ASIO interface.
+- **MIDI inputs:** JUCE's MIDI inputs with hot-plugging, and the computer keyboard as an input of its own, rather than Tracktion's input devices handing them to the engine; the MIDI input's options (overdub, quantize) as Phazite's own settings.
+- *Done when:* `te::DeviceManager` and Tracktion's input devices are unused, the recording tests pass, and recording works with an ASIO interface.
 
 ### T5. Rendering (M)
 
@@ -300,7 +342,7 @@ Conventions and workarounds that exist only because Tracktion works the way it d
 | Guide notes only if the engine behaviour says so | the piano roll forces them | the engine plays what the piano roll asks |
 | Blocking jobs run on the calling thread | `runTaskWithProgressBar()` | Phazite's own jobs |
 
-**Inputs and recording (T4)**
+**Inputs and recording (T2, T4)**
 
 | Tracktion-ism | How Phazite works around it now | What replaces it |
 |---|---|---|
