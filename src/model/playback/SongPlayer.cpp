@@ -16,6 +16,7 @@
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
@@ -250,6 +251,10 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         }
 
         const auto deviceIDs = addDevices (*plan, places, channel, strip, channel.state, frozen);
+
+        if (! isRender && ! strip.hasInstrument && ! isFolderState (channel.state) && ! isReturnState (channel.state))
+            strip.inputChannels = getHeardInput (channel.state);
+
         addFaderAutomation (strip, channel.state, false);
         addModulation (strip, channel.state, deviceIDs);
         setChannel (channel.state, false);
@@ -1036,6 +1041,18 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
         file->keep ((std::int64_t) region.fileStart);
         strip.audio.push_back (std::move (region));
     }
+}
+
+std::vector<int> SongPlayer::getHeardInput (const juce::ValueTree& trackState) const
+{
+    const auto monitoring = trackState[schema::trackMonitoring].toString();
+    const auto* recorder = AudioRecorder::findFor (edit);
+    const auto armed = recorder != nullptr && recorder->isArmed (getTrackID (trackState));
+
+    if (monitoring == schema::monitorAlways || (armed && monitoring.isEmpty()))
+        return getInputChannels (trackState[schema::trackInput].toString());
+
+    return {};
 }
 
 bool SongPlayer::addFrozenFile (engine::Plan::Strip& strip, const juce::ValueTree& trackState)

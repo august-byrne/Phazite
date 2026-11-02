@@ -45,6 +45,7 @@ The first column covers the warm-up after playback starts (about 0.5 s); the sec
 | Phazite's own engine: chords through a filter that an LFO, a note follower and a breakpoint envelope move, the pan and the volume by an envelope follower, steps, a random source and a macro (2026-11-02) | 0 | 0 |
 | Phazite's own engine: chords in a bus with a container, sends before and after the fader to returns, a sidechain and the loudness meter (2026-11-02) | 0 | 0 |
 | Phazite's own engine: chords through a plug-in (the tests' stand-in) after Phazite's synth (2026-11-02) | 0 | 0 |
+| Phazite's own engine recording a take: an armed track's input, heard and recorded, and notes played live from another thread (2026-11-02) | 0 | 0 |
 | Volume automation and an LFO on pan | 2 allocations | 0 |
 | A tone through a bus, with a send to Phazite's reverb on a return, into the loudness meter | 7 allocations | 0 |
 | Phazite's EQ, every band on and one automated, with its analyzer listening | 2 allocations | 0 |

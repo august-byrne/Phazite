@@ -87,6 +87,10 @@ struct Plan
         std::vector<Device> devices;               // in the order the sound goes through them, an instrument first
         bool hasInstrument = false;
         std::vector<Input> inputs;
+
+        // The audio device's inputs it hears (a track without an instrument): one, on both sides, or a pair, by their
+        // channels; or none.
+        std::vector<int> inputChannels;
         int latency = 0; // how late its sound comes out, in samples, from its devices and what it adds up, as its fader's
                          // automation follows the song
         std::shared_ptr<const Curve> volume, pan;               // or none

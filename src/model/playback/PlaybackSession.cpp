@@ -4,6 +4,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/transport/internal/Take.h"
 
 #include <algorithm>
 #include <vector>
@@ -48,6 +49,7 @@ PlaybackSession::PlaybackSession (te::Edit& e, PlaybackHost& h)
 
 PlaybackSession::~PlaybackSession()
 {
+    take = nullptr; // a take not finished keeps nothing
     cancelPendingUpdate();
     editState.removeListener (this);
 
@@ -92,11 +94,56 @@ bool PlaybackSession::isPlaying() const
     return host.getEngine().isPlaying();
 }
 
-void PlaybackSession::play()
+void PlaybackSession::play (bool countIn)
 {
     update(); // what it plays as the song is now, should a change still be on its way
-    host.getEngine().play();
+    host.getEngine().play (countIn);
+    playStartClock = host.getEngine().getClock();
     writer.playbackStarted();
+}
+
+bool PlaybackSession::startTake()
+{
+    if (take == nullptr && exists.get() != nullptr)
+    {
+        update(); // the song as it is now, whose tempo and delays the take starts with
+        take = Take::start (*this);
+        update(); // its loop
+    }
+
+    return take != nullptr;
+}
+
+std::unique_ptr<Take> PlaybackSession::releaseTake()
+{
+    auto released = std::move (take);
+    update(); // the song's loop again
+    return released;
+}
+
+int PlaybackSession::getNumInputs() const noexcept
+{
+    return host.getNumInputs();
+}
+
+int PlaybackSession::getInputLatency() const noexcept
+{
+    return host.getInputLatency();
+}
+
+int PlaybackSession::getOutputLatency() const noexcept
+{
+    return host.getOutputLatency();
+}
+
+const std::deque<engine::Engine::PlayedEvent>& PlaybackSession::getPlayedEvents()
+{
+    return host.getPlayedEvents();
+}
+
+void PlaybackSession::keepPlayedFrom (std::optional<std::int64_t> clock)
+{
+    host.keepPlayedFrom (clock);
 }
 
 void PlaybackSession::stop()
@@ -175,7 +222,19 @@ void PlaybackSession::update()
     auto& engine = host.getEngine();
 
     if (exists.get() != nullptr && host.isOn() && host.getPlayingSession() == this)
-        engine.setPlan (player.compile (engine.getSampleRate(), engine.getMaximumBlockSize(), false));
+    {
+        auto plan = player.compile (engine.getSampleRate(), engine.getMaximumBlockSize(), false);
+
+        // A take loops the range looped on purpose, or nothing (Take.h).
+        if (take != nullptr)
+        {
+            const auto loop = take->getLoop();
+            plan->loop = loop.has_value() ? std::optional (engine::Plan::BeatRange { loop->getStart().inBeats(), loop->getEnd().inBeats() })
+                                          : std::nullopt;
+        }
+
+        engine.setPlan (std::move (plan));
+    }
 
     followLiveMidi();
 }

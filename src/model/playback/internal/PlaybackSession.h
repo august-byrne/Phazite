@@ -2,7 +2,8 @@
 // A project as Phazite's own engine plays it (docs/tracktion-migration.md, T2): its song compiled into what the engine plays
 // (SongPlayer.h), given again as the song changes, at most once a turn of the message loop, a value set by hand at once;
 // the transport the model's functions use while Phazite's engine plays the project (model/transport/internal/Playback.h),
-// in the song's beats; the notes played live into it; and the automation written by hand while it plays (AutomationWriter.h).
+// in the song's beats; the notes played live into it; the automation written by hand while it plays (AutomationWriter.h);
+// and the take it records (model/transport/internal/Take.h).
 // ProjectContext makes one for each Edit it holds, which joins the app's PlaybackHost.
 #pragma once
 
@@ -14,6 +15,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -21,6 +24,7 @@
 namespace phazite
 {
 class PlaybackHost;
+class Take;
 
 class PlaybackSession : private juce::ValueTree::Listener,
                         private juce::AsyncUpdater
@@ -37,15 +41,32 @@ public:
     engine::Engine& getEngine() noexcept; // the host's, which plays it
 
     // Whether Phazite's engine plays this project now: the host is on, this is the project it plays, and Tracktion isn't
-    // recording (until T2 step 9 records through Phazite's engine).
+    // recording.
     bool isPlayingProject() const;
 
     // The transport, through the host's engine. The playhead is in the song's beats.
     bool isPlaying() const;
-    void play();
+    void play (bool countIn = false); // a bar of clicks first, from a stop (Engine.h)
     void stop();
     void locate (BeatPosition);
     BeatPosition getPlayhead() const;
+
+    // The engine's clock as playback last started: what Capture keeps of what was played while the song plays.
+    std::int64_t getPlayStartClock() const noexcept { return playStartClock; }
+
+    // Recording through Phazite's engine: the take it keeps while it records (model/transport/internal/Take.h), whose loop
+    // its engine plays; started, if anything would record; and let go of, to be finished or dropped.
+    bool isRecording() const noexcept { return take != nullptr; }
+    bool startTake();
+    std::unique_ptr<Take> releaseTake();
+
+    // The audio device's inputs and their delays, as the host has them (PlaybackHost.h); and the notes played live in the
+    // last 30 seconds, and from a clock on while a take records.
+    int getNumInputs() const noexcept;
+    int getInputLatency() const noexcept;
+    int getOutputLatency() const noexcept;
+    const std::deque<engine::Engine::PlayedEvent>& getPlayedEvents();
+    void keepPlayedFrom (std::optional<std::int64_t> clock);
 
     // Live MIDI (the computer keyboard and the MIDI inputs, which Tracktion's "All MIDI Ins" brings together) plays the track
     // it goes to (model/engine/internal/LiveInput.h) through Phazite's engine while the engine plays the project, in its next
@@ -84,6 +105,8 @@ private:
     std::vector<std::pair<std::int64_t, int>> guideNotes; // each track's sounding
 
     te::EditPlaybackContext* heldContext = nullptr; // the context whose graph is held, or none
+    std::unique_ptr<Take> take;
+    std::int64_t playStartClock = 0;
 
     void changed (const juce::ValueTree& tree, const juce::ValueTree& child = {});
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Recording (docs/design.md, section 17; roadmap steps 1.7 and 3.4). What MIDI keyboards and the computer keyboard play is
 // recorded onto the track live MIDI plays (LiveInput.h), with no track to arm first, and the armed tracks record their
-// audio inputs (RecordingModel.h, which Phazite records itself: AudioRecorder.h): from where playback starts, after the
-// count-in when it is on (Metronome.h), or from where the song is if it plays already. With a range looped, recording
-// goes round with it, each time round a take of an audio clip; with Punch on, only what is played in the looped range is
-// kept, the take not looping. Overdub, the default, adds the notes to the clips already there; with it off, they take
-// those clips' place. Recorded notes can be quantized to sixteenths as they go in. However recording stops, the take is
-// one undo step, "Record" (Playback.h's stop functions keep it too). Overdub and quantizing are the app's settings, for
-// every project, which Tracktion keeps with the MIDI input's own.
+// audio inputs (RecordingModel.h, which Phazite records itself: AudioRecorder.h, and through its own engine, Take.h): from
+// where playback starts, after the count-in when it is on (Metronome.h), or from where the song is if it plays already.
+// With a range looped, recording goes round with it, each time round a take of an audio clip; with Punch on, only what is
+// played in the looped range is kept, the take not looping. Overdub, the default, adds the notes to the clips already
+// there; with it off, they take those clips' place. Recorded notes can be quantized to sixteenths as they go in. However
+// recording stops, the take is one undo step, "Record" (Playback.h's stop functions keep it too). Overdub and quantizing
+// are the app's settings, for every project, which Tracktion keeps with the MIDI input's own.
 #pragma once
 
 #include "model/base/internal/Selection.h"

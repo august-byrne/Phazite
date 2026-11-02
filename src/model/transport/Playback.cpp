@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Playback.h"
+#include "internal/Recording.h"
+#include "internal/Take.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/base/internal/Schema.h"
@@ -54,7 +56,16 @@ namespace
     {
         if (auto* session = findPlayingSession (edit))
         {
+            auto take = session->releaseTake();
             session->stop();
+
+            // A take recorded through Phazite's engine (Take.h).
+            if (take != nullptr)
+            {
+                const UndoStep step (edit, "Record");
+                take->finish();
+            }
+
             return;
         }
 
@@ -332,7 +343,7 @@ void SongFollower::timerCallback()
             session->followLiveMidi();
     }
 
-    if (! isSongPlaying (edit) || isLoopOn (edit) || transport.isRecording())
+    if (! isSongPlaying (edit) || isLoopOn (edit) || isRecording (edit))
     {
         lastPosition.reset();
         return;

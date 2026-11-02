@@ -19,6 +19,7 @@ namespace
 } // namespace
 
 Engine::Engine()
+    : played ((size_t) maximumPlayed)
 {
     prepare (sampleRate, maximumBlockSize);
 }
@@ -50,6 +51,11 @@ void Engine::dropPlans()
     plans.freeReplaced();
 }
 
+void Engine::setRecording (std::unique_ptr<Recording> recording)
+{
+    recordings.give (std::move (recording));
+}
+
 //==============================================================================
 void Engine::push (Command command)
 {
@@ -61,10 +67,10 @@ void Engine::push (Command command)
         jassertfalse; // the audio thread hasn't taken the commands for 64 blocks: is it running?
 }
 
-void Engine::play()
+void Engine::play (bool countIn)
 {
     playing = true;
-    push ({ Command::Type::play });
+    push ({ Command::Type::play, 0.0, countIn });
 }
 
 void Engine::stop()
@@ -132,7 +138,19 @@ void Engine::takeCommands (const Plan& plan) noexcept
             switch (command.type)
             {
                 case Command::Type::play:
-                    // The notes sounding where it starts start too.
+                    // The notes sounding where it starts start too. A count-in from a stop: a bar there, on its beats.
+                    if (command.countIn && ! transport.playing)
+                    {
+                        auto& countIn = transport.countIn;
+                        countIn.beatsPerBar = std::max (1, plan.tempo.getTimeSignatureAt (transport.beat).numerator);
+                        countIn.samplesPerBeat = plan.tempo.getSamplesPerBeat (transport.beat);
+                        countIn.length = std::llround (countIn.beatsPerBar * countIn.samplesPerBeat);
+                        countIn.left = countIn.length;
+                        countIn.firstBeat = transport.beat - countIn.beatsPerBar;
+                        countIn.barStart = plan.tempo.getBarStart (transport.beat);
+                        clicking = nullptr;
+                    }
+
                     transport.chase = transport.chase || ! transport.playing;
                     transport.playing = true;
                     break;
@@ -140,12 +158,15 @@ void Engine::takeCommands (const Plan& plan) noexcept
                 case Command::Type::stop:
                     transport.notesOff = transport.notesOff || transport.playing;
                     transport.playing = false;
+                    transport.countIn.left = 0;
+                    brokeTake = true;
                     clicking = nullptr;
                     break;
 
                 case Command::Type::locate:
                     // A jump while playing: the notes sounding stop, and those where it lands start.
                     transport.notesOff = transport.notesOff || transport.playing;
+                    brokeTake = true;
                     transport.chase = true;
                     transport.beat = command.beat;
                     transport.sample = std::llround (plan.tempo.toSamples (command.beat));
@@ -156,12 +177,12 @@ void Engine::takeCommands (const Plan& plan) noexcept
         });
 }
 
-void Engine::playLive (std::int64_t track, devices::NoteEvent event) noexcept
+void Engine::playLive (std::int64_t track, devices::NoteEvent event, bool recordable) noexcept
 {
-    liveQueue.push ({ track, event, getMilliseconds() });
+    liveQueue.push ({ track, event, getMilliseconds(), recordable });
 }
 
-void Engine::takeLiveEvents (int numSamples) noexcept
+void Engine::takeLiveEvents (const Plan& plan, int numSamples, std::int64_t partClock) noexcept
 {
     // Each in the block as far as it came after the last block started: a block's delay, the same for every note.
     const auto now = getMilliseconds();
@@ -169,11 +190,46 @@ void Engine::takeLiveEvents (int numSamples) noexcept
     lastBlockMilliseconds = now;
     numLiveEvents = 0;
 
+    // Where the song was as each came in, in the last part: round the loop, as it plays.
+    std::int64_t loopStart = 0, loopEnd = 0;
+
+    if (plan.loop.has_value())
+    {
+        loopStart = std::llround (plan.tempo.toSamples (plan.loop->start));
+        loopEnd = std::llround (plan.tempo.toSamples (plan.loop->end));
+    }
+
     for (LiveEvent live; numLiveEvents < (int) liveEvents.size() && liveQueue.pop (live);)
     {
         live.event.sample = std::clamp ((int) std::lround ((live.milliseconds - since) * sampleRate / 1000.0), 0, numSamples - 1);
         liveEvents[(size_t) numLiveEvents++] = live;
+
+        if (! live.recordable)
+            continue;
+
+        PlayedEvent event { live.track, live.event, lastPart.clock + live.event.sample, -1 };
+
+        if (lastPart.playing)
+        {
+            event.songSample = lastPart.sample + live.event.sample;
+
+            if (loopEnd > loopStart && lastPart.sample < loopEnd && event.songSample >= loopEnd)
+                event.songSample = loopStart + (event.songSample - loopEnd);
+        }
+
+        if (const auto scope = playedFifo.write (1); scope.blockSize1 > 0)
+            played[(size_t) scope.startIndex1] = event;
     }
+
+    lastPart = { partClock, transport.sample, transport.playing && transport.countIn.left == 0 };
+}
+
+int Engine::takePlayed (std::span<PlayedEvent> into) noexcept
+{
+    const auto scope = playedFifo.read (std::min ((int) into.size(), playedFifo.getNumReady()));
+    auto taken = 0;
+    scope.forEach ([this, &into, &taken] (int index) { into[(size_t) taken++] = played[(size_t) index]; });
+    return taken;
 }
 
 int Engine::getOutputLatency (const Plan& plan) noexcept
@@ -181,11 +237,12 @@ int Engine::getOutputLatency (const Plan& plan) noexcept
     return plan.strips.empty() ? 0 : plan.strips.back().latency;
 }
 
-void Engine::process (float* const* outputs, int numOutputs, int numSamples) noexcept
+void Engine::process (const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples) noexcept
 {
     const juce::ScopedNoDenormals noDenormals;
     const auto startTicks = juce::Time::getHighResolutionTicks();
     numOutputs = std::min (numOutputs, maximumChannels);
+    numInputs = inputs != nullptr ? std::clamp (numInputs, 0, maximumInputs) : 0;
 
     for (int channel = 0; channel < numOutputs; ++channel)
         if (outputs[channel] != nullptr)
@@ -201,7 +258,14 @@ void Engine::process (float* const* outputs, int numOutputs, int numSamples) noe
         for (int channel = 0; channel < numOutputs; ++channel)
             part[(size_t) channel] = outputs[channel] != nullptr ? outputs[channel] + done : nullptr;
 
+        numPartInputs = numInputs;
+
+        for (int channel = 0; channel < numInputs; ++channel)
+            partInputs[(size_t) channel] = inputs[channel] != nullptr ? inputs[channel] + done : nullptr;
+
         const Handover<Plan>::Block held { plans };
+        const Handover<Recording>::Block heldRecording { recordings };
+        auto* recording = heldRecording.get();
 
         // A plan for another rate (the device's changed, and the new one is still being built) plays nothing.
         if (const auto* plan = held.get(); plan != nullptr && juce::exactlyEqual (plan->tempo.getSampleRate(), sampleRate))
@@ -214,8 +278,29 @@ void Engine::process (float* const* outputs, int numOutputs, int numSamples) noe
             }
 
             takeCommands (*plan);
-            takeLiveEvents (length);
+            takeLiveEvents (*plan, length, clock + done);
             const auto startBeat = transport.beat;
+            auto counted = 0;
+
+            // A take ends as playback stops or jumps.
+            if (recording != nullptr && brokeTake)
+                recording->end();
+
+            brokeTake = false;
+
+            // The count-in: its clicks, while the song waits to play; live notes and the inputs play meanwhile, as when
+            // it is stopped, and the notes sounding where it starts start after it.
+            if (transport.playing && transport.countIn.left > 0)
+            {
+                counted = (int) std::min<std::int64_t> (length, transport.countIn.left);
+                const auto chase = transport.chase;
+                transport.playing = false;
+                playSpan (*plan, part.data(), numOutputs, 0, counted);
+                transport.playing = true;
+                transport.chase = chase;
+                playCountIn (part.data(), numOutputs, counted);
+                transport.countIn.left -= counted;
+            }
 
             if (! transport.playing)
             {
@@ -223,7 +308,7 @@ void Engine::process (float* const* outputs, int numOutputs, int numSamples) noe
             }
             else
             {
-                for (int offset = 0; offset < length;)
+                for (int offset = counted; offset < length;)
                 {
                     auto span = length - offset;
                     std::int64_t loopStart = 0, loopEnd = 0;
@@ -247,6 +332,11 @@ void Engine::process (float* const* outputs, int numOutputs, int numSamples) noe
                     endsAtLoop = loopEnd > loopStart && transport.sample + span >= loopEnd;
                     playSpan (*plan, part.data(), numOutputs, offset, span);
                     endsAtLoop = false;
+
+                    // What comes in meanwhile, into the take, which starts here if it hasn't yet.
+                    if (recording != nullptr)
+                        recording->record (partInputs.data(), numPartInputs, offset, span, transport.sample, clock + done + offset);
+
                     transport.sample += span;
                     offset += span;
 
@@ -260,7 +350,8 @@ void Engine::process (float* const* outputs, int numOutputs, int numSamples) noe
                 transport.beat = plan->tempo.toBeats ((double) transport.sample);
             }
 
-            const auto beatsPerSecond = transport.playing ? sampleRate / plan->tempo.getSamplesPerBeat (startBeat) : 0.0;
+            const auto beatsPerSecond =
+                transport.playing && transport.countIn.left == 0 ? sampleRate / plan->tempo.getSamplesPerBeat (startBeat) : 0.0;
             publishPlayhead (startBeat, beatsPerSecond, length / sampleRate);
         }
         else
@@ -277,6 +368,7 @@ void Engine::process (float* const* outputs, int numOutputs, int numSamples) noe
     load.store (load.load (std::memory_order_relaxed) * 0.95 + share * 0.05, std::memory_order_relaxed);
     blocksPlayed.fetch_add (1, std::memory_order_release);
     clock += numSamples;
+    publishedClock.store (clock, std::memory_order_release);
 }
 
 void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept
@@ -422,7 +514,10 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
             };
 
             if (! strip.hasInstrument)
+            {
+                addInput (strip, channels, offset, numSamples);
                 playAudio();
+            }
 
             for (size_t i = 0; i < strip.devices.size(); ++i)
             {
@@ -506,6 +601,18 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
             modulator->listen (channels, 2, numSamples);
 
         state.donePass.store (span.pass, std::memory_order_release);
+    }
+}
+
+void Engine::addInput (const Plan::Strip& strip, float* const* channels, int offset, int numSamples) noexcept
+{
+    // The inputs it hears: one on both sides, or a pair.
+    for (size_t side = 0; side < 2 && ! strip.inputChannels.empty(); ++side)
+    {
+        const auto channel = strip.inputChannels[std::min (side, strip.inputChannels.size() - 1)];
+
+        if (channel >= 0 && channel < numPartInputs && partInputs[(size_t) channel] != nullptr)
+            juce::FloatVectorOperations::add (channels[side], partInputs[(size_t) channel] + offset, numSamples);
     }
 }
 
@@ -670,27 +777,53 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     }
 }
 
-void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept
+void Engine::continueClick (float* const* outputs, int numOutputs, int offset, int from, int to) noexcept
 {
     // The click playing on, as far as a sample of the span.
-    const auto continueClick = [this, outputs, numOutputs, offset] (int from, int to)
+    if (clicking == nullptr)
+        return;
+
+    const auto length = std::min (to - from, clicking->getNumSamples() - clickPosition);
+    const auto* samples = clicking->getReadPointer (0, clickPosition);
+
+    for (int channel = 0; channel < numOutputs; ++channel)
+        if (outputs[channel] != nullptr)
+            juce::FloatVectorOperations::add (outputs[channel] + offset + from, samples, length);
+
+    clickPosition += length;
+
+    if (clickPosition >= clicking->getNumSamples())
+        clicking = nullptr;
+}
+
+void Engine::playCountIn (float* const* outputs, int numOutputs, int numSamples) noexcept
+{
+    // The song's beats in the bar before where it starts, as long as the beats there: each starts a click, a bar's first
+    // the accented one.
+    const auto& countIn = transport.countIn;
+    const auto from = (double) (countIn.length - countIn.left);
+    auto done = 0;
+
+    for (auto beat = std::ceil (countIn.firstBeat + from / countIn.samplesPerBeat - 1.0e-9);; beat += 1.0)
     {
-        if (clicking == nullptr)
-            return;
+        const auto at = std::ceil ((beat - countIn.firstBeat) * countIn.samplesPerBeat - 1.0e-6) - from;
 
-        const auto length = std::min (to - from, clicking->getNumSamples() - clickPosition);
-        const auto* samples = clicking->getReadPointer (0, clickPosition);
+        if (at >= numSamples || beat >= countIn.firstBeat + countIn.beatsPerBar - 1.0e-9)
+            break;
 
-        for (int channel = 0; channel < numOutputs; ++channel)
-            if (outputs[channel] != nullptr)
-                juce::FloatVectorOperations::add (outputs[channel] + offset + from, samples, length);
+        const auto start = std::max (0, (int) at);
+        continueClick (outputs, numOutputs, 0, done, start);
+        done = start;
+        const auto inBar = (beat - countIn.barStart) / countIn.beatsPerBar;
+        clicking = std::abs (inBar - std::round (inBar)) < 1.0e-6 ? &accentClick : &click;
+        clickPosition = 0;
+    }
 
-        clickPosition += length;
+    continueClick (outputs, numOutputs, 0, done, numSamples);
+}
 
-        if (clickPosition >= clicking->getNumSamples())
-            clicking = nullptr;
-    };
-
+void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept
+{
     // Each beat starts a click at the first sample at or after it, a bar's first beat the accented one.
     const auto from = (double) transport.sample;
     const auto to = from + numSamples;
@@ -704,13 +837,13 @@ void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs
             break;
 
         const auto start = std::max (0, (int) (at - from));
-        continueClick (done, start);
+        continueClick (outputs, numOutputs, offset, done, start);
         done = start;
         clicking = std::abs (plan.tempo.getBarStart (beat) - beat) < 1.0e-6 ? &accentClick : &click;
         clickPosition = 0;
     }
 
-    continueClick (done, numSamples);
+    continueClick (outputs, numOutputs, offset, done, numSamples);
 }
 
 //==============================================================================

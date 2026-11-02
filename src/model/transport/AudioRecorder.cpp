@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 #include <map>
 
@@ -31,23 +32,27 @@ namespace
         return recorders;
     }
 
-    juce::String getInputOf (const te::Track& track)
+    juce::String getInputOf (const juce::ValueTree& trackState)
     {
-        return findTrackState (track).getProperty (schema::trackInput).toString();
+        return trackState.getProperty (schema::trackInput).toString();
     }
 
     // When the track hears its input: schema::monitorAlways, schema::monitorNever, or while it is armed (none).
-    juce::String getMonitoringOf (const te::Track& track)
+    juce::String getMonitoringOf (const juce::ValueTree& trackState)
     {
-        return findTrackState (track).getProperty (schema::trackMonitoring).toString();
+        return trackState.getProperty (schema::trackMonitoring).toString();
     }
 
-    int getNumDeviceInputs (te::Engine& engine)
-    {
-        auto* device = engine.getDeviceManager().deviceManager.getCurrentAudioDevice();
-        return device != nullptr ? device->getInputChannelNames().size() : 0;
-    }
 } // namespace
+
+int AudioRecorder::getNumInputs() const
+{
+    if (auto* session = findPlayingSession (edit))
+        return session->getNumInputs();
+
+    auto* device = engine.getDeviceManager().deviceManager.getCurrentAudioDevice();
+    return device != nullptr ? device->getInputChannelNames().size() : 0;
+}
 
 std::vector<int> getInputChannels (const juce::String& inputID)
 {
@@ -85,8 +90,8 @@ void setRecordingCorrection (te::Engine& engine, double milliseconds)
 // copies the track's channels into, and the WAV file the recorder's thread writes them into.
 struct AudioRecorder::Recording : public te::InputDeviceInstance::Consumer
 {
-    Recording (te::AudioTrack& t, te::InputDeviceInstance& in, te::EditPlaybackContext& context, std::vector<int> channelsInInput,
-               juce::File f, double rate, juce::int64 delay)
+    Recording (TrackID t, te::InputDeviceInstance& in, te::EditPlaybackContext& context, std::vector<int> channelsInInput, juce::File f,
+               double rate, juce::int64 delay)
         : track (t),
           instance (&in),
           playback (context),
@@ -94,7 +99,7 @@ struct AudioRecorder::Recording : public te::InputDeviceInstance::Consumer
           file (std::move (f)),
           sampleRate (rate),
           shift (delay),
-          devices (t.edit.engine.getDeviceManager()),
+          devices (context.edit.engine.getDeviceManager()),
           buffer ((int) channels.size(), (int) (bufferSeconds * rate)),
           fifo ((int) (bufferSeconds * rate))
     {
@@ -189,7 +194,7 @@ struct AudioRecorder::Recording : public te::InputDeviceInstance::Consumer
 
     void close() { writer = nullptr; } // the file whole
 
-    te::AudioTrack& track;
+    const TrackID track;
     te::InputDeviceInstance* instance; // compared only: it may be gone
     te::EditPlaybackContext& playback; // the Edit's, which lives while it records
     const std::vector<int> channels;   // the track's, in its input's
@@ -275,16 +280,26 @@ AudioRecorder* AudioRecorder::findFor (const te::Edit& edit)
 
 bool AudioRecorder::isArmed (const te::AudioTrack& track) const
 {
-    return armed.count (track.itemID) > 0;
+    return isArmed (getTrackID (findTrackState (track)));
+}
+
+bool AudioRecorder::isArmed (TrackID track) const
+{
+    return armed.count (track) > 0;
 }
 
 void AudioRecorder::setArmed (te::AudioTrack& track, bool shouldArm)
 {
-    if (shouldArm && getInputChannels (getInputOf (track)).empty())
+    if (shouldArm && getInputChannels (getInputOf (findTrackState (track))).empty())
         return;
 
-    if (shouldArm ? armed.insert (track.itemID).second : armed.erase (track.itemID) > 0)
+    if (const auto id = getTrackID (findTrackState (track)); shouldArm ? armed.insert (id).second : armed.erase (id) > 0)
+    {
         update();
+
+        if (auto* session = findSession (edit))
+            session->update(); // the track hears its input while armed
+    }
 }
 
 juce::Array<te::AudioTrack*> AudioRecorder::getArmedTracks() const
@@ -300,10 +315,11 @@ juce::Array<te::AudioTrack*> AudioRecorder::getArmedTracks() const
 
 bool AudioRecorder::canRecord() const
 {
-    const auto numInputs = getNumDeviceInputs (edit.engine);
+    const auto numInputs = getNumInputs();
 
     for (auto* track : getArmedTracks())
-        if (const auto channels = getInputChannels (getInputOf (*track)); ! channels.empty() && channels.back() < numInputs)
+        if (const auto channels = getInputChannels (getInputOf (findTrackState (*track)));
+            ! channels.empty() && channels.back() < numInputs)
             return true;
 
     return false;
@@ -318,7 +334,8 @@ void AudioRecorder::update()
 
     const juce::ScopedValueSetter<bool> svs (updating, true);
     auto& devices = engine.getDeviceManager();
-    const auto numInputs = getNumDeviceInputs (engine);
+    auto* device = devices.deviceManager.getCurrentAudioDevice();
+    const auto numInputs = device != nullptr ? device->getInputChannelNames().size() : 0;
     auto* liveEdit = alive.get(); // once the Edit is gone, its tracks need nothing
 
     // What the tracks need now, by the first channel of each input: whether it is a pair, and the tracks that hear it.
@@ -333,12 +350,13 @@ void AudioRecorder::update()
 
     for (auto* track : liveEdit != nullptr ? te::getAudioTracks (*liveEdit) : juce::Array<te::AudioTrack*>())
     {
-        const auto channels = getInputChannels (getInputOf (*track));
+        const auto trackState = findTrackState (*track);
+        const auto channels = getInputChannels (getInputOf (trackState));
 
         if (channels.empty() || channels.back() >= numInputs)
             continue;
 
-        const auto monitoring = getMonitoringOf (*track);
+        const auto monitoring = getMonitoringOf (trackState);
         const auto isOn = isArmed (*track) || monitoring == schema::monitorAlways;
 
         if (! isOn)
@@ -358,7 +376,7 @@ void AudioRecorder::update()
     // closed again; the ones the user opened in the audio settings stay. Only a change opens the device again: then its
     // channels are named, or JUCE would put back its default ones (none: Phazite opens no microphone by itself) whenever
     // it opened again.
-    if (auto* device = devices.deviceManager.getCurrentAudioDevice(); device != nullptr && numInputs > 0)
+    if (device != nullptr && numInputs > 0)
     {
         auto setup = devices.deviceManager.getAudioDeviceSetup();
         auto channels = setup.inputChannels;
@@ -456,7 +474,7 @@ void AudioRecorder::prepareRecordings()
 
     for (auto* track : getArmedTracks())
     {
-        const auto wanted = getInputChannels (getInputOf (*track));
+        const auto wanted = getInputChannels (getInputOf (findTrackState (*track)));
 
         // The input that holds the track's channels, and where they are in it.
         for (auto* instance : playback->getAllInputs())
@@ -482,7 +500,8 @@ void AudioRecorder::prepareRecordings()
             const auto delay = devices.getRecordAdjustmentSamples() + playback->getLatencySamples()
                                + (juce::int64) std::llround (input->getRecordAdjustmentMs() * rate / 1000.0);
 
-            auto recording = std::make_unique<Recording> (*track, *instance, *playback, inInput, getTakeFile (*track), rate, delay);
+            auto recording = std::make_unique<Recording> (getTrackID (findTrackState (*track)), *instance, *playback, inInput,
+                                                          getTakeFile (*track), rate, delay);
 
             if (recording->open())
             {
@@ -551,9 +570,8 @@ void AudioRecorder::finishRecordings (te::SyncPoint stopped, bool discard)
 
     for (auto& recording : recordings)
     {
-        if (! discard && started.has_value() && alive.get() != nullptr
-            && te::findTrackForID (edit, recording->track.itemID) == &recording->track)
-            makeClips (*recording, stopped);
+        if (! discard && started.has_value() && alive.get() != nullptr)
+            makeClips (*recording, stopped); // if its track is still there
         else
             recording->file.deleteFile();
     }
@@ -586,24 +604,55 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
     }
 
     lastShift = recording.shift;
-    const auto rate = recording.sampleRate;
     const auto& start = *started;
 
-    // Where in the song, as if nothing looped, each frame of the file was played: where it came in, less the delay the input
-    // comes in with; and the frame played at a time.
-    const auto timeOf = [&] (double frame) { return recording.startTime + (frame - (double) recording.shift) / rate; };
-    const auto frameOf = [&] (double seconds) { return (seconds - recording.startTime) * rate + (double) recording.shift; };
+    // Where in the song, as if nothing looped, the file's first frame was played: where it came in, less the delay the
+    // input comes in with.
+    TakePlace place;
+    place.sampleRate = recording.sampleRate;
+    place.frames = recording.written;
+    place.firstFrame = recording.startTime - (double) recording.shift / recording.sampleRate;
+    place.start = start.unloopedTime.inSeconds();
+    place.stop = stopped.unloopedTime.inSeconds();
 
-    const auto from = std::max (start.unloopedTime.inSeconds(), timeOf (0.0));
-    const auto to = std::min (stopped.unloopedTime.inSeconds(), timeOf ((double) recording.written));
+    if (punchRange.has_value())
+        place.punch = juce::Range (punchRange->getStart().inSeconds(), punchRange->getEnd().inSeconds());
 
-    if (to - from < shortestRecording)
+    if (loopRange.has_value())
     {
-        recording.file.deleteFile();
+        place.loop = juce::Range (loopRange->getStart().inSeconds(), loopRange->getEnd().inSeconds());
+        place.firstLoopStart = start.unloopedTime.inSeconds() - (start.time.inSeconds() - loopRange->getStart().inSeconds());
+    }
+
+    placeTake (edit, recording.track, recording.file, place);
+}
+
+void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const TakePlace& take)
+{
+    const auto rate = take.sampleRate;
+    auto* found = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (trackID)));
+
+    if (found == nullptr)
+    {
+        file.deleteFile();
         return;
     }
 
-    auto& track = recording.track;
+    auto& track = *found;
+
+    // Where in the song, as if nothing looped, each frame of the file was played; and the frame played at a time.
+    const auto timeOf = [&] (double frame) { return take.firstFrame + frame / rate; };
+    const auto frameOf = [&] (double seconds) { return (seconds - take.firstFrame) * rate; };
+
+    const auto from = std::max (take.start, timeOf (0.0));
+    const auto to = std::min (take.stop, timeOf ((double) take.frames));
+
+    if (take.frames <= 0 || to - from < shortestRecording)
+    {
+        file.deleteFile();
+        return;
+    }
+
     const auto name = getTrackName (track);
     const auto& tempo = edit.tempoSequence;
     const auto toBeats = [&tempo] (double seconds) { return fromTracktion (tempo.toBeats (te::TimePosition::fromSeconds (seconds))); };
@@ -612,21 +661,20 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
     const auto place = [&] (double clipStart, double clipEnd, double fileStart) -> te::AudioClipBase*
     {
         const auto partStart = std::max (0.0, fileStart);
-        const auto clipState =
-            makeAudioClipState (edit, name, recording.file, toBeats (clipStart), { partStart, partStart + (clipEnd - clipStart) });
+        const auto clipState = makeAudioClipState (edit, name, file, toBeats (clipStart), { partStart, partStart + (clipEnd - clipStart) });
         return dynamic_cast<te::AudioClipBase*> (placeClipState (edit, clipState, track));
     };
 
     // Punched in: only what falls in the range, in place of what was there, cross-fading at the edges: the new clip
     // reaches half a fade past each, fading in and out over what was there, which fades out and in where it is cut.
-    if (punchRange.has_value())
+    if (take.punch.has_value())
     {
-        const auto in = std::max (from, punchRange->getStart().inSeconds());
-        const auto out = std::min (to, punchRange->getEnd().inSeconds());
+        const auto in = std::max (from, take.punch->getStart());
+        const auto out = std::min (to, take.punch->getEnd());
 
         if (out - in < shortestRecording)
         {
-            recording.file.deleteFile();
+            file.deleteFile();
             return;
         }
 
@@ -658,11 +706,10 @@ void AudioRecorder::makeClips (Recording& recording, te::SyncPoint stopped)
 
     // Round a looped range: a take for each time round that began within the recording, in one clip over the range, the
     // last whole one playing (or the last one, if none was whole). Once round or less, a clip of what was played.
-    if (loopRange.has_value() && loopRange->getLength().inSeconds() > 0.0)
+    if (take.loop.has_value() && take.loop->getLength() > 0.0)
     {
-        const auto loopStart = loopRange->getStart().inSeconds(), length = loopRange->getLength().inSeconds();
-        const auto firstLoopStart =
-            start.unloopedTime.inSeconds() - (start.time.inSeconds() - loopStart); // where the first time round began
+        const auto loopStart = take.loop->getStart(), length = take.loop->getLength();
+        const auto firstLoopStart = take.firstLoopStart; // where the first time round began
         const auto passOf = [&] (double seconds) { return (int) std::floor ((seconds - firstLoopStart) / length + 1.0e-9); };
 
         if (passOf (to - 1.0e-6) > passOf (from))
@@ -721,9 +768,8 @@ void AudioRecorder::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
     if ((property == schema::trackInput || property == schema::trackMonitoring) && tree.hasType (schema::TRACK) && alive.get() != nullptr)
     {
         // A track left without an input can't stay armed.
-        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (tree))));
-            track != nullptr && getInputChannels (getInputOf (*track)).empty())
-            armed.erase (track->itemID);
+        if (getInputChannels (tree[schema::trackInput].toString()).empty())
+            armed.erase (getTrackID (tree));
 
         update();
     }
@@ -731,9 +777,9 @@ void AudioRecorder::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
 
 void AudioRecorder::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int)
 {
-    if (child.hasType (te::IDs::TRACK))
+    if (child.hasType (schema::TRACK))
     {
-        armed.erase (te::EditItemID::fromID (child));
+        armed.erase (getTrackID (child));
         update();
     }
 }

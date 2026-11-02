@@ -103,6 +103,9 @@ private:
     void addAudio (engine::Plan::Strip&, const juce::ValueTree& trackState);
     bool addFrozenFile (engine::Plan::Strip&, const juce::ValueTree& trackState);
 
+    // The audio device's inputs a track hears: its input, while it is armed or always hears it (RecordingModel.h).
+    std::vector<int> getHeardInput (const juce::ValueTree& trackState) const;
+
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
     std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState);
     std::shared_ptr<engine::DeviceNode> getPluginDevice (const juce::ValueTree& deviceState);

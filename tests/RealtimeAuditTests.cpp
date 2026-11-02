@@ -56,6 +56,7 @@
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/RecordingModel.h"
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
@@ -250,18 +251,42 @@ Measurement playAndMeasure (te::Edit& edit, int numInputChannels = 0)
 }
 
 // Plays the open project from its start through Phazite's own engine (docs/tracktion-migration.md, T2), in real time on
-// a separate "audio" thread, as playAndMeasure() plays Tracktion's, and measures that thread.
-Measurement playPhaziteAndMeasure (phazite::ProjectContext& context)
+// a separate "audio" thread, as playAndMeasure() plays Tracktion's, and measures that thread; a tone comes into the
+// device's two inputs. Recording, it records a take instead, while another thread plays a note every twentieth of a
+// second into a track live, as a MIDI driver would; stopping keeps the take.
+Measurement playPhaziteAndMeasure (phazite::ProjectContext& context, bool recording = false, phazite::TrackID liveTrack = {})
 {
-    const phazite::test::EnginePlayback playback; // at the audit's rate and block size
+    const phazite::test::EnginePlayback playback; // at the audit's rate and block size, with two inputs
     static_assert (phazite::test::EnginePlayback::sampleRate == auditSampleRate
                    && phazite::test::EnginePlayback::blockSize == auditBlockSize);
 
     auto& edit = *phazite::getEdit (context);
     phazite::movePlayhead (edit, 0_tp);
-    phazite::playOrStop (edit);
+
+    if (recording)
+        phazite::startRecording (edit);
+    else
+        phazite::playOrStop (edit);
+
     phazite::test::dispatchPendingMessages();
     auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    juce::AudioBuffer<float> tone (1, auditBlockSize);
+
+    for (int i = 0; i < auditBlockSize; ++i)
+        tone.setSample (0, i, 0.25f * std::sin (juce::MathConstants<float>::twoPi * (float) i * 4.0f / (float) auditBlockSize));
+
+    std::atomic<bool> playingNotes { liveTrack.isValid() };
+    std::thread notes (
+        [&]
+        {
+            for (int note = 0; playingNotes.load(); ++note)
+            {
+                engine.playLive ((std::int64_t) liveTrack.getRaw(),
+                                 { note % 2 == 0 ? phazite::devices::NoteEvent::Type::noteOn : phazite::devices::NoteEvent::Type::noteOff,
+                                   0, 60, 0.8f });
+                std::this_thread::sleep_for (std::chrono::milliseconds (50));
+            }
+        });
 
     // On one thread, so that the monitor counts every allocation (the workers play the same strips' code, T2 step 8).
     const auto threads = engine.getNumThreads();
@@ -287,7 +312,8 @@ Measurement playPhaziteAndMeasure (phazite::ProjectContext& context)
                 {
                     const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
                     float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
-                    engine.process (channels, 2, auditBlockSize);
+                    const float* inputs[] = { tone.getReadPointer (0), tone.getReadPointer (0) };
+                    engine.process (inputs, 2, channels, 2, auditBlockSize);
                     m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
                     std::this_thread::sleep_until (blockEnd);
                 }
@@ -302,6 +328,8 @@ Measurement playPhaziteAndMeasure (phazite::ProjectContext& context)
             m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
         });
     audioThread.join();
+    playingNotes = false;
+    notes.join();
     engine.setNumThreads (threads);
 
     phazite::stopAndReturn (edit);
@@ -734,6 +762,33 @@ TEST_SUITE ("realtime-audit")
         const auto m = playPhaziteAndMeasure (song.context);
         report ("Phazite's engine: routing", m);
         CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's own engine recording a take: an armed track's input, heard, and notes played live")
+    {
+        auto& engine = phazite::test::getEngine();
+
+        if (phazite::getAllMidiInputs (engine) == nullptr)
+        {
+            engine.getDeviceManager().rescanMidiDeviceList();
+            phazite::test::runTimersUntil ([&engine] { return phazite::getAllMidiInputs (engine) != nullptr; });
+        }
+
+        phazite::test::TestSong song;
+        song.setSwitch ("transport.countIn", false);
+        song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+        phazite::routeLiveMidiInput (*phazite::getEdit (song.context)); // live MIDI plays the synth's track, which the take records
+        const auto voice = song.addTrack ("Voice");
+        phazite::setTrackInput (song.context, voice, "1");
+        phazite::setArmed (song.context, voice, true);
+        REQUIRE (phazite::isArmed (song.context, voice));
+
+        const auto m = playPhaziteAndMeasure (song.context, true, song.firstTrack);
+        report ("Phazite's engine: recording", m);
+        CHECK (m.peakLevel > 0.01f);                                           // the input is heard, and the notes
+        CHECK (phazite::getClips (song.context, voice).size() == 1);           // the input's take
+        CHECK (phazite::getClips (song.context, song.firstTrack).size() == 1); // the notes'
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

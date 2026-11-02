@@ -9,6 +9,7 @@
 #include "EventQueue.h"
 #include "Handover.h"
 #include "Plan.h"
+#include "Recording.h"
 #include "Workers.h"
 #include "engine/nodes/LoudnessMeter.h"
 
@@ -46,10 +47,13 @@ public:
 
     // The transport, as the message thread asks for it: each takes effect at the start of the audio thread's next
     // block, in the order asked.
-    void play();                                        // from where the playhead is
+    void play (bool countIn = false);                   // from where the playhead is (after a count-in: below)
     void stop();                                        // where the playhead is
     void locate (double beat);                          // the playhead there, playing on from there if it plays
     bool isPlaying() const noexcept { return playing; } // as last asked
+
+    // A count-in: a bar of clicks on the song's beats before the playhead, as long as a bar there, which the song waits
+    // for; live notes and the inputs play meanwhile, and a take starts after it.
 
     // Where the playhead is: where the audio thread last played, moved on by the time since, as far as a block (any
     // thread). Before the first block after a locate, where it was asked to be.
@@ -57,8 +61,31 @@ public:
 
     // A note or controller played live into a track's instrument (the computer keyboard, a MIDI input, the piano roll's
     // guide notes), from any thread: it plays in the audio thread's next block, as far into it as it came after the last
-    // block started, so that live notes keep their timing (at a block's delay). Dropped if 1024 wait already.
-    void playLive (std::int64_t track, devices::NoteEvent) noexcept;
+    // block started, so that live notes keep their timing (at a block's delay). Dropped if 1024 wait already. What is
+    // recordable comes out again as it was played (takePlayed()); the piano roll's guide notes aren't.
+    void playLive (std::int64_t track, devices::NoteEvent, bool recordable = true) noexcept;
+
+    // A note played live, as the engine played it: into a track, at the engine's clock as it came in (getClock()), and
+    // where the song was then, or -1 while it was stopped or counting in.
+    struct PlayedEvent
+    {
+        std::int64_t track = 0;
+        devices::NoteEvent event {};
+        std::int64_t clock = 0, songSample = -1;
+    };
+
+    // Message thread (one reader): the recordable notes played live since it last asked, as many as fit, oldest first;
+    // how many. Once 4,096 wait, those played after them are lost.
+    int takePlayed (std::span<PlayedEvent>) noexcept;
+
+    // How many samples the engine has played since it was made, playing or not: its clock, as of its last block (any
+    // thread).
+    std::int64_t getClock() const noexcept { return publishedClock.load (std::memory_order_acquire); }
+
+    // Message thread: what it records from its next block on (Recording.h), or nothing. What it replaces is freed once
+    // the audio thread can't be using it.
+    void setRecording (std::unique_ptr<Recording>);
+    Recording* getRecording() const noexcept { return recordings.get(); }
 
     // How much of each block's time the engine takes, from 0 to 1, eased (any thread).
     double getLoad() const noexcept { return load.load (std::memory_order_relaxed); }
@@ -75,8 +102,12 @@ public:
     // How loud what goes out is (any thread reads it, and resets its integrated loudness and held peak).
     LoudnessMeter& getLoudnessMeter() noexcept { return loudness; }
 
-    // The audio thread: plays a block into the outputs (every channel the same). Real-time safe.
-    void process (float* const* outputs, int numOutputs, int numSamples) noexcept;
+    // The audio thread: plays a block into the outputs (every channel the same), with what comes into the audio device's
+    // inputs (by their channels, nullptr for one that is closed; the first 64), which the strips that hear them play and a
+    // take records. Real-time safe.
+    void process (const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples) noexcept;
+    void process (float* const* outputs, int numOutputs, int numSamples) noexcept { process (nullptr, 0, outputs, numOutputs, numSamples); }
+    static constexpr int maximumInputs = 64;
 
     // A render (on the thread that calls it, not in real time): plays numSamples, from where the playhead is, playing,
     // into a stereo buffer that it makes, in blocks of the prepared size. The plan must have been given.
@@ -103,6 +134,7 @@ private:
 
         Type type = Type::stop;
         double beat = 0.0;
+        bool countIn = false;
     };
 
     static constexpr int maximumCommands = 64;
@@ -119,7 +151,16 @@ private:
     // The audio thread's transport: where the playhead is, in samples from the song's start, and in beats (to stay on its
     // beat when a plan with another tempo comes); and the plan it last played.
     // Whether every track's notes stop (playback stopped or jumped) and those sounding where it plays from start, at the
-    // next stretch played.
+    // next stretch played. A count-in, while it lasts: its length and what is left of it in samples, the song's beat it
+    // starts on, the first beat of the bar the playhead is in, and the beats of a bar and samples of a beat there.
+    struct CountIn
+    {
+        std::int64_t length = 0, left = 0;
+        double firstBeat = 0.0, barStart = 0.0;
+        int beatsPerBar = 4;
+        double samplesPerBeat = 1.0;
+    };
+
     struct Transport
     {
         bool playing = false;
@@ -127,9 +168,18 @@ private:
         double beat = 0.0;
         const Plan* plan = nullptr;
         bool notesOff = false, chase = true;
+        CountIn countIn;
     } transport;
 
     bool rendering = false;
+
+    // What comes into the audio device's inputs for the part of the block played, by their channels.
+    std::array<const float*, maximumInputs> partInputs {};
+    int numPartInputs = 0;
+
+    // The take recorded, which ends as playback stops or jumps (brokeTake: since the last part).
+    Handover<Recording> recordings;
+    bool brokeTake = false;
 
     void takeCommands (const Plan&) noexcept;
     void playSpan (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
@@ -150,6 +200,7 @@ private:
     Workers workers;
     std::uint64_t passes = 0;
     void playStrip (const Span&, size_t index) noexcept;
+    void addInput (const Plan::Strip&, float* const* channels, int offset, int numSamples) noexcept;
     void addNotes (const Plan::Strip&, const Plan&, int numSamples) noexcept;
 
     // The control points of a stretch of a block that modulators play on (ModulatorNode.h), the samples counted since the
@@ -171,13 +222,28 @@ private:
         std::int64_t track = 0;
         devices::NoteEvent event {};
         double milliseconds = 0.0;
+        bool recordable = true;
     };
 
     EventQueue<LiveEvent, 1024> liveQueue;
     std::array<LiveEvent, 256> liveEvents {};
     int numLiveEvents = 0;
     double lastBlockMilliseconds = 0.0;
-    void takeLiveEvents (int numSamples) noexcept;
+    void takeLiveEvents (const Plan&, int numSamples, std::int64_t partClock) noexcept;
+
+    // The notes played live as they came out (takePlayed()), in a lock-free queue the audio thread alone fills; and the
+    // last part played, from whose start the live notes taken in a part came in.
+    static constexpr int maximumPlayed = 4096;
+    juce::AbstractFifo playedFifo { maximumPlayed };
+    std::vector<PlayedEvent> played;
+
+    struct LastPart
+    {
+        std::int64_t clock = 0, sample = 0;
+        bool playing = false;
+    } lastPart;
+
+    std::atomic<std::int64_t> publishedClock { 0 };
 
     std::atomic<double> load { 0.0 };
     std::atomic<std::uint64_t> blocksPlayed { 0 };
@@ -187,6 +253,8 @@ private:
     const juce::AudioBuffer<float>* clicking = nullptr;
     int clickPosition = 0;
     void playClicks (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
+    void playCountIn (float* const* outputs, int numOutputs, int numSamples) noexcept;
+    void continueClick (float* const* outputs, int numOutputs, int offset, int from, int to) noexcept;
 
     // Where the playhead is, for any thread: written by the audio thread after each block, between two counts of a
     // sequence (odd while it writes), so that a reader takes the three values from one block.

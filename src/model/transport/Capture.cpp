@@ -8,8 +8,10 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/notes/internal/Notes.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -80,6 +82,65 @@ namespace
         double start = 0.0, end = 0.0; // seconds: in the song while it plays, or as they were played
     };
 
+    // The notes played live into Phazite's engine in its last 30 seconds (PlaybackHost.h): while the song plays, those
+    // played since it started, where they were heard in it (by the output's delay and the song's delay compensation, as a
+    // take places them: Take.h); otherwise as they were played. One still held ends now.
+    std::vector<CapturedNote> takePlayedNotes (PlaybackSession& session, bool playing)
+    {
+        auto& engine = session.getEngine();
+        const auto rate = engine.getSampleRate();
+        const auto* plan = engine.getPlan();
+        const auto shift = session.getOutputLatency() + (plan != nullptr ? engine::Engine::getOutputLatency (*plan) : 0);
+        std::vector<CapturedNote> notes;
+        std::vector<std::int64_t> startClocks; // each note's
+        std::array<int, 128> sounding;
+        sounding.fill (-1);
+
+        const auto endNote = [&notes, &sounding] (int pitch, double at)
+        {
+            if (auto& index = sounding[(size_t) pitch]; index >= 0)
+            {
+                notes[(size_t) index].end = std::max (at, notes[(size_t) index].start);
+                index = -1;
+            }
+        };
+
+        for (const auto& played : session.getPlayedEvents())
+        {
+            if (playing && (played.clock < session.getPlayStartClock() || played.songSample < 0))
+                continue;
+
+            const auto at = playing ? (double) (played.songSample - shift) / rate : (double) played.clock / rate;
+            const auto pitch = juce::jlimit (0, 127, played.event.number);
+            using Type = devices::NoteEvent::Type;
+
+            if (played.event.type == Type::noteOn)
+            {
+                endNote (pitch, at);
+                sounding[(size_t) pitch] = (int) notes.size();
+                notes.push_back ({ pitch, juce::jlimit (1, 127, juce::roundToInt (played.event.value * 127.0f)), at, at });
+                startClocks.push_back (played.clock);
+            }
+            else if (played.event.type == Type::noteOff)
+            {
+                endNote (pitch, at);
+            }
+            else if (played.event.type == Type::allNotesOff)
+            {
+                for (int p = 0; p < 128; ++p)
+                    endNote (p, at);
+            }
+        }
+
+        // Those still held: as long as they have been.
+        for (const auto index : sounding)
+            if (index >= 0)
+                notes[(size_t) index].end += (double) (engine.getClock() - startClocks[(size_t) index]) / rate;
+
+        std::sort (notes.begin(), notes.end(), [] (const CapturedNote& a, const CapturedNote& b) { return a.start < b.start; });
+        return notes;
+    }
+
     // The notes in the clips Tracktion's capture made, which go again.
     std::vector<CapturedNote> takeNotes (const juce::Array<te::Clip*>& clips)
     {
@@ -107,6 +168,33 @@ namespace
         return notes;
     }
 
+    // Tracktion's capture makes clips of what was played, which Phazite takes the notes out of, unquantized, to place
+    // them itself. Live MIDI's input only: an audio input carried to a track would give a clip of its own (or, with no
+    // Tracktion project, none), and keeps no buffer to capture from (model/engine/internal/EngineSetup.h). While the song
+    // plays: only what was played since it started.
+    bool captureFromTracktion (te::Edit& edit, bool playing, std::vector<CapturedNote>& notes)
+    {
+        auto* midiInput = findLiveMidiInput (edit);
+        const auto device = getAllMidiInputs (edit.engine);
+
+        if (midiInput == nullptr || device == nullptr || edit.getCurrentPlaybackContext() == nullptr)
+            return false;
+
+        const auto quantizing = device->quantisation.getType (false);
+        device->quantisation.setType ("(none)");
+        te::InputDevice::setRetrospectiveLock (edit.engine, { midiInput }, true);
+        const auto made = midiInput->applyRetrospectiveRecord (false);
+        te::InputDevice::setRetrospectiveLock (edit.engine, { midiInput }, false);
+        device->quantisation.setType (quantizing);
+
+        notes = takeNotes (made);
+
+        if (playing)
+            notes.erase (std::remove_if (notes.begin(), notes.end(), [] (const CapturedNote& n) { return n.start < 0.0; }), notes.end());
+
+        return true;
+    }
+
     // The first bar line from one, in beats, after which a clip of some beats would overlap none of the track's clips.
     double findRoom (te::ClipTrack& track, double bar, double length, double beatsPerBar)
     {
@@ -132,42 +220,26 @@ namespace
 
 bool canCapture (te::Edit& edit)
 {
-    return getLiveMidiTrack (edit) != nullptr && edit.getCurrentPlaybackContext() != nullptr;
+    return getLiveMidiTrack (edit) != nullptr && (findPlayingSession (edit) != nullptr || edit.getCurrentPlaybackContext() != nullptr);
 }
 
 te::MidiClip* capture (te::Edit& edit, Selection* selection)
 {
     auto* track = getLiveMidiTrack (edit);
-    auto* context = edit.getCurrentPlaybackContext();
-    const auto device = getAllMidiInputs (edit.engine);
 
-    if (track == nullptr || context == nullptr || device == nullptr)
+    if (track == nullptr || ! canCapture (edit))
         return nullptr;
 
     const UndoStep step (edit, "Capture");
-    const bool playing = edit.getTransport().isPlaying();
-    const bool songWasEmpty = getSongEnd (edit) == te::TimePosition();
+    const bool playing = isSongPlaying (edit);
+    const bool songWasEmpty = getSongEnd (edit).inSeconds() <= 0.0;
+    std::vector<CapturedNote> notes;
 
-    // Tracktion's capture makes clips of what was played, which Phazite takes the notes out of, unquantized, to place
-    // them itself. Live MIDI's input only: an audio input carried to a track would give a clip of its own (or, with no
-    // Tracktion project, none), and keeps no buffer to capture from (model/engine/internal/EngineSetup.h).
-    auto* midiInput = findLiveMidiInput (edit);
-
-    if (midiInput == nullptr)
+    // Phazite's engine keeps what was played itself; Tracktion, in its retrospective buffer.
+    if (auto* session = findPlayingSession (edit))
+        notes = takePlayedNotes (*session, playing);
+    else if (! captureFromTracktion (edit, playing, notes))
         return nullptr;
-
-    const auto quantizing = device->quantisation.getType (false);
-    device->quantisation.setType ("(none)");
-    te::InputDevice::setRetrospectiveLock (edit.engine, { midiInput }, true);
-    const auto made = midiInput->applyRetrospectiveRecord (false);
-    te::InputDevice::setRetrospectiveLock (edit.engine, { midiInput }, false);
-    device->quantisation.setType (quantizing);
-
-    auto notes = takeNotes (made);
-
-    // While the song plays: only what was played since it started.
-    if (playing)
-        notes.erase (std::remove_if (notes.begin(), notes.end(), [] (const CapturedNote& n) { return n.start < 0.0; }), notes.end());
 
     if (notes.empty())
         return nullptr;

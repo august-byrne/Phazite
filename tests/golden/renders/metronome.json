@@ -1,5 +1,5 @@
 {
-  "about": "Golden render (tests/GoldenMetronomeTests.cpp), played in real time from its first click: the metronome on every beat at 90 BPM in 3/4. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
+  "about": "Golden render (tests/GoldenMetronomeTests.cpp), played from its first click: the metronome on every beat at 90 BPM in 3/4. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
   "sampleRate": 48000,
   "blockSamples": 4800,
   "channels": 2,

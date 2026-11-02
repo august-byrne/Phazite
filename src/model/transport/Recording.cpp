@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Recording.h"
 #include "internal/AudioRecorder.h"
+#include "internal/Metronome.h"
 #include "internal/Playback.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -35,13 +36,29 @@ bool canRecord (te::Edit& edit)
 
 bool isRecording (const te::Edit& edit)
 {
-    return edit.getTransport().isRecording();
+    const auto* session = findSession (edit);
+    return edit.getTransport().isRecording() || (session != nullptr && session->isRecording());
 }
 
 void startRecording (te::Edit& edit)
 {
     if (isRecording (edit) || ! canRecord (edit))
         return;
+
+    // Phazite's engine records what it plays (Take.h): from where playback starts, after the count-in, or from where the
+    // song is if it plays already.
+    if (auto* session = findPlayingSession (edit))
+    {
+        const auto playing = session->isPlaying();
+
+        if (session->startTake() && ! playing)
+        {
+            session->locate (fromTracktion (edit.tempoSequence.toBeats (getPlayStart (edit))));
+            session->play (isCountInOn (edit));
+        }
+
+        return;
+    }
 
     auto& transport = edit.getTransport();
 
@@ -67,7 +84,7 @@ void startRecording (te::Edit& edit)
     if (recorder != nullptr)
         recorder->prepareRecordings();
 
-    // Tracktion's graph plays while it records (T2 step 9 records through Phazite's engine).
+    // Tracktion's graph plays while it records.
     auto* session = findSession (edit);
 
     if (session != nullptr)

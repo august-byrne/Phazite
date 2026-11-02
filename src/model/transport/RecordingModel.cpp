@@ -37,9 +37,8 @@ namespace
 std::vector<AudioInput> getAudioInputs (const ProjectContext& context)
 {
     std::vector<AudioInput> inputs;
-    auto* edit = getEdit (context);
-    auto* device = edit != nullptr ? edit->engine.getDeviceManager().deviceManager.getCurrentAudioDevice() : nullptr;
-    const auto numChannels = device != nullptr ? device->getInputChannelNames().size() : 0;
+    const auto* recorder = findRecorder (context);
+    const auto numChannels = recorder != nullptr ? recorder->getNumInputs() : 0;
 
     for (int channel = 1; channel <= numChannels; ++channel)
         inputs.push_back ({ juce::String (channel), describeInput (juce::String (channel)), 1 });

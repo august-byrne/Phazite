@@ -162,6 +162,8 @@ target_sources(phazite_core PRIVATE
     src/engine/core/EventQueue.h
     src/engine/core/Handover.h
     src/engine/core/Plan.h
+    src/engine/core/Recording.cpp
+    src/engine/core/Recording.h
     src/engine/core/TempoMap.cpp
     src/engine/core/TempoMap.h
     src/engine/core/Workers.cpp
@@ -376,6 +378,7 @@ target_sources(phazite_core PRIVATE
     src/model/transport/Recording.cpp
     src/model/transport/RecordingModel.cpp
     src/model/transport/RecordingModel.h
+    src/model/transport/Take.cpp
     src/model/transport/Tempo.cpp
     src/model/transport/TempoValues.h
     src/model/transport/TransportModel.cpp
@@ -385,6 +388,7 @@ target_sources(phazite_core PRIVATE
     src/model/transport/internal/Metronome.h
     src/model/transport/internal/Playback.h
     src/model/transport/internal/Recording.h
+    src/model/transport/internal/Take.h
     src/model/transport/internal/Tempo.h
     # services: what the whole app shares (they use the model; the model never uses them)
     src/services/BrowserModel.cpp

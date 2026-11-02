@@ -41,7 +41,7 @@ tracktion-notes              155
 tracktion-playback            70
 tracktion-presets             83
 tracktion-project            122
-tracktion-transport          287
+tracktion-transport          284
 tracktion-other                0
 tracktion-services             0
 tracktion-app                 46

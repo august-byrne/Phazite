@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Golden renders of the metronome and the count-in (tests/golden/renders, RenderHarness.h; docs/tracktion-migration.md,
-// T0), which sound only as the song plays live, what played kept from its first click on: the metronome through Phazite's
-// own engine, driven a block at a time (EnginePlayback.h; T2 step 1); the count-in, which recording plays, through
-// Tracktion's hosted audio device in real time (RealTimePlayback.h) until recording is Phazite's engine's (T2 step 9),
-// where that lands depending on when playback started, not on the song. Both start between beats: from a stop, Tracktion
-// now and then skips the first block it should play (docs/known-bugs.md, bug 4).
+// T0), which sound only as the song plays live, what played kept from its first click on, through Phazite's own engine,
+// driven a block at a time (EnginePlayback.h): the metronome (T2 step 1), and the count-in that recording plays (T2 step
+// 9). Both start between beats.
 #include "EnginePlayback.h"
-#include "RealTimePlayback.h"
 #include "RenderHarness.h"
 #include "TestSong.h"
 #include "devices/synth/Synth.h"
@@ -19,7 +16,6 @@
 
 using phazite::test::EnginePlayback;
 using phazite::test::Fingerprint;
-using phazite::test::RealTimePlayback;
 using phazite::test::TestSong;
 
 namespace
@@ -31,7 +27,7 @@ constexpr double clickSeconds = 2.5; // how long a golden render keeps after the
 
 juce::String aboutGolden (const char* about)
 {
-    return juce::String ("Golden render (tests/GoldenMetronomeTests.cpp), played in real time from its first click: ") + about
+    return juce::String ("Golden render (tests/GoldenMetronomeTests.cpp), played from its first click: ") + about
            + " Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
 }
 
@@ -45,7 +41,7 @@ juce::AudioBuffer<float> fromFirstClick (const juce::AudioBuffer<float>& played)
             first = i;
 
     REQUIRE_MESSAGE (first >= 0, "nothing clicked");
-    const auto length = (int) (clickSeconds * RealTimePlayback::sampleRate);
+    const auto length = (int) (clickSeconds * EnginePlayback::sampleRate);
     REQUIRE (first + length <= played.getNumSamples());
 
     juce::AudioBuffer<float> clicks (2, length);
@@ -113,19 +109,18 @@ TEST_SUITE ("golden")
         }; // the app's setting, for every project
         phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (0.5));
 
+        // Phazite's engine plays the count-in (T2 step 9): on the song's beats in the bar before where it starts.
         juce::AudioBuffer<float> played;
         {
-            RealTimePlayback playback (engine, RealTimePlayback::Input::silence, 5.0);
-            playback.startCapture();
+            EnginePlayback playback;
             song.run ("transport.record");
-            RealTimePlayback::wait (3500);
+            played = playback.play (3.5);
             song.run ("transport.record");
-            played = playback.stopCapture();
         }
 
         // A beat is half a second: four clicks, a bar, then silence while recording, the metronome off.
         phazite::test::checkGoldenAudio (
-            fromFirstClick (played), RealTimePlayback::sampleRate,
+            fromFirstClick (played), EnginePlayback::sampleRate,
             { "count-in", aboutGolden ("a bar of count-in at 120 BPM in 4/4 before recording, the metronome off."), clickSeconds,
               [] (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
               {
