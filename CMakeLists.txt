@@ -78,6 +78,8 @@ phazite_check_juceaide_toolchain("${_phazite_juceaide_dir}")
 add_library(phazite_core STATIC)
 
 target_sources(phazite_core PRIVATE
+    src/devices/core/AudioThreads.cpp
+    src/devices/core/AudioThreads.h
     src/devices/core/DeviceInfo.cpp
     src/devices/core/DeviceInfo.h
     src/devices/core/DeviceScope.h
@@ -390,6 +392,17 @@ target_sources(phazite_core PRIVATE
     src/model/transport/internal/Recording.h
     src/model/transport/internal/Take.h
     src/model/transport/internal/Tempo.h
+    # sandbox: what Phazite and the helpers that host plug-ins share, engine-neutral (docs/tracktion-migration.md, T3)
+    src/sandbox/client/Helper.cpp
+    src/sandbox/client/Helper.h
+    src/sandbox/client/RemoteInstance.cpp
+    src/sandbox/client/RemoteInstance.h
+    src/sandbox/core/BlockChannel.cpp
+    src/sandbox/core/BlockChannel.h
+    src/sandbox/core/Messages.cpp
+    src/sandbox/core/Messages.h
+    src/sandbox/core/SharedMemory.cpp
+    src/sandbox/core/SharedMemory.h
     # services: what the whole app shares (they use the model; the model never uses them)
     src/services/BrowserModel.cpp
     src/services/BrowserModel.h
@@ -797,6 +810,37 @@ target_compile_definitions(Phazite PRIVATE
 phazite_use_core(Phazite)
 target_link_libraries(Phazite PRIVATE phazite_app phazite_ui)
 
+# --- PhaziteHost: the helper program that hosts plug-ins for Phazite, each in a process of its own or with others, so
+# that one that crashes or hangs can't take the song with it (docs/tracktion-migration.md, T3). It links phazite_core,
+# as phazite_soundkit does, for JUCE and the sandbox's code, and compiles without Tracktion; its code is in phazite_host,
+# which the tests' helper links too. It goes next to the app, which starts it. ---
+add_library(phazite_host STATIC)
+target_sources(phazite_host PRIVATE
+    src/host/core/Host.cpp
+    src/host/core/Host.h
+    src/host/core/Instance.cpp
+    src/host/core/Instance.h
+    src/host/core/ProcessStats.cpp)
+phazite_use_core(phazite_host WITHOUT_TRACKTION)
+
+juce_add_gui_app(PhaziteHost
+    PRODUCT_NAME "PhaziteHost"
+    COMPANY_NAME "Phazite"
+    BUNDLE_ID "io.github.august-byrne.phazite.host"
+    NEEDS_CURL FALSE
+    NEEDS_WEB_BROWSER FALSE
+    PLUGINHOST_AU TRUE)
+
+target_sources(PhaziteHost PRIVATE src/host/app/HostMain.cpp src/host/app/Formats.cpp)
+target_compile_definitions(PhaziteHost PRIVATE JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:PhaziteHost,JUCE_VERSION>")
+phazite_use_core(PhaziteHost WITHOUT_TRACKTION)
+target_link_libraries(PhaziteHost PRIVATE phazite_host)
+
+add_dependencies(Phazite PhaziteHost)
+add_custom_command(TARGET Phazite POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:PhaziteHost>" "$<TARGET_FILE_DIR:Phazite>"
+    VERBATIM)
+
 # The UI font, Inter (SIL Open Font License 1.1), goes next to the app as separate files with its licence
 # text (fonts/Inter), as CLAUDE.md asks of fonts. ui::LookAndFeel loads it from there.
 add_custom_command(TARGET Phazite POST_BUILD
@@ -949,6 +993,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/RoutingTests.cpp
         tests/ReverbEditorTests.cpp
         tests/ReverbTests.cpp
+        tests/SandboxBenchmarks.cpp
+        tests/SandboxTests.cpp
         tests/SchemaTests.cpp
         tests/SectionTests.cpp
         tests/SelectionTests.cpp
@@ -987,10 +1033,35 @@ if(PHAZITE_BUILD_TESTS)
         tests/WavetableModelTests.cpp
         tests/WavetableTests.cpp
         tests/WelcomeTests.cpp
-        tests/WindowKeysTests.cpp)
+        tests/WindowKeysTests.cpp
+        tests/host/TestPlugins.cpp
+        tests/host/TestPlugins.h
+        tests/host/ThreadCpu.cpp
+        tests/host/ThreadCpu.h)
 
     phazite_use_core(phazite_tests)
     target_link_libraries(phazite_tests PRIVATE phazite_app phazite_ui)
+
+    # The tests' helper: the app's, with the tests' stand-ins for plug-ins (tests/host/TestPlugins.h), which the tests
+    # start in its place.
+    juce_add_gui_app(phazite_test_host
+        PRODUCT_NAME "phazite_test_host"
+        COMPANY_NAME "Phazite"
+        BUNDLE_ID "io.github.august-byrne.phazite.testhost"
+        NEEDS_CURL FALSE
+        NEEDS_WEB_BROWSER FALSE)
+
+    target_sources(phazite_test_host PRIVATE
+        src/host/app/HostMain.cpp
+        tests/host/TestFormats.cpp
+        tests/host/TestPlugins.cpp
+        tests/host/TestPlugins.h)
+    target_compile_definitions(phazite_test_host PRIVATE JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:phazite_test_host,JUCE_VERSION>")
+    phazite_use_core(phazite_test_host WITHOUT_TRACKTION)
+    target_link_libraries(phazite_test_host PRIVATE phazite_host)
+
+    add_dependencies(phazite_tests phazite_test_host)
+    target_compile_definitions(phazite_tests PRIVATE PHAZITE_TEST_HOST="$<TARGET_FILE:phazite_test_host>")
 
     # A CTest test for each test file, which runs phazite_tests with that file's tests only, so that CTest can run them
     # side by side (the test presets run 4 at once; -j <n> changes that). Each test program has a temporary folder of its

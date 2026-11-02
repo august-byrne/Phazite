@@ -16,6 +16,8 @@ model-undo-steps               0
 model-include-loops            0
 devices-tracktion              0
 engine-tracktion               0
+sandbox-tracktion              0
+host-tracktion                 0
 ui-tracktion-includes          0
 ui-tracktion-references        0
 ui-tracktion-aliases           0

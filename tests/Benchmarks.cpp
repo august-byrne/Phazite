@@ -26,6 +26,7 @@
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "host/ThreadCpu.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LiveInput.h"
@@ -388,7 +389,30 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
     // then on four.
     auto& playing = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
     const auto threads = playing.getNumThreads();
-    juce::String report ("\n| Project | Threads | Stopped | Playing |\n|---|---|---|---|\n");
+    juce::String report (
+        "\n| Project | Threads | Stopped | Playing | The process's CPU playing, a block each block's length (% of a core) |\n"
+        "|---|---|---|---|---|\n");
+
+    // The whole process's CPU while blocks come as an audio device brings them, one each block's length: what threads
+    // that wait for the next block cost meanwhile.
+    const auto processCpuInRealTime = [&device] (int count)
+    {
+        const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration> (
+            std::chrono::duration<double> (HostedDevice::blockSize / HostedDevice::sampleRate));
+        auto next = std::chrono::steady_clock::now();
+        const auto start = next;
+        const auto cpuBefore = phazite::test::getProcessCpuSeconds();
+
+        for (int block = 0; block < count; ++block)
+        {
+            next += period;
+            device.process (1, {}, 0);
+            std::this_thread::sleep_until (next);
+        }
+
+        const auto seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+        return 100.0 * (phazite::test::getProcessCpuSeconds() - cpuBefore) / seconds;
+    };
 
     for (const auto& [numTracks, withDevices] : { std::pair (20, false), std::pair (20, true) })
     {
@@ -403,11 +427,13 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
             phazite::playOrStop (*edit);
             phazite::test::settle (500);
             const auto played = device.percentOfRealTime (500);
+            const auto processCpu = processCpuInRealTime (400);
             phazite::stopAndReturn (*edit);
             phazite::test::settle (300);
             report << "| " << numTracks
                    << (withDevices ? " tracks, each a synth, an EQ, a compressor and a reverb, chords" : " empty tracks") << " | "
-                   << numThreads << " | " << juce::String (stopped, 2) << " % | " << juce::String (played, 2) << " % |\n";
+                   << numThreads << " | " << juce::String (stopped, 2) << " % | " << juce::String (played, 2) << " % | "
+                   << juce::String (processCpu, 1) << " % |\n";
             setEdit (context, nullptr);
             edit = nullptr;
             phazite::test::settle (300);

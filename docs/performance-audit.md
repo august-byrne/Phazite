@@ -359,3 +359,55 @@ a whole block, as it came; Phazite's engine plays it as far into the next block 
 time what they record. The benchmark, which plays its note about 1.5 ms after a block, hears it 71 samples into the next
 (1.48 ms at 48 kHz), and the delay compensation of a limiter on another track (+98 samples) and on the master too (+99)
 as before. With 256-sample blocks at 48 kHz a live note waits a constant 5.3 ms, where Tracktion's waited 0 to 5.3 ms.
+
+**The engine's workers between blocks (2026-11-02, found by T3's measurement).** Each of the engine's workers (T2 step 8)
+spun through 4000 yields for its next job before it slept, and at 128 to 480 samples the next block came before it slept:
+every worker was busy between blocks, taking CPU from plug-ins and their helpers, and a laptop's battery. The benchmark
+of a project now also measures the whole process's CPU while blocks come one each block's length, as a device brings
+them (480 samples at 48 kHz). A worker now spins for 50 microseconds at most, long enough to keep up with a render's
+blocks, played back to back, then sleeps until the next job; the audio thread's share is as it was:
+
+| 20 tracks, four threads | The audio thread, playing | The process's CPU, before | After |
+|---|---|---|---|
+| Empty | 0.31 % | 53.5 % of a core | 7.4 % |
+| A synth, an EQ, a compressor and a reverb each, chords | 8.14 % | 91.4 % | 39.4 % (30.8 % on one thread) |
+
+## 10. Plug-ins in helpers (2026-11-02)
+
+T3 step 0's measurement ([tracktion-migration.md](tracktion-migration.md), roadmap step 3.3): a plug-in played in a
+helper process, a block at a time at 128 samples (2.67 ms at 48 kHz), one each block's length as a device brings them,
+against the same plug-in in Phazite's process, from `tests/SandboxBenchmarks.cpp` (`--test-suite=benchmark --no-skip`,
+`windows-profile`, the same PC). Each block's time is from handing it over to having it back; the memory is the
+helper's private working set (what of it is in memory and no other process's: its private bytes are about 56 MB more,
+which OLE, started by JUCE on Windows, commits and never touches).
+
+| One plug-in | In Phazite's process (median / 99th % / worst) | In a helper, asleep at once | The thread that waits | The helper |
+|---|---|---|---|---|
+| The tests' stand-in effect (a gain) | 1.4 / 3.0 / 156 us | 29.6 / 89.7 / 594 us | 1.6 % of a core | 1.6 MB empty |
+| Surge XT Effects | 19.1 / 74 / 262 us | 47.8 / 133 / 573 us | 0.9 % | 16.6 MB with it |
+| Surge XT, a chord held | 74.6 / 192 / 1013 us | 104.4 / 248 / 996 us | 1.0 % (3.4 % in the helper) | 38.9 MB with it |
+
+A round trip costs about 28 microseconds a block (a wake-up each way), about 1 % of a 128-sample block for each plug-in
+in a chain. Waiting asleep at once was both the quickest and the cheapest: Windows runs the helper's woken thread on the
+core the waiting thread gives up, warm; spinning 30 microseconds first took 57.9 us for the stand-in, spinning until it
+answered 44.6 us and twice the CPU.
+
+| Eight Surge XTs, a chord each | Median | 99th % | Worst | CPU | Memory |
+|---|---|---|---|---|---|
+| Phazite's process, one after another | 464 us | 639 us | 3.3 ms | 17.9 % of a core | |
+| Phazite's process, on the engine's workers | 237 us | 397 us | 3.5 ms | 68 % (the whole process) | |
+| A helper each, each waited for in turn | 451 us | 717 us | 7.8 ms | 1.0 % here, 17.9 % in the helpers | 311 MB |
+| A helper each, all handed over first, then waited for | 253 us | 360 us | 1.7 ms | 2.3 %, 54 % | 310 MB |
+| One helper with all eight, handed over first | 236 us | 337 us | 1.3 ms | 1.9 %, 45 % | 232 MB |
+
+Played side by side, as the engine plays tracks, sandboxed plug-ins cost no more than plug-ins in Phazite's process:
+the same median, a lower 99th percentile and worst case, and less CPU. (Eight synths side by side take three to four
+times the CPU of eight one after another, sandboxed or not: the cores' second threads, lower boost clocks and shared
+caches.) A helper for each instance costs about 10 MB more for each of them, for Surge XT.
+
+**Decided from these numbers (Claude, as the owner asked, 2026-11-02; [design section 19](design.md#19-plug-in-hosting-and-stability)):** sandboxing on,
+and the only way Phazite hosts plug-ins (its cost is small: decision 7's condition); one helper for each plug-in, every
+instance of it in that helper with an audio thread of its own, as Bitwig's default ("By plug-in"), so that a plug-in that
+crashes takes only its own instances with it, at a fraction of a helper for each instance's memory; Phazite's audio
+thread waits asleep at once; and the engine hands each plug-in instrument's block over as the block starts, so that the
+instruments of every track play side by side.
