@@ -126,9 +126,10 @@ bool canHoldClips (const ProjectContext&, TrackID); // a track, not a folder
 // them one under another in their track's row, as REAPER offsets overlapping items, rather than one over another, where
 // they are hard to tell apart and to grab (docs/design.md, section 6). For a track's clips (getClips()), in their order:
 // each one's sub-row, from the top, and how many sub-rows the clips it overlaps, directly or through others, share the
-// row out into; a clip that overlaps none has the whole row. Clips made earlier (Tracktion's IDs grow as items are made)
-// take the higher sub-rows, so a clip being dragged never moves those made before it. Two audio clips that overlap only
-// in a crossfade, the first fading out and the second in over all of it (setCrossfade()), share a sub-row.
+// row out into; a clip that overlaps none (or less than a thousandth of a beat: they touch) has the whole row. Clips
+// made earlier (Tracktion's IDs grow as items are made) take the higher sub-rows, so a clip being dragged never moves
+// those made before it. Two audio clips that overlap only in a crossfade, the first fading out and the second in over
+// all of it (setCrossfade()), share a sub-row.
 struct ClipSubRow
 {
     int index = 0, count = 1;

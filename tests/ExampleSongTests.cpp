@@ -101,6 +101,11 @@ TEST_CASE ("Every example song opens as a new project without undo steps or unsa
         CHECK_FALSE (phazite::getSongUndoManager (example.project->getEdit()).canUndo());
         CHECK (phazite::findExampleTrackToPlay (example.context, song).isValid());
 
+        // Its clips lie end to end, each with its track's row to itself (none overlap, the samples' copies neither).
+        for (const auto track : phazite::getAllPlaylistTracks (example.context))
+            for (const auto& subRow : phazite::getClipSubRows (phazite::getClips (example.context, track)))
+                CHECK (subRow == phazite::ClipSubRow());
+
         // Its first seconds: sound, never over full scale.
         const auto audio = phazite::test::makeReferenceEngine()->render (example.context, 6.0);
         CHECK (audio.getMagnitude (0, audio.getNumSamples()) < 1.0f);

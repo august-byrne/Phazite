@@ -263,7 +263,7 @@ struct Browser::ItemNode : public Node
     bool mightContainSubItems() override { return item.kind == LibraryItem::Kind::folder; }
     juce::String getUniqueName() const override { return item.getKey(); }
     void populate() override { browser.addRows (*this, browser.model.getContents (item)); }
-    void clicked() override { browser.preview (item); }
+    void clicked() override { browser.togglePreview (item); }
 
     void activate() override
     {
@@ -709,6 +709,22 @@ void Browser::preview (const LibraryItem& item)
         previewer.stop();
 
     wasPlaying = previewer.isPlaying();
+    tree->repaint();
+    repaint (statusArea);
+}
+
+void Browser::togglePreview (const LibraryItem& item)
+{
+    // A one-shot plays again from its start, as clicked again and again to hear it; a loop, which plays until something
+    // stops it, stops.
+    if (! isPreviewing (item) || ! previewer.isInTime())
+    {
+        preview (item);
+        return;
+    }
+
+    previewer.stop();
+    wasPlaying = false;
     tree->repaint();
     repaint (statusArea);
 }

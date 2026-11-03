@@ -135,6 +135,10 @@ MixHandle getMix (ProjectContext&, DeviceID);
 void setDeviceOn (ProjectContext&, DeviceID, bool);
 void moveEffect (ProjectContext&, DeviceID, int places); // earlier (negative) or later among its channel's effects
 void removeDevice (ProjectContext&, DeviceID);
+
+// "Replace Reverb with Delay": an effect taken out for a new one of another type, in its place among its channel's
+// effects or its container's devices, as one undo step. (A track's instrument is replaced by chooseInstrument().)
+void replaceEffect (ProjectContext&, DeviceID, const DeviceType&);
 // A device's window (DeviceSlot::opensWindow, popsOut), shown, or brought to the front if it shows; and whether it shows
 // (its close button puts it back into the Devices view). Nothing for a device without one.
 void showDeviceWindow (ProjectContext&, DeviceID);

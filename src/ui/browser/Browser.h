@@ -68,8 +68,10 @@ public:
     // Puts an item into the song with onPlace, and notes it as used, for the recent items.
     bool place (const LibraryItem&);
 
-    // Plays a sound or a MIDI file, unless previews are off; stops the preview for anything else.
+    // Plays a sound or a MIDI file, unless previews are off; stops the preview for anything else. A click on an item plays
+    // it, and stops it if it is a loop playing (togglePreview()).
     void preview (const LibraryItem&);
+    void togglePreview (const LibraryItem&);
 
     // Puts the keyboard focus in the search field, with its text selected.
     void focusSearch();

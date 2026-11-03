@@ -319,6 +319,9 @@ TEST_CASE ("Clips that overlap on a track take sub-rows of its row, those made f
     CHECK (subRowsOf ({ clipAt (1, 0.0, 8.0), clipAt (2, 4.0, 8.0), clipAt (3, 8.0, 8.0), clipAt (4, 12.0, 8.0), clipAt (5, 20.0, 4.0) })
            == std::vector<ClipSubRow> { { 0, 2 }, { 1, 2 }, { 0, 2 }, { 1, 2 }, { 0, 1 } });
 
+    // A loop whose length from its audio rounds a little past its beats only touches a copy placed on its end.
+    CHECK (subRowsOf ({ clipAt (1, 0.0, 4.0 + 1.0e-9), clipAt (2, 4.0, 4.0) }) == std::vector<ClipSubRow> (2));
+
     // The one made first is above, wherever it is: a newer clip dragged over it never moves it.
     CHECK (subRowsOf ({ clipAt (2, 0.0, 6.0), clipAt (1, 4.0, 4.0) }) == std::vector<ClipSubRow> { { 1, 2 }, { 0, 2 } });
 

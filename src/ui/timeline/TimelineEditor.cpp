@@ -271,6 +271,8 @@ void TimelineRuler::mouseDown (const juce::MouseEvent& e)
     loopDrag = getLoopDragAt (e);
     loopDragged = false;
 
+    // A press below the loop's lane moves the playhead there, once, as in Logic Pro and FL Studio: the song plays on from
+    // there while the button is held or dragged (no scrubbing).
     if (loopDrag == LoopDrag::none)
     {
         movePlayhead (e);
@@ -291,13 +293,10 @@ void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu())
         return;
 
-    editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
-
     if (loopDrag == LoopDrag::none)
-    {
-        movePlayhead (e);
         return;
-    }
+
+    editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
 
     if (! loopDragged && ! TimelineGesture::isPastDragThreshold (e))
         return;
@@ -599,18 +598,32 @@ void TimelineEditor::zoomToFit()
     updateGridControls();
 }
 
+void TimelineEditor::setFollowingPlayback (bool shouldFollow) noexcept
+{
+    followPlayback = shouldFollow;
+    followPaused = false;
+}
+
+void TimelineEditor::pauseFollowing()
+{
+    if (isPlaying (timelineContext))
+        followPaused = true;
+}
+
 void TimelineEditor::centreOnPlayhead()
 {
     if (isViewFixed())
         return;
 
+    followPaused = false;
     setViewStart (getPlayheadBeat() - BeatDuration::fromBeats (getTimelineArea().getWidth() / 2.0 / view.pixelsPerBeat));
 }
 
 void TimelineEditor::movePlayheadTo (BeatPosition beat)
 {
-    // Playback starts there from now on, and Space comes back there when it stops.
+    // Playback starts there from now on, and Space comes back there when it stops; the view follows it again.
     phazite::movePlayhead (timelineContext, beat);
+    followPaused = false;
     updatePlayhead();
 }
 
@@ -672,6 +685,7 @@ void TimelineEditor::scrollByWheel (float wheelDelta)
     if (isViewFixed())
         return;
 
+    pauseFollowing();
     setViewStart (view.xToBeat (-getWheelNotches (wheelDelta) * scrollPerNotch));
 }
 
@@ -692,6 +706,9 @@ bool TimelineEditor::autoScroll (juce::Point<int> position, juce::Rectangle<int>
             const auto before = view.start.inBeats();
             setViewStart (view.xToBeat (speed * seconds));
             scrolled = ! juce::exactlyEqual (view.start.inBeats(), before);
+
+            if (scrolled)
+                pauseFollowing();
         }
     }
 
@@ -888,10 +905,16 @@ void TimelineEditor::showRulerMenu (BeatPosition)
 //==============================================================================
 void TimelineEditor::scrollBarMoved (juce::ScrollBar* scrollBar, double newRangeStart)
 {
+    // Moved by the user (the editor moves it without telling itself).
     if (scrollBar == &horizontalScrollBar)
+    {
+        pauseFollowing();
         setViewStart (BeatPosition::fromBeats (newRangeStart));
+    }
     else
+    {
         verticalScrollBarMoved (newRangeStart);
+    }
 }
 
 void TimelineEditor::timerCallback()
@@ -934,8 +957,17 @@ void TimelineEditor::timerCallback()
 
 void TimelineEditor::followPlayhead()
 {
-    // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end).
-    if (followPlayback && ! isViewFixed() && isPlaying (timelineContext) && ! horizontalScrollBar.isMouseButtonDown())
+    // Playback started: the view follows again, if a scroll paused it.
+    const auto playing = isPlaying (timelineContext);
+
+    if (playing && ! playedWhenFollowed)
+        followPaused = false;
+
+    playedWhenFollowed = playing;
+
+    // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end), unless the user
+    // scrolled away while it played, or holds the mouse down in the editor (dragging what is in view).
+    if (followPlayback && ! followPaused && ! isViewFixed() && playing && ! horizontalScrollBar.isMouseButtonDown() && ! mouseIsDown)
     {
         const auto beat = getPlayheadBeat();
         const auto width = getTimelineArea().getWidth();

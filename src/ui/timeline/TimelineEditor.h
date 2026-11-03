@@ -98,9 +98,12 @@ public:
     BeatPosition getPlayheadBeat() const;
     bool isPlayheadShowingLinkedClip() const; // where a linked clip plays elsewhere (getLinkedPlayheadBeat()), for tests
 
-    // While playing, turn the page when the playhead reaches the right edge.
+    // While playing, turn the page when the playhead reaches the right edge. Scrolling the view sideways while the song
+    // plays pauses that, as in Ableton Live, until playback starts again, the playhead is moved or the view is centred on
+    // it (centreOnPlayhead()).
     bool isFollowingPlayback() const noexcept { return followPlayback; }
-    void setFollowingPlayback (bool shouldFollow) noexcept { followPlayback = shouldFollow; }
+    void setFollowingPlayback (bool shouldFollow) noexcept;
+    bool isFollowingPaused() const noexcept { return followPaused; }
 
     // Scrolling while something is dragged past an edge. Call autoScroll() on each mouse drag, with the
     // pointer's position and the area it scrolls (in the same coordinates): near or past an edge, the view
@@ -230,6 +233,8 @@ private:
     std::optional<Tool> toolAfterDrag; // the key was let go during a drag: the tool to go back to when it ends
     bool mouseIsDown = false;
     bool followPlayback = true, active = false;
+    bool followPaused = false, playedWhenFollowed = false; // by a scroll while playing; and whether it played last time
+    void pauseFollowing();                                 // the view scrolled sideways by the user
     bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;
     double contentEnd = 0.0;            // in beats, as the scroll bar knows it
     std::optional<BeatRange> shownLoop; // the loop the ruler shows (none while playback doesn't loop), to repaint it on changes

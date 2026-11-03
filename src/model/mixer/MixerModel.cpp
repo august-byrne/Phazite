@@ -9,6 +9,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Devices.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
@@ -376,6 +377,31 @@ void removeDevice (ProjectContext& context, DeviceID id)
 {
     if (auto* device = findDevice (context, id))
         phazite::removeDevice (*device);
+}
+
+void replaceEffect (ProjectContext& context, DeviceID id, const DeviceType& type)
+{
+    auto* device = findDevice (context, id);
+    auto* edit = getEdit (context);
+
+    if (device == nullptr || edit == nullptr || type.isInstrument || isInstrument (*device))
+        return;
+
+    const UndoStep step (*edit, "Replace " + device->getName() + " with " + type.name);
+    auto replacement = createDevice (*edit, type);
+
+    if (replacement == nullptr)
+        return;
+
+    // The new one where the old one is, then the old one out (a bus keeps a device all along).
+    if (auto* container = findContainerOf (*device))
+        insertIntoContainer (*container, replacement, getContainerDevices (*container).indexOf (device));
+    else if (auto* track = device->getOwnerTrack())
+        insertDevice (*track, replacement, getDevices (*track).indexOf (device));
+    else
+        insertMasterDevice (*edit, replacement, getMasterDevices (*edit).indexOf (device));
+
+    phazite::removeDevice (*device);
 }
 
 std::optional<juce::String> reloadDevice (ProjectContext& context, DeviceID id)

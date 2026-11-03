@@ -757,6 +757,67 @@ TEST_CASE ("Dragging along the top of the ruler loops part of the song, and the 
     CHECK (isLoop (1.0, 2.0));
 }
 
+TEST_CASE ("While the song plays, the playlist turns the page at the playhead, until it is scrolled away until it plays again")
+{
+    PlaylistScreen screen;
+    screen.addClip (0, 0.0, 256.0);
+    screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (16.0) });
+    const auto viewStart = [&screen] { return screen.playlist.getView().start.inBeats(); };
+    const auto playTo = [&screen] (double beat) { phazite::movePlayhead (*screen.edit, screen.edit->tempoSequence.toTime (beats (beat))); };
+
+    screen.edit->getTransport().ensureContextAllocated();
+    phazite::playOrStop (*screen.edit);
+    REQUIRE (phazite::isSongPlaying (*screen.edit));
+
+    // Past the right edge, the page turns.
+    playTo (20.0);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return viewStart() > 16.0; }));
+
+    // Scrolled back while it plays (Shift and the wheel), the view stays there as the playhead plays on out of it.
+    phazite::test::Mouse mouse (*screen.lanes);
+    mouse.wheel ({ 10, 10 }, 1.0f, juce::ModifierKeys::shiftModifier);
+    const auto scrolledTo = viewStart();
+    REQUIRE (scrolledTo < 19.0);
+    CHECK (screen.playlist.isFollowingPaused());
+    playTo (40.0);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    CHECK (viewStart() == doctest::Approx (scrolledTo));
+
+    // Stopped and played again, from where it was moved to last, the view follows it there.
+    phazite::playOrStop (*screen.edit);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    phazite::playOrStop (*screen.edit);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return viewStart() > 30.0; }));
+    CHECK_FALSE (screen.playlist.isFollowingPaused());
+    phazite::playOrStop (*screen.edit);
+}
+
+TEST_CASE ("A press in the ruler moves the playhead once, and the song plays on from there while it is held or dragged")
+{
+    PlaylistScreen screen;
+    screen.addClip (0, 0.0, 16.0);
+    phazite::test::dispatchPendingMessages();
+
+    auto* ruler = dynamic_cast<phazite::ui::TimelineRuler*> (phazite::test::findComponentWithTitle (screen.playlist, "Timeline"));
+    REQUIRE (ruler != nullptr);
+    const auto y = ruler->getHeight() - 4;
+    const auto x = [&screen] (double beat)
+    { return juce::roundToInt (screen.playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))); };
+    const auto playhead = [&screen] { return screen.playlist.getPlayheadBeat().inBeats(); };
+
+    phazite::test::Mouse mouse (*ruler);
+    mouse.press ({ x (3.0), y });
+    CHECK (playhead() == doctest::Approx (3.0));
+
+    // The song plays on while the press is held: its drags leave the playhead where the song got to (no scrubbing), and
+    // so do those JUCE repeats while the button is held still, to scroll at the edges (which a window off the screen
+    // doesn't repeat: the drag here stands for them).
+    screen.playlist.movePlayheadTo (phazite::BeatPosition::fromBeats (5.0));
+    mouse.dragTo ({ x (4.0), y });
+    mouse.release();
+    CHECK (playhead() == doctest::Approx (5.0));
+}
+
 TEST_CASE ("The sections strip adds, selects, resizes, moves and copies sections with the mouse")
 {
     PlaylistScreen screen;

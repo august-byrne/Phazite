@@ -93,6 +93,46 @@ struct BrowserScreen
 };
 } // namespace
 
+TEST_CASE ("A loop playing stops at a click on it, a one-shot plays again, and starting or stopping the song stops either")
+{
+    BrowserScreen screen;
+    phazite::test::Mouse mouse (screen.browser.getTree());
+    const auto click = [&] (const char* row)
+    {
+        mouse.click (screen.getRow (row).getCentre());
+        phazite::test::dispatchPendingMessages();
+    };
+
+    // A loop, in time with the song, plays until it is clicked again; then it plays again.
+    click ("Loops");
+    click ("Break 120 BPM");
+    REQUIRE (screen.previewer.isPlaying());
+    CHECK (screen.previewer.isInTime());
+    click ("Break 120 BPM");
+    CHECK_FALSE (screen.previewer.isPlaying());
+    click ("Break 120 BPM");
+    CHECK (screen.previewer.isPlaying());
+
+    // The song started: it stops.
+    phazite::playOrStop (*screen.edit);
+    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }, 2000));
+
+    // One started while the song plays plays on, until the song stops.
+    click ("Break 120 BPM");
+    phazite::test::runTimersUntil ([] { return false; }, 300);
+    CHECK (screen.previewer.isPlaying());
+    phazite::playOrStop (*screen.edit);
+    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }, 2000));
+
+    // A one-shot clicked again plays again from its start.
+    click ("Drums");
+    click ("Kick");
+    REQUIRE (screen.previewer.isPlaying());
+    click ("Kick");
+    CHECK (screen.previewer.isPlaying());
+    CHECK (screen.previewer.getFile().getFileName() == juce::String ("Kick.wav"));
+}
+
 TEST_CASE ("The browser shows its places, plays a sound when clicked, and Enter puts it into the song")
 {
     BrowserScreen screen;

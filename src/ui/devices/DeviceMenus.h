@@ -24,6 +24,9 @@ void showInstrumentMenu (ProjectContext&, TrackID, juce::Component& target);
 // The effects. The one chosen goes on the track, or with an empty ID on the master, after its other effects.
 void showEffectMenu (ProjectContext&, TrackID, juce::Component& target);
 
+// The effects, for one to replace: the one chosen takes its place (replaceEffect()).
+void showReplaceEffectMenu (ProjectContext&, DeviceID effect, juce::Component& target);
+
 // The effects, for a new return track that the track sends to: the return holds the effect chosen and is named after it.
 void showNewReturnMenu (ProjectContext&, TrackID sender, juce::Component& target);
 

@@ -102,6 +102,38 @@ DeviceID groupEqAndReverb (Song& song)
 }
 } // namespace
 
+TEST_CASE ("An effect is replaced by another in its place, on its channel or in its container, as one undo step")
+{
+    Song song;
+    auto& context = song.context;
+    const auto effects = song.effectsOf (*song.a);
+    const auto names = song.effectNamesOf (*song.a);
+    REQUIRE (names.size() == 3);
+
+    // The compressor's place, between the EQ and the reverb, the delay's.
+    phazite::replaceEffect (context, effects[1], song.find ("phaziteDelay"));
+    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { names[0], "Delay", names[2] });
+    CHECK (song.effectsOf (*song.a)[0] == effects[0]);
+    CHECK (song.describeUndo() == juce::String ("Undo Replace Compressor with Delay"));
+    phazite::undo (*song.edit);
+    CHECK (song.effectNamesOf (*song.a) == names);
+    CHECK (song.effectsOf (*song.a) == effects);
+
+    // In a container, its place among the container's devices.
+    const auto container = groupEqAndReverb (song);
+    const auto inside = phazite::getContainerDevices (context, container);
+    REQUIRE (inside.size() == 2);
+    phazite::replaceEffect (context, inside[0].id, song.find ("phazitePhaser"));
+    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Phaser", inside[1].name });
+
+    // Never an instrument, nor by one.
+    const auto instrument = phazite::getInstrument (context, idOf (*song.a))->id;
+    phazite::replaceEffect (context, instrument, song.find ("phaziteDelay"));
+    phazite::replaceEffect (context, song.effectsOf (*song.b)[0], song.find ("phaziteSynth"));
+    CHECK (phazite::getInstrument (context, idOf (*song.a))->id == instrument);
+    CHECK (song.effectNamesOf (*song.b) == std::vector<juce::String> { names[0] });
+}
+
 TEST_CASE ("Effects of one channel group into a container in the first one's place, as one undo step, and ungroup again")
 {
     Song song;

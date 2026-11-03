@@ -5,6 +5,9 @@
 #include "internal/PreviewLoop.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
+
+#include <cmath>
 
 namespace phazite
 {
@@ -54,7 +57,7 @@ struct Previewer::Impl : private juce::Timer
         {
             stopTimer();
         }
-        else if (! repeating && edit->getTransport().getPosition() >= te::toPosition (edit->getLength()))
+        else if (! repeating && edit->getTransport().getPosition() >= getEnd())
         {
             release();
         }
@@ -66,14 +69,18 @@ struct Previewer::Impl : private juce::Timer
         startTimer (5);
     }
 
+    // Where the sound ends, in its Edit.
+    te::TimePosition getEnd() const { return te::toPosition (edit->getLength()); }
+
     te::Engine& engine;
     std::unique_ptr<te::Edit> edit;
     std::unique_ptr<StretchedLoop> loop; // a loop's sound, stretched to the project's tempo, while it plays
     juce::File file;
     bool inTime = false;
     bool repeating = false;
-    bool starting = false; // a loop waiting for its start to be stretched
-    bool synced = false;   // to the project, while it plays
+    bool starting = false;   // a loop waiting for its start to be stretched
+    bool synced = false;     // to the project, while it plays
+    bool songPlayed = false; // whether the project played as it started: it stops once that changes
     float volume = te::decibelsToVolumeFaderPosition (-6.0f);
 };
 
@@ -124,6 +131,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
 
     impl->file = newFile;
     impl->synced = false;
+    impl->songPlayed = getEdit (context) != nullptr && isSongPlaying (*getEdit (context));
     impl->edit->setMasterVolumeSliderPos (impl->volume);
 
     // A loop in time plays stretched as a clip of it would be, by Rubber Band, rather than by the clip Tracktion made of
@@ -150,19 +158,35 @@ void Previewer::keepInTime (const ProjectContext& context)
 {
     auto* project = getEdit (context);
 
-    if (impl->edit == nullptr || ! impl->inTime || project == nullptr)
+    if (impl->edit == nullptr || impl->file == juce::File() || project == nullptr)
         return;
 
-    // Once each time the project starts: Tracktion then moves the loop to start on one of the project's bars.
-    if (! project->getTransport().isPlaying())
+    // The song started or stopped stops the sound heard meanwhile: the transport plays the song, as FL Studio's Stop ends
+    // a preview. A loop started while the song plays plays on in time with it.
+    const auto songPlays = isSongPlaying (*project);
+
+    if (songPlays != impl->songPlayed)
     {
-        impl->synced = false;
+        stop();
+        return;
     }
-    else if (! impl->synced && impl->edit->getTransport().isPlaying())
+
+    if (! impl->repeating || ! songPlays || impl->synced || ! impl->edit->getTransport().isPlaying())
+        return;
+
+    // Once it plays: from where the song is in it, the loop counted from the song's start (its first bar), so that its
+    // bars fall on the song's. The song plays on Phazite's engine, whose playhead Tracktion's transport doesn't follow.
+    const auto& tempo = impl->edit->tempoSequence;
+    const auto loopBeats = tempo.toBeats (impl->getEnd()).inBeats();
+
+    if (loopBeats > 0.0)
     {
-        impl->edit->getTransport().syncToEdit (project, false);
-        impl->synced = true;
+        const auto songBeat = project->tempoSequence.toBeats (getPlayheadTime (*project)).inBeats();
+        impl->edit->getTransport().setPosition (
+            tempo.toTime (toTracktion (BeatPosition::fromBeats (std::fmod (std::max (0.0, songBeat), loopBeats)))));
     }
+
+    impl->synced = true;
 }
 
 void Previewer::stop()
@@ -183,7 +207,7 @@ bool Previewer::isPlaying() const
         return false;
 
     // Anything that doesn't repeat has finished once the playhead passes its end.
-    return impl->repeating || impl->edit->getTransport().getPosition() < te::toPosition (impl->edit->getLength());
+    return impl->repeating || impl->edit->getTransport().getPosition() < impl->getEnd();
 }
 
 juce::File Previewer::getFile() const

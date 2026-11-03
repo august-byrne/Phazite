@@ -92,6 +92,15 @@ void showEffectMenu (ProjectContext& context, TrackID track, juce::Component& ta
     show (std::move (menu), target, std::move (types), [&context, track] (const DeviceType& type) { addEffect (context, track, type); });
 }
 
+void showReplaceEffectMenu (ProjectContext& context, DeviceID effect, juce::Component& target)
+{
+    auto types = getDeviceTypes (context);
+    auto menu = makeMenu (types, false, "No effect plug-ins yet: Options > Scan for Plug-ins finds them");
+
+    show (std::move (menu), target, std::move (types),
+          [&context, effect] (const DeviceType& type) { replaceEffect (context, effect, type); });
+}
+
 void showNewReturnMenu (ProjectContext& context, TrackID sender, juce::Component& target)
 {
     auto types = getDeviceTypes (context);

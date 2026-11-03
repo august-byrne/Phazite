@@ -53,19 +53,35 @@ void PianoRoll::Keys::paint (juce::Graphics& g)
             continue;
         }
 
-        const auto isBlack = juce::MidiMessage::isMidiNoteBlack (pitch);
-        const auto keyColour = isBlack ? black : white;
-        g.setColour (playing ? p.accent : keyColour);
-        g.fillRect (isBlack ? area.withWidth (getWidth() * 2 / 3) : area);
+        // A black key covers the left of its row. On its right, the white keys beside it meet, each reaching halfway
+        // into its row, as on a piano; where two white keys meet without one between (E and F, B and C), a line parts
+        // them right across.
+        const auto whiteColour = [this, &p, white] (int key) { return key == playingPitch ? p.accent : white; };
+        const auto blackWidth = getWidth() * 2 / 3;
 
-        if (isBlack)
+        if (juce::MidiMessage::isMidiNoteBlack (pitch))
         {
-            g.setColour (white);
-            g.fillRect (area.withTrimmedLeft (getWidth() * 2 / 3));
+            const auto right = area.withTrimmedLeft (blackWidth);
+            g.setColour (playing ? p.accent : black);
+            g.fillRect (area.withWidth (blackWidth));
+            g.setColour (whiteColour (pitch + 1));
+            g.fillRect (right.withHeight (height / 2));
+            g.setColour (whiteColour (pitch - 1));
+            g.fillRect (right.withTrimmedTop (height / 2));
+            g.setColour (p.border);
+            g.fillRect (right.withTrimmedTop (height / 2).withHeight (1));
         }
+        else
+        {
+            g.setColour (whiteColour (pitch));
+            g.fillRect (area);
 
-        g.setColour (p.border);
-        g.fillRect (area.removeFromBottom (1));
+            if (pitch == 0 || ! juce::MidiMessage::isMidiNoteBlack (pitch - 1))
+            {
+                g.setColour (p.border);
+                g.fillRect (area.removeFromBottom (1));
+            }
+        }
 
         // C4 is middle C, as on the top bar's keyboard button.
         if (pitch % 12 == 0 && height >= 9)

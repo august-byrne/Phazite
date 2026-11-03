@@ -3,7 +3,8 @@
 // with the project, at its tempo, stretched as a clip of it would be, by Rubber Band (internal/PreviewLoop.h), and at its
 // own pitch (in key later). A one-shot plays as it is. Tracktion knows a loop by its loop data, or by a tempo in its name
 // ("Break 120 BPM") when it lasts whole bars at that tempo. Each sound plays in a small Edit of its own (Tracktion's
-// preview Edit), which the engine mixes with the project's; while the project plays, a loop keeps in step with its bars.
+// preview Edit), which the engine mixes with the project's; while the project plays, a loop keeps in step with its bars,
+// and starting or stopping the project stops it.
 // A MIDI file plays on Phazite's synth, in time, as a loop. Without Tracktion here (architecture phase A3): the app makes
 // it (internal/Preview.h).
 #pragma once
@@ -33,7 +34,8 @@ public:
     // Whether the sound is a loop that keeps the project's tempo.
     bool isInTime() const noexcept;
 
-    // Keeps a loop on the open project's bars once the project starts playing. Call it regularly, from a timer.
+    // Keeps a loop started while the project plays on its bars, and stops the sound once the project starts or stops (the
+    // transport plays the song). Call it regularly, from a timer.
     void keepInTime (const ProjectContext&);
 
     // How loud previews play, as a fader position from 0 to 1.

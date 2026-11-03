@@ -351,7 +351,10 @@ std::vector<ClipSubRow> getClipSubRows (const std::vector<ClipInfo>& clips)
     const auto count = clips.size();
     std::vector<ClipSubRow> subRows (count);
 
-    // The clips each one overlaps, which can't share its sub-row: those that start after it, up to its end.
+    // The clips each one overlaps, which can't share its sub-row: those that start after it, up to its end. Clips that
+    // overlap by less than a thousandth of a beat only touch: a loop as long as its beats ends there, however its
+    // length from its audio rounds, and a copy of it placed on its end doesn't overlap it.
+    constexpr auto touching = BeatDuration::fromBeats (1.0e-3);
     std::vector<size_t> byStart (count);
     std::iota (byStart.begin(), byStart.end(), size_t());
     std::stable_sort (byStart.begin(), byStart.end(),
@@ -361,10 +364,11 @@ std::vector<ClipSubRow> getClipSubRows (const std::vector<ClipInfo>& clips)
     for (size_t i = 0; i < count; ++i)
     {
         const auto& first = clips[byStart[i]];
+        const auto end = first.range.getEnd() - touching;
 
-        for (auto j = i + 1; j < count && clips[byStart[j]].range.getStart() < first.range.getEnd(); ++j)
+        for (auto j = i + 1; j < count && clips[byStart[j]].range.getStart() < end; ++j)
         {
-            if (const auto& second = clips[byStart[j]]; first.range.overlaps (second.range) && ! isCrossfade (first, second))
+            if (const auto& second = clips[byStart[j]]; ! second.range.isEmpty() && ! isCrossfade (first, second))
             {
                 overlapping[byStart[i]].push_back (byStart[j]);
                 overlapping[byStart[j]].push_back (byStart[i]);

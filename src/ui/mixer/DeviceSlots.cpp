@@ -539,6 +539,15 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
     }
     else
     {
+        // An effect is replaced in its place by another (a container holds devices of its own, which stay its own).
+        if (! device.isContainer)
+            menu.addItem ("Replace...",
+                          [&projectContext, id, safeTarget]
+                          {
+                              if (safeTarget != nullptr)
+                                  showReplaceEffectMenu (projectContext, id, *safeTarget);
+                          });
+
         // Effects move among the channel's effects, or the container's devices; the Devices view shows them in a row.
         menu.addItem (inRow ? "Move Left" : "Move Up", index > 0, false,
                       act ([&projectContext, id] { moveEffect (projectContext, id, -1); }));

@@ -15,6 +15,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "ui/pianoroll/PianoRoll.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace
 {
@@ -82,6 +83,66 @@ TEST_CASE ("The piano roll keeps the notes being edited in view while the song p
     // View > Follow Playback turns it on for the editor used last, as the playlist has it from the start.
     REQUIRE (screen.registry.invoke ("view.followPlayback"));
     CHECK (screen.pianoRoll.isFollowingPlayback());
+}
+
+TEST_CASE ("The piano roll's keys are a piano's: white keys parted in the middle of the black keys between them")
+{
+    PianoRollScreen screen;
+    screen.select (screen.addClip (0, 0.0, 4.0));
+
+    auto* keys = phazite::test::findComponentWithTitle (screen.pianoRoll, "Keys");
+    REQUIRE (keys != nullptr);
+    const auto image = keys->createComponentSnapshot (keys->getLocalBounds());
+    const auto& p = phazite::ui::getPalette (*keys);
+    const auto isNear = [] (juce::Colour a, juce::Colour b)
+    {
+        return std::abs ((int) a.getRed() - (int) b.getRed()) <= 2 && std::abs ((int) a.getGreen() - (int) b.getGreen()) <= 2
+               && std::abs ((int) a.getBlue() - (int) b.getBlue()) <= 2;
+    };
+
+    // The black keys, from the left of the keys; the lines between white keys, just right of the black keys (left of
+    // where C's names show).
+    const auto black = p.background.interpolatedWith (juce::Colours::black, 0.6f);
+    std::vector<juce::Range<int>> blackKeys;
+
+    for (int y = 0; y < image.getHeight(); ++y)
+    {
+        if (! isNear (image.getPixelAt (1, y), black))
+            continue;
+
+        if (! blackKeys.empty() && blackKeys.back().getEnd() == y)
+            blackKeys.back().setEnd (y + 1);
+        else
+            blackKeys.push_back ({ y, y + 1 });
+    }
+
+    const auto linesIn = [&] (int from, int to)
+    {
+        auto lines = 0;
+
+        for (auto y = from; y < to; ++y)
+            lines += isNear (image.getPixelAt (keys->getWidth() * 2 / 3 + 2, y), p.border) ? 1 : 0;
+
+        return lines;
+    };
+
+    REQUIRE (blackKeys.size() >= 10);
+    const auto rowHeight = blackKeys[1].getLength();
+
+    // Each black key whole in view: one line on its right, where the white keys beside it meet. Between two black keys,
+    // one white key without a line across it (D, G, A), or two parted by one (E and F, B and C).
+    for (size_t i = 1; i + 1 < blackKeys.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK (blackKeys[i].getLength() == rowHeight);
+        CHECK (linesIn (blackKeys[i].getStart(), blackKeys[i].getEnd()) == 1);
+
+        if (i + 2 < blackKeys.size())
+        {
+            const auto gap = blackKeys[i + 1].getStart() - blackKeys[i].getEnd();
+            CHECK (linesIn (blackKeys[i].getEnd(), blackKeys[i + 1].getStart()) == (gap > rowHeight * 3 / 2 ? 1 : 0));
+        }
+    }
 }
 
 TEST_CASE ("While a clip linked to the one shown plays, the piano roll's playhead shows where its notes are playing")
