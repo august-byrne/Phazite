@@ -97,6 +97,10 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
         {
             const auto copy = copyIntoProject (edit, file);
             const te::AudioFile audio (edit.engine, copy);
+
+            // Tracktion keeps what it read of a file by its path, until it checks the file again: read again if it changed
+            // since (a file written where another was, or where none was yet when Tracktion was asked about it).
+            edit.engine.getAudioFileManager().checkFileForChanges (audio);
             const auto length = te::TimeDuration::fromSeconds (audio.getLength());
 
             if (length <= te::TimeDuration())
