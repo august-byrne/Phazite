@@ -224,10 +224,10 @@ inline const juce::Identifier laneCollapsed { "collapsed" };
 //==============================================================================
 // The song's devices (model/mixer/internal/Mixer.h; docs/tracktion-migration.md, T1 step 5): each track's, a folder's (as a
 // bus) and the master's, in the order its sound goes through them, an instrument first, which Tracktion's devices mirror,
-// each with what it is set to, and each container with its devices; the model makes a device in Tracktion as it adds it
-// to the song, while step 5 lasts. song
+// each with what it is set to, and each container with its devices. A device is the song's first, which the mirror makes
+// Tracktion's from (a preset's are still made in Tracktion first: docs/tracktion-migration.md, T6 step 6).
 
-// Child of TRACK and of MASTER: a device. On DEVICE: its ID (DeviceID, its Tracktion plug-in's while T1 lasts); its type:
+// Child of TRACK and of MASTER: a device. On DEVICE: its ID (DeviceID, of the song's: Song::makeID()); its type:
 // the typeID of one of Phazite's own (src/devices/<area>/: "phaziteEq"), deviceIsPlugin for a plug-in, or the type of one
 // of Tracktion's own, which only tests make; and deviceOff, bool, default false: it is switched off.
 inline const juce::Identifier DEVICE { "DEVICE" };

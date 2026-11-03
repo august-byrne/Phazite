@@ -306,6 +306,9 @@ void reconcile (te::Edit& edit, Song::Part part, std::uint64_t id)
         case Song::Part::devices:
             reconcileDevices (edit);
             break;
+        case Song::Part::device:
+            reconcileDevice (edit, DeviceID::fromRaw (id));
+            break;
         case Song::Part::modulation:
             reconcileModulation (edit);
             break;

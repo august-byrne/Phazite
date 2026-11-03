@@ -218,7 +218,7 @@ TEST_CASE ("A channel's devices are the song's, in order and on or off, which Tr
         juce::StringArray names;
 
         for (auto* plugin : song.a->pluginList)
-            if (phazite::isDevice (*plugin))
+            if (phazite::mirror::isDevice (*plugin))
                 names.add (plugin->getName() + (plugin->isEnabled() ? "" : " (off)"));
 
         return names.joinIntoString (", ");

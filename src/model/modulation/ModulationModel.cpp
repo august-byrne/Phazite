@@ -4,6 +4,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"

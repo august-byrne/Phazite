@@ -6,6 +6,7 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
+#include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/mirror/internal/Bridge.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Containers.h"
@@ -18,6 +19,12 @@ namespace phazite::mirror
 {
 namespace
 {
+    template <typename... Types>
+    bool isAnyOf (const te::Plugin& plugin)
+    {
+        return (... || (dynamic_cast<const Types*> (&plugin) != nullptr));
+    }
+
     juce::Array<te::Plugin*> getTracktionDevices (const te::PluginList& list)
     {
         juce::Array<te::Plugin*> devices;
@@ -350,7 +357,7 @@ namespace
                               [send, &findSend] (const juce::ValueTree& element) { return findSend (element) == send; }))
                 send->deleteFromParent();
 
-        auto* fader = getVolumeDevice (track);
+        auto* fader = getFader (track);
 
         if (fader == nullptr)
             return;
@@ -526,12 +533,12 @@ void reconcileDevices (te::Edit& edit)
         if (auto* track = findTrack (edit, state))
         {
             reconcileChain (edit, track->pluginList, state);
-            reconcileFader (getVolumeDevice (*track), state, 0.0f);
+            reconcileFader (getFader (*track), state, 0.0f);
             reconcileSends (edit, *track, state);
         }
     }
 
-    if (const auto master = findChainState (edit, nullptr); master.isValid())
+    if (const auto master = findChainState (getSong (edit), {}); master.isValid())
     {
         reconcileChain (edit, edit.getMasterPluginList(), master);
         reconcileFader (edit.getMasterVolumePlugin().get(), master, defaultMasterVolume);
@@ -555,5 +562,101 @@ void reconcileDevices (te::Edit& edit)
     // What a return's bus name or a container's rack type added to the Edit goes before its tracks, as Tracktion would put
     // it a moment later, as an undo step of its own (reconcileTracks() says why).
     te::TrackList::sortTracksByType (edit.state, &edit.getUndoManager());
+}
+
+void reconcileDevice (te::Edit& edit, DeviceID id)
+{
+    const auto& song = getSong (edit);
+
+    if (const auto state = findDeviceState (song, id); state.isValid())
+    {
+        if (auto* device = findDevice (edit, id))
+            reconcileSettings (*device, state);
+    }
+    else if (const auto send = findSendState (song, id); send.isValid())
+    {
+        if (auto* plugin = dynamic_cast<te::AuxSendPlugin*> (findDevice (edit, id)))
+            play (plugin->gain.get(), decibelsToFaderPosition ((float) send.getProperty (schema::sendLevel, 0.0f)));
+    }
+    else if (const auto channel = findChannelOfFader (song, id); channel.isValid())
+    {
+        reconcileFader (findDevice (edit, id), channel, channel.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f);
+    }
+}
+
+//==============================================================================
+te::Plugin* findDevice (const te::Edit& edit, DeviceID id)
+{
+    return id.isValid() ? te::findPluginForID (edit, toTracktion (id)).get() : nullptr;
+}
+
+juce::Array<te::Plugin*> findDevices (const te::Edit& edit, TrackID channel)
+{
+    juce::Array<te::Plugin*> devices;
+
+    for (const auto id : getDevices (getSong (edit), channel))
+        if (auto* device = findDevice (edit, id))
+            devices.add (device);
+
+    return devices;
+}
+
+bool isDevice (const te::Plugin& plugin)
+{
+    return ! isAnyOf<te::VolumeAndPanPlugin, te::LevelMeterPlugin, te::AuxSendPlugin, te::AuxReturnPlugin, te::VCAPlugin,
+                     te::FreezePointPlugin, LoudnessMeterPlugin> (plugin);
+}
+
+te::Plugin* getFader (te::Track& track)
+{
+    if (track.isMasterTrack())
+        return track.edit.getMasterVolumePlugin().get();
+
+    if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))
+        return audio->getVolumePlugin();
+
+    if (auto* folder = dynamic_cast<te::FolderTrack*> (&track))
+        return isBus (getSong (folder->edit), getTrackID (*folder)) ? static_cast<te::Plugin*> (folder->getVolumePlugin())
+                                                                    : static_cast<te::Plugin*> (folder->getVCAPlugin());
+
+    return nullptr;
+}
+
+juce::Array<te::AuxSendPlugin*> getSends (const te::Track& track)
+{
+    return track.pluginList.getPluginsOfType<te::AuxSendPlugin>();
+}
+
+int getReturnBus (const te::Track& track)
+{
+    if (auto* input = track.pluginList.findFirstPluginOfType<te::AuxReturnPlugin>())
+        return input->busNumber;
+
+    return -1;
+}
+
+te::AudioTrack* findReturnTrack (const te::Edit& edit, int bus)
+{
+    for (auto* track : te::getAudioTracks (edit))
+        if (getReturnBus (*track) == bus)
+            return track;
+
+    return nullptr;
+}
+
+int getDevicePlace (const te::PluginList& list, int deviceIndex)
+{
+    const auto devices = getTracktionDevices (list);
+
+    if (juce::isPositiveAndBelow (deviceIndex, devices.size()))
+        return list.indexOf (devices[deviceIndex]);
+
+    auto index = 0;
+
+    for (int i = 0; i < list.size(); ++i)
+        if (isDevice (*list[i]) || dynamic_cast<te::AuxReturnPlugin*> (list[i]) != nullptr)
+            index = i + 1;
+
+    return index;
 }
 } // namespace phazite::mirror

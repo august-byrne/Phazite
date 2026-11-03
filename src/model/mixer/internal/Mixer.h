@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer's model (docs/design.md, section 8): a channel for every track, in the playlist's order; devices on
 // tracks, folders and the master (folders are buses, Buses.h); return tracks, and sends to them from any track,
-// before or after its fader.
+// before or after its fader. The song holds them all (Schema.h: DEVICE, CONTAINER, SEND, and each channel's fader on its
+// TRACK or MASTER), by their IDs (docs/tracktion-migration.md, T6), and what plays them is made from the song.
+//
+// A channel is named by its track's ID; the master's is the master's ID (Tracks.h: getMasterID()), or none, as the
+// mixer's public model names it (MixerModel.h).
 #pragma once
 
+#include "model/base/IDs.h"
+#include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/mixer/DeviceType.h"
 #include "model/mixer/internal/Buses.h"
 
-#include <memory>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -19,62 +24,13 @@
 namespace phazite
 {
 class CommandRegistry;
-class Gesture;
 struct DeviceSlot;
 
 //==============================================================================
-// Devices: the plug-ins a channel shows in its slots. A channel's volume, meter and sends are controls of its
-// own, a return track's input shows in its header, and the master's loudness meter is the mixer's, so none of
-// them is a device.
-bool isDevice (const te::Plugin&);
-juce::Array<te::Plugin*> getDevices (const te::Track&);
-juce::Array<te::Plugin*> getMasterDevices (const te::Edit&);
-
-// Whether a device has a window of its own (app/PluginWindow.h): a plug-in; not one of Phazite's own devices, nor a
-// container, which the Devices view shows.
-bool opensWindow (const te::Plugin&);
-
-// Whether one of Phazite's own devices (not a container) can show in a window of its own when the user wants it, out of
-// the Devices view; and whether a device's window shows now.
-bool popsOut (const te::Plugin&);
-bool isWindowOpen (const te::Plugin&);
-
-// A track's instrument, which turns its notes into sound: its first device, if that is an instrument. Its effects
-// are the devices after it, which change the sound. Folders, returns and the master have effects only.
-te::Plugin* getInstrument (const te::Track&);
-juce::Array<te::Plugin*> getEffects (const te::Track&);
-
-// True if a track has notes but no instrument to play them, so they make no sound.
-bool needsInstrument (const te::Track&);
-
-// Puts an instrument on a track, in place of the one it had. Returns it, or nullptr if the track can't hold one.
-te::Plugin* setInstrument (te::AudioTrack&, const te::Plugin::Ptr&);
-
-// Adds a device to a track's chain, at a place among its devices (-1 for the end), before its fader. A plain
-// folder becomes a bus first. Returns the device, or nullptr if the track can't hold it.
-te::Plugin* insertDevice (te::Track&, const te::Plugin::Ptr&, int index = -1);
-
-// Adds a device to the master, before its loudness meter.
-te::Plugin* insertMasterDevice (te::Edit&, const te::Plugin::Ptr&, int index = -1);
-
-// Removes a device, as one undo step named after it: a container with what it holds (Containers.h), and a device in a
-// container from its row. A bus left without devices becomes a plain folder again.
-void removeDevice (te::Plugin&);
-
-// Moves a device to another place among its channel's devices, as one undo step.
-void moveDevice (te::Plugin&, int newIndex);
-
-// Turns a device on or off, as one undo step; and whether it is on.
-void setDeviceOn (te::Plugin&, bool on);
-bool isDeviceOn (const te::Plugin&);
-
-// The song's devices (Schema.h: DEVICE, CONTAINER; T1 step 5), which Tracktion's devices mirror
-// (model/mirror/internal/Mirror.h: reconcileDevices()): the element that holds a track's chain (its TRACK), or the
-// master's (MASTER) for nullptr, invalid for an Edit that isn't a song's; a chain's devices' elements, in order (or a
-// container's, given its element); a device's element, on a chain or in a container, invalid for one that isn't the
-// song's; the ID an element names; whether it is a plug-in's; and the element of a device that the model has just made,
-// with what its state holds (a plug-in's settings, as a preset made it; a container's devices).
-juce::ValueTree findChainState (const te::Edit&, const te::Track*);
+// The song's devices: the element that holds a channel's chain (its TRACK, or MASTER for the master or none); a chain's
+// devices' elements, in order (or a container's, given its element); a device's element, on a chain or in a container,
+// invalid for one the song hasn't; the ID an element names; and what it is.
+juce::ValueTree findChainState (const Song&, TrackID channel);
 std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
 juce::ValueTree findDeviceState (const Song&, DeviceID);
 inline juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
@@ -83,157 +39,207 @@ inline juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
 }
 DeviceID getDeviceID (const juce::ValueTree& deviceState);
 bool isPluginState (const juce::ValueTree& deviceState);
+bool isContainerState (const juce::ValueTree& deviceState);
 
 // Whether a device's element is an instrument's, which turns notes into sound: one of Phazite's own instruments, or a plug-in
-// that is one (Schema.h: pluginInstrument); and whether a track has one.
+// that is one (Schema.h: pluginInstrument).
 bool isInstrumentState (const juce::ValueTree& deviceState);
-bool hasInstrument (const Song&, TrackID);
 
-// The channel a device is on, the devices in its containers included: a track's ID or the master's; none for a device the
-// song hasn't.
+// A channel's devices, in their order: a track's instrument, if it has one (its first device), then its effects, which
+// change the sound; folders, returns and the master have effects only. And the channel a device is on, the devices in its
+// containers included: a track's ID or the master's; none for a device the song hasn't.
+std::vector<DeviceID> getDevices (const Song&, TrackID channel);
+DeviceID getInstrument (const Song&, TrackID);
+std::vector<DeviceID> getEffects (const Song&, TrackID channel);
+bool hasInstrument (const Song&, TrackID);
 TrackID getDeviceChannel (const Song&, DeviceID);
 
-// A new device's element: one of Phazite's own (by its type ID), with an ID of the song's and values set by hand, by its
-// parameters' IDs (Schema.h: VALUES). And putting a device's element on a channel (a track's, or the master's for none), at a
-// place among its devices (-1: after them), an instrument first; what plays it is made from it. Joins the caller's step.
-// Returns its ID, or none for a channel that isn't there.
+// True if a track has notes but no instrument to play them, so they make no sound.
+bool needsInstrument (const Song&, TrackID);
+
+// A device's name: one of Phazite's own devices' (its type's), a container's own, or a plug-in's.
+juce::String getDeviceName (const Song&, DeviceID);
+
+// Whether a device has a window of its own (app/PluginWindow.h): a plug-in; not one of Phazite's own devices, nor a
+// container, which the Devices view shows. And whether one of Phazite's own devices (not a container) can show in a
+// window of its own when the user wants it, out of the Devices view.
+bool opensWindow (const Song&, DeviceID);
+bool popsOut (const Song&, DeviceID);
+
+//==============================================================================
+// New devices' elements, with IDs of the song's: one of Phazite's own (by its type ID), with values set by hand by its
+// parameters' IDs (Schema.h: VALUES); or a device of a type the browser and the menus offer (DeviceType.h): one of
+// Phazite's own, or a plug-in by its description (Schema.h: pluginFormat to pluginInstrument).
 juce::ValueTree makeOwnDeviceState (Song&, std::string_view typeID, const std::vector<std::pair<juce::String, float>>& values = {});
+juce::ValueTree makeDeviceState (Song&, const DeviceType&);
+
+// Puts a device's element on a channel, at a place among its devices (-1: after them), an instrument first; a plain folder
+// becomes a bus first. What plays it is made from it. Joins the caller's step. Returns its ID, or none for a channel that
+// can't hold it.
 DeviceID insertDeviceState (Song&, TrackID channel, juce::ValueTree device, int index = -1);
-juce::ValueTree makeDeviceState (te::Plugin&);
 
-// Which plug-in a device is, on its element in the song (Schema.h: pluginFormat to pluginUid), as its description says,
-// written outside the undo history where it differs. The plug-in scanning found that a description names: by its
-// identifier and name, else by its name, maker and format, as a preset finds it. And the description of the plug-in an
-// element names: the one scanning found, or else one made of what the element says, which Tracktion keeps as a plug-in it
-// can't load.
-void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription&);
-std::optional<juce::PluginDescription> findKnownPlugin (te::Engine&, const juce::PluginDescription&);
-juce::PluginDescription getPluginDescription (te::Engine&, const juce::ValueTree& device);
+// Puts an instrument on a track, in place of the one it had, in the caller's step. Returns it, or none if the track can't
+// hold one (a folder, a return or the master).
+DeviceID setInstrument (Song&, TrackID, juce::ValueTree instrument);
 
-// Sets a device's parameter to a value set by hand, as it snaps to its range and steps: the song's, for one of Phazite's own
-// devices in a chain (Schema.h: VALUES), and Tracktion's parameter, which plays it. And one of a device's files or tables
-// (Schema.h: SOUNDS; empty for none), the song's and its PLUGIN's. In the caller's undo step. A channel's fader's volume and
-// pan are the song's too (setChannelVolume()). A plug-in's parameter is the plug-in's own, which its state holds (stored as
-// the project saves: DeviceStates.h); a send's, a modulator's or a macro's are Tracktion's alone while T1 lasts.
-void setDeviceValue (te::AutomatableParameter&, float value);
-void setDeviceSound (te::Plugin&, const juce::Identifier& property, const juce::String& value);
+// Removes a device, as one undo step named after it: a container with what it holds (Containers.h), and a device in a
+// container from its row, what it holds of its own stored first (DeviceStates.h), so that an undo brings it back as it was.
+// A bus left without devices becomes a plain folder again, unless it was made a bus on purpose.
+void removeDevice (Song&, DeviceID);
 
-// Where in a channel's plug-ins a device goes, before the device at a place among its devices, or else after the last
-// device (or after a return's input), so before the sends, the fader and the meters.
-int getDevicePlace (const te::PluginList&, int deviceIndex);
+// Moves a device to another place among its channel's devices, as one undo step.
+void moveDevice (Song&, DeviceID, int newIndex);
+
+// Turns a device on or off, as one undo step; and whether it is on.
+void setDeviceOn (Song&, DeviceID, bool on);
+bool isDeviceOn (const Song&, DeviceID);
+
+// One of a device's files or tables (Schema.h: SOUNDS; empty for none), in the caller's undo step.
+void setDeviceSound (Song&, DeviceID, const juce::Identifier& property, const juce::String& value);
 
 // Where a device's own window was last (docs/design.md, section 9): view state in the song's element of the device
 // (Schema.h: deviceWindowX, deviceWindowY), written without an undo step, which the project saves, so that the window
-// opens there again (the mirror makes a device with it). A save stores it too (model/devices/internal/DeviceStates.h),
-// and finds it written already.
-void rememberWindowPosition (te::Plugin&, juce::Point<int> topLeft);
-
-// A plug-in's key parameters, by ID (MixerModel.h): its quick control, then the first others (not the dry and wet levels,
-// which its mix sets). None for Phazite's own devices or a container.
-juce::StringArray getKeyControls (te::Plugin&, int maximum);
-
-// A device as a slot shows it (MixerModel.h).
-DeviceSlot makeDeviceSlot (te::Plugin&);
+// opens there again.
+void rememberWindowPosition (Song&, DeviceID, juce::Point<int> topLeft);
+std::optional<juce::Point<int>> getWindowPosition (const Song&, DeviceID);
 
 // An effect's mix: how much of what it puts out is its effect, from 0 (only the sound that comes into it, "dry") to 1
-// (only the effect, "wet"), as FL Studio's mixer slots and REAPER's effect chains have for every effect. It crossfades
-// the dry and wet levels Tracktion gives each plug-in (and its reverb), linearly; a plug-in's is the song's (Schema.h:
-// deviceMix). A device without them, such as an instrument, has no mix.
-bool hasMix (te::Plugin&);
-float getMix (te::Plugin&); // 1 for a device without a mix
-void setMix (te::Plugin&, float mix);
-te::AutomatableParameter::Array getMixParameters (te::Plugin&); // the dry and wet levels, or none
+// (only the effect, "wet"), as FL Studio's mixer slots and REAPER's effect chains have for every effect: one of Phazite's
+// own effects' mix parameter, or a plug-in's or a container's mix (Schema.h: deviceMix). An instrument has none. Set in
+// the caller's step.
+bool hasMix (const Song&, DeviceID);
+float getMix (const Song&, DeviceID); // 1 for a device without a mix
+void setMix (Song&, DeviceID, float mix);
+
+// Which plug-in a device is, on its element in the song (Schema.h: pluginFormat to pluginInstrument), as its description
+// says, written outside the undo history where it differs; and the description of the plug-in an element names, as the
+// element has it.
+void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription&);
+juce::PluginDescription getPluginIdentity (const juce::ValueTree& device);
 
 //==============================================================================
-// The devices that can be added (DeviceType.h): Phazite's own and the plug-ins found by scanning.
-std::vector<DeviceType> getDeviceTypes (te::Engine&);
-te::Plugin::Ptr createDevice (te::Edit&, const DeviceType&);
-
 // Adds a device dropped from the browser or chosen in the plug-in picker, as one named undo step. An instrument becomes a
 // track's instrument, in place of the one it had; a track that can't hold one (a folder or a return), or none, gets a
 // new track after it, named and colored after the instrument, and so does a track with audio clips, which an
 // instrument would silence. An effect goes after the track's effects, or with no track on the master. Returns the
-// device, or nullptr.
-te::Plugin* addDeviceTo (te::Edit&, te::Track*, const DeviceType&, Selection*);
+// device, or none.
+DeviceID addDeviceTo (Song&, TrackID, const DeviceType&, Selection*);
 
-// The same for a device made already (from a preset), joining the caller's step.
-te::Plugin* placeDevice (te::Edit&, te::Track*, const te::Plugin::Ptr&, Selection*);
+// The same for a device's element made already (from a preset), joining the caller's step.
+DeviceID placeDevice (Song&, TrackID, juce::ValueTree device, Selection*);
 
 // The device menus' choices (ui/devices/DeviceMenus.h), each one undo step named after the device: an instrument for a
 // track, in place of the one it had ("Add Synth", or "Replace Instrument with Synth"); an effect after a track's
 // effects, or with no track on the master ("Add Reverb"); and a return track holding an effect, with a send to it from
-// a track (addReturnWithEffect(): "Add Reverb Return"). Each returns what it added, or nullptr.
-te::Plugin* chooseInstrument (te::AudioTrack&, const DeviceType&);
-te::Plugin* addEffect (te::Edit&, te::Track*, const DeviceType&);
-te::AudioTrack* addReturnWith (te::Track& sender, const DeviceType&);
+// a track (addReturnWithEffect(): "Add Reverb Return"). Each returns what it added, or none.
+DeviceID chooseInstrument (Song&, TrackID, const DeviceType&);
+DeviceID addEffect (Song&, TrackID channel, const DeviceType&);
+TrackID addReturnWith (Song&, TrackID sender, const DeviceType&);
 
 //==============================================================================
 // Folders (Buses.h). The bus switch on a folder's strip, as an undo step. A folder made a bus with it, as every new
-// folder is, stays one when its last effect goes, while a plain folder that became a bus by getting an effect (in a
-// project made before folders started as buses) turns plain again then. A bus with effects stays a bus.
-void setMixedAsBus (te::FolderTrack&, bool);
+// folder is, stays one when its last effect goes, while a plain folder that became a bus by getting an effect turns plain
+// again then. A bus with effects stays a bus.
+void setMixedAsBus (Song&, TrackID folder, bool);
 
-// The plug-in whose volume a channel's fader moves: a track's or a bus's volume, or a plain folder's VCA.
-te::Plugin* getVolumeDevice (te::Track&);
-juce::String getVolumeParameterID (te::Track&);
-te::LevelMeasurer* getLevelMeasurer (te::Track&); // nullptr for a plain folder, which has no sound of its own
+// What sets a channel's volume (Schema.h: channelFader, or channelVCA for a plain folder), the master's for the master,
+// and the IDs of its parameters, which automation and modulation name ("volume" and "pan", "master volume" and "master
+// pan", or a VCA's "vca"). And the channel's element whose fader a device is, invalid for another device.
+DeviceID getFader (const Song&, TrackID channel);
+juce::String getVolumeParameterID (const Song&, TrackID channel);
+juce::String getPanParameterID (const Song&, TrackID channel); // none for a plain folder's VCA
+juce::ValueTree findChannelOfFader (const Song&, DeviceID fader);
 
-// A channel's volume, in decibels, and its pan, from -1 to 1 (Schema.h: channelVolume, channelPan; T1 step 5e): the
-// song's, which its fader plays (a plain folder's VCA has no pan); the master track's are the master's, whose volume is
-// -3 dB until it is set, as a new song's. Set in the caller's undo step; setDeviceValue() sets them too, given the fader's
-// parameters.
+// A channel's volume, in decibels, and its pan, from -1 to 1 (Schema.h: channelVolume, channelPan): the song's, which its
+// fader plays (a plain folder's VCA has no pan); the master's are the master's, whose volume is -3 dB until it is set, as a
+// new song's. Set in the caller's undo step.
 inline constexpr float defaultMasterVolume = -3.0f;
-void setChannelVolume (te::Track&, float decibels);
-void setChannelPan (te::Track&, float pan);
-float getChannelVolume (const te::Track&);
-float getChannelPan (const te::Track&);
+void setChannelVolume (Song&, TrackID channel, float decibels);
+void setChannelPan (Song&, TrackID channel, float pan);
+float getChannelVolume (const Song&, TrackID channel);
+float getChannelPan (const Song&, TrackID channel);
 
-// The bus a channel's sound goes into: the nearest folder it is in that is a bus; nullptr for the master.
-te::FolderTrack* getOutputBus (const te::Track&);
+// The bus a channel's sound goes into: the nearest folder it is in that is a bus; none for the master.
+TrackID getOutputBus (const Song&, TrackID);
 
 // The tracks the mixer shows as channels, in its order: the playlist's, then the returns.
-juce::Array<te::Track*> getChannelTracks (const te::Edit&);
+std::vector<TrackID> getChannelTracks (const Song&);
 
 //==============================================================================
-// Returns and sends. A return track takes in an aux bus (Tracktion's AuxReturnPlugin, its first plug-in, which the mirror
-// gives each of the song's returns, on the first bus no other return takes), so its devices, such as a reverb, process
-// what the sends feed it.
-int getReturnBus (const te::Track&); // -1 if it isn't a return track
-juce::Array<te::AudioTrack*> getReturnTracks (const te::Edit&);
-te::AudioTrack* findReturnTrack (const te::Edit&, int bus);
+// Returns and sends. A return track takes in what the sends to it feed it, so its devices, such as a reverb, process it.
+std::vector<TrackID> getReturnTracks (const Song&);
 
-// Adds a return track after the last track, on a bus of its own, named as given, and selects it.
-te::AudioTrack* addReturnTrack (te::Edit&, const juce::String& name, Selection*);
+// Adds a return track after the last track, named as given, and selects it if a selection is given. Solo-safe, as Studio
+// One's effect channels are: soloing a track keeps its reverb, say, audible. Joins the caller's step.
+TrackID addReturnTrack (Song&, const juce::String& name, Selection*);
 
 // The same, named "Return" and its number, after the returns there are.
-te::AudioTrack* addNewReturnTrack (te::Edit&, Selection*);
+TrackID addNewReturnTrack (Song&, Selection*);
 
 // In one step, as Studio One does: a return track holding an effect, named after it, and a send to it from a track,
-// after the track's fader. The effect plays only its effect, at a mix of 100 % (Tracktion's reverb without its dry level):
-// the dry sound reaches the master through the track itself.
-// Returns the return track, or nullptr if there was no room for it.
-te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& effect);
+// after the track's fader. The effect plays only its effect, at a mix of 100 %: the dry sound reaches the master through
+// the track itself. Returns the return track, or none.
+TrackID addReturnWithEffect (Song&, TrackID sender, juce::ValueTree effect);
 
-juce::Array<te::AuxSendPlugin*> getSends (const te::Track&);
-
-// Sends are the song's (Schema.h: SEND; T1 step 5f), each to a return by the return's track, which Tracktion's sends
-// mirror on the returns' buses. Adds a send from a track to the return on a bus: after the fader, or before it with
-// preFader. Its level starts at -6 dB. Returns nullptr if the track can't hold it, or no return has the bus. Joins the
+// A track's sends (Schema.h: SEND), each to a return by the return's track, in their order; a send's element (invalid
+// for one the song hasn't) and where it goes; and adding one from a track to a return: after the fader, or before it with
+// preFader, its level starting at -6 dB. Returns none if the track can't send there or the return isn't one. Joins the
 // caller's step.
-te::AuxSendPlugin* addSend (te::Track&, int bus, bool preFader);
-bool isPreFader (const te::AuxSendPlugin&);
-void setPreFader (te::AuxSendPlugin&, bool); // as one undo step, "Change Send"
+std::vector<DeviceID> getSends (const Song&, TrackID);
+juce::ValueTree findSendState (const Song&, DeviceID send);
+TrackID getSendTarget (const Song&, DeviceID send);
+DeviceID addSend (Song&, TrackID from, TrackID returnTrack, bool preFader);
+bool isPreFader (const Song&, DeviceID send);
+void setPreFader (Song&, DeviceID send, bool); // as one undo step, "Change Send"
 
-// A send's level in decibels, the song's (setDeviceValue() sets it too, given its parameter), in the caller's step.
-void setSendLevel (te::AuxSendPlugin&, float decibels);
-float getSendLevel (const te::AuxSendPlugin&);
+// A send's level in decibels, the song's, in the caller's step.
+void setSendLevel (Song&, DeviceID send, float decibels);
+float getSendLevel (const Song&, DeviceID send);
 
-// The send menus' choices, each one undo step named "Add Send": a send after the fader to a return's bus, or to a new,
-// empty return. Each returns the send, or nullptr. And removing one, "Remove Send".
-te::AuxSendPlugin* addSendTo (te::Track&, int bus);
-te::AuxSendPlugin* addSendToNewReturn (te::Track&);
-void removeSend (te::AuxSendPlugin&);
+// The send menus' choices, each one undo step named "Add Send": a send after the fader to a return, or to a new, empty
+// return. Each returns the send, or none. And removing one, "Remove Send".
+DeviceID addSendTo (Song&, TrackID from, TrackID returnTrack);
+DeviceID addSendToNewReturn (Song&, TrackID from);
+void removeSend (Song&, DeviceID send);
 
 // The mixer's commands: add a return track.
 void addMixerCommands (CommandRegistry&, Selection&);
+
+// A device as a slot shows it (MixerModel.h).
+DeviceSlot makeDeviceSlot (const Song&, DeviceID);
+
+//==============================================================================
+// Tracktion's side, until the step of docs/tracktion-migration.md's T6 that replaces each: the plug-ins found by
+// scanning (step 7); a parameter set by hand, a plug-in's key parameters and an effect's mix as parameters (step 4); a
+// device's window (step 5); a channel's meter (step 6); and a device of Tracktion's taken into the song (a preset's).
+
+// The devices that can be added (DeviceType.h): Phazite's own and the plug-ins found by scanning. The plug-in scanning
+// found that a description names: by its identifier and name, else by its name, maker and format, as a preset finds it.
+// And the description of the plug-in an element names: the one scanning found, or else the element's own, which
+// Tracktion keeps as a plug-in it can't load.
+std::vector<DeviceType> getDeviceTypes (te::Engine&);
+std::optional<juce::PluginDescription> findKnownPlugin (te::Engine&, const juce::PluginDescription&);
+juce::PluginDescription getPluginDescription (te::Engine&, const juce::ValueTree& device);
+
+// Sets a device's parameter to a value set by hand, as it snaps to its range and steps: the song's, for one of Phazite's own
+// devices in a chain (Schema.h: VALUES), a fader's volume or pan, a send's level, a modulator's or a macro's, and
+// Tracktion's parameter, which plays it. In the caller's undo step. A plug-in's parameter is the plug-in's own, which its
+// state holds (stored as the project saves: DeviceStates.h).
+void setDeviceValue (te::AutomatableParameter&, float value);
+
+// A plug-in's key parameters, by ID (MixerModel.h): its quick control, then the first others (not the dry and wet levels,
+// which its mix sets). None for Phazite's own devices or a container. And the parameters an effect's mix sets: one of
+// Phazite's own effects' mix, or the dry and wet levels Tracktion gives a plug-in or a container.
+juce::StringArray getKeyControls (te::Plugin&, int maximum);
+te::AutomatableParameter::Array getMixParameters (te::Plugin&);
+
+// Whether a device's window shows now.
+bool isWindowOpen (const te::Plugin&);
+
+// A channel's meter in Tracktion: nullptr for a plain folder, which has no sound of its own.
+te::LevelMeasurer* getLevelMeasurer (te::Track&);
+
+// The element of a device of Tracktion's (one a preset made), with what its state holds: a plug-in's settings, a
+// container's devices.
+juce::ValueTree makeDeviceState (te::Plugin&);
 } // namespace phazite

@@ -63,7 +63,7 @@ bool setPadSound (te::Plugin& plugin, int pad, const juce::File& file)
     auto& edit = plugin.edit;
     const auto copy = copyIntoProject (getSong (edit), file);
     const UndoStep step (edit, "Put " + copy.getFileNameWithoutExtension() + " on Pad " + juce::String (pad + 1));
-    setDeviceSound (plugin, schema::getPadSoundFile (pad), getProjectPath (getSong (edit), copy));
+    setDeviceSound (getSong (plugin.edit), getDeviceID (plugin), schema::getPadSoundFile (pad), getProjectPath (getSong (edit), copy));
     return true;
 }
 
@@ -73,6 +73,6 @@ void clearPadSound (te::Plugin& plugin, int pad)
         return;
 
     const UndoStep step (plugin.edit, "Reset Pad " + juce::String (pad + 1));
-    setDeviceSound (plugin, schema::getPadSoundFile (pad), {});
+    setDeviceSound (getSong (plugin.edit), getDeviceID (plugin), schema::getPadSoundFile (pad), {});
 }
 } // namespace phazite

@@ -8,6 +8,8 @@
 #include "model/automation/AutomationValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Tracktion.h"
+#include "model/mixer/DeviceType.h"
+#include "model/mixer/SidechainChoice.h"
 #include "model/notes/NoteValues.h"
 
 #include <optional>
@@ -77,7 +79,88 @@ void makeBus (te::FolderTrack&);
 void makePlainFolder (te::FolderTrack&);
 void mixAsBus (te::FolderTrack&);
 
+//==============================================================================
+// Devices (model/mixer/internal/Mixer.h). A device of Tracktion's (made with an Edit's plug-in cache, as a preset makes
+// one) goes into Tracktion's list where the song's element of it goes, which is made from it (makeDeviceState()).
+juce::Array<te::Plugin*> getDevices (const te::Track&);
+juce::Array<te::Plugin*> getMasterDevices (const te::Edit&);
+te::Plugin* getInstrument (const te::Track&);
+juce::Array<te::Plugin*> getEffects (const te::Track&);
+bool needsInstrument (const te::Track&);
+te::Plugin* setInstrument (te::AudioTrack&, const te::Plugin::Ptr&);
+te::Plugin* insertDevice (te::Track&, const te::Plugin::Ptr&, int index = -1);
+te::Plugin* insertMasterDevice (te::Edit&, const te::Plugin::Ptr&, int index = -1);
+void removeDevice (te::Plugin&);
+void moveDevice (te::Plugin&, int newIndex);
+void setDeviceOn (te::Plugin&, bool on);
+bool isDeviceOn (const te::Plugin&); // Tracktion's own for a device the song hasn't (a preview's)
+bool opensWindow (const te::Plugin&);
+bool popsOut (const te::Plugin&);
+bool hasMix (te::Plugin&);
+float getMix (te::Plugin&);
+void setMix (te::Plugin&, float mix);
+void setDeviceSound (te::Plugin&, const juce::Identifier& property, const juce::String& value);
+void rememberWindowPosition (te::Plugin&, juce::Point<int> topLeft);
+juce::ValueTree findChainState (const te::Edit&, const te::Track*);
+
+te::Plugin::Ptr createDevice (te::Edit&, const DeviceType&); // Tracktion's, on no channel
+te::Plugin* addDeviceTo (te::Edit&, te::Track*, const DeviceType&, Selection*);
+te::Plugin* placeDevice (te::Edit&, te::Track*, const te::Plugin::Ptr&, Selection*);
+te::Plugin* chooseInstrument (te::AudioTrack&, const DeviceType&);
+te::Plugin* addEffect (te::Edit&, te::Track*, const DeviceType&);
+te::AudioTrack* addReturnWith (te::Track& sender, const DeviceType&);
+
+void setMixedAsBus (te::FolderTrack&, bool);
+te::Plugin* getVolumeDevice (te::Track&);
+juce::String getVolumeParameterID (te::Track&);
+void setChannelVolume (te::Track&, float decibels);
+void setChannelPan (te::Track&, float pan);
+float getChannelVolume (const te::Track&);
+float getChannelPan (const te::Track&);
+te::FolderTrack* getOutputBus (const te::Track&);
+juce::Array<te::Track*> getChannelTracks (const te::Edit&);
+
+int getReturnBus (const te::Track&);
+juce::Array<te::AudioTrack*> getReturnTracks (const te::Edit&);
+te::AudioTrack* findReturnTrack (const te::Edit&, int bus);
+te::AudioTrack* addReturnTrack (te::Edit&, const juce::String& name, Selection*);
+te::AudioTrack* addNewReturnTrack (te::Edit&, Selection*);
+te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& effect);
+juce::Array<te::AuxSendPlugin*> getSends (const te::Track&);
+te::AuxSendPlugin* addSend (te::Track&, int bus, bool preFader);
+bool isPreFader (const te::AuxSendPlugin&);
+void setPreFader (te::AuxSendPlugin&, bool);
+void setSendLevel (te::AuxSendPlugin&, float decibels);
+float getSendLevel (const te::AuxSendPlugin&);
+te::AuxSendPlugin* addSendTo (te::Track&, int bus);
+te::AuxSendPlugin* addSendToNewReturn (te::Track&);
+void removeSend (te::AuxSendPlugin&);
+
+// Containers (model/mixer/internal/Containers.h). A container of Tracktion's the song hasn't yet (a preset's) has its
+// rack type's devices, in their order.
+te::RackInstance* findContainerOf (const te::Plugin&);
+juce::Array<te::Plugin*> getContainerDevices (const te::Plugin& container);
+juce::ReferenceCountedArray<te::MacroParameter> getContainerMacros (const te::Plugin& container);
+te::Track* getTrackOfContainer (const te::RackInstance&); // the master track for the master's
+te::Track* getTrackOfContainerDevice (const te::Plugin&);
+bool canGroupIntoContainer (const juce::Array<te::Plugin*>&);
+te::RackInstance* groupIntoContainer (const juce::Array<te::Plugin*>&);
+void ungroupContainer (te::RackInstance&);
+void setContainerName (te::Plugin& container, const juce::String&);
+te::Plugin* insertIntoContainer (te::RackInstance&, const te::Plugin::Ptr&, int index = -1);
+void moveInContainer (te::Plugin&, int newIndex);
+juce::String makeContainerName (const te::Edit&);
+
 // Sidechains (model/mixer/internal/Sidechain.h).
+juce::Array<te::Track*> getTracksFedBy (te::Track&);
+bool hasSidechain (te::Plugin&);
+juce::Array<te::AudioTrack*> getSidechainSources (te::Plugin&);
+te::AudioTrack* getSidechainSource (te::Plugin&);
+SidechainChoice describeSidechainSource (te::Plugin&);
+std::vector<SidechainChoice> describeTracksToListenTo (te::Edit&, te::Track* listener);
+std::vector<SidechainChoice> describeSidechainChoices (te::Plugin&);
+void setSidechainSource (te::Plugin&, te::AudioTrack* source);
+te::Plugin* duckUnder (te::AudioTrack& ducked, te::AudioTrack& key);
 void forgetSidechainSources (const juce::Array<te::Track*>&);
 
 // Keys (model/notes/internal/Notes.h).

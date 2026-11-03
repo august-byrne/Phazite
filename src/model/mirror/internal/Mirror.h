@@ -24,6 +24,24 @@ te::Track* findTrack (const te::Edit&, TrackID);
 te::Track* findTrack (const te::Edit&, const juce::ValueTree& trackState);
 juce::Array<te::Track*> findTracks (const te::Edit&, const std::vector<TrackID>&); // those there, in their order
 
+// Tracktion's devices for the song's (model/mixer/internal/Mixer.h), while the model still reaches some of what they do
+// through them (their parameters, windows and meters): a device, a container, a fader or a send by the song's ID, nullptr
+// for none; and a channel's devices in the song's order, a track's by its ID, the master's by none.
+te::Plugin* findDevice (const te::Edit&, DeviceID);
+juce::Array<te::Plugin*> findDevices (const te::Edit&, TrackID channel);
+
+// Tracktion's plug-ins of a channel's that the mirror makes for what the song has on it: whether one is a device of the
+// song's, not one of the channel's own (its fader, meter, sends, a return's input); a track's fader (a plain folder's
+// VCA); a track's sends; the bus a return's input takes, -1 for a track that isn't a return, and the return on a bus; and
+// where in a list a device goes, before the device at a place among its devices, or else after the last device (or
+// after a return's input), so before the sends, the fader and the meters.
+bool isDevice (const te::Plugin&);
+te::Plugin* getFader (te::Track&);
+juce::Array<te::AuxSendPlugin*> getSends (const te::Track&);
+int getReturnBus (const te::Track&);
+te::AudioTrack* findReturnTrack (const te::Edit&, int bus);
+int getDevicePlace (const te::PluginList&, int deviceIndex);
+
 // A file Tracktion's clips may play, which Tracktion may have read before: read again (a render made since it last looked),
 // or let go of before it is deleted.
 void reconcileFile (te::Edit&, const juce::File&);
@@ -67,8 +85,12 @@ void reconcileCurve (te::Edit&, const ParameterRef&);
 // and those it has and Tracktion hasn't are made, with the tracks they listen to through their sidechains. Each channel's
 // fader plays the song's volume and pan, its sends are the song's, and each return has its input. The modulation follows
 // (reconcileModulation()), and last the frozen tracks: each plays its frozen file, if it is in the Edit's temporary
-// folder, or live. The model still makes a device in Tracktion as it adds it to the song.
+// folder, or live.
 void reconcileDevices (te::Edit&);
+
+// The same for one device's settings alone, after a change to them: a device's or a container's (on or off, its values,
+// files and mix), a fader's volume and pan, or a send's level, by its ID.
+void reconcileDevice (te::Edit&, DeviceID);
 
 // The state Tracktion makes an Edit built from a song alone from (createEditFromSong(), model/project/internal/Project.h):
 // the song in it from the start, with its count of IDs where Tracktion counts from, so that what Tracktion makes as it

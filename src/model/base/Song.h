@@ -50,6 +50,7 @@ public:
         clip, // one, by its ID
         automation,
         devices,
+        device, // one's settings, by its ID: a device's, a fader's or a send's
         modulation,
         transport,
         everything

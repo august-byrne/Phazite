@@ -709,7 +709,7 @@ bool saveDevicePreset (const ProjectContext& context, DeviceID id, const juce::F
 {
     auto* edit = getEdit (context);
     const auto device = edit != nullptr && id.isValid() ? te::findPluginForID (*edit, phazite::toTracktion (id)) : nullptr;
-    return device != nullptr && isDevice (*device) && writePreset (makeDevicePreset (*device), file);
+    return device != nullptr && findDeviceState (*edit, id).isValid() && writePreset (makeDevicePreset (*device), file);
 }
 
 bool saveTrackPreset (const ProjectContext& context, TrackID id, const juce::File& file)

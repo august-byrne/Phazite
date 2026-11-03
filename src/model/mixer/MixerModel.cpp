@@ -15,7 +15,7 @@
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
-#include "model/mirror/internal/Bridge.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"
@@ -27,84 +27,124 @@ namespace phazite
 {
 namespace
 {
+    // Tracktion's track or device for one of the song's, for what is still reached through it (docs/tracktion-migration.md,
+    // T6: parameters, windows, meters and plug-ins' instances).
     te::Track* findTrack (const ProjectContext& context, TrackID id)
     {
         auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
+        return edit != nullptr && id.isValid() ? mirror::findTrack (*edit, id) : nullptr;
     }
 
     te::Plugin* findDevice (const ProjectContext& context, DeviceID id)
     {
         auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
+        return edit != nullptr ? mirror::findDevice (*edit, id) : nullptr;
     }
 
-    std::vector<DeviceSlot> makeSlots (const juce::Array<te::Plugin*>& devices)
+    // A track of the playlist's (a track, a folder or a return); and one with sound of its own (not a folder).
+    bool isTrack (const Song& song, TrackID id)
+    {
+        return findTrackState (song, id).hasType (schema::TRACK);
+    }
+
+    bool hasSound (const Song& song, TrackID id)
+    {
+        return isTrack (song, id) && ! isFolder (song, id);
+    }
+
+    bool contains (const std::vector<TrackID>& tracks, TrackID track)
+    {
+        return std::find (tracks.begin(), tracks.end(), track) != tracks.end();
+    }
+
+    std::vector<DeviceSlot> makeSlots (const Song& song, const std::vector<DeviceID>& devices)
     {
         std::vector<DeviceSlot> slots;
 
-        for (auto* device : devices)
-            slots.push_back (makeDeviceSlot (*device));
+        for (const auto device : devices)
+            slots.push_back (makeDeviceSlot (song, device));
 
         return slots;
     }
 
-    // The tracks that send to a return's bus.
-    juce::StringArray getSenderNames (const te::Edit& edit, int bus)
+    // The tracks that send to a return.
+    juce::StringArray getSenderNames (const Song& song, TrackID returnTrack)
     {
         juce::StringArray names;
 
-        for (auto* track : te::getAudioTracks (edit))
-            for (auto* send : phazite::getSends (*track))
-                if (send->getBusNumber() == bus)
-                    names.addIfNotAlreadyThere (getTrackName (*track));
+        for (const auto track : getTrackIDs (song))
+            for (const auto send : getSends (song, track))
+                if (getSendTarget (song, send) == returnTrack)
+                    names.addIfNotAlreadyThere (getTrackName (song, track));
 
         return names;
     }
 
-    // Whether one channel's sound reaches another's: through a send to a return, or by being in a bus folder.
-    bool reaches (const te::Track& from, const te::Track& to)
+    // A track's send to a return, or none.
+    DeviceID findSendTo (const Song& song, TrackID from, TrackID returnTrack)
     {
-        if (const auto bus = getReturnBus (to); bus >= 0)
-            for (auto* send : phazite::getSends (from))
-                if (send->getBusNumber() == bus)
-                    return true;
+        for (const auto send : getSends (song, from))
+            if (getSendTarget (song, send) == returnTrack)
+                return send;
 
-        for (auto* parent = getParentFolder (from); parent != nullptr; parent = getParentFolder (*parent))
-            if (parent == &to && isBus (*parent))
+        return {};
+    }
+
+    // Whether one channel's sound reaches another's: through a send to a return, or by being in a bus folder.
+    bool reaches (const Song& song, TrackID from, TrackID to)
+    {
+        if (isReturnTrack (song, to) && findSendTo (song, from, to).isValid())
+            return true;
+
+        for (auto parent = getParentFolder (song, from); parent.isValid(); parent = getParentFolder (song, parent))
+            if (parent == to && isBus (song, parent))
                 return true;
 
         return false;
     }
+
+    // Tracks and returns send, folders don't; and a return whose sound comes back to the track would make a loop.
+    bool canSendTo (const Song& song, TrackID from, TrackID returnTrack)
+    {
+        return from != returnTrack && hasSound (song, from) && isReturnTrack (song, returnTrack)
+               && ! contains (getTracksFedBy (song, returnTrack), from);
+    }
+
+    // The parameter of Tracktion's send that sets its level (tracktion_AuxSend.cpp), which the send's knob changes.
+    const juce::String sendLevelID ("send level");
 } // namespace
 
-DeviceSlot makeDeviceSlot (te::Plugin& device)
+DeviceSlot makeDeviceSlot (const Song& song, DeviceID id)
 {
+    auto* edit = findEdit (song);
+    auto* device = edit != nullptr ? mirror::findDevice (*edit, id) : nullptr;
+    const auto on = isDeviceOn (song, id);
+
     // How late its sound comes out, as Phazite's engine plays it while it plays the device's project, in seconds; or as
     // Tracktion knows it otherwise. While Low Latency is on, one that looks ahead further than its limit is bypassed
     // (EngineSetup.h).
-    auto latency = device.isEnabled() ? device.getLatencySeconds() : 0.0;
+    auto latency = device != nullptr && on ? device->getLatencySeconds() : 0.0;
 
-    if (auto* session = findPlayingSession (device.edit))
+    if (auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr)
     {
-        auto* node = session->getPlayer().findDevice ((std::int64_t) device.itemID.getRawID());
+        auto* node = session->getPlayer().findDevice ((std::int64_t) id.getRaw());
         latency = node != nullptr && node->isOn() ? node->getRunner().getLatencySamples() / session->getEngine().getSampleRate() : 0.0;
-        latency = isLowLatency (device.engine) && latency > lowLatencyLimitSeconds ? 0.0 : latency;
+        latency = isLowLatency (edit->engine) && latency > lowLatencyLimitSeconds ? 0.0 : latency;
     }
 
-    return { .id = getDeviceID (device),
-             .name = device.getName(),
-             .isOn = isDeviceOn (device),
-             .hasMix = hasMix (device),
+    return { .id = id,
+             .name = getDeviceName (song, id),
+             .isOn = on,
+             .hasMix = hasMix (song, id),
              .latencySeconds = latency,
-             .isContainer = isContainer (device),
-             .opensWindow = opensWindow (device),
-             .popsOut = popsOut (device),
-             .windowOpen = popsOut (device) && isWindowOpen (device),
-             .frozen = isFrozenDevice (device),
-             .crashed = hasCrashed (device),
-             .hasSidechain = hasSidechain (device),
-             .sidechain = describeSidechainSource (device) };
+             .isContainer = isContainer (song, id),
+             .opensWindow = opensWindow (song, id),
+             .popsOut = popsOut (song, id),
+             .windowOpen = popsOut (song, id) && device != nullptr && isWindowOpen (*device),
+             .frozen = device != nullptr && isFrozenDevice (*device),
+             .crashed = device != nullptr && hasCrashed (*device),
+             .hasSidechain = hasSidechain (song, id),
+             .sidechain = describeSidechainSource (song, id) };
 }
 
 //==============================================================================
@@ -112,71 +152,69 @@ MixerChannels getMixerChannels (const ProjectContext& context)
 {
     MixerChannels channels;
 
-    if (auto* edit = getEdit (context))
-        for (auto* track : getPlaylistTracks (*edit))
-            (isReturnTrack (*track) ? channels.returns : channels.tracks).push_back (getTrackID (*track));
+    if (auto* song = findSong (context))
+        for (const auto track : getTrackIDs (*song))
+            (isReturnTrack (*song, track) ? channels.returns : channels.tracks).push_back (track);
 
     return channels;
 }
 
 std::optional<Channel> getChannel (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr)
+    if (song == nullptr || ! isTrack (*song, id))
         return {};
+
+    const auto tracks = getTrackIDs (*song);
+    const auto row = (int) std::distance (tracks.begin(), std::find (tracks.begin(), tracks.end(), id));
 
     Channel channel;
     channel.id = id;
-    channel.name = getTrackName (*track);
-    channel.colour = getTrackColour (*track, getPlaylistTracks (track->edit).indexOf (track));
-    channel.hasEffects = ! phazite::getEffects (*track).isEmpty();
-    channel.needsInstrument = phazite::needsInstrument (*track);
+    channel.name = getTrackName (*song, id);
+    channel.colour = getTrackColour (*song, id, row);
+    channel.hasEffects = ! getEffects (*song, id).empty();
+    channel.needsInstrument = needsInstrument (*song, id);
 
-    if (auto* folder = dynamic_cast<te::FolderTrack*> (track))
-        channel.kind = isBus (*folder) ? ChannelKind::bus : ChannelKind::plainFolder;
-    else if (isReturnTrack (*track))
-        channel.kind = ChannelKind::returnTrack, channel.senders = getSenderNames (track->edit, getReturnBus (*track));
+    if (isFolder (*song, id))
+        channel.kind = isBus (*song, id) ? ChannelKind::bus : ChannelKind::plainFolder;
+    else if (isReturnTrack (*song, id))
+        channel.kind = ChannelKind::returnTrack, channel.senders = getSenderNames (*song, id);
 
     // A track's sound goes into the nearest bus it is in, or else to the master.
-    for (auto* parent = getParentFolder (*track); parent != nullptr; parent = getParentFolder (*parent))
-    {
-        if (isBus (*parent))
-        {
-            channel.outputBus = getTrackName (*parent);
-            break;
-        }
-    }
+    if (const auto bus = getOutputBus (*song, id); bus.isValid())
+        channel.outputBus = getTrackName (*song, bus);
 
     return channel;
 }
 
 bool feeds (const ProjectContext& context, TrackID from, TrackID to)
 {
-    auto* source = findTrack (context, from);
-    auto* destination = findTrack (context, to);
-    return source != nullptr && destination != nullptr && reaches (*source, *destination);
+    auto* song = findSong (context);
+    return song != nullptr && isTrack (*song, from) && isTrack (*song, to) && reaches (*song, from, to);
 }
 
 TrackID getInspectedChannel (const ProjectContext& context)
 {
+    auto* song = findSong (context);
     auto* edit = getEdit (context);
 
-    if (edit == nullptr)
+    if (song == nullptr || edit == nullptr)
         return {};
 
-    te::Track* track = findTracks (*edit, getSelectedTracks (getSelection (context))).getFirst();
+    if (const auto selected = getSelectedTracks (getSelection (context)); ! selected.empty())
+        return selected.front();
 
-    if (track == nullptr)
-        track = getSelectedAudioTrack (getSelection (context));
+    te::Track* track = getSelectedAudioTrack (getSelection (context));
 
     if (track == nullptr)
         track = getLiveMidiTrack (*edit);
 
-    if (track == nullptr)
-        track = getPlaylistTracks (*edit).getFirst();
+    if (track != nullptr)
+        return getTrackID (*track);
 
-    return track != nullptr ? getTrackID (*track) : TrackID();
+    const auto tracks = getTrackIDs (*song);
+    return tracks.empty() ? TrackID() : tracks.front();
 }
 
 //==============================================================================
@@ -192,16 +230,24 @@ float decibelsToFaderPosition (float decibels)
 
 ParameterHandle getVolume (ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    return track != nullptr ? makeParameterHandle (getVolumeDevice (*track), getVolumeParameterID (*track), "Change Volume")
-                            : ParameterHandle();
+    auto* song = findSong (context);
+
+    if (song == nullptr || ! isTrack (*song, id))
+        return {};
+
+    auto* fader = findDevice (context, getFader (*song, id));
+    return fader != nullptr ? makeParameterHandle (fader, getVolumeParameterID (*song, id), "Change Volume") : ParameterHandle();
 }
 
 ParameterHandle getPan (ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    auto* fader = track != nullptr ? dynamic_cast<te::VolumeAndPanPlugin*> (getVolumeDevice (*track)) : nullptr;
-    return fader != nullptr ? makeParameterHandle (fader, fader->panParam->paramID, "Change Pan") : ParameterHandle();
+    auto* song = findSong (context);
+
+    if (song == nullptr || ! isTrack (*song, id) || getPanParameterID (*song, id).isEmpty())
+        return {};
+
+    auto* fader = findDevice (context, getFader (*song, id));
+    return fader != nullptr ? makeParameterHandle (fader, getPanParameterID (*song, id), "Change Pan") : ParameterHandle();
 }
 
 namespace
@@ -209,11 +255,12 @@ namespace
     // A channel's meter (a track's by its ID, the master's by 0) in Phazite's own engine, while it plays the project.
     engine::LevelMeter* findOwnMeter (ProjectContext& context, std::int64_t id)
     {
+        auto* song = findSong (context);
         auto* edit = getEdit (context);
 
         // A track's while it is the song's (the engine may play one deleted a moment ago), the master's always.
         if (auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr)
-            if (id == 0 || findTrackState (*edit, TrackID::fromRaw ((std::uint64_t) id)).isValid())
+            if (id == 0 || (song != nullptr && findTrackState (*song, TrackID::fromRaw ((std::uint64_t) id)).isValid()))
                 if (auto* strip = session->getPlayer().findStrip (id))
                     return &strip->getChannel().getMeter();
 
@@ -232,7 +279,7 @@ LevelSource getLevel (ProjectContext& context, TrackID id)
          track = te::SafeSelectable<te::Track>()]() mutable -> te::LevelMeasurer*
         {
             if (auto* e = edit.get(); e != nullptr && track.get() == nullptr)
-                track = te::findTrackForID (*e, toTracktion (id));
+                track = mirror::findTrack (*e, id);
 
             auto* t = track.get();
             return t != nullptr ? getLevelMeasurer (*t) : nullptr;
@@ -242,9 +289,9 @@ LevelSource getLevel (ProjectContext& context, TrackID id)
 
 ParameterHandle getMasterVolume (ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    const auto fader = edit != nullptr ? edit->getMasterVolumePlugin() : nullptr;
-    return fader != nullptr ? makeParameterHandle (fader.get(), fader->volParam->paramID, "Change Master Volume") : ParameterHandle();
+    auto* song = findSong (context);
+    auto* fader = song != nullptr ? findDevice (context, getFader (*song, {})) : nullptr;
+    return fader != nullptr ? makeParameterHandle (fader, getVolumeParameterID (*song, {}), "Change Master Volume") : ParameterHandle();
 }
 
 LevelSource getMasterLevel (ProjectContext& context)
@@ -262,12 +309,12 @@ LevelSource getMasterLevel (ProjectContext& context)
 
 std::optional<MuteSolo> getMuteSolo (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr)
+    if (song == nullptr || ! isTrack (*song, id))
         return {};
 
-    return MuteSolo { isTrackMuted (*track, false), isTrackSoloed (*track), isSilencedBySolo (*track) };
+    return MuteSolo { isTrackMuted (*song, id, false), isTrackSoloed (*song, id), isSilencedBySolo (*song, id) };
 }
 
 void toggleMute (ProjectContext& context, TrackID id)
@@ -284,41 +331,38 @@ void toggleSolo (ProjectContext& context, TrackID id)
 
 void toggleSoloAlone (ProjectContext& context, TrackID id)
 {
-    if (auto* track = findTrack (context, id))
-        phazite::toggleSoloAlone (*track);
+    if (auto* song = findSong (context); song != nullptr && isTrack (*song, id))
+        toggleSoloAlone (*song, id);
 }
 
 void setMixedAsBus (ProjectContext& context, TrackID id, bool bus)
 {
-    if (auto* folder = dynamic_cast<te::FolderTrack*> (findTrack (context, id)))
-        phazite::setMixedAsBus (*folder, bus);
+    if (auto* song = findSong (context))
+        setMixedAsBus (*song, id, bus);
 }
 
 //==============================================================================
 std::optional<DeviceSlot> getInstrument (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    auto* instrument = track != nullptr ? phazite::getInstrument (*track) : nullptr;
+    auto* song = findSong (context);
+    const auto instrument = song != nullptr && isTrack (*song, id) ? getInstrument (*song, id) : DeviceID();
 
-    if (instrument == nullptr)
+    if (! instrument.isValid())
         return {};
 
-    return makeDeviceSlot (*instrument);
+    return makeDeviceSlot (*song, instrument);
 }
 
 std::vector<DeviceSlot> getEffects (const ProjectContext& context, TrackID id)
 {
-    if (! id.isValid())
-        return getEdit (context) != nullptr ? makeSlots (getMasterDevices (*getEdit (context))) : std::vector<DeviceSlot>();
-
-    auto* track = findTrack (context, id);
-    return track != nullptr ? makeSlots (phazite::getEffects (*track)) : std::vector<DeviceSlot>();
+    auto* song = findSong (context);
+    return song != nullptr ? makeSlots (*song, getEffects (*song, id)) : std::vector<DeviceSlot>();
 }
 
 bool canHoldInstrument (const ProjectContext& context, TrackID id)
 {
-    auto* track = dynamic_cast<te::AudioTrack*> (findTrack (context, id));
-    return track != nullptr && ! isReturnTrack (*track);
+    auto* song = findSong (context);
+    return song != nullptr && hasSound (*song, id) && ! isReturnTrack (*song, id);
 }
 
 std::vector<ParameterHandle> getKeyControls (ProjectContext& context, DeviceID id, int maximum)
@@ -341,81 +385,79 @@ MixHandle getMix (ProjectContext& context, DeviceID id)
 
 void setDeviceOn (ProjectContext& context, DeviceID id, bool on)
 {
-    auto* device = findDevice (context, id);
+    auto* song = findSong (context);
 
-    if (device == nullptr)
+    if (song == nullptr || ! findDeviceState (*song, id).isValid())
         return;
 
     // An instrument stays on: its track's switch mutes it (the owner, 2026-11-01: with one instrument a track, its own switch
     // was a second way to silence the track).
-    if (auto* track = device->getOwnerTrack(); ! on && track != nullptr && getInstrument (*track) == device)
+    if (! on && getInstrument (*song, getDeviceChannel (*song, id)) == id)
         return;
 
-    phazite::setDeviceOn (*device, on);
+    setDeviceOn (*song, id, on);
 }
 
 void moveEffect (ProjectContext& context, DeviceID id, int places)
 {
-    auto* device = findDevice (context, id);
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (device == nullptr || edit == nullptr)
+    if (song == nullptr || ! findDeviceState (*song, id).isValid())
         return;
 
-    // Among its container's devices.
-    if (auto* container = findContainerOf (*device))
-    {
-        const auto devices = getContainerDevices (*container);
-        const auto target = devices.indexOf (device) + places;
+    const auto indexOf = [] (const std::vector<DeviceID>& devices, DeviceID device)
+    { return (int) std::distance (devices.begin(), std::find (devices.begin(), devices.end(), device)); };
 
-        if (juce::isPositiveAndBelow (target, devices.size()))
+    // Among its container's devices.
+    if (const auto container = findContainerOf (*song, id); container.isValid())
+    {
+        const auto devices = getContainerDevices (*song, container);
+        const auto target = indexOf (devices, id) + places;
+
+        if (juce::isPositiveAndBelow (target, (int) devices.size()))
         {
-            const UndoStep step (*edit, "Move Device");
-            moveInContainer (*device, target);
+            const UndoStep step (*song, "Move Device");
+            moveInContainer (*song, id, target);
         }
 
         return;
     }
 
     // Among the channel's effects, which follow its instrument among all its devices.
-    auto* track = device->getOwnerTrack();
-    const auto effects = track != nullptr ? phazite::getEffects (*track) : getMasterDevices (*edit);
-    const auto all = track != nullptr ? getDevices (*track) : getMasterDevices (*edit);
-    const auto target = effects.indexOf (device) + places;
+    const auto channel = getDeviceChannel (*song, id);
+    const auto effects = getEffects (*song, channel);
+    const auto all = getDevices (*song, channel);
+    const auto target = indexOf (effects, id) + places;
 
-    if (effects.contains (device) && juce::isPositiveAndBelow (target, effects.size()))
-        moveDevice (*device, all.indexOf (effects[target]));
+    if (indexOf (effects, id) < (int) effects.size() && juce::isPositiveAndBelow (target, (int) effects.size()))
+        moveDevice (*song, id, indexOf (all, effects[(size_t) target]));
 }
 
 void removeDevice (ProjectContext& context, DeviceID id)
 {
-    if (auto* device = findDevice (context, id))
-        phazite::removeDevice (*device);
+    if (auto* song = findSong (context))
+        removeDevice (*song, id);
 }
 
 void replaceEffect (ProjectContext& context, DeviceID id, const DeviceType& type)
 {
-    auto* device = findDevice (context, id);
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (device == nullptr || edit == nullptr || type.isInstrument || isInstrument (*device))
+    if (song == nullptr || type.isInstrument || ! findDeviceState (*song, id).isValid() || isInstrumentState (findDeviceState (*song, id)))
         return;
 
-    const UndoStep step (*edit, "Replace " + device->getName() + " with " + type.name);
-    auto replacement = createDevice (*edit, type);
-
-    if (replacement == nullptr)
-        return;
+    const UndoStep step (*song, "Replace " + getDeviceName (*song, id) + " with " + type.name);
+    const auto replacement = makeDeviceState (*song, type);
+    const auto indexOf = [] (const std::vector<DeviceID>& devices, DeviceID device)
+    { return (int) std::distance (devices.begin(), std::find (devices.begin(), devices.end(), device)); };
 
     // The new one where the old one is, then the old one out (a bus keeps a device all along).
-    if (auto* container = findContainerOf (*device))
-        insertIntoContainer (*container, replacement, getContainerDevices (*container).indexOf (device));
-    else if (auto* track = device->getOwnerTrack())
-        insertDevice (*track, replacement, getDevices (*track).indexOf (device));
-    else
-        insertMasterDevice (*edit, replacement, getMasterDevices (*edit).indexOf (device));
+    if (const auto container = findContainerOf (*song, id); container.isValid())
+        insertIntoContainer (*song, container, replacement, indexOf (getContainerDevices (*song, container), id));
+    else if (const auto channel = getDeviceChannel (*song, id); channel.isValid())
+        insertDeviceState (*song, channel, replacement, indexOf (getDevices (*song, channel), id));
 
-    phazite::removeDevice (*device);
+    removeDevice (*song, id);
 }
 
 std::optional<juce::String> reloadDevice (ProjectContext& context, DeviceID id)
@@ -433,8 +475,10 @@ std::optional<juce::String> reloadDevice (ProjectContext& context, DeviceID id)
 
 void showDeviceWindow (ProjectContext& context, DeviceID id)
 {
-    if (auto* device = findDevice (context, id);
-        device != nullptr && (opensWindow (*device) || popsOut (*device)) && ! isFrozenDevice (*device))
+    auto* song = findSong (context);
+    auto* device = findDevice (context, id);
+
+    if (song != nullptr && device != nullptr && (opensWindow (*song, id) || popsOut (*song, id)) && ! isFrozenDevice (*device))
         device->showWindowExplicitly();
 }
 
@@ -452,23 +496,15 @@ DeviceHandle getDeviceHandle (ProjectContext& context, DeviceID id)
 
 std::optional<TrackID> getDeviceChannel (const ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
+    auto* song = findSong (context);
 
-    if (device == nullptr)
+    if (song == nullptr || ! findDeviceState (*song, id).isValid())
         return {};
 
-    // A container's devices are on its channel (containers don't nest). The master's devices belong to Tracktion's master
-    // track, which the mixer calls the master, by an empty ID.
-    if (auto* container = findContainerOf (*device))
-        device = container;
-
-    if (getMasterDevices (device->edit).contains (device))
-        return TrackID();
-
-    if (auto* track = device->getOwnerTrack())
-        return getTrackID (*track);
-
-    return {};
+    // A container's devices are on its channel (containers don't nest); the master's, which the mixer calls the master, by
+    // an empty ID.
+    const auto channel = getDeviceChannel (*song, id);
+    return channel == getMasterID (*song) ? TrackID() : channel;
 }
 
 std::vector<DeviceType> getDeviceTypes (const ProjectContext& context)
@@ -478,35 +514,30 @@ std::vector<DeviceType> getDeviceTypes (const ProjectContext& context)
 
 void chooseInstrument (ProjectContext& context, TrackID id, const DeviceType& type)
 {
-    if (auto* track = dynamic_cast<te::AudioTrack*> (findTrack (context, id)))
-        phazite::chooseInstrument (*track, type);
+    if (auto* song = findSong (context); song != nullptr && canHoldInstrument (context, id))
+        chooseInstrument (*song, id, type);
 }
 
 void addEffect (ProjectContext& context, TrackID id, const DeviceType& type)
 {
-    auto* edit = getEdit (context);
-    auto* track = findTrack (context, id);
-
-    if (edit != nullptr && (track != nullptr || ! id.isValid()))
-        phazite::addEffect (*edit, track, type);
+    if (auto* song = findSong (context); song != nullptr && (! id.isValid() || isTrack (*song, id)))
+        addEffect (*song, id, type);
 }
 
 TrackID addReturnWith (ProjectContext& context, TrackID sender, const DeviceType& type)
 {
-    auto* track = findTrack (context, sender);
-    auto* added = track != nullptr ? phazite::addReturnWith (*track, type) : nullptr;
-    return added != nullptr ? getTrackID (*added) : TrackID();
+    auto* song = findSong (context);
+    return song != nullptr && hasSound (*song, sender) ? addReturnWith (*song, sender, type) : TrackID();
 }
 
 bool addDeviceTo (ProjectContext& context, TrackID id, const DeviceType& type)
 {
-    auto* edit = getEdit (context);
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
 
-    if (edit == nullptr || (track == nullptr && id.isValid()))
+    if (song == nullptr || (id.isValid() && ! isTrack (*song, id)))
         return false;
 
-    return phazite::addDeviceTo (*edit, track, type, &getSelection (context)) != nullptr; // selects a track made for it
+    return addDeviceTo (*song, id, type, &getSelection (context)).isValid(); // selects a track made for it
 }
 
 //==============================================================================
@@ -514,14 +545,9 @@ std::vector<Send> getSends (const ProjectContext& context, TrackID id)
 {
     std::vector<Send> sends;
 
-    if (auto* track = findTrack (context, id))
-    {
-        for (auto* send : phazite::getSends (*track))
-        {
-            const auto* target = findReturnTrack (track->edit, send->getBusNumber());
-            sends.push_back ({ getDeviceID (*send), target != nullptr ? target->getName() : send->getBusName(), isPreFader (*send) });
-        }
-    }
+    if (auto* song = findSong (context))
+        for (const auto send : getSends (*song, id))
+            sends.push_back ({ send, getTrackName (*song, getSendTarget (*song, send)), isPreFader (*song, send) });
 
     return sends;
 }
@@ -534,81 +560,56 @@ ParameterHandle getSendLevel (ProjectContext& context, DeviceID id)
 
 void setPreFader (ProjectContext& context, DeviceID id, bool preFader)
 {
-    if (auto* send = dynamic_cast<te::AuxSendPlugin*> (findDevice (context, id)))
-        phazite::setPreFader (*send, preFader);
+    if (auto* song = findSong (context))
+        setPreFader (*song, id, preFader);
 }
 
 void removeSend (ProjectContext& context, DeviceID id)
 {
-    if (auto* send = dynamic_cast<te::AuxSendPlugin*> (findDevice (context, id)))
-        phazite::removeSend (*send);
+    if (auto* song = findSong (context))
+        removeSend (*song, id);
 }
 
 std::vector<Return> getReturns (const ProjectContext& context)
 {
     std::vector<Return> returns;
 
-    if (auto* edit = getEdit (context))
-        for (auto* track : getReturnTracks (*edit))
-            returns.push_back ({ getTrackID (*track), getTrackName (*track) });
+    if (auto* song = findSong (context))
+        for (const auto track : getReturnTracks (*song))
+            returns.push_back ({ track, getTrackName (*song, track) });
 
     return returns;
 }
 
 void addSendTo (ProjectContext& context, TrackID from, TrackID returnTrack)
 {
-    auto* track = findTrack (context, from);
-    auto* target = findTrack (context, returnTrack);
-
-    if (track != nullptr && target != nullptr && getReturnBus (*target) >= 0)
-        phazite::addSendTo (*track, getReturnBus (*target));
+    if (auto* song = findSong (context); song != nullptr && isReturnTrack (*song, returnTrack))
+        addSendTo (*song, from, returnTrack);
 }
 
 void addSendToNewReturn (ProjectContext& context, TrackID from)
 {
-    if (auto* track = findTrack (context, from))
-        phazite::addSendToNewReturn (*track);
+    if (auto* song = findSong (context); song != nullptr && hasSound (*song, from))
+        addSendToNewReturn (*song, from);
 }
-
-//==============================================================================
-namespace
-{
-    te::AuxSendPlugin* findSendTo (const te::Track& track, int bus)
-    {
-        for (auto* send : phazite::getSends (track))
-            if (send->getBusNumber() == bus)
-                return send;
-
-        return nullptr;
-    }
-
-    // Tracks and returns send, folders don't; and a return whose sound comes back to the track would make a loop.
-    bool canSendTo (te::Track& from, te::AudioTrack& returnTrack)
-    {
-        return &from != &returnTrack && ! from.isFolderTrack() && ! getTracksFedBy (returnTrack).contains (&from);
-    }
-
-    // The parameter of Tracktion's send that sets its level (tracktion_AuxSend.cpp), which the send's knob changes.
-    const juce::String sendLevelID ("send level");
-} // namespace
 
 std::vector<SendTarget> getSendTargets (const ProjectContext& context, TrackID id)
 {
     std::vector<SendTarget> targets;
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr)
+    if (song == nullptr || ! isTrack (*song, id))
         return targets;
 
-    for (auto* returnTrack : getReturnTracks (track->edit))
+    for (const auto returnTrack : getReturnTracks (*song))
     {
-        if (! canSendTo (*track, *returnTrack))
+        if (! canSendTo (*song, id, returnTrack))
             continue;
 
-        SendTarget target { getTrackID (*returnTrack), getTrackName (*returnTrack), std::nullopt };
+        SendTarget target { returnTrack, getTrackName (*song, returnTrack), std::nullopt };
 
-        if (auto* send = findSendTo (*track, getReturnBus (*returnTrack)))
-            target.send = Send { getDeviceID (*send), getTrackName (*returnTrack), isPreFader (*send) };
+        if (const auto send = findSendTo (*song, id, returnTrack); send.isValid())
+            target.send = Send { send, getTrackName (*song, returnTrack), isPreFader (*song, send) };
 
         targets.push_back (target);
     }
@@ -618,125 +619,118 @@ std::vector<SendTarget> getSendTargets (const ProjectContext& context, TrackID i
 
 ParameterHandle getSendLevelTo (ProjectContext& context, TrackID from, TrackID returnTrack)
 {
+    auto* song = findSong (context);
     auto* track = findTrack (context, from);
-    auto* target = dynamic_cast<te::AudioTrack*> (findTrack (context, returnTrack));
-    const auto bus = target != nullptr ? getReturnBus (*target) : -1;
 
-    if (track == nullptr || bus < 0 || ! canSendTo (*track, *target))
+    if (song == nullptr || track == nullptr || ! canSendTo (*song, from, returnTrack))
         return {};
 
     // The send goes after the fader, as every new send does.
-    const auto locate = [bus] (te::Track& sender) -> te::Plugin* { return findSendTo (sender, bus); };
-    const auto create = [bus] (te::Track& sender) -> te::Plugin* { return addSend (sender, bus, false); };
+    const auto locate = [returnTrack] (te::Track& sender) -> te::Plugin*
+    { return mirror::findDevice (sender.edit, findSendTo (getSong (sender.edit), getTrackID (sender), returnTrack)); };
+    const auto create = [returnTrack] (te::Track& sender) -> te::Plugin*
+    { return mirror::findDevice (sender.edit, addSend (getSong (sender.edit), getTrackID (sender), returnTrack, false)); };
     const auto identity = "send " + juce::String (from.getRaw()) + " " + juce::String (returnTrack.getRaw());
-    return makeCreatingHandle (*track, locate, create, identity, sendLevelID, { 0.0f, 1.0f }, "Send to " + getTrackName (*target),
-                               "Change Send Level");
+    return makeCreatingHandle (*track, locate, create, identity, sendLevelID, { 0.0f, 1.0f },
+                               "Send to " + getTrackName (*song, returnTrack), "Change Send Level");
 }
 
 //==============================================================================
 std::vector<OutputChoice> getOutputChoices (const ProjectContext& context, TrackID id)
 {
     std::vector<OutputChoice> choices;
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr || isReturnTrack (*track))
+    if (song == nullptr || ! isTrack (*song, id) || isReturnTrack (*song, id))
         return choices;
 
-    const auto* current = getOutputBus (*track);
-    choices.push_back ({ {}, "Master", current == nullptr });
+    const auto current = getOutputBus (*song, id);
+    choices.push_back ({ {}, "Master", ! current.isValid() });
 
     // The buses, in the playlist's order: not the channel itself, nor a folder inside it.
-    for (auto* other : getPlaylistTracks (track->edit))
-    {
-        auto* folder = dynamic_cast<te::FolderTrack*> (other);
-
-        if (folder != nullptr && folder != track && isBus (*folder) && ! findTrackState (*folder).isAChildOf (findTrackState (*track)))
-            choices.push_back ({ getTrackID (*folder), getTrackName (*folder), folder == current });
-    }
+    for (const auto other : getTrackIDs (*song))
+        if (other != id && isFolder (*song, other) && isBus (*song, other)
+            && ! findTrackState (*song, other).isAChildOf (findTrackState (*song, id)))
+            choices.push_back ({ other, getTrackName (*song, other), other == current });
 
     return choices;
 }
 
 bool canChooseOutput (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    return track != nullptr && ! isReturnTrack (*track);
+    auto* song = findSong (context);
+    return song != nullptr && isTrack (*song, id) && ! isReturnTrack (*song, id);
 }
 
-void setOutput (ProjectContext& context, TrackID id, TrackID busID)
+void setOutput (ProjectContext& context, TrackID id, TrackID bus)
 {
-    auto* track = findTrack (context, id);
-    auto* bus = busID.isValid() ? dynamic_cast<te::FolderTrack*> (findTrack (context, busID)) : nullptr;
+    auto* song = findSong (context);
 
-    if (track == nullptr || isReturnTrack (*track) || (busID.isValid() && bus == nullptr))
+    if (song == nullptr || ! canChooseOutput (context, id))
         return;
 
-    if (bus != nullptr && (bus == track || ! isBus (*bus) || findTrackState (*bus).isAChildOf (findTrackState (*track))))
+    if (bus.isValid()
+        && (bus == id || ! isFolder (*song, bus) || ! isBus (*song, bus)
+            || findTrackState (*song, bus).isAChildOf (findTrackState (*song, id))))
         return;
 
-    if (getOutputBus (*track) == bus)
+    if (getOutputBus (*song, id) == bus)
         return;
 
-    const UndoStep step (track->edit, "Change Output");
+    const UndoStep step (*song, "Change Output");
 
-    if (bus != nullptr)
+    if (bus.isValid())
     {
-        moveTrackIntoFolder (*track, *bus);
+        moveTrackIntoFolder (*song, id, bus);
         return;
     }
 
     // Out of its buses, after the outermost: a plain folder around them keeps it.
-    te::FolderTrack* outermost = nullptr;
+    TrackID outermost;
 
-    for (auto* parent = getParentFolder (*track); parent != nullptr; parent = getParentFolder (*parent))
-        if (isBus (*parent))
+    for (auto parent = getParentFolder (*song, id); parent.isValid(); parent = getParentFolder (*song, parent))
+        if (isBus (*song, parent))
             outermost = parent;
 
-    if (outermost != nullptr)
-        moveTracksAfter ({ track }, outermost);
+    if (outermost.isValid())
+        moveTracksAfter (*song, { id }, outermost);
 }
 
 //==============================================================================
 bool hasSidechain (const ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
-    return device != nullptr && phazite::hasSidechain (*device);
+    auto* song = findSong (context);
+    return song != nullptr && hasSidechain (*song, id);
 }
 
 std::vector<SidechainChoice> getSidechainChoices (const ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
-    return device != nullptr ? describeSidechainChoices (*device) : std::vector<SidechainChoice>();
+    auto* song = findSong (context);
+    return song != nullptr ? describeSidechainChoices (*song, id) : std::vector<SidechainChoice>();
 }
 
 TrackID getSidechainSource (const ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
-    auto* source = device != nullptr ? phazite::getSidechainSource (*device) : nullptr;
-    return source != nullptr ? getTrackID (*source) : TrackID();
+    auto* song = findSong (context);
+    return song != nullptr ? getSidechainSource (*song, id) : TrackID();
 }
 
-void setSidechainSource (ProjectContext& context, DeviceID id, TrackID sourceID)
+void setSidechainSource (ProjectContext& context, DeviceID id, TrackID source)
 {
-    auto* device = findDevice (context, id);
-    auto* source = sourceID.isValid() ? dynamic_cast<te::AudioTrack*> (findTrack (context, sourceID)) : nullptr;
-
-    if (device != nullptr && (source != nullptr || ! sourceID.isValid()))
-        phazite::setSidechainSource (*device, source);
+    if (auto* song = findSong (context))
+        setSidechainSource (*song, id, source);
 }
 
 std::vector<SidechainChoice> getDuckUnderChoices (const ProjectContext& context, TrackID id)
 {
-    auto* ducked = dynamic_cast<te::AudioTrack*> (findTrack (context, id));
-    return ducked != nullptr ? describeTracksToListenTo (ducked->edit, ducked) : std::vector<SidechainChoice>();
+    auto* song = findSong (context);
+    return song != nullptr && hasSound (*song, id) ? describeTracksToListenTo (*song, id) : std::vector<SidechainChoice>();
 }
 
-DeviceID duckUnder (ProjectContext& context, TrackID duckedID, TrackID keyID)
+DeviceID duckUnder (ProjectContext& context, TrackID ducked, TrackID key)
 {
-    auto* ducked = dynamic_cast<te::AudioTrack*> (findTrack (context, duckedID));
-    auto* key = dynamic_cast<te::AudioTrack*> (findTrack (context, keyID));
-    auto* compressor = ducked != nullptr && key != nullptr ? phazite::duckUnder (*ducked, *key) : nullptr;
-    return compressor != nullptr ? getDeviceID (*compressor) : DeviceID();
+    auto* song = findSong (context);
+    return song != nullptr && hasSound (*song, ducked) && hasSound (*song, key) ? duckUnder (*song, ducked, key) : DeviceID();
 }
 
 //==============================================================================
@@ -766,29 +760,24 @@ float getCpuLoad (const ProjectContext& context, TrackID id)
 std::vector<Connection> getConnections (const ProjectContext& context)
 {
     std::vector<Connection> connections;
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return connections;
 
-    for (auto* track : getChannelTracks (*edit))
+    for (const auto track : getChannelTracks (*song))
     {
-        const auto id = getTrackID (*track);
-
         // A plain folder has no sound of its own to send anywhere.
-        if (! track->isFolderTrack() || isBus (*track))
-        {
-            const auto* bus = getOutputBus (*track);
-            connections.push_back ({ Connection::Kind::output, id, bus != nullptr ? getTrackID (*bus) : TrackID(), {} });
-        }
+        if (! isFolder (*song, track) || isBus (*song, track))
+            connections.push_back ({ Connection::Kind::output, track, getOutputBus (*song, track), {} });
 
-        for (auto* send : phazite::getSends (*track))
-            if (auto* returnTrack = findReturnTrack (*edit, send->getBusNumber()))
-                connections.push_back ({ Connection::Kind::send, id, getTrackID (*returnTrack), getDeviceID (*send) });
+        for (const auto send : getSends (*song, track))
+            if (const auto target = getSendTarget (*song, send); isReturnTrack (*song, target))
+                connections.push_back ({ Connection::Kind::send, track, target, send });
 
-        for (auto* device : track->pluginList)
-            if (auto* source = phazite::getSidechainSource (*device))
-                connections.push_back ({ Connection::Kind::sidechain, getTrackID (*source), id, getDeviceID (*device) });
+        for (const auto device : getDevices (*song, track))
+            if (const auto source = getSidechainSource (*song, device); source.isValid())
+                connections.push_back ({ Connection::Kind::sidechain, source, track, device });
     }
 
     return connections;
@@ -834,19 +823,24 @@ void resetLoudness (ProjectContext& context)
 DelayCompensation getDelayCompensation (const ProjectContext& context)
 {
     DelayCompensation compensation;
+    auto* song = findSong (context);
     auto* edit = getEdit (context);
 
-    if (edit == nullptr)
+    if (song == nullptr || edit == nullptr)
         return compensation;
 
-    // Each device's, as Phazite's engine plays it, while it plays the project.
-    auto* session = findPlayingSession (*edit);
+    // Each device's, as Phazite's engine plays it, while it plays the project: the master's first, then the channels'.
+    std::vector<TrackID> channels { TrackID() };
 
-    for (auto* track : te::getAllTracks (*edit))
-        for (auto* plugin : track->pluginList.getPlugins())
-            if (const auto latency = makeDeviceSlot (*plugin).latencySeconds; latency > 0.0)
-                compensation.devices.push_back (
-                    { plugin->getName() + " on " + (track->isMasterTrack() ? juce::String ("Master") : getTrackName (*track)), latency });
+    for (const auto track : getChannelTracks (*song))
+        channels.push_back (track);
+
+    for (const auto channel : channels)
+        for (const auto device : getDevices (*song, channel))
+            if (const auto latency = makeDeviceSlot (*song, device).latencySeconds; latency > 0.0)
+                compensation.devices.push_back ({ getDeviceName (*song, device) + " on "
+                                                      + (channel.isValid() ? getTrackName (*song, channel) : juce::String ("Master")),
+                                                  latency });
 
     std::stable_sort (compensation.devices.begin(), compensation.devices.end(),
                       [] (const auto& a, const auto& b) { return a.second > b.second; });
@@ -854,6 +848,7 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
     // What the engine waits for, the longest of its paths; the latest device while it plays nothing.
     if (edit->isLatencyCompensationEnabled())
     {
+        auto* session = findPlayingSession (*edit);
         const auto* plan = session != nullptr ? session->getEngine().getPlan() : nullptr;
 
         if (plan != nullptr)

@@ -5,9 +5,8 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 
 #include <set>
@@ -16,109 +15,118 @@ namespace phazite
 {
 namespace
 {
-    bool listensToAny (const te::Plugin& plugin, const juce::Array<te::Track*>& tracks)
+    bool contains (const std::vector<TrackID>& tracks, TrackID track)
     {
-        const auto source = plugin.getSidechainSourceID();
-
-        if (source.isValid())
-            for (auto* track : tracks)
-                if (track->itemID == source)
-                    return true;
-
-        return false;
+        return std::find (tracks.begin(), tracks.end(), track) != tracks.end();
     }
 
-    // Whether a track's sound comes from any of these tracks: a bus mixes the tracks inside it, a return takes in what
-    // is sent to its bus, and a device can listen to a sidechain. (Returns and sends are read from their aux plug-ins,
-    // as Mixer.h makes them: Mixer.h depends on this file, through deleting tracks.)
-    bool isFedBy (const te::Track& track, const juce::Array<te::Track*>& feeding)
+    // The tracks with sound of their own, in the song's order: tracks and returns, not folders.
+    std::vector<TrackID> getSoundTracks (const Song& song)
     {
-        if (const auto* folder = dynamic_cast<const te::FolderTrack*> (&track))
-            for (auto* inside : folder->getAllSubTracks (false))
-                if (feeding.contains (inside))
+        std::vector<TrackID> tracks;
+
+        for (const auto& state : getTrackStates (song))
+            if (! isFolderState (state))
+                tracks.push_back (getTrackID (state));
+
+        return tracks;
+    }
+
+    // Whether a track's sound comes from any of these tracks: a folder mixes the tracks inside it, a return takes in what
+    // is sent to it, and a device can listen to a sidechain.
+    bool isFedBy (const Song& song, const juce::ValueTree& state, const std::vector<TrackID>& feeding)
+    {
+        const auto track = getTrackID (state);
+
+        if (isFolderState (state))
+            for (const auto inside : getTracksInFolder (song, track))
+                if (contains (feeding, inside))
                     return true;
 
-        for (auto* input : track.pluginList.getPluginsOfType<te::AuxReturnPlugin>())
-            for (auto* sender : feeding)
-                for (auto* send : sender->pluginList.getPluginsOfType<te::AuxSendPlugin>())
-                    if (send->getBusNumber() == input->busNumber.get())
+        if (isReturnState (state))
+            for (const auto sender : feeding)
+                for (const auto send : getSends (song, sender))
+                    if (getSendTarget (song, send) == track)
                         return true;
 
-        for (auto* plugin : track.pluginList)
-            if (listensToAny (*plugin, feeding))
+        for (const auto& device : getDeviceStates (state))
+            if (contains (feeding, TrackID::fromRaw ((std::uint64_t) (juce::int64) device[schema::deviceSidechain])))
                 return true;
 
         return false;
     }
 
-    SidechainChoice describe (te::AudioTrack& track)
+    SidechainChoice describe (const Song& song, TrackID track)
     {
-        return { getTrackID (track), getTrackName (track), getTrackColour (track, getPlaylistTracks (track.edit).indexOf (&track)) };
+        const auto tracks = getTrackIDs (song);
+        const auto row = (int) std::distance (tracks.begin(), std::find (tracks.begin(), tracks.end(), track));
+        return { track, getTrackName (song, track), getTrackColour (song, track, row) };
     }
 
-    bool playsDrumSampler (te::AudioTrack& track)
+    bool playsDrumSampler (const Song& song, TrackID track)
     {
-        for (auto* plugin : track.pluginList)
-            if (isDrumSampler (*plugin))
-                return true;
-
-        return false;
+        const auto devices = getDeviceStates (findTrackState (song, track));
+        return std::any_of (devices.begin(), devices.end(), [] (const juce::ValueTree& device) { return isDrumSampler (device); });
     }
 
-    // A compressor still as it was made starts ducking, joining the caller's step (setSidechainSource()).
-    void startDucking (te::Plugin& plugin, te::AudioTrack& source)
+    // A compressor still as it was made starts ducking, joining the caller's step (setSidechainSource()): its values set
+    // by hand, which the song holds.
+    void startDucking (Song& song, DeviceID id, TrackID source)
     {
         using devices::Compressor;
-        auto* device = dynamic_cast<DevicePlugin*> (&plugin);
+        const auto state = findDeviceState (song, id);
 
-        if (device == nullptr || device->getDeviceInfo().typeID != Compressor::typeID)
+        if (state[schema::deviceType].toString() != juce::String (Compressor::typeID))
             return;
 
+        const auto nameOf = [] (std::string_view parameter)
+        { return juce::Identifier (juce::String (parameter.data(), parameter.size())); };
+        const auto set = state.getChildWithName (schema::VALUES);
+
         for (const auto& parameter : Compressor::info.parameters)
-            if (auto* value = device->findParameter (parameter.id);
-                value == nullptr || std::abs (value->getCurrentValue() - parameter.defaultValue) > 1.0e-4f)
+            if (std::abs ((float) set.getProperty (nameOf (parameter.id), parameter.defaultValue) - parameter.defaultValue) > 1.0e-4f)
                 return;
 
-        const auto set = [device] (std::string_view id, float value)
-        {
-            if (auto* parameter = device->findParameter (id))
-                setDeviceValue (*parameter, value);
-        };
+        auto* undo = &song.getUndoManager();
+        auto values = juce::ValueTree (state).getOrCreateChildWithName (schema::VALUES, undo);
+        const auto setValue = [&] (std::string_view parameter, float value) { values.setProperty (nameOf (parameter), value, undo); };
 
         // Its curve: 8:1 over -30 dB, its last point in the places the others leave.
         namespace curves = devices::curves;
         const auto points = curves::makeCompression (-30.0f, 8.0f);
-        set (Compressor::info.parameters[(size_t) Compressor::points].id, (float) points.size());
+        setValue (Compressor::info.parameters[(size_t) Compressor::points].id, (float) points.size());
 
         for (int point = 0; point < curves::maxPoints; ++point)
             for (int field = 0; field < curves::pointFields; ++field)
-                set (Compressor::info
-                         .parameters[(size_t) (Compressor::points + curves::getPointParameter (point, (curves::PointField) field))]
-                         .id,
-                     points[(size_t) std::min (point, (int) points.size() - 1)][(size_t) field]);
+                setValue (Compressor::info
+                              .parameters[(size_t) (Compressor::points + curves::getPointParameter (point, (curves::PointField) field))]
+                              .id,
+                          points[(size_t) std::min (point, (int) points.size() - 1)][(size_t) field]);
 
-        set ("attack", 1.0f);
-        set ("release", 150.0f);
+        setValue ("attack", 1.0f);
+        setValue ("release", 150.0f);
 
-        if (playsDrumSampler (source))
-            set ("keyHighCut", 150.0f);
+        if (playsDrumSampler (song, source))
+            setValue ("keyHighCut", 150.0f);
+
+        song.reconcile (Song::Part::device, id.getRaw());
     }
 } // namespace
 
-juce::Array<te::Track*> getTracksFedBy (te::Track& track)
+std::vector<TrackID> getTracksFedBy (const Song& song, TrackID track)
 {
-    juce::Array<te::Track*> fed { &track };
-    const auto all = te::getAllTracks (track.edit);
+    std::vector<TrackID> fed { track };
+    const auto all = getTrackStates (song);
 
     for (auto grew = true; grew;)
     {
         grew = false;
 
-        for (auto* other : all)
+        for (const auto& other : all)
         {
-            if (! fed.contains (other) && isFedBy (*other, fed))
+            if (! contains (fed, getTrackID (other)) && isFedBy (song, other, fed))
             {
-                fed.add (other);
+                fed.push_back (getTrackID (other));
                 grew = true;
             }
         }
@@ -127,58 +135,68 @@ juce::Array<te::Track*> getTracksFedBy (te::Track& track)
     return fed;
 }
 
-bool hasSidechain (te::Plugin& plugin)
+bool hasSidechain (const Song& song, DeviceID id)
 {
+    const auto state = findDeviceState (song, id);
+
     // A container wires only the sound passing through its devices (Containers.h).
-    return plugin.canSidechain() && ! plugin.isInRack();
+    if (! state.hasType (schema::DEVICE) || isContainerState (state.getParent()))
+        return false;
+
+    if (const auto* own = findOwnDevice (state[schema::deviceType].toString().toStdString()))
+        return own->hasSidechain;
+
+    // A plug-in's inputs, as its helper tells them (Tracktion's plug-in has them while it mirrors the song's).
+    auto* edit = findEdit (song);
+    auto* device = edit != nullptr ? mirror::findDevice (*edit, id) : nullptr;
+    return device != nullptr && device->canSidechain();
 }
 
-juce::Array<te::AudioTrack*> getSidechainSources (te::Plugin& plugin)
+std::vector<TrackID> getSidechainSources (const Song& song, DeviceID id)
 {
-    juce::Array<te::AudioTrack*> sources;
+    std::vector<TrackID> sources;
 
-    if (! hasSidechain (plugin))
+    if (! hasSidechain (song, id))
         return sources;
 
     // A device on the master, which no track's sound comes from, can listen to any track.
-    juce::Array<te::Track*> fed;
+    const auto channel = getDeviceChannel (song, id);
+    const auto fed = findTrackState (song, channel).hasType (schema::TRACK) ? getTracksFedBy (song, channel) : std::vector<TrackID>();
 
-    if (auto* owner = plugin.getOwnerTrack())
-        fed = getTracksFedBy (*owner);
-
-    for (auto* track : te::getAudioTracks (plugin.edit))
-        if (! fed.contains (track))
-            sources.add (track);
+    for (const auto track : getSoundTracks (song))
+        if (! contains (fed, track))
+            sources.push_back (track);
 
     return sources;
 }
 
-te::AudioTrack* getSidechainSource (te::Plugin& plugin)
+TrackID getSidechainSource (const Song& song, DeviceID id)
 {
-    const auto source = plugin.getSidechainSourceID();
-    return source.isValid() ? dynamic_cast<te::AudioTrack*> (te::findTrackForID (plugin.edit, source)) : nullptr;
+    const auto source = TrackID::fromRaw ((std::uint64_t) (juce::int64) findDeviceState (song, id)[schema::deviceSidechain]);
+    const auto state = findTrackState (song, source);
+    return state.hasType (schema::TRACK) && ! isFolderState (state) ? source : TrackID();
 }
 
-SidechainChoice describeSidechainSource (te::Plugin& plugin)
+SidechainChoice describeSidechainSource (const Song& song, DeviceID id)
 {
-    auto* source = getSidechainSource (plugin);
-    return source != nullptr ? describe (*source) : SidechainChoice();
+    const auto source = getSidechainSource (song, id);
+    return source.isValid() ? describe (song, source) : SidechainChoice();
 }
 
-std::vector<SidechainChoice> describeTracksToListenTo (te::Edit& edit, te::Track* listener)
+std::vector<SidechainChoice> describeTracksToListenTo (const Song& song, TrackID listener)
 {
     std::vector<SidechainChoice> choices;
-    const auto fed = listener != nullptr ? getTracksFedBy (*listener) : juce::Array<te::Track*>();
+    const auto fed = findTrackState (song, listener).hasType (schema::TRACK) ? getTracksFedBy (song, listener) : std::vector<TrackID>();
 
-    for (auto* track : te::getAudioTracks (edit))
+    for (const auto track : getSoundTracks (song))
     {
         if (track == listener)
             continue;
 
-        auto choice = describe (*track);
+        auto choice = describe (song, track);
 
-        if (fed.contains (track))
-            choice.whyNot = "its sound comes from " + getTrackName (*listener);
+        if (contains (fed, track))
+            choice.whyNot = "its sound comes from " + getTrackName (song, listener);
 
         choices.push_back (choice);
     }
@@ -186,49 +204,48 @@ std::vector<SidechainChoice> describeTracksToListenTo (te::Edit& edit, te::Track
     return choices;
 }
 
-std::vector<SidechainChoice> describeSidechainChoices (te::Plugin& plugin)
+std::vector<SidechainChoice> describeSidechainChoices (const Song& song, DeviceID id)
 {
-    if (! hasSidechain (plugin))
+    if (! hasSidechain (song, id))
         return {};
 
-    return describeTracksToListenTo (plugin.edit, plugin.getOwnerTrack());
+    return describeTracksToListenTo (song, getDeviceChannel (song, id));
 }
 
-void setSidechainSource (te::Plugin& plugin, te::AudioTrack* source)
+void setSidechainSource (Song& song, DeviceID id, TrackID source)
 {
-    if (source == getSidechainSource (plugin) || (source != nullptr && ! getSidechainSources (plugin).contains (source)))
+    if (source == getSidechainSource (song, id) || (source.isValid() && ! contains (getSidechainSources (song, id), source)))
         return;
 
-    // The song's (Schema.h: deviceSidechain), which the mirror plays.
-    auto state = findDeviceState (plugin.edit, getDeviceID (plugin));
+    auto state = findDeviceState (song, id);
 
     if (! state.isValid())
         return;
 
-    const UndoStep step (plugin.edit, source != nullptr ? "Sidechain from " + getTrackName (*source) : juce::String ("Turn Sidechain Off"));
-    auto* undo = &getSong (plugin.edit).getUndoManager();
+    const UndoStep step (song, source.isValid() ? "Sidechain from " + getTrackName (song, source) : juce::String ("Turn Sidechain Off"));
+    auto* undo = &song.getUndoManager();
 
-    if (source != nullptr)
-        state.setProperty (schema::deviceSidechain, (juce::int64) getTrackID (*source).getRaw(), undo);
+    if (source.isValid())
+        state.setProperty (schema::deviceSidechain, (juce::int64) source.getRaw(), undo);
     else
         state.removeProperty (schema::deviceSidechain, undo);
 
-    mirror::reconcileDevices (plugin.edit);
+    song.reconcile (Song::Part::device, id.getRaw());
 
-    if (source != nullptr)
-        startDucking (plugin, *source);
+    if (source.isValid())
+        startDucking (song, id, source);
 }
 
-te::Plugin* duckUnder (te::AudioTrack& ducked, te::AudioTrack& key)
+DeviceID duckUnder (Song& song, TrackID ducked, TrackID key)
 {
-    if (&ducked == &key || getTracksFedBy (ducked).contains (&key))
-        return nullptr;
+    if (ducked == key || ! findTrackState (song, ducked).hasType (schema::TRACK) || contains (getTracksFedBy (song, ducked), key))
+        return {};
 
-    const UndoStep step (ducked.edit, "Duck " + getTrackName (ducked) + " Under " + getTrackName (key));
-    auto* compressor = insertDevice (ducked, ducked.edit.getPluginCache().createNewPlugin (devices::Compressor::typeID, {}));
+    const UndoStep step (song, "Duck " + getTrackName (song, ducked) + " Under " + getTrackName (song, key));
+    const auto compressor = insertDeviceState (song, ducked, makeOwnDeviceState (song, devices::Compressor::typeID));
 
-    if (compressor != nullptr)
-        setSidechainSource (*compressor, &key);
+    if (compressor.isValid())
+        setSidechainSource (song, compressor, key);
 
     return compressor;
 }

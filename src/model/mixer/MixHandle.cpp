@@ -8,14 +8,23 @@ namespace phazite
 {
 struct MixHandle::Impl
 {
-    te::SafeSelectable<te::Plugin> plugin;
+    te::SafeSelectable<te::Edit> edit;
+    DeviceID device;
     std::unique_ptr<Gesture> gesture;
+
+    // The song's Edit while it holds the device.
+    te::Edit* findEdit() const
+    {
+        auto* in = edit.get();
+        return in != nullptr && findDeviceState (*in, device).isValid() ? in : nullptr;
+    }
 };
 
 MixHandle makeMixHandle (te::Plugin& device)
 {
     auto impl = std::make_unique<MixHandle::Impl>();
-    impl->plugin = &device;
+    impl->edit = &device.edit;
+    impl->device = getDeviceID (device);
     return MixHandle (std::move (impl));
 }
 
@@ -46,40 +55,40 @@ MixHandle::~MixHandle()
 
 bool MixHandle::isValid() const
 {
-    return impl != nullptr && impl->plugin.get() != nullptr;
+    return impl != nullptr && impl->findEdit() != nullptr;
 }
 
 float MixHandle::getValue() const
 {
-    auto* device = impl != nullptr ? impl->plugin.get() : nullptr;
-    return device != nullptr ? getMix (*device) : 1.0f;
+    auto* edit = impl != nullptr ? impl->findEdit() : nullptr;
+    return edit != nullptr ? getMix (getSong (*edit), impl->device) : 1.0f;
 }
 
 void MixHandle::beginGesture()
 {
-    auto* device = impl != nullptr ? impl->plugin.get() : nullptr;
+    auto* edit = impl != nullptr ? impl->findEdit() : nullptr;
 
-    if (device == nullptr || impl->gesture != nullptr)
+    if (edit == nullptr || impl->gesture != nullptr)
         return;
 
-    impl->gesture = std::make_unique<Gesture> (device->edit, "Change Mix");
+    impl->gesture = std::make_unique<Gesture> (*edit, "Change Mix");
 }
 
 void MixHandle::setValue (float mix)
 {
-    auto* device = impl != nullptr ? impl->plugin.get() : nullptr;
+    auto* edit = impl != nullptr ? impl->findEdit() : nullptr;
 
-    if (device == nullptr)
+    if (edit == nullptr)
         return;
 
     if (impl->gesture != nullptr)
     {
-        setMix (*device, mix);
+        setMix (getSong (*edit), impl->device, mix);
         return;
     }
 
-    const UndoStep step (device->edit, "Change Mix");
-    setMix (*device, mix);
+    const UndoStep step (*edit, "Change Mix");
+    setMix (getSong (*edit), impl->device, mix);
 }
 
 void MixHandle::endGesture()

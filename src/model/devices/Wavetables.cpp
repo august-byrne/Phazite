@@ -60,8 +60,8 @@ void setFactoryWavetable (te::Plugin& plugin, int osc, int index)
         return;
 
     const UndoStep step (plugin.edit, getStepName (name, osc));
-    setDeviceSound (plugin, schema::getOscillatorWavetableFile (osc), {});
-    setDeviceSound (plugin, schema::getOscillatorWavetable (osc), name);
+    setDeviceSound (getSong (plugin.edit), getDeviceID (plugin), schema::getOscillatorWavetableFile (osc), {});
+    setDeviceSound (getSong (plugin.edit), getDeviceID (plugin), schema::getOscillatorWavetable (osc), name);
 }
 
 bool setWavetableFile (te::Plugin& plugin, int osc, const juce::File& file)
@@ -72,7 +72,8 @@ bool setWavetableFile (te::Plugin& plugin, int osc, const juce::File& file)
     auto& edit = plugin.edit;
     const auto copy = copyIntoProject (getSong (edit), file);
     const UndoStep step (edit, getStepName (copy.getFileNameWithoutExtension(), osc));
-    setDeviceSound (plugin, schema::getOscillatorWavetableFile (osc), getProjectPath (getSong (edit), copy));
+    setDeviceSound (getSong (plugin.edit), getDeviceID (plugin), schema::getOscillatorWavetableFile (osc),
+                    getProjectPath (getSong (edit), copy));
     return true;
 }
 } // namespace phazite

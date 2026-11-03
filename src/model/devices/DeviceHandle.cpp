@@ -5,6 +5,7 @@
 #include "internal/DrumKit.h"
 #include "internal/ParameterHandle.h"
 #include "internal/Wavetables.h"
+#include "model/base/internal/Schema.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/playback/internal/PlaybackSession.h"
 
@@ -62,7 +63,7 @@ ParameterHandle DeviceHandle::getParameter (std::string_view id, const juce::Str
 SidechainChoice DeviceHandle::getSidechainSource() const
 {
     auto* device = pluginOf (impl);
-    return device != nullptr ? describeSidechainSource (*device) : SidechainChoice();
+    return device != nullptr ? describeSidechainSource (getSong (device->edit), getDeviceID (*device)) : SidechainChoice();
 }
 
 juce::String DeviceHandle::getPadName (int pad) const

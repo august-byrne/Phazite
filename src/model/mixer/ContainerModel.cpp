@@ -2,75 +2,36 @@
 #include "ContainerModel.h"
 #include "internal/Containers.h"
 #include "internal/Mixer.h"
-#include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/modulation/ModulationModel.h"
-#include "model/modulation/internal/Modulation.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
 namespace phazite
 {
-namespace
-{
-    te::Plugin* findDevice (const ProjectContext& context, DeviceID id)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
-    }
-
-    te::RackInstance* findContainer (const ProjectContext& context, DeviceID id)
-    {
-        return dynamic_cast<te::RackInstance*> (findDevice (context, id));
-    }
-
-    juce::Array<te::Plugin*> findDevices (const ProjectContext& context, const std::vector<DeviceID>& ids)
-    {
-        juce::Array<te::Plugin*> devices;
-
-        for (const auto id : ids)
-            devices.add (findDevice (context, id)); // nullptr for one that is gone, which can't be grouped
-
-        return devices;
-    }
-
-    juce::Array<te::Plugin*> getSelectedDevices (const Selection& selection)
-    {
-        juce::Array<te::Plugin*> devices;
-
-        if (auto* edit = selection.getEdit())
-            for (const auto id : selection.getDevices())
-                if (const auto device = te::findPluginForID (*edit, toTracktion (id)))
-                    devices.add (device.get());
-
-        return devices;
-    }
-} // namespace
-
-//==============================================================================
 bool canGroupIntoContainer (const ProjectContext& context, const std::vector<DeviceID>& ids)
 {
-    return canGroupIntoContainer (findDevices (context, ids));
+    auto* song = findSong (context);
+    return song != nullptr && canGroupIntoContainer (*song, ids);
 }
 
 DeviceID groupIntoContainer (ProjectContext& context, const std::vector<DeviceID>& ids)
 {
-    const auto devices = findDevices (context, ids);
+    auto* song = findSong (context);
 
-    if (! canGroupIntoContainer (devices))
+    if (song == nullptr || ! canGroupIntoContainer (*song, ids))
         return {};
 
-    const UndoStep step (devices.getFirst()->edit, "Group into Container");
-    auto* container = groupIntoContainer (devices);
-    return container != nullptr ? getDeviceID (*container) : DeviceID();
+    const UndoStep step (*song, "Group into Container");
+    return groupIntoContainer (*song, ids);
 }
 
 void ungroupContainer (ProjectContext& context, DeviceID id)
 {
-    if (auto* container = findContainer (context, id))
+    if (auto* song = findSong (context); song != nullptr && isContainer (*song, id))
     {
-        const UndoStep step (container->edit, "Ungroup Container");
-        ungroupContainer (*container);
+        const UndoStep step (*song, "Ungroup Container");
+        ungroupContainer (*song, id);
     }
 }
 
@@ -78,119 +39,55 @@ std::vector<DeviceSlot> getContainerDevices (const ProjectContext& context, Devi
 {
     std::vector<DeviceSlot> slots;
 
-    if (auto* container = findContainer (context, id))
-        for (auto* device : getContainerDevices (*container))
-            slots.push_back (makeDeviceSlot (*device));
+    if (auto* song = findSong (context))
+        for (const auto device : getContainerDevices (*song, id))
+            slots.push_back (makeDeviceSlot (*song, device));
 
     return slots;
 }
 
 DeviceID getContainerOf (const ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
-    auto* container = device != nullptr ? findContainerOf (*device) : nullptr;
-    return container != nullptr ? getDeviceID (*container) : DeviceID();
+    auto* song = findSong (context);
+    return song != nullptr ? findContainerOf (*song, id) : DeviceID();
 }
 
 void addEffectToContainer (ProjectContext& context, DeviceID id, const DeviceType& type)
 {
-    if (auto* container = findContainer (context, id); container != nullptr && ! type.isInstrument)
+    if (auto* song = findSong (context); song != nullptr && isContainer (*song, id) && ! type.isInstrument)
     {
-        const UndoStep step (container->edit, "Add " + type.name);
-        insertIntoContainer (*container, createDevice (container->edit, type));
+        const UndoStep step (*song, "Add " + type.name);
+        insertIntoContainer (*song, id, makeDeviceState (*song, type));
     }
 }
 
 juce::String getContainerName (const ProjectContext& context, DeviceID id)
 {
-    auto* container = findContainer (context, id);
-    return container != nullptr ? container->getName() : juce::String();
+    auto* song = findSong (context);
+    return song != nullptr && isContainer (*song, id) ? getDeviceName (*song, id) : juce::String();
 }
 
 void renameContainer (ProjectContext& context, DeviceID id, const juce::String& name)
 {
-    auto* container = findContainer (context, id);
+    auto* song = findSong (context);
     const auto trimmed = name.trim();
 
-    if (container == nullptr || trimmed.isEmpty() || trimmed == container->getName())
+    if (song == nullptr || ! isContainer (*song, id) || trimmed.isEmpty() || trimmed == getDeviceName (*song, id))
         return;
 
-    const UndoStep step (container->edit, "Rename Container");
-    setContainerName (*container, trimmed);
+    const UndoStep step (*song, "Rename Container");
+    setContainerName (*song, id, trimmed);
 }
 
 std::vector<ModulatorInfo> getContainerMacros (const ProjectContext& context, DeviceID id)
 {
     std::vector<ModulatorInfo> macros;
 
-    if (auto* container = findContainer (context, id))
-        for (auto* macro : getContainerMacros (*container))
-            if (const auto info = getModulator (context, getModulatorID (*macro)))
+    if (auto* song = findSong (context))
+        for (const auto macro : getContainerMacros (*song, id))
+            if (const auto info = getModulator (context, macro))
                 macros.push_back (*info);
 
     return macros;
-}
-
-//==============================================================================
-bool canGroupSelectedDevices (const Selection& selection)
-{
-    return canGroupIntoContainer (getSelectedDevices (selection));
-}
-
-void groupSelectedDevices (Selection& selection)
-{
-    if (auto* container = groupIntoContainer (getSelectedDevices (selection)))
-        selection.selectOnly (getDeviceID (*container));
-}
-
-bool canUngroupSelectedContainer (const Selection& selection)
-{
-    const auto devices = getSelectedDevices (selection);
-    return devices.size() == 1 && isContainer (*devices.getFirst());
-}
-
-void ungroupSelectedContainer (Selection& selection)
-{
-    const auto devices = getSelectedDevices (selection);
-    auto* container = devices.size() == 1 ? dynamic_cast<te::RackInstance*> (devices.getFirst()) : nullptr;
-
-    if (container == nullptr)
-        return;
-
-    // Its devices, selected once they are back on its channel.
-    te::Plugin::Array inside;
-
-    for (auto* device : getContainerDevices (*container))
-        inside.add (device);
-
-    ungroupContainer (*container);
-    selection.deselectAll();
-
-    for (auto* device : inside)
-        selection.addToSelection (getDeviceID (*device));
-}
-
-void addContainerCommands (CommandRegistry& registry, Selection& selection)
-{
-    registry.add ({ .id = "device.group",
-                    .name = "Group into Container",
-                    .category = "Device",
-                    .description = "Groups the selected effects into a container, which plays them one after the other and has "
-                                   "eight macros that can turn several of their knobs at once.",
-                    .synonyms = { "rack", "chain", "fx chain", "combine", "macro", "group devices" },
-                    .perform = [&selection] { groupSelectedDevices (selection); },
-                    .isEnabled = [&selection] { return canGroupSelectedDevices (selection); },
-                    .undoTarget = undoTargetOf (selection),
-                    .keyPriority = Command::notePriority }); // shares Ctrl+G with grouping tracks: devices are selected on their own
-
-    registry.add ({ .id = "device.ungroup",
-                    .name = "Ungroup Container",
-                    .category = "Device",
-                    .description = "Puts the selected container's effects back in its place, without the container and its macros.",
-                    .synonyms = { "rack", "chain", "split", "unpack" },
-                    .perform = [&selection] { ungroupSelectedContainer (selection); },
-                    .isEnabled = [&selection] { return canUngroupSelectedContainer (selection); },
-                    .undoTarget = undoTargetOf (selection),
-                    .keyPriority = Command::notePriority });
 }
 } // namespace phazite

@@ -50,7 +50,7 @@ namespace
         {
             store (device.state, te::IDs::windowX, bounds->getX());
             store (device.state, te::IDs::windowY, bounds->getY());
-            rememberWindowPosition (device, bounds->getPosition());
+            rememberWindowPosition (getSong (device.edit), getDeviceID (device), bounds->getPosition());
         }
     }
 
