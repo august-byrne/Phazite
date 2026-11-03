@@ -158,7 +158,7 @@ namespace
         if (! tempo.toTime (toTracktion (range)).reduced (splitMargin).contains (time))
             return {};
 
-        auto right = copyClipState (edit, clipState);
+        auto right = copyClipState (getSong (edit), clipState);
         right.setProperty (schema::clipStart, beat.inBeats(), nullptr);
 
         if (isAudioState (clipState))
@@ -238,27 +238,6 @@ namespace
             clip.setStart (clip.edit.tempoSequence.toTime (toTracktion (start)), false, true);
     }
 
-    bool isClipMuted (te::Clip& clip)
-    {
-        if (const auto clipState = findClipState (clip); clipState.isValid())
-            return clipState[schema::clipMute];
-
-        return clip.isMuted();
-    }
-
-    void setClipMuted (te::Clip& clip, bool muted)
-    {
-        if (auto clipState = findClipState (clip); clipState.isValid())
-        {
-            clipState.setProperty (schema::clipMute, muted, getUndo (clip.edit));
-            mirror::reconcileClip (clip.edit, getClipID (clipState));
-        }
-        else
-        {
-            clip.setMuted (muted);
-        }
-    }
-
     // The clips in a range of a track, as deleteTimeRange() deletes them, without the automation there.
     void deleteClipsIn (te::ClipTrack& track, te::BeatRange range, bool closeGap)
     {
@@ -335,10 +314,10 @@ namespace
 } // namespace
 
 //==============================================================================
-juce::ValueTree findClipState (const te::Edit& edit, ClipID id)
+juce::ValueTree findClipState (const Song& song, ClipID id)
 {
     if (id.isValid())
-        for (const auto& trackState : getTrackStates (edit))
+        for (const auto& trackState : getTrackStates (song))
             if (auto found = findIn (trackState, id); found.isValid())
                 return found;
 
@@ -352,7 +331,7 @@ juce::ValueTree findClipState (const te::Clip& clip)
         if (auto found = findIn (findTrackState (*track), getClipID (clip)); found.isValid())
             return found;
 
-    return findClipState (clip.edit, getClipID (clip));
+    return findClipState (getSong (clip.edit), getClipID (clip));
 }
 
 std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState)
@@ -366,11 +345,11 @@ std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState)
     return clips;
 }
 
-std::vector<juce::ValueTree> getClipStates (const te::Edit& edit)
+std::vector<juce::ValueTree> getClipStates (const Song& song)
 {
     std::vector<juce::ValueTree> clips;
 
-    for (const auto& trackState : getTrackStates (edit))
+    for (const auto& trackState : getTrackStates (song))
         for (const auto& child : trackState)
             if (child.hasType (schema::CLIP))
                 clips.push_back (child);
@@ -430,18 +409,18 @@ std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState)
     return aliases;
 }
 
-juce::ValueTree copyClipState (te::Edit& edit, const juce::ValueTree& clipState)
+juce::ValueTree copyClipState (Song& song, const juce::ValueTree& clipState)
 {
     auto copy = clipState.createCopy();
-    copy.setProperty (schema::clipID, (juce::int64) getSong (edit).makeID(), nullptr);
+    copy.setProperty (schema::clipID, (juce::int64) song.makeID(), nullptr);
     return copy;
 }
 
-juce::ValueTree makeMidiClipState (te::Edit& edit, const juce::String& name, BeatRange range)
+juce::ValueTree makeMidiClipState (Song& song, const juce::String& name, BeatRange range)
 {
     const auto start = std::max (0.0, range.getStart().inBeats());
     juce::ValueTree clipState (schema::CLIP);
-    clipState.setProperty (schema::clipID, (juce::int64) getSong (edit).makeID(), nullptr);
+    clipState.setProperty (schema::clipID, (juce::int64) song.makeID(), nullptr);
     clipState.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
     clipState.setProperty (schema::clipName, name, nullptr);
     clipState.setProperty (schema::clipStart, start, nullptr);
@@ -559,7 +538,7 @@ juce::ValueTree adoptMidiClip (te::MidiClip& clip)
         return {};
 
     const auto range = fromTracktion (clip.getEditBeatRange());
-    auto clipState = makeMidiClipState (edit, clip.getName(), range);
+    auto clipState = makeMidiClipState (getSong (edit), clip.getName(), range);
     clipState.setProperty (schema::clipID, (juce::int64) clip.itemID.getRawID(), nullptr);
 
     if (const auto offset = range.getStart() - fromTracktion (clip.getContentStartBeat()); offset.inBeats() > 0.0)
@@ -582,53 +561,82 @@ juce::ValueTree adoptMidiClip (te::MidiClip& clip)
 }
 
 //==============================================================================
-juce::Array<te::Clip*> getSelectedClips (const Selection& selection)
+juce::Array<te::Clip*> findClips (const te::Edit& edit, const std::vector<ClipID>& ids)
 {
-    auto clips = selection.getItemsOfType<te::Clip>();
-    auto* edit = selection.getEdit();
+    juce::Array<te::Clip*> clips;
 
-    if (edit == nullptr)
+    for (const auto id : ids)
+        if (auto* clip = te::findClipForID (edit, toTracktion (id)))
+            clips.add (clip);
+
+    return clips;
+}
+
+std::vector<ClipID> getSelectedClips (const Selection& selection)
+{
+    auto* song = selection.getSong();
+
+    if (song == nullptr)
         return {};
 
-    const auto tracks = getPlaylistTracks (*edit);
-    std::stable_sort (clips.begin(), clips.end(),
-                      [&tracks] (te::Clip* a, te::Clip* b)
-                      {
-                          const auto rowA = tracks.indexOf (a->getTrack()), rowB = tracks.indexOf (b->getTrack());
-                          return rowA != rowB ? rowA < rowB : a->getPosition().getStart() < b->getPosition().getStart();
-                      });
-    return clips;
+    // Top to bottom by their tracks, and on a track from the earliest.
+    struct Placed
+    {
+        ClipID id;
+        size_t row;
+        BeatPosition start;
+    };
+
+    const auto tracks = getTrackIDs (*song);
+    std::vector<Placed> placed;
+
+    for (const auto id : selection.getClips())
+    {
+        const auto clipState = findClipState (*song, id);
+        const auto row = (size_t) (std::find (tracks.begin(), tracks.end(), getTrackID (clipState.getParent())) - tracks.begin());
+        placed.push_back ({ id, row, getClipRange (clipState).getStart() });
+    }
+
+    std::stable_sort (placed.begin(), placed.end(),
+                      [] (const Placed& a, const Placed& b) { return a.row != b.row ? a.row < b.row : a.start < b.start; });
+
+    std::vector<ClipID> ids;
+
+    for (const auto& clip : placed)
+        ids.push_back (clip.id);
+
+    return ids;
+}
+
+juce::Array<te::Clip*> findSelectedClips (const Selection& selection)
+{
+    auto* edit = selection.getEdit();
+    return edit != nullptr ? findClips (*edit, getSelectedClips (selection)) : juce::Array<te::Clip*>();
 }
 
 bool hasSelectedClips (const Selection& selection)
 {
-    return ! getSelectedClips (selection).isEmpty();
+    return ! getSelectedClips (selection).empty();
 }
 
-bool hasAliases (const juce::Array<te::Clip*>& clips)
+bool hasAliases (const Song& song, const std::vector<ClipID>& clips)
 {
     return std::any_of (clips.begin(), clips.end(),
-                        [] (te::Clip* clip)
-                        {
-                            if (const auto clipState = findClipState (*clip); clipState.isValid())
-                                return clipState.hasProperty (schema::clipLink);
-
-                            return clip->isLinked();
-                        });
+                        [&song] (ClipID id) { return findClipState (song, id).hasProperty (schema::clipLink); });
 }
 
-bool hasAudioClips (const juce::Array<te::Clip*>& clips)
+bool hasAudioClips (const Song& song, const std::vector<ClipID>& clips)
 {
-    return std::any_of (clips.begin(), clips.end(), [] (te::Clip* clip) { return dynamic_cast<te::AudioClipBase*> (clip) != nullptr; });
+    return std::any_of (clips.begin(), clips.end(), [&song] (ClipID id) { return isAudioState (findClipState (song, id)); });
 }
 
-bool hasFadeShape (const juce::Array<te::Clip*>& clips, FadeCurve curve)
+bool hasFadeShape (const Song& song, const std::vector<ClipID>& clips, FadeCurve curve)
 {
     auto any = false;
 
-    for (auto* clip : clips)
+    for (const auto id : clips)
     {
-        if (const auto clipState = findClipState (*clip); isAudioState (clipState))
+        if (const auto clipState = findClipState (song, id); isAudioState (clipState))
         {
             if (! (getClipFadeCurve (clipState, true) == curve && getClipFadeCurve (clipState, false) == curve))
                 return false;
@@ -680,7 +688,7 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAl
         if (asAliases && ! clipState.hasProperty (schema::clipLink))
             clipState.setProperty (schema::clipLink, (juce::int64) getSong (edit).makeID(), getUndo (edit));
 
-        auto copy = copyClipState (edit, clipState);
+        auto copy = copyClipState (getSong (edit), clipState);
 
         if (! asAliases)
             copy.removeProperty (schema::clipLink, nullptr);
@@ -798,7 +806,7 @@ void setFadeCurve (te::Clip& clip, bool fadeIn, FadeCurve curve)
 
 te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selection* selection, const juce::String& name)
 {
-    const auto clipState = makeMidiClipState (track.edit, name.isNotEmpty() ? name : getTrackName (track), fromTracktion (range));
+    const auto clipState = makeMidiClipState (getSong (track.edit), name.isNotEmpty() ? name : getTrackName (track), fromTracktion (range));
     auto* clip = dynamic_cast<te::MidiClip*> (placeClipState (track.edit, clipState, track));
 
     if (clip != nullptr && selection != nullptr)
@@ -931,32 +939,41 @@ juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>& clips, bool
     return copies;
 }
 
-void makeClipsUnique (const juce::Array<te::Clip*>& clips)
+void makeClipsUnique (Song& song, const std::vector<ClipID>& clips)
 {
-    for (auto* clip : clips)
+    for (const auto id : clips)
     {
-        auto clipState = findClipState (*clip);
+        auto clipState = findClipState (song, id);
 
         if (! clipState.hasProperty (schema::clipLink))
             continue;
 
         const auto aliases = getAliasStates (clipState);
-        clipState.removeProperty (schema::clipLink, getUndo (clip->edit));
+        clipState.removeProperty (schema::clipLink, &song.getUndoManager());
 
         // The last one left in the group leaves it too.
         if (auto last = aliases.size() == 2 ? aliases[1] : juce::ValueTree(); last.isValid())
-            last.removeProperty (schema::clipLink, getUndo (clip->edit));
+            last.removeProperty (schema::clipLink, &song.getUndoManager());
     }
 }
 
-bool areAllClipsMuted (const juce::Array<te::Clip*>& clips)
+bool areAllClipsMuted (const Song& song, const std::vector<ClipID>& clips)
 {
-    return areAllOn (clips, [] (te::Clip* clip) { return isClipMuted (*clip); });
+    return areAllOn (clips, [&song] (ClipID id) { return (bool) findClipState (song, id)[schema::clipMute]; });
 }
 
-void toggleClipsMuted (const juce::Array<te::Clip*>& clips)
+void toggleClipsMuted (Song& song, const std::vector<ClipID>& clips)
 {
-    toggleAll (clips, [] (te::Clip* clip) { return isClipMuted (*clip); }, [] (te::Clip* clip, bool on) { setClipMuted (*clip, on); });
+    toggleAll (
+        clips, [&song] (ClipID id) { return (bool) findClipState (song, id)[schema::clipMute]; },
+        [&song] (ClipID id, bool on)
+        {
+            if (auto clipState = findClipState (song, id); clipState.isValid())
+            {
+                clipState.setProperty (schema::clipMute, on, &song.getUndoManager());
+                song.reconcile (Song::Part::clip, id.getRaw());
+            }
+        });
 }
 
 void nudgeClips (const juce::Array<te::Clip*>& clips, te::BeatDuration amount)

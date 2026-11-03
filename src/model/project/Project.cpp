@@ -44,7 +44,7 @@ namespace
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
-        getSong (edit).setMirror ([&edit] (Song::Part part) { mirror::reconcile (edit, part); });
+        getSong (edit).setMirror ([&edit] (Song::Part part, std::uint64_t id) { mirror::reconcile (edit, part, id); });
         ensureTempoMap (getSong (edit));
         getTrackList (edit);
         countIDs (edit);

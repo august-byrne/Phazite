@@ -262,10 +262,13 @@ void reconcileAll (te::Edit& edit)
     reconcileTransport (edit);
 }
 
-void reconcile (te::Edit& edit, Song::Part part)
+void reconcile (te::Edit& edit, Song::Part part, std::uint64_t id)
 {
     switch (part)
     {
+        case Song::Part::clip:
+            reconcileClip (edit, ClipID::fromRaw (id));
+            break;
         case Song::Part::tempoMap:
             reconcileTempoMap (edit);
             break;

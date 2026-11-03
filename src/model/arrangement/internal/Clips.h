@@ -7,6 +7,7 @@
 #pragma once
 
 #include "model/arrangement/PlaylistValues.h"
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -19,12 +20,20 @@ namespace phazite
 // The song's clips as Phazite's record holds them.
 
 // A clip's element: invalid for a clip that isn't the song's (gone).
-juce::ValueTree findClipState (const te::Edit&, ClipID);
+juce::ValueTree findClipState (const Song&, ClipID);
 juce::ValueTree findClipState (const te::Clip&);
+inline juce::ValueTree findClipState (const te::Edit& edit, ClipID id)
+{
+    return findClipState (getSong (edit), id);
+}
 
 // The clips' elements on a track's element; and on every track of the song, track by track.
 std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState);
-std::vector<juce::ValueTree> getClipStates (const te::Edit&);
+std::vector<juce::ValueTree> getClipStates (const Song&);
+inline std::vector<juce::ValueTree> getClipStates (const te::Edit& edit)
+{
+    return getClipStates (getSong (edit));
+}
 
 ClipID getClipID (const juce::ValueTree& clipState);
 BeatDuration getClipOffset (const juce::ValueTree& clipState);
@@ -43,11 +52,11 @@ void moveClipState (te::Edit&, juce::ValueTree clipState, BeatPosition start);
 std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState);
 
 // A new MIDI clip's element, with an ID from the Edit's (as Tracktion's items get theirs while T1 lasts), on no track yet.
-juce::ValueTree makeMidiClipState (te::Edit&, const juce::String& name, BeatRange);
+juce::ValueTree makeMidiClipState (Song&, const juce::String& name, BeatRange);
 
 // A copy of a clip's element, on no track yet, with an ID of its own and the same notes, with the same IDs, in the same alias
 // group.
-juce::ValueTree copyClipState (te::Edit&, const juce::ValueTree& clipState);
+juce::ValueTree copyClipState (Song&, const juce::ValueTree& clipState);
 
 // Puts a clip's element on a track's, or moves it there, and has Tracktion's clip follow (in the caller's undo step).
 // Returns Tracktion's clip.
@@ -78,16 +87,19 @@ bool haveSameControls (const te::MidiClip&, const juce::ValueTree& clipState);
 juce::ValueTree adoptMidiClip (te::MidiClip&);
 
 //==============================================================================
-// The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).
-juce::Array<te::Clip*> getSelectedClips (const Selection&);
+// The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h). And Tracktion's
+// clips for IDs, those still there, while the model's callers hold Tracktion's.
+std::vector<ClipID> getSelectedClips (const Selection&);
 bool hasSelectedClips (const Selection&);
+juce::Array<te::Clip*> findClips (const te::Edit&, const std::vector<ClipID>&);
+juce::Array<te::Clip*> findSelectedClips (const Selection&); // Tracktion's, for the selected clips
 
-bool hasAliases (const juce::Array<te::Clip*>&);    // whether any of the clips is linked to others
-bool hasAudioClips (const juce::Array<te::Clip*>&); // whether any of them holds audio
+bool hasAliases (const Song&, const std::vector<ClipID>&);    // whether any of the clips is linked to others
+bool hasAudioClips (const Song&, const std::vector<ClipID>&); // whether any of them holds audio
 
 // Whether there is an audio clip among these, and every audio clip among them fades in and out in this shape. MIDI
 // clips don't count.
-bool hasFadeShape (const juce::Array<te::Clip*>&, FadeCurve);
+bool hasFadeShape (const Song&, const std::vector<ClipID>&, FadeCurve);
 
 // A copy of each clip, on the same track and in the same place, for the caller to move. As aliases,
 // the copies stay linked to their originals: editing the notes of one edits them all.
@@ -152,11 +164,11 @@ void splitClipsAtEdges (const juce::Array<te::Track*>&, te::BeatRange);
 juce::Array<te::Clip*> duplicateClips (const juce::Array<te::Clip*>&, bool asAliases, Selection*);
 
 // Turns aliases back into separate clips. A clip left alone in its link group is unlinked too.
-void makeClipsUnique (const juce::Array<te::Clip*>&);
+void makeClipsUnique (Song&, const std::vector<ClipID>&);
 
 // Mutes the clips, or unmutes them if they all are muted already.
-void toggleClipsMuted (const juce::Array<te::Clip*>&);
-bool areAllClipsMuted (const juce::Array<te::Clip*>&);
+void toggleClipsMuted (Song&, const std::vector<ClipID>&);
+bool areAllClipsMuted (const Song&, const std::vector<ClipID>&);
 
 // Moves clips by an amount, all together, but none before the start of the song, with the automation under them.
 void nudgeClips (const juce::Array<te::Clip*>&, te::BeatDuration);

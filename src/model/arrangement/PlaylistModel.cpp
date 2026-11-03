@@ -117,7 +117,7 @@ namespace
         info.name = clip.getName();
         info.range = { fromTracktion (clip.getStartBeat()), fromTracktion (clip.getEndBeat()) };
         info.muted = clip.isMuted();
-        info.linked = hasAliases ({ &clip });
+        info.linked = hasAliases (getSong (clip.edit), { getClipID (clip) });
 
         // The song's own place for one of its clips, without rounding through seconds, and its fades' shapes.
         const auto clipState = findClipState (clip);
@@ -546,8 +546,8 @@ void deleteClips (ProjectContext& context, const std::vector<ClipID>& ids, bool 
 
 void toggleClipsMuted (ProjectContext& context, const std::vector<ClipID>& ids)
 {
-    if (const auto clips = findClips (context, ids); ! clips.isEmpty())
-        toggleClipsMuted (clips);
+    if (auto* song = findSong (context))
+        toggleClipsMuted (*song, ids);
 }
 
 void nudgeClips (ProjectContext& context, const std::vector<ClipID>& ids, BeatDuration step)

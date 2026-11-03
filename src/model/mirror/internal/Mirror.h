@@ -87,7 +87,7 @@ bool isSettingValues();
 void reconcileAll (te::Edit&);
 
 // A part of the song (Song::reconcile(), which the song calls this through after a change to it).
-void reconcile (te::Edit&, Song::Part);
+void reconcile (te::Edit&, Song::Part, std::uint64_t id = 0);
 
 // The transport's state that the song keeps (model/transport/internal/Playback.h, Metronome.h), which Tracktion keeps
 // outside its undo history: its transport loops, around the song or the range looped, starts playback where the song

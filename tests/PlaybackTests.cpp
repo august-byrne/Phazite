@@ -373,7 +373,7 @@ TEST_CASE ("The song ends with the bar its last clip ends in, and its sections d
     CHECK (songEnd() == "4.000");
     CHECK (song.getSongLoop() == "0.000-4.000");
 
-    phazite::toggleClipsMuted ({ &clip }); // a muted clip counts
+    phazite::toggleClipsMuted (phazite::test::songOf ({ &clip }), phazite::test::idsOf ({ &clip })); // a muted clip counts
     CHECK (songEnd() == "4.000");
 
     phazite::setTimeSignature (phazite::getSong (*song.edit), { 3, 4 }); // beat 4.5 is in the second bar of three beats

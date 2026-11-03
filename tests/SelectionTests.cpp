@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the selection commands do (src/model/arrangement/internal/Selection.h), called directly: each acts on the first kind of
 // thing selected, in the order notes, time range, sections, clips, tracks.
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
@@ -193,9 +194,9 @@ TEST_CASE ("Duplicate takes notes first, then the range, sections, clips and tra
     s.selection.selectOnly (s.second);
     s.selection.addToSelection (s.b);
     phazite::duplicateSelection (s.selection, s.range, true);
-    const auto copies = phazite::getSelectedClips (s.selection);
+    const auto copies = phazite::findSelectedClips (s.selection);
     REQUIRE (copies.size() == 1);
-    CHECK (phazite::hasAliases ({ copies.getFirst() }));
+    CHECK (phazite::hasAliases (phazite::test::songOf ({ copies.getFirst() }), phazite::test::idsOf ({ copies.getFirst() })));
     CHECK_FALSE (s.selection.isSelected (s.b));
 
     // Tracks last, and never as aliases.

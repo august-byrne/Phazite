@@ -151,7 +151,7 @@ void deleteSelection (Selection& selection, const RangeSelection& range, bool cl
         return;
     }
 
-    if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
+    if (const auto clips = findSelectedClips (selection); ! clips.isEmpty())
     {
         deleteClips (clips, closeGap);
         return;
@@ -201,7 +201,7 @@ void duplicateSelection (Selection& selection, RangeSelection& range, bool asAli
         return;
     }
 
-    if (const auto clips = getSelectedClips (selection); ! clips.isEmpty())
+    if (const auto clips = findSelectedClips (selection); ! clips.isEmpty())
     {
         duplicateClips (clips, asAliases, &selection);
         return;
@@ -221,7 +221,7 @@ void splitSelection (const Selection& selection, const RangeSelection& range)
     if (! range.isEmpty())
         splitClipsAtEdges (range.getTracks(), range.getRange());
     else
-        splitClips (getSelectedClips (selection), edit->tempoSequence.toBeats (getPlayheadTime (*edit)));
+        splitClips (findSelectedClips (selection), edit->tempoSequence.toBeats (getPlayheadTime (*edit)));
 }
 
 void selectAllClipsOrTracks (Selection& selection, RangeSelection& range)
@@ -261,8 +261,8 @@ void toggleSelectionMuted (const Selection& selection)
 {
     if (const auto notes = getSelectedNotes (selection); ! notes.empty())
         toggleNotesMuted (notes);
-    else
-        toggleClipsMuted (getSelectedClips (selection));
+    else if (auto* song = selection.getSong())
+        toggleClipsMuted (*song, getSelectedClips (selection));
 }
 
 bool isSelectionMuted (const Selection& selection)
@@ -270,7 +270,8 @@ bool isSelectionMuted (const Selection& selection)
     if (const auto notes = getSelectedNotes (selection); ! notes.empty())
         return areAllNotesMuted (notes);
 
-    return areAllClipsMuted (getSelectedClips (selection));
+    auto* song = selection.getSong();
+    return song != nullptr && areAllClipsMuted (*song, getSelectedClips (selection));
 }
 
 bool canDeleteSelection (const Selection& selection, const RangeSelection& range)
@@ -316,7 +317,7 @@ juce::String describeSelection (const Selection& selection, const RangeSelection
     if (const auto sections = getSelectedSections (selection).size(); sections > 0)
         return describe ((int) sections, "Section");
 
-    if (const auto clips = getSelectedClips (selection).size(); clips > 0)
+    if (const auto clips = (int) getSelectedClips (selection).size(); clips > 0)
         return describe (clips, "Clip");
 
     if (const auto tracks = (int) getSelectedTracks (selection).size(); tracks > 0)
@@ -375,14 +376,15 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
                     .currentName = [&selection]
                     { return hasSelectedSections (selection) ? juce::String ("Duplicate Section as Aliases") : juce::String(); } });
 
-    registry.add ({ .id = "clip.makeUnique",
-                    .name = "Make Unique",
-                    .category = "Clip",
-                    .description = "Turns the selected aliases into separate clips, which can be edited on their own.",
-                    .synonyms = { "unlink", "independent" },
-                    .perform = [&selection] { makeClipsUnique (getSelectedClips (selection)); },
-                    .isEnabled = [&selection] { return hasAliases (getSelectedClips (selection)); },
-                    .undoTarget = undoTarget });
+    registry.add (
+        { .id = "clip.makeUnique",
+          .name = "Make Unique",
+          .category = "Clip",
+          .description = "Turns the selected aliases into separate clips, which can be edited on their own.",
+          .synonyms = { "unlink", "independent" },
+          .perform = withSong (selection, [&selection] (Song& song) { makeClipsUnique (song, getSelectedClips (selection)); }),
+          .isEnabled = ifSong (selection, [&selection] (const Song& song) { return hasAliases (song, getSelectedClips (selection)); }),
+          .undoTarget = undoTarget });
 
     registry.add ({ .id = "edit.mute",
                     .name = "Mute",
@@ -416,33 +418,37 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
                         .category = "Clip",
                         .description = juce::String (shape.description) + " For the selected audio clips.",
                         .synonyms = { "fade shape", "fade curve", "crossfade" },
-                        .perform = [&selection, type] { setFadeShape (getSelectedClips (selection), type); },
-                        .isEnabled = [&selection] { return hasAudioClips (getSelectedClips (selection)); },
+                        .perform = [&selection, type] { setFadeShape (findSelectedClips (selection), type); },
+                        .isEnabled = ifSong (selection, [&selection] (const Song& song)
+                                             { return hasAudioClips (song, getSelectedClips (selection)); }),
                         .undoTarget = undoTarget,
-                        .isTicked = [&selection, type] { return hasFadeShape (getSelectedClips (selection), type); } });
+                        .isTicked = ifSong (selection, [&selection, type] (const Song& song)
+                                            { return hasFadeShape (song, getSelectedClips (selection), type); }) });
     }
 
     // What the selected audio clips play: backwards, and stretched to the song's tempo (as the audio clip editor sets them).
-    registry.add ({ .id = "clip.reverse",
-                    .name = "Reverse",
-                    .category = "Clip",
-                    .description = "Plays the selected audio clips backwards, or forwards again.",
-                    .synonyms = { "backwards", "reverse audio", "play backwards" },
-                    .perform = [&selection] { toggleClipsReversed (getSelectedClips (selection)); },
-                    .isEnabled = [&selection] { return hasAudioClips (getSelectedClips (selection)); },
-                    .undoTarget = undoTarget,
-                    .isTicked = [&selection] { return areAllClipsReversed (getSelectedClips (selection)); } });
+    registry.add (
+        { .id = "clip.reverse",
+          .name = "Reverse",
+          .category = "Clip",
+          .description = "Plays the selected audio clips backwards, or forwards again.",
+          .synonyms = { "backwards", "reverse audio", "play backwards" },
+          .perform = [&selection] { toggleClipsReversed (findSelectedClips (selection)); },
+          .isEnabled = ifSong (selection, [&selection] (const Song& song) { return hasAudioClips (song, getSelectedClips (selection)); }),
+          .undoTarget = undoTarget,
+          .isTicked = [&selection] { return areAllClipsReversed (findSelectedClips (selection)); } });
 
-    registry.add ({ .id = "clip.followTempo",
-                    .name = "Follow Tempo",
-                    .category = "Clip",
-                    .description = "Stretches the selected audio clips to follow the song's tempo, keeping their pitch, or plays them at "
-                                   "their own speed again.",
-                    .synonyms = { "warp", "stretch", "time stretch", "sync to tempo", "tempo" },
-                    .perform = [&selection] { toggleClipsFollowTempo (getSelectedClips (selection)); },
-                    .isEnabled = [&selection] { return hasAudioClips (getSelectedClips (selection)); },
-                    .undoTarget = undoTarget,
-                    .isTicked = [&selection] { return doAllClipsFollowTempo (getSelectedClips (selection)); } });
+    registry.add (
+        { .id = "clip.followTempo",
+          .name = "Follow Tempo",
+          .category = "Clip",
+          .description = "Stretches the selected audio clips to follow the song's tempo, keeping their pitch, or plays them at "
+                         "their own speed again.",
+          .synonyms = { "warp", "stretch", "time stretch", "sync to tempo", "tempo" },
+          .perform = [&selection] { toggleClipsFollowTempo (findSelectedClips (selection)); },
+          .isEnabled = ifSong (selection, [&selection] (const Song& song) { return hasAudioClips (song, getSelectedClips (selection)); }),
+          .undoTarget = undoTarget,
+          .isTicked = [&selection] { return doAllClipsFollowTempo (findSelectedClips (selection)); } });
 
     registry.add ({ .id = "edit.split",
                     .name = "Split",

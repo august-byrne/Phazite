@@ -39,7 +39,7 @@ namespace
     // A clip made from what Copy kept, where it was, on a track: a copy, in no alias group, with an ID of its own.
     te::Clip* pasteClip (te::Edit& edit, const juce::ValueTree& kept, te::ClipTrack& track)
     {
-        auto clipState = copyClipState (edit, kept);
+        auto clipState = copyClipState (getSong (edit), kept);
         clipState.removeProperty (schema::clipLink, nullptr);
         return placeClipState (edit, clipState, track);
     }
@@ -92,7 +92,7 @@ namespace
             if (auto* audio = dynamic_cast<te::AudioTrack*> (track))
                 return audio;
 
-        for (auto* clip : getSelectedClips (selection))
+        for (auto* clip : findSelectedClips (selection))
             if (auto* audio = dynamic_cast<te::AudioTrack*> (clip->getTrack()))
                 return audio;
 
@@ -309,7 +309,7 @@ void copySelection (Clipboard& clipboard, const Selection& selection, const Rang
     else
     {
         copy.kind = Clipboard::Kind::clips;
-        const auto clips = getSelectedClips (selection);
+        const auto clips = findSelectedClips (selection);
         keepClips (copy, *edit, clips, std::nullopt);
         std::vector<AutomationStretch> stretches;
 
@@ -342,7 +342,7 @@ void cutSelection (Clipboard& clipboard, Selection& selection, RangeSelection& r
             break;
 
         case Clipboard::Kind::clips:
-            deleteClips (getSelectedClips (selection), false);
+            deleteClips (findSelectedClips (selection), false);
             break;
 
         case Clipboard::Kind::nothing:

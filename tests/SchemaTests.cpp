@@ -46,7 +46,7 @@ TEST_CASE ("A song numbers its items from its own count, past Tracktion's while 
     // Without a mirror, reconciling does nothing; with one, it hears which part changed.
     song.reconcile (phazite::Song::Part::tempoMap);
     std::vector<phazite::Song::Part> told;
-    song.setMirror ([&told] (phazite::Song::Part part) { told.push_back (part); });
+    song.setMirror ([&told] (phazite::Song::Part part, std::uint64_t) { told.push_back (part); });
     song.reconcile (phazite::Song::Part::tracks);
     CHECK (told == std::vector { phazite::Song::Part::tracks });
 }

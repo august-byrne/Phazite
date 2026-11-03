@@ -318,8 +318,8 @@ TEST_CASE ("Duplicating a section copies what is in it, as aliases if asked")
     auto* riffCopy = song.findClip (0, 160);
     REQUIRE (riffCopy != nullptr);
     CHECK (riffCopy->getName() == juce::String ("Riff"));
-    CHECK (phazite::hasAliases ({ riffCopy }));
-    CHECK (phazite::hasAliases ({ &riff }));
+    CHECK (phazite::hasAliases (phazite::test::songOf ({ riffCopy }), phazite::test::idsOf ({ riffCopy })));
+    CHECK (phazite::hasAliases (phazite::test::songOf ({ &riff }), phazite::test::idsOf ({ &riff })));
     CHECK (song.findClip (0, 224) != nullptr); // the Pad
     CHECK (song.section (4).range.getStart().inBeats() == doctest::Approx (224.0));
 
@@ -421,7 +421,7 @@ TEST_CASE ("The section commands")
     auto& undoManager = phazite::getSong (*song.edit).getUndoManager();
 
     song.selection.selectOnly (song.id (2));
-    CHECK (phazite::getSelectedClips (song.selection).isEmpty()); // a section isn't a clip
+    CHECK (phazite::getSelectedClips (song.selection).empty()); // a section isn't a clip
     CHECK (phazite::getCurrentName (*song.registry.find ("edit.delete")) == juce::String ("Delete Section"));
     CHECK (phazite::getCurrentName (*song.registry.find ("edit.duplicateAsAlias")) == juce::String ("Duplicate Section as Aliases"));
 

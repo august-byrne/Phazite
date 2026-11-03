@@ -2,6 +2,7 @@
 // Cut, Copy and Paste (src/model/arrangement/internal/Clipboard.h; roadmap step 3.7): clips, a time range's clips and
 // notes, put in at the playhead, each paste one named undo step that selects what it put in, with the automation under
 // clips going back onto their own tracks.
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/Clips.h"
@@ -101,7 +102,7 @@ TEST_CASE ("Copied clips paste at the playhead on the selected track, as copies,
     CHECK (copy->getStartBeat().inBeats() == doctest::Approx (8.0));
     CHECK (copy->getEndBeat().inBeats() == doctest::Approx (12.0));
     CHECK (copy->getSequence().getNumNotes() == 2);
-    CHECK_FALSE (phazite::hasAliases ({ copy })); // a copy, not an alias
+    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ copy }), phazite::test::idsOf ({ copy }))); // a copy, not an alias
     CHECK (selection.isSelected (copy));
     CHECK_FALSE (selection.isSelected (song.clip));
 

@@ -15,7 +15,7 @@ namespace phazite::test
 inline te::MidiClip* addMidiClip (te::ClipTrack& track, te::BeatRange beats, const juce::String& name = "Notes")
 {
     auto& edit = track.edit;
-    return dynamic_cast<te::MidiClip*> (placeClipState (edit, makeMidiClipState (edit, name, fromTracktion (beats)), track));
+    return dynamic_cast<te::MidiClip*> (placeClipState (edit, makeMidiClipState (getSong (edit), name, fromTracktion (beats)), track));
 }
 
 // An audio clip on a track playing a file from its start (or from an offset into it), from one time in the song to another,
@@ -34,5 +34,23 @@ inline te::WaveAudioClip* addAudioClip (te::ClipTrack& track, const juce::String
 inline te::MidiNote* addMidiNote (te::MidiClip& clip, int pitch, te::BeatPosition beat, te::BeatDuration length, int velocity = 100)
 {
     return addNote (clip, pitch, clip.getContentStartBeat() + te::toDuration (beat), length, velocity);
+}
+
+// The IDs of Tracktion's clips, and the song of their Edit, for the model's functions that take clips by ID.
+inline std::vector<ClipID> idsOf (const juce::Array<te::Clip*>& clips)
+{
+    std::vector<ClipID> ids;
+
+    for (auto* clip : clips)
+        if (clip != nullptr)
+            ids.push_back (getClipID (*clip));
+
+    return ids;
+}
+
+inline Song& songOf (const juce::Array<te::Clip*>& clips)
+{
+    REQUIRE_FALSE (clips.isEmpty());
+    return getSong (clips.getFirst()->edit);
 }
 } // namespace phazite::test
