@@ -19,13 +19,17 @@
 // Realtek output or its Bluetooth headphones in either shared mode, with or without the song, restarted every 2 s, with
 // threads busy computing or allocating; a shared stream's buffer is 1056 samples (22 ms) on each output (the second test
 // case), and a block held up 12 ms still played whole. The app logs blocks that come late (Engine::takeBlockTimes()).
+#include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "engine/nodes/LoudnessMeter.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/mixer/MixerModel.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
@@ -35,6 +39,7 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <thread>
@@ -444,6 +449,299 @@ TEST_CASE ("Device glitches: an example song through Phazite's engine on a real 
              << "heard at " << juce::Decibels::gainToDecibels ((float) capture.peak.load()) << " dBFS), " << player.blocks.load()
              << " blocks, the longest " << player.longestBlock.load() << " ms (" << player.slowBlocks.load()
              << " over 5 ms), the longest gap between blocks " << player.longestGap.load() << " ms, " << restarts << " restarts");
+}
+
+TEST_CASE ("Device timing: House Groove's first blocks from a stop, each as long as it takes the engine" * doctest::test_suite ("device")
+           * doctest::skip())
+{
+    // As the app plays it, on the app's threads, at 48 kHz in blocks of 480 (10 ms): the first play after it opens, then
+    // another from a stop, each block of the engine timed (the owner's log, 2026-11-03, had a block 11.5 ms late as
+    // playback started).
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    auto& engine = host.getEngine();
+    const auto threads =
+        getVariable ("PHAZITE_GLITCH_THREADS", juce::String (std::max (1, juce::SystemStats::getNumPhysicalCpus() - 1))).getIntValue();
+    engine.setNumThreads (threads);
+    host.prepare (48000.0, 480);
+
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (
+        phazite::test::getEngine(), temp.folder, "houseGroove", error,
+        phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
+    REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, &project->getEdit());
+    phazite::test::settle();
+
+    juce::AudioBuffer<float> block (2, 480);
+    juce::String report ("\n");
+
+    // PHAZITE_GLITCH_IDLE: seconds the computer idles before each play, as before the owner pressed play.
+    const auto idleMilliseconds = (int) (getVariable ("PHAZITE_GLITCH_IDLE", "0").getDoubleValue() * 1000.0);
+
+    for (const auto* run : { "first play", "played again" })
+    {
+        if (idleMilliseconds > 0)
+            juce::Thread::sleep (idleMilliseconds);
+
+        phazite::playOrStop (project->getEdit());
+        phazite::test::dispatchPendingMessages();
+        std::vector<double> took;
+
+        for (int i = 0; i < 300; ++i)
+        {
+            const auto start = juce::Time::getHighResolutionTicks();
+            host.process (nullptr, 0, block.getArrayOfWritePointers(), 2, 480);
+            took.push_back (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - start) * 1000.0);
+        }
+
+        phazite::playOrStop (project->getEdit());
+        phazite::test::dispatchPendingMessages();
+
+        report << run << ": the first blocks ";
+
+        for (size_t i = 0; i < 6; ++i)
+            report << juce::String (took[i], 2) << " ";
+
+        const auto longest = std::max_element (took.begin(), took.end());
+        report << "ms; the longest " << juce::String (*longest, 2) << " ms (block " << (int) (longest - took.begin()) << "), then "
+               << juce::String (*std::max_element (took.begin() + 6, took.end()), 2) << " ms at most after the first six\n";
+    }
+
+    setEdit (context, nullptr);
+    project = nullptr;
+    engine.setNumThreads (1);
+    host.prepare (48000.0, 256);
+    MESSAGE (report);
+}
+
+TEST_CASE ("Device sound: House Groove's intro rendered, its clicks found where the kicks start and end" * doctest::test_suite ("device")
+           * doctest::skip())
+{
+    // The owner hears about ten crackles in the intro (8 bars of the kick on each beat and hats between, 2026-11-03), with
+    // no block late: what plays is looked through for samples that jump from the line of the two before by far more than
+    // the sound around them does (its second difference against the median of its neighbourhood's), each told by how far
+    // after a kick's start it is (a kick starts each beat, 0.484 s at 124 BPM, and its note ends a quarter beat later).
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (
+        phazite::test::getEngine(), temp.folder, "houseGroove", error,
+        phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
+    REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, &project->getEdit());
+    phazite::test::settle();
+
+    constexpr double rate = 48000.0, beat = 60.0 / 124.0;
+    const auto audio = phazite::renderWithOwnEngine (project->getEdit(), (int) (8 * 4 * beat * rate), rate, 480);
+    const auto* left = audio.getReadPointer (0);
+    const auto n = audio.getNumSamples();
+    std::vector<float> d2 ((size_t) n, 0.0f);
+
+    for (int i = 2; i < n; ++i)
+        d2[(size_t) i] = std::abs (left[i] - 2.0f * left[i - 1] + left[i - 2]);
+
+    struct Click
+    {
+        int sample;
+        float size, ratio;
+    };
+
+    std::vector<Click> clicks;
+    constexpr int around = 240; // 5 ms each way
+
+    for (int i = around; i < n - around; ++i)
+    {
+        if (d2[(size_t) i] < 0.01f)
+            continue;
+
+        std::vector<float> neighbourhood (d2.begin() + i - around, d2.begin() + i + around);
+        std::nth_element (neighbourhood.begin(), neighbourhood.begin() + around, neighbourhood.end());
+        const auto median = std::max (1.0e-5f, neighbourhood[(size_t) around]);
+
+        if (d2[(size_t) i] > 30.0f * median && (clicks.empty() || i - clicks.back().sample > 480))
+            clicks.push_back ({ i, d2[(size_t) i], d2[(size_t) i] / median });
+    }
+
+    phazite::engine::LoudnessMeter meter;
+    meter.prepare (rate, n);
+    meter.process (audio.getArrayOfReadPointers(), 2, n);
+    juce::String report;
+    report << "\nPeak " << juce::Decibels::toString (juce::Decibels::gainToDecibels (audio.getMagnitude (0, n))) << ", true peak "
+           << juce::String (meter.getReadings().truePeak.value_or (-100.0f), 2) << " dBTP; " << (int) clicks.size()
+           << " jumps far over their neighbourhood's:\n";
+
+    for (const auto& click : clicks)
+    {
+        const auto seconds = click.sample / rate;
+        const auto intoBeat = std::fmod (seconds, beat);
+        report << "  " << juce::String (seconds, 3) << " s (" << juce::String (intoBeat * 1000.0, 1) << " ms after a beat), "
+               << juce::String (click.size, 4) << ", " << juce::String (click.ratio, 0) << " times its neighbourhood's\n";
+    }
+
+    setEdit (context, nullptr);
+    MESSAGE (report);
+}
+
+TEST_CASE ("Device sound: House Groove's intro played live sounds the same when the engine is given the song again as it plays"
+           * doctest::test_suite ("device") * doctest::skip())
+{
+    // What plays live, through the app's engine a block at a time: once as it is, and once given a new plan of the same song
+    // every half second, as a change of the song gives it one; any difference is where a new plan changed the sound.
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (
+        phazite::test::getEngine(), temp.folder, "houseGroove", error,
+        phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
+    REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, &project->getEdit());
+    phazite::test::settle();
+    auto* session = phazite::findSession (project->getEdit());
+    REQUIRE (session != nullptr);
+
+    const auto playIntro = [&] (bool newPlans)
+    {
+        phazite::test::EnginePlayback playback;
+        phazite::playOrStop (project->getEdit());
+        juce::AudioBuffer<float> audio (2, 0);
+
+        for (int part = 0; part < 30; ++part)
+        {
+            if (newPlans)
+                session->update();
+
+            const auto next = playback.play (0.5);
+            audio.setSize (2, audio.getNumSamples() + next.getNumSamples(), true);
+
+            for (int channel = 0; channel < 2; ++channel)
+                audio.copyFrom (channel, audio.getNumSamples() - next.getNumSamples(), next, channel, 0, next.getNumSamples());
+        }
+
+        phazite::playOrStop (project->getEdit());
+        phazite::test::dispatchPendingMessages();
+        return audio;
+    };
+
+    const auto asItIs = playIntro (false), givenAgain = playIntro (true);
+    REQUIRE (asItIs.getNumSamples() == givenAgain.getNumSamples());
+    auto largest = 0.0f;
+    auto at = 0;
+
+    for (int i = 0; i < asItIs.getNumSamples(); ++i)
+        if (const auto difference = std::abs (asItIs.getSample (0, i) - givenAgain.getSample (0, i)); difference > largest)
+        {
+            largest = difference;
+            at = i;
+        }
+
+    setEdit (context, nullptr);
+    MESSAGE ("\nPlayed live as it is, and given the song again every half second: the largest difference "
+             << largest << " at " << juce::String (at / phazite::test::EnginePlayback::sampleRate, 3) << " s, the mix's peak "
+             << asItIs.getMagnitude (0, asItIs.getNumSamples()));
+}
+
+TEST_CASE ("Device sound: where in House Groove's intro the sound above 6 kHz is that a kick shouldn't have"
+           * doctest::test_suite ("device") * doctest::skip())
+{
+    // Between a kick's first 10 ms and the hat half a beat after it there should be next to nothing above 6 kHz: crackle
+    // there is distortion. Measured in an export (PHAZITE_GLITCH_FILE), and in renders with the master's multiband and the
+    // drum bus's compressor each switched off, to tell which device makes it.
+    constexpr double beat = 60.0 / 124.0;
+
+    const auto measure = [] (const juce::AudioBuffer<float>& audio, double rate)
+    {
+        juce::IIRFilter first, second;
+        first.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 6000.0));
+        second.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 6000.0));
+        std::vector<float> high (audio.getReadPointer (0), audio.getReadPointer (0) + audio.getNumSamples());
+        first.processSamples (high.data(), (int) high.size());
+        second.processSamples (high.data(), (int) high.size());
+
+        std::vector<double> levels;
+
+        for (int k = 0; k < 32; ++k)
+        {
+            const auto from = (int) ((k * beat + 0.01) * rate), to = (int) ((k * beat + 0.2) * rate);
+            auto peak = 0.0f;
+
+            for (int i = from; i < to && i < (int) high.size(); ++i)
+                peak = std::max (peak, std::abs (high[(size_t) i]));
+
+            levels.push_back (juce::Decibels::gainToDecibels (peak, -120.0f));
+        }
+
+        auto sorted = levels;
+        std::sort (sorted.begin(), sorted.end());
+        juce::String text;
+        text << "above 6 kHz in the kicks' bodies: median " << juce::String (sorted[16], 1) << " dB, loudest "
+             << juce::String (sorted.back(), 1) << " dB; "
+             << (int) std::count_if (levels.begin(), levels.end(), [] (double level) { return level > -50.0; })
+             << " of 32 kicks over -50 dB:";
+
+        for (int k = 0; k < 32; ++k)
+            text << " " << juce::String (levels[(size_t) k], 0);
+
+        return text;
+    };
+
+    juce::String report ("\n");
+
+    if (const auto path = getVariable ("PHAZITE_GLITCH_FILE", {}); path.isNotEmpty())
+    {
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (path)));
+        REQUIRE (reader != nullptr);
+        juce::AudioBuffer<float> audio (2, (int) (8 * 4 * beat * reader->sampleRate));
+        reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
+        report << "The export (" << juce::String (reader->sampleRate) << " Hz, peak "
+               << juce::Decibels::toString (juce::Decibels::gainToDecibels (audio.getMagnitude (0, audio.getNumSamples())))
+               << "): " << measure (audio, reader->sampleRate) << "\n";
+    }
+
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (
+        phazite::test::getEngine(), temp.folder, "houseGroove", error,
+        phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
+    REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, &project->getEdit());
+    phazite::test::settle();
+
+    phazite::TrackID drums;
+
+    for (const auto id : phazite::getAllPlaylistTracks (context))
+        if (const auto row = phazite::getTrackRow (context, id); row.has_value() && row->name == "Drums")
+            drums = id;
+
+    const auto master = phazite::getEffects (context, {});
+    const auto bus = phazite::getEffects (context, drums);
+    REQUIRE (! master.empty());
+    REQUIRE (! bus.empty());
+
+    const auto render = [&] (const juce::String& what)
+    {
+        constexpr double rate = 48000.0;
+        const auto audio = phazite::renderWithOwnEngine (project->getEdit(), (int) (8 * 4 * beat * rate), rate, 480);
+        report << what << " (peak "
+               << juce::Decibels::toString (juce::Decibels::gainToDecibels (audio.getMagnitude (0, audio.getNumSamples())))
+               << "): " << measure (audio, rate) << "\n";
+    };
+
+    render ("Rendered as it is");
+    phazite::setDeviceOn (context, master.front().id, false);
+    render ("Without the master's " + master.front().name);
+    phazite::setDeviceOn (context, master.front().id, true);
+    phazite::setDeviceOn (context, bus.front().id, false);
+    render ("Without the drum bus's " + bus.front().name);
+    phazite::setDeviceOn (context, master.front().id, false);
+    render ("Without either");
+
+    setEdit (context, nullptr);
+    MESSAGE (report);
 }
 
 TEST_CASE ("Device facts: each output's periods, and the buffer a shared stream gets as JUCE opens one" * doctest::test_suite ("device")
