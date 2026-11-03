@@ -86,7 +86,7 @@ TEST_CASE ("With nothing selected the inspector shows the song; a selected track
     REQUIRE (editors.getFirst()->onReturnKey != nullptr);
     editors.getFirst()->onReturnKey();
     CHECK (phazite::getTrackRow (screen.context, screen.track (1))->name == juce::String ("Bass"));
-    CHECK (phazite::describeUndo (screen.edit.get()).isNotEmpty());
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)).isNotEmpty());
 
     // The volume fader is the track's.
     auto* volume = dynamic_cast<juce::Slider*> (phazite::test::findComponentWithTitle (screen.inspector, "Volume"));
@@ -177,7 +177,7 @@ TEST_CASE ("Selected notes show the range of their values, which a step changes 
     step (findField (screen, "Velocity"), true);
     CHECK (noteOf (c4).velocity == 65);
     CHECK (noteOf (e4).velocity == 101);
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Change Velocity"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Change Velocity"));
     CHECK (screen.shows ("65 to 101"));
 
     // Dragged up, each by as much, as one undo step that takes all of the drag back.
@@ -243,7 +243,7 @@ TEST_CASE ("Selected clips' starts, lengths, gain and pitch change together, and
     type (findField (screen, "Length"), "2 bars");
     CHECK (clipOf (first).range.getLength().inBeats() == doctest::Approx (8.0));
     CHECK (clipOf (second).range.getLength().inBeats() == doctest::Approx (8.0));
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Change Clip Length"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Change Clip Length"));
 
     // Two points of the first track's volume, at 0 and -12 dB: their range, a step up for both, and a value typed for both.
     const auto volume = phazite::getVolume (screen.context, screen.track (0)).getRef();
@@ -264,7 +264,7 @@ TEST_CASE ("Selected clips' starts, lengths, gain and pitch change together, and
     type (findField (screen, "Value"), "-6 dB");
     CHECK (valueOf (0) == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
     CHECK (valueOf (1) == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Set Automation Value"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Set Automation Value"));
 }
 
 TEST_CASE ("The inspector fills its panel, and scrolls up and down when the panel is shorter than what it shows")

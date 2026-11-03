@@ -266,4 +266,27 @@ void reconcileModulation (te::Edit& edit)
 
     reconcileAssignments (edit);
 }
+
+void reconcileModulator (te::Edit& edit, ModulatorID id)
+{
+    const auto state = findModulatorState (getSong (edit), id);
+    const auto found = state.isValid() ? findModulator (edit, id) : std::nullopt;
+
+    if (! found.has_value())
+        return;
+
+    if (found->modifier != nullptr)
+    {
+        reconcileSettings (*found->modifier, state);
+    }
+    else if (auto* macro = found->macro.get())
+    {
+        if (const auto name = state[schema::macroName].toString(); macro->macroName.get() != name)
+            macro->macroName = name;
+
+        if (const auto value = (float) state.getProperty (schema::macroValue, 0.0f);
+            ! juce::exactlyEqual (macro->getCurrentExplicitValue(), value))
+            setValueSetByHand (*macro, value);
+    }
+}
 } // namespace phazite::mirror

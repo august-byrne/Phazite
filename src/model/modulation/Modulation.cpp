@@ -110,11 +110,11 @@ std::optional<ModulatorType> findModulatorType (const juce::String& name)
     return {};
 }
 
-std::vector<juce::ValueTree> getModulatorStates (const te::Edit& edit)
+std::vector<juce::ValueTree> getModulatorStates (const Song& song)
 {
     std::vector<juce::ValueTree> states;
-    auto channels = getTrackStates (edit);
-    channels.push_back (findChainState (edit, nullptr));
+    auto channels = getTrackStates (song);
+    channels.push_back (findChainState (song, {}));
 
     const auto collect = [&states] (const juce::ValueTree& owner)
     {
@@ -135,13 +135,23 @@ std::vector<juce::ValueTree> getModulatorStates (const te::Edit& edit)
     return states;
 }
 
-juce::ValueTree findModulatorState (const te::Edit& edit, ModulatorID id)
+juce::ValueTree findModulatorState (const Song& song, ModulatorID id)
 {
-    for (const auto& state : getModulatorStates (edit))
+    for (const auto& state : getModulatorStates (song))
         if (getModulatorID (state) == id)
             return state;
 
     return {};
+}
+
+std::vector<juce::ValueTree> getModulatorStates (const te::Edit& edit)
+{
+    return getModulatorStates (getSong (edit));
+}
+
+juce::ValueTree findModulatorState (const te::Edit& edit, ModulatorID id)
+{
+    return findModulatorState (getSong (edit), id);
 }
 
 ModulatorID getModulatorID (const juce::ValueTree& modulatorState)

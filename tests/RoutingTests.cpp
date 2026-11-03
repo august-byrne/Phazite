@@ -51,7 +51,7 @@ struct Mix
     ~Mix() { setEdit (context, nullptr); }
 
     phazite::TrackID id (te::Track* track) const { return phazite::getTrackID (*track); }
-    juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
 
     // Undo puts a moved track back from its saved state, as a new object: the old pointer is gone, its ID stays.
     te::AudioTrack* findAudioTrack (phazite::TrackID trackID) const

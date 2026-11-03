@@ -213,7 +213,7 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
     CHECK_FALSE (song.hasFreezePoint());
     CHECK_FALSE (song.expander->isFrozen());
-    CHECK (phazite::describeUndo (&song.edit()) == juce::String ("Undo Move Clip"));
+    CHECK (phazite::describeUndo (&phazite::getSong (song.edit())) == juce::String ("Undo Move Clip"));
 
     // Undo puts the clip back, and leaves it unfrozen: the file may not hold what plays.
     phazite::undo (song.edit());
@@ -392,7 +392,7 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK (phazite::isTrackMuted (*song.bass, false));
     CHECK (song.bass->isMuted (false));
     CHECK (phazite::isCollapsed (*song.bass));
-    CHECK (phazite::describeUndo (&song.edit()) == juce::String ("Undo Bounce in Place"));
+    CHECK (phazite::describeUndo (&phazite::getSong (song.edit())) == juce::String ("Undo Bounce in Place"));
     phazite::undo (song.edit());
     CHECK (te::getAudioTracks (song.edit()).size() == 2);
     CHECK_FALSE (phazite::isTrackMuted (*song.bass, false));

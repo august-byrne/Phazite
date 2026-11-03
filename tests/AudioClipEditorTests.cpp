@@ -60,7 +60,7 @@ struct EditorScreen
         return *info;
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
 
     juce::Component& waveform() { return editor.getWaveformComponent(); }
 

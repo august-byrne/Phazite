@@ -204,7 +204,7 @@ TEST_CASE ("The Effects page shows the selected track's effects in a row, as car
     phazite::test::Mouse powerMouse (*power);
     powerMouse.click (power->getLocalBounds().getCentre());
     CHECK_FALSE (phazite::getEffects (screen.context, screen.track (0))[1].isOn);
-    CHECK (phazite::describeUndo (screen.edit.get()).isNotEmpty());
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)).isNotEmpty());
     phazite::test::checkChildrenApart (view);
 
     // Showing the plug-in opens its card, to its key knobs (the rest are in its window), and folds the one that was open.
@@ -352,7 +352,7 @@ TEST_CASE ("An effect dragged by its name moves among its neighbours, in the Dev
     phazite::test::Mouse mouse (*eqName);
     drag (mouse, eqName->getLocalBounds().getCentre(), eqName->getLocalPoint (plugin, juce::Point<int> (plugin->getWidth() - 4, 60)));
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return screen.effects (0) == std::vector { effects[1], effects[2], effects[0] }; }));
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Move Device"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Move Device"));
     CHECK (screen.context.getSongSelection().getDevices().empty()); // a drag, not a click: nothing selected
 
     // A drop where it was moves nothing.
@@ -571,7 +571,7 @@ TEST_CASE ("A container shows its macros and its devices in line, as cards; a ma
 
     REQUIRE (name != nullptr);
     name->setText ("Glue", juce::sendNotification);
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Rename Container"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Rename Container"));
     CHECK (phazite::getEffects (screen.context, screen.track (0))[0].name == juce::String ("Glue"));
 
     // A device added to it shows in it.

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Undo.h"
 #include "model/base/internal/Schema.h"
-#include "model/mirror/internal/Mirror.h"
 
 #include <algorithm>
 #include <vector>
@@ -10,15 +9,6 @@ namespace phazite
 {
 namespace
 {
-    // The song's history takes a step back or forth, and the mirror brings Tracktion's Edit in line with it
-    // (docs/tracktion-migration.md, T1 step 11): what plays follows the song, values set by hand included.
-    template <typename UndoOrRedo>
-    void undoOrRedo (te::Edit& edit, UndoOrRedo&& undoOrRedoIt)
-    {
-        undoOrRedoIt();
-        mirror::reconcileAll (edit);
-    }
-
     // The song's histories with a gesture in progress (message thread only).
     std::vector<juce::UndoManager*>& getOpenGestures()
     {
@@ -39,55 +29,84 @@ namespace
     }
 } // namespace
 
+// The song's history takes a step back or forth, and the mirror brings Tracktion's Edit in line with it (docs/tracktion-migration.md,
+// T1 step 11): what plays follows the song, values set by hand included.
+void undo (Song& song)
+{
+    song.getUndoManager().undo();
+    song.reconcile (Song::Part::everything);
+}
+
+void redo (Song& song)
+{
+    song.getUndoManager().redo();
+    song.reconcile (Song::Part::everything);
+}
+
 void undo (te::Edit& edit)
 {
-    undoOrRedo (edit, [&edit] { getSong (edit).getUndoManager().undo(); });
+    undo (getSong (edit));
 }
 
 void redo (te::Edit& edit)
 {
-    undoOrRedo (edit, [&edit] { getSong (edit).getUndoManager().redo(); });
+    redo (getSong (edit));
+}
+
+bool canUndo (const Song& song)
+{
+    return song.getUndoManager().canUndo();
+}
+
+bool canRedo (const Song& song)
+{
+    return song.getUndoManager().canRedo();
 }
 
 bool canUndo (te::Edit& edit)
 {
-    return getSong (edit).getUndoManager().canUndo();
+    return canUndo (getSong (edit));
 }
 
 bool canRedo (te::Edit& edit)
 {
-    return getSong (edit).getUndoManager().canRedo();
+    return canRedo (getSong (edit));
+}
+
+void undoOrRedo (Song& song)
+{
+    if (canRedo (song))
+        redo (song);
+    else
+        undo (song);
 }
 
 void undoOrRedo (te::Edit& edit)
 {
-    if (canRedo (edit))
-        redo (edit);
-    else
-        undo (edit);
+    undoOrRedo (getSong (edit));
 }
 
-juce::String describeUndo (te::Edit* edit)
+juce::String describeUndo (Song* song)
 {
-    if (edit == nullptr)
+    if (song == nullptr)
         return "Undo";
 
-    auto& undoManager = getSong (*edit).getUndoManager();
+    auto& undoManager = song->getUndoManager();
     return withStep ("Undo", undoManager.canUndo(), undoManager.getUndoDescription());
 }
 
-juce::String describeRedo (te::Edit* edit)
+juce::String describeRedo (Song* song)
 {
-    if (edit == nullptr)
+    if (song == nullptr)
         return "Redo";
 
-    auto& undoManager = getSong (*edit).getUndoManager();
+    auto& undoManager = song->getUndoManager();
     return withStep ("Redo", undoManager.canRedo(), undoManager.getRedoDescription());
 }
 
-juce::String describeUndoOrRedo (te::Edit* edit)
+juce::String describeUndoOrRedo (Song* song)
 {
-    return edit != nullptr && canRedo (*edit) ? describeRedo (edit) : describeUndo (edit);
+    return song != nullptr && canRedo (*song) ? describeRedo (song) : describeUndo (song);
 }
 
 //==============================================================================
@@ -124,14 +143,19 @@ UndoStep::~UndoStep()
 }
 
 //==============================================================================
-Gesture::Gesture (te::Edit& e, const juce::String& name)
-    : edit (e),
+Gesture::Gesture (Song& s, const juce::String& name)
+    : song (s),
       open (true)
 {
-    auto& undoManager = getSong (edit).getUndoManager();
+    auto& undoManager = song.getUndoManager();
     jassert (! isInGesture (undoManager)); // one at a time for a song
     undoManager.beginNewTransaction (name);
     getOpenGestures().push_back (&undoManager);
+}
+
+Gesture::Gesture (te::Edit& edit, const juce::String& name)
+    : Gesture (getSong (edit), name)
+{
 }
 
 Gesture::~Gesture()
@@ -145,13 +169,18 @@ void Gesture::commit()
         return;
 
     auto& gestures = getOpenGestures();
-    gestures.erase (std::remove (gestures.begin(), gestures.end(), &getSong (edit).getUndoManager()), gestures.end());
+    gestures.erase (std::remove (gestures.begin(), gestures.end(), &song.getUndoManager()), gestures.end());
     open = false;
+}
+
+bool Gesture::isInProgress (Song& song)
+{
+    return isInGesture (song.getUndoManager());
 }
 
 bool Gesture::isInProgress (te::Edit& edit)
 {
-    return isInGesture (getSong (edit).getUndoManager());
+    return isInProgress (getSong (edit));
 }
 
 void Gesture::rollBack()
@@ -159,15 +188,21 @@ void Gesture::rollBack()
     if (! open)
         return;
 
-    undoOrRedo (edit, [this] { getSong (edit).getUndoManager().undoCurrentTransactionOnly(); });
+    song.getUndoManager().undoCurrentTransactionOnly();
+    song.reconcile (Song::Part::everything);
     commit();
 }
 
 //==============================================================================
-RecordingStep::RecordingStep (te::Edit& edit, const juce::String& name)
+RecordingStep::RecordingStep (Song& song, const juce::String& name)
 {
-    if (auto& undoManager = getSong (edit).getUndoManager(); ! isInGesture (undoManager))
+    if (auto& undoManager = song.getUndoManager(); ! isInGesture (undoManager))
         undoManager.beginNewTransaction (name);
+}
+
+RecordingStep::RecordingStep (te::Edit& edit, const juce::String& name)
+    : RecordingStep (getSong (edit), name)
+{
 }
 
 //==============================================================================

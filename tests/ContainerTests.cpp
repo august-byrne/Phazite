@@ -86,7 +86,7 @@ struct Song
     std::vector<juce::String> effectNamesOf (const te::Track& track) const { return namesOf (phazite::getEffects (context, idOf (track))); }
 
     te::AutomatableParameter::Ptr find (const ParameterRef& ref) const { return phazite::findParameter (*edit, ref); }
-    juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };

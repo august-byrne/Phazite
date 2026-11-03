@@ -2,6 +2,7 @@
 #include "ModulationModel.h"
 #include "internal/Modulation.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/mirror/internal/Bridge.h"
@@ -26,6 +27,17 @@ namespace
     {
         auto* edit = getEdit (context);
         return edit != nullptr ? findModulator (*edit, id) : std::nullopt;
+    }
+
+    // Whether any of the song's modulators or macros modulates a parameter (Schema.h: MODULATES).
+    bool isModulated (const Song& song, const ParameterRef& parameter)
+    {
+        for (const auto& modulator : getModulatorStates (song))
+            for (const auto& child : modulator)
+                if (child.hasType (schema::MODULATES) && getModulatedParameter (child) == parameter)
+                    return true;
+
+        return false;
     }
 
     // What plays a modulator or a macro while Phazite's engine plays the project, or nullptr.
@@ -204,15 +216,7 @@ ParameterHandle getModulatorParameter (ProjectContext& context, ModulatorID id, 
     if (modulator->macro == nullptr || modulator->macro->paramID != parameterID)
         return {};
 
-    const auto undoName = "Change " + getModulatorName (*modulator);
-
-    if (auto* rack = modulator->getContainerRack())
-        return makeMacroHandle (*rack, *modulator->macro, undoName);
-
-    if (auto* track = dynamic_cast<te::AudioTrack*> (modulator->getTrack()))
-        return makeMacroHandle (*track, *modulator->macro, undoName);
-
-    return {};
+    return makeMacroHandle (*modulator->macro, "Change " + getModulatorName (*modulator));
 }
 
 void renameMacro (ProjectContext& context, ModulatorID id, const juce::String& name)
@@ -436,6 +440,11 @@ std::unique_ptr<ModulationDrag> beginModulationDrag (const ParameterHandle& hand
 
 std::optional<ModulationRange> getModulationRange (const ParameterHandle& handle)
 {
+    // Most parameters nothing modulates, which the song tells without Tracktion's parameter (a knob asks at each tick).
+    if (const auto ref = handle.getRef(); ref.isValid())
+        if (auto* song = findSong (handle); song == nullptr || ! isModulated (*song, ref))
+            return {};
+
     const auto parameter = findParameter (handle);
 
     if (parameter == nullptr)

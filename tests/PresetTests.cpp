@@ -74,7 +74,7 @@ struct Song
     }
 
     te::AutomatableParameter::Ptr find (const ParameterRef& ref) const { return phazite::findParameter (edit(), ref); }
-    juce::String describeUndo() const { return phazite::describeUndo (&edit()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (edit())); }
 
     std::unique_ptr<phazite::Project> project;
     phazite::ProjectContext context { phazite::test::getEngineContext() };

@@ -99,7 +99,7 @@ TEST_CASE ("The chord lane: a click on empty space offers the key's chords, and 
     REQUIRE (chords.size() == 1);
     CHECK (chords[0].range.getStart() == beat (4.0));
     CHECK (chords[0].range.getEnd() == beat (8.0));
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Add Chord"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Add Chord"));
 
     // In the bar before, up to the chord after it; and one from outside the key.
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (1.0)), { "Outside the Key", "Bb    bVII" }));
@@ -123,7 +123,7 @@ TEST_CASE ("The chord lane: a chord's menu changes it, its kind and inversion, a
 
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (5.0)), { "Delete Chord" }));
     CHECK (screen.names() == juce::String ("Am7/C Am F"));
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Delete Chord"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Delete Chord"));
 
     // The key from a chord on.
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (9.0)), { "Change Key from Here", "D", "Major" }));
@@ -149,7 +149,7 @@ TEST_CASE ("The chord lane: dragging a chord's right edge makes it longer, over 
     REQUIRE (chords.size() == 4);
     CHECK (chords[0].range.getEnd() == beat (6.0));
     CHECK (chords[1].range.getStart() == beat (6.0));
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Change Chord Length"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Change Chord Length"));
     CHECK_FALSE (screen.lane->getDragTarget().has_value());
 }
 

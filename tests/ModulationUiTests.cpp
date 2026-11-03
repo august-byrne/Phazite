@@ -41,7 +41,7 @@ struct Song
     ~Song() { setEdit (context, nullptr); }
 
     ParameterRef makeup() const { return { phazite::getEffects (context, phazite::getTrackID (*a))[0].id, "makeup" }; }
-    juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };

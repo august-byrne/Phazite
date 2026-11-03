@@ -65,7 +65,7 @@ struct Song
 
     te::AutomatableParameter::Ptr find (const ParameterRef& ref) const { return phazite::findParameter (*edit, ref); }
 
-    juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
 
     std::vector<juce::String> namesOf (phazite::TrackID track) const
     {

@@ -54,7 +54,7 @@ TEST_CASE ("The synth's editor has a control for each parameter, in groups, and 
     REQUIRE (cutoff != nullptr);
     cutoff->setValue (800.0, juce::sendNotificationSync);
     CHECK (plugin->getAutomatableParameterByID ("cutoff")->getCurrentValue() == doctest::Approx (800.0f));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Cutoff"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Cutoff"));
 
     auto* wave = dynamic_cast<juce::ComboBox*> (panel->findControl ("osc1Wave"));
     REQUIRE (wave != nullptr);
@@ -139,7 +139,7 @@ TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonan
     mouse.release();
     CHECK (valueOf ("cutoff") < cutoffBefore);
     CHECK (valueOf ("resonance") == doctest::Approx (0.5f).epsilon (0.1));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Cutoff"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Cutoff"));
 
     // A note held: the amp envelope shows how far it has got, and the oscillators' wave is drawn.
     auto* synth = device.getProcessor<Synth>();

@@ -36,7 +36,7 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
     decay->setValue (8.0, juce::sendNotificationSync);
     editor.refresh();
     CHECK (plugin->getAutomatableParameterByID ("decay")->getCurrentValue() == doctest::Approx (8.0f));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Decay"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Decay"));
     CHECK (editor.getShownSeconds() > 3.0 * before);
 
     // Dragging the gap at the tail's start to the right lengthens the pre-delay, as one undo step.
@@ -48,7 +48,7 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
     mouse.dragTo (gap + juce::Point<int> (20, 0));
     mouse.release();
     CHECK (plugin->getAutomatableParameterByID ("predelay")->getCurrentValue() > 100.0f);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Pre-Delay"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Pre-Delay"));
 
     // And its end to the left, a shorter decay.
     mouse.pause();

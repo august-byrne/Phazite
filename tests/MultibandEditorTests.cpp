@@ -50,7 +50,7 @@ struct Song
         return valueOf (Multiband::info.parameters[(size_t) Multiband::getBandParameter (band, Multiband::points)].id);
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr plugin;

@@ -127,6 +127,7 @@ void selectPoints (Selection&, const te::AutomatableParameter&, const std::vecto
 //==============================================================================
 // The song's curves (Schema.h: AUTOMATION; T1 step 4), which Tracktion's curves mirror (model/mirror/internal/Mirror.h):
 // a parameter's, invalid for one without; every one; and the parameter each is for.
+juce::ValueTree findCurveState (const Song&, const ParameterRef&);
 juce::ValueTree findCurveState (const te::Edit&, const ParameterRef&);
 std::vector<juce::ValueTree> getCurveStates (const te::Edit&);
 ParameterRef getCurveParameter (const juce::ValueTree& curveState);

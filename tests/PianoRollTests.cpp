@@ -318,7 +318,7 @@ TEST_CASE ("A note added and dragged is one undo step, however long the drag tak
     mouse.release();
 
     CHECK (screen.notesOf (clip).front().start.inBeats() > 2.5);
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Add Note"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Add Note"));
     phazite::undo (*screen.edit);
     CHECK (screen.notesOf (clip).empty()); // the note and all its moves, in one step
 }
@@ -347,7 +347,7 @@ TEST_CASE ("The mouse adds, selects, copies, resizes and deletes notes, each cha
     REQUIRE (notes().size() == 2);
     const auto first = notes()[0].getRef(), second = notes()[1].getRef();
     CHECK (selected() == std::vector { second });
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Add Note"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Add Note"));
 
     // Ctrl+click adds the first to the selection.
     const auto inside = [&context] (phazite::NoteRef note) { return phazite::getNote (context, note)->start.inBeats() + 0.05; };
@@ -363,7 +363,7 @@ TEST_CASE ("The mouse adds, selects, copies, resizes and deletes notes, each cha
     REQUIRE (notes().size() == 4);
     CHECK (selected().size() == 2);
     CHECK_FALSE (isSelected (first));
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Copy Notes"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Copy Notes"));
     CHECK (phazite::getNote (context, first)->start.inBeats() < 1.5); // where it was
 
     // Dragging the end of the first note makes it longer.
@@ -373,7 +373,7 @@ TEST_CASE ("The mouse adds, selects, copies, resizes and deletes notes, each cha
     mouse.release();
     mouse.pause();
     CHECK (phazite::getNote (context, first)->getEnd().inBeats() > 2.2);
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Resize Notes"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Resize Notes"));
 
     // A right-click deletes a note, and Undo puts the same note back.
     mouse.click (screen.at (inside (second)), juce::ModifierKeys::rightButtonModifier);

@@ -431,3 +431,26 @@ rest, and a block takes a sixth as long on one thread and two thirds as long on 
 a few percent of a core more meanwhile: the master's task, taken sooner, waits for the last helpers by yielding, as the
 engine's tasks wait for what they take in (T2 step 8); that column moves by as much from run to run (the 20 empty
 tracks on four threads took 10.2 % and 6.2 % of a core with nothing changed between).
+
+## 11. Parameters on the song (2026-11-03)
+
+T6 step 4 (docs/tracktion-migration.md) moves `ParameterHandle` off Tracktion's parameters: a handle holds the song and
+the parameter's reference, and reads its description and values from the song (`model/devices/internal/Parameters.h`).
+Controls read their handles at each of the display ticker's ticks, a strip its volume, pan and sends, so a handle keeps
+the element it found and finds it again only once that element has left the song or names another; a parameter that
+nothing moves reads its value set by hand from the song, and a knob asks the song whether anything modulates its
+parameter before it asks Tracktion for the modulation's range. The UI's benchmark (`tests/Benchmarks.cpp`,
+`windows-profile`), before (the build of 2026-11-02, before T6's steps of 2026-11-03) and after:
+
+| The UI's work, 16 tracks, 256 clips, 16,384 notes | Before | After |
+|---|---|---|
+| A parameter's change, as the views handle it | 0.20 ms | 0.19 ms |
+| The whole window painted | 18.7 ms | 12.8 ms |
+| An 11-px column of the window, as a playhead repaints | 0.65 ms | 0.66 ms |
+| Save | 132.1 ms | 135.5 ms |
+| Autosave, on the UI thread | 10.7 ms | 15.8 ms |
+| A note moved a step, with what follows | 2.54 ms | 2.07 ms |
+
+A project's CPU, stopped and playing, moved within its noise (20 tracks of Phazite's devices on one thread: 0.84 % and
+27.19 % of each block before, 0.80 % and 26.59 % after). The comparison spans every T6 change of that day, so the
+autosave's 5 ms more may come from any of them (one run each); which is left to measure.

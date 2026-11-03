@@ -323,6 +323,24 @@ PlaybackSession* findPlayingSession (const te::Edit& edit)
     return nullptr;
 }
 
+PlaybackSession* findSession (const Song& song)
+{
+    for (auto* session : getSessions())
+        if (session->hasEdit() && &getSong (session->getEdit()) == &song)
+            return session;
+
+    return nullptr;
+}
+
+PlaybackSession* findPlayingSession (const Song& song)
+{
+    for (auto* session : getSessions())
+        if (session->hasEdit() && &getSong (session->getEdit()) == &song && session->isPlayingProject())
+            return session;
+
+    return nullptr;
+}
+
 std::optional<float> getPlayedValue (const te::AutomatableParameter& parameter, bool withModulation)
 {
     const auto* session = findPlayingSession (parameter.getEdit());

@@ -104,6 +104,10 @@ juce::ValueTree makeEditState (const juce::ValueTree& song);
 // modulator or macro the song hasn't go.
 void reconcileModulation (te::Edit&);
 
+// The same for one modulator's or macro's settings alone, after a change to them: on or off, its values set by hand and a
+// step sequencer's steps, or a macro's name and value, by its ID.
+void reconcileModulator (te::Edit&, ModulatorID);
+
 // Only the switches Tracktion keeps outside its undo history (the tracks' mute, solo and solo isolation), and the write
 // modes, which Phazite sets outside it: after a write mode changed.
 void reconcileTrackSwitches (te::Edit&);

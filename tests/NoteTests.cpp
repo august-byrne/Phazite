@@ -536,7 +536,7 @@ TEST_CASE ("Slide and portamento notes are switched by their commands, each one 
     CHECK (n.get (e).slide);
     CHECK_FALSE (n.get (e).portamento);
     CHECK_FALSE (n.get (c).slide);
-    CHECK (phazite::describeUndo (n.edit.get()) == juce::String ("Undo Slide Note"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*n.edit)) == juce::String ("Undo Slide Note"));
 
     // Portamento on both; with one of them already, it goes on for the other.
     n.select ({ c, e });

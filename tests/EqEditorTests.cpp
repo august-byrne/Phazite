@@ -117,7 +117,7 @@ TEST_CASE ("Dragging an EQ band's dot moves its frequency and gain as one undo s
     CHECK (editor.getSelectedBand() == 3);
     CHECK (valueOf (*eq, "band4Frequency") > 900.0f);
     CHECK (valueOf (*eq, "band4Gain") > 3.0f);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Move Band 4"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Move Band 4"));
 
     phazite::undo (*edit);
     editor.refresh();

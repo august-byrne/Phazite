@@ -78,7 +78,7 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     handle.endGesture();
     CHECK_FALSE (handle.isInGesture());
     CHECK (handle.getValue() == doctest::Approx (0.8f));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Size"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Size"));
 
     phazite::undo (*edit);
     CHECK (handle.getValue() == doctest::Approx (0.5f)); // where the drag began, played again
@@ -87,14 +87,14 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
 
     // A key press: a step of its own, so undo goes back that far only.
     handle.setValue (0.5f);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Size"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Size"));
     phazite::undo (*edit);
     CHECK (handle.getValue() == doctest::Approx (0.8f));
 
     // A name given for the steps.
     auto damping = phazite::makeParameterHandle (reverb.get(), "damping", "Change Reverb Damping");
     damping.setValue (9000.0f);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Reverb Damping"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Reverb Damping"));
 
     // A handle that goes away during a drag keeps the drag's change.
     {
@@ -104,7 +104,7 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     }
 
     CHECK (phazite::makeParameterHandle (reverb.get(), "width").getValue() == doctest::Approx (0.25f));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Width"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Width"));
 }
 
 TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices")
@@ -112,6 +112,7 @@ TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr keep;
     auto& device = phazite::test::createTestDevice (*edit, phazite::test::TestGain::typeID, keep);
+    REQUIRE (phazite::insertDevice (*te::getAudioTracks (*edit)[0], keep) != nullptr); // the song's, which handles reach
 
     const auto mode = phazite::makeParameterHandle (&device, "mode");
     const auto info = mode.getInfo();
@@ -145,7 +146,7 @@ TEST_CASE ("A gesture begun during another for the same project joins it: a drag
     size.endGesture();
     CHECK_FALSE (damping.isInGesture());
 
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Move Both"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Move Both"));
     phazite::undo (*edit);
     CHECK (size.getValue() == doctest::Approx (0.5f));
     CHECK (damping.getValue() == doctest::Approx (6000.0f));

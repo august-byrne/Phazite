@@ -47,7 +47,7 @@ struct Screen
     }
 
     float getValue (const char* id) const { return synth->getAutomatableParameterByID (id)->getCurrentValue(); }
-    juce::String describeUndo() const { return phazite::describeUndo (&project->getEdit()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (project->getEdit())); }
 
     phazite::test::TemporaryFolder temp;
     std::unique_ptr<phazite::Project> project;

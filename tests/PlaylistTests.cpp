@@ -245,7 +245,7 @@ TEST_CASE ("A clip dragged along its track takes the automation under it, Ctrl c
     CHECK (screen.startOf (clip) == doctest::Approx (8.0));
     CHECK (valueAt (10.0) == doctest::Approx (0.9f));
     CHECK (valueAt (6.0) == doctest::Approx (0.5f));
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Move Clip"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Move Clip"));
     phazite::undo (*screen.edit);
     CHECK (valueAt (6.0) == doctest::Approx (0.9f));
     phazite::test::dispatchPendingMessages();
@@ -349,7 +349,7 @@ TEST_CASE ("A track's header moves the selected tracks from anywhere on it, a do
     CHECK (header.getAlpha() == 1.0f);
     using Tracks = juce::Array<te::AudioTrack*>;
     CHECK (te::getAudioTracks (*screen.edit) == Tracks { screen.tracks[1], screen.tracks[2], screen.tracks[0] });
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Move Track"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Move Track"));
 
     // Several selected tracks move together, in their order in the playlist, by any of their headers: the third track
     // added to the selection, both dragged by the first's into the upper half of the top row, go before it.
@@ -363,7 +363,7 @@ TEST_CASE ("A track's header moves the selected tracks from anywhere on it, a do
     mouse.pause();
     phazite::test::dispatchPendingMessages();
     CHECK (te::getAudioTracks (*screen.edit) == Tracks { screen.tracks[2], screen.tracks[0], screen.tracks[1] });
-    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Move Tracks"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Move Tracks"));
 
     // A click without a drag selects it alone; a double-click collapses it to a thin row, which shows its name.
     mouse.click (inPlaylist (header.getLocalBounds().getCentre()));

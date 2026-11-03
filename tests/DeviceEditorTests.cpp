@@ -80,7 +80,7 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
     auto& gain = knobs.getKnob (Equalizer::getParameterIndex (2, Equalizer::gain));
     gain.setValue (6.0, juce::sendNotificationSync);
     CHECK (eq->getAutomatableParameterByID ("band3Gain")->getCurrentValue() == doctest::Approx (6.0f));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Band 3 Gain"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Band 3 Gain"));
 
     CHECK (phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*eq)) != nullptr);
     CHECK (phazite::ui::createDeviceEditor (phazite::DeviceHandle()) == nullptr);

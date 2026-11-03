@@ -5,6 +5,7 @@
 // MODULATOR, MACRO, MODULATES; T1 step 6), which the model changes, and Tracktion's mirror. Not for the UI.
 #pragma once
 
+#include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/devices/ParameterRef.h"
 #include "model/modulation/ModulationValues.h"
@@ -36,6 +37,8 @@ ModulatorID getModulatorID (const te::MacroParameter&);
 // and their assignments mirror (model/mirror/internal/Mirror.h: reconcileModulation()): every modulator's and macro's
 // element (the tracks', the master's and the containers'); one's by its ID, invalid for one the song hasn't (a container's
 // a preset made, before it is on a channel); and the ID an element names. The model changes them, and the mirror follows.
+std::vector<juce::ValueTree> getModulatorStates (const Song&);
+juce::ValueTree findModulatorState (const Song&, ModulatorID);
 std::vector<juce::ValueTree> getModulatorStates (const te::Edit&);
 juce::ValueTree findModulatorState (const te::Edit&, ModulatorID);
 ModulatorID getModulatorID (const juce::ValueTree& modulatorState);

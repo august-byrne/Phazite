@@ -114,9 +114,9 @@ TEST_CASE ("Undo and redo say what they would undo")
     // Nothing to undo or redo: the bare verbs.
     CHECK_FALSE (phazite::canUndo (*edit));
     CHECK_FALSE (phazite::canRedo (*edit));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo"));
-    CHECK (phazite::describeRedo (edit.get()) == juce::String ("Redo"));
-    CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Undo"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo"));
+    CHECK (phazite::describeRedo (&phazite::getSong (*edit)) == juce::String ("Redo"));
+    CHECK (phazite::describeUndoOrRedo (&phazite::getSong (*edit)) == juce::String ("Undo"));
 
     {
         const phazite::UndoStep step (*edit, "Set Value");
@@ -125,22 +125,22 @@ TEST_CASE ("Undo and redo say what they would undo")
 
     CHECK (phazite::canUndo (*edit));
     CHECK_FALSE (phazite::canRedo (*edit));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Set Value"));
-    CHECK (phazite::describeRedo (edit.get()) == juce::String ("Redo"));
-    CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Undo Set Value"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Set Value"));
+    CHECK (phazite::describeRedo (&phazite::getSong (*edit)) == juce::String ("Redo"));
+    CHECK (phazite::describeUndoOrRedo (&phazite::getSong (*edit)) == juce::String ("Undo Set Value"));
 
     // FL Studio's undo-or-redo undoes, then redoes what it undid.
     phazite::undoOrRedo (*edit);
     CHECK_FALSE (phazite::getSong (*edit).getState().hasProperty ("testValue"));
     CHECK_FALSE (phazite::canUndo (*edit));
     CHECK (phazite::canRedo (*edit));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo"));
-    CHECK (phazite::describeRedo (edit.get()) == juce::String ("Redo Set Value"));
-    CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Redo Set Value"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo"));
+    CHECK (phazite::describeRedo (&phazite::getSong (*edit)) == juce::String ("Redo Set Value"));
+    CHECK (phazite::describeUndoOrRedo (&phazite::getSong (*edit)) == juce::String ("Redo Set Value"));
 
     phazite::undoOrRedo (*edit);
     CHECK ((int) phazite::getSong (*edit).getState()["testValue"] == 1);
-    CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Undo Set Value"));
+    CHECK (phazite::describeUndoOrRedo (&phazite::getSong (*edit)) == juce::String ("Undo Set Value"));
 
     // Without an Edit.
     CHECK (phazite::describeUndo (nullptr) == juce::String ("Undo"));
@@ -151,8 +151,8 @@ TEST_CASE ("Undo and redo say what they would undo")
     phazite::getSong (*edit).getUndoManager().beginNewTransaction();
     change (*edit, "testValue", 2);
     CHECK (phazite::canUndo (*edit));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo"));
-    CHECK (phazite::describeUndoOrRedo (edit.get()) == juce::String ("Undo"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo"));
+    CHECK (phazite::describeUndoOrRedo (&phazite::getSong (*edit)) == juce::String ("Undo"));
 }
 
 TEST_CASE ("An undo that puts back what devices play keeps what it undid to redo")

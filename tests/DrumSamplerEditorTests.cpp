@@ -81,7 +81,7 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
     REQUIRE (level != knobs.end());
     (*level)->setValue (-12.0, juce::sendNotificationSync);
     CHECK (plugin->getAutomatableParameterByID ("pad3Level")->getCurrentValue() == doctest::Approx (-12.0f));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Pad 3 Level"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Pad 3 Level"));
 
     // A sound dropped on a pad plays there, named after its file.
     const auto file = elsewhere.folder.getChildFile ("Shaker.wav");
@@ -102,7 +102,7 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
     CHECK (editor.getSelectedPad() == 14);
     CHECK (editor.getPad (14).getDescription() == juce::String ("Shaker"));
     CHECK (device.hasPadSound (14));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Put Shaker on Pad 15"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Put Shaker on Pad 15"));
 
     phazite::undo (*edit);
     editor.refresh();
@@ -140,7 +140,7 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     mouse.dragTo ({ waveform.getWidth() / 2, y });
     mouse.release();
     CHECK (valueOf ("pad1Length") < 10000.0f);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Pad 1 Length"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Pad 1 Length"));
 
     // The attack's ramp, dragged right: a longer attack.
     mouse.pause();
@@ -149,7 +149,7 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     mouse.dragTo ({ attackX + 20, 4 });
     mouse.release();
     CHECK (valueOf ("pad1Attack") > 0.5f);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Pad 1 Attack"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Pad 1 Attack"));
 
     // As it plays, its playhead moves along it.
     sampler->audition (0, 1.0f);

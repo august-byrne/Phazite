@@ -367,7 +367,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
         CHECK_FALSE (phazite::setPadSound (*plugin, 0, text));
 
         REQUIRE (phazite::setPadSound (*plugin, 0, sample));
-        CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Put My Kick on Pad 1"));
+        CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Put My Kick on Pad 1"));
         CHECK (plugin->state[phazite::schema::getPadSoundFile (0)].toString() == juce::String ("Audio/My Kick.wav"));
         CHECK (project.folder.getChildFile ("Audio/My Kick.wav").existsAsFile());
         CHECK (phazite::getPadName (*plugin, 0) == juce::String ("My Kick"));
@@ -398,7 +398,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
 
     // Back to the kit's sound, as an undo step.
     phazite::clearPadSound (*drums, 0);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Reset Pad 1"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Reset Pad 1"));
     CHECK_FALSE (drums->getSampler().hasOwnSound (0));
 }
 

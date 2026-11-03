@@ -122,7 +122,7 @@ TEST_CASE ("A plug-in window's menu loads the presets saved for its plug-in into
     // One loaded: its settings, as one undo step named after it, which undo takes back.
     REQUIRE (phazite::test::runMenuItem (menu, { "Load Preset", "Loud" }));
     CHECK (TestPlugin::getGain (*studio.plugin) == doctest::Approx (0.9f));
-    CHECK (phazite::describeUndo (&edit) == juce::String ("Undo Load Preset Loud"));
+    CHECK (phazite::describeUndo (&phazite::getSong (edit)) == juce::String ("Undo Load Preset Loud"));
     phazite::undo (edit);
     CHECK (TestPlugin::getGain (*studio.plugin) == doctest::Approx (0.5f));
 

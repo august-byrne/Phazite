@@ -109,9 +109,6 @@ namespace
         return from != returnTrack && hasSound (song, from) && isReturnTrack (song, returnTrack)
                && ! contains (getTracksFedBy (song, returnTrack), from);
     }
-
-    // The parameter of Tracktion's send that sets its level (tracktion_AuxSend.cpp), which the send's knob changes.
-    const juce::String sendLevelID ("send level");
 } // namespace
 
 DeviceSlot makeDeviceSlot (const Song& song, DeviceID id)
@@ -235,8 +232,7 @@ ParameterHandle getVolume (ProjectContext& context, TrackID id)
     if (song == nullptr || ! isTrack (*song, id))
         return {};
 
-    auto* fader = findDevice (context, getFader (*song, id));
-    return fader != nullptr ? makeParameterHandle (fader, getVolumeParameterID (*song, id), "Change Volume") : ParameterHandle();
+    return makeParameterHandle (*song, { getFader (*song, id), getVolumeParameterID (*song, id) }, "Change Volume");
 }
 
 ParameterHandle getPan (ProjectContext& context, TrackID id)
@@ -246,8 +242,7 @@ ParameterHandle getPan (ProjectContext& context, TrackID id)
     if (song == nullptr || ! isTrack (*song, id) || getPanParameterID (*song, id).isEmpty())
         return {};
 
-    auto* fader = findDevice (context, getFader (*song, id));
-    return fader != nullptr ? makeParameterHandle (fader, getPanParameterID (*song, id), "Change Pan") : ParameterHandle();
+    return makeParameterHandle (*song, { getFader (*song, id), getPanParameterID (*song, id) }, "Change Pan");
 }
 
 namespace
@@ -290,8 +285,8 @@ LevelSource getLevel (ProjectContext& context, TrackID id)
 ParameterHandle getMasterVolume (ProjectContext& context)
 {
     auto* song = findSong (context);
-    auto* fader = song != nullptr ? findDevice (context, getFader (*song, {})) : nullptr;
-    return fader != nullptr ? makeParameterHandle (fader, getVolumeParameterID (*song, {}), "Change Master Volume") : ParameterHandle();
+    return song != nullptr ? makeParameterHandle (*song, { getFader (*song, {}), getVolumeParameterID (*song, {}) }, "Change Master Volume")
+                           : ParameterHandle();
 }
 
 LevelSource getMasterLevel (ProjectContext& context)
@@ -368,11 +363,12 @@ bool canHoldInstrument (const ProjectContext& context, TrackID id)
 std::vector<ParameterHandle> getKeyControls (ProjectContext& context, DeviceID id, int maximum)
 {
     std::vector<ParameterHandle> handles;
+    auto* song = findSong (context);
     auto* device = findDevice (context, id);
 
-    if (device != nullptr)
+    if (song != nullptr && device != nullptr)
         for (const auto& parameterID : phazite::getKeyControls (*device, maximum))
-            handles.push_back (makeParameterHandle (device, parameterID));
+            handles.push_back (makeParameterHandle (*song, { id, parameterID }));
 
     return handles;
 }
@@ -554,8 +550,8 @@ std::vector<Send> getSends (const ProjectContext& context, TrackID id)
 
 ParameterHandle getSendLevel (ProjectContext& context, DeviceID id)
 {
-    auto* send = dynamic_cast<te::AuxSendPlugin*> (findDevice (context, id));
-    return send != nullptr ? makeParameterHandle (send, send->gain->paramID, "Change Send Level") : ParameterHandle();
+    auto* song = findSong (context);
+    return song != nullptr ? makeParameterHandle (*song, { id, schema::sendLevelParameter }, "Change Send Level") : ParameterHandle();
 }
 
 void setPreFader (ProjectContext& context, DeviceID id, bool preFader)
@@ -620,18 +616,15 @@ std::vector<SendTarget> getSendTargets (const ProjectContext& context, TrackID i
 ParameterHandle getSendLevelTo (ProjectContext& context, TrackID from, TrackID returnTrack)
 {
     auto* song = findSong (context);
-    auto* track = findTrack (context, from);
 
-    if (song == nullptr || track == nullptr || ! canSendTo (*song, from, returnTrack))
+    if (song == nullptr || ! canSendTo (*song, from, returnTrack))
         return {};
 
     // The send goes after the fader, as every new send does.
-    const auto locate = [returnTrack] (te::Track& sender) -> te::Plugin*
-    { return mirror::findDevice (sender.edit, findSendTo (getSong (sender.edit), getTrackID (sender), returnTrack)); };
-    const auto create = [returnTrack] (te::Track& sender) -> te::Plugin*
-    { return mirror::findDevice (sender.edit, addSend (getSong (sender.edit), getTrackID (sender), returnTrack, false)); };
+    const auto locate = [from, returnTrack] (const Song& in) { return findSendTo (in, from, returnTrack); };
+    const auto create = [from, returnTrack] (Song& in) { return addSend (in, from, returnTrack, false); };
     const auto identity = "send " + juce::String (from.getRaw()) + " " + juce::String (returnTrack.getRaw());
-    return makeCreatingHandle (*track, locate, create, identity, sendLevelID, { 0.0f, 1.0f },
+    return makeCreatingHandle (*song, locate, create, identity, schema::sendLevelParameter, { 0.0f, 1.0f },
                                "Send to " + getTrackName (*song, returnTrack), "Change Send Level");
 }
 

@@ -34,7 +34,7 @@ float valueOf (phazite::test::TestSong& song, phazite::DeviceID device, const ch
 
 juce::String describeUndo (phazite::test::TestSong& song)
 {
-    return phazite::describeUndo (phazite::getEdit (song.context));
+    return phazite::describeUndo (phazite::findSong (song.context));
 }
 
 void undo (phazite::test::TestSong& song)

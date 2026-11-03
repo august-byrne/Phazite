@@ -44,7 +44,7 @@ struct Song
     ~Song() { setEdit (context, nullptr); }
 
     te::Edit& edit() const { return project->getEdit(); }
-    juce::String describeUndo() const { return phazite::describeUndo (&edit()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (edit())); }
 
     juce::String getPlayedTable (int osc) const
     {

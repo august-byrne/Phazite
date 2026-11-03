@@ -12,9 +12,9 @@ void addUndoCommands (CommandRegistry& registry, Selection& selection)
                     .category = "Edit",
                     .description = "Undoes the last change.",
                     .synonyms = { "back", "revert" },
-                    .perform = withEdit (selection, undo),
-                    .isEnabled = ifEdit (selection, canUndo),
-                    .currentName = [&selection] { return describeUndo (selection.getEdit()); },
+                    .perform = withSong (selection, [] (Song& song) { undo (song); }),
+                    .isEnabled = ifSong (selection, [] (const Song& song) { return canUndo (song); }),
+                    .currentName = [&selection] { return describeUndo (selection.getSong()); },
                     .repeatsWhileHeld = true });
 
     registry.add ({ .id = "edit.redo",
@@ -22,9 +22,9 @@ void addUndoCommands (CommandRegistry& registry, Selection& selection)
                     .category = "Edit",
                     .description = "Redoes the change you last undid.",
                     .synonyms = { "again" },
-                    .perform = withEdit (selection, redo),
-                    .isEnabled = ifEdit (selection, canRedo),
-                    .currentName = [&selection] { return describeRedo (selection.getEdit()); },
+                    .perform = withSong (selection, [] (Song& song) { redo (song); }),
+                    .isEnabled = ifSong (selection, [] (const Song& song) { return canRedo (song); }),
+                    .currentName = [&selection] { return describeRedo (selection.getSong()); },
                     .repeatsWhileHeld = true });
 
     registry.add ({ .id = "edit.undoOrRedo",
@@ -32,8 +32,8 @@ void addUndoCommands (CommandRegistry& registry, Selection& selection)
                     .category = "Edit",
                     .description = "Undoes the last change, or redoes it if you just undid it, like Ctrl+Z in FL Studio.",
                     .synonyms = { "undo", "redo", "toggle" },
-                    .perform = withEdit (selection, undoOrRedo),
-                    .isEnabled = ifEdit (selection, [] (te::Edit& edit) { return canUndo (edit) || canRedo (edit); }),
-                    .currentName = [&selection] { return describeUndoOrRedo (selection.getEdit()); } });
+                    .perform = withSong (selection, [] (Song& song) { undoOrRedo (song); }),
+                    .isEnabled = ifSong (selection, [] (const Song& song) { return canUndo (song) || canRedo (song); }),
+                    .currentName = [&selection] { return describeUndoOrRedo (selection.getSong()); } });
 }
 } // namespace phazite

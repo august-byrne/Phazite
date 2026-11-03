@@ -25,6 +25,7 @@ public:
 
     // Its undo history: 30 steps at least.
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
+    const juce::UndoManager& getUndoManager() const noexcept { return undoManager; }
 
     // Where its files are: its project file, which the paths it keeps of the files it plays start from (none for a song
     // outside a project, which keeps whole paths); and the folder of what Phazite makes for it and can make again (renders
@@ -52,6 +53,7 @@ public:
         devices,
         device, // one's settings, by its ID: a device's, a fader's or a send's
         modulation,
+        modulator, // one's settings, by its ID: a modulator's or a macro's
         transport,
         everything
     };
@@ -77,6 +79,7 @@ private:
     std::function<void (Part, std::uint64_t)> mirror;
     std::function<void (std::uint64_t)> deviceStateStore;
 
+    JUCE_DECLARE_WEAK_REFERENCEABLE (Song)
     JUCE_DECLARE_NON_COPYABLE (Song)
 };
 } // namespace phazite

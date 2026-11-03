@@ -312,6 +312,9 @@ void reconcile (te::Edit& edit, Song::Part part, std::uint64_t id)
         case Song::Part::modulation:
             reconcileModulation (edit);
             break;
+        case Song::Part::modulator:
+            reconcileModulator (edit, ModulatorID::fromRaw (id));
+            break;
         case Song::Part::transport:
             reconcileTransport (edit);
             break;

@@ -110,7 +110,7 @@ TEST_CASE ("The compressor's editor shows its characters, its knobs and its curv
     mouse.release();
     CHECK (song.valueOf ("point2X") < curves::axisForDecibels (-18.0f) - 0.02f);
     CHECK (song.valueOf ("point2Y") == doctest::Approx (curves::axisForDecibels (-18.0f)).epsilon (1.0e-4));
-    CHECK (phazite::describeUndo (song.edit.get()) == juce::String ("Undo Move Point"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*song.edit)) == juce::String ("Undo Move Point"));
 
     phazite::undo (*song.edit);
     editor.refresh();
@@ -192,7 +192,7 @@ TEST_CASE ("The compressor's characters are a row of buttons: a click picks one 
     phazite::test::Mouse mouse (editor.getCharacterButton (3));
     mouse.click (editor.getCharacterButton (3).getLocalBounds().getCentre());
     CHECK (song.valueOf ("character") == doctest::Approx ((float) Compressor::Character::opto));
-    CHECK (phazite::describeUndo (song.edit.get()) == juce::String ("Undo Change Character"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*song.edit)) == juce::String ("Undo Change Character"));
     CHECK (editor.getCharacterButton (3).getToggleState());
     CHECK_FALSE (editor.getCharacterButton (0).getToggleState());
 

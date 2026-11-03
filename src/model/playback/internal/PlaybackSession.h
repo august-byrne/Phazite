@@ -26,6 +26,7 @@
 namespace phazite
 {
 class AudioIO;
+class Song;
 class PlaybackHost;
 class Take;
 
@@ -131,6 +132,8 @@ private:
 // (isPlayingProject()), or nullptr while Tracktion's does.
 PlaybackSession* findSession (const te::Edit&);
 PlaybackSession* findPlayingSession (const te::Edit&);
+PlaybackSession* findSession (const Song&); // the same by the Edit's song
+PlaybackSession* findPlayingSession (const Song&);
 
 // A parameter's value as Phazite's engine played it last, while the engine plays the parameter's project and its automation
 // or modulation moves it (SongPlayer::getPlayedValue()), with its modulation or without; nothing otherwise, while its value

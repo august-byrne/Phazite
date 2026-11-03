@@ -76,7 +76,7 @@ struct Song
         return all.joinIntoString (" ");
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
 
     void undo() { phazite::undo (*edit); }
 

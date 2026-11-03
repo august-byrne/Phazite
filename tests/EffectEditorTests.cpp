@@ -50,7 +50,7 @@ struct Song
     ~Song() { plugin = nullptr; }
 
     float valueOf (const char* id) const { return plugin->getAutomatableParameterByID (id)->getCurrentValue(); }
-    juce::String describeUndo() const { return phazite::describeUndo (edit.get()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     te::Plugin::Ptr plugin;

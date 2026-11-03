@@ -73,7 +73,7 @@ struct Song
         return ids;
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (&edit()); }
+    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (edit())); }
 
     phazite::test::TemporaryFolder temp;
     std::unique_ptr<phazite::Project> project;

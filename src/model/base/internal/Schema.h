@@ -158,6 +158,17 @@ inline const juce::Identifier channelPan { "pan" };
 inline const juce::Identifier channelFader { "fader" };
 inline const juce::Identifier channelVCA { "vca" };
 
+// The parameters of a channel's fader and of a send, by the IDs their curves and lanes name them with (curveParameter,
+// laneParameter): a track's, a return's or a bus's volume and pan, the master's, a plain folder's VCA's volume, and a send's
+// level. A volume and a send's level are a fader's position from 0 to 1 (engine/nodes/Channel.h: faderPositionToDecibels()),
+// a pan from -1 (left) to 1 (right). song
+inline constexpr const char* faderVolume = "volume";
+inline constexpr const char* faderPan = "pan";
+inline constexpr const char* masterVolume = "master volume";
+inline constexpr const char* masterPan = "master pan";
+inline constexpr const char* vcaVolume = "vca";
+inline constexpr const char* sendLevelParameter = "send level";
+
 // On a track's TRACK (T1, step 8). true, or none: the track plays its frozen file (model/mixer/internal/Freeze.h), which is
 // in the project's Cache folder, in place of its clips and the devices before its freeze point. Neither freezing nor
 // unfreezing is an undo step; a track whose file is gone as the project opens plays live.
@@ -225,7 +236,7 @@ inline const juce::Identifier laneCollapsed { "collapsed" };
 // The song's devices (model/mixer/internal/Mixer.h; docs/tracktion-migration.md, T1 step 5): each track's, a folder's (as a
 // bus) and the master's, in the order its sound goes through them, an instrument first, which Tracktion's devices mirror,
 // each with what it is set to, and each container with its devices. A device is the song's first, which the mirror makes
-// Tracktion's from (a preset's are still made in Tracktion first: docs/tracktion-migration.md, T6 step 6).
+// Tracktion's from (a preset's are still made in Tracktion first: docs/tracktion-migration.md, T6 step 6). song
 
 // Child of TRACK and of MASTER: a device. On DEVICE: its ID (DeviceID, of the song's: Song::makeID()); its type:
 // the typeID of one of Phazite's own (src/devices/<area>/: "phaziteEq"), deviceIsPlugin for a plug-in, or the type of one

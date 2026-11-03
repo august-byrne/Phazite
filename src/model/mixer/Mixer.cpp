@@ -147,10 +147,10 @@ namespace
         if (! state.isValid())
             return;
 
-        if (parameterID == "volume" || parameterID == "master volume" || parameterID == "vca")
+        if (parameterID == schema::faderVolume || parameterID == schema::masterVolume || parameterID == schema::vcaVolume)
             setChannelValue (state, schema::channelVolume, faderPositionToDecibels (value),
                              state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f, getUndo (song));
-        else if (parameterID == "pan" || parameterID == "master pan")
+        else if (parameterID == schema::faderPan || parameterID == schema::masterPan)
             setChannelValue (state, schema::channelPan, value, 0.0f, getUndo (song));
     }
 
@@ -626,9 +626,9 @@ juce::String getVolumeParameterID (const Song& song, TrackID channel)
     const auto state = findChainState (song, channel);
 
     if (state.hasType (schema::MASTER))
-        return "master volume";
+        return schema::masterVolume;
 
-    return state.hasProperty (schema::channelVCA) ? "vca" : "volume";
+    return state.hasProperty (schema::channelVCA) ? schema::vcaVolume : schema::faderVolume;
 }
 
 juce::String getPanParameterID (const Song& song, TrackID channel)
@@ -636,9 +636,9 @@ juce::String getPanParameterID (const Song& song, TrackID channel)
     const auto state = findChainState (song, channel);
 
     if (state.hasType (schema::MASTER))
-        return "master pan";
+        return schema::masterPan;
 
-    return state.hasProperty (schema::channelVCA) ? juce::String() : juce::String ("pan");
+    return state.hasProperty (schema::channelVCA) ? juce::String() : juce::String (schema::faderPan);
 }
 
 juce::ValueTree findChannelOfFader (const Song& song, DeviceID fader)

@@ -506,9 +506,16 @@ te::AutomatableParameter::Ptr findParameter (const te::Edit& edit, const Paramet
     if (const auto modulator = te::findModifierForID (edit, id))
         return modulator->getAutomatableParameterByID (parameter.parameter);
 
+    // A macro by its list's ID, or by its own (as a handle names it: model/devices/internal/Parameters.h).
     for (auto* macros : te::getAllMacroParameterLists (edit))
+    {
         if (macros->itemID == id)
             return macros->getAutomatableParameterByID (parameter.parameter);
+
+        if (auto macro = macros->getAutomatableParameterByID (parameter.parameter);
+            macro != nullptr && macro->paramID == juce::String (parameter.device.getRaw()))
+            return macro;
+    }
 
     return {};
 }
@@ -958,12 +965,17 @@ void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, Bea
 }
 
 //==============================================================================
-juce::ValueTree findCurveState (const te::Edit& edit, const ParameterRef& parameter)
+juce::ValueTree findCurveState (const Song& song, const ParameterRef& parameter)
 {
     if (! parameter.isValid())
         return {};
 
-    return findCurveIn (findPhaziteState (edit).getChildWithName (schema::AUTOMATION), parameter);
+    return findCurveIn (song.getState().getChildWithName (schema::AUTOMATION), parameter);
+}
+
+juce::ValueTree findCurveState (const te::Edit& edit, const ParameterRef& parameter)
+{
+    return findCurveState (getSong (edit), parameter);
 }
 
 std::vector<juce::ValueTree> getCurveStates (const te::Edit& edit)

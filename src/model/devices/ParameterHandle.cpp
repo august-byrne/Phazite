@@ -1,154 +1,151 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ParameterHandle.h"
-#include "internal/DevicePlugin.h"
 #include "internal/ParameterHandle.h"
+#include "internal/Parameters.h"
+#include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
 struct ParameterHandle::Impl
 {
-    te::SafeSelectable<te::Plugin> plugin;     // a device's parameter,
-    te::SafeSelectable<te::Modifier> modifier; // a modulator's,
-    te::SafeSelectable<te::AudioTrack> macros; // one of a track's macros,
-    te::SafeSelectable<te::RackType> rack;     // or one of a container's
-    juce::String parameterID, undoName;
+    juce::WeakReference<Song> song; // the context can outlive it
+    ParameterRef ref;
+    bool automatable = true; // a device's, a fader's or a send's, which automation names
+    juce::String undoName;
     std::unique_ptr<Gesture> gesture; // the gesture it began,
     bool joined = false;              // or whether it joined another change's
 
-    // A device that may not be there yet, on a track, found each time, which the first change makes
-    // (makeCreatingHandle()), in a step of createName; and the range its parameter shows until then.
-    te::SafeSelectable<te::Track> owner;
-    std::function<te::Plugin*(te::Track&)> locate, create;
+    // A device that may not be there yet, found each time, which the first change makes (makeCreatingHandle()), in a step
+    // of createName; and the range its parameter shows until then.
+    std::function<DeviceID (const Song&)> locate;
+    std::function<DeviceID (Song&)> create;
     juce::String identity; // which device it is, for refersToSameParameter() while it isn't there
     juce::String createName;
     juce::NormalisableRange<float> rangeUntilMade;
 
-    // Where a device's parameter was in its list, once found (find()).
-    mutable int foundAt = -1;
+    mutable std::optional<FoundParameter> cache; // as find() found it last
 
-    te::Plugin* locateDevice() const
+    // Its parameter while the song has it, or nullptr: found again only once its element has left the song or names another
+    // (controls read it at each of the display ticker's ticks: docs/performance-audit.md, U5).
+    const FoundParameter* find() const
     {
-        auto* track = owner.get();
-        return track != nullptr && locate != nullptr ? locate (*track) : nullptr;
+        auto* in = song.get();
+
+        if (in == nullptr)
+            return nullptr;
+
+        auto wanted = ref;
+
+        if (locate != nullptr)
+            wanted.device = locate (*in);
+
+        if (! cache.has_value() || cache->ref != wanted || ! isStillThere (*in, *cache))
+            cache = locateParameter (*in, wanted);
+
+        return cache.has_value() ? &*cache : nullptr;
     }
 
-    te::AutomatableParameter::Ptr find() const
+    ParameterRef findRef() const
     {
-        if (locate != nullptr)
-        {
-            if (auto* p = locateDevice())
-                return p->getAutomatableParameterByID (parameterID);
-
-            return {};
-        }
-
-        // A device's, which controls ask for several times a tick: looked for where it was in the device's list and checked
-        // by its ID, rather than found by name each time (docs/performance-audit.md, U5). Nothing is held between calls: a
-        // parameter mustn't outlive its device, and a plug-in makes its parameters again as it reloads.
-        if (auto* p = plugin.get())
-        {
-            if (auto parameter = p->getAutomatableParameter (foundAt); parameter != nullptr && parameter->paramID == parameterID)
-                return parameter;
-
-            auto parameter = p->getAutomatableParameterByID (parameterID);
-            foundAt = p->indexOfAutomatableParameter (parameter);
-            return parameter;
-        }
-
-        if (auto* m = modifier.get())
-            return m->getAutomatableParameterByID (parameterID);
-
-        if (auto* t = macros.get())
-            if (auto* list = t->getMacroParameterList())
-                return list->getAutomatableParameterByID (parameterID);
-
-        if (auto* r = rack.get())
-            if (auto* list = r->getMacroParameterList())
-                return list->getAutomatableParameterByID (parameterID);
-
-        return {};
+        const auto* parameter = find();
+        return parameter != nullptr ? parameter->ref : ParameterRef();
     }
 
-    const void* getOwner() const
+    std::optional<ParameterDescription> describe() const
     {
-        if (locate != nullptr)
-            return locateDevice();
+        const auto* parameter = find();
+        return parameter != nullptr ? std::optional (describeParameter (*song.get(), *parameter)) : std::nullopt;
+    }
 
-        if (auto* p = plugin.get())
-            return p;
+    juce::String getUndoName (const ParameterRef& found) const
+    {
+        if (undoName.isNotEmpty())
+            return undoName;
 
-        if (auto* m = modifier.get())
-            return m;
+        const auto description = describeParameter (*song.get(), found);
+        return "Change " + (description.has_value() ? description->name : juce::String());
+    }
 
-        if (auto* t = macros.get())
-            return t;
+    // Tracktion's parameter, which records a gesture (and Phazite's automation writer, through it), while it mirrors the
+    // song's (docs/tracktion-migration.md, T6 step 4 moves the writer to references).
+    te::AutomatableParameter::Ptr findTracktionParameter (const ParameterRef& found) const
+    {
+        auto* edit = song.get() != nullptr ? findEdit (*song.get()) : nullptr;
+        return edit != nullptr && found.isValid() ? phazite::findParameter (*edit, found) : nullptr;
+    }
 
-        return rack.get();
+    void beginRecording (const ParameterRef& found) const
+    {
+        if (const auto parameter = findTracktionParameter (found))
+        {
+            parameter->parameterChangeGestureBegin();
+
+            if (auto* session = findPlayingSession (*song.get()))
+                session->getWriter().gestureBegan (*parameter);
+        }
     }
 };
 
-ParameterHandle makeParameterHandle (te::Plugin* plugin, const juce::String& parameterID, const juce::String& undoName)
+ParameterHandle makeParameterHandle (Song& song, const ParameterRef& ref, const juce::String& undoName, bool automatable)
 {
-    if (plugin == nullptr)
+    if (! ref.isValid())
         return {};
 
     auto impl = std::make_unique<ParameterHandle::Impl>();
-    impl->plugin = plugin;
-    impl->parameterID = parameterID;
+    impl->song = &song;
+    impl->ref = ref;
+    impl->automatable = automatable;
     impl->undoName = undoName;
     return ParameterHandle (std::move (impl));
 }
 
-ParameterHandle makeParameterHandle (te::Modifier& modifier, const juce::String& parameterID, const juce::String& undoName)
+ParameterHandle makeCreatingHandle (Song& song, std::function<DeviceID (const Song&)> locate, std::function<DeviceID (Song&)> create,
+                                    const juce::String& identity, const juce::String& parameterID, juce::NormalisableRange<float> range,
+                                    const juce::String& createName, const juce::String& undoName)
 {
     auto impl = std::make_unique<ParameterHandle::Impl>();
-    impl->modifier = &modifier;
-    impl->parameterID = parameterID;
-    impl->undoName = undoName;
-    return ParameterHandle (std::move (impl));
-}
-
-ParameterHandle makeMacroHandle (te::AudioTrack& track, const te::MacroParameter& macro, const juce::String& undoName)
-{
-    auto impl = std::make_unique<ParameterHandle::Impl>();
-    impl->macros = &track;
-    impl->parameterID = macro.paramID;
-    impl->undoName = undoName;
-    return ParameterHandle (std::move (impl));
-}
-
-ParameterHandle makeMacroHandle (te::RackType& container, const te::MacroParameter& macro, const juce::String& undoName)
-{
-    auto impl = std::make_unique<ParameterHandle::Impl>();
-    impl->rack = &container;
-    impl->parameterID = macro.paramID;
-    impl->undoName = undoName;
-    return ParameterHandle (std::move (impl));
-}
-
-ParameterHandle makeCreatingHandle (te::Track& owner, std::function<te::Plugin*(te::Track&)> locate,
-                                    std::function<te::Plugin*(te::Track&)> create, const juce::String& identity,
-                                    const juce::String& parameterID, juce::NormalisableRange<float> range, const juce::String& createName,
-                                    const juce::String& undoName)
-{
-    auto impl = std::make_unique<ParameterHandle::Impl>();
-    impl->owner = &owner;
+    impl->song = &song;
+    impl->ref = { {}, parameterID };
     impl->locate = std::move (locate);
     impl->create = std::move (create);
     impl->identity = identity;
-    impl->parameterID = parameterID;
     impl->rangeUntilMade = range;
     impl->createName = createName;
     impl->undoName = undoName;
     return ParameterHandle (std::move (impl));
 }
 
+ParameterHandle makeParameterHandle (te::Plugin* plugin, const juce::String& parameterID, const juce::String& undoName)
+{
+    return plugin != nullptr ? makeParameterHandle (getSong (plugin->edit), { getDeviceID (*plugin), parameterID }, undoName)
+                             : ParameterHandle();
+}
+
+ParameterHandle makeParameterHandle (te::Modifier& modifier, const juce::String& parameterID, const juce::String& undoName)
+{
+    const auto id = DeviceID::fromRaw (getModulatorID (modifier).getRaw());
+    return makeParameterHandle (getSong (modifier.edit), { id, parameterID }, undoName, false);
+}
+
+ParameterHandle makeMacroHandle (const te::MacroParameter& macro, const juce::String& undoName)
+{
+    const auto id = DeviceID::fromRaw (getModulatorID (macro).getRaw());
+    return makeParameterHandle (getSong (macro.getEdit()), { id, macro.paramID }, undoName, false);
+}
+
+Song* findSong (const ParameterHandle& handle)
+{
+    return handle.getImpl() != nullptr ? handle.getImpl()->song.get() : nullptr;
+}
+
 te::AutomatableParameter::Ptr findParameter (const ParameterHandle& handle)
 {
-    return handle.getImpl() != nullptr ? handle.getImpl()->find() : nullptr;
+    const auto* impl = handle.getImpl();
+    return impl != nullptr ? impl->findTracktionParameter (impl->findRef()) : nullptr;
 }
 
 ParameterHandle::ParameterHandle() = default;
@@ -178,7 +175,7 @@ ParameterHandle::~ParameterHandle()
 
 bool ParameterHandle::isValid() const
 {
-    return exists() || (impl != nullptr && impl->create != nullptr);
+    return exists() || (impl != nullptr && impl->create != nullptr && impl->song.get() != nullptr);
 }
 
 bool ParameterHandle::exists() const
@@ -192,83 +189,63 @@ bool ParameterHandle::refersToSameParameter (const ParameterHandle& other) const
         return impl == other.impl;
 
     if (impl->identity.isNotEmpty() || other.impl->identity.isNotEmpty())
-        return impl->identity == other.impl->identity && impl->parameterID == other.impl->parameterID;
+        return impl->identity == other.impl->identity && impl->ref.parameter == other.impl->ref.parameter;
 
-    return impl->getOwner() == other.impl->getOwner() && impl->parameterID == other.impl->parameterID;
+    return impl->song.get() == other.impl->song.get() && impl->ref == other.impl->ref;
 }
 
 ParameterRef ParameterHandle::getRef() const
 {
-    if (impl == nullptr)
-        return {};
-
-    if (auto* plugin = impl->locate != nullptr ? impl->locateDevice() : impl->plugin.get())
-        return { getDeviceID (*plugin), impl->parameterID };
-
-    return {};
+    return impl != nullptr && impl->automatable ? impl->findRef() : ParameterRef();
 }
 
 juce::String ParameterHandle::getName() const
 {
-    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
-        return parameter->getParameterName();
-
-    return {};
+    const auto description = impl != nullptr ? impl->describe() : std::nullopt;
+    return description.has_value() ? description->name : juce::String();
 }
 
 juce::NormalisableRange<float> ParameterHandle::getRange() const
 {
-    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
-        return parameter->valueRange;
+    if (const auto description = impl != nullptr ? impl->describe() : std::nullopt)
+        return description->range;
 
     return impl != nullptr && impl->create != nullptr ? impl->rangeUntilMade : juce::NormalisableRange<float>();
 }
 
 std::optional<float> ParameterHandle::getDefaultValue() const
 {
-    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
-        return parameter->getDefaultValue();
-
-    return {};
+    const auto description = impl != nullptr ? impl->describe() : std::nullopt;
+    return description.has_value() ? description->defaultValue : std::nullopt;
 }
 
 float ParameterHandle::getValue() const
 {
     // While Phazite's engine plays the project, an automated parameter's value is the one it played.
-    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
-        return getPlayedValue (*parameter, true).value_or (parameter->getCurrentValue());
+    if (const auto* parameter = impl != nullptr ? impl->find() : nullptr)
+        return getCurrentValue (*impl->song.get(), *parameter, true);
 
     return impl != nullptr && impl->create != nullptr ? impl->rangeUntilMade.start : 0.0f; // the start of the range until made
 }
 
 float ParameterHandle::getBaseValue() const
 {
-    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
-        return getPlayedValue (*parameter, false).value_or (parameter->getCurrentBaseValue());
+    if (const auto* parameter = impl != nullptr ? impl->find() : nullptr)
+        return getCurrentValue (*impl->song.get(), *parameter, false);
 
     return impl != nullptr && impl->create != nullptr ? impl->rangeUntilMade.start : 0.0f; // the start of the range until made
 }
 
 juce::String ParameterHandle::getText (float value) const
 {
-    if (const auto parameter = impl != nullptr ? impl->find() : nullptr)
-        return parameter->valueToString (value);
-
-    return {};
+    const auto* parameter = impl != nullptr ? impl->find() : nullptr;
+    return parameter != nullptr ? getParameterText (*impl->song.get(), *parameter, value) : juce::String();
 }
 
 std::optional<devices::ParameterInfo> ParameterHandle::getInfo() const
 {
-    if (auto* device = impl != nullptr ? dynamic_cast<DevicePlugin*> (impl->plugin.get()) : nullptr)
-    {
-        const auto& info = device->getDeviceInfo();
-        const auto id = impl->parameterID.toStdString();
-
-        if (const auto index = devices::findParameter (info, id); index >= 0)
-            return info.parameters[(size_t) index];
-    }
-
-    return {};
+    const auto description = impl != nullptr ? impl->describe() : std::nullopt;
+    return description.has_value() ? description->info : std::nullopt;
 }
 
 void ParameterHandle::beginGesture()
@@ -276,88 +253,77 @@ void ParameterHandle::beginGesture()
     if (impl == nullptr || isInGesture())
         return;
 
-    const auto parameter = impl->find();
+    auto* song = impl->song.get();
 
-    // A device the first value makes: the gesture's step begins now, and a press without a drag makes nothing.
-    if (parameter == nullptr)
-    {
-        auto* track = impl->owner.get();
-
-        if (impl->create == nullptr || track == nullptr)
-            return;
-
-        if (Gesture::isInProgress (track->edit))
-            impl->joined = true;
-        else
-            impl->gesture = std::make_unique<Gesture> (track->edit, impl->createName);
-
+    if (song == nullptr)
         return;
-    }
 
-    // Within another change's gesture (a drag that moves two parameters), it joins that gesture's step.
-    if (Gesture::isInProgress (parameter->getEdit()))
+    const auto found = impl->findRef();
+
+    // A device the first value makes: the gesture's step begins now, and a press without a drag makes nothing. Within
+    // another change's gesture (a drag that moves two parameters), it joins that gesture's step.
+    if (! found.isValid() && impl->create == nullptr)
+        return;
+
+    if (Gesture::isInProgress (*song))
         impl->joined = true;
     else
-        impl->gesture = std::make_unique<Gesture> (
-            parameter->getEdit(), impl->undoName.isNotEmpty() ? impl->undoName : "Change " + parameter->getParameterName());
+        impl->gesture = std::make_unique<Gesture> (*song, found.isValid() ? impl->getUndoName (found) : impl->createName);
 
-    parameter->parameterChangeGestureBegin(); // for automation recording, Tracktion's
-
-    if (auto* session = findPlayingSession (parameter->getEdit())) // and Phazite's engine's
-        session->getWriter().gestureBegan (*parameter);
+    if (found.isValid())
+        impl->beginRecording (found);
 }
 
 void ParameterHandle::setValue (float value)
 {
-    if (impl == nullptr)
+    if (impl == nullptr || impl->song.get() == nullptr)
         return;
 
-    if (impl->find() == nullptr)
+    const auto* found = impl->find();
+
+    if (found == nullptr)
     {
         makeAndSet (value);
         return;
     }
 
-    const auto parameter = impl->find();
+    // As found now, which the change can make it find again.
+    const auto parameter = *found;
+    auto& song = *impl->song.get();
 
     if (isInGesture())
     {
-        setDeviceValue (*parameter, value);
+        setValueSetByHand (song, parameter, value);
         return;
     }
 
-    const UndoStep step (parameter->getEdit(), impl->undoName.isNotEmpty() ? impl->undoName : "Change " + parameter->getParameterName());
-    setDeviceValue (*parameter, value);
+    const UndoStep step (song, impl->getUndoName (parameter.ref));
+    setValueSetByHand (song, parameter, value);
 }
 
 void ParameterHandle::makeAndSet (float value)
 {
-    auto* track = impl->owner.get();
+    auto* song = impl->song.get();
 
-    if (impl->create == nullptr || track == nullptr)
+    if (impl->create == nullptr || song == nullptr)
         return;
 
     // In the gesture's step, or a step of its own for a value set outside a gesture.
     std::optional<UndoStep> step;
 
     if (! isInGesture())
-        step.emplace (track->edit, impl->createName);
+        step.emplace (*song, impl->createName);
 
-    auto* made = impl->create (*track);
-    const auto parameter = made != nullptr ? made->getAutomatableParameterByID (impl->parameterID) : nullptr;
+    const auto made = impl->create (*song);
+    const ParameterRef found { made, impl->ref.parameter };
 
-    if (parameter == nullptr)
+    if (! made.isValid() || ! describeParameter (*song, found).has_value())
         return;
 
     if (isInGesture())
-    {
-        parameter->parameterChangeGestureBegin();
+        impl->beginRecording (found);
 
-        if (auto* session = findPlayingSession (parameter->getEdit()))
-            session->getWriter().gestureBegan (*parameter);
-    }
-
-    setDeviceValue (*parameter, value);
+    setValueSetByHand (*song, found, value);
 }
 
 void ParameterHandle::endGesture()
@@ -365,11 +331,11 @@ void ParameterHandle::endGesture()
     if (! isInGesture())
         return;
 
-    if (const auto parameter = impl->find())
+    if (const auto parameter = impl->findTracktionParameter (impl->findRef()))
     {
         parameter->parameterChangeGestureEnd();
 
-        if (auto* session = findPlayingSession (parameter->getEdit())) // what it wrote joins the gesture's step
+        if (auto* session = findPlayingSession (*impl->song.get())) // what it wrote joins the gesture's step
             session->getWriter().gestureEnded (*parameter);
     }
 

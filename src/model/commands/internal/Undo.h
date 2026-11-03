@@ -15,22 +15,27 @@ namespace phazite
 // Undo and redo for an Edit's song: a step back or forth in its history, after which the mirror brings Tracktion's Edit in
 // line with the song (model/mirror/internal/Mirror.h: reconcileAll()), so that what plays follows it, the values set by
 // hand included. Never Tracktion's Edit::undo() and redo(), whose history only records what the mirror told Tracktion.
+void undo (Song&);
+void redo (Song&);
 void undo (te::Edit&);
 void redo (te::Edit&);
 
-// Whether the Edit has a change to undo, or an undone change to redo.
+// Whether the song has a change to undo, or an undone change to redo.
+bool canUndo (const Song&);
+bool canRedo (const Song&);
 bool canUndo (te::Edit&);
 bool canRedo (te::Edit&);
 
 // FL Studio's undo-or-redo: redoes the change last undone if there is one, else undoes the last change.
+void undoOrRedo (Song&);
 void undoOrRedo (te::Edit&);
 
-// The names menus show for undo and redo: "Undo Change Volume" when the Edit can undo a named step, else "Undo" (also
-// without an Edit); likewise "Redo ...". describeUndoOrRedo() is describeRedo() when the Edit can redo, else
+// The names menus show for undo and redo: "Undo Change Volume" when the song can undo a named step, else "Undo" (also
+// without a song); likewise "Redo ...". describeUndoOrRedo() is describeRedo() when the song can redo, else
 // describeUndo().
-juce::String describeUndo (te::Edit*);
-juce::String describeRedo (te::Edit*);
-juce::String describeUndoOrRedo (te::Edit*);
+juce::String describeUndo (Song*);
+juce::String describeRedo (Song*);
+juce::String describeUndoOrRedo (Song*);
 
 //==============================================================================
 // Begins a named undo step: it holds every change made through the song's history until the next step begins. Make one
@@ -61,6 +66,7 @@ private:
 class Gesture
 {
 public:
+    Gesture (Song&, const juce::String& name);
     Gesture (te::Edit&, const juce::String& name);
     ~Gesture();
 
@@ -68,11 +74,12 @@ public:
     void rollBack();
     bool isOpen() const noexcept { return open; }
 
-    // Whether a gesture is in progress for the Edit's song, which a change that starts meanwhile can join.
+    // Whether a gesture is in progress for a song (an Edit's), which a change that starts meanwhile can join.
+    static bool isInProgress (Song&);
     static bool isInProgress (te::Edit&);
 
 private:
-    te::Edit& edit;
+    Song& song;
     bool open = false;
 
     JUCE_DECLARE_NON_COPYABLE (Gesture)
@@ -86,6 +93,7 @@ private:
 class RecordingStep
 {
 public:
+    RecordingStep (Song&, const juce::String& name);
     RecordingStep (te::Edit&, const juce::String& name);
 
 private:

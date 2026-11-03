@@ -270,6 +270,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/ParameterHandle.cpp
     src/model/devices/ParameterHandle.h
     src/model/devices/ParameterRef.h
+    src/model/devices/Parameters.cpp
     src/model/devices/PluginParameters.cpp
     src/model/devices/WavetablePlugin.cpp
     src/model/devices/Wavetables.cpp
@@ -282,6 +283,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/internal/DrumKit.h
     src/model/devices/internal/DrumSamplerPlugin.h
     src/model/devices/internal/ParameterHandle.h
+    src/model/devices/internal/Parameters.h
     src/model/devices/internal/PluginParameters.h
     src/model/devices/internal/WavetablePlugin.h
     src/model/devices/internal/Wavetables.h
@@ -1007,6 +1009,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/NotesModelTests.cpp
         tests/PanelLayoutTests.cpp
         tests/PanelsTests.cpp
+        tests/ParameterDescriptionTests.cpp
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp

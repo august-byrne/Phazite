@@ -99,7 +99,7 @@ TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the c
     REQUIRE (ceilingKnob != nullptr);
     ceilingKnob->setValue (-3.0, juce::sendNotificationSync);
     CHECK (plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue() == doctest::Approx (-3.0f));
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Ceiling"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Ceiling"));
 
     // Dragging the ceiling's line down in the history lowers it, as one undo step; a double-click puts it back.
     auto& history = editor.getDisplay().getHistory();
@@ -111,7 +111,7 @@ TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the c
     mouse.release();
     const auto lowered = plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue();
     CHECK (lowered < -4.0f);
-    CHECK (phazite::describeUndo (edit.get()) == juce::String ("Undo Change Ceiling"));
+    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Ceiling"));
     phazite::undo (*edit);
     CHECK (plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue() == doctest::Approx (-3.0f));
 
