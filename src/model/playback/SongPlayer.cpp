@@ -178,10 +178,10 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::vector<engine::TempoMap::Tempo> tempos;
     std::vector<engine::TempoMap::TimeSignature> signatures;
 
-    for (const auto& change : getTempoChanges (edit))
+    for (const auto& change : getTempoChanges (getSong (edit)))
         tempos.push_back ({ change.beat.inBeats(), change.bpm });
 
-    for (const auto& change : getTimeSignatureChanges (edit))
+    for (const auto& change : getTimeSignatureChanges (getSong (edit)))
         signatures.push_back ({ change.beat.inBeats(), change.signature.numerator, change.signature.denominator });
 
     plan->tempo = engine::TempoMap (std::move (tempos), std::move (signatures), sampleRate);

@@ -26,7 +26,7 @@ struct Tracks
         for (int i = 0; i < numTracks; ++i)
             phazite::setTrackName (*te::getAudioTracks (*edit)[i], juce::String::charToString ((juce::juce_wchar) ('A' + i)));
 
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
         setEdit (context, edit.get());
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addTrackCommands (registry, selection);
@@ -72,7 +72,7 @@ struct Tracks
             selection.addToSelection ((*this)[name]);
     }
 
-    juce::String getUndoName() const { return phazite::getSongUndoManager (*edit).getUndoDescription(); }
+    juce::String getUndoName() const { return phazite::getSong (*edit).getUndoManager().getUndoDescription(); }
 
     // How the playlist shows a track's height, through the model's row of it.
     phazite::TrackRow rowOf (const te::Track& track) const
@@ -275,7 +275,7 @@ TEST_CASE ("Track heights stay within limits, and change for the selection or al
 
     phazite::setSavedTrackHeight (a, 0);
     CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::minimum);
-    CHECK_FALSE (phazite::getSongUndoManager (*tracks.edit).canUndo()); // heights aren't undo steps
+    CHECK_FALSE (phazite::getSong (*tracks.edit).getUndoManager().canUndo()); // heights aren't undo steps
 
     tracks.select ({ "B" });
     REQUIRE (tracks.registry.invoke ("track.taller"));
@@ -321,7 +321,7 @@ TEST_CASE ("A track collapses to a thin row by its command, or by getting shorte
     tracks.setShownHeight (a, 29);
     CHECK_FALSE (phazite::isCollapsed (a));
     CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::minimum);
-    CHECK_FALSE (phazite::getSongUndoManager (*tracks.edit).canUndo()); // collapsing changes the view, as heights do
+    CHECK_FALSE (phazite::getSong (*tracks.edit).getUndoManager().canUndo()); // collapsing changes the view, as heights do
 
     // A collapsed folder keeps its height, shorter than a track's at first (its tracks are hidden instead), and doesn't collapse
     // by resizing.
@@ -390,7 +390,7 @@ TEST_CASE ("Pinning a track is kept in the project, but isn't an undo step")
     REQUIRE (tracks.registry.invoke ("track.pin"));
     CHECK (phazite::isPinned (*tracks["B"]));
     CHECK (tracks.registry.find ("track.pin")->isTicked());
-    CHECK_FALSE (phazite::getSongUndoManager (*tracks.edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*tracks.edit).getUndoManager().canUndo());
 
     REQUIRE (tracks.registry.invoke ("track.pin"));
     CHECK_FALSE (phazite::isPinned (*tracks["B"]));
@@ -460,10 +460,10 @@ TEST_CASE ("The track switches work on lists of tracks")
     }
 
     // Collapsing and pinning change the view, so they aren't undo steps.
-    phazite::getSongUndoManager (*tracks.edit).clearUndoHistory();
+    phazite::getSong (*tracks.edit).getUndoManager().clearUndoHistory();
     phazite::toggleTracksCollapsed (both);
     phazite::toggleTracksPinned (both);
-    CHECK_FALSE (phazite::getSongUndoManager (*tracks.edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*tracks.edit).getUndoManager().canUndo());
 
     SUBCASE ("A track in a muted folder isn't muted itself, and Mute switches its own switch")
     {
@@ -686,15 +686,15 @@ TEST_CASE ("Renaming a track is an undo step, and an empty name gives it its num
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     auto* track = te::getAudioTracks (*edit)[0];
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     phazite::renameTrack (*track, "  Bass ");
     CHECK (track->getName() == juce::String ("Bass"));
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Rename Track"));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Rename Track"));
 
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     phazite::renameTrack (*track, "Bass");
-    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
 
     phazite::renameTrack (*track, "");
     CHECK (track->getName() != juce::String ("Bass"));

@@ -79,14 +79,14 @@ TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is on
     phazite::setTrackInput (context, track, "1+2");
     CHECK (phazite::getTrackInput (context, track) == juce::String ("1+2"));
     CHECK (phazite::getLastInput (context) == juce::String ("1+2"));
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Input"));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Input"));
     phazite::setArmed (context, track, true);
     CHECK (phazite::isArmed (context, track));
     CHECK (phazite::getArmedTracks (context) == std::vector { track });
     CHECK (phazite::getInputMonitoring (context, track) == phazite::InputMonitoring::whileArmed);
     phazite::setInputMonitoring (context, track, phazite::InputMonitoring::never);
     CHECK (phazite::getInputMonitoring (context, track) == phazite::InputMonitoring::never);
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Input Monitoring"));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Input Monitoring"));
 
     // Undoing the input leaves the track without one, and disarmed; arming is no undo step and isn't saved.
     phazite::undo (*edit);

@@ -881,7 +881,7 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
     settings.setProperty (te::IDs::programNum, (int) saved[keys::program], nullptr);
     const UndoStep step (*edit, "Load Preset " + file.getFileNameWithoutExtension());
 
-    if (! getSongUndoManager (*edit).perform (new PluginSettingsAction (*plugin, settings)))
+    if (! getSong (*edit).getUndoManager().perform (new PluginSettingsAction (*plugin, settings)))
         return false;
 
     applyMix (*plugin, saved);

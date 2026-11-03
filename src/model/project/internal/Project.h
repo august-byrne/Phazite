@@ -73,7 +73,7 @@ public:
     juce::File getBackupsFolder() const { return getFolder().getChildFile ("Backups"); }
     juce::File getCacheFolder() const { return getCacheFolder (file); }
 
-    // The song, which the project file holds (phazite::getPhaziteState(), model/base/internal/Schema.h).
+    // The song, which the project file holds (phazite::getSong(), model/base/internal/Schema.h).
     juce::ValueTree getPhaziteState();
 
     // Whether the project holds anything it didn't hold when it was opened (with Phazite's parts added) or last saved,

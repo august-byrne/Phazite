@@ -372,7 +372,7 @@ std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType typ
     if (! channel.isValid() || track.getModifierList() == nullptr)
         return {};
 
-    const auto id = ModulatorID::fromRaw (makeID (edit));
+    const auto id = ModulatorID::fromRaw (getSong (edit).makeID());
     juce::ValueTree modulator (schema::MODULATOR);
     modulator.setProperty (schema::modulatorID, (juce::int64) id.getRaw(), nullptr);
     modulator.setProperty (schema::modulatorType, schema::preset::modulatorTypeNames[(size_t) type], nullptr);
@@ -389,7 +389,7 @@ std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType typ
     if (values.getNumProperties() > 0)
         modulator.appendChild (values, nullptr);
 
-    channel.appendChild (modulator, &getSongUndoManager (edit));
+    channel.appendChild (modulator, &getSong (edit).getUndoManager());
     mirror::reconcileModulation (edit);
     auto added = findModulator (edit, id);
 
@@ -408,7 +408,7 @@ std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType typ
 te::MacroParameter* addMacro (te::MacroParameterList& macros, const juce::String& name)
 {
     auto& edit = macros.edit;
-    const auto id = ModulatorID::fromRaw (makeID (edit));
+    const auto id = ModulatorID::fromRaw (getSong (edit).makeID());
 
     // A track's is the song's (Schema.h: MACRO), which the mirror makes; a container's not yet on a channel (a preset's) is
     // Tracktion's until it is.
@@ -417,7 +417,7 @@ te::MacroParameter* addMacro (te::MacroParameterList& macros, const juce::String
         juce::ValueTree macro (schema::MACRO);
         macro.setProperty (schema::modulatorID, (juce::int64) id.getRaw(), nullptr);
         macro.setProperty (schema::macroName, name, nullptr);
-        track.appendChild (macro, &getSongUndoManager (edit));
+        track.appendChild (macro, &getSong (edit).getUndoManager());
         mirror::reconcileModulation (edit);
     }
     else
@@ -447,7 +447,7 @@ void renameMacro (te::MacroParameter& macro, const juce::String& name)
 
     if (auto state = findModulatorState (edit, getModulatorID (macro)); state.isValid())
     {
-        state.setProperty (schema::macroName, trimmed, &getSongUndoManager (edit));
+        state.setProperty (schema::macroName, trimmed, &getSong (edit).getUndoManager());
         mirror::reconcileModulation (edit);
     }
     else
@@ -511,7 +511,7 @@ void removeModulator (const ModulatorAccess& modulator)
 
     if (auto state = findModulatorState (edit, modulator.getID()); state.isValid())
     {
-        state.getParent().removeChild (state, &getSongUndoManager (edit));
+        state.getParent().removeChild (state, &getSong (edit).getUndoManager());
         mirror::reconcileModulation (edit);
     }
 }
@@ -546,9 +546,9 @@ void setModulatorOn (const ModulatorAccess& modulator, bool on)
         return;
 
     if (on)
-        state.removeProperty (schema::deviceOff, &getSongUndoManager (modifier->edit));
+        state.removeProperty (schema::deviceOff, &getSong (modifier->edit).getUndoManager());
     else
-        state.setProperty (schema::deviceOff, true, &getSongUndoManager (modifier->edit));
+        state.setProperty (schema::deviceOff, true, &getSong (modifier->edit).getUndoManager());
 
     mirror::reconcileModulation (modifier->edit);
 
@@ -567,7 +567,7 @@ void setModulatorStep (const ModulatorAccess& modulator, int index, float value)
     auto steps = getModulatorSteps (state);
     steps.resize (std::max (steps.size(), (size_t) index + 1), 0.0f);
     steps[(size_t) index] = juce::jlimit (-1.0f, 1.0f, value);
-    writeSteps (state, steps, &getSongUndoManager (modifier->edit));
+    writeSteps (state, steps, &getSong (modifier->edit).getUndoManager());
     mirror::reconcileModulation (modifier->edit);
 }
 
@@ -628,7 +628,7 @@ void setModulation (const ModulatorAccess& modulator, te::AutomatableParameter& 
         return;
 
     // In the song, by the parameter (its device's ID as a curve names it), which the mirror plays.
-    auto* undo = &getSongUndoManager (edit);
+    auto* undo = &getSong (edit).getUndoManager();
     const auto ref = getParameterRef (parameter);
     auto modulates = findModulatesState (state, ref);
 
@@ -652,7 +652,7 @@ void removeModulation (const ModulatorAccess& modulator, te::AutomatableParamete
     if (auto modulates = findModulatesState (findModulatorState (edit, modulator.getID()), getParameterRef (parameter));
         modulates.isValid())
     {
-        modulates.getParent().removeChild (modulates, &getSongUndoManager (edit));
+        modulates.getParent().removeChild (modulates, &getSong (edit).getUndoManager());
         mirror::reconcileModulation (edit);
     }
 

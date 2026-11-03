@@ -33,7 +33,7 @@ struct Screen
     {
         phazite::ensureTracks (*edit, 2);
         setEdit (context, edit.get());
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
         phazite::test::dispatchPendingMessages();
     }
 
@@ -160,7 +160,7 @@ TEST_CASE ("Selected notes show the range of their values, which a step changes 
     const auto clip = phazite::addMidiClipAt (screen.context, screen.track (0), BeatPosition());
     const auto c4 = phazite::addNote (screen.context, clip, 60, BeatPosition(), BeatDuration::fromBeats (1.0), 64);
     const auto e4 = phazite::addNote (screen.context, clip, 64, BeatPosition::fromBeats (1.0), BeatDuration::fromBeats (0.5), 100);
-    phazite::getSongUndoManager (*screen.edit).clearUndoHistory();
+    phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
     auto& selection = screen.context.getSongSelection();
     selection.setNoteClips ({ clip });
     selection.selectNotes ({ c4, e4 });

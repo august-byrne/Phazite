@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Mirror.h"
+#include "model/base/internal/Schema.h"
 #include "model/transport/internal/Tempo.h"
 
 namespace phazite::mirror
@@ -13,7 +14,7 @@ namespace
 void reconcileTempoMap (te::Edit& edit)
 {
     auto& sequence = edit.tempoSequence;
-    const auto tempos = getTempoChanges (edit);
+    const auto tempos = getTempoChanges (getSong (edit));
 
     while (sequence.getNumTempos() > (int) tempos.size())
         sequence.removeTempo (sequence.getNumTempos() - 1, false);
@@ -43,7 +44,7 @@ void reconcileTempoMap (te::Edit& edit)
             tempo->setBpm (change.bpm);
     }
 
-    const auto signatures = getTimeSignatureChanges (edit);
+    const auto signatures = getTimeSignatureChanges (getSong (edit));
 
     while (sequence.getNumTimeSigs() > (int) signatures.size())
         sequence.removeTimeSig (sequence.getNumTimeSigs() - 1);

@@ -54,50 +54,50 @@ TEST_CASE ("The tempo changes as one undo step, within Tracktion's limits, and c
     auto* track = te::getAudioTracks (*edit)[0];
     auto* clip = phazite::insertMidiClip (*track, { te::BeatPosition::fromBeats (8.0), te::BeatPosition::fromBeats (12.0) }, nullptr);
     REQUIRE (clip != nullptr);
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (120.0));
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (120.0));
 
     phazite::setTempo (*edit, 90.004);
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (90.0));
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Tempo"));
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (90.0));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Tempo"));
     CHECK (clip->getStartBeat().inBeats() == doctest::Approx (8.0));
     CHECK (clip->getPosition().getStart().inSeconds() == doctest::Approx (8.0 * 60.0 / 90.0));
 
     phazite::setTempo (*edit, 1000.0);
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (phazite::maxTempo));
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (phazite::maxTempo));
     phazite::setTempo (*edit, 1.0);
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (phazite::minTempo));
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (phazite::minTempo));
 
     phazite::undo (*edit);
     phazite::undo (*edit);
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (90.0));
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (90.0));
 
     // The same tempo again changes nothing.
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     phazite::setTempo (*edit, 90.0);
-    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
 }
 
 TEST_CASE ("The time signature changes as one undo step, to one Phazite takes")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
-    CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 4, 4 });
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    CHECK (phazite::getTimeSignature (phazite::getSong (*edit)) == phazite::TimeSignature { 4, 4 });
 
-    phazite::setTimeSignature (*edit, { 6, 8 });
-    CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 6, 8 });
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Time Signature"));
+    phazite::setTimeSignature (phazite::getSong (*edit), { 6, 8 });
+    CHECK (phazite::getTimeSignature (phazite::getSong (*edit)) == phazite::TimeSignature { 6, 8 });
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Time Signature"));
 
     // Not 0 beats, nor a beat of a third of a note.
     for (const auto invalid : { phazite::TimeSignature { 0, 4 }, phazite::TimeSignature { 4, 3 }, phazite::TimeSignature { 33, 4 } })
     {
         CHECK_FALSE (phazite::isValid (invalid));
-        phazite::setTimeSignature (*edit, invalid);
-        CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 6, 8 });
+        phazite::setTimeSignature (phazite::getSong (*edit), invalid);
+        CHECK (phazite::getTimeSignature (phazite::getSong (*edit)) == phazite::TimeSignature { 6, 8 });
     }
 
     phazite::undo (*edit);
-    CHECK (phazite::getTimeSignature (*edit) == phazite::TimeSignature { 4, 4 });
+    CHECK (phazite::getTimeSignature (phazite::getSong (*edit)) == phazite::TimeSignature { 4, 4 });
 }
 
 TEST_CASE ("The tempo map is Phazite's own, which Tracktion's tempo sequence mirrors one way, undo and redo too")
@@ -113,32 +113,32 @@ TEST_CASE ("The tempo map is Phazite's own, which Tracktion's tempo sequence mir
 
     // A change goes into the map, and Tracktion follows; an undo puts both back, and a redo both again.
     phazite::setTempo (edit, 96.5);
-    phazite::setTimeSignature (edit, { 7, 8 });
+    phazite::setTimeSignature (phazite::getSong (edit), { 7, 8 });
     CHECK ((double) map.getChildWithName (phazite::schema::TEMPO)[phazite::schema::bpm] == doctest::Approx (96.5));
     CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (96.5));
     CHECK (edit.tempoSequence.getTimeSig (0)->numerator.get() == 7);
     CHECK (edit.tempoSequence.getTimeSig (0)->denominator.get() == 8);
 
     phazite::undo (edit);
-    CHECK (phazite::getTimeSignature (edit) == phazite::TimeSignature { 4, 4 });
+    CHECK (phazite::getTimeSignature (phazite::getSong (edit)) == phazite::TimeSignature { 4, 4 });
     CHECK (edit.tempoSequence.getTimeSig (0)->numerator.get() == 4);
     phazite::undo (edit);
-    CHECK (phazite::getTempo (edit) == doctest::Approx (120.0));
+    CHECK (phazite::getTempo (phazite::getSong (edit)) == doctest::Approx (120.0));
     CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (120.0));
     phazite::redo (edit);
-    CHECK (phazite::getTempo (edit) == doctest::Approx (96.5));
+    CHECK (phazite::getTempo (phazite::getSong (edit)) == doctest::Approx (96.5));
     CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (96.5));
 
     // One way: what Tracktion holds is never the song's tempo; the mirror puts it back as the map says, and once they
     // agree, it changes nothing.
     edit.tempoSequence.getTempo (0)->setBpm (150.0);
-    CHECK (phazite::getTempo (edit) == doctest::Approx (96.5));
+    CHECK (phazite::getTempo (phazite::getSong (edit)) == doctest::Approx (96.5));
     phazite::mirror::reconcileTempoMap (edit);
     CHECK (edit.tempoSequence.getTempo (0)->getBpm() == doctest::Approx (96.5));
 
-    phazite::getSongUndoManager (edit).clearUndoHistory();
+    phazite::getSong (edit).getUndoManager().clearUndoHistory();
     phazite::mirror::reconcileTempoMap (edit);
-    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
+    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
 }
 
 TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite renders, and leaves the others at their speed")
@@ -156,10 +156,10 @@ TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite r
     CHECK (phazite::getClipTempo (*loop) == doctest::Approx (120.0));
     CHECK_FALSE (phazite::isRendered (*loop)); // at its own tempo it plays its file
     CHECK (phazite::getClipTempo (*sound) == doctest::Approx (0.0));
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     phazite::setTempo (*edit, 100.0);
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Tempo"));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Tempo"));
 
     // The loop keeps its beats: eight of them, stretched from its file's four seconds, played from a render.
     CHECK (loop->getStartBeat().inBeats() == doctest::Approx (0.0));
@@ -182,7 +182,7 @@ TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite r
 
     // Undone, it plays its file again; redone, its render, at once.
     phazite::undo (*edit);
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (120.0));
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (120.0));
     CHECK_FALSE (phazite::isRendered (*loop));
     CHECK (loop->getPosition().getLength().inSeconds() == doctest::Approx (4.0));
     phazite::redo (*edit);
@@ -341,11 +341,11 @@ TEST_CASE ("Patterns follow the tempo, their notes on their beats, unless the so
     for (int i = 0; i < 4; ++i)
         phazite::test::addMidiNote (*clip, 60, te::BeatPosition::fromBeats (i), te::BeatDuration::fromBeats (0.5), 100);
 
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     const auto noteBeat = [&clip] (int i) { return clip->getSequence().getNotes()[i]->getStartBeat().inBeats(); };
 
     // Following, they play twice as slowly at half the tempo.
-    CHECK (phazite::doPatternsFollowTempo (*edit));
+    CHECK (phazite::doPatternsFollowTempo (phazite::getSong (*edit)));
     phazite::setTempo (*edit, 60.0);
     CHECK (noteBeat (3) == doctest::Approx (3.0));
     CHECK (clip->getLengthInBeats().inBeats() == doctest::Approx (4.0));
@@ -355,10 +355,10 @@ TEST_CASE ("Patterns follow the tempo, their notes on their beats, unless the so
     // in, and the clip, starting on the same beat, lasts as many seconds.
     {
         const phazite::UndoStep step (*edit, "Patterns Follow Tempo");
-        phazite::togglePatternsFollowTempo (*edit);
+        phazite::togglePatternsFollowTempo (phazite::getSong (*edit));
     }
 
-    CHECK_FALSE (phazite::doPatternsFollowTempo (*edit));
+    CHECK_FALSE (phazite::doPatternsFollowTempo (phazite::getSong (*edit)));
     phazite::setTempo (*edit, 60.0);
     CHECK (noteBeat (3) == doctest::Approx (1.5));
     CHECK (clip->getSequence().getNotes()[3]->getLengthBeats().inBeats() == doctest::Approx (0.25));
@@ -400,6 +400,6 @@ TEST_CASE ("What a tempo change stretches: every sample follows it or none does,
     phazite::toggleSamplesFollowTempo (*edit);
     CHECK (phazite::getTempoStretch (*edit).samplesFollowing == 0);
 
-    phazite::togglePatternsFollowTempo (*edit);
+    phazite::togglePatternsFollowTempo (phazite::getSong (*edit));
     CHECK_FALSE (phazite::getTempoStretch (*edit).patternsFollow);
 }

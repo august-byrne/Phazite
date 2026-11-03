@@ -175,7 +175,7 @@ TEST_CASE ("A channel's fader is the song's, by its ID, which Tracktion's and an
 
     // Built again from the song alone: the same faders, the master's too, at the song's volumes.
     phazite::setChannelVolume (*mix.a, -6.0f);
-    const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getPhaziteState (*mix.edit).createCopy());
+    const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getSong (*mix.edit).getState().createCopy());
     REQUIRE (rebuilt != nullptr);
     auto* rebuiltA = dynamic_cast<te::AudioTrack*> (te::findTrackForID (*rebuilt, mix.a->itemID));
     auto* rebuiltFolder = dynamic_cast<te::FolderTrack*> (te::findTrackForID (*rebuilt, folder->itemID));
@@ -457,7 +457,7 @@ TEST_CASE ("New return tracks are numbered in turn")
 TEST_CASE ("The device menus' choices are undo steps named after the device")
 {
     Mix mix;
-    auto& undo = phazite::getSongUndoManager (*mix.edit);
+    auto& undo = phazite::getSong (*mix.edit).getUndoManager();
     const auto types = phazite::getDeviceTypes (phazite::test::getEngine());
     const auto find = [&types] (const char* type)
     {
@@ -488,7 +488,7 @@ TEST_CASE ("The device menus' choices are undo steps named after the device")
 TEST_CASE ("The mixer strip's edits are undo steps of their own, and a mix drag is one")
 {
     Mix mix;
-    auto& undo = phazite::getSongUndoManager (*mix.edit);
+    auto& undo = phazite::getSong (*mix.edit).getUndoManager();
     auto* eq = phazite::insertDevice (*mix.a, mix.create ("phaziteEq"));
     auto* compressor = phazite::insertDevice (*mix.a, mix.create ("phaziteCompressor"));
     REQUIRE (eq != nullptr);

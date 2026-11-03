@@ -35,7 +35,7 @@ struct Song
         compressor = edit->getPluginCache().createNewPlugin (Compressor::typeID, {});
         REQUIRE (phazite::insertDevice (*tracks[1], compressor) != nullptr);
         phazite::test::settle();
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     }
 
     float valueOf (const char* id) const { return compressor->getAutomatableParameterByID (id)->getCurrentValue(); }

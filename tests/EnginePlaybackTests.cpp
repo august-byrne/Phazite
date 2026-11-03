@@ -51,7 +51,7 @@ TEST_CASE ("The engine's tempo map places beats where Tracktion's tempo sequence
     for (int round = 0; round < 8; ++round)
     {
         // Tempos and time signatures along the song, in its tempo map, which Tracktion's mirrors.
-        auto map = phazite::getPhaziteState (edit).getChildWithName (phazite::schema::TEMPOMAP);
+        auto map = phazite::getSong (edit).getState().getChildWithName (phazite::schema::TEMPOMAP);
         REQUIRE (map.isValid());
         map.removeAllChildren (nullptr);
         auto beat = 0.0;

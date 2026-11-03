@@ -53,7 +53,7 @@ struct Song
 
         phazite::addAutomationPoint (context, other, { beats (0.0), 0.3f });
         phazite::addAutomationPoint (context, other, { beats (16.0), 0.3f });
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }

@@ -36,7 +36,7 @@ struct LaneScreen
         setEdit (context, edit.get());
         volume = phazite::getVolume (context, trackID (0)).getRef();
         phazite::showAutomationLane (context, volume);
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
         phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
@@ -123,7 +123,7 @@ TEST_CASE ("Dragging a point moves it on the grid as one step, and a double-clic
     LaneScreen screen;
     phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (4.0), 0.5f });
     phazite::test::dispatchPendingMessages();
-    phazite::getSongUndoManager (*screen.edit).clearUndoHistory();
+    phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
 
     phazite::test::Mouse mouse (screen.lane());
     mouse.press (screen.at (4.0, 0.5f));
@@ -181,7 +181,7 @@ TEST_CASE ("A press on the line adds a point on it, which a drag pulls, as one s
     phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (2.0), 0.2f });
     phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (6.0), 0.6f });
     phazite::test::dispatchPendingMessages();
-    phazite::getSongUndoManager (*screen.edit).clearUndoHistory();
+    phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
     phazite::test::Mouse mouse (screen.lane());
 
     // At beat 3 the line is at 0.3, away from the bend handle in its middle (beat 4).
@@ -451,7 +451,7 @@ TEST_CASE ("Right-clicking a fader shows its menu instead of moving it")
     fader.onContextMenu = [&shown] { ++shown; };
 
     const auto before = fader.getValue();
-    const auto undoBefore = phazite::getSongUndoManager (*screen.edit).getNumActionsInCurrentTransaction();
+    const auto undoBefore = phazite::getSong (*screen.edit).getUndoManager().getNumActionsInCurrentTransaction();
     const auto stepBefore = screen.describeUndo();
     phazite::test::Mouse mouse (fader);
     mouse.press ({ 20, 50 }, juce::ModifierKeys::rightButtonModifier);
@@ -460,5 +460,5 @@ TEST_CASE ("Right-clicking a fader shows its menu instead of moving it")
     CHECK (shown == 1);
     CHECK (fader.getValue() == doctest::Approx (before));
     CHECK (screen.describeUndo() == stepBefore); // no step
-    CHECK (phazite::getSongUndoManager (*screen.edit).getNumActionsInCurrentTransaction() == undoBefore);
+    CHECK (phazite::getSong (*screen.edit).getUndoManager().getNumActionsInCurrentTransaction() == undoBefore);
 }

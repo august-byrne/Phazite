@@ -261,4 +261,35 @@ void reconcileAll (te::Edit& edit)
     reconcileAutomation (edit);
     reconcileTransport (edit);
 }
+
+void reconcile (te::Edit& edit, Song::Part part)
+{
+    switch (part)
+    {
+        case Song::Part::tempoMap:
+            reconcileTempoMap (edit);
+            break;
+        case Song::Part::tracks:
+            reconcileTracks (edit);
+            break;
+        case Song::Part::clips:
+            reconcileClips (edit);
+            break;
+        case Song::Part::automation:
+            reconcileAutomation (edit);
+            break;
+        case Song::Part::devices:
+            reconcileDevices (edit);
+            break;
+        case Song::Part::modulation:
+            reconcileModulation (edit);
+            break;
+        case Song::Part::transport:
+            reconcileTransport (edit);
+            break;
+        case Song::Part::everything:
+            reconcileAll (edit);
+            break;
+    }
+}
 } // namespace phazite::mirror

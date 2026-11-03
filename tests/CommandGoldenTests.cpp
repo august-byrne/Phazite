@@ -212,7 +212,7 @@ struct Script
         one = te::getAudioTracks (edit)[0];
         REQUIRE (one != nullptr);
         phazite::setTrackName (*one, "One");
-        phazite::getSongUndoManager (edit).clearUndoHistory();
+        phazite::getSong (edit).getUndoManager().clearUndoHistory();
 
         setEdit (context, &edit);
         addModelCommands (registry, context);
@@ -231,7 +231,7 @@ struct Script
     {
         REQUIRE_MESSAGE (registry.invoke (id), ("The script runs " + id + ", which is unknown or greyed out there.").toStdString());
 
-        const auto step = phazite::getSongUndoManager (edit).getUndoDescription();
+        const auto step = phazite::getSong (edit).getUndoManager().getUndoDescription();
         undoLines.add (id + ": " + (step.isEmpty() ? juce::String ("(nothing to undo)") : step));
         snapshot (id);
     }
@@ -239,7 +239,7 @@ struct Script
     // A change the script makes itself, as an undo step of its own.
     void setup (const juce::String& what, const std::function<void()>& change)
     {
-        phazite::getSongUndoManager (edit).beginNewTransaction ("Script: " + what);
+        phazite::getSong (edit).getUndoManager().beginNewTransaction ("Script: " + what);
         change();
         snapshot (what);
     }

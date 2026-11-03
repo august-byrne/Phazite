@@ -44,8 +44,8 @@ namespace
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
-        getPhaziteState (edit);
-        ensureTempoMap (edit);
+        getSong (edit).setMirror ([&edit] (Song::Part part) { mirror::reconcile (edit, part); });
+        ensureTempoMap (getSong (edit));
         getTrackList (edit);
         countIDs (edit);
         mirror::reconcileTempoMap (edit);
@@ -57,7 +57,7 @@ namespace
         mirror::reconcileAutomation (edit);
         mirror::reconcileTransport (edit);
         ensureLoudnessMeter (edit);
-        getSongUndoManager (edit).clearUndoHistory();
+        getSong (edit).getUndoManager().clearUndoHistory();
         edit.getUndoManager().clearUndoHistory();
 
         if (! wasChanged)
@@ -310,7 +310,7 @@ Project::~Project()
 
 juce::ValueTree Project::getPhaziteState()
 {
-    return phazite::getPhaziteState (*edit);
+    return phazite::getSong (*edit).getState();
 }
 
 bool Project::hasUnsavedChanges()
@@ -331,7 +331,7 @@ juce::Result Project::save()
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
         storeForSaving (*edit);
 
-        if (! writeProjectFile (phazite::getPhaziteState (*edit), file))
+        if (! writeProjectFile (phazite::getSong (*edit).getState(), file))
             return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ".");
 
         edit->resetChangedStatus(); // Tracktion's flag, which the undo history and plug-ins' own changes set
@@ -360,7 +360,7 @@ juce::Result Project::autosave()
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*edit);
 
-        if (! writeProjectFile (phazite::getPhaziteState (*edit), target))
+        if (! writeProjectFile (phazite::getSong (*edit).getState(), target))
             return juce::Result::fail ("Phazite couldn't write the autosave " + target.getFullPathName() + ".");
     }
 
@@ -389,7 +389,7 @@ void Project::autosaveInBackground()
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*edit);
-        autosaveWriter->write (phazite::getPhaziteState (*edit).createCopy(), target);
+        autosaveWriter->write (phazite::getSong (*edit).getState().createCopy(), target);
     }
 
     changedSinceAutosave = false;
@@ -421,7 +421,7 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
     const juce::ScopedValueSetter<bool> writing (isWriting, true);
     storeForSaving (*edit);
 
-    if (! writeProjectFile (phazite::getPhaziteState (*edit), newFile))
+    if (! writeProjectFile (phazite::getSong (*edit).getState(), newFile))
     {
         newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
         error = "Phazite couldn't write the project file " + newFile.getFullPathName() + ".";
@@ -521,7 +521,7 @@ void Project::backUpProjectFile()
 
 void Project::rememberSavedState()
 {
-    savedState = phazite::getPhaziteState (*edit).createCopy();
+    savedState = phazite::getSong (*edit).getState().createCopy();
     mayHaveChanged = compareAll = false;
     elementsToCompare.clearQuick();
 }
@@ -533,7 +533,7 @@ void Project::compareWithSavedState()
 
     // The elements that notified, each with its copy at the same place in savedState: the song's own elements keep their
     // places unless one was added or removed, which notifies the song itself.
-    const auto song = phazite::getPhaziteState (*edit);
+    const auto song = phazite::getSong (*edit).getState();
     const auto isSame = [this, &song] (const juce::ValueTree& element)
     {
         const auto index = song.indexOf (element);

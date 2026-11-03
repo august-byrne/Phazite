@@ -3,6 +3,7 @@
 #include "internal/Clips.h"
 #include "internal/Sections.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/chords/internal/Chords.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -38,7 +39,7 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
 
     // As Tracktion's insertSpaceIntoEdit() does: in an Edit counted in bars and beats, clips move before the
     // tempo changes after them, since they follow the beat.
-    const auto moveTempo = [&edit, at, length] { insertTempoMapTime (edit, fromTracktion (at), fromTracktion (length)); };
+    const auto moveTempo = [&edit, at, length] { insertTempoMapTime (getSong (edit), fromTracktion (at), fromTracktion (length)); };
 
     const auto tempoFirst = ! edit.getTimecodeFormat().isBarsBeats();
 
@@ -55,8 +56,8 @@ void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
                 moveLater (*clip, fromTracktion (length));
 
     insertAutomationTime (edit, fromTracktion (at), fromTracktion (length));
-    insertSectionTime (edit, fromTracktion (at), fromTracktion (length));
-    insertLaneTime (edit, fromTracktion (at), fromTracktion (length));
+    insertSectionTime (getSong (edit), fromTracktion (at), fromTracktion (length));
+    insertLaneTime (getSong (edit), fromTracktion (at), fromTracktion (length));
 
     if (! tempoFirst)
         moveTempo();
@@ -85,11 +86,11 @@ void removeTime (te::Edit& edit, te::BeatRange range)
     }
 
     removeAutomationTime (edit, fromTracktion (range));
-    removeSectionTime (edit, fromTracktion (range));
-    removeLaneTime (edit, fromTracktion (range));
+    removeSectionTime (getSong (edit), fromTracktion (range));
+    removeLaneTime (getSong (edit), fromTracktion (range));
 
     // Tempo changes last, as Tracktion's deleteRegionOfTracks() does.
-    removeTempoMapTime (edit, fromTracktion (range));
+    removeTempoMapTime (getSong (edit), fromTracktion (range));
 }
 
 void moveTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination)
@@ -148,8 +149,8 @@ void moveTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
     removeAutomationPointsIn (edit, changed);
     addAutomationPoints (edit, points);
 
-    moveSectionTime (edit, fromTracktion (range), fromTracktion (destination));
-    moveLaneTime (edit, fromTracktion (range), fromTracktion (destination));
+    moveSectionTime (getSong (edit), fromTracktion (range), fromTracktion (destination));
+    moveLaneTime (getSong (edit), fromTracktion (range), fromTracktion (destination));
 }
 
 void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination, bool asAliases)
@@ -179,12 +180,12 @@ void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
 
     addAutomationEdges (edit, { fromTracktion (start), fromTracktion (end), fromTracktion (destination) });
     auto points = getAutomationPointsIn (edit, fromTracktion (range));
-    const auto sections = copySections (edit, fromTracktion (range));
-    const auto chords = copyLaneChords (edit, fromTracktion (range));
+    const auto sections = copySections (getSong (edit), fromTracktion (range));
+    const auto chords = copyLaneChords (getSong (edit), fromTracktion (range));
 
     insertTime (edit, destination, length);
-    pasteSections (edit, sections, fromTracktion (destination));
-    pasteLaneChords (edit, chords, fromTracktion (destination));
+    pasteSections (getSong (edit), sections, fromTracktion (destination));
+    pasteLaneChords (getSong (edit), chords, fromTracktion (destination));
 
     for (const auto& source : sources)
     {

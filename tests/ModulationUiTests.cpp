@@ -35,7 +35,7 @@ struct Song
             if (each.description.fileOrIdentifier == juce::String ("phaziteCompressor"))
                 phazite::addEffect (context, phazite::getTrackID (*a), each);
 
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }

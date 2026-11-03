@@ -110,7 +110,7 @@ bool canPunch (const te::Edit& edit)
 
 void setPunchOn (te::Edit& edit, bool on)
 {
-    getPhaziteState (edit).setProperty (schema::punch, on, nullptr); // like the loop's switch, not an undo step
+    getSong (edit).getState().setProperty (schema::punch, on, nullptr); // like the loop's switch, not an undo step
 }
 
 bool isPunching (const te::Edit& edit)

@@ -62,7 +62,7 @@ juce::ValueTree makeSavedSong()
     phazite::setModulation (*lfo, *tone, 0.5f);
 
     phazite::storeDeviceStates (*edit);
-    return phazite::getPhaziteState (*edit).createCopy();
+    return phazite::getSong (*edit).getState().createCopy();
 }
 
 // The song opened again as a project opens, with the stand-in in the version set.
@@ -210,7 +210,7 @@ TEST_CASE ("What a project refers to follows the parameters of a plug-in in a co
         phazite::addPoint (*gain, { phazite::BeatPosition::fromBeats (4.0), 0.8f });
         phazite::showLane (track, phazite::getParameterRef (*gain));
         phazite::storeDeviceStates (*edit);
-        saved = phazite::getPhaziteState (*edit).createCopy();
+        saved = phazite::getSong (*edit).getState().createCopy();
     }
 
     testPlugin.setVersion (2);

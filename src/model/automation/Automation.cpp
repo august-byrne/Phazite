@@ -119,7 +119,7 @@ namespace
 
             if (! state.isValid())
             {
-                auto automation = getPhaziteState (edit).getOrCreateChildWithName (schema::AUTOMATION, getUndo());
+                auto automation = getSong (edit).getState().getOrCreateChildWithName (schema::AUTOMATION, getUndo());
                 state = juce::ValueTree (schema::CURVE);
                 state.setProperty (schema::curveDevice, toTracktion (ref.device).toString(), nullptr);
                 state.setProperty (schema::curveParameter, ref.parameter, nullptr);
@@ -217,7 +217,7 @@ namespace
         juce::ValueTree state;
         mutable bool changed = false;
 
-        juce::UndoManager* getUndo() const { return &getSongUndoManager (edit); }
+        juce::UndoManager* getUndo() const { return &getSong (edit).getUndoManager(); }
 
         void reconcile() const
         {
@@ -1188,7 +1188,7 @@ void copyLanesAndCurves (const te::Track& original, te::Track& copy, const te::E
         {
             auto copiedState = curve.createCopy();
             copiedState.setProperty (schema::curveDevice, toTracktion (copiedRef.device).toString(), nullptr);
-            automation.appendChild (copiedState, &getSongUndoManager (edit));
+            automation.appendChild (copiedState, &getSong (edit).getUndoManager());
             mirror::reconcileCurve (edit, copiedRef);
         }
     }

@@ -66,7 +66,7 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto eq = addDevice (*edit, Equalizer::typeID);
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     phazite::ui::DeviceKnobs knobs ((phazite::makeDeviceHandle (*eq)));
     REQUIRE (knobs.getNumKnobs() == 50);

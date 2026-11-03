@@ -206,7 +206,7 @@ TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, a
         CHECK (phazite::getLaneChords (context).back().range.getEnd() == beat (16.0));
 
         // A selected section is where it goes first.
-        const auto section = phazite::insertSection (*edit, phazite::BeatPosition::fromBeats (16.0),
+        const auto section = phazite::insertSection (phazite::getSong (*edit), phazite::BeatPosition::fromBeats (16.0),
                                                      { .name = "Verse", .length = phazite::BeatDuration::fromBeats (8.0) });
         REQUIRE (section.isValid());
         getSelection (context).selectOnly (section);
@@ -260,7 +260,7 @@ TEST_CASE ("The inspector shows whether a part made from the chords follows them
         REQUIRE (clip != nullptr);
         {
             const phazite::UndoStep step (*edit, "Change Velocity");
-            clip->getSequence().getNotes().getFirst()->setVelocity (50, &phazite::getSongUndoManager (*edit));
+            clip->getSequence().getNotes().getFirst()->setVelocity (50, &phazite::getSong (*edit).getUndoManager());
         }
         phazite::test::dispatchPendingMessages();
         CHECK_FALSE (toggle->getToggleState());

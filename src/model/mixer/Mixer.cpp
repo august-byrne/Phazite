@@ -114,7 +114,7 @@ namespace
         else if (! devices.empty())
             index = chain.indexOf (devices.back()) + 1;
 
-        chain.addChild (device, index, &getSongUndoManager (edit));
+        chain.addChild (device, index, &getSong (edit).getUndoManager());
     }
 
     // Takes a device out of the song, and Tracktion's with it (in the caller's undo step), with what it holds of its state
@@ -124,7 +124,7 @@ namespace
         if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
         {
             storeDeviceState (device);
-            state.getParent().removeChild (state, &getSongUndoManager (device.edit));
+            state.getParent().removeChild (state, &getSong (device.edit).getUndoManager());
             mirror::reconcileDevices (device.edit);
         }
     }
@@ -181,7 +181,7 @@ namespace
 
         // As Tracktion names them: a track's volume and pan, the master's, and a VCA's level.
         auto state = findChannelState (*track);
-        auto* undo = &getSongUndoManager (edit);
+        auto* undo = &getSong (edit).getUndoManager();
 
         if (parameterID == "volume" || parameterID == "master volume" || parameterID == "vca")
             setChannelValue (state, schema::channelVolume, faderPositionToDecibels (value),
@@ -340,7 +340,7 @@ void moveDevice (te::Plugin& device, int newIndex)
     auto chain = state.getParent();
     const auto devices = getDeviceStates (chain);
     const auto& target = devices[(size_t) juce::jlimit (0, (int) devices.size() - 1, newIndex)];
-    chain.moveChild (chain.indexOf (state), chain.indexOf (target), &getSongUndoManager (device.edit));
+    chain.moveChild (chain.indexOf (state), chain.indexOf (target), &getSong (device.edit).getUndoManager());
     mirror::reconcileDevices (device.edit);
 }
 
@@ -398,9 +398,9 @@ void setMix (te::Plugin& device, float mix)
         if (auto state = findDeviceState (device.edit, getDeviceID (device)); isPluginState (state) || state.hasType (schema::CONTAINER))
         {
             if (wet < 1.0f)
-                state.setProperty (schema::deviceMix, wet, &getSongUndoManager (device.edit));
+                state.setProperty (schema::deviceMix, wet, &getSong (device.edit).getUndoManager());
             else
-                state.removeProperty (schema::deviceMix, &getSongUndoManager (device.edit));
+                state.removeProperty (schema::deviceMix, &getSong (device.edit).getUndoManager());
         }
 
         setDeviceValue (*levels->wet, wet);
@@ -519,7 +519,7 @@ void setMixedAsBus (te::FolderTrack& folder, bool bus)
     }
     else if (getDevices (folder).isEmpty())
     {
-        findTrackState (folder).removeProperty (schema::folderBus, &getSongUndoManager (folder.edit));
+        findTrackState (folder).removeProperty (schema::folderBus, &getSong (folder.edit).getUndoManager());
         makePlainFolder (folder);
     }
 }
@@ -669,7 +669,7 @@ te::AuxSendPlugin* addSend (te::Track& track, int bus, bool preFader)
     if (target == nullptr || ! state.isValid() || getVolumeDevice (track) == nullptr)
         return nullptr;
 
-    const auto id = makeID (track.edit);
+    const auto id = getSong (track.edit).makeID();
     juce::ValueTree send (schema::SEND);
     send.setProperty (schema::sendID, (juce::int64) id, nullptr);
     send.setProperty (schema::sendTo, (juce::int64) getTrackID (*target).getRaw(), nullptr);
@@ -678,7 +678,7 @@ te::AuxSendPlugin* addSend (te::Track& track, int bus, bool preFader)
     if (preFader)
         send.setProperty (schema::sendPreFader, true, nullptr);
 
-    state.appendChild (send, &getSongUndoManager (track.edit));
+    state.appendChild (send, &getSong (track.edit).getUndoManager());
     mirror::reconcileDevices (track.edit);
 
     for (auto* made : getSends (track))
@@ -704,9 +704,9 @@ void setDeviceOn (te::Plugin& device, bool on)
     if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
     {
         if (on)
-            state.removeProperty (schema::deviceOff, &getSongUndoManager (device.edit));
+            state.removeProperty (schema::deviceOff, &getSong (device.edit).getUndoManager());
         else
-            state.setProperty (schema::deviceOff, true, &getSongUndoManager (device.edit));
+            state.setProperty (schema::deviceOff, true, &getSong (device.edit).getUndoManager());
 
         mirror::reconcileDevices (device.edit);
     }
@@ -911,21 +911,21 @@ void setDeviceValue (te::AutomatableParameter& parameter, float value)
     {
         if (auto state = findDeviceState (own->edit, getDeviceID (*own)); state.isValid())
         {
-            auto* undo = &getSongUndoManager (own->edit);
+            auto* undo = &getSong (own->edit).getUndoManager();
             state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (parameter.paramID), stored, undo);
         }
     }
     else if (auto* send = dynamic_cast<te::AuxSendPlugin*> (parameter.getPlugin()))
     {
         if (auto state = findSendState (*send); state.isValid())
-            setChannelValue (state, schema::sendLevel, faderPositionToDecibels (stored), 0.0f, &getSongUndoManager (send->edit));
+            setChannelValue (state, schema::sendLevel, faderPositionToDecibels (stored), 0.0f, &getSong (send->edit).getUndoManager());
     }
     else if (auto* modifier = dynamic_cast<te::Modifier*> (&parameter.automatableEditElement))
     {
         // A modulator's, but its switch (setModulatorOn() in model/modulation/internal/Modulation.h).
         if (auto state = findModulatorState (modifier->edit, getModulatorID (*modifier)); state.isValid() && parameter.paramID != "enabled")
         {
-            auto* undo = &getSongUndoManager (modifier->edit);
+            auto* undo = &getSong (modifier->edit).getUndoManager();
             state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (parameter.paramID), stored, undo);
         }
     }
@@ -934,9 +934,9 @@ void setDeviceValue (te::AutomatableParameter& parameter, float value)
         if (auto state = findModulatorState (macro->getEdit(), getModulatorID (*macro)); state.isValid())
         {
             if (juce::exactlyEqual (stored, 0.0f))
-                state.removeProperty (schema::macroValue, &getSongUndoManager (macro->getEdit()));
+                state.removeProperty (schema::macroValue, &getSong (macro->getEdit()).getUndoManager());
             else
-                state.setProperty (schema::macroValue, stored, &getSongUndoManager (macro->getEdit()));
+                state.setProperty (schema::macroValue, stored, &getSong (macro->getEdit()).getUndoManager());
         }
     }
     else if (auto* fader = parameter.getPlugin())
@@ -985,7 +985,7 @@ float getChannelPan (const te::Track& channel)
 
 void setDeviceSound (te::Plugin& device, const juce::Identifier& property, const juce::String& value)
 {
-    auto* undo = &getSongUndoManager (device.edit);
+    auto* undo = &getSong (device.edit).getUndoManager();
 
     if (auto state = findDeviceState (device.edit, getDeviceID (device)); state.isValid())
     {
@@ -1070,7 +1070,7 @@ void removeSend (te::AuxSendPlugin& send)
 
     if (auto state = findSendState (send); state.isValid())
     {
-        state.getParent().removeChild (state, &getSongUndoManager (edit));
+        state.getParent().removeChild (state, &getSong (edit).getUndoManager());
         mirror::reconcileDevices (edit);
     }
 }
@@ -1085,9 +1085,9 @@ void setPreFader (te::AuxSendPlugin& send, bool preFader)
     const UndoStep step (send.edit, "Change Send");
 
     if (preFader)
-        state.setProperty (schema::sendPreFader, true, &getSongUndoManager (send.edit));
+        state.setProperty (schema::sendPreFader, true, &getSong (send.edit).getUndoManager());
     else
-        state.removeProperty (schema::sendPreFader, &getSongUndoManager (send.edit));
+        state.removeProperty (schema::sendPreFader, &getSong (send.edit).getUndoManager());
 
     mirror::reconcileDevices (send.edit);
 }

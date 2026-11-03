@@ -4,6 +4,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -25,7 +26,7 @@ void addNewProjectContent (te::Edit& edit, const NewProjectSettings& settings)
     // 2026-11-01), so the one Tracktion makes with the Edit goes.
     deleteTracks (getPlaylistTracks (edit), nullptr);
     setTempo (edit, settings.tempo);
-    setTimeSignature (edit, settings.timeSignature);
+    setTimeSignature (getSong (edit), settings.timeSignature);
 
     // The key goes on the tracks added later.
     if (settings.keyRoot.has_value())

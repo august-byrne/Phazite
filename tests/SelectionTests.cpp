@@ -44,12 +44,13 @@ struct Song
         REQUIRE (phazite::addNote (*first, 64, beats (1.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
         selection.setNoteClips ({ phazite::getClipID (*first) });
 
-        intro = phazite::insertSection (*edit, {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (16.0) });
-        verse = phazite::insertSection (*edit, phazite::BeatPosition::fromBeats (16.0),
+        intro =
+            phazite::insertSection (phazite::getSong (*edit), {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (16.0) });
+        verse = phazite::insertSection (phazite::getSong (*edit), phazite::BeatPosition::fromBeats (16.0),
                                         { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
         REQUIRE (intro.isValid());
         REQUIRE (verse.isValid());
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     }
 
     ~Song() { selection.deselectAll(); }
@@ -107,14 +108,14 @@ TEST_CASE ("Delete takes notes first, then the range, sections, clips and tracks
     s.selection.selectOnly (s.verse);
     phazite::deleteSelection (s.selection, s.range, false);
     CHECK (Song::describe (*s.a) == juce::String ("0-4"));
-    CHECK (phazite::getSections (*s.edit).size() == 2);
+    CHECK (phazite::getSections (phazite::getSong (*s.edit)).size() == 2);
 
     // A section, with what is in it (B's clip), before a clip and a track.
     s.range.clear();
     s.selection.addToSelection (s.first);
     s.selection.addToSelection (s.b);
     phazite::deleteSelection (s.selection, s.range, false);
-    CHECK (phazite::getSections (*s.edit).size() == 1);
+    CHECK (phazite::getSections (phazite::getSong (*s.edit)).size() == 1);
     CHECK (Song::describe (*s.b).isEmpty());
     CHECK (Song::describe (*s.a) == juce::String ("0-4"));
 
@@ -183,7 +184,7 @@ TEST_CASE ("Duplicate takes notes first, then the range, sections, clips and tra
     s.selection.selectOnly (s.verse);
     s.selection.addToSelection (s.first);
     phazite::duplicateSelection (s.selection, s.range, false);
-    CHECK (phazite::getSections (*s.edit).size() == 3);
+    CHECK (phazite::getSections (phazite::getSong (*s.edit)).size() == 3);
     CHECK (phazite::getSelectedSections (s.selection).size() == 1);
     CHECK_FALSE (phazite::hasSelectedClips (s.selection));
     CHECK (Song::describe (*s.b) == juce::String ("20-24 36-40"));

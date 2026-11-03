@@ -2,6 +2,7 @@
 #include "TransportModel.h"
 #include "internal/Playback.h"
 #include "internal/Tempo.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/ProjectContext.h"
@@ -25,7 +26,7 @@ bool isLoopOn (const ProjectContext& context)
 std::optional<TimeSignature> getTimeSignature (const ProjectContext& context)
 {
     if (auto* edit = getEdit (context))
-        return getTimeSignature (*edit);
+        return getTimeSignature (getSong (*edit));
 
     return {};
 }
@@ -33,7 +34,7 @@ std::optional<TimeSignature> getTimeSignature (const ProjectContext& context)
 void setTimeSignature (ProjectContext& context, TimeSignature timeSignature)
 {
     if (auto* edit = getEdit (context))
-        setTimeSignature (*edit, timeSignature);
+        setTimeSignature (getSong (*edit), timeSignature);
 }
 
 TrackID getLiveMidiTrack (const ProjectContext& context)
@@ -101,7 +102,7 @@ bool TempoHandle::isValid() const
 double TempoHandle::getValue() const
 {
     auto* edit = impl != nullptr ? impl->edit.get() : nullptr;
-    return edit != nullptr ? getTempo (*edit) : 120.0;
+    return edit != nullptr ? getTempo (getSong (*edit)) : 120.0;
 }
 
 void TempoHandle::beginGesture()

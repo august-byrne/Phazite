@@ -114,7 +114,7 @@ namespace
 
 void RangeSelection::setInUndoStep (te::Edit& edit, te::BeatRange newRange, const juce::Array<te::Track*>& newTracks)
 {
-    getSongUndoManager (edit).perform (new SetRange (*this, edit, newRange, newTracks)); // the undo manager owns it
+    getSong (edit).getUndoManager().perform (new SetRange (*this, edit, newRange, newTracks)); // the undo manager owns it
 }
 
 //==============================================================================

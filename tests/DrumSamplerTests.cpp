@@ -381,7 +381,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
 
         // Saved as a project saves it: the song alone.
         phazite::storeDeviceStates (*edit);
-        REQUIRE (phazite::getPhaziteState (*edit).createXml()->writeTo (projectFile));
+        REQUIRE (phazite::getSong (*edit).getState().createXml()->writeTo (projectFile));
     }
 
     // Opened again from the file, the pad plays its file.

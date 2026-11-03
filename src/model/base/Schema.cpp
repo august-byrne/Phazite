@@ -27,21 +27,23 @@ namespace
         return (std::uint64_t) (juce::int64) song.getProperty (schema::nextID, (juce::int64) 0);
     }
 
-    // The song's undo history, as long as Tracktion keeps an Edit's: 30 steps at least.
-    struct SongUndo final : juce::ReferenceCountedObject
-    {
-        SongUndo() { undoManager.setMaxNumberOfStoredUnits (30000, 30); }
-
-        juce::UndoManager undoManager;
-    };
-
-    // Where the Edit's state holds it, on its root, which is never saved (a project file is the song alone).
-    const juce::Identifier songUndo { "phaziteSongUndo" };
+    // Where the Edit's state holds its song, on its root, which is never saved (a project file is the song alone).
+    const juce::Identifier songHolder { "phaziteSong" };
 } // namespace
 
-juce::ValueTree getPhaziteState (te::Edit& edit)
+Song& getSong (const te::Edit& edit)
 {
-    return edit.state.getOrCreateChildWithName (schema::PHAZITE, nullptr);
+    auto root = edit.state;
+
+    if (auto* held = dynamic_cast<Song*> (root[songHolder].getObject()))
+        return *held;
+
+    auto* made = new Song (root.getOrCreateChildWithName (schema::PHAZITE, nullptr));
+
+    // Tracktion's items take their IDs from the same numbers while it mirrors the song (Song::makeID()).
+    made->setTracktionIDs ([&mutableEdit = const_cast<te::Edit&> (edit)] { return mutableEdit.createNewItemID().getRawID(); });
+    root.setProperty (songHolder, juce::var (made), nullptr);
+    return *made;
 }
 
 juce::ValueTree findPhaziteState (const te::Edit& edit)
@@ -49,30 +51,25 @@ juce::ValueTree findPhaziteState (const te::Edit& edit)
     return edit.state.getChildWithName (schema::PHAZITE);
 }
 
-juce::UndoManager& getSongUndoManager (const te::Edit& edit)
+// Here, with the other counting of IDs and the name of the count (schema::nextID), rather than in Song.cpp.
+std::uint64_t Song::makeID()
 {
-    auto root = edit.state;
+    // From 1: no item's ID is 0.
+    auto id = std::max ((std::uint64_t) 1, readNextID (state));
 
-    if (auto* held = dynamic_cast<SongUndo*> (root[songUndo].getObject()))
-        return held->undoManager;
+    // While Tracktion mirrors the song, its next ID, brought past the song's (a project whose last items went before it was
+    // saved), so that Tracktion never gives what the song has given.
+    if (takeTracktionID != nullptr)
+    {
+        auto tracktions = takeTracktionID();
 
-    auto* made = new SongUndo();
-    root.setProperty (songUndo, juce::var (made), nullptr);
-    return made->undoManager;
-}
+        while (tracktions < id)
+            tracktions = takeTracktionID();
 
-std::uint64_t makeID (te::Edit& edit)
-{
-    auto song = getPhaziteState (edit);
-    const auto next = readNextID (song);
-    auto id = edit.createNewItemID().getRawID();
+        id = tracktions;
+    }
 
-    // Tracktion's behind the song's (a project whose last items went before it was saved): brought past it, so that
-    // Tracktion never gives what the song has given.
-    while (id < next)
-        id = edit.createNewItemID().getRawID();
-
-    song.setProperty (schema::nextID, (juce::int64) (id + 1), nullptr);
+    state.setProperty (schema::nextID, (juce::int64) (id + 1), nullptr);
     return id;
 }
 
@@ -83,7 +80,7 @@ std::uint64_t findNextID (const juce::ValueTree& song)
 
 void countIDs (te::Edit& edit)
 {
-    auto song = getPhaziteState (edit);
+    auto song = getSong (edit).getState();
     const auto next = findNextID (song);
 
     if (next != readNextID (song))

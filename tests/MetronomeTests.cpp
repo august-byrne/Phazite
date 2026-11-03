@@ -14,7 +14,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
     selection.setEdit (edit.get());
     phazite::CommandRegistry registry;
     phazite::addMetronomeCommands (registry, selection);
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     const auto* metronome = registry.find ("transport.metronome");
     REQUIRE (metronome != nullptr);
@@ -24,7 +24,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
     CHECK (phazite::isMetronomeOn (*edit));
     CHECK (metronome->isTicked());
     CHECK (edit->clickTrackEmphasiseBars.get()); // each bar's first beat louder
-    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
 
     REQUIRE (registry.invoke ("transport.metronome"));
     CHECK_FALSE (phazite::isMetronomeOn (*edit));
@@ -42,7 +42,7 @@ TEST_CASE ("The metronome's and the count-in's commands switch them on and off, 
 
     REQUIRE (registry.invoke ("transport.countIn"));
     CHECK_FALSE (phazite::isCountInOn (*other));
-    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
     selection.setEdit (nullptr);
 }
 

@@ -105,20 +105,20 @@ const Outline* findOutline (const juce::String& id)
 
 void applyOutline (te::Edit& edit, const Outline& outline)
 {
-    removeSections (edit);
+    removeSections (getSong (edit));
 
-    const auto bars = getBars (edit);
+    const auto bars = getBars (getSong (edit));
     auto bar = 0;
 
     for (const auto& section : outline.sections)
     {
         const auto start = bars.getBarStart (bar);
         const auto end = bars.getBarStart (bar + section.bars);
-        insertSection (edit, start, { section.name, end - start, section.role, section.tip, section.energy, section.colour });
+        insertSection (getSong (edit), start, { section.name, end - start, section.role, section.tip, section.energy, section.colour });
         bar += section.bars;
     }
 
-    getPhaziteState (edit).setProperty (schema::outline, outline.id, &getSongUndoManager (edit));
+    getSong (edit).getState().setProperty (schema::outline, outline.id, &getSong (edit).getUndoManager());
 }
 
 bool applyOutline (te::Edit& edit, const juce::String& outlineID)
@@ -139,7 +139,7 @@ juce::String getAppliedOutline (const te::Edit& edit)
 
 bool isOutlineApplied (const te::Edit& edit, const juce::String& outlineID)
 {
-    return getAppliedOutline (edit) == outlineID && ! getSections (edit).empty();
+    return getAppliedOutline (edit) == outlineID && ! getSections (getSong (edit)).empty();
 }
 
 juce::String getOutlineCommandID (const juce::String& outlineID)

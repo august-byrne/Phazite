@@ -45,7 +45,7 @@ struct Song
             phazite::addEffect (context, track(), find (type));
 
         phazite::addContainerCommands (registry, getSelection (context));
-        phazite::getSongUndoManager (edit()).clearUndoHistory();
+        phazite::getSong (edit()).getUndoManager().clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }

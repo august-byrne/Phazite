@@ -237,6 +237,8 @@ target_sources(phazite_core PRIVATE
     src/model/base/IDs.h
     src/model/base/Selection.cpp
     src/model/base/Schema.cpp
+    src/model/base/Song.cpp
+    src/model/base/Song.h
     src/model/base/Toggles.h
     src/model/base/internal/Schema.h
     src/model/base/internal/Selection.h

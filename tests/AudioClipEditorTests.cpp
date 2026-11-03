@@ -44,7 +44,7 @@ struct EditorScreen
         REQUIRE (imported.size() == 1);
         vocal = imported[0];
         context.getSongSelection().clear();
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
         phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
         phazite::ui::addTimelineCommands (registry, [this] { return &editor; });

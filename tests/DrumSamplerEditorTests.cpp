@@ -115,7 +115,7 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
     REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
     phazite::test::settle();
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     const auto device = phazite::makeDeviceHandle (*plugin);
     auto* sampler = device.getProcessor<DrumSampler>();

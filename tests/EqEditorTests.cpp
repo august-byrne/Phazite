@@ -103,7 +103,7 @@ TEST_CASE ("Dragging an EQ band's dot moves its frequency and gain as one undo s
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     const auto eq = addEq (*edit);
     phazite::test::settle();
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (*eq)));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());

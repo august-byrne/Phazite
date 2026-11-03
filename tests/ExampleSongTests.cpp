@@ -98,7 +98,7 @@ TEST_CASE ("Every example song opens as a new project without undo steps or unsa
         Example example (song.id);
         phazite::test::settle();
         CHECK_FALSE (example.project->hasUnsavedChanges());
-        CHECK_FALSE (phazite::getSongUndoManager (example.project->getEdit()).canUndo());
+        CHECK_FALSE (phazite::getSong (example.project->getEdit()).getUndoManager().canUndo());
         CHECK (phazite::findExampleTrackToPlay (example.context, song).isValid());
 
         // Its clips lie end to end, each with its track's row to itself (none overlap, the samples' copies neither).

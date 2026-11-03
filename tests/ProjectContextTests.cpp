@@ -8,6 +8,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
@@ -107,7 +108,8 @@ TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
     // Clips by theirs, left to right; a section is no clip.
     auto* later = phazite::insertMidiClip (*tracks[0], { te::BeatPosition::fromBeats (8.0), te::BeatPosition::fromBeats (12.0) }, nullptr);
     auto* earlier = phazite::insertMidiClip (*tracks[0], { te::BeatPosition::fromBeats (0.0), te::BeatPosition::fromBeats (4.0) }, nullptr);
-    const auto section = phazite::insertSection (*edit, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
+    const auto section =
+        phazite::insertSection (phazite::getSong (*edit), {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
     REQUIRE (later != nullptr);
     REQUIRE (earlier != nullptr);
     REQUIRE (section.isValid());
@@ -202,7 +204,8 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     CHECK (hear() == "clips");
 
     // A section; and the tempo, which moves the clips in time (Tracktion keeps them in seconds; sections are in beats).
-    REQUIRE (phazite::insertSection (*edit, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) }).isValid());
+    REQUIRE (phazite::insertSection (phazite::getSong (*edit), {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) })
+                 .isValid());
     CHECK (juce::String (hear()).contains ("sections"));
     phazite::setTempo (*edit, 100.0);
     CHECK (hear() == "clips tempo");

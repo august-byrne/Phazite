@@ -21,10 +21,10 @@ void makeBus (te::FolderTrack& folder)
     // A fader of its own in place of its VCA, which the mirror makes at the folder's volume (the song's: Schema.h
     // channelVolume).
     auto& edit = folder.edit;
-    auto* undo = &getSongUndoManager (edit);
+    auto* undo = &getSong (edit).getUndoManager();
     auto state = findTrackState (folder);
     state.removeProperty (schema::channelVCA, undo);
-    state.setProperty (schema::channelFader, (juce::int64) makeID (edit), undo);
+    state.setProperty (schema::channelFader, (juce::int64) getSong (edit).makeID(), undo);
     mirror::reconcileTracks (edit);
     mirror::reconcileDevices (edit);
 }
@@ -36,14 +36,14 @@ void makePlainFolder (te::FolderTrack& folder)
 
     // A VCA of its own in place of its fader, at the folder's volume; its devices go from the song too.
     auto& edit = folder.edit;
-    auto* undo = &getSongUndoManager (edit);
+    auto* undo = &getSong (edit).getUndoManager();
     auto state = findTrackState (folder);
 
     for (const auto& device : getDeviceStates (state))
         state.removeChild (device, undo);
 
     state.removeProperty (schema::channelFader, undo);
-    state.setProperty (schema::channelVCA, (juce::int64) makeID (edit), undo);
+    state.setProperty (schema::channelVCA, (juce::int64) getSong (edit).makeID(), undo);
     mirror::reconcileTracks (edit);
     mirror::reconcileDevices (edit);
 }
@@ -51,6 +51,6 @@ void makePlainFolder (te::FolderTrack& folder)
 void mixAsBus (te::FolderTrack& folder)
 {
     makeBus (folder);
-    findTrackState (folder).setProperty (schema::folderBus, true, &getSongUndoManager (folder.edit));
+    findTrackState (folder).setProperty (schema::folderBus, true, &getSong (folder.edit).getUndoManager());
 }
 } // namespace phazite

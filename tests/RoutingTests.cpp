@@ -44,7 +44,7 @@ struct Mix
         compressor = phazite::insertDevice (*bass, edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
         REQUIRE (compressor != nullptr);
 
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
         setEdit (context, edit.get());
     }
 
@@ -96,7 +96,7 @@ TEST_CASE ("A send knob for every return: no send until its first turn, which ma
     level.beginGesture();
     level.endGesture();
     CHECK (phazite::getSends (*mix.keys).isEmpty());
-    CHECK_FALSE (phazite::getSongUndoManager (*mix.edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*mix.edit).getUndoManager().canUndo());
 
     // The first turn makes the send, after the fader, at the level turned to: one step.
     level.beginGesture();

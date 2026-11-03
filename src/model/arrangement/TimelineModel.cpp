@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TimelineModel.h"
 #include "internal/Grid.h"
+#include "model/base/internal/Schema.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -16,7 +17,7 @@ namespace
     Bars getBars (const ProjectContext& context)
     {
         auto* edit = getEdit (context);
-        return edit != nullptr ? phazite::getBars (*edit) : Bars();
+        return edit != nullptr ? phazite::getBars (getSong (*edit)) : Bars();
     }
 } // namespace
 

@@ -109,7 +109,7 @@ TEST_CASE ("Picking a sidechain's source is one undo step, and deleting the sour
 {
     Song song;
     auto& ducker = song.add (*song.bass, TestSidechain::typeID);
-    auto& undoManager = phazite::getSongUndoManager (*song.edit);
+    auto& undoManager = phazite::getSong (*song.edit).getUndoManager();
     CHECK (phazite::getSidechainSource (ducker) == nullptr);
 
     phazite::setSidechainSource (ducker, song.kick);
@@ -157,7 +157,8 @@ TEST_CASE ("A device's sidechain is the song's, which Tracktion's and an Edit bu
 
     // Built again from the song alone, it listens to the kick, wired as before.
     {
-        const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getPhaziteState (*song.edit).createCopy());
+        const auto rebuilt =
+            phazite::createEditFromSong (phazite::test::getEngine(), phazite::getSong (*song.edit).getState().createCopy());
         REQUIRE (rebuilt != nullptr);
         const auto copy = te::findPluginForID (*rebuilt, compressor->itemID);
         REQUIRE (copy != nullptr);
@@ -231,7 +232,7 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
 
     // On the bass, from the kick: quick, slow to let go, deep; the key whole, as the kick plays no drum sampler.
     auto& compressor = addCompressor (*song.bass);
-    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
+    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
     phazite::setSidechainSource (compressor, song.kick);
     const auto ducking = phazite::devices::curves::makeCompression (-30.0f, 8.0f); // its curve: 8:1 over -30 dB
     CHECK (valueOf (compressor, "points") == doctest::Approx ((float) ducking.size()));
@@ -240,7 +241,7 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
     CHECK (valueOf (compressor, "attack") == doctest::Approx (1.0f));
     CHECK (valueOf (compressor, "release") == doctest::Approx (150.0f));
     CHECK (valueOf (compressor, "keyHighCut") == doctest::Approx (20000.0f));
-    CHECK (phazite::getSongUndoManager (*song.edit).getUndoDescription() == juce::String ("Sidechain from Kick"));
+    CHECK (phazite::getSong (*song.edit).getUndoManager().getUndoDescription() == juce::String ("Sidechain from Kick"));
 
     // One step: undo puts back both the source and the settings.
     phazite::undo (*song.edit);
@@ -265,14 +266,14 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
 TEST_CASE ("Duck Under puts a compressor on a track, ducking under another, as one undo step")
 {
     Song song;
-    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
+    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
     auto* compressor = phazite::duckUnder (*song.bass, *song.kick);
     REQUIRE (compressor != nullptr);
     CHECK (compressor->getOwnerTrack() == song.bass);
     CHECK (phazite::getSidechainSource (*compressor) == song.kick);
     CHECK (compressor->getAutomatableParameterByID ("point2X")->getCurrentValue()
            == doctest::Approx (phazite::devices::curves::axisForDecibels (-30.0f))); // ducking, 8:1 over -30 dB
-    CHECK (phazite::getSongUndoManager (*song.edit).getUndoDescription() == juce::String ("Duck Bass Under Kick"));
+    CHECK (phazite::getSong (*song.edit).getUndoManager().getUndoDescription() == juce::String ("Duck Bass Under Kick"));
 
     phazite::undo (*song.edit);
     CHECK (song.bass->pluginList.getPluginsOfType<phazite::DevicePlugin>().isEmpty());

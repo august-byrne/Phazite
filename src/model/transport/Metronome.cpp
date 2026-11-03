@@ -16,7 +16,7 @@ void setMetronomeOn (te::Edit& edit, bool on)
 {
     // Written only while it is on, without an undo manager; Tracktion's click track follows.
     if (on)
-        getPhaziteState (edit).setProperty (schema::metronome, true, nullptr);
+        getSong (edit).getState().setProperty (schema::metronome, true, nullptr);
     else if (auto state = findPhaziteState (edit); state.isValid())
         state.removeProperty (schema::metronome, nullptr);
 

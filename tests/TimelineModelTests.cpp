@@ -34,7 +34,7 @@ TEST_CASE ("The time line's bars follow the time signature, and the grid snaps i
     CHECK (phazite::snapToGrid (context, beat (2.7), { 9, false }).inBeats() == doctest::Approx (2.7)); // nothing to snap to
 
     setEdit (context, edit.get());
-    phazite::setTimeSignature (*edit, { 3, 4 });
+    phazite::setTimeSignature (phazite::getSong (*edit), { 3, 4 });
     CHECK (phazite::getBeatsPerBar (context, beat (0.0)) == 3);
     CHECK (phazite::getBarAt (context, beat (7.0)) == 2);
     CHECK (phazite::getBarStart (context, 2).inBeats() == doctest::Approx (6.0));
@@ -112,7 +112,7 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
     }
 
     setEdit (context, edit.get());
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     {
         phazite::SongGesture gesture (context, "Rename Twice");
@@ -121,7 +121,7 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
         phazite::setTrackName (*track, "Twice");
     }
 
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Rename Twice"));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Rename Twice"));
     phazite::undo (*edit);
     CHECK (track->getName() == name);
 

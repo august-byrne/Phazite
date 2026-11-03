@@ -203,7 +203,7 @@ TEST_CASE ("Grid settings are kept in the project")
 TEST_CASE ("Each editor keeps its own grid in the project")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     // A project that has none reads the defaults, and reading adds nothing to it.
     CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == phazite::GridSettings());
@@ -224,5 +224,5 @@ TEST_CASE ("Each editor keeps its own grid in the project")
     CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == pianoRollGrid);
 
     // View settings: no undo steps.
-    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
 }

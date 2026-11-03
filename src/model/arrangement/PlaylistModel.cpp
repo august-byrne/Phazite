@@ -637,7 +637,7 @@ std::vector<SongSection> getSongSections (const ProjectContext& context)
     std::vector<SongSection> sections;
 
     if (auto* edit = getEdit (context))
-        for (const auto& section : getSections (*edit))
+        for (const auto& section : getSections (getSong (*edit)))
             sections.push_back (makeSongSection (section));
 
     return sections;
@@ -646,7 +646,7 @@ std::vector<SongSection> getSongSections (const ProjectContext& context)
 std::optional<SongSection> getSongSection (const ProjectContext& context, SectionID id)
 {
     if (auto* edit = getEdit (context))
-        if (const auto section = getSection (*edit, id))
+        if (const auto section = getSection (getSong (*edit), id))
             return makeSongSection (*section);
 
     return {};
@@ -655,25 +655,25 @@ std::optional<SongSection> getSongSection (const ProjectContext& context, Sectio
 SectionID addSectionAt (ProjectContext& context, BeatPosition beat)
 {
     auto* edit = getEdit (context);
-    return edit != nullptr ? addSectionAt (*edit, beat, &getSelection (context)) : SectionID();
+    return edit != nullptr ? addSectionAt (getSong (*edit), beat, &getSelection (context)) : SectionID();
 }
 
 void renameSection (ProjectContext& context, SectionID id, const juce::String& name)
 {
     if (auto* edit = getEdit (context))
-        renameSection (*edit, id, name);
+        renameSection (getSong (*edit), id, name);
 }
 
 void setSectionColour (ProjectContext& context, SectionID id, juce::Colour colour)
 {
     if (auto* edit = getEdit (context))
-        setSectionColour (*edit, id, colour);
+        setSectionColour (getSong (*edit), id, colour);
 }
 
 std::vector<BeatPosition> getSectionBoundaries (const ProjectContext& context)
 {
     auto* edit = getEdit (context);
-    return edit != nullptr ? getSectionBoundaries (*edit) : std::vector<BeatPosition>();
+    return edit != nullptr ? getSectionBoundaries (getSong (*edit)) : std::vector<BeatPosition>();
 }
 
 void moveSection (ProjectContext& context, SectionID id, BeatPosition destination)
@@ -707,9 +707,10 @@ BeatPosition getTimelineEnd (const ProjectContext& context)
     if (edit == nullptr)
         return {};
 
-    auto end = std::max (fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength()))), getSectionsEnd (*edit));
+    auto end =
+        std::max (fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength()))), getSectionsEnd (getSong (*edit)));
 
-    for (const auto& chord : getLaneChords (*edit))
+    for (const auto& chord : getLaneChords (getSong (*edit)))
         end = std::max (end, chord.range.getEnd());
 
     return end;

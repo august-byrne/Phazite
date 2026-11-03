@@ -164,7 +164,7 @@ TEST_CASE ("Dropped files go on the track that suits them, or on new tracks belo
     auto project = createProject (temp.folder.getChildFile ("Project"));
     auto& edit = project->getEdit();
     auto* target = te::getAudioTracks (edit)[0];
-    phazite::getSongUndoManager (edit).clearUndoHistory();
+    phazite::getSong (edit).getUndoManager().clearUndoHistory();
 
     // The audio suits the empty track; the MIDI file gets a new track below it, named after the file. A file that is
     // neither is left out.
@@ -180,13 +180,13 @@ TEST_CASE ("Dropped files go on the track that suits them, or on new tracks belo
     const auto tracks = phazite::getPlaylistTracks (edit);
     CHECK (midiTrack->getName() == juce::String ("Chords"));
     CHECK (tracks.indexOf (midiTrack) == tracks.indexOf (target) + 1);
-    CHECK (phazite::getSongUndoManager (edit).getUndoDescription() == juce::String ("Add Files"));
+    CHECK (phazite::getSong (edit).getUndoManager().getUndoDescription() == juce::String ("Add Files"));
 
     // MIDI doesn't go on a track with audio on it.
     const auto more = phazite::importFiles (edit, { chords.getFullPathName() }, target, beats (0.0));
     REQUIRE (more.size() == 1);
     CHECK (more[0]->getTrack() != target);
-    CHECK (phazite::getSongUndoManager (edit).getUndoDescription() == juce::String ("Add File"));
+    CHECK (phazite::getSong (edit).getUndoManager().getUndoDescription() == juce::String ("Add File"));
 
     phazite::undo (edit);
     CHECK (phazite::getPlaylistTracks (edit).size() == 2);

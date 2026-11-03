@@ -333,10 +333,10 @@ void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const T
                 if (auto* clip = place (loopStart, loopStart + length, frameOf (passStart) / rate))
                 {
                     auto clipState = findClipState (*clip);
-                    clipState.setProperty (schema::clipTakes, (int) takes.size(), &getSongUndoManager (edit));
+                    clipState.setProperty (schema::clipTakes, (int) takes.size(), &getSong (edit).getUndoManager());
                     clipState.setProperty (schema::clipTake, (int) (std::find (takes.begin(), takes.end(), playing) - takes.begin()) + 1,
-                                           &getSongUndoManager (edit));
-                    clipState.setProperty (schema::clipTakeLength, length, &getSongUndoManager (edit));
+                                           &getSong (edit).getUndoManager());
+                    clipState.setProperty (schema::clipTakeLength, length, &getSong (edit).getUndoManager());
                 }
 
                 return;

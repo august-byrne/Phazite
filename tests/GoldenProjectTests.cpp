@@ -84,7 +84,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
 
     auto& edit = project.getEdit();
     phazite::setTempo (edit, 120.0);
-    phazite::setTimeSignature (edit, { 4, 4 });
+    phazite::setTimeSignature (phazite::getSong (edit), { 4, 4 });
 
     auto* drums = te::getAudioTracks (edit)[0];
     REQUIRE (drums != nullptr);
@@ -101,7 +101,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
                                        .role = "outro",
                                        .tip = "Let it fade.",
                                        .energy = 0.1f };
-    REQUIRE (phazite::insertSection (edit, phazite::BeatPosition::fromBeats (24.0), outro).isValid());
+    REQUIRE (phazite::insertSection (phazite::getSong (edit), phazite::BeatPosition::fromBeats (24.0), outro).isValid());
 
     // Drums: a beat, shown in drum mode with the snare's row first and a row hidden; the track pinned and muted.
     auto* beat = phazite::insertMidiClip (*drums, { beats (0.0), beats (4.0) }, nullptr);
@@ -197,11 +197,11 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
         juce::JSON::parse (R"({ "id": "golden", "name": "Golden", "scale": "minor", "chords": "i*2 VI VII/1 iim7b5 V7" })"));
     REQUIRE (progression.has_value());
     const auto at = [] (double b) { return phazite::BeatPosition::fromBeats (b); };
-    phazite::setLaneKey (edit, at (0.0), { 2, phazite::Scale::minor });
-    phazite::putProgression (edit, *progression, { at (0.0), at (24.0) });
-    phazite::putLaneChord (edit, { at (20.0), at (24.0) }, { 2, -1, phazite::ChordType::majorSeventh, 2 });
-    phazite::setLaneKey (edit, at (24.0), { 5, phazite::Scale::major });
-    phazite::putLaneChord (edit, { at (24.0), at (32.0) }, { 1, 0, phazite::ChordType::suspendedFourth, 0 });
+    phazite::setLaneKey (phazite::getSong (edit), at (0.0), { 2, phazite::Scale::minor });
+    phazite::putProgression (phazite::getSong (edit), *progression, { at (0.0), at (24.0) });
+    phazite::putLaneChord (phazite::getSong (edit), { at (20.0), at (24.0) }, { 2, -1, phazite::ChordType::majorSeventh, 2 });
+    phazite::setLaneKey (phazite::getSong (edit), at (24.0), { 5, phazite::Scale::major });
+    phazite::putLaneChord (phazite::getSong (edit), { at (24.0), at (32.0) }, { 1, 0, phazite::ChordType::suspendedFourth, 0 });
     REQUIRE (phazite::addChordPart (edit, phazite::PartStyle::bassRootFifth, { at (0.0), at (32.0) }, nullptr) != nullptr);
 }
 
@@ -411,7 +411,7 @@ TEST_SUITE ("golden")
 
         // The first start shows no unsaved changes, and nothing to undo.
         CHECK_FALSE (project->hasUnsavedChanges());
-        CHECK_FALSE (phazite::getSongUndoManager (project->getEdit()).canUndo());
+        CHECK_FALSE (phazite::getSong (project->getEdit()).getUndoManager().canUndo());
 
         saveReopenAndSaveAgain (std::move (project), "first-beat",
                                 "The First Beat example song (ExampleSongs.h), saved, reopened and saved again: "

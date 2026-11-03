@@ -118,11 +118,11 @@ TEST_CASE ("The playlist's rows are its tracks top to bottom, without those in c
     CHECK (phazite::getTrackRow (context, idOf (*song.b))->depth == 1);
 
     // Heights are view state: no undo steps.
-    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
+    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
     CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->savedHeight.has_value());
     phazite::setSavedTrackHeight (context, idOf (*song.a), 120);
     CHECK (phazite::getTrackRow (context, idOf (*song.a))->savedHeight.value_or (0) == 120);
-    CHECK_FALSE (phazite::getSongUndoManager (*song.edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo());
 
     // A track with an instrument takes a double-click's MIDI clip.
     CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->hasInstrument);
@@ -175,7 +175,7 @@ TEST_CASE ("Tracks by ID are renamed, colored, moved and added, each as one undo
 {
     Song song;
     auto& context = song.context;
-    auto& undo = phazite::getSongUndoManager (*song.edit);
+    auto& undo = phazite::getSong (*song.edit).getUndoManager();
     undo.clearUndoHistory();
 
     phazite::renameTrack (context, idOf (*song.a), "Lead");
@@ -271,7 +271,7 @@ TEST_CASE ("Collapse All collapses every row and lane while any is expanded, and
     auto* folder = phazite::groupIntoFolder ({ song.b }, nullptr);
     REQUIRE (folder != nullptr);
     phazite::showAutomationLane (context, phazite::getVolume (context, idOf (*song.a)).getRef());
-    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
+    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
     REQUIRE (phazite::isAnyRowExpanded (context));
 
     phazite::toggleAllRowsCollapsed (*song.edit);
@@ -291,7 +291,7 @@ TEST_CASE ("Collapse All collapses every row and lane while any is expanded, and
     CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->collapsed);
     CHECK_FALSE (phazite::getTrackRow (context, idOf (*folder))->collapsed);
     CHECK_FALSE (phazite::getAutomationLanes (context, idOf (*song.a))[0].collapsed);
-    CHECK_FALSE (phazite::getSongUndoManager (*song.edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo());
 }
 
 TEST_CASE ("Clips by ID: what the playlist draws of them, and the tools' edits")
@@ -447,7 +447,9 @@ TEST_CASE ("The playlist's sections, play start and time line by plain values")
     CHECK (phazite::getSongSections (context).empty());
     CHECK (phazite::getTimelineEnd (context).inBeats() == doctest::Approx (8.0)); // the clip's end
 
-    REQUIRE (phazite::insertSection (*song.edit, {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (32.0) }).isValid());
+    REQUIRE (
+        phazite::insertSection (phazite::getSong (*song.edit), {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (32.0) })
+            .isValid());
     const auto sections = phazite::getSongSections (context);
     REQUIRE (sections.size() == 1);
     CHECK (sections[0].name == juce::String ("Intro"));
@@ -464,7 +466,7 @@ TEST_CASE ("Sections by ID are added, renamed, colored, moved, copied and resize
 {
     Song song;
     auto& context = song.context;
-    auto& undo = phazite::getSongUndoManager (*song.edit);
+    auto& undo = phazite::getSong (*song.edit).getUndoManager();
     const auto startsOf = [&context]
     {
         std::vector<double> starts;

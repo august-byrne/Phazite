@@ -31,7 +31,7 @@ struct PianoRollScreen
     {
         phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
         phazite::ui::addTimelineCommands (registry, [this] { return &pianoRoll; });
         pianoRoll.addCommands (registry);

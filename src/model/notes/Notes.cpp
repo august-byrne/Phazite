@@ -114,7 +114,7 @@ namespace
 
     juce::UndoManager* getUndoManager (te::MidiClip& clip)
     {
-        return &getSongUndoManager (clip.edit);
+        return &getSong (clip.edit).getUndoManager();
     }
 
     // Where a clip's notes count from in the song (its content start), and where it is, as the song has them.
@@ -176,10 +176,10 @@ namespace
         reconcileAll (clip.edit, aliases);
     }
 
-    // A new note's ID, the song's (makeID()): one no note has had before.
+    // A new note's ID, the song's (Song::makeID()): one no note has had before.
     juce::int64 makeNoteID (te::Edit& edit)
     {
-        return (juce::int64) makeID (edit);
+        return (juce::int64) getSong (edit).makeID();
     }
 
     // What a note is besides its place, pitch and velocity: muted, a slide note or a portamento note, each written on its
@@ -311,7 +311,7 @@ namespace
             return;
 
         const auto& tempo = clip.edit.tempoSequence;
-        const auto bars = getBars (clip.edit);
+        const auto bars = getBars (getSong (clip.edit));
         auto newEnd = tempo.toTime (toTracktion (bars.getBarStart (bars.getBarAt (fromTracktion (end - tinyBeats)) + 1)));
 
         if (const auto roomEnd = findRoomEnd (clip))
@@ -895,11 +895,11 @@ std::optional<Key> getTrackKey (const te::Track& track)
 
 void setTrackKey (te::Track& track, const std::optional<Key>& key)
 {
-    writeKey (findTrackState (track), key, &getSongUndoManager (track.edit));
+    writeKey (findTrackState (track), key, &getSong (track.edit).getUndoManager());
 
     // What new tracks get; not an edit to undo.
     if (key.has_value())
-        writeKey (getPhaziteState (track.edit).getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
+        writeKey (getSong (track.edit).getState().getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
 }
 
 void setTrackKeys (const juce::Array<te::Track*>& tracks, const std::optional<Key>& key)
@@ -922,7 +922,7 @@ void applyLastKey (te::Track& track)
 
 void setLastKey (te::Edit& edit, const Key& key)
 {
-    writeKey (getPhaziteState (edit).getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
+    writeKey (getSong (edit).getState().getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
 }
 
 int snapToKey (int pitch, const Key& key)

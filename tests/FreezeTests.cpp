@@ -58,7 +58,7 @@ struct Song
         // Tracktion puts clips added in code in order a moment later, as an undo step of its own.
         phazite::test::dispatchPendingMessages();
         REQUIRE (project->save().wasOk());
-        phazite::getSongUndoManager (edit).clearUndoHistory();
+        phazite::getSong (edit).getUndoManager().clearUndoHistory();
         open();
     }
 
@@ -168,7 +168,7 @@ TEST_CASE ("Freezing renders a track up to its fader in the background, and play
     CHECK (te::AudioFile (song.edit().engine, song.frozenFile()).getLength() >= 1.5);
 
     // Not an undo step, but a change to save; the render's switches are as they were.
-    CHECK_FALSE (phazite::getSongUndoManager (song.edit()).canUndo());
+    CHECK_FALSE (phazite::getSong (song.edit()).getUndoManager().canUndo());
     CHECK (song.project->hasUnsavedChanges());
     CHECK (song.expander->isEnabled());
     CHECK (song.bass->getVolumePlugin()->isEnabled());
@@ -180,7 +180,7 @@ TEST_CASE ("Freezing renders a track up to its fader in the background, and play
     CHECK_FALSE (phazite::findTrackState (*song.bass).hasProperty (phazite::schema::trackFrozen));
     CHECK_FALSE (song.expander->isFrozen());
     CHECK_FALSE (song.hasFreezePoint());
-    CHECK_FALSE (phazite::getSongUndoManager (song.edit()).canUndo());
+    CHECK_FALSE (phazite::getSong (song.edit()).getUndoManager().canUndo());
     const auto frozenFile = song.frozenFile();
     CHECK (frozenFile.existsAsFile());
 
@@ -246,7 +246,7 @@ TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unf
     CHECK ((bool) phazite::findTrackState (*song.bass)[phazite::schema::trackFrozen]);
 
     {
-        const auto rebuilt = phazite::createEditFromSong (song.edit().engine, phazite::getPhaziteState (song.edit()).createCopy(),
+        const auto rebuilt = phazite::createEditFromSong (song.edit().engine, phazite::getSong (song.edit()).getState().createCopy(),
                                                           song.project->getFile(), song.project->getCacheFolder());
         REQUIRE (rebuilt != nullptr);
         auto* bass = dynamic_cast<te::AudioTrack*> (te::findTrackForID (*rebuilt, song.bass->itemID));

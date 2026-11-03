@@ -28,7 +28,7 @@ namespace
 
     juce::UndoManager* getUndo (te::Edit& edit)
     {
-        return &getSongUndoManager (edit);
+        return &getSong (edit).getUndoManager();
     }
 
     // The latest a clip can end: where its audio does, for an audio clip that doesn't loop (Tracktion's longest takes no
@@ -304,10 +304,10 @@ namespace
         note.state.setProperty (schema::phaziteNoteID, id, undo);
     }
 
-    // A new note's ID, the song's (makeID()): one no note has had before.
+    // A new note's ID, the song's (Song::makeID()): one no note has had before.
     juce::int64 makeNoteID (te::Edit& edit)
     {
-        return (juce::int64) makeID (edit);
+        return (juce::int64) getSong (edit).makeID();
     }
 
     // A copy of the part of a clip that lies in a range, where that part is. The copy is cut at the range's edges as
@@ -433,7 +433,7 @@ std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState)
 juce::ValueTree copyClipState (te::Edit& edit, const juce::ValueTree& clipState)
 {
     auto copy = clipState.createCopy();
-    copy.setProperty (schema::clipID, (juce::int64) makeID (edit), nullptr);
+    copy.setProperty (schema::clipID, (juce::int64) getSong (edit).makeID(), nullptr);
     return copy;
 }
 
@@ -441,7 +441,7 @@ juce::ValueTree makeMidiClipState (te::Edit& edit, const juce::String& name, Bea
 {
     const auto start = std::max (0.0, range.getStart().inBeats());
     juce::ValueTree clipState (schema::CLIP);
-    clipState.setProperty (schema::clipID, (juce::int64) makeID (edit), nullptr);
+    clipState.setProperty (schema::clipID, (juce::int64) getSong (edit).makeID(), nullptr);
     clipState.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
     clipState.setProperty (schema::clipName, name, nullptr);
     clipState.setProperty (schema::clipStart, start, nullptr);
@@ -678,7 +678,7 @@ juce::Array<te::Clip*> copyClips (const juce::Array<te::Clip*>& clips, bool asAl
         // Aliases share an alias group, which the original gets if it is in none; a copy that isn't an alias leaves the
         // original's.
         if (asAliases && ! clipState.hasProperty (schema::clipLink))
-            clipState.setProperty (schema::clipLink, (juce::int64) makeID (edit), getUndo (edit));
+            clipState.setProperty (schema::clipLink, (juce::int64) getSong (edit).makeID(), getUndo (edit));
 
         auto copy = copyClipState (edit, clipState);
 
@@ -809,7 +809,7 @@ te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selecti
 
 te::MidiClip* insertBarLongMidiClip (te::ClipTrack& track, te::BeatPosition start, Selection* selection)
 {
-    const auto bar = te::BeatDuration::fromBeats (getBars (track.edit).getBeatsPerBar (fromTracktion (start)));
+    const auto bar = te::BeatDuration::fromBeats (getBars (getSong (track.edit)).getBeatsPerBar (fromTracktion (start)));
     return insertMidiClip (track, { start, start + bar }, selection);
 }
 

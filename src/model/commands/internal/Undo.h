@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Undo and redo, and the undo convention: every change to a project is one named undo step in the song's history
-// (getSongUndoManager(), model/base/internal/Schema.h), which a command (through its undoTarget) or a model function that
+// (Song::getUndoManager(), model/base/Song.h), which a command (through its undoTarget) or a model function that
 // is a change of its own begins with an UndoStep.
 #pragma once
 
+#include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -40,6 +41,7 @@ class UndoStep
 {
 public:
     UndoStep (te::Edit&, const juce::String& name);
+    UndoStep (Song&, const juce::String& name);
     UndoStep (juce::UndoManager&, const juce::String& name); // a song's history, as a command's undo target names it
     ~UndoStep();
 
@@ -96,5 +98,9 @@ private:
 // history as the undo target of a command that changes it.
 std::function<void()> withEdit (const Selection&, std::function<void (te::Edit&)> action);
 std::function<bool()> ifEdit (const Selection&, std::function<bool (te::Edit&)> test);
+
+// The same, with its song (model/base/Song.h), for actions and tests of the song alone.
+std::function<void()> withSong (const Selection&, std::function<void (Song&)> action);
+std::function<bool()> ifSong (const Selection&, std::function<bool (const Song&)> test);
 std::function<juce::UndoManager*()> undoTargetOf (const Selection&);
 } // namespace phazite

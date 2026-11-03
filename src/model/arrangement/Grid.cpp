@@ -115,7 +115,7 @@ GridSettings loadGridSettings (const te::Edit& edit, GridOwner owner)
 
 void saveGridSettings (te::Edit& edit, GridOwner owner, const GridSettings& grid)
 {
-    auto state = getPhaziteState (edit);
+    auto state = getSong (edit).getState();
 
     if (owner == GridOwner::pianoRoll)
         state = state.getOrCreateChildWithName (schema::PIANOROLL, nullptr);

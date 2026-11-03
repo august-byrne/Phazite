@@ -5,6 +5,7 @@
 // it (Arrangement.h): move, copy, delete and resize. Sections never overlap.
 #pragma once
 
+#include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -37,12 +38,12 @@ struct Section
 };
 
 // The sections, in song order.
-std::vector<Section> getSections (const te::Edit&);
-std::optional<Section> getSection (const te::Edit&, SectionID);
-std::optional<Section> getSectionAt (const te::Edit&, BeatPosition);
+std::vector<Section> getSections (const Song&);
+std::optional<Section> getSection (const Song&, SectionID);
+std::optional<Section> getSectionAt (const Song&, BeatPosition);
 
 // Where the last section ends, or the song's start if there are none.
-BeatPosition getSectionsEnd (const te::Edit&);
+BeatPosition getSectionsEnd (const Song&);
 
 // The selected sections, in song order.
 std::vector<Section> getSelectedSections (const Selection&);
@@ -56,29 +57,29 @@ std::vector<SectionID> getIDs (const std::vector<Section>&);
 juce::Colour getRoleColour (const juce::String& role);
 
 // Adds a section, without moving anything else, and returns its ID.
-SectionID insertSection (te::Edit&, BeatPosition start, const SectionInfo&);
+SectionID insertSection (Song&, BeatPosition start, const SectionInfo&);
 
 // Removes every section, without moving anything: a song outline puts its own in their place.
-void removeSections (te::Edit&);
+void removeSections (Song&);
 
 // A new section is this long, and named "Section" and its number, after the sections there are.
 inline constexpr int barsPerNewSection = 8;
-juce::String getNewSectionName (const te::Edit&);
+juce::String getNewSectionName (const Song&);
 
 // Adds a new section after the last one, or at the start of the song if there is none, and selects it alone if a
 // selection is given.
-SectionID appendSection (te::Edit&, Selection*);
+SectionID appendSection (Song&, Selection*);
 
 // Adds a new section where the user asks for one, as one undo step: from the start of the bar the beat is in (or the
 // end of the section there, if that ends later) for barsPerNewSection bars, or up to the next section, since sections
 // never overlap. Selects it alone if a selection is given. Returns no ID if there is no room.
-SectionID addSectionAt (te::Edit&, BeatPosition, Selection*);
+SectionID addSectionAt (Song&, BeatPosition, Selection*);
 
 // Renames a section, as one undo step; an empty name or the same one changes nothing.
-void renameSection (te::Edit&, SectionID, const juce::String& name);
+void renameSection (Song&, SectionID, const juce::String& name);
 
 // Gives a section another color, as one undo step.
-void setSectionColour (te::Edit&, SectionID, juce::Colour);
+void setSectionColour (Song&, SectionID, juce::Colour);
 
 // From the earliest section's start to the latest one's end: an empty range for none.
 BeatRange getSectionsRange (const std::vector<Section>&);
@@ -114,21 +115,21 @@ std::vector<SectionID> duplicateSections (te::Edit&, const std::vector<SectionID
 void resizeSection (te::Edit&, SectionID, BeatDuration newLength, bool moveRest);
 
 // Where a section can be moved or copied to: the start of each section and the end of the last.
-std::vector<BeatPosition> getSectionBoundaries (const te::Edit&);
+std::vector<BeatPosition> getSectionBoundaries (const Song&);
 
 //==============================================================================
 // The sections' part of the time edits (Arrangement.h), which make them longer, shorter, move or copy them as they
 // change the time they are in; the caller's change.
 
 // Sections from the time on move later by its length; one the time is inside of gets longer.
-void insertSectionTime (te::Edit&, BeatPosition at, BeatDuration);
+void insertSectionTime (Song&, BeatPosition at, BeatDuration);
 
 // Sections inside the range go; those that reach into it get shorter; those after it move back.
-void removeSectionTime (te::Edit&, BeatRange);
+void removeSectionTime (Song&, BeatRange);
 
 // The sections that start in the range go to the destination, and those that start between it and the destination
 // move the other way, by the range's length, as the time does.
-void moveSectionTime (te::Edit&, BeatRange, BeatPosition destination);
+void moveSectionTime (Song&, BeatRange, BeatPosition destination);
 
 // Copies of the sections wholly inside a range, kept to be put in elsewhere, by how far into the range each starts.
 struct SectionsCopy
@@ -137,8 +138,8 @@ struct SectionsCopy
     std::vector<juce::ValueTree> sections {};
 };
 
-SectionsCopy copySections (const te::Edit&, BeatRange);
-void pasteSections (te::Edit&, const SectionsCopy&, BeatPosition destination); // with IDs of their own
+SectionsCopy copySections (const Song&, BeatRange);
+void pasteSections (Song&, const SectionsCopy&, BeatPosition destination); // with IDs of their own
 
 // The section commands: add a section. Delete, duplicate and duplicate as aliases are the selection
 // commands (Selection.h); the song outlines' are Outlines.h's; the sections strip adds rename and color.

@@ -41,22 +41,22 @@ namespace
 
 void undo (te::Edit& edit)
 {
-    undoOrRedo (edit, [&edit] { getSongUndoManager (edit).undo(); });
+    undoOrRedo (edit, [&edit] { getSong (edit).getUndoManager().undo(); });
 }
 
 void redo (te::Edit& edit)
 {
-    undoOrRedo (edit, [&edit] { getSongUndoManager (edit).redo(); });
+    undoOrRedo (edit, [&edit] { getSong (edit).getUndoManager().redo(); });
 }
 
 bool canUndo (te::Edit& edit)
 {
-    return getSongUndoManager (edit).canUndo();
+    return getSong (edit).getUndoManager().canUndo();
 }
 
 bool canRedo (te::Edit& edit)
 {
-    return getSongUndoManager (edit).canRedo();
+    return getSong (edit).getUndoManager().canRedo();
 }
 
 void undoOrRedo (te::Edit& edit)
@@ -72,7 +72,7 @@ juce::String describeUndo (te::Edit* edit)
     if (edit == nullptr)
         return "Undo";
 
-    auto& undoManager = getSongUndoManager (*edit);
+    auto& undoManager = getSong (*edit).getUndoManager();
     return withStep ("Undo", undoManager.canUndo(), undoManager.getUndoDescription());
 }
 
@@ -81,7 +81,7 @@ juce::String describeRedo (te::Edit* edit)
     if (edit == nullptr)
         return "Redo";
 
-    auto& undoManager = getSongUndoManager (*edit);
+    auto& undoManager = getSong (*edit).getUndoManager();
     return withStep ("Redo", undoManager.canRedo(), undoManager.getRedoDescription());
 }
 
@@ -92,7 +92,12 @@ juce::String describeUndoOrRedo (te::Edit* edit)
 
 //==============================================================================
 UndoStep::UndoStep (te::Edit& edit, const juce::String& name)
-    : UndoStep (getSongUndoManager (edit), name)
+    : UndoStep (getSong (edit).getUndoManager(), name)
+{
+}
+
+UndoStep::UndoStep (Song& song, const juce::String& name)
+    : UndoStep (song.getUndoManager(), name)
 {
 }
 
@@ -123,7 +128,7 @@ Gesture::Gesture (te::Edit& e, const juce::String& name)
     : edit (e),
       open (true)
 {
-    auto& undoManager = getSongUndoManager (edit);
+    auto& undoManager = getSong (edit).getUndoManager();
     jassert (! isInGesture (undoManager)); // one at a time for a song
     undoManager.beginNewTransaction (name);
     getOpenGestures().push_back (&undoManager);
@@ -140,13 +145,13 @@ void Gesture::commit()
         return;
 
     auto& gestures = getOpenGestures();
-    gestures.erase (std::remove (gestures.begin(), gestures.end(), &getSongUndoManager (edit)), gestures.end());
+    gestures.erase (std::remove (gestures.begin(), gestures.end(), &getSong (edit).getUndoManager()), gestures.end());
     open = false;
 }
 
 bool Gesture::isInProgress (te::Edit& edit)
 {
-    return isInGesture (getSongUndoManager (edit));
+    return isInGesture (getSong (edit).getUndoManager());
 }
 
 void Gesture::rollBack()
@@ -154,14 +159,14 @@ void Gesture::rollBack()
     if (! open)
         return;
 
-    undoOrRedo (edit, [this] { getSongUndoManager (edit).undoCurrentTransactionOnly(); });
+    undoOrRedo (edit, [this] { getSong (edit).getUndoManager().undoCurrentTransactionOnly(); });
     commit();
 }
 
 //==============================================================================
 RecordingStep::RecordingStep (te::Edit& edit, const juce::String& name)
 {
-    if (auto& undoManager = getSongUndoManager (edit); ! isInGesture (undoManager))
+    if (auto& undoManager = getSong (edit).getUndoManager(); ! isInGesture (undoManager))
         undoManager.beginNewTransaction (name);
 }
 
@@ -184,12 +189,30 @@ std::function<bool()> ifEdit (const Selection& selection, std::function<bool (te
     };
 }
 
+std::function<void()> withSong (const Selection& selection, std::function<void (Song&)> action)
+{
+    return [&selection, action]
+    {
+        if (auto* edit = selection.getEdit())
+            action (getSong (*edit));
+    };
+}
+
+std::function<bool()> ifSong (const Selection& selection, std::function<bool (const Song&)> test)
+{
+    return [&selection, test]
+    {
+        auto* edit = selection.getEdit();
+        return edit != nullptr && test (getSong (*edit));
+    };
+}
+
 std::function<juce::UndoManager*()> undoTargetOf (const Selection& selection)
 {
     return [&selection]() -> juce::UndoManager*
     {
         auto* edit = selection.getEdit();
-        return edit != nullptr ? &getSongUndoManager (*edit) : nullptr;
+        return edit != nullptr ? &getSong (*edit).getUndoManager() : nullptr;
     };
 }
 } // namespace phazite

@@ -293,7 +293,7 @@ TEST_CASE ("Parts made from the chords: a new track with the synth, notes that f
     REQUIRE (clip != nullptr);
     {
         const phazite::UndoStep step (*song.edit, "Change Velocity");
-        clip->getSequence().getNotes().getFirst()->setVelocity (60, &phazite::getSongUndoManager (*song.edit));
+        clip->getSequence().getNotes().getFirst()->setVelocity (60, &phazite::getSong (*song.edit).getUndoManager());
     }
     CHECK_FALSE (phazite::followsChords (song.context, *part));
     phazite::changeLaneChord (song.context, beat (0.0), { 2, 0, ChordType::minor, 0 });
@@ -321,7 +321,7 @@ TEST_CASE ("Parts made from the chords go where the selection says: a time range
     CHECK (phazite::getChordPartRange (song.context) == beats (4.0, 20.0));
     CHECK (phazite::canMakeChordPart (song.context));
 
-    const auto section = phazite::insertSection (*song.edit, phazite::BeatPosition::fromBeats (8.0),
+    const auto section = phazite::insertSection (phazite::getSong (*song.edit), phazite::BeatPosition::fromBeats (8.0),
                                                  { .name = "Verse", .length = phazite::BeatDuration::fromBeats (8.0) });
     REQUIRE (section.isValid());
     phazite::getSelection (song.context).selectOnly (section);
@@ -390,7 +390,7 @@ TEST_CASE ("The chord lane and its parts are saved, and read back the same")
 
     // A copy of the song, opened as another Edit, reads the same chords, and its part still follows them.
     const phazite::test::TemporaryFolder temp;
-    auto copy = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getPhaziteState (*song.edit).createCopy(),
+    auto copy = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getSong (*song.edit).getState().createCopy(),
                                              temp.folder.getChildFile ("Copy.phazite"));
     REQUIRE (copy != nullptr);
     phazite::ProjectContext other { phazite::test::getEngineContext() };

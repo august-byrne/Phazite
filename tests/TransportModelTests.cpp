@@ -17,7 +17,7 @@ TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each c
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    auto& undo = phazite::getSongUndoManager (*edit);
+    auto& undo = phazite::getSong (*edit).getUndoManager();
 
     CHECK_FALSE (phazite::getTempoHandle (context).isValid()); // no project open
     CHECK (phazite::getTempoHandle (context).getValue() == doctest::Approx (120.0));
@@ -36,21 +36,21 @@ TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each c
     CHECK (tempo.getValue() == doctest::Approx (90.0));
     CHECK (undo.getUndoDescription() == juce::String ("Change Tempo"));
     phazite::undo (*edit);
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (120.0)); // the whole drag at once
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (120.0)); // the whole drag at once
     CHECK_FALSE (undo.canUndo());
 
     tempo.setValue (140.0); // typed: a step of its own
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (140.0));
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (140.0));
     CHECK (undo.canUndo());
 
     // A drag in progress when another project opens is kept, and the handle then has nothing.
     tempo.beginGesture();
     tempo.setValue (150.0);
     tempo = phazite::TempoHandle();
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (150.0));
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (150.0));
     CHECK_FALSE (tempo.isValid());
     tempo.setValue (60.0);
-    CHECK (phazite::getTempo (*edit) == doctest::Approx (150.0));
+    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (150.0));
     setEdit (context, nullptr);
 }
 
@@ -73,7 +73,7 @@ TEST_CASE ("The transport's switches and the time signature by the project's con
     CHECK (phazite::getTimeSignature (context) == phazite::TimeSignature { 4, 4 });
     phazite::setTimeSignature (context, { 6, 8 });
     CHECK (phazite::getTimeSignature (context) == phazite::TimeSignature { 6, 8 });
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Time Signature"));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Time Signature"));
     setEdit (context, nullptr);
 }
 

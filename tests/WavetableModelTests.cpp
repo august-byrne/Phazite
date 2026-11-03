@@ -38,7 +38,7 @@ struct Song
         REQUIRE (synth != nullptr);
         REQUIRE (phazite::isWavetableSynth (*synth));
         phazite::test::settle();
-        phazite::getSongUndoManager (edit()).clearUndoHistory();
+        phazite::getSong (edit()).getUndoManager().clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }
@@ -134,9 +134,9 @@ TEST_CASE ("What a wavetable oscillator plays is kept in the project, and choosi
         CHECK (song.describeUndo() == juce::String ("Undo Put Vowels on Osc 1"));
 
         // The one it plays already: no step.
-        phazite::getSongUndoManager (song.edit()).clearUndoHistory();
+        phazite::getSong (song.edit()).getUndoManager().clearUndoHistory();
         phazite::setFactoryWavetable (*song.synth, 0, factory ("Vowels"));
-        CHECK_FALSE (phazite::getSongUndoManager (song.edit()).canUndo());
+        CHECK_FALSE (phazite::getSong (song.edit()).getUndoManager().canUndo());
 
         // Undo and redo, as the oscillator plays them too.
         phazite::setFactoryWavetable (*song.synth, 1, factory ("Growl"));
@@ -191,11 +191,11 @@ TEST_CASE ("A sound file becomes a wavetable oscillator's table, the project pla
     CHECK (song.getPlayedTable (1) == juce::String ("Buzz"));
 
     // Not a sound: nothing changes.
-    phazite::getSongUndoManager (song.edit()).clearUndoHistory();
+    phazite::getSong (song.edit()).getUndoManager().clearUndoHistory();
     const auto text = temp.folder.getChildFile ("notes.txt");
     REQUIRE (text.replaceWithText ("not a sound"));
     CHECK_FALSE (phazite::setWavetableFile (*song.synth, 0, text));
-    CHECK_FALSE (phazite::getSongUndoManager (song.edit()).canUndo());
+    CHECK_FALSE (phazite::getSong (song.edit()).getUndoManager().canUndo());
 
     // A file that isn't there any more: the oscillator plays its factory table.
     song.synth->state.setProperty ("osc1WavetableFile", "Audio/Gone.wav", nullptr);

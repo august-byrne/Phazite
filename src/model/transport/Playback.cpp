@@ -25,14 +25,14 @@ namespace
     void setLoopFollowsSong (te::Edit& edit, bool follows)
     {
         if (doesLoopFollowSong (edit) != follows)
-            getPhaziteState (edit).setProperty (schema::loopFollowsSong, follows, nullptr);
+            getSong (edit).getState().setProperty (schema::loopFollowsSong, follows, nullptr);
     }
 
     // The song's switches, each written only while it is on.
     void setSwitch (te::Edit& edit, const juce::Identifier& property, bool on)
     {
         if (on)
-            getPhaziteState (edit).setProperty (property, true, nullptr);
+            getSong (edit).getState().setProperty (property, true, nullptr);
         else if (auto state = findPhaziteState (edit); state.isValid())
             state.removeProperty (property, nullptr);
     }
@@ -44,7 +44,7 @@ namespace
             return;
 
         setLoopFollowsSong (edit, false);
-        auto state = getPhaziteState (edit);
+        auto state = getSong (edit).getState();
         state.setProperty (schema::loopStart, std::max (0.0, range.getStart().inBeats()), nullptr);
         state.setProperty (schema::loopEnd, range.getEnd().inBeats(), nullptr);
         setSwitch (edit, schema::loop, true);
@@ -186,7 +186,7 @@ void movePlayhead (te::Edit& edit, te::TimePosition position)
 {
     // The song's start isn't written: a project that never played from elsewhere has nothing new to save.
     if (const auto beat = edit.tempoSequence.toBeats (position).inBeats(); beat > 0.0)
-        getPhaziteState (edit).setProperty (schema::playStart, beat, nullptr);
+        getSong (edit).getState().setProperty (schema::playStart, beat, nullptr);
     else if (auto state = findPhaziteState (edit); state.isValid())
         state.removeProperty (schema::playStart, nullptr);
 

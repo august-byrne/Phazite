@@ -18,7 +18,7 @@ namespace
 
     juce::UndoManager* getUndo (te::Edit& edit)
     {
-        return &getSongUndoManager (edit);
+        return &getSong (edit).getUndoManager();
     }
 
     // What a clip's sound is made from, and how (Schema.h).
@@ -118,7 +118,7 @@ FilePart getFilePart (const juce::ValueTree& clipState)
 juce::ValueTree makeAudioClipState (te::Edit& edit, const juce::String& name, const juce::File& file, BeatPosition start, FilePart part)
 {
     juce::ValueTree clipState (schema::CLIP);
-    clipState.setProperty (schema::clipID, (juce::int64) makeID (edit), nullptr);
+    clipState.setProperty (schema::clipID, (juce::int64) getSong (edit).makeID(), nullptr);
     clipState.setProperty (schema::clipKind, schema::clipIsAudio, nullptr);
     clipState.setProperty (schema::clipName, name, nullptr);
     clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), nullptr);

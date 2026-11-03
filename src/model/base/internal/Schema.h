@@ -10,18 +10,19 @@
 // parameters and variables of the same name.
 #pragma once
 
+#include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite::schema
 {
 //==============================================================================
-// Phazite's state: what Phazite keeps for the whole song (getPhaziteState()).
+// Phazite's state: what Phazite keeps for the whole song (getSong()).
 
 // Child of EDIT. Every project has one (Project adds it as the project opens); another Edit gets one when something is
 // first written to it.
 inline const juce::Identifier PHAZITE { "PHAZITE" };
 
-// On PHAZITE (T1, step 9). int64, above every ID in the song: the next ID it gives an item (makeID()), each kind from the
+// On PHAZITE (T1, step 9). int64, above every ID in the song: the next ID it gives an item (Song::makeID()), each kind from the
 // same numbers, never one twice. Written without an undo step, and no change of its own (the item it numbers is). state
 inline const juce::Identifier nextID { "nextID" };
 
@@ -704,19 +705,24 @@ namespace preset
 
 namespace phazite
 {
-// An Edit's Phazite state: the PHAZITE element, added if the Edit has none yet (without an undo step).
-juce::ValueTree getPhaziteState (te::Edit&);
+// An Edit's song (model/base/Song.h): its Phazite state, the PHAZITE element (Song::getState()), with its undo history and
+// its count of IDs, which the Edit holds for as long as it lives (on its state's root, which nothing saves), made with the
+// PHAZITE element if the Edit has none yet (without an undo step). While T1 lasts, Tracktion's items take IDs from the same
+// numbers (the mirror gives Tracktion's the song's IDs, and Tracktion numbers what it makes itself above every ID in its
+// state), so the song takes Tracktion's next too, and the larger of the two (Song::makeID()): Tracktion's and the song's
+// never meet.
+//
+// Every change to the song is an undo step in its history (T1, step 11; model/commands/internal/Undo.h), which
+// phazite::undo() and redo() take back and forth, the mirror bringing Tracktion's Edit in line after. Tracktion's own
+// (te::Edit::getUndoManager()) records what the mirror tells Tracktion to do, which nothing takes back. Never record a
+// change of the Edit's root itself in the song's: the history would hold the root that holds it, and the Edit's whole state
+// would outlive the Edit (CI's leak check found it in tests that did, 2026-11-01). The song's changes are to its own
+// element and below.
+Song& getSong (const te::Edit&);
 
-// The same, but without adding it if the Edit has none yet (adding it would count as an unsaved change): then the
+// The song's state, but without adding it if the Edit has none yet (adding it would count as an unsaved change): then the
 // result is invalid, and reading a property from it gives the default.
 juce::ValueTree findPhaziteState (const te::Edit&);
-
-// A new ID for an item of the song (a track, a channel's fader or VCA, a clip, a note, an alias group, a device, a
-// container, a send, a modulator, a macro, a section): the song's next (Schema.h: nextID), never given twice, nor taken back
-// by an undo. While T1 lasts, Tracktion's items take IDs from the same numbers (the mirror gives Tracktion's the song's
-// IDs, and Tracktion numbers what it makes itself above every ID in its state), so it takes Tracktion's next too, and the
-// larger of the two: Tracktion's and the song's never meet.
-std::uint64_t makeID (te::Edit&);
 
 // The ID a song gives next: past its count (nextID) and every ID it holds, those Tracktion gave what it made and the song
 // took in too (a device made in Tracktion first, a recording's clips, a copied track's).
@@ -724,12 +730,4 @@ std::uint64_t findNextID (const juce::ValueTree& song);
 
 // Brings the song's count there (findNextID()), and Tracktion's next past that. As a project opens and saves.
 void countIDs (te::Edit&);
-
-// The song's undo history (T1, step 11): every change to the song is an undo step in it (model/commands/internal/Undo.h),
-// which phazite::undo() and redo() take back and forth, the mirror bringing Tracktion's Edit in line after. Tracktion's
-// own (te::Edit::getUndoManager()) records what the mirror tells Tracktion to do, which nothing takes back. The Edit holds
-// it for as long as it lives (on its state's root, which nothing saves). So never record a change of the root itself in it:
-// the history would hold the root that holds it, and the Edit's whole state would outlive the Edit (CI's leak check found it
-// in tests that did, 2026-11-01). The song's changes are to its own element (getPhaziteState()) and below.
-juce::UndoManager& getSongUndoManager (const te::Edit&);
 } // namespace phazite

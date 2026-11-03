@@ -4,6 +4,7 @@
 #include "internal/EngineContext.h"
 #include "internal/Preview.h"
 #include "internal/PreviewLoop.h"
+#include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/MixerModel.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -178,7 +179,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
     auto& previews = impl->previews;
     const auto rate = previews.getSampleRate();
     const auto blockSize = previews.getMaximumBlockSize();
-    const auto bpm = project != nullptr ? getTempo (*project) : 120.0;
+    const auto bpm = project != nullptr ? getTempo (getSong (*project)) : 120.0;
 
     // The sound on a strip of its own.
     engine::Plan::Strip sound;

@@ -13,10 +13,6 @@ namespace phazite::mirror
 {
 namespace
 {
-    te::EditItemID toTracktionID (ModulatorID id)
-    {
-        return te::EditItemID::fromRawID (id.getRaw());
-    }
 
     std::vector<juce::ValueTree> getChildren (const juce::ValueTree& owner, const juce::Identifier& type)
     {
@@ -94,7 +90,7 @@ namespace
                 if (const auto type = findModulatorType (wanted[i][schema::modulatorType].toString()))
                 {
                     juce::ValueTree made (getModifierType (*type));
-                    toTracktionID (id).writeID (made, nullptr);
+                    toTracktion (id).writeID (made, nullptr);
                     list->insertModifier (made, (int) i, nullptr);
                 }
 
@@ -150,7 +146,7 @@ namespace
             if (findMacro (id) == nullptr)
             {
                 juce::ValueTree made (te::IDs::MACROPARAMETER);
-                toTracktionID (id).writeID (made, nullptr);
+                toTracktion (id).writeID (made, nullptr);
                 made.setProperty (te::IDs::name, name, nullptr);
                 made.setProperty (te::IDs::value, value, nullptr);
                 list.state.addChild (made, std::min ((int) i, list.state.getNumChildren()), undo);

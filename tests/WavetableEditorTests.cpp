@@ -34,7 +34,7 @@ struct Screen
                                         project->getEdit().getPluginCache().createNewPlugin (WavetableSynth::typeID, {}));
         REQUIRE (synth != nullptr);
         phazite::test::settle();
-        phazite::getSongUndoManager (project->getEdit()).clearUndoHistory();
+        phazite::getSong (project->getEdit()).getUndoManager().clearUndoHistory();
 
         editor = std::make_unique<WavetableEditor> (phazite::makeDeviceHandle (*synth));
         window = std::make_unique<phazite::test::TestWindow> (*editor, editor->getWidth(), editor->getHeight());

@@ -204,7 +204,7 @@ TEST_CASE ("The loop, where playback starts and the metronome are the song's, wh
     Song song;
     auto& edit = *song.edit;
     auto& transport = edit.getTransport();
-    phazite::getSongUndoManager (edit).clearUndoHistory();
+    phazite::getSong (edit).getUndoManager().clearUndoHistory();
 
     // Beats 4 to 12 looped and playback starting at beat 6: at 120 BPM, 2 to 6 seconds and 3. None is an undo step.
     phazite::loopBeatRange (edit, 4.0, 12.0);
@@ -220,7 +220,7 @@ TEST_CASE ("The loop, where playback starts and the metronome are the song's, wh
     CHECK (song.isLooping());
     CHECK (transport.startPosition.get().inSeconds() == doctest::Approx (3.0));
     CHECK (edit.clickTrackEnabled.get());
-    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
+    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
 
     // They keep their beats when the tempo changes, when the change is undone, and when the time signature changes (a beat
     // is an eighth note in 6/8: a quarter of a second at 120 BPM).
@@ -230,7 +230,7 @@ TEST_CASE ("The loop, where playback starts and the metronome are the song's, wh
     phazite::undo (edit);
     CHECK (song.getLoop() == "2.000-6.000");
     CHECK (transport.startPosition.get().inSeconds() == doctest::Approx (3.0));
-    phazite::setTimeSignature (edit, { 6, 8 });
+    phazite::setTimeSignature (phazite::getSong (edit), { 6, 8 });
     CHECK (song.getLoop() == "1.000-3.000");
     CHECK (phazite::getPlayStart (edit).inSeconds() == doctest::Approx (1.5));
 
@@ -282,9 +282,9 @@ TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, s
 
     // Loop Section: from the first selected section's start to the last one's end.
     CHECK_FALSE (song.registry.invoke ("section.loop"));
-    const auto verse = phazite::insertSection (*song.edit, phazite::BeatPosition::fromBeats (8.0),
+    const auto verse = phazite::insertSection (phazite::getSong (*song.edit), phazite::BeatPosition::fromBeats (8.0),
                                                { .name = "Verse", .length = phazite::BeatDuration::fromBeats (8.0) });
-    const auto chorus = phazite::insertSection (*song.edit, phazite::BeatPosition::fromBeats (16.0),
+    const auto chorus = phazite::insertSection (phazite::getSong (*song.edit), phazite::BeatPosition::fromBeats (16.0),
                                                 { .name = "Chorus", .length = phazite::BeatDuration::fromBeats (8.0) });
     REQUIRE (verse.isValid());
     REQUIRE (chorus.isValid());
@@ -365,7 +365,7 @@ TEST_CASE ("The song ends with the bar its last clip ends in, and its sections d
 
     // An outline runs on past what is in it so far: its sections end with its last bar; the song's end doesn't.
     REQUIRE (phazite::applyOutline (*song.edit, "rock")); // 96 bars
-    CHECK (phazite::getSectionsEnd (*song.edit).inBeats() == doctest::Approx (384.0));
+    CHECK (phazite::getSectionsEnd (phazite::getSong (*song.edit)).inBeats() == doctest::Approx (384.0));
     CHECK (songEnd() == "0.000");
     CHECK (song.getSongLoop() == "0.000-2.000");
 
@@ -376,7 +376,7 @@ TEST_CASE ("The song ends with the bar its last clip ends in, and its sections d
     phazite::toggleClipsMuted ({ &clip }); // a muted clip counts
     CHECK (songEnd() == "4.000");
 
-    phazite::setTimeSignature (*song.edit, { 3, 4 }); // beat 4.5 is in the second bar of three beats
+    phazite::setTimeSignature (phazite::getSong (*song.edit), { 3, 4 }); // beat 4.5 is in the second bar of three beats
     CHECK (songEnd() == "3.000");
 }
 
@@ -428,10 +428,11 @@ TEST_CASE ("The loop's functions")
 
     // Around sections, from the earliest start to the latest end; without sections, the loop stays.
     const auto first = phazite::getSection (
-        *song.edit, phazite::insertSection (*song.edit, {}, { .name = "A", .length = phazite::BeatDuration::fromBeats (4.0) }));
-    const auto third =
-        phazite::getSection (*song.edit, phazite::insertSection (*song.edit, phazite::BeatPosition::fromBeats (8.0),
-                                                                 { .name = "C", .length = phazite::BeatDuration::fromBeats (4.0) }));
+        phazite::getSong (*song.edit),
+        phazite::insertSection (phazite::getSong (*song.edit), {}, { .name = "A", .length = phazite::BeatDuration::fromBeats (4.0) }));
+    const auto third = phazite::getSection (phazite::getSong (*song.edit),
+                                            phazite::insertSection (phazite::getSong (*song.edit), phazite::BeatPosition::fromBeats (8.0),
+                                                                    { .name = "C", .length = phazite::BeatDuration::fromBeats (4.0) }));
     REQUIRE (first.has_value());
     REQUIRE (third.has_value());
     phazite::loopSections (*song.edit, { *third, *first });

@@ -84,7 +84,7 @@ namespace
             auto* edit = getEdit (context);
             REQUIRE (edit != nullptr);
             storeDeviceStates (*edit); // as a save does
-            const auto copy = createEditFromSong (edit->engine, getPhaziteState (*edit).createCopy(), edit->editFileRetriever(),
+            const auto copy = createEditFromSong (edit->engine, getSong (*edit).getState().createCopy(), edit->editFileRetriever(),
                                                   edit->getTempDirectory (false));
             REQUIRE (copy != nullptr);
 

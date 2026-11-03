@@ -4,6 +4,7 @@
 #include "internal/Recording.h"
 #include "internal/Tempo.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
@@ -208,14 +209,14 @@ te::MidiClip* capture (te::Edit& edit, Selection* selection)
                 setTempo (edit, *detected); // part of this step
         }
 
-        const auto beatsPerSecond = getTempo (edit) / 60.0;
+        const auto beatsPerSecond = getTempo (getSong (edit)) / 60.0;
 
         for (const auto& n : notes)
             beats.emplace_back ((n.start - notes.front().start) * beatsPerSecond, (n.end - notes.front().start) * beatsPerSecond);
     }
 
     // Whole bars, from the bar the first note is in to the bar the last one ends in.
-    const auto beatsPerBar = (double) getTimeSignature (edit).numerator;
+    const auto beatsPerBar = (double) getTimeSignature (getSong (edit)).numerator;
     auto clipStart = std::floor (beats.front().first / beatsPerBar) * beatsPerBar;
     auto lastEnd = clipStart;
 

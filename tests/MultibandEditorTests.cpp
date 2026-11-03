@@ -30,7 +30,7 @@ struct Song
         plugin = edit->getPluginCache().createNewPlugin (Multiband::typeID, {});
         phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
         phazite::test::settle();
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     }
 
     ~Song() { plugin = nullptr; }

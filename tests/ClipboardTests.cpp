@@ -42,7 +42,7 @@ struct Song
         volume = phazite::getVolume (context, phazite::getTrackID (*tracks[0])).getRef();
         phazite::addAutomationPoint (context, volume, { BeatPosition::fromBeats (1.0), 0.2f });
         phazite::addAutomationPoint (context, volume, { BeatPosition::fromBeats (3.0), 0.8f });
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     }
 
     ~Song() { setEdit (context, nullptr); }
@@ -86,7 +86,7 @@ TEST_CASE ("Copied clips paste at the playhead on the selected track, as copies,
     // Copying changes nothing in the song.
     selection.selectOnly (song.clip);
     REQUIRE (song.registry.invoke ("edit.copy"));
-    CHECK_FALSE (phazite::getSongUndoManager (*song.edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo());
     CHECK (song.isEnabled ("edit.paste"));
 
     selection.selectOnly (song.tracks[1]);
@@ -118,7 +118,7 @@ TEST_CASE ("Cut clips paste back onto their own track with the automation that w
     auto& selection = getSelection (song.context);
     auto* later = phazite::insertMidiClip (*song.tracks[0], { teBeats (10.0), teBeats (14.0) }, nullptr);
     REQUIRE (later != nullptr);
-    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
+    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
 
     selection.selectOnly (song.clip);
     REQUIRE (song.registry.invoke ("edit.cut"));
@@ -173,7 +173,7 @@ TEST_CASE ("Copied notes paste at the playhead in the clip the piano roll shows 
     auto* other = phazite::insertMidiClip (*song.tracks[1], { teBeats (8.0), teBeats (12.0) }, nullptr);
     REQUIRE (other != nullptr);
     const auto to = phazite::getClipID (*other);
-    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
+    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
 
     songSelection.setNoteClips ({ from });
     songSelection.selectNotes ({ phazite::getNoteRef (*song.clip, *song.clip->getSequence().getNote (0)),

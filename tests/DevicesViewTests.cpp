@@ -100,7 +100,7 @@ struct Screen
                         } });
 
         context.getSongSelection().selectOnly (track (0));
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
         phazite::test::dispatchPendingMessages();
     }
 

@@ -6,6 +6,7 @@
 // Phazite's own (schema::TEMPOMAP; docs/tracktion-migration.md, T1), which Tracktion's tempo sequence mirrors.
 #pragma once
 
+#include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/transport/TempoValues.h"
@@ -18,22 +19,22 @@ class CommandRegistry;
 
 //==============================================================================
 // The song's tempo map (TempoValues.h), and its bars.
-std::vector<TempoChange> getTempoChanges (const te::Edit&);
-std::vector<TimeSignatureChange> getTimeSignatureChanges (const te::Edit&);
-Bars getBars (const te::Edit&);
+std::vector<TempoChange> getTempoChanges (const Song&);
+std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song&);
+Bars getBars (const Song&);
 
 // What every project's tempo map holds when it has none yet: a tempo of 120 BPM and 4/4 from the song's start, as a new
 // song is. Not an undo step: Project adds it as a project opens.
-void ensureTempoMap (te::Edit&);
+void ensureTempoMap (Song&);
 
 // The time edits (model/arrangement/internal/Arrangement.h): the tempos and time signatures after a beat move later by a
 // length; and those in a range go, the ones after it moving earlier by its length. The first, at the song's start, stays.
-void insertTempoMapTime (te::Edit&, BeatPosition, BeatDuration);
-void removeTempoMapTime (te::Edit&, BeatRange);
+void insertTempoMapTime (Song&, BeatPosition, BeatDuration);
+void removeTempoMapTime (Song&, BeatRange);
 
 //==============================================================================
 // The song's tempo: the first in its tempo map.
-double getTempo (const te::Edit&);
+double getTempo (const Song&);
 
 // Changes the tempo, as one undo step, "Change Tempo" (a drag's changes join the drag's step). It stays within the
 // limits (TempoValues.h), to a hundredth of a beat per minute.
@@ -49,15 +50,15 @@ void toggleSamplesFollowTempo (te::Edit&);
 
 // The Patterns Follow Tempo command's switch, the song's (schema::patternsKeepTheirSpeed): on, a tempo change leaves
 // MIDI clips' notes on their beats, so they play faster or slower; off, it moves the notes to keep their times.
-bool doPatternsFollowTempo (const te::Edit&);
-void togglePatternsFollowTempo (te::Edit&);
+bool doPatternsFollowTempo (const Song&);
+void togglePatternsFollowTempo (Song&);
 
 // Registers the commands that say what a tempo change stretches.
 void addTempoCommands (CommandRegistry&, Selection&);
 
 // The song's time signature: the first in its tempo map.
-TimeSignature getTimeSignature (const te::Edit&);
+TimeSignature getTimeSignature (const Song&);
 
 // Changes the time signature, as one undo step, "Change Time Signature". An invalid one changes nothing.
-void setTimeSignature (te::Edit&, TimeSignature);
+void setTimeSignature (Song&, TimeSignature);
 } // namespace phazite

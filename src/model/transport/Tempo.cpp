@@ -14,9 +14,9 @@ namespace phazite
 {
 namespace
 {
-    juce::ValueTree findTempoMap (const te::Edit& edit)
+    juce::ValueTree findTempoMap (const Song& song)
     {
-        return findPhaziteState (edit).getChildWithName (schema::TEMPOMAP);
+        return song.getState().getChildWithName (schema::TEMPOMAP);
     }
 
     // A tempo map's tempos or time signatures (their type), in the song's order.
@@ -35,10 +35,10 @@ namespace
 
     // The song's tempo or time signature (the first of its type, at the song's start), to change: the tempo map gets
     // them first if it has none.
-    juce::ValueTree getFirstOfMap (te::Edit& edit, const juce::Identifier& type)
+    juce::ValueTree getFirstOfMap (Song& song, const juce::Identifier& type)
     {
-        ensureTempoMap (edit);
-        return getEntries (findTempoMap (edit), type).front();
+        ensureTempoMap (song);
+        return getEntries (findTempoMap (song), type).front();
     }
 
     // Keeps the song's patterns at their speed while the tempo changes, when the song says so (doPatternsFollowTempo()).
@@ -49,15 +49,15 @@ namespace
     public:
         explicit PatternsKeepTheirSpeed (te::Edit& e)
             : edit (e),
-              tempoBefore (getTempo (e))
+              tempoBefore (getTempo (getSong (e)))
         {
         }
 
         ~PatternsKeepTheirSpeed()
         {
-            const auto scale = getTempo (edit) / tempoBefore;
+            const auto scale = getTempo (getSong (edit)) / tempoBefore;
 
-            if (doPatternsFollowTempo (edit) || juce::approximatelyEqual (scale, 1.0))
+            if (doPatternsFollowTempo (getSong (edit)) || juce::approximatelyEqual (scale, 1.0))
                 return;
 
             for (const auto& clipState : getClipStates (edit))
@@ -71,7 +71,7 @@ namespace
 
         void keepSpeed (juce::ValueTree clipState, double scale)
         {
-            auto* um = &getSongUndoManager (edit);
+            auto* um = &getSong (edit).getUndoManager();
 
             for (auto child : clipState)
             {
@@ -98,11 +98,11 @@ namespace
 } // namespace
 
 //==============================================================================
-std::vector<TempoChange> getTempoChanges (const te::Edit& edit)
+std::vector<TempoChange> getTempoChanges (const Song& song)
 {
     std::vector<TempoChange> changes;
 
-    for (const auto& entry : getEntries (findTempoMap (edit), schema::TEMPO))
+    for (const auto& entry : getEntries (findTempoMap (song), schema::TEMPO))
         changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]), (double) entry.getProperty (schema::bpm, 120.0) });
 
     if (changes.empty())
@@ -111,11 +111,11 @@ std::vector<TempoChange> getTempoChanges (const te::Edit& edit)
     return changes;
 }
 
-std::vector<TimeSignatureChange> getTimeSignatureChanges (const te::Edit& edit)
+std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song& song)
 {
     std::vector<TimeSignatureChange> changes;
 
-    for (const auto& entry : getEntries (findTempoMap (edit), schema::TIMESIGNATURE))
+    for (const auto& entry : getEntries (findTempoMap (song), schema::TIMESIGNATURE))
         changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]),
                              { (int) entry.getProperty (schema::numerator, 4), (int) entry.getProperty (schema::denominator, 4) } });
 
@@ -125,14 +125,14 @@ std::vector<TimeSignatureChange> getTimeSignatureChanges (const te::Edit& edit)
     return changes;
 }
 
-Bars getBars (const te::Edit& edit)
+Bars getBars (const Song& song)
 {
-    return Bars (getTimeSignatureChanges (edit));
+    return Bars (getTimeSignatureChanges (song));
 }
 
-void ensureTempoMap (te::Edit& edit)
+void ensureTempoMap (Song& song)
 {
-    auto phazite = getPhaziteState (edit);
+    auto phazite = song.getState();
     auto map = phazite.getChildWithName (schema::TEMPOMAP);
 
     if (! map.isValid())
@@ -150,18 +150,18 @@ void ensureTempoMap (te::Edit& edit)
             nullptr);
 }
 
-void insertTempoMapTime (te::Edit& edit, BeatPosition at, BeatDuration length)
+void insertTempoMapTime (Song& song, BeatPosition at, BeatDuration length)
 {
-    for (auto entry : findTempoMap (edit))
+    for (auto entry : findTempoMap (song))
         if (const auto beat = (double) entry[schema::mapBeat]; beat > 0.0 && beat >= at.inBeats())
-            entry.setProperty (schema::mapBeat, beat + length.inBeats(), &getSongUndoManager (edit));
+            entry.setProperty (schema::mapBeat, beat + length.inBeats(), &song.getUndoManager());
 
-    mirror::reconcileTempoMap (edit);
+    song.reconcile (Song::Part::tempoMap);
 }
 
-void removeTempoMapTime (te::Edit& edit, BeatRange range)
+void removeTempoMapTime (Song& song, BeatRange range)
 {
-    auto map = findTempoMap (edit);
+    auto map = findTempoMap (song);
 
     for (int i = map.getNumChildren(); --i >= 0;)
     {
@@ -172,37 +172,37 @@ void removeTempoMapTime (te::Edit& edit, BeatRange range)
             continue;
 
         if (beat < range.getEnd().inBeats())
-            map.removeChild (i, &getSongUndoManager (edit));
+            map.removeChild (i, &song.getUndoManager());
         else
-            entry.setProperty (schema::mapBeat, beat - range.getLength().inBeats(), &getSongUndoManager (edit));
+            entry.setProperty (schema::mapBeat, beat - range.getLength().inBeats(), &song.getUndoManager());
     }
 
-    mirror::reconcileTempoMap (edit);
+    song.reconcile (Song::Part::tempoMap);
 }
 
 //==============================================================================
-double getTempo (const te::Edit& edit)
+double getTempo (const Song& song)
 {
-    return getTempoChanges (edit).front().bpm;
+    return getTempoChanges (song).front().bpm;
 }
 
 void setTempo (te::Edit& edit, double bpm)
 {
     const auto rounded = std::round (juce::jlimit (minTempo, maxTempo, bpm) * 100.0) / 100.0;
 
-    if (juce::approximatelyEqual (getTempo (edit), rounded))
+    if (juce::approximatelyEqual (getTempo (getSong (edit)), rounded))
         return;
 
     const UndoStep step (edit, "Change Tempo");
     const PatternsKeepTheirSpeed keepPatterns (edit); // unless they follow it
-    getFirstOfMap (edit, schema::TEMPO).setProperty (schema::bpm, rounded, &getSongUndoManager (edit));
+    getFirstOfMap (getSong (edit), schema::TEMPO).setProperty (schema::bpm, rounded, &getSong (edit).getUndoManager());
     mirror::reconcileTempoMap (edit); // which places the clips and the automation again, a clip that follows it stretched again
 }
 
 TempoStretch getTempoStretch (te::Edit& edit)
 {
     TempoStretch stretch;
-    stretch.patternsFollow = doPatternsFollowTempo (edit);
+    stretch.patternsFollow = doPatternsFollowTempo (getSong (edit));
 
     for (auto* track : te::getAudioTracks (edit))
     {
@@ -241,36 +241,36 @@ void toggleSamplesFollowTempo (te::Edit& edit)
     toggleClipsFollowTempo (clips);
 }
 
-bool doPatternsFollowTempo (const te::Edit& edit)
+bool doPatternsFollowTempo (const Song& song)
 {
-    return ! (bool) findPhaziteState (edit).getProperty (schema::patternsKeepTheirSpeed, false);
+    return ! (bool) song.getState().getProperty (schema::patternsKeepTheirSpeed, false);
 }
 
-void togglePatternsFollowTempo (te::Edit& edit)
+void togglePatternsFollowTempo (Song& song)
 {
-    auto state = getPhaziteState (edit);
+    auto state = song.getState();
 
-    if (doPatternsFollowTempo (edit))
-        state.setProperty (schema::patternsKeepTheirSpeed, true, &getSongUndoManager (edit));
+    if (doPatternsFollowTempo (song))
+        state.setProperty (schema::patternsKeepTheirSpeed, true, &song.getUndoManager());
     else
-        state.removeProperty (schema::patternsKeepTheirSpeed, &getSongUndoManager (edit));
+        state.removeProperty (schema::patternsKeepTheirSpeed, &song.getUndoManager());
 }
 
-TimeSignature getTimeSignature (const te::Edit& edit)
+TimeSignature getTimeSignature (const Song& song)
 {
-    return getTimeSignatureChanges (edit).front().signature;
+    return getTimeSignatureChanges (song).front().signature;
 }
 
-void setTimeSignature (te::Edit& edit, TimeSignature timeSignature)
+void setTimeSignature (Song& song, TimeSignature timeSignature)
 {
-    if (! isValid (timeSignature) || timeSignature == getTimeSignature (edit))
+    if (! isValid (timeSignature) || timeSignature == getTimeSignature (song))
         return;
 
-    const UndoStep step (edit, "Change Time Signature");
-    auto first = getFirstOfMap (edit, schema::TIMESIGNATURE);
-    first.setProperty (schema::numerator, timeSignature.numerator, &getSongUndoManager (edit));
-    first.setProperty (schema::denominator, timeSignature.denominator, &getSongUndoManager (edit));
-    mirror::reconcileTempoMap (edit);
+    const UndoStep step (song, "Change Time Signature");
+    auto first = getFirstOfMap (song, schema::TIMESIGNATURE);
+    first.setProperty (schema::numerator, timeSignature.numerator, &song.getUndoManager());
+    first.setProperty (schema::denominator, timeSignature.denominator, &song.getUndoManager());
+    song.reconcile (Song::Part::tempoMap);
 }
 
 void addTempoCommands (CommandRegistry& registry, Selection& selection)
@@ -295,9 +295,9 @@ void addTempoCommands (CommandRegistry& registry, Selection& selection)
                     .description = "When the song's tempo changes, its patterns play faster or slower, their notes on their beats; off, "
                                    "they keep their speed.",
                     .synonyms = { "stretch patterns", "midi follows tempo", "notes follow tempo", "timebase" },
-                    .perform = withEdit (selection, togglePatternsFollowTempo),
+                    .perform = withSong (selection, togglePatternsFollowTempo),
                     .isEnabled = hasEdit,
                     .undoTarget = undoTarget,
-                    .isTicked = ifEdit (selection, doPatternsFollowTempo) });
+                    .isTicked = ifSong (selection, doPatternsFollowTempo) });
 }
 } // namespace phazite

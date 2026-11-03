@@ -35,7 +35,7 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     const auto before = volume->getVolumeDb();
     slider.setValue (phazite::decibelsToFaderPosition (-12.0f), juce::sendNotificationSync);
     CHECK (volume->getVolumeDb() == doctest::Approx (-12.0f).epsilon (0.01));
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Change Volume"));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Volume"));
 
     // Undo (as the app's commands do it) plays the old volume again, not just stores it.
     phazite::undo (*edit);
@@ -51,7 +51,7 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     CHECK (phazite::faderPositionToDecibels ((float) slider.getValue()) == doctest::Approx (-3.0f).epsilon (0.01));
 
     // A drag is one step, even when the strip hands the slider a handle of the same parameter meanwhile.
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     slider.onDragStart();
     slider.setValue (phazite::decibelsToFaderPosition (-6.0f), juce::sendNotificationSync);
     attachment.setParameter (phazite::getVolume (context, phazite::getTrackID (*track)));
@@ -60,7 +60,7 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     CHECK (volume->getVolumeDb() == doctest::Approx (-9.0f).epsilon (0.01));
     phazite::undo (*edit);
     CHECK (volume->getVolumeDb() == doctest::Approx (-3.0f).epsilon (0.01));
-    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
 
     // The master volume's parameter has its own ID.
     attachment.setParameter (phazite::getMasterVolume (context));

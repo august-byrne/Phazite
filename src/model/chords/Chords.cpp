@@ -20,14 +20,14 @@ namespace
     // Positions this close count as the same.
     constexpr double tiny = 1.0e-6;
 
-    juce::UndoManager* getUndo (te::Edit& edit)
+    juce::UndoManager* getUndo (Song& song)
     {
-        return &getSongUndoManager (edit);
+        return &song.getUndoManager();
     }
 
-    juce::ValueTree findLaneState (const te::Edit& edit)
+    juce::ValueTree findLaneState (const Song& song)
     {
-        return findPhaziteState (edit).getChildWithName (schema::CHORDLANE);
+        return song.getState().getChildWithName (schema::CHORDLANE);
     }
 
     std::optional<Key> readKey (const juce::ValueTree& state)
@@ -46,9 +46,9 @@ namespace
     }
 
     // The key before any is written: the one new tracks get, which a new project sets, or else C major.
-    Key getDefaultKey (const te::Edit& edit)
+    Key getDefaultKey (const Song& song)
     {
-        return readKey (findPhaziteState (edit).getChildWithName (schema::LASTKEY)).value_or (Key {});
+        return readKey (song.getState().getChildWithName (schema::LASTKEY)).value_or (Key {});
     }
 
     BeatPosition getStart (const juce::ValueTree& state)
@@ -109,9 +109,9 @@ namespace
     }
 
     // The lane's chord or key change that starts at a beat.
-    juce::ValueTree findStartingAt (const te::Edit& edit, const juce::Identifier& type, BeatPosition start)
+    juce::ValueTree findStartingAt (const Song& song, const juce::Identifier& type, BeatPosition start)
     {
-        for (auto child : findLaneState (edit))
+        for (auto child : findLaneState (song))
             if (child.hasType (type) && std::abs ((getStart (child) - start).inBeats()) < 1.0e-4)
                 return child;
 
@@ -129,9 +129,9 @@ namespace
         return children;
     }
 
-    int getBeatsPerBar (const te::Edit& edit, BeatPosition where)
+    int getBeatsPerBar (const Song& song, BeatPosition where)
     {
-        return getBars (edit).getBeatsPerBar (where);
+        return getBars (song).getBeatsPerBar (where);
     }
 
     //==============================================================================
@@ -243,25 +243,25 @@ namespace
 } // namespace
 
 //==============================================================================
-std::vector<LaneKey> getLaneKeys (const te::Edit& edit)
+std::vector<LaneKey> getLaneKeys (const Song& song)
 {
     std::vector<LaneKey> keys;
 
-    for (const auto& state : getChildren (findLaneState (edit), schema::CHORDKEY))
+    for (const auto& state : getChildren (findLaneState (song), schema::CHORDKEY))
         if (const auto key = readKey (state))
             keys.push_back ({ getStart (state), *key });
 
     std::stable_sort (keys.begin(), keys.end(), [] (const LaneKey& a, const LaneKey& b) { return a.start < b.start; });
 
     if (keys.empty() || keys.front().start > BeatPosition::fromBeats (tiny))
-        keys.insert (keys.begin(), { BeatPosition(), getDefaultKey (edit) });
+        keys.insert (keys.begin(), { BeatPosition(), getDefaultKey (song) });
 
     return keys;
 }
 
-Key getLaneKeyAt (const te::Edit& edit, BeatPosition where)
+Key getLaneKeyAt (const Song& song, BeatPosition where)
 {
-    const auto keys = getLaneKeys (edit);
+    const auto keys = getLaneKeys (song);
     auto key = keys.front().key;
 
     for (const auto& change : keys)
@@ -271,12 +271,12 @@ Key getLaneKeyAt (const te::Edit& edit, BeatPosition where)
     return key;
 }
 
-std::vector<PlacedChord> getLaneChords (const te::Edit& edit)
+std::vector<PlacedChord> getLaneChords (const Song& song)
 {
-    const auto keys = getLaneKeys (edit);
+    const auto keys = getLaneKeys (song);
     std::vector<PlacedChord> chords;
 
-    for (const auto& state : getChildren (findLaneState (edit), schema::CHORD))
+    for (const auto& state : getChildren (findLaneState (song), schema::CHORD))
     {
         const auto range = getRange (state);
         const auto numeral = readNumeral (state);
@@ -298,9 +298,9 @@ std::vector<PlacedChord> getLaneChords (const te::Edit& edit)
     return chords;
 }
 
-juce::ValueTree getLaneState (te::Edit& edit)
+juce::ValueTree getLaneState (Song& song)
 {
-    auto phazite = getPhaziteState (edit);
+    auto phazite = song.getState();
     auto lane = phazite.getChildWithName (schema::CHORDLANE);
 
     if (! lane.isValid())
@@ -308,23 +308,23 @@ juce::ValueTree getLaneState (te::Edit& edit)
         lane = juce::ValueTree (schema::CHORDLANE);
         juce::ValueTree key (schema::CHORDKEY);
         key.setProperty (schema::chordStart, 0.0, nullptr);
-        writeKey (key, getDefaultKey (edit), nullptr);
+        writeKey (key, getDefaultKey (song), nullptr);
         lane.appendChild (key, nullptr);
-        phazite.appendChild (lane, getUndo (edit));
+        phazite.appendChild (lane, getUndo (song));
     }
 
     return lane;
 }
 
 //==============================================================================
-void clearLaneRange (te::Edit& edit, BeatRange range)
+void clearLaneRange (Song& song, BeatRange range)
 {
-    auto lane = findLaneState (edit);
+    auto lane = findLaneState (song);
 
     if (! lane.isValid() || range.isEmpty())
         return;
 
-    auto* undo = getUndo (edit);
+    auto* undo = getUndo (song);
     const auto start = range.getStart(), end = range.getEnd();
     const auto margin = BeatDuration::fromBeats (tiny);
 
@@ -358,36 +358,36 @@ void clearLaneRange (te::Edit& edit, BeatRange range)
     }
 }
 
-void putLaneChord (te::Edit& edit, BeatRange range, const Numeral& numeral)
+void putLaneChord (Song& song, BeatRange range, const Numeral& numeral)
 {
     if (range.isEmpty())
         return;
 
-    auto lane = getLaneState (edit);
-    clearLaneRange (edit, range);
-    lane.appendChild (makeChordState (range, numeral), getUndo (edit));
+    auto lane = getLaneState (song);
+    clearLaneRange (song, range);
+    lane.appendChild (makeChordState (range, numeral), getUndo (song));
 }
 
-bool hasLaneChordAt (const te::Edit& edit, BeatPosition start)
+bool hasLaneChordAt (const Song& song, BeatPosition start)
 {
-    return findStartingAt (edit, schema::CHORD, start).isValid();
+    return findStartingAt (song, schema::CHORD, start).isValid();
 }
 
-void setLaneChordNumeral (te::Edit& edit, BeatPosition start, const Numeral& numeral)
+void setLaneChordNumeral (Song& song, BeatPosition start, const Numeral& numeral)
 {
-    if (auto chord = findStartingAt (edit, schema::CHORD, start); chord.isValid())
-        writeNumeral (chord, numeral, getUndo (edit));
+    if (auto chord = findStartingAt (song, schema::CHORD, start); chord.isValid())
+        writeNumeral (chord, numeral, getUndo (song));
 }
 
-void removeLaneChord (te::Edit& edit, BeatPosition start)
+void removeLaneChord (Song& song, BeatPosition start)
 {
-    if (auto chord = findStartingAt (edit, schema::CHORD, start); chord.isValid())
-        chord.getParent().removeChild (chord, getUndo (edit));
+    if (auto chord = findStartingAt (song, schema::CHORD, start); chord.isValid())
+        chord.getParent().removeChild (chord, getUndo (song));
 }
 
-void setLaneChordEnd (te::Edit& edit, BeatPosition start, BeatPosition end)
+void setLaneChordEnd (Song& song, BeatPosition start, BeatPosition end)
 {
-    auto chord = findStartingAt (edit, schema::CHORD, start);
+    auto chord = findStartingAt (song, schema::CHORD, start);
 
     if (! chord.isValid() || end <= start + BeatDuration::fromBeats (tiny))
         return;
@@ -396,54 +396,54 @@ void setLaneChordEnd (te::Edit& edit, BeatPosition start, BeatPosition end)
     auto lane = chord.getParent();
     auto resized = chord.createCopy();
     setRange (resized, { getStart (chord), end }, nullptr);
-    lane.removeChild (chord, getUndo (edit));
-    clearLaneRange (edit, { start, end });
-    lane.appendChild (resized, getUndo (edit));
+    lane.removeChild (chord, getUndo (song));
+    clearLaneRange (song, { start, end });
+    lane.appendChild (resized, getUndo (song));
 }
 
-void setLaneKey (te::Edit& edit, BeatPosition from, const Key& key)
+void setLaneKey (Song& song, BeatPosition from, const Key& key)
 {
-    auto lane = getLaneState (edit);
+    auto lane = getLaneState (song);
 
     // The key change at the beat, or a new one there.
-    if (auto change = findStartingAt (edit, schema::CHORDKEY, from); change.isValid())
-        return writeKey (change, key, getUndo (edit));
+    if (auto change = findStartingAt (song, schema::CHORDKEY, from); change.isValid())
+        return writeKey (change, key, getUndo (song));
 
     juce::ValueTree change (schema::CHORDKEY);
     change.setProperty (schema::chordStart, std::max (0.0, from.inBeats()), nullptr);
     writeKey (change, key, nullptr);
-    lane.appendChild (change, getUndo (edit));
+    lane.appendChild (change, getUndo (song));
 }
 
-void removeLaneKeyChange (te::Edit& edit, BeatPosition at)
+void removeLaneKeyChange (Song& song, BeatPosition at)
 {
     if (at <= BeatPosition::fromBeats (1.0e-4))
         return;
 
-    if (auto change = findStartingAt (edit, schema::CHORDKEY, at); change.isValid())
-        change.getParent().removeChild (change, getUndo (edit));
+    if (auto change = findStartingAt (song, schema::CHORDKEY, at); change.isValid())
+        change.getParent().removeChild (change, getUndo (song));
 }
 
-void putProgression (te::Edit& edit, const Progression& progression, BeatRange range)
+void putProgression (Song& song, const Progression& progression, BeatRange range)
 {
     if (range.isEmpty() || progression.chords.empty())
         return;
 
-    auto lane = getLaneState (edit);
-    clearLaneRange (edit, range);
+    auto lane = getLaneState (song);
+    clearLaneRange (song, range);
 
     auto beat = range.getStart();
 
     for (size_t i = 0; beat < range.getEnd() - BeatDuration::fromBeats (tiny); i = (i + 1) % progression.chords.size())
     {
         const auto& chord = progression.chords[i];
-        const auto key = getLaneKeyAt (edit, beat);
+        const auto key = getLaneKeyAt (song, beat);
         const auto root = getRootIn (chord.numeral, getKeyForProgression (key, progression.scale));
-        const auto length = BeatDuration::fromBeats (chord.bars * getBeatsPerBar (edit, beat));
+        const auto length = BeatDuration::fromBeats (chord.bars * getBeatsPerBar (song, beat));
         const auto end = std::min (range.getEnd(), beat + length);
 
         lane.appendChild (makeChordState ({ beat, end }, toNumeral (root, chord.numeral.type, chord.numeral.inversion, key)),
-                          getUndo (edit));
+                          getUndo (song));
         beat = end;
     }
 }
@@ -471,14 +471,14 @@ void changeLane (te::Edit& edit, const std::function<void()>& change)
 }
 
 //==============================================================================
-void insertLaneTime (te::Edit& edit, BeatPosition at, BeatDuration length)
+void insertLaneTime (Song& song, BeatPosition at, BeatDuration length)
 {
-    auto lane = findLaneState (edit);
+    auto lane = findLaneState (song);
 
     if (! lane.isValid() || length <= BeatDuration())
         return;
 
-    auto* undo = getUndo (edit);
+    auto* undo = getUndo (song);
     const auto margin = BeatDuration::fromBeats (tiny);
 
     for (auto state : lane)
@@ -500,14 +500,14 @@ void insertLaneTime (te::Edit& edit, BeatPosition at, BeatDuration length)
     }
 }
 
-void removeLaneTime (te::Edit& edit, BeatRange range)
+void removeLaneTime (Song& song, BeatRange range)
 {
-    auto lane = findLaneState (edit);
+    auto lane = findLaneState (song);
 
     if (! lane.isValid() || range.isEmpty())
         return;
 
-    auto* undo = getUndo (edit);
+    auto* undo = getUndo (song);
     const auto length = range.getLength();
     const auto start = range.getStart(), end = range.getEnd();
     const auto margin = BeatDuration::fromBeats (tiny);
@@ -543,9 +543,9 @@ void removeLaneTime (te::Edit& edit, BeatRange range)
     }
 }
 
-void moveLaneTime (te::Edit& edit, BeatRange range, BeatPosition destination)
+void moveLaneTime (Song& song, BeatRange range, BeatPosition destination)
 {
-    auto lane = findLaneState (edit);
+    auto lane = findLaneState (song);
     const auto start = range.getStart(), end = range.getEnd();
     const auto length = range.getLength();
     const auto margin = BeatDuration::fromBeats (tiny);
@@ -571,8 +571,8 @@ void moveLaneTime (te::Edit& edit, BeatRange range, BeatPosition destination)
             {
                 auto after = chord.createCopy();
                 setRange (after, { beat, r.getEnd() }, nullptr);
-                setRange (chord, { r.getStart(), beat }, getUndo (edit));
-                lane.appendChild (after, getUndo (edit));
+                setRange (chord, { r.getStart(), beat }, getUndo (song));
+                lane.appendChild (after, getUndo (song));
             }
         }
     }
@@ -584,17 +584,17 @@ void moveLaneTime (te::Edit& edit, BeatRange range, BeatPosition destination)
         if (chordStart >= changedStart - margin && chordStart < changedEnd - margin)
         {
             const auto inRange = chordStart >= start - margin && chordStart < end - margin;
-            moveChord (chord, inRange ? rangeShift : otherShift, getUndo (edit));
+            moveChord (chord, inRange ? rangeShift : otherShift, getUndo (song));
         }
     }
 }
 
-LaneCopy copyLaneChords (const te::Edit& edit, BeatRange range)
+LaneCopy copyLaneChords (const Song& song, BeatRange range)
 {
     LaneCopy copy;
     copy.rangeStart = range.getStart();
 
-    for (const auto& chord : getChildren (findLaneState (edit), schema::CHORD))
+    for (const auto& chord : getChildren (findLaneState (song), schema::CHORD))
     {
         if (const auto r = getRange (chord).getIntersectionWith (range); r.getLength() > BeatDuration::fromBeats (tiny))
         {
@@ -607,20 +607,20 @@ LaneCopy copyLaneChords (const te::Edit& edit, BeatRange range)
     return copy;
 }
 
-void pasteLaneChords (te::Edit& edit, const LaneCopy& copy, BeatPosition destination)
+void pasteLaneChords (Song& song, const LaneCopy& copy, BeatPosition destination)
 {
     if (copy.chords.empty())
         return;
 
-    auto lane = getLaneState (edit);
+    auto lane = getLaneState (song);
 
     for (const auto& chord : copy.chords)
     {
         auto pasted = chord.createCopy();
         const auto range = getRange (chord).movedBy (destination - copy.rangeStart);
         setRange (pasted, range, nullptr);
-        clearLaneRange (edit, range); // a chord the inserted time made longer is cut around it
-        lane.appendChild (pasted, getUndo (edit));
+        clearLaneRange (song, range); // a chord the inserted time made longer is cut around it
+        lane.appendChild (pasted, getUndo (song));
     }
 }
 
@@ -633,7 +633,7 @@ std::optional<PartStyle> getChordPartStyle (const te::Clip& clip)
 std::vector<NoteData> makeChordPartNotes (const te::MidiClip& clip, PartStyle style)
 {
     const auto range = BeatRange (fromTracktion (clip.getStartBeat()), fromTracktion (clip.getEndBeat()));
-    return makePartNotes (getLaneChords (clip.edit), style, range, getClipID (clip));
+    return makePartNotes (getLaneChords (getSong (clip.edit)), style, range, getClipID (clip));
 }
 
 bool followsChords (const te::MidiClip& clip)
@@ -644,7 +644,7 @@ bool followsChords (const te::MidiClip& clip)
 
 void setChordPart (te::MidiClip& clip, std::optional<PartStyle> style)
 {
-    auto* undo = getUndo (clip.edit);
+    auto* undo = getUndo (getSong (clip.edit));
 
     if (! style.has_value())
     {

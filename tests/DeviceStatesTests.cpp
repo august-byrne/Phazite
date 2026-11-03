@@ -52,7 +52,7 @@ void automate (te::AutomatableParameter& parameter)
     else
         parameter.getCurve().addPoint (te::TimePosition(), value, 0.0f, nullptr);
 
-    phazite::getSongUndoManager (parameter.getEdit()).clearUndoHistory();
+    phazite::getSong (parameter.getEdit()).getUndoManager().clearUndoHistory();
     parameter.getEdit().getUndoManager().clearUndoHistory();
     parameter.updateToFollowCurve (te::TimePosition());
     REQUIRE_FALSE (juce::exactlyEqual (parameter.getCurrentValue(), parameter.getCurrentExplicitValue()));
@@ -75,7 +75,7 @@ struct Devices
         REQUIRE (modulator.has_value());
         lfo = modulator->modifier.get();
         phazite::test::settle();
-        phazite::getSongUndoManager (*edit).clearUndoHistory();
+        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
         edit->getUndoManager().clearUndoHistory();
 
         TestPlugin::setGain (*plugin, 0.25f);
@@ -108,7 +108,7 @@ TEST_CASE ("Storing an Edit's devices' states stores all that Tracktion's save w
     Devices devices;
     auto& edit = *devices.edit;
     phazite::storeDeviceStates (edit);
-    CHECK_FALSE (phazite::getSongUndoManager (edit).canUndo());
+    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
 
     // The plug-ins' own settings and channel layout, where the window was, and the values set by hand of the parameters
     // that automation moves.
@@ -127,7 +127,7 @@ TEST_CASE ("Storing an Edit's devices' states stores all that Tracktion's save w
     CHECK ((int) element[phazite::schema::deviceWindowY] == 80);
 
     {
-        const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getPhaziteState (edit).createCopy());
+        const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getSong (edit).getState().createCopy());
         REQUIRE (rebuilt != nullptr);
         const auto plugin = te::findPluginForID (*rebuilt, devices.plugin->itemID);
         REQUIRE (plugin != nullptr);
@@ -174,7 +174,7 @@ TEST_CASE ("Duplicates, containers and presets take devices' states as they are,
 {
     Devices devices;
     auto& edit = *devices.edit;
-    auto& undoManager = phazite::getSongUndoManager (edit);
+    auto& undoManager = phazite::getSong (edit).getUndoManager();
     const auto pluginID = devices.plugin->itemID;
     const auto findPlugin = [&edit, pluginID]
     {

@@ -18,7 +18,7 @@ TEST_CASE ("A gesture's changes are one undo step, the first one's, however many
     const auto name = track->getName();
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     setEdit (context, edit.get());
-    phazite::getSongUndoManager (*edit).clearUndoHistory();
+    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     {
         phazite::ui::TimelineGesture gesture;
@@ -28,10 +28,10 @@ TEST_CASE ("A gesture's changes are one undo step, the first one's, however many
         phazite::setTrackName (*track, "Moved");
     }
 
-    CHECK (phazite::getSongUndoManager (*edit).getUndoDescription() == juce::String ("Add Note"));
+    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Add Note"));
     phazite::undo (*edit);
     CHECK (track->getName() == name);
-    CHECK_FALSE (phazite::getSongUndoManager (*edit).canUndo());
+    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
 }
 
 TEST_CASE ("A gesture does each thing once, and finds where it began after the content scrolled")
