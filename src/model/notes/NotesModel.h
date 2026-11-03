@@ -84,6 +84,23 @@ std::vector<NoteRef> replaceNotes (ProjectContext&, const std::vector<NoteRef>& 
                                    const juce::String& undoName);
 void changeNoteVelocities (ProjectContext&, const std::vector<NoteRef>&, int change);
 
+// The inspector's edits of notes (docs/design.md, section 4), as Logic Pro's and Bitwig's inspectors edit several at once.
+// Each is a step of its own ("Move Notes", "Change Note Length", "Transpose Notes", "Change Velocity"), unless a gesture
+// is open (a field's drag: SongGesture.h), whose one step it joins. Changed by an amount (dragged, scrolled or stepped),
+// every note changes by it: notes moved or transposed together by as much as all of them can go, so that a chord keeps
+// its shape, and each length (at least a 64th note) and velocity (1 to 127) kept in range. Set to a value (typed), each
+// length and velocity becomes it, and the earliest start and the lowest pitch move to it, the others with them.
+enum class NoteProperty
+{
+    start,
+    length,
+    pitch,
+    velocity
+};
+
+void changeNotes (ProjectContext&, const std::vector<NoteRef>&, NoteProperty, double amount);
+void setNotesTo (ProjectContext&, const std::vector<NoteRef>&, NoteProperty, double value);
+
 //==============================================================================
 // A track's key (Notes.h), which the piano roll shades its rows by and can snap notes to.
 std::optional<Key> getTrackKey (const ProjectContext&, TrackID);

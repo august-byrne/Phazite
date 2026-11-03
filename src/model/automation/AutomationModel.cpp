@@ -258,6 +258,32 @@ void setAutomationCurve (ProjectContext& context, const ParameterRef& parameter,
     }
 }
 
+void setAutomationPointValues (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float value)
+{
+    const auto found = find (context, parameter);
+
+    if (found == nullptr)
+        return;
+
+    const UndoStep step (found->getEdit(), "Set Automation Value");
+    const auto points = getAutomationPoints (context, parameter);
+
+    for (const auto index : indices)
+        if (juce::isPositiveAndBelow (index, (int) points.size()))
+            movePoints (*found, { index }, {}, value - points[(size_t) index].value);
+}
+
+void setAutomationCurves (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float bend)
+{
+    if (const auto found = find (context, parameter))
+    {
+        const UndoStep step (found->getEdit(), "Bend Automation");
+
+        for (const auto index : indices)
+            setCurve (*found, index, bend);
+    }
+}
+
 void deleteAutomationPoints (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices)
 {
     if (const auto found = find (context, parameter))

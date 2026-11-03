@@ -97,6 +97,11 @@ BeatDuration moveAutomationPoints (ProjectContext&, const ParameterRef&, const s
 // Bends the line after a point (AutomationPoint::curve, -1 to 1), as "Bend Automation".
 void setAutomationCurve (ProjectContext&, const ParameterRef&, int index, float bend);
 
+// The inspector's edits of the selected points, typed: each point's value set to one, as "Set Automation Value"; and the
+// line after each bent as much, as "Bend Automation". (Dragged, they move by an amount: moveAutomationPoints().)
+void setAutomationPointValues (ProjectContext&, const ParameterRef&, const std::vector<int>& indices, float value);
+void setAutomationCurves (ProjectContext&, const ParameterRef&, const std::vector<int>& indices, float bend);
+
 void deleteAutomationPoints (ProjectContext&, const ParameterRef&, const std::vector<int>& indices); // "Delete Automation Points"
 
 // Replaces the points in a range, its start and end included, with others, as drawing in a lane does: "Draw Automation".

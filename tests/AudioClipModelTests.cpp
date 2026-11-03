@@ -139,6 +139,34 @@ TEST_CASE ("An audio clip's gain and pitch change as undo steps of their own, wi
     CHECK (song.get().gain == doctest::Approx (6.0f));
 }
 
+TEST_CASE ("The inspector's edits change an audio clip's gain and pitch with its start and length, and leave a MIDI clip's be")
+{
+    Song song;
+    auto& context = song.context;
+    const std::vector clips { song.audio, song.midi };
+
+    // By an amount: the audio clip's gain; set: its pitch, as one undo step for both clips.
+    phazite::changeClips (context, clips, phazite::ClipProperty::gain, -3.0);
+    CHECK (song.get().gain == doctest::Approx (-3.0f));
+    phazite::setClipsTo (context, clips, phazite::ClipProperty::pitch, 5.0);
+    CHECK (song.get().pitch == doctest::Approx (5.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Clip Pitch"));
+
+    // Moved together, as far as the earlier (the audio clip, at the song's start) can go: not at all, back.
+    phazite::changeClips (context, clips, phazite::ClipProperty::start, -2.0);
+    CHECK (song.get().clip.range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (phazite::getClip (context, song.midi)->range.getStart().inBeats() == doctest::Approx (4.0));
+
+    // Set, the earlier goes there and the other with it; each length becomes the one set.
+    phazite::setClipsTo (context, clips, phazite::ClipProperty::start, 2.0);
+    CHECK (song.get().clip.range.getStart().inBeats() == doctest::Approx (2.0));
+    CHECK (phazite::getClip (context, song.midi)->range.getStart().inBeats() == doctest::Approx (6.0));
+    phazite::setClipsTo (context, clips, phazite::ClipProperty::length, 2.0);
+    CHECK (song.get().clip.range.getLength().inBeats() == doctest::Approx (2.0));
+    CHECK (phazite::getClip (context, song.midi)->range.getLength().inBeats() == doctest::Approx (2.0));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Clip Length"));
+}
+
 TEST_CASE ("A reversed clip plays the same part of its audio, backwards, where it is")
 {
     Song song;

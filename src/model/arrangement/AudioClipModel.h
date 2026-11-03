@@ -65,6 +65,24 @@ std::optional<ClipType> getClipTypeToEdit (const ProjectContext&);
 std::optional<ClipID> getAudioClipToEdit (const ProjectContext&, BeatPosition);
 
 //==============================================================================
+// The inspector's edits of clips, audio and MIDI, as its edits of notes (model/notes/NotesModel.h: changeNotes()): steps
+// of their own ("Move Clips", "Change Clip Length", "Change Clip Gain", "Change Clip Pitch"), unless a gesture is open,
+// whose one step they join. Changed by an amount, every clip changes by it: clips moved together as far as the earliest
+// can go (not before the song's start), each length a 64th note at least, and an audio clip's gain and pitch kept within
+// the editor's range; MIDI clips have neither. Set to a value, each length, gain and pitch becomes it, and the earliest
+// start moves to it, the others with it.
+enum class ClipProperty
+{
+    start,
+    length,
+    gain,
+    pitch
+};
+
+void changeClips (ProjectContext&, const std::vector<ClipID>&, ClipProperty, double amount);
+void setClipsTo (ProjectContext&, const std::vector<ClipID>&, ClipProperty, double value);
+
+//==============================================================================
 // "Change Clip Gain": in decibels, kept within the editor's range.
 void setClipGain (ProjectContext&, ClipID, float decibels);
 

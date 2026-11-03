@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Inspector.h"
 #include "StripParts.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/automation/AutomationModel.h"
 #include "model/chords/ChordModel.h"
+#include "model/commands/SongGesture.h"
 #include "model/mixer/MixerModel.h"
+#include "model/notes/NotesModel.h"
 #include "model/transport/TransportModel.h"
 #include "ui/components/Controls.h"
 #include "ui/components/TrackSwitch.h"
+#include "ui/components/ValueText.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/CommandUI.h"
@@ -17,6 +21,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -150,6 +156,200 @@ namespace
         editor.onFocusLost = [&editor, apply] { apply (editor.getText()); };
         editor.onEscapeKey = [&editor] { editor.giveAwayKeyboardFocus(); };
     }
+
+    // The numbers in a text, as words and commas part them ("Bar 5, beat 3.5": 5 and 3.5).
+    juce::StringArray getNumbers (const juce::String& text)
+    {
+        juce::StringArray numbers;
+        numbers.addTokens (text.retainCharacters ("0123456789.-, ").replaceCharacter (',', ' '), " ", {});
+        numbers.removeEmptyStrings();
+        return numbers;
+    }
+
+    // A place typed as describePlace() writes it ("Bar 5, beat 3"), or as a bar and a beat ("5.3", "5 3.5", "5"), each
+    // counted from 1. Nothing without a bar.
+    std::optional<BeatPosition> parsePlace (const ProjectContext& context, const juce::String& text)
+    {
+        auto numbers = getNumbers (text);
+
+        if (numbers.size() == 1 && numbers[0].containsChar ('.'))
+            numbers = juce::StringArray::fromTokens (numbers[0], ".", {});
+
+        if (numbers.isEmpty() || numbers[0].isEmpty())
+            return {};
+
+        const auto bar = std::max (1, numbers[0].getIntValue());
+        const auto beat = numbers.size() > 1 ? std::max (1.0, numbers[1].getDoubleValue()) : 1.0;
+        return getBarStart (context, bar - 1) + BeatDuration::fromBeats (beat - 1.0);
+    }
+
+    // A length typed as describeLength() writes it ("1 bar, 2 beats", "3 beats"), as a note value ("1/16", of a whole note
+    // of four beats), or in beats alone ("0.5"), in the time signature at a place.
+    std::optional<BeatDuration> parseLength (const ProjectContext& context, const juce::String& text, BeatPosition at)
+    {
+        const auto lower = text.toLowerCase();
+
+        if (lower.containsChar ('/'))
+        {
+            const auto over = lower.upToFirstOccurrenceOf ("/", false, false).getDoubleValue();
+            const auto under = lower.fromFirstOccurrenceOf ("/", false, false).getDoubleValue();
+            return over > 0.0 && under > 0.0 ? std::optional (BeatDuration::fromBeats (4.0 * over / under)) : std::nullopt;
+        }
+
+        const auto numbers = getNumbers (lower);
+
+        if (numbers.isEmpty())
+            return {};
+
+        if (! lower.contains ("bar"))
+            return BeatDuration::fromBeats (numbers[0].getDoubleValue());
+
+        const auto beats = numbers.size() > 1 ? numbers[1].getDoubleValue() : 0.0;
+        return BeatDuration::fromBeats (numbers[0].getDoubleValue() * std::max (1, getBeatsPerBar (context, at)) + beats);
+    }
+
+    // A note's name, with middle C as C4 (the keys' and the top bar's), and one typed so ("F#3", "Bb2") or as its number.
+    juce::String getPitchName (int pitch)
+    {
+        return juce::MidiMessage::getMidiNoteName (pitch, true, true, 4);
+    }
+
+    std::optional<double> parsePitch (const juce::String& text)
+    {
+        const auto name = text.trim().toUpperCase();
+
+        if (name.isEmpty())
+            return {};
+
+        if (name.containsOnly ("0123456789"))
+            return (double) juce::jlimit (0, 127, name.getIntValue());
+
+        constexpr int semitones[] = { 9, 11, 0, 2, 4, 5, 7 }; // A to G
+        const auto letter = (int) name[0] - 'A';
+
+        if (! juce::isPositiveAndBelow (letter, 7) || ! name.containsAnyOf ("0123456789"))
+            return {};
+
+        auto semitone = semitones[letter];
+        auto rest = name.substring (1);
+
+        if (rest.startsWithChar ('#'))
+            ++semitone;
+        else if (rest.startsWithChar ('B')) // a flat, as "Bb" reads in capitals
+            --semitone;
+
+        rest = rest.trimCharactersAtStart ("#B");
+        return (double) juce::jlimit (0, 127, (rest.getIntValue() + 1) * 12 + semitone);
+    }
+
+    //==============================================================================
+    // A value of one item or of several, as Logic Pro's inspector shows one for several regions: the lowest of theirs, or
+    // their range while they differ ("64 to 100"). Dragged, scrolled or stepped with the arrow keys, each item changes by as
+    // much as the field, by whole steps from where it was (change; a drag is one undo step); a value typed goes to set.
+    struct MultiField : public NumberField
+    {
+        MultiField (ProjectContext& c, const juce::String& title, double minimum, double maximum, double stepSize, juce::String undoName)
+            : NumberField (title, minimum, maximum, stepSize, minimum),
+              context (c),
+              dragName (std::move (undoName))
+        {
+            textFromValueFunction = [this] (double value)
+            {
+                const auto text = format (value);
+                return highest - lowest > getStep() / 1000.0 ? text + " to " + format (value + highest - lowest) : text;
+            };
+
+            valueFromTextFunction = [this] (const juce::String& text)
+            {
+                typed = parse (text);
+                return typed.value_or (getValue());
+            };
+
+            // A drag is one step; a value typed (which JUCE hands over as a drag's start and end) is the model's own step.
+            onDragStart = [this]
+            {
+                dragFrom = getValue();
+
+                if (! typed.has_value())
+                    gesture = std::make_unique<SongGesture> (context, dragName);
+            };
+
+            onDragEnd = [this] { gesture = nullptr; };
+
+            onValueChange = [this]
+            {
+                const auto now = getValue();
+
+                if (const auto value = std::exchange (typed, std::nullopt))
+                    set (*value);
+                else
+                    change (now - shown);
+
+                shown = now;
+            };
+        }
+
+        ~MultiField() override { gesture = nullptr; } // ends a drag in progress, keeping its change
+
+        // What the items have now: their lowest value and their highest.
+        void show (double low, double high)
+        {
+            lowest = low;
+            highest = std::max (low, high);
+
+            if (! isMouseButtonDown (true))
+            {
+                shown = low;
+                setValue (low, juce::dontSendNotification);
+            }
+
+            updateText();
+        }
+
+        // A drag changes the items by whole steps from where they were.
+        double snapValue (double attemptedValue, DragMode dragMode) override
+        {
+            if (dragMode == notDragging)
+                return attemptedValue;
+
+            const auto steps = std::round ((attemptedValue - dragFrom) / getStep());
+            return juce::jlimit (getMinimum(), getMaximum(), dragFrom + steps * getStep());
+        }
+
+        // Only a value typed is one to set.
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            typed.reset();
+            NumberField::mouseDown (e);
+        }
+
+        void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
+        {
+            typed.reset();
+            NumberField::mouseWheelMove (e, wheel);
+        }
+
+        bool keyPressed (const juce::KeyPress& key) override
+        {
+            typed.reset();
+            return NumberField::keyPressed (key);
+        }
+
+        std::function<juce::String (double)> format = [] (double value) { return juce::String (value); };
+        std::function<std::optional<double> (const juce::String&)> parse = [] (const juce::String& text) -> std::optional<double>
+        { return text.containsAnyOf ("0123456789") ? std::optional (text.getDoubleValue()) : std::nullopt; };
+        std::function<void (double amount)> change = [] (double) {};
+        std::function<void (double value)> set = [] (double) {};
+
+    private:
+        ProjectContext& context;
+        const juce::String dragName;
+        std::unique_ptr<SongGesture> gesture;
+        std::optional<double> typed; // the value typed, until it is set
+        double lowest = 0.0, highest = 0.0;
+        double shown = 0.0;    // the lowest, as the items have it, which a change is from
+        double dragFrom = 0.0; // the field's value as the drag started
+    };
 } // namespace
 
 //==============================================================================
@@ -561,8 +761,8 @@ namespace
     };
 
     //==============================================================================
-    // Clips: one's name, kind, place, length, whether it plays, and whether it is an alias; an audio clip's fades. Several
-    // share the switches, which act on all of them.
+    // Clips: one's name, kind, place and length, whether it plays, and whether it is an alias; an audio clip's gain, pitch
+    // and fades. Several share the fields and switches, which act on all of them.
     struct ClipsPage : public Inspector::Page
     {
         ClipsPage (CommandBridge& bridge, ProjectContext& c, std::vector<ClipID> shown)
@@ -571,8 +771,43 @@ namespace
               context (c),
               clips (std::move (shown))
         {
-            for (auto* label : { &kindLabel, &trackLabel, &startLabel, &lengthLabel, &aliasLabel, &fadeInLabel, &fadeOutLabel })
+            for (auto* label : { &kindLabel, &trackLabel, &aliasLabel, &fadeInLabel, &fadeOutLabel })
                 setUpValueLabel (*label);
+
+            // Where they start and how long they are, their gain and pitch, each changed or set for all of them.
+            const auto setUp = [this] (MultiField& field, ClipProperty property, const juce::String& tooltip)
+            {
+                field.setTooltip (tooltip);
+                field.change = [this, property] (double amount) { changeClips (context, clips, property, amount); };
+                field.set = [this, property] (double value) { setClipsTo (context, clips, property, value); };
+            };
+
+            setUp (startField, ClipProperty::start, "Where the clips start: drag, scroll or type a bar and a beat (5.3)");
+            startField.format = [this] (double beat) { return describePlace (context, BeatPosition::fromBeats (beat)); };
+            startField.parse = [this] (const juce::String& text) -> std::optional<double>
+            {
+                const auto place = parsePlace (context, text);
+                return place.has_value() ? std::optional (place->inBeats()) : std::nullopt;
+            };
+
+            setUp (lengthField, ClipProperty::length, "How long the clips are: drag, scroll or type a length (2 bars, 1/4)");
+            lengthField.format = [this] (double beats) { return describeLength (context, { start, BeatDuration::fromBeats (beats) }); };
+            lengthField.parse = [this] (const juce::String& text) -> std::optional<double>
+            {
+                const auto length = parseLength (context, text, start);
+                return length.has_value() ? std::optional (length->inBeats()) : std::nullopt;
+            };
+
+            setUp (gainField, ClipProperty::gain, "How loud the clips play: drag, scroll or type decibels");
+            gainField.format = [] (double dB) { return formatDecibels (dB); };
+            gainField.parse = [] (const juce::String& text) { return parseDecibels (text); };
+
+            setUp (pitchField, ClipProperty::pitch, "How far the clips' audio is pitched up or down, in semitones, keeping its length");
+            pitchField.format = [] (double semitones)
+            {
+                return (semitones > 0.0 ? "+" : "") + juce::String (semitones, 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".")
+                       + " st";
+            };
 
             mutedToggle.setTitle ("Muted");
             mutedToggle.setTooltip ("A muted clip doesn't play");
@@ -599,12 +834,14 @@ namespace
 
             addRow ("Kind", &kindLabel);
             addRow ("Track", &trackLabel);
-            addRow ("Starts", &startLabel);
-            addRow ("Length", &lengthLabel);
+            addRow ("Starts", &startField);
+            addRow ("Length", &lengthField);
             addRow ("Muted", &mutedToggle);
             addRow ("Alias", &aliasLabel);
             addRow ({}, &makeUniqueButton);
             addRow ("Follows the chords", &followsChordsToggle);
+            addRow ("Gain", &gainField);
+            addRow ("Pitch", &pitchField);
             addRow ("Fade in", &fadeInLabel);
             addRow ("Fade out", &fadeOutLabel);
             addRow ("Fade shape", &shapeBox);
@@ -652,13 +889,34 @@ namespace
             kindLabel.setText (allMidi ? "MIDI" : allAudio ? "Audio" : "MIDI and audio", juce::dontSendNotification);
             trackLabel.setText (row.has_value() ? row->name : juce::String(), juce::dontSendNotification);
 
-            auto range = first.range;
+            // Each field the range of the clips' values.
+            const auto showRange = [] (MultiField& field, const std::vector<double>& values)
+            {
+                if (! values.empty())
+                    field.show (*std::min_element (values.begin(), values.end()), *std::max_element (values.begin(), values.end()));
+            };
+
+            std::vector<double> starts, lengths, gains, pitches;
 
             for (const auto& info : infos)
-                range = BeatRange (std::min (range.getStart(), info.range.getStart()), std::max (range.getEnd(), info.range.getEnd()));
+            {
+                starts.push_back (info.range.getStart().inBeats());
+                lengths.push_back (info.range.getLength().inBeats());
 
-            startLabel.setText (describePlace (context, range.getStart()), juce::dontSendNotification);
-            lengthLabel.setText (describeLength (context, range), juce::dontSendNotification);
+                if (const auto audio = getAudioClip (context, info.id))
+                {
+                    gains.push_back (audio->gain);
+                    pitches.push_back (audio->pitch);
+                }
+            }
+
+            start = BeatPosition::fromBeats (*std::min_element (starts.begin(), starts.end()));
+            showRange (startField, starts);
+            showRange (lengthField, lengths);
+            showRange (gainField, gains);
+            showRange (pitchField, pitches);
+            setRowVisible (gainField, allAudio);
+            setRowVisible (pitchField, allAudio);
             mutedToggle.setToggleState (std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.muted; }),
                                         juce::dontSendNotification);
 
@@ -714,10 +972,288 @@ namespace
         CommandBridge& commands;
         ProjectContext& context;
         const std::vector<ClipID> clips;
-        juce::Label kindLabel, trackLabel, startLabel, lengthLabel, aliasLabel, fadeInLabel, fadeOutLabel;
+        BeatPosition start; // the earliest clip's, where lengths are counted in bars
+        juce::Label kindLabel, trackLabel, aliasLabel, fadeInLabel, fadeOutLabel;
+        MultiField startField { context, "Starts", 0.0, 100000.0, 1.0, "Move Clips" };
+        MultiField lengthField { context, "Length", 0.0, 100000.0, 1.0, "Change Clip Length" }; // the model keeps a 64th at least
+        MultiField gainField { context, "Gain", minClipGain, maxClipGain, 0.5, "Change Clip Gain" };
+        MultiField pitchField { context, "Pitch", -maxClipPitch, maxClipPitch, 1.0, "Change Clip Pitch" };
         juce::ToggleButton mutedToggle, followsChordsToggle;
         juce::TextButton makeUniqueButton { "Make Unique" };
         juce::ComboBox shapeBox;
+    };
+
+    //==============================================================================
+    // Notes selected in the piano roll: where they start, how long they are, their pitch and velocity, whether they play,
+    // and the clip they are in. Several share the fields, which act on all of them, as Bitwig's inspector edits notes.
+    struct NotesPage : public Inspector::Page
+    {
+        NotesPage (CommandBridge& bridge, ProjectContext& c, std::vector<NoteRef> shown)
+            : Page (shown.size() == 1 ? "Note" : "Notes", juce::Colours::transparentBlack),
+              commands (bridge),
+              context (c),
+              notes (std::move (shown))
+        {
+            setUpValueLabel (clipLabel);
+
+            const auto setUp = [this] (MultiField& field, NoteProperty property, const juce::String& tooltip)
+            {
+                field.setTooltip (tooltip);
+                field.change = [this, property] (double amount) { changeNotes (context, notes, property, amount); };
+                field.set = [this, property] (double value) { setNotesTo (context, notes, property, value); };
+            };
+
+            setUp (startField, NoteProperty::start, "Where the notes start: drag, scroll or type a bar and a beat (5.3)");
+            startField.format = [this] (double beat) { return describePlace (context, BeatPosition::fromBeats (beat)); };
+            startField.parse = [this] (const juce::String& text) -> std::optional<double>
+            {
+                const auto place = parsePlace (context, text);
+                return place.has_value() ? std::optional (place->inBeats()) : std::nullopt;
+            };
+
+            setUp (lengthField, NoteProperty::length, "How long the notes are: drag, scroll or type a length (1/16, 2 beats)");
+            lengthField.format = [this] (double beats) { return describeLength (context, { start, BeatDuration::fromBeats (beats) }); };
+            lengthField.parse = [this] (const juce::String& text) -> std::optional<double>
+            {
+                const auto length = parseLength (context, text, start);
+                return length.has_value() ? std::optional (length->inBeats()) : std::nullopt;
+            };
+
+            setUp (pitchField, NoteProperty::pitch, "The notes' pitch: drag or scroll to transpose them, or type a note (C4)");
+            pitchField.format = [] (double pitch) { return getPitchName ((int) std::lround (pitch)); };
+            pitchField.parse = [] (const juce::String& text) { return parsePitch (text); };
+
+            setUp (velocityField, NoteProperty::velocity, "How hard the notes are played, from 1 to 127");
+            velocityField.format = [] (double velocity) { return juce::String ((int) std::lround (velocity)); };
+
+            mutedToggle.setTitle ("Muted");
+            mutedToggle.setTooltip ("A muted note doesn't play");
+            mutedToggle.onClick = [this] { commands.invoke ("edit.mute"); }; // the selected notes, which these are
+
+            addRow ("Starts", &startField);
+            addRow ("Length", &lengthField);
+            addRow ("Pitch", &pitchField);
+            addRow ("Velocity", &velocityField);
+            addRow ("Muted", &mutedToggle);
+            addRow ("Clip", &clipLabel);
+            refresh();
+        }
+
+        void refresh() override
+        {
+            std::vector<NoteData> shown;
+
+            for (const auto ref : notes)
+                if (const auto note = getNote (context, ref))
+                    shown.push_back (*note);
+
+            if (shown.empty())
+                return;
+
+            const auto range = [&shown] (auto&& valueOf)
+            {
+                auto lowest = valueOf (shown.front()), highest = lowest;
+
+                for (const auto& note : shown)
+                {
+                    lowest = std::min (lowest, valueOf (note));
+                    highest = std::max (highest, valueOf (note));
+                }
+
+                return std::pair (lowest, highest);
+            };
+
+            const auto [firstStart, lastStart] = range ([] (const NoteData& note) { return note.start.inBeats(); });
+            start = BeatPosition::fromBeats (firstStart);
+            startField.show (firstStart, lastStart);
+            const auto [shortest, longest] = range ([] (const NoteData& note) { return note.length.inBeats(); });
+            lengthField.show (shortest, longest);
+            const auto [lowest, highest] = range ([] (const NoteData& note) { return (double) note.pitch; });
+            pitchField.show (lowest, highest);
+            const auto [softest, hardest] = range ([] (const NoteData& note) { return (double) note.velocity; });
+            velocityField.show (softest, hardest);
+
+            mutedToggle.setToggleState (std::all_of (shown.begin(), shown.end(), [] (const NoteData& note) { return note.muted; }),
+                                        juce::dontSendNotification);
+
+            title.setText (shown.size() == 1 ? getPitchName (shown.front().pitch) : juce::String ((int) shown.size()) + " notes",
+                           juce::dontSendNotification);
+
+            // Their clip's (the first's, of several), in its track's color.
+            const auto clip = getNoteClip (context, shown.front().clip);
+            colour = clip.has_value() ? clip->colour : juce::Colours::transparentBlack;
+            clipLabel.setText (clip.has_value() ? clip->name : juce::String(), juce::dontSendNotification);
+            repaint();
+        }
+
+        CommandBridge& commands;
+        ProjectContext& context;
+        const std::vector<NoteRef> notes;
+        BeatPosition start; // the earliest note's, where lengths are counted in bars
+        MultiField startField { context, "Starts", 0.0, 100000.0, 0.25, "Move Notes" };
+        MultiField lengthField { context, "Length", 0.0, 1024.0, 0.25, "Change Note Length" }; // the model keeps a 64th at least
+        MultiField pitchField { context, "Pitch", 0.0, 127.0, 1.0, "Transpose Notes" };
+        MultiField velocityField { context, "Velocity", 1.0, 127.0, 1.0, "Change Velocity" };
+        juce::ToggleButton mutedToggle;
+        juce::Label clipLabel;
+    };
+
+    //==============================================================================
+    // Automation points selected in a lane: the parameter they move, where they are, their value, and how the line after
+    // each bends. Several share the fields, which act on all of them.
+    struct AutomationPage : public Inspector::Page
+    {
+        AutomationPage (ProjectContext& c, const ParameterRef& ref, std::vector<int> shown)
+            : Page ("Automation", juce::Colours::transparentBlack),
+              context (c),
+              parameter (ref),
+              indices (std::move (shown)),
+              handle (getParameter (c, ref)),
+              target (getAutomationTarget (c, ref))
+        {
+            setUpValueLabel (parameterLabel);
+
+            positionField.setTooltip ("Where the points are: drag, scroll or type a bar and a beat (5.3)");
+            positionField.format = [this] (double beat) { return describePlace (context, BeatPosition::fromBeats (beat)); };
+            positionField.parse = [this] (const juce::String& text) -> std::optional<double>
+            {
+                const auto place = parsePlace (context, text);
+                return place.has_value() ? std::optional (place->inBeats()) : std::nullopt;
+            };
+            positionField.change = [this] (double amount)
+            { moveAutomationPoints (context, parameter, indices, BeatDuration::fromBeats (amount), 0.0f); };
+            positionField.set = [this] (double value)
+            { moveAutomationPoints (context, parameter, indices, BeatDuration::fromBeats (value - earliest), 0.0f); };
+
+            valueField.setTooltip ("The points' value: drag or scroll to move them all, or type one for all of them");
+            valueField.format = [this] (double value) { return getValueText ((float) value); };
+            valueField.parse = [this] (const juce::String& text) { return parseValue (text); };
+            valueField.change = [this] (double amount) { moveAutomationPoints (context, parameter, indices, {}, (float) amount); };
+            valueField.set = [this] (double value) { setAutomationPointValues (context, parameter, indices, (float) value); };
+
+            curveField.setTooltip ("How the line after each point bends: 0% is straight, up to 100% either way");
+            curveField.format = [] (double bend) { return juce::String (juce::roundToInt (bend * 100.0)) + "%"; };
+            curveField.parse = [] (const juce::String& text) -> std::optional<double>
+            { return text.containsAnyOf ("0123456789") ? std::optional (text.getDoubleValue() / 100.0) : std::nullopt; };
+            curveField.change = [this] (double) { setAutomationCurves (context, parameter, indices, (float) curveField.getValue()); };
+            curveField.set = [this] (double value) { setAutomationCurves (context, parameter, indices, (float) value); };
+
+            addRow ("Parameter", &parameterLabel);
+            addRow ("Position", &positionField);
+            addRow ("Value", &valueField);
+            addRow ("Curve", &curveField);
+            refresh();
+        }
+
+        // A value as the parameter's lane and control show it, and one typed so.
+        ParameterKind getParameterKind() const { return target.has_value() ? target->kind : ParameterKind::other; }
+
+        juce::String getValueText (float value) const
+        {
+            if (getParameterKind() == ParameterKind::volume)
+                return formatDecibels (faderPositionToDecibels (value));
+
+            if (getParameterKind() == ParameterKind::pan)
+                return formatPan (value);
+
+            if (const auto info = handle.getInfo())
+                return formatParameterValue (*info, value);
+
+            return handle.getText (value);
+        }
+
+        std::optional<double> parseValue (const juce::String& text) const
+        {
+            if (getParameterKind() == ParameterKind::volume)
+            {
+                const auto dB = parseDecibels (text);
+                return dB.has_value() ? std::optional ((double) decibelsToFaderPosition ((float) *dB)) : std::nullopt;
+            }
+
+            if (getParameterKind() == ParameterKind::pan)
+                return parsePan (text);
+
+            if (const auto info = handle.getInfo())
+            {
+                const auto value = parseParameterValue (*info, text);
+                return value.has_value() ? std::optional ((double) *value) : std::nullopt;
+            }
+
+            return text.containsAnyOf ("0123456789") ? std::optional (text.getDoubleValue()) : std::nullopt;
+        }
+
+        void refresh() override
+        {
+            const auto points = getAutomationPoints (context, parameter);
+            std::vector<AutomationPoint> shown;
+
+            for (const auto index : indices)
+                if (juce::isPositiveAndBelow (index, (int) points.size()))
+                    shown.push_back (points[(size_t) index]);
+
+            if (shown.empty())
+                return;
+
+            const auto range = [&shown] (auto&& valueOf)
+            {
+                auto lowest = valueOf (shown.front()), highest = lowest;
+
+                for (const auto& point : shown)
+                {
+                    lowest = std::min (lowest, valueOf (point));
+                    highest = std::max (highest, valueOf (point));
+                }
+
+                return std::pair (lowest, highest);
+            };
+
+            const auto [first, last] = range ([] (const AutomationPoint& point) { return point.beat.inBeats(); });
+            earliest = first;
+            positionField.show (first, last);
+            const auto [lowest, highest] = range ([] (const AutomationPoint& point) { return (double) point.value; });
+            valueField.show (lowest, highest);
+            const auto [least, most] = range ([] (const AutomationPoint& point) { return (double) point.curve; });
+            curveField.show (least, most);
+
+            const auto name = target.has_value() ? target->deviceName + ": " + target->name : handle.getName();
+            parameterLabel.setText (name, juce::dontSendNotification);
+            title.setText (shown.size() == 1 ? juce::String ("Automation point") : juce::String ((int) shown.size()) + " points",
+                           juce::dontSendNotification);
+
+            if (const auto row = target.has_value() ? getTrackRow (context, target->track) : std::nullopt)
+                colour = row->colour;
+
+            repaint();
+        }
+
+        ProjectContext& context;
+        const ParameterRef parameter;
+        const std::vector<int> indices;
+        const ParameterHandle handle;
+        const std::optional<AutomationTarget> target;
+        double earliest = 0.0; // the earliest point's beat
+        juce::Label parameterLabel;
+        MultiField positionField { context, "Position", 0.0, 100000.0, 0.25, "Move Automation Points" };
+        MultiField valueField { context,
+                                "Value",
+                                getLowest (handle),
+                                getHighest (handle),
+                                (getHighest (handle) - getLowest (handle)) / 100.0,
+                                "Move Automation Points" };
+
+        // The parameter's range, or 0 to 1 for one that is gone.
+        static double getLowest (const ParameterHandle& h)
+        {
+            const auto range = h.getRange();
+            return range.end > range.start ? range.start : 0.0;
+        }
+
+        static double getHighest (const ParameterHandle& h)
+        {
+            const auto range = h.getRange();
+            return range.end > range.start ? range.end : 1.0;
+        }
+        MultiField curveField { context, "Curve", -1.0, 1.0, 0.01, "Bend Automation" };
     };
 
     //==============================================================================
@@ -801,7 +1337,8 @@ namespace
             for (auto* label : { &tempoLabel, &signatureLabel, &lengthLabel, &tracksLabel, &sectionsLabel, &hintLabel })
                 setUpValueLabel (*label);
 
-            hintLabel.setText ("Select a track, a clip or a section to see its properties here.", juce::dontSendNotification);
+            hintLabel.setText ("Select a track, clips, notes, automation points or a section to see and change them here.",
+                               juce::dontSendNotification);
             hintLabel.setJustificationType (juce::Justification::topLeft);
             addRow ("Tempo", &tempoLabel);
             addRow ("Time", &signatureLabel);
@@ -864,24 +1401,23 @@ Inspector::Target Inspector::getTarget() const
 
     const auto& selection = context.getSongSelection();
 
+    // Notes and automation points are selected on their own, with nothing else.
+    if (auto notes = selection.getNotes(); ! notes.empty())
+        return { .kind = Target::Kind::notes, .notes = std::move (notes) };
+
+    if (auto points = selection.getSelectedAutomationPoints(); points.parameter.isValid() && ! points.indices.empty())
+        return { .kind = Target::Kind::automation, .parameter = points.parameter, .points = std::move (points.indices) };
+
     if (auto clips = selection.getClips(); ! clips.empty())
         return { .kind = Target::Kind::clips, .clips = std::move (clips) };
-
-    // Notes are their clip's.
-    if (const auto notes = selection.getNotes(); ! notes.empty())
-        return { .kind = Target::Kind::clips, .clips = { notes.front().clip } };
 
     if (const auto sections = selection.getSections(); ! sections.empty())
         return { .kind = Target::Kind::section, .section = sections.front() };
 
-    // A device's track (the master's has none here: the Devices view shows it), or an automation point's.
+    // A device's track (the master's has none here: the Devices view shows it).
     if (const auto devices = selection.getDevices(); ! devices.empty())
         if (const auto channel = getDeviceChannel (context, devices.front()); channel.has_value() && channel->isValid())
             return { .kind = Target::Kind::track, .track = *channel };
-
-    if (const auto points = selection.getSelectedAutomationPoints(); points.parameter.isValid())
-        if (const auto target = getAutomationTarget (context, points.parameter); target.has_value() && getChannel (context, target->track))
-            return { .kind = Target::Kind::track, .track = target->track };
 
     if (const auto tracks = selection.getTracks(); ! tracks.empty() && getChannel (context, tracks.front()).has_value())
         return { .kind = Target::Kind::track, .track = tracks.front() };
@@ -907,6 +1443,12 @@ void Inspector::showTarget()
             break;
         case Target::Kind::clips:
             page = std::make_unique<ClipsPage> (commands, context, shown.clips);
+            break;
+        case Target::Kind::notes:
+            page = std::make_unique<NotesPage> (commands, context, shown.notes);
+            break;
+        case Target::Kind::automation:
+            page = std::make_unique<AutomationPage> (context, shown.parameter, shown.points);
             break;
         case Target::Kind::section:
             page = std::make_unique<SectionPage> (context, shown.section);

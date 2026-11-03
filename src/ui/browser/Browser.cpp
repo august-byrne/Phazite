@@ -12,6 +12,7 @@ namespace
     constexpr int iconSize = 16;
     constexpr int starWidth = 24;
     constexpr int statusHeight = 20;
+    constexpr int soundViewHeight = 64; // a waveform, and a line of what the sound is
 
     Icon getIconFor (const LibraryItem& item)
     {
@@ -69,6 +70,14 @@ struct Browser::Node : public juce::TreeViewItem
 
     void itemSelectionChanged (bool isNowSelected) override
     {
+        // The sound view follows, once the tree is done changing (a selection can change as rows go).
+        juce::MessageManager::callAsync (
+            [safeBrowser = juce::Component::SafePointer<Browser> (&browser)]
+            {
+                if (safeBrowser != nullptr)
+                    safeBrowser->selectionMoved();
+            });
+
         if (! isNowSelected)
             return;
 
@@ -475,6 +484,8 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
 
     for (auto* c : std::initializer_list<juce::Component*> { &searchField, tree.get(), &previewButton, &volumeFader })
         addAndMakeVisible (c);
+
+    addChildComponent (soundView); // while a sound is selected
 
     // Search finds more once the index of the sounds is ready.
     library.onIndexChanged = [this]
@@ -1123,7 +1134,28 @@ void Browser::resized()
 
     statusArea = area.removeFromBottom (statusHeight);
     area.removeFromBottom (Space::xs);
+
+    // The sound selected, under the tree, while one is.
+    if (soundView.showsSound())
+    {
+        soundView.setBounds (area.removeFromBottom (soundViewHeight));
+        area.removeFromBottom (Space::s);
+    }
+
     tree->setBounds (area);
+}
+
+void Browser::selectionMoved()
+{
+    if (tree == nullptr)
+        return;
+
+    const auto before = soundView.showsSound();
+    soundView.show (getSelectedItem());
+    soundView.setVisible (soundView.showsSound());
+
+    if (soundView.showsSound() != before)
+        resized();
 }
 
 void Browser::visibilityChanged()

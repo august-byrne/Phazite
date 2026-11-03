@@ -587,6 +587,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/browser/Browser.h
     src/ui/browser/PluginPicker.cpp
     src/ui/browser/PluginPicker.h
+    src/ui/browser/SoundView.cpp
+    src/ui/browser/SoundView.h
     src/ui/components/ArmButton.cpp
     src/ui/components/ArmButton.h
     src/ui/components/Controls.cpp

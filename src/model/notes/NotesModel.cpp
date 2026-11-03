@@ -9,6 +9,10 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
+#include <cmath>
+#include <functional>
+#include <limits>
 #include <unordered_map>
 
 namespace phazite
@@ -256,6 +260,126 @@ void nudgeNotes (ProjectContext& context, const std::vector<NoteRef>& refs, Beat
 {
     if (const auto notes = findNotes (context, refs); ! notes.empty())
         nudgeNotes (notes, toTracktion (amount));
+}
+
+namespace
+{
+    constexpr double shortestNote = 1.0 / 16.0; // a 64th note, in beats
+
+    const char* getUndoName (NoteProperty property)
+    {
+        switch (property)
+        {
+            case NoteProperty::start:
+                return "Move Notes";
+            case NoteProperty::length:
+                return "Change Note Length";
+            case NoteProperty::pitch:
+                return "Transpose Notes";
+            case NoteProperty::velocity:
+            default:
+                return "Change Velocity";
+        }
+    }
+
+    double getProperty (const NoteData& note, NoteProperty property)
+    {
+        switch (property)
+        {
+            case NoteProperty::start:
+                return note.start.inBeats();
+            case NoteProperty::length:
+                return note.length.inBeats();
+            case NoteProperty::pitch:
+                return note.pitch;
+            case NoteProperty::velocity:
+            default:
+                return note.velocity;
+        }
+    }
+
+    // The lowest and highest of the notes' values of a property.
+    using Range = std::pair<double, double>;
+
+    Range getRange (const std::vector<NoteData>& notes, NoteProperty property)
+    {
+        auto lowest = getProperty (notes.front(), property), highest = lowest;
+
+        for (const auto& note : notes)
+        {
+            lowest = std::min (lowest, getProperty (note, property));
+            highest = std::max (highest, getProperty (note, property));
+        }
+
+        return { lowest, highest };
+    }
+
+    // The notes, as they are now; each given the value worked out for it from its own and the notes' range, kept in range,
+    // as one step.
+    void setEach (ProjectContext& context, const std::vector<NoteRef>& refs, NoteProperty property,
+                  const std::function<double (Range, double)>& valueOf)
+    {
+        auto* edit = getEdit (context);
+        std::vector<NoteData> notes;
+
+        for (const auto ref : refs)
+            if (const auto note = getNote (context, ref))
+                notes.push_back (*note);
+
+        if (edit == nullptr || notes.empty())
+            return;
+
+        const UndoStep step (*edit, getUndoName (property));
+        const auto range = getRange (notes, property);
+        auto changed = notes;
+
+        for (size_t i = 0; i < notes.size(); ++i)
+        {
+            const auto value = valueOf (range, getProperty (notes[i], property));
+            auto& note = changed[i];
+
+            switch (property)
+            {
+                case NoteProperty::start:
+                    note.start = BeatPosition::fromBeats (std::max (0.0, value));
+                    break;
+                case NoteProperty::length:
+                    note.length = BeatDuration::fromBeats (std::max (shortestNote, value));
+                    break;
+                case NoteProperty::pitch:
+                    note.pitch = juce::jlimit (0, 127, (int) std::lround (value));
+                    break;
+                case NoteProperty::velocity:
+                    note.velocity = juce::jlimit (1, 127, (int) std::lround (value));
+                    break;
+            }
+        }
+
+        if (property != NoteProperty::velocity)
+        {
+            setNotes (context, changed);
+            return;
+        }
+
+        for (const auto& note : changed)
+            setNoteVelocities (context, { note.getRef() }, note.velocity);
+    }
+} // namespace
+
+void changeNotes (ProjectContext& context, const std::vector<NoteRef>& refs, NoteProperty property, double amount)
+{
+    // Starts and pitches together, as far as the earliest, the lowest and the highest can go.
+    const auto together = property == NoteProperty::start || property == NoteProperty::pitch;
+    const auto top = property == NoteProperty::pitch ? 127.0 : std::numeric_limits<double>::max();
+
+    setEach (context, refs, property, [together, top, amount] (Range range, double own)
+             { return own + (together ? juce::jlimit (-range.first, top - range.second, amount) : amount); });
+}
+
+void setNotesTo (ProjectContext& context, const std::vector<NoteRef>& refs, NoteProperty property, double value)
+{
+    const auto each = property == NoteProperty::length || property == NoteProperty::velocity;
+    setEach (context, refs, property, [each, value] (Range range, double own) { return each ? value : own + value - range.first; });
 }
 
 void setNotes (ProjectContext& context, const std::vector<NoteData>& notes)

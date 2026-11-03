@@ -8,6 +8,7 @@
 // playlist is saved as a preset (roadmap step 2.4), as are the selected device and track by their commands.
 #pragma once
 
+#include "SoundView.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/Preview.h"
 #include "model/mixer/MixerModel.h"
@@ -88,6 +89,7 @@ public:
     juce::TreeView& getTree() noexcept;
     juce::TextEditor& getSearchField() noexcept { return searchField; }
     std::optional<LibraryItem> getSelectedItem() const;
+    const SoundView& getSoundView() const noexcept { return soundView; }
     void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override;
 
     static constexpr int rowHeight = 26;
@@ -115,7 +117,8 @@ private:
     IconButton previewButton { "Preview sounds when selected", Icon::preview };
     Fader volumeFader { Fader::Direction::horizontal, "Preview volume", decibelsToFaderPosition (-6.0f) };
     std::unique_ptr<juce::FileChooser> folderChooser, presetChooser;
-    juce::Rectangle<int> statusArea; // under the tree: what plays
+    SoundView soundView;             // under the tree: the sound selected
+    juce::Rectangle<int> statusArea; // under it: what plays
     bool wasPlaying = false;
     bool trackDropping = false;         // a track dragged over it, to save as a preset
     const void* justSelected = nullptr; // the row the click being handled selected, if it did
@@ -139,6 +142,7 @@ private:
     void noteUsed (const LibraryItem&);
     bool isPreviewing (const LibraryItem&) const;
     bool isPreviewOn() const;
+    void selectionMoved(); // the sound view shows the item selected now
 
     // A search through a big library takes a while: once one has, typing waits for the keys to pause (docs/performance-
     // audit.md, U7). Small ones search at each key.

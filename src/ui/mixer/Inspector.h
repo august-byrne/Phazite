@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The inspector, the panel on the right (docs/design.md, section 4; roadmap step 2.5): the properties of what is
 // selected, as Bitwig's, Studio Pro's, Logic Pro's and Cubase's inspectors show them, a name and a value on each row so
-// that it uses its width. Clips (or the clip of the notes selected), a section, or a track (also the track of a selected
-// device or automation point); with nothing selected, the song. It isn't a copy of a mixer channel: the mixer shows those.
+// that it uses its width. Notes, clips, automation points, a section, or a track (also the track of a selected device);
+// with nothing selected, the song. It isn't a copy of a mixer channel: the mixer shows those. Several notes, clips or
+// points show and change together, as Logic Pro's inspector edits several regions: a value shows the range of theirs
+// while they differ ("64 to 100"); dragged, scrolled or stepped, each changes by as much; typed, each length, velocity,
+// gain or value becomes it, and the earliest start and the lowest pitch go there, the others with them.
 #pragma once
 
+#include "model/devices/ParameterRef.h"
 #include "model/project/ProjectContext.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -25,7 +29,8 @@ public:
     Inspector (CommandBridge&, ProjectContext&);
     ~Inspector() override;
 
-    // What it shows: "Track", "Clip", "Clips", "Section" or "Song"; nothing without a project. For tests.
+    // What it shows: "Track", "Clip", "Clips", "Note", "Notes", "Automation", "Section" or "Song"; nothing without a
+    // project. For tests.
     juce::String getShown() const;
 
     void paint (juce::Graphics&) override;
@@ -43,12 +48,17 @@ public:
             song,
             track,
             clips,
+            notes,
+            automation,
             section
         };
 
         Kind kind = Kind::none;
         TrackID track {};
         std::vector<ClipID> clips {};
+        std::vector<NoteRef> notes {};
+        ParameterRef parameter {}; // the automation points' (their indices in time order: points)
+        std::vector<int> points {};
         SectionID section {};
 
         bool operator== (const Target&) const = default;

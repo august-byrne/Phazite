@@ -7,7 +7,9 @@
 #include "model/project/internal/ProjectContext.h"
 
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <optional>
 
 namespace phazite
 {
@@ -220,5 +222,101 @@ std::map<ClipID, double> getClipsBeingRendered (const ProjectContext& context)
                 clips[getClipID (*clip)] = *progress;
 
     return clips;
+}
+
+namespace
+{
+    constexpr double shortestClip = 1.0 / 16.0; // a 64th note, in beats
+
+    const char* getUndoName (ClipProperty property)
+    {
+        switch (property)
+        {
+            case ClipProperty::start:
+                return "Move Clips";
+            case ClipProperty::length:
+                return "Change Clip Length";
+            case ClipProperty::gain:
+                return "Change Clip Gain";
+            case ClipProperty::pitch:
+            default:
+                return "Change Clip Pitch";
+        }
+    }
+
+    // A clip's value of a property, or nothing for one it doesn't have (a MIDI clip's gain and pitch).
+    std::optional<double> getProperty (const ProjectContext& context, const ClipInfo& clip, ClipProperty property)
+    {
+        if (property == ClipProperty::start)
+            return clip.range.getStart().inBeats();
+
+        if (property == ClipProperty::length)
+            return clip.range.getLength().inBeats();
+
+        if (const auto audio = getAudioClip (context, clip.id))
+            return property == ClipProperty::gain ? audio->gain : audio->pitch;
+
+        return {};
+    }
+
+    // Each clip that has the property given the value worked out for it from its own and the earliest start, as one step.
+    void setEachClip (ProjectContext& context, const std::vector<ClipID>& ids, ClipProperty property,
+                      const std::function<double (double earliest, double own)>& valueOf)
+    {
+        auto* edit = getEdit (context);
+        std::vector<std::pair<ClipInfo, double>> clips;
+        auto earliest = std::numeric_limits<double>::max();
+
+        for (const auto id : ids)
+        {
+            if (const auto clip = getClip (context, id))
+            {
+                if (const auto own = getProperty (context, *clip, property))
+                {
+                    clips.emplace_back (*clip, *own);
+                    earliest = std::min (earliest, clip->range.getStart().inBeats());
+                }
+            }
+        }
+
+        if (edit == nullptr || clips.empty())
+            return;
+
+        const UndoStep step (*edit, getUndoName (property));
+
+        for (const auto& [clip, own] : clips)
+        {
+            const auto value = valueOf (earliest, own);
+
+            switch (property)
+            {
+                case ClipProperty::start:
+                    moveClip (context, clip.id, BeatPosition::fromBeats (std::max (0.0, value)), clip.track);
+                    break;
+                case ClipProperty::length:
+                    trimClipEnd (context, clip.id, clip.range.getStart() + BeatDuration::fromBeats (std::max (shortestClip, value)));
+                    break;
+                case ClipProperty::gain:
+                    setClipGain (context, clip.id, (float) value);
+                    break;
+                case ClipProperty::pitch:
+                    setClipPitch (context, clip.id, (float) value);
+                    break;
+            }
+        }
+    }
+} // namespace
+
+void changeClips (ProjectContext& context, const std::vector<ClipID>& ids, ClipProperty property, double amount)
+{
+    // Moved together, as far as the earliest can go.
+    setEachClip (context, ids, property, [property, amount] (double earliest, double own)
+                 { return own + (property == ClipProperty::start ? std::max (-earliest, amount) : amount); });
+}
+
+void setClipsTo (ProjectContext& context, const std::vector<ClipID>& ids, ClipProperty property, double value)
+{
+    setEachClip (context, ids, property, [property, value] (double earliest, double own)
+                 { return property == ClipProperty::start ? own + value - earliest : value; });
 }
 } // namespace phazite

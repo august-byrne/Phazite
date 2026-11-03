@@ -133,6 +133,39 @@ TEST_CASE ("A loop playing stops at a click on it, a one-shot plays again, and s
     CHECK (screen.previewer.getFile().getFileName() == juce::String ("Kick.wav"));
 }
 
+TEST_CASE ("The sound selected shows under the tree: its waveform, whether it is a loop, how long it lasts and its format")
+{
+    BrowserScreen screen;
+    phazite::test::Mouse mouse (screen.browser.getTree());
+    const auto click = [&] (const char* row)
+    {
+        mouse.click (screen.getRow (row).getCentre());
+        phazite::test::dispatchPendingMessages();
+    };
+
+    // A folder: nothing.
+    click ("Loops");
+    CHECK_FALSE (screen.browser.getSoundView().isVisible());
+
+    // A loop of 4 seconds at 120 BPM: two bars; the tree makes room for it.
+    click ("Break 120 BPM");
+    REQUIRE (screen.browser.getSoundView().isVisible());
+    auto details = screen.browser.getSoundView().getDetails();
+    CHECK (details.startsWith ("Loop"));
+    CHECK (details.contains ("120 BPM"));
+    CHECK (details.contains ("2 bars"));
+    CHECK (details.contains ("4.00 s"));
+    CHECK (details.contains ("kHz"));
+    CHECK (screen.browser.getTree().getBottom() <= screen.browser.getSoundView().getY());
+
+    // A kick: a one-shot, to the hundredth of a second.
+    click ("Drums");
+    click ("Kick");
+    details = screen.browser.getSoundView().getDetails();
+    CHECK (details.startsWith ("One-shot"));
+    CHECK (details.contains ("0.30 s"));
+}
+
 TEST_CASE ("The browser shows its places, plays a sound when clicked, and Enter puts it into the song")
 {
     BrowserScreen screen;
