@@ -93,7 +93,7 @@ void PlaybackSession::pluginParameterChanged (te::AutomatableParameter& paramete
     if (! isFollowingAutomation)
         player.takeValueSetByHand (getParameterRef (parameter), parameter.getCurrentExplicitValue());
 
-    writer.parameterChanged (parameter, isFollowingAutomation);
+    writer.parameterChanged (getParameterRef (parameter), parameter.getCurrentBaseValue(), isFollowingAutomation);
 }
 
 bool PlaybackSession::isPlayingProject() const

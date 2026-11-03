@@ -48,6 +48,10 @@ namespace
     // in the same step, as a control's change.
     void moveOnePoint (Song& song, const ParameterRef& ref, float value)
     {
+        // Not while automation is written by hand (model/playback/internal/AutomationWriter.h), which writes its own points.
+        if (auto* session = findSession (song); session != nullptr && session->getWriter().isWriting (ref))
+            return;
+
         if (auto curve = findCurveState (song, ref); curve.getNumChildren() == 1)
             if (auto point = curve.getChild (0); ! juce::exactlyEqual ((float) point[schema::pointValue], value))
                 point.setProperty (schema::pointValue, value, &song.getUndoManager());

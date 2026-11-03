@@ -307,6 +307,43 @@ TEST_CASE ("Touch writes what a control does while it is held, from the lane's v
     CHECK (phazite::getAutomationPoints (song.context, lane).size() == 2);
 }
 
+TEST_CASE ("Touch over a curve of one point writes its pass, and the point stays where it was meanwhile")
+{
+    // A curve of one point plays its value everywhere, and a value set by hand moves that point; but not while a pass writes
+    // the parameter, which writes its own points.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getVolumeParameter (track);
+    song.addAutomation (lane, { { phazite::BeatPosition::fromBeats (12.0), 0.5f } });
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::touch);
+    EnginePlayback playback;
+    auto volume = phazite::getVolume (song.context, track);
+
+    song.run ("transport.playStop");
+    playback.play (0.5); // to beat 1
+    volume.beginGesture();
+    volume.setValue (0.3f);
+    playback.play (0.5);
+    volume.setValue (0.6f);
+    playback.play (0.5);
+
+    const auto meanwhile = phazite::getAutomationPoints (song.context, lane);
+    REQUIRE (meanwhile.size() == 1);
+    CHECK (meanwhile.front().value == doctest::Approx (0.5f));
+
+    volume.endGesture();
+    song.run ("transport.playStop");
+
+    // The pass, from beat 1, and the point at beat 12 as it was.
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    CHECK (points.size() > 1);
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.6f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(),
+                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 12.0) < 0.001 && std::abs (p.value - 0.5f) < 0.001f; }));
+}
+
 TEST_CASE ("Latch writes from a control's first move until playback stops, and write puts its track in latch")
 {
     TestSong song;

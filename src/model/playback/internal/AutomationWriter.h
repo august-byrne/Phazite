@@ -12,6 +12,7 @@
 #pragma once
 
 #include "model/automation/AutomationValues.h"
+#include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <vector>
@@ -31,15 +32,19 @@ public:
     void playbackStopped();
 
     // A control grabbed, and let go (model/devices/ParameterHandle.h), while the session plays the project.
-    void gestureBegan (te::AutomatableParameter&);
-    void gestureEnded (te::AutomatableParameter&);
+    void gestureBegan (const ParameterRef&);
+    void gestureEnded (const ParameterRef&);
 
     // The same by a plug-in's own window (the session tells it): what it writes as it is let go is one "Record
     // Automation" step, as no control's drag holds one.
     void pluginGestureChanged (const ParameterRef&, bool starting);
 
-    // A parameter changed in Tracktion's Edit, by hand or by its automation (the session tells it).
-    void parameterChanged (te::AutomatableParameter&, bool isFollowingAutomation);
+    // A parameter changed, by hand or by its automation, to a value set by hand (the session tells it).
+    void parameterChanged (const ParameterRef&, float valueSetByHand, bool isFollowingAutomation);
+
+    // Whether a pass writes a parameter now, which plays its value set by hand meanwhile: a value set by hand moves no
+    // curve's one point then (model/devices/internal/Parameters.h).
+    bool isWriting (const ParameterRef&) const;
 
 private:
     struct Pass
@@ -52,13 +57,13 @@ private:
         std::vector<AutomationPoint> points; // from where it punched in, or the loop's start
     };
 
-    te::Edit& edit; // the session's, which can go before the session does (PlaybackSession::hasEdit())
+    te::Edit& edit; // the session's, which can go before the session does (PlaybackSession::hasEdit()): its song and transport
     PlaybackSession& session;
     std::vector<Pass> passes;
     bool settingValue = false; // as a pass starts from its lane's value
 
     Pass* findPass (const ParameterRef&);
-    Pass* punchIn (te::AutomatableParameter&, AutomationMode, bool byMove);
+    Pass* punchIn (const ParameterRef&, AutomationMode, bool byMove);
     void record (Pass&, float value);
     void punchOut (const Pass&); // writes it: the caller forgets it
     void write (const Pass&, std::vector<AutomationPoint>, BeatPosition end);

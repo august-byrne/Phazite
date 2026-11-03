@@ -40,7 +40,7 @@ tracktion-mirror             773
 tracktion-mixer              223
 tracktion-modulation         108
 tracktion-notes                3
-tracktion-playback            51
+tracktion-playback            42
 tracktion-plugins             21
 tracktion-presets             83
 tracktion-project             90

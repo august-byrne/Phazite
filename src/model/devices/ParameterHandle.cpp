@@ -78,15 +78,14 @@ struct ParameterHandle::Impl
         return edit != nullptr && found.isValid() ? phazite::findParameter (*edit, found) : nullptr;
     }
 
+    // A gesture begun: for Phazite's automation writer, and Tracktion's parameter while it mirrors the song's.
     void beginRecording (const ParameterRef& found) const
     {
         if (const auto parameter = findTracktionParameter (found))
-        {
             parameter->parameterChangeGestureBegin();
 
-            if (auto* session = findPlayingSession (*song.get()))
-                session->getWriter().gestureBegan (*parameter);
-        }
+        if (auto* session = findPlayingSession (*song.get()))
+            session->getWriter().gestureBegan (found);
     }
 };
 
@@ -332,12 +331,11 @@ void ParameterHandle::endGesture()
         return;
 
     if (const auto parameter = impl->findTracktionParameter (impl->findRef()))
-    {
         parameter->parameterChangeGestureEnd();
 
-        if (auto* session = findPlayingSession (*impl->song.get())) // what it wrote joins the gesture's step
-            session->getWriter().gestureEnded (*parameter);
-    }
+    if (auto* song = impl->song.get())
+        if (auto* session = findPlayingSession (*song)) // what it wrote joins the gesture's step
+            session->getWriter().gestureEnded (impl->findRef());
 
     if (impl->gesture != nullptr)
     {
