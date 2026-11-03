@@ -41,22 +41,23 @@ float getFadeGain (FadeCurve curve, float along) noexcept
 {
     const auto alpha = std::clamp (along, 0.0f, 1.0f);
     const auto bend = std::clamp (curve.bend, -1.0f, 1.0f);
-    const auto quarter = alpha * juce::MathConstants<float>::halfPi;
 
     if (juce::exactlyEqual (bend, 0.0f))
         return alpha;
 
-    // The shape bent all the way: Tracktion's convex, concave and S-curve fades; an S-curve bent the other way is the line's
+    // The shape bent all the way: a quarter of a sine wave, quick at first (convex), or its mirror image, slow at first
+    // (concave); a raised cosine, half a cosine wave, slow at both ends (the S-curve), or bent the other way the line's
     // mirror image of it, quick at both ends.
     auto bent = 0.0f;
 
     if (curve.shape == FadeShape::curve)
     {
+        const auto quarter = alpha * juce::MathConstants<float>::halfPi;
         bent = bend > 0.0f ? std::sin (quarter) : 1.0f - std::cos (quarter);
     }
     else
     {
-        const auto s = (1.0f - alpha) * (1.0f - std::cos (quarter)) + alpha * std::sin (quarter);
+        const auto s = 0.5f - 0.5f * std::cos (alpha * juce::MathConstants<float>::pi);
         bent = bend > 0.0f ? s : 2.0f * alpha - s;
     }
 

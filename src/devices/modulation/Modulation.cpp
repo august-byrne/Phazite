@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Modulation.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace phazite::devices
 {
 namespace
 {
-    // A rising staircase of so many steps over the cycle, from 0 to 1.
-    float getStepsUp (float phase, int steps)
+    // A staircase of so many steps over the cycle, from 0 to 1, going up or down: the step the point is on, as a part of the
+    // highest.
+    float getStairs (float phase, int steps, bool up)
     {
-        const auto step = juce::jlimit (0, steps - 1, (int) std::floor (phase * (float) steps));
-        return (float) step / (float) (steps - 1);
+        const auto step = std::clamp ((int) (phase * (float) steps), 0, steps - 1);
+        return (float) (up ? step : steps - 1 - step) / (float) (steps - 1);
     }
 } // namespace
 
@@ -35,13 +37,13 @@ float getWaveValue (LfoWave wave, float phase)
         case LfoWave::square:
             return phase < 0.5f ? 1.0f : 0.0f;
         case LfoWave::fourStepsUp:
-            return getStepsUp (phase, 4);
+            return getStairs (phase, 4, true);
         case LfoWave::fourStepsDown:
-            return getStepsUp (1.0f - phase, 4);
+            return getStairs (phase, 4, false);
         case LfoWave::eightStepsUp:
-            return getStepsUp (phase, 8);
+            return getStairs (phase, 8, true);
         case LfoWave::eightStepsDown:
-            return getStepsUp (1.0f - phase, 8);
+            return getStairs (phase, 8, false);
         case LfoWave::random:
         case LfoWave::noise:
             break;

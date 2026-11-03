@@ -263,7 +263,7 @@ TEST_CASE ("A breakpoint envelope's points drag in its picture, its lines bend b
     CHECK (valueOfPart ("stageOneTime") == doctest::Approx (0.5f));
     CHECK (valueOfPart ("stageOneValue") == doctest::Approx (1.0f));
 
-    // The handle in the middle of the first line, dragged up: the rising line bows up (Tracktion's curve below 0 for it).
+    // The handle in the middle of the first line, dragged up: the rising line bows up (a curve below 0, quick at first).
     mouse.press (at (0.25f, 0.5f));
     mouse.dragTo (at (0.25f, 0.5f) + juce::Point<int> (0, -10));
     mouse.release();

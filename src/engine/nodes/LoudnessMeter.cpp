@@ -24,7 +24,8 @@ void LoudnessMeter::prepare (double rate, int blockSize)
     blockLength = std::max (1, (int) std::lround (rate * 0.1));
 
     // The K-weighting at this rate, as BS.1770's analogue filters through the bilinear transform: a shelf of about +4 dB
-    // above 1.7 kHz, the head's, then a high-pass at 38 Hz.
+    // above 1.7 kHz, the head's, then a high-pass at 38 Hz. The analogue filters' parameters are libebur128's (MIT:
+    // docs/third-party.md), and so is the gating's histogram of 0.1 LU bins.
     const auto pi = juce::MathConstants<double>::pi;
 
     for (auto& channel : filters)

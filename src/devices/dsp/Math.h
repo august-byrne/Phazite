@@ -36,4 +36,19 @@ inline double noteToFrequency (double note) noexcept
 {
     return 440.0 * std::pow (2.0, (note - 69.0) / 12.0);
 }
+
+// How far a bent line has gone from its start to its end (0 to 1), a part of the way along it (0 to 1), for an ease from -1
+// (quick at first) through 0 (straight) to 1 (slow at first): an exponential ease, as synths' envelopes bend, at its
+// strongest a tenth of the way at the middle, or nine tenths. Automation's lines and the breakpoint modulator's stages bend
+// so.
+inline double getEasedProgress (double along, double ease) noexcept
+{
+    constexpr double strongest = 4.394449154672439; // 2 ln 9: e to half of it is 9, so the middle is a tenth of the way
+    const auto rate = ease * strongest;
+
+    if (std::abs (rate) < 1.0e-9)
+        return along;
+
+    return std::expm1 (rate * along) / std::expm1 (rate);
+}
 } // namespace phazite::devices::dsp

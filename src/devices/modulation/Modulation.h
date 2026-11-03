@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Modulation as Phazite's devices take it (docs/design.md, section 10; roadmap A5, part 4), engine-neutral: an LFO's
 // value at any point of its cycle, so that a device can follow it between the blocks the engine moves it in, and how
-// modulation moves a parameter. Both are as Tracktion's LFO modifier and its parameters have them, since Tracktion still
-// moves plug-ins' parameters and the mixer's by the same modulators: one LFO moves all of them alike.
+// modulation moves a parameter, as the engine's modulators (Modulators.h) move every parameter alike.
 //
 // A parameter is moved by one sum for the whole device. The same function, given a sum for each voice, is how an
 // instrument will move a parameter for each of its notes, as CLAP's polyphonic modulation does.

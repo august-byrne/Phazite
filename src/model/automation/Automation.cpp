@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Automation.h"
+#include "engine/automation/Curve.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
@@ -34,6 +35,18 @@ namespace
     float limitCurve (float curve)
     {
         return juce::jlimit (-1.0f, 1.0f, curve);
+    }
+
+    // A curve of the song's (Schema.h: CURVE) as Phazite's engine plays it (engine/automation/Curve.h).
+    engine::Curve makeEngineCurve (const juce::ValueTree& curveState)
+    {
+        std::vector<engine::CurvePoint> points;
+
+        for (const auto& point : curveState)
+            points.push_back ({ (double) point[schema::pointBeat], (float) point[schema::pointValue],
+                                (float) point.getProperty (schema::pointCurve, 0.0f) });
+
+        return engine::Curve (std::move (points));
     }
 
     // While the song plays, the engine follows the curve; while it doesn't, the value at the playhead is set here, so
@@ -83,11 +96,13 @@ namespace
         float getPointValue (int index) const { return state.getChild (index)[schema::pointValue]; }
         float getPointCurve (int index) const { return state.getChild (index).getProperty (schema::pointCurve, 0.0f); }
 
+        // As Phazite's engine plays it; without points, the parameter's own value.
         float getValueAt (BeatPosition beat) const
         {
-            reconcile();
-            const auto& curve = parameter.getCurve();
-            return curve.getValueAt (toCurvePosition (curve, beat), parameter.getCurrentBaseValue());
+            if (getNumPoints() == 0)
+                return parameter.getCurrentBaseValue();
+
+            return makeEngineCurve (state).getValueAt (std::max (0.0, beat.inBeats()));
         }
 
         // The parameter's value at the playhead in step with the curve (followCurve()).
@@ -600,18 +615,19 @@ bool hasPoints (const te::AutomatableParameter& parameter)
 
 std::vector<float> getValues (const te::AutomatableParameter& parameter, BeatRange range, int numValues)
 {
+    // As Phazite's engine plays the song's points.
     std::vector<float> values;
-    const auto& curve = parameter.getCurve();
+    const auto state = findCurveState (parameter.getEdit(), getParameterRef (parameter));
 
-    if (curve.getNumPoints() == 0 || numValues <= 0)
+    if (! state.isValid() || state.getNumChildren() == 0 || numValues <= 0)
         return values;
 
+    const auto curve = makeEngineCurve (state);
     values.reserve ((size_t) numValues);
     const auto step = numValues > 1 ? range.getLength() / (double) (numValues - 1) : BeatDuration();
 
     for (int i = 0; i < numValues; ++i)
-        values.push_back (
-            curve.getValueAt (toCurvePosition (curve, range.getStart() + step * (double) i), parameter.getCurrentBaseValue()));
+        values.push_back (curve.getValueAt (std::max (0.0, (range.getStart() + step * (double) i).inBeats())));
 
     return values;
 }

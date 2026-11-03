@@ -206,14 +206,11 @@ TEST_CASE ("The piano roll's guide notes play through Phazite's engine while the
     CHECK (after.getMagnitude (0, 0, after.getNumSamples()) < 0.001f);
 }
 
-TEST_CASE ("Phazite's engine works out a lane's values as Tracktion's curves do: straight, bent, held and jumping")
+TEST_CASE ("A lane shows its values as Phazite's engine plays them: straight, bent, held and jumping")
 {
     TestSong song;
     song.setTempo (97.0);
-    auto& edit = *phazite::getEdit (song.context);
     const auto ref = song.getVolumeParameter (song.firstTrack);
-    const auto parameter = phazite::findParameter (edit, ref);
-    REQUIRE (parameter != nullptr);
     juce::Random random (23);
     const float bends[] = { 0.0f, 0.2f, -0.5f, 0.5f, 0.75f, -0.9f, 1.0f, -1.0f };
 
@@ -230,25 +227,19 @@ TEST_CASE ("Phazite's engine works out a lane's values as Tracktion's curves do:
             beat += random.nextInt (5) == 0 ? 0.0 : 0.25 + random.nextDouble() * 2.0;
         }
 
-        phazite::replacePoints (*parameter, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (100.0) }, points);
-        phazite::mirror::reconcileAll (edit);
-
+        phazite::replaceAutomationPoints (song.context, ref, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (100.0) }, points);
         std::vector<phazite::engine::CurvePoint> enginePoints;
 
-        for (const auto& point : phazite::getPoints (*parameter))
+        for (const auto& point : phazite::getAutomationPoints (song.context, ref))
             enginePoints.push_back ({ point.beat.inBeats(), point.value, point.curve });
 
         const phazite::engine::Curve curve (std::move (enginePoints));
-        const auto& theirs = parameter->getCurve();
+        const phazite::BeatRange shown { phazite::BeatPosition(), phazite::BeatDuration::fromBeats (beat + 2.0) };
+        const auto values = phazite::getAutomationValues (song.context, ref, shown, 400);
+        REQUIRE (values.size() == 400);
 
-        for (int i = 0; i < 400; ++i)
-        {
-            const auto at = random.nextDouble() * (beat + 2.0) - 1.0;
-            const auto position = theirs.timeBase == te::AutomationCurve::TimeBase::beats
-                                      ? te::EditPosition (te::BeatPosition::fromBeats (at))
-                                      : te::EditPosition (edit.tempoSequence.toTime (te::BeatPosition::fromBeats (at)));
-            CHECK (curve.getValueAt (at) == doctest::Approx (theirs.getValueAt (position, 0.0f)).epsilon (1.0e-4));
-        }
+        for (size_t i = 0; i < values.size(); ++i)
+            CHECK (values[i] == doctest::Approx (curve.getValueAt ((beat + 2.0) * (double) i / 399.0)).epsilon (1.0e-6));
     }
 }
 

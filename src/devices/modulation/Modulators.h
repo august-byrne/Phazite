@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The six modulators as Phazite's engine plays them (docs/tracktion-migration.md, T2 step 5), engine-neutral: an LFO, an
-// envelope follower, a step sequencer, a random source, a breakpoint envelope and a note follower, each worked out as
-// Tracktion's modifier of its kind works it out, so that a song modulates as it did. Each gives its value on the song's
-// control points (one every 32 samples from the song's start: engine/automation/Curve.h): one free-running moves on by its
-// own time from where it was, stopped too; one synced to the transport is where the song is; one synced to notes starts
-// again at each note. Its parameters are Tracktion's, by their IDs ("rate") and in their units, as the song keeps them
-// (model/base/internal/Schema.h: MODULATOR), with Tracktion's defaults for those never set.
+// The six modulators as Phazite's engine plays them, engine-neutral: an LFO, an envelope follower, a step sequencer, a
+// random source, a breakpoint envelope and a note follower. Each gives its value on the song's control points (one every
+// 32 samples from the song's start: engine/automation/Curve.h): one free-running moves on by its own time from where it
+// was, stopped too; one synced to the transport is where the song is; one synced to notes starts again at each note. Its
+// parameters are kept by their IDs ("rate") and in their units, as the song keeps them (model/base/internal/Schema.h:
+// MODULATOR), each with a default for one never set.
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -27,7 +26,7 @@ enum class ModulatorKind
     noteFollower
 };
 
-// A modulator's parameter: its ID, as Tracktion names it, and its value when none is set.
+// A modulator's parameter: its ID, as the song keeps it, and its value when none is set.
 struct ModulatorParameterInfo
 {
     std::string_view id;
@@ -78,11 +77,11 @@ private:
     juce::Random random;
     std::uint32_t seed = 0;
 
-    // Where a cycle is, from 0 to 1, as Tracktion's ramps keep it, and where it was last (a cycle starting again draws a
-    // new random value), with the random values it moves between.
-    double ramp = 0.0;
-    float phase = 0.0f;
-    float previousRandom = 0.0f, currentRandom = 0.0f;
+    // Where a free cycle is, from 0 to 1; the point of the cycle it was at last (a cycle starting again picks a new random
+    // value); and the random values it goes from and to.
+    double cycle = 0.0;
+    float lastPoint = 0.0f;
+    float fromRandom = 0.0f, toRandom = 0.0f;
     bool noteStarted = false;
 
     // The envelope follower's envelope, as its filters left it; and the note follower's last note.
@@ -93,8 +92,8 @@ private:
     float noteValue = -1.0f;
     int lastNote = -1, lastVelocity = 0;
 
-    // The point of its cycle at a control point, from 0 to 1, the ramp of a free one moved on after it: for a step
-    // sequencer, the cycle is its pattern, so many of its rate's lengths.
+    // The point of its cycle at a control point, from 0 to 1, a free one moved on after it: for a step sequencer, the cycle
+    // is its pattern, so many of its rate's lengths.
     double movePhase (std::span<const float> parameters, double patternUnits, const SongPlace&, double seconds) noexcept;
     float getLfoValue (std::span<const float> parameters, float newPhase) noexcept;
     float getRandomValue (std::span<const float> parameters, float newPhase) noexcept;

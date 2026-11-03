@@ -7,6 +7,7 @@
 #include "devices/motion/Phaser.h"
 #include "devices/synth/Synth.h"
 #include "engine/audio/AudioRegion.h"
+#include "engine/automation/Curve.h"
 #include "engine/core/Engine.h"
 #include "engine/core/Handover.h"
 #include "engine/core/TempoMap.h"
@@ -915,6 +916,40 @@ TEST_CASE ("A long audio file is read ahead of where it plays, each clip's start
     CHECK (count == 10);
 }
 
+TEST_CASE ("A lane's line eases as far as it bends: quick or slow at first up to half way, then held at one end, and at the ends a jump")
+{
+    const auto valueAt = [] (float bend, double along)
+    {
+        const engine::Curve curve ({ { 0.0, 0.0f, bend }, { 1.0, 1.0f, 0.0f } });
+        return curve.getValueAt (along);
+    };
+
+    // Straight; and bent half way, the most a lane's handle bends it, a tenth of the way at the middle (slow at first) or
+    // nine tenths (quick at first).
+    CHECK (valueAt (0.0f, 0.3) == doctest::Approx (0.3f));
+    CHECK (valueAt (0.5f, 0.5) == doctest::Approx (0.1f));
+    CHECK (valueAt (-0.5f, 0.5) == doctest::Approx (0.9f));
+
+    // A bend and the same the other way are each other's mirror image, and rise all the way.
+    for (const auto bend : { -0.9f, -0.3f, 0.2f, 0.5f, 0.8f })
+    {
+        for (const auto along : { 0.1, 0.4, 0.7 })
+            CHECK (valueAt (bend, along) == doctest::Approx (1.0f - valueAt (-bend, 1.0 - along)).epsilon (1.0e-5));
+
+        for (auto along = 0.05; along < 1.0; along += 0.05)
+            CHECK (valueAt (bend, along) >= valueAt (bend, along - 0.05));
+    }
+
+    // Further, it holds for a part of the line: slow at first, at its start; quick at first, at its end; eased in the rest.
+    CHECK (valueAt (0.75f, 0.4) == doctest::Approx (0.0f));
+    CHECK (valueAt (0.75f, 0.75) == doctest::Approx (0.1f));
+    CHECK (valueAt (-0.75f, 0.6) == doctest::Approx (1.0f));
+
+    // All the way, a hold and a jump: at the line's end, or at its start.
+    CHECK (valueAt (1.0f, 0.99) == doctest::Approx (0.0f));
+    CHECK (valueAt (-1.0f, 0.01) == doctest::Approx (1.0f));
+}
+
 TEST_CASE ("A fader follows its automation on the song's control points and in a line between, the same at any block size")
 {
     // Three beats at 120 BPM in 4/4 (24000 samples a beat): a bent line, one bent past half way, and a hold with a jump.
@@ -1280,7 +1315,7 @@ TEST_CASE ("An LFO runs free at its rate from its start, or follows the transpor
     CHECK (lfo.next (noted, {}, placeAt (0.0), secondsPerPoint) == doctest::Approx (0.0f));
 }
 
-TEST_CASE ("A step sequencer, a breakpoint envelope and a random source move as Tracktion's do, the random one the same each time")
+TEST_CASE ("A step sequencer, a breakpoint envelope and a random source move as they are set, the random one the same each time")
 {
     using dev::ModulatorKind;
     constexpr double secondsPerPoint = engine::controlPointSpacing / rate;
@@ -1328,8 +1363,8 @@ TEST_CASE ("An envelope follower rises and falls with what it hears, and a note 
 {
     using dev::ModulatorKind;
 
-    // At 0.5 for a tenth of a second, its attack: it rises all but 14% of the way (exp (-2): Tracktion's digital time
-    // constant); then in silence, it falls.
+    // At 0.5 for a tenth of a second, its attack: it rises all but 37% of the way (a time constant: exp (-1) left); then in
+    // silence, it falls.
     dev::Modulator follower (ModulatorKind::envelopeFollower);
     follower.prepare (rate, 1);
     const auto values = getModulatorValues (ModulatorKind::envelopeFollower);
@@ -1340,7 +1375,7 @@ TEST_CASE ("An envelope follower rises and falls with what it hears, and a note 
         juce::FloatVectorOperations::fill (sound.getWritePointer (channel), 0.5f, 4800);
 
     follower.listen (sound.getArrayOfReadPointers(), 2, 4800, values);
-    CHECK (follower.next (values, {}, placeAt (0.0), 0.0) == doctest::Approx (0.5 * (1.0 - std::exp (-2.0))).epsilon (0.01));
+    CHECK (follower.next (values, {}, placeAt (0.0), 0.0) == doctest::Approx (0.5 * (1.0 - std::exp (-1.0))).epsilon (0.01));
 
     sound.clear();
     follower.listen (sound.getArrayOfReadPointers(), 2, 4800, values);
@@ -1348,16 +1383,16 @@ TEST_CASE ("An envelope follower rises and falls with what it hears, and a note 
     CHECK (fallen < 0.45f);
     CHECK (fallen > 0.2f);
 
-    // The note follower: -1 for the lowest note, 0 in the middle, 1 for the highest; relative, a root and a spread.
+    // The note follower: -1 for the lowest note, 1 for the highest, in a line between; relative, a root and a spread.
     dev::Modulator notes (ModulatorKind::noteFollower);
     notes.prepare (rate, 1);
     const auto absolute = getModulatorValues (ModulatorKind::noteFollower);
     const auto relative = getModulatorValues (ModulatorKind::noteFollower, { { "mode", 1.0f } });
 
-    for (const auto& [note, expected] : { std::pair (0, -1.0f), std::pair (63, 0.0f), std::pair (79, 0.25f), std::pair (127, 1.0f) })
+    for (const auto note : { 0, 32, 64, 96, 127 })
     {
         notes.noteOn (note, 100);
-        CHECK (notes.next (absolute, {}, placeAt (0.0), 0.0) == doctest::Approx (expected));
+        CHECK (notes.next (absolute, {}, placeAt (0.0), 0.0) == doctest::Approx ((float) note / 63.5f - 1.0f));
     }
 
     notes.noteOn (72, 100);

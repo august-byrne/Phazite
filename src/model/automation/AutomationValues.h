@@ -33,7 +33,7 @@ struct AutomationPoint
     // and at -1 or 1 it holds and then jumps, as discrete parameters' points do.
     float curve = 0.0f;
 
-    static constexpr float maxBend = 0.5f; // the most bending a lane's line gives (Tracktion's curve)
+    static constexpr float maxBend = 0.5f; // the most bending a lane's line gives (engine/automation/Curve.h)
 };
 
 //==============================================================================

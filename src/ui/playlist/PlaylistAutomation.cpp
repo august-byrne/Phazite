@@ -714,8 +714,8 @@ void Playlist::AutomationLaneView::bendLine (const juce::MouseEvent& e)
     if (! juce::isPositiveAndBelow (pressed + 1, (int) before.size()))
         return;
 
-    // Dragging up bows the line up, whichever way it goes (Tracktion's curve bends a rising line up below 0, a falling
-    // one above). It stops where the line still runs from point to point: bent further, it would hold at both ends.
+    // Dragging up bows the line up, whichever way it goes: a curve below 0 is quick at first, which bows a rising line up and
+    // a falling one down. It stops where the line still runs from point to point: bent further, it would hold at an end.
     const auto& first = before[(size_t) pressed];
     const auto rising = before[(size_t) pressed + 1].value > first.value;
     const auto up = (start.y - e.position.y) / std::max (1.0f, getCurveArea().getHeight());

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A parameter's automation as Phazite's engine plays it (docs/tracktion-migration.md, T2): its points in the song's beats,
-// each with how the line to the next one bends, worked out as Tracktion's curves are, so that a lane sounds as it is
-// drawn: a straight line; a bend up to half way (a quadratic Bezier curve through a point moved off the line's middle);
-// beyond, the value held at both ends with a shorter bend between them; and at the ends of the bend's range, a hold and
-// a jump. Before the first point and after the last, the value stays at theirs. Built on the message thread from the
-// song's points and never changed after, so the audio thread reads it as it is.
+// A parameter's automation as Phazite's engine plays it, and the lanes draw it: its points in the song's beats, each with
+// how the line to the next one bends (from -1 to 1): a straight line at 0; up to half way, the line eased (devices/dsp/
+// Math.h: getEasedProgress()), quick at first below 0 and slow at first above; beyond, held at one end for a part of the
+// line, as much more as the bend goes further, and eased all the way in the rest; and at -1 or 1, a jump and a hold.
+// Before the first point and after the last, the value stays at theirs. Built on the message thread from the song's points
+// and never changed after, so the audio thread reads it as it is.
 #pragma once
 
 #include <vector>

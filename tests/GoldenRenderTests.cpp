@@ -410,7 +410,7 @@ bool soundsLikeAnAlias (const Fingerprint& fingerprint, const juce::AudioBuffer<
 //==============================================================================
 // A tone at 120 BPM whose volume is automated through each kind of line: from 0 dB down to -24 dB at 1 s bent as far as a
 // line bends (staying high, then falling), back up to 0 dB at 2 s bent the other way (rising at once), holding there until
-// 3 s and jumping down to -12 dB. Played as the lane draws it (Tracktion played a bend half as bent).
+// 3 s and jumping down to -12 dB. Played as the lane draws it.
 void addAutomationSong (TestSong& song)
 {
     song.setTempo (120.0);

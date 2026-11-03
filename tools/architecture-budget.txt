@@ -48,4 +48,4 @@ tracktion-transport          246
 tracktion-other                0
 tracktion-services             0
 tracktion-app                 45
-tracktion-tests              929
+tracktion-tests              924

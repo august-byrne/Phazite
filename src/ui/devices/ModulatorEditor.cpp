@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModulatorEditor.h"
 #include "DeviceGraph.h"
+#include "devices/dsp/Math.h"
 #include "model/commands/SongGesture.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
 #include <array>
 #include <optional>
 
@@ -231,22 +233,18 @@ struct ModulatorEditor::Breakpoints : public juce::Component
 
     juce::Point<float> getPointPosition (int i) const { return toScreen ({ getTime (i), getLevel (i) }); }
 
-    // The control point of the line that ends at point i (from 1), as Tracktion's breakpoint envelope bends it: its curve,
-    // from -0.5 to 0.5, moves it from the line's middle to the corner at the line's end time and start level (0.5) or at
-    // its start time and end level (-0.5). Tracktion's getQuadraticControlPoint() has a branch for each way the line runs;
-    // both come to this.
-    juce::Point<float> getControl (int i) const
+    // Where the line that ends at point i (from 1) is, a part of the way along it, as the breakpoint modulator bends it: its
+    // curve, from -0.5 to 0.5, is half the ease of devices/dsp/Math.h (getEasedProgress()).
+    juce::Point<float> getAlong (int i, float along) const
     {
-        const juce::Point<float> start { getTime (i - 1), getLevel (i - 1) }, end { getTime (i), getLevel (i) };
-        const auto c = juce::jlimit (-1.0f, 1.0f, getCurve (i) * 2.0f);
-        return { start.x + (end.x - start.x) / 2.0f * (1.0f + c), start.y + (end.y - start.y) / 2.0f * (1.0f - c) };
+        const auto ease = std::clamp ((double) getCurve (i) * 2.0, -1.0, 1.0);
+        const auto progress = (float) devices::dsp::getEasedProgress (along, ease);
+        return { getTime (i - 1) + (getTime (i) - getTime (i - 1)) * along,
+                 getLevel (i - 1) + (getLevel (i) - getLevel (i - 1)) * progress };
     }
 
     // The middle of the line that ends at point i (from 1), where its handle is.
-    juce::Point<float> getBendPosition (int i) const
-    {
-        return getPointPosition (i - 1) * 0.25f + toScreen (getControl (i)) * 0.5f + getPointPosition (i) * 0.25f;
-    }
+    juce::Point<float> getBendPosition (int i) const { return toScreen (getAlong (i, 0.5f)); }
 
     // How the curve of the line ending at point i changes to bend it up: lower for a rising line, higher for a falling one.
     float getUpward (int i) const { return getLevel (i) >= getLevel (i - 1) ? -1.0f : 1.0f; }
@@ -275,8 +273,12 @@ struct ModulatorEditor::Breakpoints : public juce::Component
         juce::Path line;
         line.startNewSubPath (getPointPosition (0));
 
+        // Each line in short pieces, as it bends.
+        constexpr int pieces = 24;
+
         for (int i = 1; i <= getCount(); ++i)
-            line.quadraticTo (toScreen (getControl (i)), getPointPosition (i));
+            for (int k = 1; k <= pieces; ++k)
+                line.lineTo (toScreen (getAlong (i, (float) k / (float) pieces)));
 
         line.lineTo (toScreen ({ 1.0f, getLevel (getCount()) })); // the rest of the cycle, holding
         g.setColour (p.modulation);

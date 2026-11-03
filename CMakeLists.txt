@@ -886,6 +886,12 @@ add_custom_command(TARGET Phazite POST_BUILD
             "${CMAKE_CURRENT_SOURCE_DIR}/external/rubberband/COPYING" "$<TARGET_FILE_DIR:Phazite>/licenses/RubberBand.txt"
     VERBATIM)
 
+# The loudness meter's K-weighting and gating follow libebur128 (MIT), whose notice goes with every copy.
+add_custom_command(TARGET Phazite POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/licenses/libebur128.txt" "$<TARGET_FILE_DIR:Phazite>/licenses/libebur128.txt"
+    VERBATIM)
+
 # --- phazite_soundkit: renders Phazite Sounds, the pack Phazite offers to download, from the recipes in the
 # phazite-sounds repository (CC0 sample libraries and its own synthesis), and zips it for a release. It is run by hand
 # when the sounds change, not as part of the build. ---
