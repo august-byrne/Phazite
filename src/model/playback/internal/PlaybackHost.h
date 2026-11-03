@@ -21,7 +21,7 @@ class EngineContext;
 class PlaybackSession;
 
 class PlaybackHost : private juce::AudioIODeviceCallback,
-                     private juce::Timer // which takes in what was played live
+                     private juce::Timer // which takes in what was played live, and logs blocks that came late
 {
 public:
     explicit PlaybackHost (te::Engine&);
@@ -68,7 +68,7 @@ private:
     std::deque<engine::Engine::PlayedEvent> played;
     std::optional<std::int64_t> keepFrom;
     std::vector<engine::Engine::PlayedEvent> taking;
-    void timerCallback() override { getPlayedEvents(); }
+    void timerCallback() override;
 
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples,
                                            const juce::AudioIODeviceCallbackContext&) override;

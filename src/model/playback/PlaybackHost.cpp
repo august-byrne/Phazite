@@ -136,6 +136,22 @@ void PlaybackHost::audioDeviceIOCallbackWithContext (const float* const* open, i
     engine.process (inputs.data(), count, outputs, numOutputs, numSamples);
 }
 
+void PlaybackHost::timerCallback()
+{
+    getPlayedEvents();
+
+    // Blocks a device asked for late, or the engine played late, in the log (Engine::takeBlockTimes()): what a crackle
+    // heard then can be told by.
+    const auto times = engine.takeBlockTimes();
+    const auto milliseconds = [] (double seconds) { return juce::String (seconds * 1000.0, 1) + " ms"; };
+
+    if (running && times.late > 0)
+        juce::Logger::writeToLog ("Audio: " + juce::String (times.late) + (times.late == 1 ? " block" : " blocks") + " came late (up to "
+                                  + milliseconds (times.longestGap) + " after the one before, in blocks of "
+                                  + milliseconds (times.blockLength) + "); the longest took " + milliseconds (times.longestBlock)
+                                  + " to play.");
+}
+
 const std::deque<engine::Engine::PlayedEvent>& PlaybackHost::getPlayedEvents()
 {
     for (auto taken = engine.takePlayed (taking); taken > 0; taken = engine.takePlayed (taking))

@@ -90,6 +90,18 @@ public:
     // How much of each block's time the engine takes, from 0 to 1, eased (any thread).
     double getLoad() const noexcept { return load.load (std::memory_order_relaxed); }
 
+    // How the blocks came since this was last asked (any thread; the app asks a few times a second, for its log): those
+    // that started more than two blocks' length after the one before (later than a shared mode's buffer hides: the
+    // owner's crackles, 2026-11-02, tests/AudioGlitchTests.cpp), the longest time from one block's start to the next's
+    // and the longest block the engine took, in seconds, and the last block's length.
+    struct BlockTimes
+    {
+        int late = 0;
+        double longestGap = 0.0, longestBlock = 0.0, blockLength = 0.0;
+    };
+
+    BlockTimes takeBlockTimes() noexcept;
+
     // How many blocks the audio thread has played: what it let go of before the count it read is no longer played
     // (audio/AudioFile.h frees what it lets go of after it).
     const std::atomic<std::uint64_t>& getBlocksPlayed() const noexcept { return blocksPlayed; }
@@ -255,6 +267,9 @@ private:
     std::atomic<std::int64_t> publishedClock { 0 };
 
     std::atomic<double> load { 0.0 };
+    std::int64_t lastBlockStart = 0; // the audio thread's, in high-resolution ticks; 0 before a first block
+    std::atomic<std::int64_t> longestGapTicks { 0 }, longestBlockTicks { 0 };
+    std::atomic<int> lateBlocks { 0 }, lastBlockLength { 0 };
     std::atomic<std::uint64_t> blocksPlayed { 0 };
 
     // The metronome: its two clicks (made in prepare()), and the one playing, where it is.

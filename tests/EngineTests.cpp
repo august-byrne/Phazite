@@ -385,6 +385,37 @@ TEST_CASE ("The engine stops and locates as the message thread asks, at its next
     CHECK (silence.getMagnitude (0, 1024) == 0.0f);
 }
 
+TEST_CASE ("The engine tells of blocks that started more than two blocks' length after the one before, once")
+{
+    engine::Engine player;
+    player.prepare (rate, 480); // 10 ms
+    juce::AudioBuffer<float> block (2, 480);
+    float* channels[] = { block.getWritePointer (0), block.getWritePointer (1) };
+
+    // Back to back: none late.
+    player.process (channels, 2, 480);
+    player.process (channels, 2, 480);
+    auto times = player.takeBlockTimes();
+    CHECK (times.late == 0);
+    CHECK (times.blockLength == doctest::Approx (0.01));
+    CHECK (times.longestGap < 0.02);
+
+    // One 30 ms after the one before: late, and told of once.
+    juce::Thread::sleep (30);
+    player.process (channels, 2, 480);
+    times = player.takeBlockTimes();
+    CHECK (times.late == 1);
+    CHECK (times.longestGap >= 0.029);
+    CHECK (times.longestBlock < times.longestGap);
+    CHECK (player.takeBlockTimes().late == 0);
+
+    // A device started again (prepared): its first block is no gap.
+    juce::Thread::sleep (30);
+    player.prepare (rate, 480);
+    player.process (channels, 2, 480);
+    CHECK (player.takeBlockTimes().late == 0);
+}
+
 TEST_CASE ("A new plan with another tempo leaves the playhead on its beat")
 {
     engine::Engine player;

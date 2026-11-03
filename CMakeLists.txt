@@ -905,6 +905,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AudioDevicesTests.cpp
         tests/AudioSettingsTests.cpp
         tests/AudioClipModelTests.cpp
+        tests/AudioGlitchTests.cpp
         tests/AudioRecordingTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h

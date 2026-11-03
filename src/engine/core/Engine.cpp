@@ -38,6 +38,7 @@ void Engine::prepare (double rate, int blockSize)
     controlPoints.assign ((size_t) (maximumBlockSize / controlPointSpacing + 3), {});
     numControlPoints = 0;
     loudness.prepare (sampleRate, maximumBlockSize);
+    lastBlockStart = 0; // a device that starts again: no gap
 }
 
 void Engine::setPlan (std::unique_ptr<Plan> plan)
@@ -256,6 +257,16 @@ int Engine::takePlayed (std::span<PlayedEvent> into) noexcept
     return taken;
 }
 
+Engine::BlockTimes Engine::takeBlockTimes() noexcept
+{
+    BlockTimes times;
+    times.late = lateBlocks.exchange (0, std::memory_order_relaxed);
+    times.longestGap = juce::Time::highResolutionTicksToSeconds (longestGapTicks.exchange (0, std::memory_order_relaxed));
+    times.longestBlock = juce::Time::highResolutionTicksToSeconds (longestBlockTicks.exchange (0, std::memory_order_relaxed));
+    times.blockLength = lastBlockLength.load (std::memory_order_relaxed) / sampleRate;
+    return times;
+}
+
 int Engine::getOutputLatency (const Plan& plan) noexcept
 {
     return plan.strips.empty() ? 0 : plan.strips.back().latency;
@@ -387,9 +398,29 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
     }
 
     // Its share of the block's time, eased over about a second of blocks.
-    const auto seconds = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - startTicks);
+    const auto tookTicks = juce::Time::getHighResolutionTicks() - startTicks;
+    const auto seconds = juce::Time::highResolutionTicksToSeconds (tookTicks);
     const auto share = numSamples > 0 ? seconds * sampleRate / numSamples : 0.0;
     load.store (load.load (std::memory_order_relaxed) * 0.95 + share * 0.05, std::memory_order_relaxed);
+
+    // How it came after the one before, and how long it took (takeBlockTimes(), which resets the longest: a reset it
+    // misses by a block only reports that block again).
+    if (lastBlockStart != 0)
+    {
+        const auto gapTicks = startTicks - lastBlockStart;
+
+        if (gapTicks > longestGapTicks.load (std::memory_order_relaxed))
+            longestGapTicks.store (gapTicks, std::memory_order_relaxed);
+
+        if (juce::Time::highResolutionTicksToSeconds (gapTicks) * sampleRate > 2.0 * numSamples)
+            lateBlocks.fetch_add (1, std::memory_order_relaxed);
+    }
+
+    if (tookTicks > longestBlockTicks.load (std::memory_order_relaxed))
+        longestBlockTicks.store (tookTicks, std::memory_order_relaxed);
+
+    lastBlockStart = startTicks;
+    lastBlockLength.store (numSamples, std::memory_order_relaxed);
     blocksPlayed.fetch_add (1, std::memory_order_release);
     clock += numSamples;
     publishedClock.store (clock, std::memory_order_release);

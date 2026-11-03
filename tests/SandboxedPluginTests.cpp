@@ -281,7 +281,9 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
     CHECK (phazite::findDeviceState (*phazite::getEdit (song.context), effect)[phazite::schema::pluginProgram] == juce::var (1));
     instance = &getSandboxed (song, effect);
     CHECK (instance->getCurrentProgram() == 1);
-    CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
+
+    // The old helper goes with the old instance, which Tracktion deletes on a timer of its own once its project has closed.
+    CHECK (phazite::test::dispatchMessagesUntil ([] { return SandboxedPlugins::getHost().getNumHelpers() == 1; }, 10000));
     playback = std::make_unique<EnginePlayback>();
     song.run ("transport.playStop");
     CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));

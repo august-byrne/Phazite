@@ -62,6 +62,10 @@ public:
     // Whether plug-ins load as projects open (setPluginsLoad()).
     std::atomic<bool> loadsPlugins { true };
 
+    // Another number of threads (0: the app's), which Tracktion's playback graphs take as they are next built: for the test
+    // that plays on a real output as the app plays (tests/AudioGlitchTests.cpp), where the tests use one.
+    void setNumAudioThreads (int count) noexcept { options.numAudioThreads = count; }
+
 private:
     Options options;
 };
