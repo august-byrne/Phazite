@@ -6,6 +6,10 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/transport/internal/Tempo.h"
+
+#include <optional>
+#include <vector>
 
 namespace phazite
 {
@@ -20,6 +24,107 @@ namespace
                 return false;
 
         return kind == FileKind::midi || ! hasInstrument (track);
+    }
+
+    // What a MIDI file holds for a clip: the notes and controller events of its first track with notes, as the song keeps
+    // them (Schema.h: NOTE, CONTROL), in beats (quarter notes) from the file's start, and its name: the track's own, or
+    // else the file's. Nothing for a file that can't be read or that holds no notes.
+    struct MidiFileClip
+    {
+        juce::String name;
+        std::vector<juce::ValueTree> notes, controls;
+        double lastBeat = 0.0;
+    };
+
+    std::optional<MidiFileClip> readMidiFile (const juce::File& file)
+    {
+        juce::FileInputStream stream (file);
+        juce::MidiFile midi;
+
+        if (! stream.openedOk() || ! midi.readFrom (stream))
+            return std::nullopt;
+
+        // So many ticks to a quarter note; a file timed in frames is read in seconds, at MIDI's 120 BPM.
+        const auto ticks = (double) midi.getTimeFormat();
+
+        if (ticks <= 0.0)
+            midi.convertTimestampTicksToSeconds();
+
+        const auto toBeats = [ticks] (double time) { return ticks > 0.0 ? time / ticks : time * 2.0; };
+
+        for (int index = 0; index < midi.getNumTracks(); ++index)
+        {
+            juce::MidiMessageSequence sequence (*midi.getTrack (index));
+            sequence.updateMatchedPairs();
+            MidiFileClip clip;
+
+            for (const auto* event : sequence)
+            {
+                const auto& message = event->message;
+                const auto beat = std::max (0.0, toBeats (message.getTimeStamp()));
+                juce::ValueTree control (schema::CONTROL);
+
+                if (message.isTrackNameEvent())
+                {
+                    clip.name = message.getTextFromTextMetaEvent().trim();
+                }
+                else if (message.isNoteOn())
+                {
+                    const auto end = event->noteOffObject != nullptr ? toBeats (event->noteOffObject->message.getTimeStamp()) : beat;
+                    juce::ValueTree note (schema::NOTE);
+                    note.setProperty (schema::notePitch, message.getNoteNumber(), nullptr);
+                    note.setProperty (schema::noteStart, beat, nullptr);
+                    note.setProperty (schema::noteLength, std::max (end - beat, 1.0 / 64.0), nullptr);
+                    note.setProperty (schema::noteVelocity, (int) message.getVelocity(), nullptr);
+                    clip.notes.push_back (note);
+                    clip.lastBeat = std::max (clip.lastBeat, end);
+                }
+                else if (message.isController())
+                {
+                    control.setProperty (schema::controlKind, schema::controlIsController, nullptr);
+                    control.setProperty (schema::controlNumber, message.getControllerNumber(), nullptr);
+                    control.setProperty (schema::controlValue, message.getControllerValue(), nullptr);
+                }
+                else if (message.isPitchWheel())
+                {
+                    control.setProperty (schema::controlKind, schema::controlIsPitchWheel, nullptr);
+                    control.setProperty (schema::controlValue, message.getPitchWheelValue(), nullptr);
+                }
+                else if (message.isChannelPressure())
+                {
+                    control.setProperty (schema::controlKind, schema::controlIsChannelPressure, nullptr);
+                    control.setProperty (schema::controlValue, message.getChannelPressureValue(), nullptr);
+                }
+                else if (message.isAftertouch())
+                {
+                    control.setProperty (schema::controlKind, schema::controlIsAftertouch, nullptr);
+                    control.setProperty (schema::controlNumber, message.getNoteNumber(), nullptr);
+                    control.setProperty (schema::controlValue, message.getAfterTouchValue(), nullptr);
+                }
+                else if (message.isProgramChange())
+                {
+                    control.setProperty (schema::controlKind, schema::controlIsProgramChange, nullptr);
+                    control.setProperty (schema::controlValue, message.getProgramChangeNumber(), nullptr);
+                }
+
+                if (control.hasProperty (schema::controlKind))
+                {
+                    control.setProperty (schema::controlBeat, beat, nullptr);
+                    clip.lastBeat = std::max (clip.lastBeat, beat);
+                    clip.controls.push_back (control);
+                }
+            }
+
+            if (! clip.notes.empty())
+            {
+                if (clip.name.isEmpty())
+                    clip.name = file.getFileNameWithoutExtension();
+
+                return clip;
+            }
+        }
+
+        return std::nullopt;
     }
 } // namespace
 
@@ -124,15 +229,29 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
 
         case FileKind::midi:
         {
-            auto clip = te::createClipFromFile (file, track, false);
-            auto* midi = dynamic_cast<te::MidiClip*> (clip.get());
+            // As long as the file's bars from its start to the end of the bar its last event is in, each note with an ID of
+            // the song's, where it is dropped.
+            const auto content = readMidiFile (file);
 
-            if (midi == nullptr)
+            if (! content.has_value())
                 return nullptr;
 
-            adoptMidiClip (*midi); // Tracktion made it, with its notes: the song takes it
-            moveClip (*clip, start, track);
-            return clip.get();
+            auto& song = getSong (edit);
+            const auto bars = getBars (song);
+            const auto end = bars.getBarStart (bars.getBarAt (BeatPosition::fromBeats (std::max (0.0, content->lastBeat - 1.0e-6))) + 1);
+            auto clipState = makeMidiClipState (song, content->name, { BeatPosition(), end });
+
+            for (auto note : content->notes)
+            {
+                note.setProperty (schema::noteID, (juce::int64) song.makeID(), nullptr);
+                clipState.appendChild (note, nullptr);
+            }
+
+            for (const auto& control : content->controls)
+                clipState.appendChild (control, nullptr);
+
+            clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), nullptr);
+            return placeClipState (edit, clipState, track);
         }
 
         case FileKind::other:

@@ -68,7 +68,7 @@ void setClipPlace (te::Edit&, juce::ValueTree clipState, BeatPosition start, Bea
 
 // A controller event of a MIDI clip of the song's (schema::CONTROL) as Tracktion's MidiControllerEvent has it: its type (a
 // MIDI controller's number, or one of Tracktion's own types), its value (7 bits up, but for the pitch wheel's) and its
-// metadata (an aftertouch's note). And the song's element for one of Tracktion's: invalid for a kind the song doesn't keep.
+// metadata (an aftertouch's note).
 struct TracktionControl
 {
     te::BeatPosition beat;
@@ -76,15 +76,9 @@ struct TracktionControl
 };
 
 TracktionControl toTracktionControl (const juce::ValueTree& control);
-juce::ValueTree makeControlState (const te::MidiControllerEvent&);
 
 // Whether Tracktion's clip holds the controller events of the song's element for it, in their order.
 bool haveSameControls (const te::MidiClip&, const juce::ValueTree& clipState);
-
-// Takes one of Tracktion's MIDI clips on one of the song's tracks into the song, which hasn't it yet (one Tracktion made
-// from a MIDI file): an element for it, with its notes, each with an ID of its own, and its controller events. Returns the
-// element.
-juce::ValueTree adoptMidiClip (te::MidiClip&);
 
 //==============================================================================
 // The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h). And Tracktion's

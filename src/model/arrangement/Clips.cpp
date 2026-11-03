@@ -267,22 +267,6 @@ namespace
     // What Tracktion made itself, taken into the song.
 
     // One of Tracktion's notes, as a note of a song clip's element, with an ID, which Tracktion's note gets too.
-    void adoptNote (juce::ValueTree clipState, te::MidiNote& note, juce::int64 id, juce::UndoManager* undo)
-    {
-        juce::ValueTree noteState (schema::NOTE);
-        noteState.setProperty (schema::noteID, id, nullptr);
-        noteState.setProperty (schema::notePitch, note.getNoteNumber(), nullptr);
-        noteState.setProperty (schema::noteStart, note.getStartBeat().inBeats(), nullptr);
-        noteState.setProperty (schema::noteLength, note.getLengthBeats().inBeats(), nullptr);
-        noteState.setProperty (schema::noteVelocity, note.getVelocity(), nullptr);
-
-        if (note.isMute())
-            noteState.setProperty (schema::noteMute, true, nullptr);
-
-        clipState.appendChild (noteState, undo);
-        note.state.setProperty (schema::phaziteNoteID, id, undo);
-    }
-
     // A new note's ID, the song's (Song::makeID()): one no note has had before.
     juce::int64 makeNoteID (te::Edit& edit)
     {
@@ -482,32 +466,6 @@ TracktionControl toTracktionControl (const juce::ValueTree& control)
     return event;
 }
 
-juce::ValueTree makeControlState (const te::MidiControllerEvent& event)
-{
-    juce::ValueTree control (schema::CONTROL);
-    const auto type = event.getType();
-    auto value = event.getControllerValue() >> 7;
-    const char* kind = schema::controlIsController;
-
-    if (type == te::MidiControllerEvent::pitchWheelType)
-        kind = schema::controlIsPitchWheel, value = event.getControllerValue();
-    else if (type == te::MidiControllerEvent::channelPressureType)
-        kind = schema::controlIsChannelPressure;
-    else if (type == te::MidiControllerEvent::aftertouchType)
-        kind = schema::controlIsAftertouch, control.setProperty (schema::controlNumber, event.getMetadata(), nullptr);
-    else if (type == te::MidiControllerEvent::programChangeType)
-        kind = schema::controlIsProgramChange;
-    else if (juce::isPositiveAndBelow (type, 128))
-        control.setProperty (schema::controlNumber, type, nullptr);
-    else
-        return {};
-
-    control.setProperty (schema::controlKind, kind, nullptr);
-    control.setProperty (schema::controlBeat, event.getBeatPosition().inBeats(), nullptr);
-    control.setProperty (schema::controlValue, value, nullptr);
-    return control;
-}
-
 bool haveSameControls (const te::MidiClip& clip, const juce::ValueTree& clipState)
 {
     const auto& events = clip.getSequence().getControllerEvents();
@@ -527,37 +485,6 @@ bool haveSameControls (const te::MidiClip& clip, const juce::ValueTree& clipStat
     }
 
     return i == events.size();
-}
-
-juce::ValueTree adoptMidiClip (te::MidiClip& clip)
-{
-    auto& edit = clip.edit;
-    auto trackState = clip.getTrack() != nullptr ? findTrackState (*clip.getTrack()) : juce::ValueTree();
-
-    if (! trackState.isValid())
-        return {};
-
-    const auto range = fromTracktion (clip.getEditBeatRange());
-    auto clipState = makeMidiClipState (getSong (edit), clip.getName(), range);
-    clipState.setProperty (schema::clipID, (juce::int64) clip.itemID.getRawID(), nullptr);
-
-    if (const auto offset = range.getStart() - fromTracktion (clip.getContentStartBeat()); offset.inBeats() > 0.0)
-        clipState.setProperty (schema::clipOffset, offset.inBeats(), nullptr);
-
-    if (clip.isMuted())
-        clipState.setProperty (schema::clipMute, true, nullptr);
-
-    trackState.appendChild (clipState, getUndo (edit));
-
-    for (auto* note : juce::Array<te::MidiNote*> (clip.getSequence().getNotes()))
-        adoptNote (clipState, *note, makeNoteID (edit), getUndo (edit));
-
-    for (auto* event : clip.getSequence().getControllerEvents())
-        if (const auto control = makeControlState (*event); control.isValid())
-            clipState.appendChild (control, getUndo (edit));
-
-    mirror::reconcileClip (edit, getClipID (clipState));
-    return clipState;
 }
 
 //==============================================================================

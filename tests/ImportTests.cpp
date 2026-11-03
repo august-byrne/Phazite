@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -131,6 +132,39 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
     CHECK (clip->getSequence().getNumNotes() == 1);
 
     CHECK (phazite::importFile (*track, temp.folder.getChildFile ("Notes.txt"), beats (0.0)) == nullptr);
+
+    // The first track with notes, named as the file names it, with its controllers, to the end of the bar it ends in.
+    {
+        juce::MidiMessageSequence empty, notes;
+        empty.addEvent (juce::MidiMessage::textMetaEvent (3, "Tempo track"), 0.0);
+        notes.addEvent (juce::MidiMessage::textMetaEvent (3, "Bassline"), 0.0);
+        notes.addEvent (juce::MidiMessage::controllerEvent (1, 74, 100), 480.0);
+        notes.addEvent (juce::MidiMessage::noteOn (1, 40, (juce::uint8) 90), 960.0);
+        notes.addEvent (juce::MidiMessage::noteOff (1, 40), 4800.0);
+        juce::MidiFile midi;
+        midi.setTicksPerQuarterNote (960);
+        midi.addTrack (empty);
+        midi.addTrack (notes);
+        const auto file = temp.folder.getChildFile ("Bass.mid");
+        juce::FileOutputStream stream (file);
+        REQUIRE (midi.writeTo (stream));
+    }
+
+    auto* bass = phazite::importFile (*track, temp.folder.getChildFile ("Bass.mid"), beats (16.0));
+    REQUIRE (bass != nullptr);
+    const auto clipState = phazite::findClipState (*bass);
+    CHECK (clipState[phazite::schema::clipName].toString() == juce::String ("Bassline"));
+    CHECK ((double) clipState[phazite::schema::clipStart] == doctest::Approx (16.0));
+    CHECK ((double) clipState[phazite::schema::clipLength] == doctest::Approx (8.0)); // the note ends in the second bar
+    const auto note = clipState.getChildWithName (phazite::schema::NOTE);
+    CHECK ((double) note[phazite::schema::noteStart] == doctest::Approx (1.0));
+    CHECK ((double) note[phazite::schema::noteLength] == doctest::Approx (4.0));
+    CHECK ((int) note[phazite::schema::noteVelocity] == 90);
+    CHECK (note.hasProperty (phazite::schema::noteID));
+    const auto control = clipState.getChildWithName (phazite::schema::CONTROL);
+    CHECK ((int) control[phazite::schema::controlNumber] == 74);
+    CHECK ((int) control[phazite::schema::controlValue] == 100);
+    CHECK ((double) control[phazite::schema::controlBeat] == doctest::Approx (0.5));
 }
 
 TEST_CASE ("Track colors follow the words in a file's name")
