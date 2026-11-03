@@ -157,8 +157,9 @@ private:
     void dragDivider (Panel, int distance);
     void togglePanel (Panel);
     void toggleMaximized (Panel);
-    void maximizePanelInUse(); // or restores the panels
-    void toggleMixer();        // the mixer, or the playlist again if it shows beside it ("view.mixer")
+    void maximizePanelInUse();            // or restores the panels
+    void toggleMixer();                   // the mixer, or the playlist again if it shows beside it ("view.mixer")
+    void setScrollingContinuously (bool); // in every editor that follows playback, kept in the settings
 
     // The editor the time line's commands act on: the one used last, while it shows; or one that shows, the playlist first.
     TimelineEditor* getTimelineEditorInUse();

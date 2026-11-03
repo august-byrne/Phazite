@@ -184,7 +184,10 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     addChildComponent (lessonCard.getRing());
     addChildComponent (lessonCard);
 
-    // The panels as they were left, or every panel, and the views where they were left.
+    // How the editors follow playback, as it was left; the panels as they were left, or every panel, and the views where
+    // they were left.
+    playlist.setScrollingContinuously (settings.get (Settings::scrollContinuously));
+    pianoRoll.setScrollingContinuously (settings.get (Settings::scrollContinuously));
     panels.setFromText (settings.get (Settings::panelLayout));
     viewPlaces = ViewPlaces::fromString (settings.get (Settings::viewPlaces));
     placeViews();
@@ -538,6 +541,13 @@ void AppShell::toggleMixer()
         showView (ViewTab::mixer);
     else
         revealView (ViewTab::mixer);
+}
+
+void AppShell::setScrollingContinuously (bool on)
+{
+    settings.set (Settings::scrollContinuously, on);
+    playlist.setScrollingContinuously (on);
+    pianoRoll.setScrollingContinuously (on); // while it follows playback (View > Follow Playback)
 }
 
 TimelineEditor* AppShell::getTimelineEditorInUse()
@@ -916,6 +926,15 @@ void AppShell::addCommands (CommandRegistry& registry)
          { "layout" }, [this] { setLayout (Layout::mix); });
 
     add ("view.layoutFull", "Full Layout", "Shows every panel.", { "layout", "all" }, [this] { setLayout (Layout::full); });
+
+    registry.add ({ .id = "view.scrollContinuously",
+                    .name = "Scroll Continuously",
+                    .category = "View",
+                    .description = "While the song plays, keeps the playhead in the middle and scrolls the song under it, rather "
+                                   "than turning the page at the edge.",
+                    .synonyms = { "smooth scrolling", "stationary playhead", "centered playhead", "scroll in play", "follow" },
+                    .perform = [this] { setScrollingContinuously (! settings.get (Settings::scrollContinuously)); },
+                    .isTicked = [this] { return settings.get (Settings::scrollContinuously); } });
 
     // A view's tab drags to the other panel, or moves there from its menu (Panels.h); this puts them back.
     registry.add ({ .id = "view.resetViewPlaces",

@@ -845,7 +845,8 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSeparator();
             add (menu, { "view.pianoRoll", "view.mixer" });
             menu.addSeparator();
-            add (menu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback" });
+            add (menu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback",
+                         "view.scrollContinuously" });
             add (menu, { "transport.goToStart", "transport.goToEnd" });
 
             // Where playback loops: the song, unless something else is looped on purpose.

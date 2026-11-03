@@ -98,12 +98,16 @@ public:
     BeatPosition getPlayheadBeat() const;
     bool isPlayheadShowingLinkedClip() const; // where a linked clip plays elsewhere (getLinkedPlayheadBeat()), for tests
 
-    // While playing, turn the page when the playhead reaches the right edge. Scrolling the view sideways while the song
-    // plays pauses that, as in Ableton Live, until playback starts again, the playhead is moved or the view is centred on
-    // it (centreOnPlayhead()).
+    // While playing, turn the page when the playhead reaches the right edge; or, scrolling continuously (View > Scroll
+    // Continuously, which the app keeps in its settings), keep the playhead in the middle and scroll the song under it, as
+    // Logic Pro's Scroll in Play and Cubase's Stationary Cursor do. Scrolling the view sideways while the song plays pauses
+    // either, as in Ableton Live, until playback starts again, the playhead is moved or the view is centred on it
+    // (centreOnPlayhead()).
     bool isFollowingPlayback() const noexcept { return followPlayback; }
     void setFollowingPlayback (bool shouldFollow) noexcept;
     bool isFollowingPaused() const noexcept { return followPaused; }
+    bool isScrollingContinuously() const noexcept { return scrollContinuously; }
+    void setScrollingContinuously (bool shouldScroll) noexcept { scrollContinuously = shouldScroll; }
 
     // Scrolling while something is dragged past an edge. Call autoScroll() on each mouse drag, with the
     // pointer's position and the area it scrolls (in the same coordinates): near or past an edge, the view
@@ -232,7 +236,7 @@ private:
     bool usedWhileKeyDown = false;     // and whether the mouse was pressed meanwhile
     std::optional<Tool> toolAfterDrag; // the key was let go during a drag: the tool to go back to when it ends
     bool mouseIsDown = false;
-    bool followPlayback = true, active = false;
+    bool followPlayback = true, active = false, scrollContinuously = false;
     bool followPaused = false, playedWhenFollowed = false; // by a scroll while playing; and whether it played last time
     void pauseFollowing();                                 // the view scrolled sideways by the user
     bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;

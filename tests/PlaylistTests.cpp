@@ -792,6 +792,39 @@ TEST_CASE ("While the song plays, the playlist turns the page at the playhead, u
     phazite::playOrStop (*screen.edit);
 }
 
+TEST_CASE ("Scrolling continuously, the playlist keeps the playhead in the middle while the song plays, once it gets there")
+{
+    PlaylistScreen screen;
+    screen.addClip (0, 0.0, 256.0);
+    screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (16.0) });
+    screen.playlist.setScrollingContinuously (true);
+    const auto viewStart = [&screen] { return screen.playlist.getView().start.inBeats(); };
+    const auto playTo = [&screen] (double beat) { phazite::movePlayhead (*screen.edit, screen.edit->tempoSequence.toTime (beats (beat))); };
+
+    screen.edit->getTransport().ensureContextAllocated();
+    phazite::playOrStop (*screen.edit);
+    REQUIRE (phazite::isSongPlaying (*screen.edit));
+
+    // Before the middle of the view (8 of its 16 beats), the playhead crosses it; after, the song scrolls under it, a pixel
+    // at a time.
+    playTo (3.0);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    CHECK (viewStart() == doctest::Approx (0.0));
+    playTo (40.0);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return std::abs (viewStart() - 32.0) < 0.05; }));
+    playTo (40.5);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return std::abs (viewStart() - 32.5) < 0.05; }));
+
+    // Scrolled away while it plays, it stays there.
+    phazite::test::Mouse mouse (*screen.lanes);
+    mouse.wheel ({ 10, 10 }, 1.0f, juce::ModifierKeys::shiftModifier);
+    const auto scrolledTo = viewStart();
+    playTo (41.0);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    CHECK (viewStart() == doctest::Approx (scrolledTo));
+    phazite::playOrStop (*screen.edit);
+}
+
 TEST_CASE ("A press in the ruler moves the playhead once, and the song plays on from there while it is held or dragged")
 {
     PlaylistScreen screen;

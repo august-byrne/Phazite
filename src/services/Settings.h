@@ -55,7 +55,8 @@ public:
     // Every setting Phazite keeps, each by the key Settings.xml keeps it under.
     static constexpr TextSetting theme { "phaziteTheme", "dark", SaveTiming::now }; // dark, light, highContrast
     static constexpr BoolSetting hoverHelp { "phaziteHoverHelp", true, SaveTiming::now };
-    static constexpr BoolSetting computerKeyboard { "phaziteComputerKeyboard", false, SaveTiming::now }; // off at first (question 10)
+    static constexpr BoolSetting scrollContinuously { "phaziteScrollContinuously", false, SaveTiming::now }; // or turn pages
+    static constexpr BoolSetting computerKeyboard { "phaziteComputerKeyboard", false, SaveTiming::now };     // off at first (question 10)
     static constexpr NumberSetting interfaceScale { "phaziteInterfaceScale", 1.0, SaveTiming::now };
     static constexpr BoolSetting welcomeShown { "phaziteWelcomeShown", false, SaveTiming::now };
     static constexpr TextSetting keymap { "phaziteKeymap", "Phazite", SaveTiming::now };

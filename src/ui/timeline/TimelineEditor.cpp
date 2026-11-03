@@ -965,15 +965,28 @@ void TimelineEditor::followPlayhead()
 
     playedWhenFollowed = playing;
 
-    // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end), unless the user
-    // scrolled away while it played, or holds the mouse down in the editor (dragging what is in view).
+    // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end), or scroll it to
+    // the middle, unless the user scrolled away while it played, or holds the mouse down in the editor (dragging what is in
+    // view).
     if (followPlayback && ! followPaused && ! isViewFixed() && playing && ! horizontalScrollBar.isMouseButtonDown() && ! mouseIsDown)
     {
         const auto beat = getPlayheadBeat();
         const auto width = getTimelineArea().getWidth();
 
-        if (const auto x = view.beatToX (beat); x < 0.0 || x > width - 4.0)
+        if (scrollContinuously)
+        {
+            // By whole pixels, once the playhead has moved one: what is drawn moves without shimmering, and the view isn't
+            // painted again at every frame of the display for a song that hasn't moved a pixel since. Near the song's start
+            // the playhead crosses to the middle first.
+            const auto pixels = std::round ((beat.inBeats() - width / 2.0 / view.pixelsPerBeat) * view.pixelsPerBeat);
+
+            if (const auto start = std::max (timeOrigin, BeatPosition::fromBeats (pixels / view.pixelsPerBeat)); start != view.start)
+                setViewStart (start);
+        }
+        else if (const auto x = view.beatToX (beat); x < 0.0 || x > width - 4.0)
+        {
             setViewStart (beat - BeatDuration::fromBeats (width * 0.05 / view.pixelsPerBeat));
+        }
     }
 
     updatePlayhead();
