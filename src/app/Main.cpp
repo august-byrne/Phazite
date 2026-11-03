@@ -48,9 +48,9 @@ public:
         juce::Logger::setCurrentLogger (logger.get());
 
         // The services load the plug-in list Phazite keeps and open the audio device and the MIDI inputs as its settings
-        // saved them (settings live in %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in its helper program.
+        // saved them (settings live in %APPDATA%\Phazite\Phazite.settings). Plug-ins are scanned in its helper program.
         engine = createEngine ({ .uiBehaviour = std::make_unique<AppUIBehaviour>() });
-        runMarker = std::make_unique<RunMarker> (engine->getPropertyStorage().getAppPrefsFolder().getChildFile ("Running"));
+        runMarker = std::make_unique<RunMarker> (Settings::getFolder().getChildFile ("Running"));
         services = std::make_unique<AppServices> (*engine);
         services->openAudioDevices();
         logAudioOutput();

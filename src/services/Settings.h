@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's settings: every key it keeps in Settings.xml (next to the Engine's own settings), with its default and when
-// a change is saved. Code reads and writes Phazite's settings only through this list.
+// Phazite's settings: every key it keeps in its settings file (Phazite.settings in the user's application data:
+// getFileOptions()), with its default and when a change is saved. Code reads and writes Phazite's settings only through
+// this list.
 #pragma once
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -52,7 +53,7 @@ struct ListSetting
 class Settings
 {
 public:
-    // Every setting Phazite keeps, each by the key Settings.xml keeps it under.
+    // Every setting Phazite keeps, each by the key its file keeps it under.
     static constexpr TextSetting theme { "phaziteTheme", "dark", SaveTiming::now }; // dark, light, highContrast
     static constexpr BoolSetting hoverHelp { "phaziteHoverHelp", true, SaveTiming::now };
     static constexpr BoolSetting scrollContinuously { "phaziteScrollContinuously", false, SaveTiming::now }; // or turn pages
@@ -92,9 +93,14 @@ public:
     static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon };  // ui/shell/PanelLayout.h
     static constexpr TextSetting viewPlaces { "phaziteViewPlaces", "", SaveTiming::soon };    // ui/shell/Panels.h: ViewPlaces
 
-    // Kept in that file (the Engine's, which must outlive this), or, without one, in memory (tests). The parameter
-    // isn't named 'file': it would hide the member (C4458, -Wshadow).
+    // Kept in that file (which must outlive this), or, without one, in memory (tests). The parameter isn't named
+    // 'file': it would hide the member (C4458, -Wshadow).
     explicit Settings (juce::PropertiesFile* propertiesFile = nullptr);
+
+    // Where Phazite keeps its settings, and the folder they are in, where it keeps what else it keeps of its own (whether
+    // the last run closed properly).
+    static juce::PropertiesFile::Options getFileOptions();
+    static juce::File getFolder();
 
     bool get (const BoolSetting&) const;
     double get (const NumberSetting&) const;

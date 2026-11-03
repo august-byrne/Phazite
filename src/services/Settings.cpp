@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Settings.h"
+#include "model/engine/AppInfo.h"
 
 namespace phazite
 {
@@ -8,6 +9,23 @@ Settings::Settings (juce::PropertiesFile* propertiesFile)
       storage (propertiesFile != nullptr ? static_cast<juce::PropertySet*> (propertiesFile) : inMemory.get()),
       file (propertiesFile)
 {
+}
+
+juce::PropertiesFile::Options Settings::getFileOptions()
+{
+    juce::PropertiesFile::Options options;
+    options.applicationName = appName;
+    options.filenameSuffix = "settings";
+    options.folderName = appName;
+    options.osxLibrarySubFolder = "Application Support";
+    options.storageFormat = juce::PropertiesFile::storeAsXML;
+    options.millisecondsBeforeSaving = 2000;
+    return options;
+}
+
+juce::File Settings::getFolder()
+{
+    return getFileOptions().getDefaultFile().getParentDirectory();
 }
 
 bool Settings::get (const BoolSetting& setting) const

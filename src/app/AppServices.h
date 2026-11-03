@@ -17,7 +17,7 @@ namespace phazite
 // default argument of its enclosing class (CWG 1397).
 struct AppServicesOptions
 {
-    bool settingsInMemory = false;                                 // for tests: nothing is read from or written to Settings.xml
+    bool settingsInMemory = false;                                 // for tests: nothing is read from or written to Phazite.settings
     juce::File packsFolder = SoundPack::getDefaultPacksFolder();   // where Phazite Sounds are installed
     juce::File presetsFolder = Library::getDefaultPresetsFolder(); // where the user's presets are saved
     juce::File factoryPresetsFolder = Library::getDefaultFactoryPresetsFolder(); // the presets that come with Phazite
@@ -30,8 +30,9 @@ struct AppServices
 
     // In this order: each may use those before it. The browser's library indexes Phazite Sounds' folder, and writes its
     // settings until the window that shows it goes; the previewer's Edit goes before the Engine.
-    std::unique_ptr<EngineContext> engineContext; // the Engine as the UI reaches it
-    Settings settings;                            // in the Engine's settings file
+    std::unique_ptr<EngineContext> engineContext;       // the Engine as the UI reaches it
+    std::unique_ptr<juce::PropertiesFile> settingsFile; // Phazite's own (Settings::getFileOptions()), or none in memory
+    Settings settings;
     RecentProjects recentProjects;
     SoundPack soundPack;                  // Phazite Sounds, downloaded when the user asks
     Library library;                      // what the browser and the plug-in picker show

@@ -18,7 +18,7 @@ app draws with Direct2D, which fills pixels differently but walks the same notes
 ## 1. The delay between a key and its sound
 
 **The cause is the Bluetooth headphones.** Phazite plays through the owner's Bluetooth headphones (its settings,
-`%APPDATA%\Phazite\Settings.xml`), which Windows lists as a Bluetooth A2DP device. Bluetooth audio adds a buffer of its
+`%APPDATA%\Phazite\Phazite.settings`), which Windows lists as a Bluetooth A2DP device. Bluetooth audio adds a buffer of its
 own, outside anything Phazite or Windows' audio API can see or change. The Phazite running on 2026-10-21 was the
 Release build, so the lag isn't a Debug-build effect.
 

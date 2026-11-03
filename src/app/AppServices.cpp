@@ -85,7 +85,8 @@ struct AppServices::DeviceSettings final : private juce::ChangeListener
 };
 AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
     : engineContext (createEngineContext (engine)),
-      settings (options.settingsInMemory ? nullptr : &engine.getPropertyStorage().getPropertiesFile()),
+      settingsFile (options.settingsInMemory ? nullptr : std::make_unique<juce::PropertiesFile> (Settings::getFileOptions())),
+      settings (settingsFile.get()),
       recentProjects (settings),
       soundPack (options.packsFolder, options.soundPackRelease),
       library (*engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),

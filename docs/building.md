@@ -109,7 +109,7 @@ Configure has worked when its last line is `-- Build files have been written to:
 | `windows-release` | `build\windows-release\Phazite_artefacts\Release\Phazite.exe` |
 | `windows-debug` | `build\windows-debug\Phazite_artefacts\Debug\Phazite.exe` |
 
-Start it from File Explorer or PowerShell, or with F5 in [VS Code](../CONTRIBUTING.md#vs-code). The Welcome window opens at the first start, and the README's [First steps](../README.md#first-steps) say what to try. Your settings (audio and MIDI devices, the plug-in list, the theme and the shortcuts) are kept in `%APPDATA%\Phazite\Settings.xml`.
+Start it from File Explorer or PowerShell, or with F5 in [VS Code](../CONTRIBUTING.md#vs-code). The Welcome window opens at the first start, and the README's [First steps](../README.md#first-steps) say what to try. Your settings (audio and MIDI devices, the plug-in list, the theme and the shortcuts) are kept in `%APPDATA%\Phazite\Phazite.settings`.
 
 - **Sound:** Phazite opens your default audio output. With an audio interface, choose **ASIO**® under **Options > Audio Settings** for the lowest delay; without an ASIO driver, [FlexASIO](https://github.com/dechamps/FlexASIO) (MIT) gives you one that plays through Windows' normal audio. Audio inputs are off until you turn them on there.
 - **Plug-ins:** **Options > Scan for Plug-ins** scans the standard VST3 folders. The scan runs in a separate copy of Phazite, so a plug-in that crashes while being scanned doesn't take Phazite down. With no plug-ins installed, `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT to try it with.
