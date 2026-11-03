@@ -3,57 +3,86 @@
 #include "internal/Schema.h"
 
 #include <algorithm>
+#include <functional>
 #include <unordered_set>
 
 namespace phazite
 {
-te::EditItemID getSelectableID (const te::Selectable& item)
-{
-    if (const auto* track = dynamic_cast<const te::Track*> (&item))
-        return track->itemID;
-
-    if (const auto* clip = dynamic_cast<const te::Clip*> (&item))
-        return clip->itemID;
-
-    if (const auto* device = dynamic_cast<const te::Plugin*> (&item))
-        return device->itemID;
-
-    return {};
-}
-
 namespace
 {
-    bool isDevice (const te::Selectable* item)
+    // Whether the song holds an item of a kind with an ID: a track (or a folder, a return or the master), a clip on a track,
+    // or a device (or a container) of a track, of the master or of a container. Each kind's ID is its element's "id".
+    bool holds (const juce::ValueTree& parent, Selection::Kind kind, std::uint64_t id)
     {
-        return dynamic_cast<const te::Plugin*> (item) != nullptr;
+        for (const auto& child : parent)
+        {
+            const auto isTrack = child.hasType (schema::TRACK) || child.hasType (schema::MASTER);
+            const auto isOfKind = kind == Selection::Kind::track  ? isTrack
+                                  : kind == Selection::Kind::clip ? child.hasType (schema::CLIP)
+                                                                  : child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER);
+
+            if (isOfKind && (std::uint64_t) (juce::int64) child.getProperty (schema::trackID, (juce::int64) 0) == id)
+                return true;
+
+            // Into what holds items: the track list, tracks and containers, not clips' notes or devices' values.
+            if ((child.hasType (schema::TRACKS) || isTrack || child.hasType (schema::CONTAINER)) && holds (child, kind, id))
+                return true;
+        }
+
+        return false;
     }
 
-    // How many of these notes are still in their clips, found as model/notes/internal/Notes.h finds a note: by the ID the
-    // project stores on it.
-    int countNotesThere (te::Edit& edit, const std::vector<ClipID>& clips, const std::vector<NoteRef>& notes)
+    // How many of these notes are still in their clips: by their IDs in the song's clips.
+    int countNotesThere (const juce::ValueTree& song, const std::vector<ClipID>& clips, const std::vector<NoteRef>& notes)
     {
-        auto count = 0;
+        std::unordered_set<juce::int64> clipsShown;
 
         for (const auto& id : clips)
+            clipsShown.insert ((juce::int64) id.getRaw());
+
+        std::unordered_set<juce::int64> there; // the notes of those clips, by their IDs
+        std::function<void (const juce::ValueTree&)> collect = [&] (const juce::ValueTree& parent)
         {
-            auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (edit, toTracktion (id)));
+            for (const auto& child : parent)
+            {
+                if (child.hasType (schema::CLIP))
+                {
+                    if (clipsShown.contains ((juce::int64) child[schema::clipID]))
+                        for (const auto& note : child)
+                            if (note.hasType (schema::NOTE))
+                                there.insert ((juce::int64) note[schema::noteID]);
+                }
+                else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+                {
+                    collect (child);
+                }
+            }
+        };
 
-            if (clip == nullptr)
-                continue;
+        collect (song);
+        auto count = 0;
 
-            std::unordered_set<juce::int64> there;
-
-            for (auto* note : clip->getSequence().getNotes())
-                there.insert (static_cast<juce::int64> (note->state[schema::phaziteNoteID]));
-
-            for (const auto& ref : notes)
-                if (ref.clip == id && there.contains (static_cast<juce::int64> (ref.note.getRaw())))
-                    ++count;
-        }
+        for (const auto& ref : notes)
+            if (clipsShown.contains ((juce::int64) ref.clip.getRaw()) && there.contains ((juce::int64) ref.note.getRaw()))
+                ++count;
 
         return count;
     }
 } // namespace
+
+std::optional<Selection::Item> Selection::toItem (const te::Selectable* item)
+{
+    if (const auto* track = dynamic_cast<const te::Track*> (item))
+        return Item { Kind::track, track->itemID.getRawID() };
+
+    if (const auto* clip = dynamic_cast<const te::Clip*> (item))
+        return Item { Kind::clip, clip->itemID.getRawID() };
+
+    if (const auto* device = dynamic_cast<const te::Plugin*> (item))
+        return Item { Kind::device, device->itemID.getRawID() };
+
+    return std::nullopt;
+}
 
 void Selection::setEdit (te::Edit* newEdit)
 {
@@ -67,31 +96,49 @@ void Selection::setEdit (te::Edit* newEdit)
     changed();
 }
 
-te::Selectable* Selection::find (te::EditItemID id) const
+Song* Selection::getSong() const
+{
+    auto* in = edit.get();
+    return in != nullptr ? &phazite::getSong (*in) : nullptr;
+}
+
+te::Selectable* Selection::find (Item item) const
 {
     auto* in = edit.get();
 
-    if (in == nullptr || ! id.isValid())
+    if (in == nullptr || item.id == 0)
         return nullptr;
 
-    if (auto* track = te::findTrackForID (*in, id))
-        return track;
+    const auto id = te::EditItemID::fromRawID (item.id);
 
-    if (auto* clip = te::findClipForID (*in, id))
-        return clip;
+    switch (item.kind)
+    {
+        case Kind::track:
+            return te::findTrackForID (*in, id);
+        case Kind::clip:
+            return te::findClipForID (*in, id);
+        case Kind::device:
+            return te::findPluginForID (*in, id).get();
+    }
 
-    return te::findPluginForID (*in, id).get();
+    return nullptr;
+}
+
+bool Selection::isThere (Item item) const
+{
+    auto* song = getSong();
+    return song != nullptr && item.id != 0 && holds (song->getState(), item.kind, item.id);
 }
 
 bool Selection::isThere (SectionID id) const
 {
-    auto* in = edit.get();
+    auto* song = getSong();
 
-    if (in == nullptr || ! id.isValid())
+    if (song == nullptr || ! id.isValid())
         return false;
 
-    for (const auto& section : findPhaziteState (*in).getChildWithName (schema::SECTIONS))
-        if (te::EditItemID::fromVar (section[schema::sectionID]).getRawID() == id.getRaw())
+    for (const auto& section : song->getState().getChildWithName (schema::SECTIONS))
+        if ((std::uint64_t) (juce::int64) section[schema::sectionID] == id.getRaw())
             return true;
 
     return false;
@@ -99,7 +146,7 @@ bool Selection::isThere (SectionID id) const
 
 bool Selection::holdsDevices() const
 {
-    return ! items.empty() && isDevice (find (items.front()));
+    return ! items.empty() && items.front().kind == Kind::device;
 }
 
 void Selection::clearItems()
@@ -117,51 +164,45 @@ bool Selection::clearNotesAndPoints()
     return had;
 }
 
-bool Selection::isSelected (const te::Selectable* item) const
+bool Selection::isSelected (Item item) const
 {
-    const auto id = item != nullptr ? getSelectableID (*item) : te::EditItemID();
-    return id.isValid() && std::find (items.begin(), items.end(), id) != items.end();
+    return item.id != 0 && std::find (items.begin(), items.end(), item) != items.end();
 }
 
-void Selection::selectOnly (te::Selectable* item)
+void Selection::selectOnly (Item item)
 {
-    const auto id = item != nullptr ? getSelectableID (*item) : te::EditItemID();
-
-    if (! id.isValid())
+    if (item.id == 0)
         return;
 
-    if (items == std::vector { id } && sections.empty() && notes.empty() && ! pointsParameter.isValid())
+    if (items == std::vector { item } && sections.empty() && notes.empty() && ! pointsParameter.isValid())
         return;
 
     clearItems();
     clearNotesAndPoints();
-    items = { id };
+    items = { item };
     changed();
 }
 
-void Selection::addToSelection (te::Selectable* item)
+void Selection::addToSelection (Item item)
 {
-    const auto id = item != nullptr ? getSelectableID (*item) : te::EditItemID();
-
-    if (! id.isValid() || isSelected (item))
+    if (item.id == 0 || isSelected (item))
         return;
 
     // Devices are selected on their own: one added to a selection of anything else starts a new one, and so does anything
     // else added to a selection of devices.
-    if (isDevice (item) != holdsDevices())
+    if ((item.kind == Kind::device) != holdsDevices())
         clearItems();
 
     clearNotesAndPoints();
-    items.push_back (id);
+    items.push_back (item);
     changed();
 }
 
-void Selection::deselect (te::Selectable* item)
+void Selection::deselect (Item item)
 {
-    const auto id = item != nullptr ? getSelectableID (*item) : te::EditItemID();
-    const auto found = std::find (items.begin(), items.end(), id);
+    const auto found = std::find (items.begin(), items.end(), item);
 
-    if (! id.isValid() || found == items.end())
+    if (item.id == 0 || found == items.end())
         return;
 
     items.erase (found);
@@ -181,18 +222,33 @@ int Selection::getNumObjectsSelected() const
 {
     auto count = 0;
 
-    for (const auto& id : items)
-        if (find (id) != nullptr)
+    for (const auto& item : items)
+        if (isThere (item))
             ++count;
 
     for (const auto& id : sections)
         if (isThere (id))
             ++count;
 
-    if (auto* in = edit.get(); in != nullptr && ! notes.empty())
-        count += countNotesThere (*in, noteClips, notes);
+    if (auto* song = getSong(); song != nullptr && ! notes.empty())
+        count += countNotesThere (song->getState(), noteClips, notes);
 
     return count + (int) points.size();
+}
+
+std::vector<TrackID> Selection::getTracks() const
+{
+    return getIDs<TrackID> (Kind::track);
+}
+
+std::vector<ClipID> Selection::getClips() const
+{
+    return getIDs<ClipID> (Kind::clip);
+}
+
+std::vector<DeviceID> Selection::getDevices() const
+{
+    return getIDs<DeviceID> (Kind::device);
 }
 
 //==============================================================================
