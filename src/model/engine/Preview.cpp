@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Preview.h"
+#include "AudioFiles.h"
 #include "devices/synth/Synth.h"
 #include "internal/EngineContext.h"
 #include "internal/Preview.h"
@@ -214,11 +215,8 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
     }
     else
     {
-        // An audio file. Tracktion keeps what it read of a file by its path, so it reads it again if it changed since: a loop
-        // written again at the same path would otherwise play at its old length.
-        impl->tracktion.getAudioFileManager().checkFileForChanges (te::AudioFile (impl->tracktion, newFile));
-        auto reader = std::unique_ptr<juce::AudioFormatReader> (
-            impl->tracktion.getAudioFileFormatManager().readFormatManager.createReaderFor (newFile));
+        // An audio file, read afresh each time: a loop written again at the same path plays at its new length.
+        auto reader = std::unique_ptr<juce::AudioFormatReader> (getAudioFormats().createReaderFor (newFile));
 
         if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0)
             return false;
@@ -226,14 +224,14 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
         // A loop that knows its beats (from its loop data, or from its name when it lasts whole bars) plays in time with the
         // project, stretched as a clip of it would be, by Rubber Band; at its own pitch. Anything else plays as it is.
         const auto fileSeconds = (double) reader->lengthInSamples / reader->sampleRate;
-        const auto loopInfo = te::AudioFile (impl->tracktion, newFile).getInfo().loopInfo;
-        inTime = project != nullptr && loopInfo.getNumBeats() > 0.0 && ! loopInfo.isOneShot();
+        const auto loopBeats = readAudioFileInfo (*reader, newFile.getFileNameWithoutExtension()).loopBeats;
+        inTime = project != nullptr && loopBeats > 0.0;
         std::shared_ptr<engine::AudioFile> audio;
         engine::AudioRegion region;
 
         if (inTime)
         {
-            lengthBeats = loopInfo.getNumBeats();
+            lengthBeats = loopBeats;
             auto stretched = std::make_shared<StretchedLoop> (impl->tracktion, newFile, lengthBeats * 60.0 / bpm / fileSeconds, rate);
 
             if (! stretched->isValid())

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Library.h"
 #include "model/engine/AppInfo.h"
+#include "model/engine/AudioFiles.h"
 #include "model/engine/EngineContext.h"
 
 #include <algorithm>
@@ -208,29 +209,6 @@ namespace
 } // namespace
 
 //==============================================================================
-std::optional<double> getTempoFromName (const juce::String& name)
-{
-    // A number from 50 to 250 just before or after "bpm".
-    const auto tokens = getTokens (name);
-
-    for (int i = 0; i < tokens.size(); ++i)
-    {
-        if (tokens[i] != "bpm")
-            continue;
-
-        for (const auto neighbour : { i - 1, i + 1 })
-        {
-            if (! juce::isPositiveAndBelow (neighbour, tokens.size()) || ! tokens[neighbour].containsOnly ("0123456789"))
-                continue;
-
-            if (const auto tempo = tokens[neighbour].getIntValue(); tempo >= 50 && tempo <= 250)
-                return (double) tempo;
-        }
-    }
-
-    return std::nullopt;
-}
-
 juce::StringArray getSoundTags (const juce::File& file, const juce::File& root)
 {
     // The words of the name, and of the folders' names between the root and the file.

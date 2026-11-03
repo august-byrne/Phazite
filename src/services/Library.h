@@ -17,9 +17,6 @@ namespace phazite
 class EngineContext;
 
 //==============================================================================
-// A sound's tempo, from its name ("Break 120 BPM", "loop_128bpm"): 50 to 250 BPM.
-std::optional<double> getTempoFromName (const juce::String&);
-
 // A sound's tags, from the words in its name and in the names of its folders below the root: what it is (Kick, Snare,
 // Clap, Hat, Cymbal, Tom, Percussion, Bass, FX, Foley, Vocal, Synth), Loop or One-shot, and its tempo ("120 BPM") if
 // its name says. A sound is a loop if its name or folders say so, or if its name has a tempo and it isn't an effect.

@@ -3,6 +3,7 @@
 #include "internal/AudioClips.h"
 #include "internal/ClipRenders.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/AudioFiles.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -62,11 +63,11 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
 
     // The file as it was recorded, not the render that plays it stretched, pitched or reversed.
     const auto original = getClipFile (*clip);
-    const auto file = te::AudioFile (clip->edit.engine, original).getInfo();
+    const auto file = getAudioFileInfo (original);
     info.fileName = original.getFileName();
     info.sampleRate = file.sampleRate;
     info.channels = file.numChannels;
-    info.seconds = file.getLengthInSeconds();
+    info.seconds = file.getSeconds();
 
     const auto& tempo = clip->edit.tempoSequence;
     const auto audio = getAudioTimeRange (*clip);

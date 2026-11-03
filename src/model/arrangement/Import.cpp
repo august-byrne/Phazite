@@ -4,6 +4,7 @@
 #include "internal/Clips.h"
 #include "internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/AudioFiles.h"
 #include "model/engine/internal/LiveInput.h"
 
 namespace phazite
@@ -96,26 +97,26 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
         case FileKind::audio:
         {
             const auto copy = copyIntoProject (edit, file);
-            const te::AudioFile audio (edit.engine, copy);
 
-            // Tracktion keeps what it read of a file by its path, until it checks the file again: read again if it changed
-            // since (a file written where another was, or where none was yet when Tracktion was asked about it).
-            edit.engine.getAudioFileManager().checkFileForChanges (audio);
-            const auto length = te::TimeDuration::fromSeconds (audio.getLength());
+            // Tracktion's clips, which read the file too while they mirror the song's, keep what Tracktion read of a file by
+            // its path until it checks the file again: read again if it changed since (a file written where another was,
+            // or where none was yet when Tracktion was asked about it).
+            edit.engine.getAudioFileManager().checkFileForChanges (te::AudioFile (edit.engine, copy));
+            const auto info = getAudioFileInfo (copy);
 
-            if (length <= te::TimeDuration())
+            if (info.getSeconds() <= 0.0)
                 return nullptr;
 
             const auto clipState =
-                makeAudioClipState (edit, file.getFileNameWithoutExtension(), copy, fromTracktion (start), { 0.0, length.inSeconds() });
+                makeAudioClipState (edit, file.getFileNameWithoutExtension(), copy, fromTracktion (start), { 0.0, info.getSeconds() });
             auto* clip = dynamic_cast<te::AudioClipBase*> (placeClipState (edit, clipState, track));
 
             if (clip == nullptr)
                 return nullptr;
 
-            // A loop that knows its tempo (from its loop data, or from its name when it lasts whole bars) follows the
-            // song's tempo, as the browser's preview played it: stretched to its beats from where it starts.
-            if (const auto loop = audio.getInfo().loopInfo; loop.getNumBeats() > 0.0 && ! loop.isOneShot())
+            // A loop that knows its beats (from its loop data, or from its name when it lasts whole bars) follows the song's
+            // tempo, as the browser's preview played it: stretched to its beats from where it starts.
+            if (info.loopBeats > 0.0)
                 setClipFollowsTempo (*clip, true);
 
             return clip;

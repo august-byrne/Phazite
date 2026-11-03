@@ -289,6 +289,8 @@ target_sources(phazite_core PRIVATE
     src/model/engine/AppInfo.h
     src/model/engine/AudioDevices.cpp
     src/model/engine/AudioDevices.h
+    src/model/engine/AudioFiles.cpp
+    src/model/engine/AudioFiles.h
     src/model/engine/AudioIO.cpp
     src/model/engine/EngineContext.cpp
     src/model/engine/EngineContext.h

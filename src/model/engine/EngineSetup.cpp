@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/EngineSetup.h"
 #include "AudioDevices.h"
+#include "AudioFiles.h"
 #include "internal/AudioIO.h"
 #include "internal/LoudnessMeterPlugin.h"
 #include "internal/PluginScanner.h"
@@ -179,7 +180,7 @@ void EngineBehaviour::newClipCreated (te::Clip& clip, bool)
     audio->setAutoTempo (false);
     audio->setAutoPitch (false);
 
-    if (const auto length = te::AudioFile (clip.edit.engine, audio->getOriginalFile()).getLength(); length > 0.0)
+    if (const auto length = getAudioFileInfo (audio->getOriginalFile()).getSeconds(); length > 0.0)
         audio->setLength (te::TimeDuration::fromSeconds (length), true);
 }
 

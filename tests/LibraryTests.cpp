@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The browser's model: sounds by folder and by search, tags from names, favorites and recent items, and previews.
 #include "TestHelpers.h"
+#include "model/engine/AudioFiles.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
 #include "model/project/ProjectContext.h"
@@ -142,4 +143,45 @@ TEST_CASE ("Sounds named as Phazite Sounds names them get their folders' tags, a
         INFO (file.getFileName());
         CHECK (te::AudioFile (phazite::test::getEngine(), file).getInfo().loopInfo.getNumBeats() > 0.0);
     }
+}
+
+TEST_CASE ("An audio file is a loop with beats from its loop data, or from a tempo in its name at which it lasts whole bars")
+{
+    TemporaryFolder temp;
+
+    // Two seconds at 120 BPM: four beats, a bar. At 90 BPM, three beats, no whole bar; a kick, no tempo at all.
+    const auto loop = phazite::getAudioFileInfo (writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 2.0));
+    CHECK (loop.isValid());
+    CHECK (loop.numChannels == 1);
+    CHECK (loop.getSeconds() == doctest::Approx (2.0));
+    CHECK (loop.loopBeats == doctest::Approx (4.0));
+    CHECK (phazite::getAudioFileInfo (writeSound (temp.folder.getChildFile ("Break 90 BPM.wav"), 2.0)).loopBeats == 0.0);
+    CHECK (phazite::getAudioFileInfo (writeSound (temp.folder.getChildFile ("Kick.wav"), 2.0)).loopBeats == 0.0);
+
+    // A WAV file's acid chunk says its beats whatever its name, unless it plays once.
+    const auto withLoopData = [&temp] (const juce::String& name, bool oneShot)
+    {
+        const auto file = temp.folder.getChildFile (name);
+        juce::AudioBuffer<float> silence (1, 44100);
+        silence.clear();
+        std::unordered_map<juce::String, juce::String> data;
+        data[juce::WavAudioFormat::acidBeats] = "8";
+        data[juce::WavAudioFormat::acidOneShot] = oneShot ? "1" : "0";
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+
+        if (auto writer = juce::WavAudioFormat().createWriterFor (
+                stream,
+                juce::AudioFormatWriterOptions {}.withSampleRate (44100.0).withNumChannels (1).withBitsPerSample (16).withMetadataValues (
+                    data)))
+            writer->writeFromAudioSampleBuffer (silence, 0, silence.getNumSamples());
+
+        return phazite::getAudioFileInfo (file);
+    };
+
+    CHECK (withLoopData ("Pad.wav", false).loopBeats == doctest::Approx (8.0));
+    CHECK (withLoopData ("Hit 120 BPM.wav", true).loopBeats == 0.0);
+
+    // Written again where it was, it is read again.
+    writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
+    CHECK (phazite::getAudioFileInfo (temp.folder.getChildFile ("Break 120 BPM.wav")).loopBeats == doctest::Approx (8.0));
 }

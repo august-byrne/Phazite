@@ -5,6 +5,7 @@
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceFiles.h"
+#include "model/engine/AudioFiles.h"
 #include "model/mirror/internal/Mirror.h"
 
 #include <algorithm>
@@ -47,9 +48,9 @@ namespace
         return { sound.tempo > 0.0 && songTempo > 0.0 ? sound.tempo / songTempo : 1.0, (double) sound.pitch, sound.reversed };
     }
 
-    double getFileSeconds (const te::Edit& edit, const juce::File& file)
+    double getFileSeconds (const juce::File& file)
     {
-        return te::AudioFile (edit.engine, file).getLength();
+        return getAudioFileInfo (file).getSeconds();
     }
 
     void setOrRemove (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value, juce::UndoManager* um)
@@ -90,15 +91,9 @@ namespace
     // does until either tempo changes.
     double getFileTempo (const te::Edit& edit, BeatPosition start, const juce::File& file)
     {
-        const auto info = te::AudioFile (edit.engine, file).getInfo();
-        const auto& loop = info.loopInfo;
-        auto out = loop.getOutMarker();
-
-        if (out < 0 || out > info.lengthInSamples)
-            out = info.lengthInSamples;
-
-        const auto seconds = info.sampleRate > 0.0 ? (double) (out - loop.getInMarker()) / info.sampleRate : 0.0;
-        const auto tempo = seconds > 0.0 && loop.getNumBeats() > 0.0 ? loop.getNumBeats() / seconds * 60.0 : getSongTempoAt (edit, start);
+        const auto info = getAudioFileInfo (file);
+        const auto seconds = info.getSeconds();
+        const auto tempo = seconds > 0.0 && info.loopBeats > 0.0 ? info.loopBeats / seconds * 60.0 : getSongTempoAt (edit, start);
         return juce::jlimit (minClipTempo, maxClipTempo, tempo);
     }
 
@@ -138,7 +133,7 @@ juce::File getClipFile (const te::Edit& edit, const juce::ValueTree& clipState)
 
 double getClipFileLength (const te::Edit& edit, const juce::ValueTree& clipState)
 {
-    return getFileSeconds (edit, getClipFile (edit, clipState));
+    return getFileSeconds (getClipFile (edit, clipState));
 }
 
 stretch::Settings getClipStretch (const te::Edit& edit, const juce::ValueTree& clipState)
@@ -161,7 +156,7 @@ te::ClipPosition getPlayedPosition (const te::Edit& edit, const juce::ValueTree&
     const auto start = edit.tempoSequence.toTime (toTracktion (getClipRange (clipState).getStart()));
     const auto settings = getClipStretch (edit, clipState);
     const auto part = getFilePart (clipState);
-    const auto from = settings.reversed ? getFileSeconds (edit, getClipFile (edit, clipState)) - part.end : part.start;
+    const auto from = settings.reversed ? getFileSeconds (getClipFile (edit, clipState)) - part.end : part.start;
     return { { start, start + te::TimeDuration::fromSeconds ((part.end - part.start) * settings.timeRatio) },
              te::TimeDuration::fromSeconds (from * settings.timeRatio) };
 }
@@ -275,8 +270,7 @@ te::TimeRange getAudioTimeRange (te::AudioClipBase& clip)
 {
     const auto position = clip.getPosition();
     const auto start = position.getStart() - position.getOffset();
-    return { start,
-             start + te::TimeDuration::fromSeconds (getFileSeconds (clip.edit, getClipFile (clip)) * getClipStretch (clip).timeRatio) };
+    return { start, start + te::TimeDuration::fromSeconds (getFileSeconds (getClipFile (clip)) * getClipStretch (clip).timeRatio) };
 }
 
 double getFileTimeAt (te::AudioClipBase& clip, te::BeatPosition beat)
@@ -285,7 +279,7 @@ double getFileTimeAt (te::AudioClipBase& clip, te::BeatPosition beat)
     const auto settings = getClipStretch (clip);
     const auto intoFile =
         (clip.edit.tempoSequence.toTime (beat) - (position.getStart() - position.getOffset())).inSeconds() / settings.timeRatio;
-    return settings.reversed ? getFileSeconds (clip.edit, getClipFile (clip)) - intoFile : intoFile;
+    return settings.reversed ? getFileSeconds (getClipFile (clip)) - intoFile : intoFile;
 }
 
 double getClipTempo (const te::AudioClipBase& clip)
@@ -338,8 +332,7 @@ void setClipFollowsTempo (te::AudioClipBase& clip, bool follows)
     const auto clipState = findClipState (clip);
 
     // Without its file, how long it lasts is unknown, and so is its tempo.
-    if (! clipState.isValid() || (getClipTempo (clip) > 0.0) == follows
-        || (follows && getFileSeconds (clip.edit, getClipFile (clip)) <= 0.0))
+    if (! clipState.isValid() || (getClipTempo (clip) > 0.0) == follows || (follows && getFileSeconds (getClipFile (clip)) <= 0.0))
         return;
 
     const auto tempo = follows ? getFileTempo (clip.edit, getClipRange (clipState).getStart(), getClipFile (clip)) : 0.0;
