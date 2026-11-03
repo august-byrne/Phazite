@@ -242,9 +242,12 @@ void PianoRoll::VelocityLane::paint (juce::Graphics& g)
         if (note.muted)
             colour = colour.withAlpha (0.4f);
 
+        // The stem on the screen's pixels, and the ball centred on it.
+        const auto left = snapToPixels (g, x - VelocityTint::stem / 2.0f);
+        const auto centre = left + VelocityTint::stem / 2.0f;
         g.setColour (colour);
-        g.fillRect (x, top, 2.0f, height);
-        g.fillEllipse (x - 2.5f, top - 2.5f, 6.0f, 6.0f);
+        g.fillRect (left, snapToPixels (g, top), VelocityTint::stem, height);
+        g.fillEllipse (juce::Rectangle<float> (VelocityTint::ball, VelocityTint::ball).withCentre ({ centre, top }));
     }
 }
 

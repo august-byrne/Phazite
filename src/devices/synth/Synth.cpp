@@ -239,12 +239,18 @@ void Synth::stealVoice (Voice& voice)
     voice.fadeStep = 0.0f;
 }
 
-void Synth::startNote (int note, float velocityValue, std::span<const float> values)
+void Synth::startNote (int note, float velocityValue, std::span<const float> values, bool portamento)
 {
     const auto sensitivity = values[velocity];
     const auto gain = 1.0f - sensitivity + sensitivity * velocityValue * velocityValue;
-    const auto from = values[glide] > 0.0f && lastNote >= 0.0f ? lastNote : (float) note;
+    const auto glidesIn = portamento && lastNote >= 0.0f;
+    const auto from = glidesIn || (values[glide] > 0.0f && lastNote >= 0.0f) ? lastNote : (float) note;
     lastNote = (float) note;
+
+    // A portamento note slides in evenly over Glide's time, or a short one while Glide is off.
+    const auto seconds = values[glide] > 0.0f ? (double) values[glide] * 0.001 : portamentoSeconds;
+    const auto slideFrom = [&] (float pitch)
+    { return glidesIn ? std::abs ((float) note - pitch) / (float) std::max (1.0, seconds * sampleRate) : 0.0f; };
 
     if (choiceOf<int> (values[voiceMode]) == 1)
     {
@@ -279,6 +285,7 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
             voice.filterEnvelope.noteOn();
         }
 
+        voice.slidePerSample = slideFrom (voice.pitch);
         return;
     }
 
@@ -315,6 +322,7 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
     voice.velocityGain = gain;
     voice.target = (float) note;
     voice.pitch = from;
+    voice.slidePerSample = slideFrom (from);
     voice.started = ++notesPlayed;
     voice.age = 0;
     voice.amp.noteOn();
@@ -342,6 +350,7 @@ void Synth::stopNote (int note, std::span<const float> values)
         {
             voice.note = heldKeys[(size_t) numHeld - 1];
             voice.target = (float) voice.note;
+            voice.slidePerSample = 0.0f;
             lastNote = voice.target;
             return;
         }
@@ -376,12 +385,32 @@ void Synth::stopNote (int note, std::span<const float> values)
     }
 }
 
+void Synth::slideTo (int note, float seconds)
+{
+    // Every voice that sounds, to the slide note's pitch, evenly over its length; a note after it glides from there.
+    for (size_t i = 0; i < (size_t) maxVoices; ++i)
+    {
+        if (auto& voice = voices[i]; voice.amp.isActive() && (voice.held || voice.sustained) && voice.fadeStep <= 0.0f)
+        {
+            voice.target = (float) note;
+            voice.slidePerSample = std::abs (voice.target - voice.pitch) / (float) std::max (1.0, (double) seconds * sampleRate);
+        }
+    }
+
+    lastNote = (float) note;
+}
+
 void Synth::handle (const NoteEvent& event, std::span<const float> values)
 {
     switch (event.type)
     {
         case NoteEvent::Type::noteOn:
-            startNote (event.number, event.value, values);
+        case NoteEvent::Type::portamentoOn:
+            startNote (event.number, event.value, values, event.type == NoteEvent::Type::portamentoOn);
+            break;
+
+        case NoteEvent::Type::slide:
+            slideTo (event.number, event.value);
             break;
 
         case NoteEvent::Type::noteOff:
@@ -507,8 +536,18 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 
             voice.age = std::min (voice.age + length, 1 << 30);
 
-            // Pitch and filter, once per step.
-            voice.pitch += (voice.target - voice.pitch) * glideStep;
+            // Pitch and filter, once per step: a slide moves evenly until it gets there, a glide part of the way each step.
+            if (voice.slidePerSample > 0.0f)
+            {
+                const auto step = voice.slidePerSample * (float) length;
+                const auto gap = voice.target - voice.pitch;
+                voice.pitch = std::abs (gap) <= step ? voice.target : voice.pitch + std::copysign (step, gap);
+                voice.slidePerSample = std::abs (gap) <= step ? 0.0f : voice.slidePerSample;
+            }
+            else
+            {
+                voice.pitch += (voice.target - voice.pitch) * glideStep;
+            }
             const auto semitones = (double) (voice.pitch + bent + pitchMove);
             const auto frequency = dsp::noteToFrequency (semitones);
 

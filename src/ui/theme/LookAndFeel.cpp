@@ -289,4 +289,17 @@ const Palette& getPalette (const juce::Component& component)
     static const auto fallback = getPalette (ThemeName::dark);
     return fallback;
 }
+
+float snapToPixels (juce::Graphics& g, float position)
+{
+    const auto scale = std::max (1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    return std::round (position * scale) / scale;
+}
+
+juce::Rectangle<float> snapToPixels (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    const auto left = snapToPixels (g, area.getX()), top = snapToPixels (g, area.getY());
+    const auto right = snapToPixels (g, area.getRight()), bottom = snapToPixels (g, area.getBottom());
+    return { left, top, std::max (0.0f, right - left), std::max (0.0f, bottom - top) };
+}
 } // namespace phazite::ui

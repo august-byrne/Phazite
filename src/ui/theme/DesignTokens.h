@@ -335,6 +335,24 @@ namespace SectionTint
     inline constexpr float edge = 0.6f;
 } // namespace SectionTint
 
+// The piano roll's velocity lane (ui/pianoroll/PianoRollParts.h): each note's stem, this wide, centred on where the note
+// starts, with a ball this wide on top, centred on the stem (pixels).
+namespace VelocityTint
+{
+    inline constexpr float stem = 2.0f;
+    inline constexpr float ball = 6.0f;
+} // namespace VelocityTint
+
+// The piano roll's marks on slide and portamento notes (model/notes/NoteValues.h), in the note's ink at its start: a slide
+// note's triangle, pointing on as FL Studio's slide icon does, and a portamento note's rising stroke, each at most this big,
+// this far inside the note, the stroke this thick (pixels).
+namespace NoteMarkTint
+{
+    inline constexpr float size = 8.0f;
+    inline constexpr float inset = 3.0f;
+    inline constexpr float stroke = 1.5f;
+} // namespace NoteMarkTint
+
 // How the chord lane shows the song's chords (ui/playlist/ChordLane.h): each a block in a wash of the accent color,
 // stronger under the pointer, with a line where it starts, and a line in the warning color where the key changes
 // (alphas); the piano roll's wash over the rows of the notes of the chord there (an alpha of the accent color); the

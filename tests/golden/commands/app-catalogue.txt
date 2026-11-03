@@ -155,6 +155,8 @@ note.octaveDown | shift + cursor down
 note.lengthen | shift + cursor right
 note.shorten | shift + cursor left
 note.legato | ctrl + L
+note.slide
+note.portamento
 note.chop | ctrl + E
 note.selectAll | ctrl + A
 note.quantizeSettings | ctrl + shift + U

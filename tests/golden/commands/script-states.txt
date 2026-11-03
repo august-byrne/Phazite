@@ -93,6 +93,8 @@ after start:
   note.lengthen: off "Lengthen Notes"
   note.shorten: off "Shorten Notes"
   note.legato: off "Legato"
+  note.slide: off "Slide Note"
+  note.portamento: off "Portamento"
   note.chop: off "Chop"
   selected: nothing
   playhead at 0.000
@@ -483,6 +485,8 @@ after select the clip's notes:
   note.lengthen: on "Lengthen Notes"
   note.shorten: on "Shorten Notes"
   note.legato: on "Legato"
+  note.slide: on "Slide Note"
+  note.portamento: on "Portamento"
   note.chop: on "Chop"
   selected: 2 notes (60 at 0.000 for 0.500, 64 at 1.000 for 0.500)
 after note.transposeUp:
@@ -547,6 +551,8 @@ after edit.delete:
   note.lengthen: off "Lengthen Notes"
   note.shorten: off "Shorten Notes"
   note.legato: off "Legato"
+  note.slide: off "Slide Note"
+  note.portamento: off "Portamento"
   note.chop: off "Chop"
   selected: nothing
 after select nothing, and drop the notes' selection:

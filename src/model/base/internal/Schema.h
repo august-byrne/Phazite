@@ -515,6 +515,11 @@ inline const juce::Identifier noteVelocity { "velocity" };
 // On NOTE. bool, default false: it is muted.
 inline const juce::Identifier noteMute { "mute" };
 
+// On NOTE. bool, default false: it is a slide note, which plays nothing itself but glides the notes sounding as it starts to
+// its pitch over its length; and a portamento note, which glides in from the note played before it (NoteValues.h).
+inline const juce::Identifier noteSlide { "slide" };
+inline const juce::Identifier notePortamento { "portamento" };
+
 // Child of a MIDI CLIP: a controller event a recording took in with the notes, such as a sustain pedal or a bend, in MIDI's
 // own terms (no Tracktion numbers): its kind, controlIsController (a MIDI controller: controlNumber 0..127),
 // controlIsPitchWheel, controlIsChannelPressure, controlIsAftertouch (on the note controlNumber) or

@@ -39,6 +39,9 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     keyButton.setTitle ("Key");
     keyButton.onClick = [this] { showKeyMenu(); };
     transformButton.onClick = [this] { showTransformMenu(); };
+    notesMenuButton.setTooltip ("The notes' menu: slide and portamento notes, legato, chop, cut, copy and more for the selected notes. "
+                                "Shift+right-click on the notes shows it too");
+    notesMenuButton.onClick = [this] { grid->showMenu (&notesMenuButton); };
 
     // It runs its command, so the palette, the keys and the button agree. (Drum mode has no button: it comes
     // with drum tracks, and the grid's menu has it.)
@@ -49,7 +52,7 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     clipLabel.setFont (juce::FontOptions (TextSize::small));
 
     for (auto* c : std::initializer_list<juce::Component*> { &instrumentButton, &chordButton, &keyButton, &ghostButton, &transformButton,
-                                                             &clipLabel, keys.get(), grid.get(), velocityLane.get() })
+                                                             &notesMenuButton, &clipLabel, keys.get(), grid.get(), velocityLane.get() })
         addAndMakeVisible (c);
 
     addChildComponent (*transformBar);
@@ -464,6 +467,7 @@ void PianoRoll::resized()
         toolbar.removeFromLeft (Space::xs);
     }
 
+    notesMenuButton.setBounds (toolbar.removeFromLeft (toolbar.getHeight()));
     clipLabel.setBounds (toolbar.withTrimmedLeft (Space::s));
 
     const auto verticalBarWidth = getVerticalScrollBarWidth();

@@ -14,12 +14,15 @@ namespace phazite::engine
 class NoteSequence
 {
 public:
-    // A note as it plays: from its start to its end, in beats, at most to its clip's end.
+    // A note as it plays: from its start to its end, in beats, at most to its clip's end. A slide note plays nothing itself
+    // but a slide event at its start, which glides what sounds then to its pitch by its end; a portamento note starts with a
+    // portamento note on (devices/core/Processor.h).
     struct Note
     {
         double start = 0.0, end = 0.0;
         int pitch = 60;
         float velocity = 0.8f; // 0 to 1
+        bool slide = false, portamento = false;
     };
 
     // A controller's change (a pitch bend or a MIDI controller), at a beat.
@@ -31,7 +34,8 @@ public:
         float value = 0.0f; // as a device takes it (devices/core/Processor.h)
     };
 
-    // What happens at a beat, in the order played: a note's start or end, or a controller's change.
+    // What happens at a beat, in the order played: a note's start or end, a controller's change, or a slide (whose value is
+    // its length in beats, which the engine plays in seconds).
     struct Event
     {
         double beat = 0.0;
@@ -47,7 +51,7 @@ public:
     NoteSequence (std::vector<Note>, std::vector<Control>);
 
     const std::vector<Event>& getEvents() const noexcept { return events; } // in time order, ends before starts at a beat
-    const std::vector<Note>& getNotes() const noexcept { return notes; }    // by their starts
+    const std::vector<Note>& getNotes() const noexcept { return notes; }    // by their starts, without the slide notes
 
     // The first event at or after a beat.
     std::size_t findEvent (double beat) const noexcept;

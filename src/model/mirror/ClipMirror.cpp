@@ -76,6 +76,11 @@ namespace
 
             if (note->isMute() != (bool) noteState[schema::noteMute])
                 note->setMute (noteState[schema::noteMute], undo);
+
+            // Kept on Tracktion's note for the model's reading of it (getNoteData()); Tracktion makes nothing of them.
+            for (const auto& flag : { schema::noteSlide, schema::notePortamento })
+                if ((bool) note->state[flag] != (bool) noteState[flag])
+                    note->state.setProperty (flag, (bool) noteState[flag], undo);
         }
 
         for (const auto& [id, note] : byID)

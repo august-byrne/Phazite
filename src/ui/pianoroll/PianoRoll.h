@@ -103,7 +103,8 @@ private:
     bool transformOpen = false; // while its preview shows
 
     juce::TextButton instrumentButton, chordButton, keyButton, ghostButton { "Ghosts" }, transformButton { "Transform" };
-    juce::Label clipLabel; // which clips are shown, and where they are in the song
+    IconButton notesMenuButton { "Notes menu", Icon::menu }; // what a Shift+right-click on the notes shows: slide, portamento...
+    juce::Label clipLabel;                                   // which clips are shown, and where they are in the song
 
     std::unique_ptr<Keys> keys;
     std::unique_ptr<NoteGrid> grid;

@@ -552,7 +552,7 @@ void PianoRoll::NoteGrid::mouseDoubleClick (const juce::MouseEvent& e)
             roll.selection.selectOnly (clip);
 }
 
-void PianoRoll::NoteGrid::showMenu()
+void PianoRoll::NoteGrid::showMenu (juce::Component* target)
 {
     auto& registry = roll.getCommands();
     juce::PopupMenu menu;
@@ -560,12 +560,14 @@ void PianoRoll::NoteGrid::showMenu()
     menu.addSeparator();
     addCommandItems (menu, registry, { "edit.duplicate", "edit.delete", "edit.mute" });
     menu.addSeparator();
+    addCommandItems (menu, registry, { "note.slide", "note.portamento" });
+    menu.addSeparator();
     addCommandItems (menu, registry, { "edit.quantize", "note.legato", "note.chop" });
     addCommandItems (menu, registry, { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings" });
     menu.addSeparator();
     addCommandItems (menu, registry, { "note.selectAll", "edit.deselectAll" });
     menu.addSeparator();
     addCommandItems (menu, registry, { "pianoRoll.drumMode", "pianoRoll.ghostNotes", "pianoRoll.snapToKey" });
-    menu.showMenuAsync (juce::PopupMenu::Options());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target));
 }
 } // namespace phazite::ui

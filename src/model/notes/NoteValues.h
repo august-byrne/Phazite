@@ -27,6 +27,11 @@ struct NoteData
     int velocity = 100;
     bool muted = false;
 
+    // As FL Studio's: a slide note plays nothing itself, but glides the notes sounding as it starts to its pitch over its
+    // length (an 808's glide); a portamento note glides in from the note played before it. Phazite's own instruments play
+    // them; plug-ins get no slide notes, and portamento notes as plain ones.
+    bool slide = false, portamento = false;
+
     NoteRef getRef() const noexcept { return { clip, id }; }
     BeatPosition getEnd() const noexcept { return start + length; }
 };

@@ -58,4 +58,9 @@ private:
 
 // The palette of the LookAndFeel a component uses (the dark theme if that isn't Phazite's).
 const Palette& getPalette (const juce::Component&);
+
+// A place, or a rectangle's edges, moved to the nearest of the screen's pixels at the context's scale, so that a shape filled
+// there, or an outline drawn half its width inside it, isn't smeared across two pixels at its edges.
+float snapToPixels (juce::Graphics&, float);
+juce::Rectangle<float> snapToPixels (juce::Graphics&, juce::Rectangle<float>);
 } // namespace phazite::ui

@@ -61,8 +61,9 @@ namespace
                     const auto to = from + (double) child[schema::noteLength];
 
                     if (const auto playedFrom = std::max (from, start), playedTo = std::min (to, end); playedTo > playedFrom)
-                        notes.push_back (
-                            { playedFrom, playedTo, (int) child[schema::notePitch], (float) (int) child[schema::noteVelocity] / 127.0f });
+                        notes.push_back ({ playedFrom, playedTo, (int) child[schema::notePitch],
+                                           (float) (int) child[schema::noteVelocity] / 127.0f, (bool) child[schema::noteSlide],
+                                           (bool) child[schema::notePortamento] });
                 }
                 else if (child.hasType (schema::CONTROL))
                 {

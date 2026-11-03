@@ -789,7 +789,8 @@ void Engine::playModulators (const Plan::Strip& strip) noexcept
     state.noteStarts.clear();
 
     for (int i = 0; i < state.numEvents && state.noteStarts.size() < state.noteStarts.capacity(); ++i)
-        if (const auto& event = state.events[(size_t) i]; event.type == devices::NoteEvent::Type::noteOn)
+        if (const auto& event = state.events[(size_t) i];
+            event.type == devices::NoteEvent::Type::noteOn || event.type == devices::NoteEvent::Type::portamentoOn)
             state.noteStarts.push_back ({ event.sample, event.number, juce::roundToInt (event.value * 127.0f) });
 
     const std::span<const ModulatorNode::Point> points (controlPoints.data(), (size_t) numControlPoints);
@@ -903,9 +904,15 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     {
         const auto& event = events[state.nextEvent];
         const auto sample = std::clamp ((int) (std::llround (plan.tempo.toSamples (event.beat)) - transport.sample), 0, numSamples - 1);
-        state.addEvent ({ event.type, sample, event.number, event.value });
 
-        if (event.type == Type::noteOn)
+        // A slide's length, in beats in the sequence, as the instrument takes it: in seconds at the song's tempo.
+        const auto value =
+            event.type == Type::slide
+                ? (float) ((plan.tempo.toSamples (event.beat + (double) event.value) - plan.tempo.toSamples (event.beat)) / sampleRate)
+                : event.value;
+        state.addEvent ({ event.type, sample, event.number, value });
+
+        if (event.type == Type::noteOn || event.type == Type::portamentoOn)
             state.sounding.set ((size_t) event.number);
         else if (event.type == Type::noteOff)
             state.sounding.reset ((size_t) event.number);

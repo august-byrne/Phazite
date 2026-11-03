@@ -174,10 +174,30 @@ namespace
         return (juce::int64) makeID (edit);
     }
 
+    // What a note is besides its place, pitch and velocity: muted, a slide note or a portamento note, each written on its
+    // element only while it is (Schema.h).
+    struct NoteFlags
+    {
+        bool muted = false, slide = false, portamento = false;
+    };
+
+    NoteFlags getFlags (const NoteData& data)
+    {
+        return { data.muted, data.slide, data.portamento };
+    }
+
+    void writeFlags (juce::ValueTree& note, NoteFlags flags)
+    {
+        for (const auto& [property, on] : { std::pair { &schema::noteMute, flags.muted }, std::pair { &schema::noteSlide, flags.slide },
+                                            std::pair { &schema::notePortamento, flags.portamento } })
+            if (on)
+                note.setProperty (*property, true, nullptr);
+    }
+
     // Adds a note to a clip and to each of its aliases, with the ID wanted if no note of the clip has it, or else a new
     // one; and Tracktion's notes follow. Returns its ID, or none if the clip isn't the song's.
     NoteID addNoteState (te::MidiClip& clip, NoteID wanted, int pitch, te::BeatPosition start, te::BeatDuration length, int velocity,
-                         bool muted)
+                         NoteFlags flags)
     {
         const auto clipState = findClipState (clip);
 
@@ -197,10 +217,7 @@ namespace
             note.setProperty (schema::noteStart, start.inBeats(), nullptr);
             note.setProperty (schema::noteLength, length.inBeats(), nullptr);
             note.setProperty (schema::noteVelocity, velocity, nullptr);
-
-            if (muted)
-                note.setProperty (schema::noteMute, true, nullptr);
-
+            writeFlags (note, flags);
             alias.appendChild (note, getUndoManager (clip));
         }
 
@@ -343,13 +360,16 @@ te::BeatPosition getNoteStart (const te::MidiClip& clip, const te::MidiNote& not
 
 NoteData getNoteData (const te::MidiClip& clip, const te::MidiNote& note)
 {
+    // Its slide and portamento as the mirror keeps them on Tracktion's note (ClipMirror.cpp).
     return { getClipID (clip),
              getNoteID (note),
              note.getNoteNumber(),
              fromTracktion (getNoteStart (clip, note)),
              fromTracktion (note.getLengthBeats()),
              note.getVelocity(),
-             note.isMute() };
+             note.isMute(),
+             (bool) note.state[schema::noteSlide],
+             (bool) note.state[schema::notePortamento] };
 }
 
 te::Scale::ScaleType toTracktion (Scale scale)
@@ -461,22 +481,22 @@ bool hasSelectedNotes (const Selection& selection)
 //==============================================================================
 namespace
 {
-    // Adds a note at a song beat, as addNote() says, muted or not, with the ID wanted if no note of the clip has it.
+    // Adds a note at a song beat, as addNote() says, with its flags, with the ID wanted if no note of the clip has it.
     te::MidiNote* addNoteTo (te::MidiClip& clip, NoteID wanted, int pitch, te::BeatPosition start, te::BeatDuration length, int velocity,
-                             bool muted)
+                             NoteFlags flags)
     {
         start = std::max (start, getStartOf (clip));
         length = std::max (length, toTracktion (getMinimumNoteLength()));
         growToHold (clip, start + length);
         const auto id =
-            addNoteState (clip, wanted, clampPitch (pitch), toClipBeat (clip, start), length, juce::jlimit (1, 127, velocity), muted);
+            addNoteState (clip, wanted, clampPitch (pitch), toClipBeat (clip, start), length, juce::jlimit (1, 127, velocity), flags);
         return id.isValid() ? findNote (clip, id) : nullptr;
     }
 } // namespace
 
 te::MidiNote* addNote (te::MidiClip& clip, int pitch, te::BeatPosition start, te::BeatDuration length, int velocity)
 {
-    return addNoteTo (clip, {}, pitch, start, length, velocity, false);
+    return addNoteTo (clip, {}, pitch, start, length, velocity, {});
 }
 
 void moveNote (te::MidiClip& clip, te::MidiNote& note, te::BeatPosition start, int pitch)
@@ -571,6 +591,51 @@ void toggleNotesMuted (const std::vector<ClipNote>& notes)
         });
 }
 
+namespace
+{
+    bool hasFlag (const ClipNote& n, const juce::Identifier& flag)
+    {
+        return (bool) n.note->state[flag];
+    }
+
+    void toggleNoteFlags (const std::vector<ClipNote>& notes, const juce::Identifier& flag)
+    {
+        toggleAll (
+            withoutAliasCopies (notes), [&flag] (const ClipNote& n) { return hasFlag (n, flag); },
+            [&flag] (const ClipNote& n, bool on)
+            {
+                changeNote (*n.clip, getNoteID (*n.note),
+                            [on, &flag] (juce::ValueTree& note, juce::UndoManager* undo)
+                            {
+                                if (on)
+                                    note.setProperty (flag, true, undo);
+                                else
+                                    note.removeProperty (flag, undo);
+                            });
+            });
+    }
+} // namespace
+
+bool areAllNotesSlides (const std::vector<ClipNote>& notes)
+{
+    return areAllOn (notes, [] (const ClipNote& n) { return hasFlag (n, schema::noteSlide); });
+}
+
+void toggleNotesSlide (const std::vector<ClipNote>& notes)
+{
+    toggleNoteFlags (notes, schema::noteSlide);
+}
+
+bool areAllNotesPortamento (const std::vector<ClipNote>& notes)
+{
+    return areAllOn (notes, [] (const ClipNote& n) { return hasFlag (n, schema::notePortamento); });
+}
+
+void toggleNotesPortamento (const std::vector<ClipNote>& notes)
+{
+    toggleNoteFlags (notes, schema::notePortamento);
+}
+
 void setNoteVelocities (const std::vector<ClipNote>& notes, int velocity)
 {
     const auto clamped = juce::jlimit (1, 127, velocity);
@@ -645,10 +710,7 @@ void setClipNotes (te::MidiClip& clip, const std::vector<NoteData>& notes)
             note.setProperty (schema::noteStart, (toTracktion (data.start) - contentStart).inBeats(), nullptr);
             note.setProperty (schema::noteLength, data.length.inBeats(), nullptr);
             note.setProperty (schema::noteVelocity, juce::jlimit (1, 127, data.velocity), nullptr);
-
-            if (data.muted)
-                note.setProperty (schema::noteMute, true, nullptr);
-
+            writeFlags (note, getFlags (data));
             alias.appendChild (note, undo);
         }
     }
@@ -673,7 +735,7 @@ std::vector<ClipNote> replaceNotes (te::Edit& edit, const std::vector<ClipNote>&
         // A note that replaces one of the old ones (a quantized or transposed note, a chopped note's first piece) keeps
         // that one's ID, if no other note of the clip has it now; a copy, whose original is still there, gets its own.
         if (auto* note =
-                addNoteTo (*clip, data.id, data.pitch, toTracktion (data.start), toTracktion (data.length), data.velocity, data.muted))
+                addNoteTo (*clip, data.id, data.pitch, toTracktion (data.start), toTracktion (data.length), data.velocity, getFlags (data)))
             added.push_back ({ clip, note });
     }
 
@@ -1123,6 +1185,32 @@ void addNoteCommands (CommandRegistry& registry, Selection& selection, std::func
                     { replaceSelectedNotes (selection, [] (std::vector<NoteData> notes) { return legato (std::move (notes)); }); },
                     .isEnabled = [&selection] { return hasSelectedNotes (selection); },
                     .undoTarget = undoTarget,
+                    .keyPriority = Command::notePriority });
+
+    // Slide and portamento notes, as FL Studio has them.
+    registry.add ({ .id = "note.slide",
+                    .name = "Slide Note",
+                    .category = "Note",
+                    .description = "Makes the selected notes slide notes, which play nothing themselves but glide the notes sounding as "
+                                   "they start to their pitch over their length, as an 808 glides; or plain notes again. Phazite's own "
+                                   "instruments play them.",
+                    .synonyms = { "glide", "808", "pitch slide", "bend" },
+                    .perform = [&selection] { toggleNotesSlide (getSelectedNotes (selection)); },
+                    .isEnabled = [&selection] { return hasSelectedNotes (selection); },
+                    .undoTarget = undoTarget,
+                    .isTicked = [&selection] { return areAllNotesSlides (getSelectedNotes (selection)); },
+                    .keyPriority = Command::notePriority });
+
+    registry.add ({ .id = "note.portamento",
+                    .name = "Portamento",
+                    .category = "Note",
+                    .description = "Makes the selected notes glide in from the note played before each, or start on their own pitch "
+                                   "again. Phazite's own instruments play the glide, over their Glide time.",
+                    .synonyms = { "porta", "glide", "legato", "slide in" },
+                    .perform = [&selection] { toggleNotesPortamento (getSelectedNotes (selection)); },
+                    .isEnabled = [&selection] { return hasSelectedNotes (selection); },
+                    .undoTarget = undoTarget,
+                    .isTicked = [&selection] { return areAllNotesPortamento (getSelectedNotes (selection)); },
                     .keyPriority = Command::notePriority });
 
     registry.add ({ .id = "note.chop",

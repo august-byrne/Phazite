@@ -295,6 +295,7 @@ private:
         bool held = false, sustained = false;
         float velocity = 0.0f, velocityGain = 1.0f, random = 0.0f;
         float pitch = 60.0f, target = 60.0f; // in semitones, gliding to the target
+        float slidePerSample = 0.0f;         // while it slides there evenly (a slide or portamento note): semitones a sample
         std::uint64_t started = 0;
         std::array<OscillatorRun, numOscillators> oscillators;
         dsp::Oscillator sub;
@@ -321,6 +322,7 @@ private:
     static constexpr double stealFadeSeconds = 0.003; // a voice taken for another note fades out over this
     static constexpr double stopFadeSeconds = 0.01;   // a note that had only just begun when playback stopped, over this
     static constexpr double justBegunSeconds = 0.1;   // how young that is
+    static constexpr double portamentoSeconds = 0.1;  // a portamento note's glide while Glide is off
     bool songPlaying = false;                         // as the block being processed began
 
     // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
@@ -348,7 +350,8 @@ private:
     Shown shown;
 
     void handle (const NoteEvent&, std::span<const float> parameters);
-    void startNote (int note, float velocity, std::span<const float> parameters);
+    void startNote (int note, float velocity, std::span<const float> parameters, bool portamento = false);
+    void slideTo (int note, float seconds); // every sounding voice, evenly
     void stopNote (int note, std::span<const float> parameters);
     void startVoice (Voice&);
     void releaseVoice (Voice&);

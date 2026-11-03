@@ -510,6 +510,34 @@ private:
     bool ringing = false;
 };
 
+// An instrument that keeps each note event it is given, at its sample from the first block's start.
+class EventRecorder final : public dev::Processor
+{
+public:
+    static inline const dev::DeviceInfo info { .typeID = "testEventRecorder",
+                                               .name = "Event Recorder",
+                                               .kind = dev::DeviceKind::instrument };
+
+    std::vector<dev::NoteEvent> events;
+
+    void prepare (double, int) override {}
+    void reset() override {}
+
+    void process (const dev::ProcessContext& context) override
+    {
+        for (auto event : context.events)
+        {
+            event.sample += done;
+            events.push_back (event);
+        }
+
+        done += context.numSamples;
+    }
+
+private:
+    int done = 0;
+};
+
 // A track of a plan: its notes, into one instrument, which is made and prepared for it.
 engine::Plan::Strip makeTrack (std::int64_t id, const dev::DeviceInfo& info, std::unique_ptr<dev::Processor> instrument,
                                std::vector<engine::NoteSequence::Note> notes, int maximumBlockSize)
@@ -567,6 +595,38 @@ TEST_CASE ("The engine plays a track's notes on their samples, and ends what sou
     CHECK (played.getSample (0, 47999) == 0.0f); // the loop's last sample: the note ends there
     CHECK (played.getSample (0, 48000) == 0.5f); // and starts again with the loop
     CHECK (played.getSample (1, 48000) == 0.5f);
+}
+
+TEST_CASE ("A slide note reaches the instrument as a slide to its pitch over its length in seconds, a portamento note as one gliding in")
+{
+    auto plan = makeClickPlan();
+    plan->metronome = false;
+    auto recorder = std::make_unique<EventRecorder>();
+    auto* recorded = recorder.get();
+
+    // C4 from beat 0 to 4, a slide to E4 at beat 1 a beat long, and G4 a portamento note at beat 4; a beat is 24000 samples.
+    plan->strips.push_back (makeTrack (1, EventRecorder::info, std::move (recorder),
+                                       { { 0.0, 4.0, 60, 0.8f }, { 1.0, 2.0, 64, 0.8f, true }, { 4.0, 5.0, 67, 0.8f, false, true } },
+                                       blockSize));
+    plan->strips.push_back (makeMaster (*plan, blockSize));
+
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (std::move (plan));
+    player.render (24000 * 6);
+
+    using Type = dev::NoteEvent::Type;
+    std::vector<dev::NoteEvent> events;
+    std::copy_if (recorded->events.begin(), recorded->events.end(), std::back_inserter (events),
+                  [] (const dev::NoteEvent& event) { return event.type != Type::allNotesOff; });
+
+    REQUIRE (events.size() == 5);
+    CHECK ((events[0].type == Type::noteOn && events[0].number == 60 && events[0].sample == 0));
+    CHECK ((events[1].type == Type::slide && events[1].number == 64 && events[1].sample == 24000));
+    CHECK (events[1].value == doctest::Approx (0.5f)); // a beat at 120 BPM, in seconds
+    CHECK ((events[2].type == Type::noteOff && events[2].number == 60 && events[2].sample == 96000));
+    CHECK ((events[3].type == Type::portamentoOn && events[3].number == 67 && events[3].sample == 96000));
+    CHECK ((events[4].type == Type::noteOff && events[4].number == 67 && events[4].sample == 120000));
 }
 
 TEST_CASE ("The engine played from where one note ends and the next starts plays the next alone, however its beat rounds")

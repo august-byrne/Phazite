@@ -92,7 +92,7 @@ struct PianoRoll::NoteGrid : public juce::Component
     void addNoteAt (const juce::MouseEvent&); // or a chord, with a chord stamp chosen
     void eraseOrMuteAt (juce::Point<float>, bool erase);
     void paintAt (const juce::MouseEvent&);
-    void showMenu();
+    void showMenu (juce::Component* target = nullptr); // the notes' menu, at the pointer or under the toolbar's button
     void updateHint (juce::Point<float>);
     void cancelGesture(); // when the tool changes mid-drag
 };

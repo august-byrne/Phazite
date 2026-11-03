@@ -17,6 +17,7 @@ namespace
         switch (event.type)
         {
             case Type::noteOn:
+            case Type::portamentoOn: // a plug-in plays it as a plain note, as FL Studio's portamento notes reach plug-ins
                 bytes[0] = 0x90;
                 bytes[1] = byte (event.number);
                 bytes[2] = byte (std::max (1, juce::roundToInt (event.value * 127.0f)));
@@ -44,6 +45,8 @@ namespace
                 bytes[1] = 123;
                 bytes[2] = 0;
                 return 3;
+            case Type::slide: // MIDI has no slide of one note to another
+                return 0;
         }
 
         return 0;

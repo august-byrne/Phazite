@@ -487,3 +487,32 @@ TEST_CASE ("The synth's sustain pedal holds notes until it lifts, and it plays t
     play (first, values, 24000, { { NoteEvent::Type::allNotesOff, 0, 0, 0.0f } }); // and the 200 ms release passes
     CHECK (first.getActiveVoices() == 0);
 }
+
+TEST_CASE ("A slide note glides the sounding notes to its pitch evenly over its length, and a portamento note glides in")
+{
+    // C4, with a slide to C5 a quarter of a second in, half a second long: half way there half way through, there after.
+    const auto values = getSineValues();
+    Synth slid;
+    slid.prepare (testRate, testBlockSize);
+    auto played = play (slid, values, 72000, { noteOn (0, 60), { NoteEvent::Type::slide, 12000, 72, 0.5f } });
+    CHECK (measureFrequency (played, 2400, 11000) == doctest::Approx (261.63).epsilon (0.002));
+    CHECK (measureFrequency (played, 23000, 25000) == doctest::Approx (261.63 * std::sqrt (2.0)).epsilon (0.03));
+    CHECK (measureFrequency (played, 40000, 72000) == doctest::Approx (523.25).epsilon (0.002));
+    CHECK (slid.getActiveVoices() == 1); // the slide played no note of its own
+
+    // A portamento note after C4 starts there and glides up to its own pitch in a tenth of a second (Glide is off). In mono
+    // mode, so that C4's release doesn't sound with it.
+    auto mono = values;
+    mono[Synth::voiceMode] = 1.0f;
+    Synth porta;
+    porta.prepare (testRate, testBlockSize);
+    played = play (porta, mono, 72000, { noteOn (0, 60), noteOff (24000, 60), { NoteEvent::Type::portamentoOn, 24000, 72, 1.0f } });
+    CHECK (measureFrequency (played, 24000, 25200) < 380.0);
+    CHECK (measureFrequency (played, 36000, 72000) == doctest::Approx (523.25).epsilon (0.002));
+
+    // A plain note after C4 starts on its own pitch.
+    Synth plain;
+    plain.prepare (testRate, testBlockSize);
+    played = play (plain, mono, 48000, { noteOn (0, 60), noteOff (24000, 60), noteOn (24000, 72) });
+    CHECK (measureFrequency (played, 24480, 30000) == doctest::Approx (523.25).epsilon (0.002));
+}

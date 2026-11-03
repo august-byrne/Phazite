@@ -77,6 +77,12 @@ bool areAllNotesMuted (const std::vector<ClipNote>&);
 void toggleNotesMuted (const std::vector<ClipNote>&); // mutes them, or unmutes them if they all are
 void setNoteVelocities (const std::vector<ClipNote>&, int velocity);
 
+// Slide and portamento notes (NoteValues.h), switched on for all of them, or off if all are, in the caller's undo step.
+bool areAllNotesSlides (const std::vector<ClipNote>&);
+void toggleNotesSlide (const std::vector<ClipNote>&);
+bool areAllNotesPortamento (const std::vector<ClipNote>&);
+void toggleNotesPortamento (const std::vector<ClipNote>&);
+
 // Raises or lowers each note's velocity by the same amount, as one undo step, "Change Velocity" (Alt and the wheel).
 void changeNoteVelocities (const std::vector<ClipNote>&, int change);
 

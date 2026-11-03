@@ -17,9 +17,14 @@ struct NoteEvent
     {
         noteOn,
         noteOff,
-        pitchBend,  // value: from -1 to 1
-        controller, // number: the controller; value: from 0 to 1
-        allNotesOff // every note lets go: playback stopped or jumped; when it stopped, those that only just began stop at once
+        pitchBend,   // value: from -1 to 1
+        controller,  // number: the controller; value: from 0 to 1
+        allNotesOff, // every note lets go: playback stopped or jumped; when it stopped, those that only just began stop at once
+        // A note on that glides in from the note played before it, as FL Studio's portamento notes do (an instrument
+        // without glides plays it as a note on); and every sounding note gliding to the pitch number, evenly, over value
+        // seconds, as FL Studio's slide notes make them (an instrument without glides ignores it).
+        portamentoOn,
+        slide
     };
 
     Type type = Type::noteOn;

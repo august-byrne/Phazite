@@ -343,7 +343,9 @@ void DrumSampler::process (const ProcessContext& block)
             const auto& event = block.events[next];
             const auto pad = event.number - firstNote;
 
-            if (event.type == NoteEvent::Type::noteOn && juce::isPositiveAndBelow (pad, numPads))
+            const auto isNoteOn = event.type == NoteEvent::Type::noteOn || event.type == NoteEvent::Type::portamentoOn;
+
+            if (isNoteOn && juce::isPositiveAndBelow (pad, numPads))
                 hit (pad, event.value, values);
 
             // Playback stopped: hits that had only just begun fade out, so that nothing the song began just before Stop

@@ -240,7 +240,7 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
             if (roll.drumMode)
                 g.fillPath (makeDiamond (bounds));
             else
-                g.fillRoundedRectangle (bounds, noteCorner);
+                g.fillRoundedRectangle (snapToPixels (g, bounds), noteCorner);
         }
     }
 
@@ -348,18 +348,44 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
             continue;
         }
 
+        // On the screen's pixels, its outline inside its edges, so that both are sharp.
+        const auto shape = snapToPixels (g, bounds);
+        const auto stroke = isSelected ? 2.0f : 1.0f;
         g.setColour (fill);
-        g.fillRoundedRectangle (bounds, noteCorner);
+        g.fillRoundedRectangle (shape, noteCorner);
         g.setColour (outline);
-        g.drawRoundedRectangle (bounds, noteCorner, isSelected ? 2.0f : 1.0f);
+        g.drawRoundedRectangle (shape.reduced (stroke / 2.0f), noteCorner, stroke);
 
-        // The note's name, where it fits.
-        if (bounds.getHeight() >= 11.0f && bounds.getWidth() >= 30.0f)
+        // A slide note's triangle or a portamento note's rising stroke at its start, where it fits; then its name.
+        const auto ink = getInkFor (fill).withAlpha (0.85f);
+        auto text = bounds.reduced (3.0f, 0.0f);
+
+        if (const auto size = std::min ({ NoteMarkTint::size, bounds.getHeight() - 4.0f, bounds.getWidth() - 2.0f * NoteMarkTint::inset });
+            (note.slide || note.portamento) && size >= 4.0f)
         {
-            g.setColour (getInkFor (fill).withAlpha (0.85f));
+            const auto mark =
+                juce::Rectangle<float> (size, size).withPosition (bounds.getX() + NoteMarkTint::inset, bounds.getCentreY() - size / 2.0f);
+            g.setColour (ink);
+
+            if (note.slide)
+            {
+                juce::Path triangle;
+                triangle.addTriangle (mark.getTopLeft(), mark.getBottomLeft(), { mark.getRight(), mark.getCentreY() });
+                g.fillPath (triangle);
+            }
+            else
+            {
+                g.drawLine ({ mark.getBottomLeft(), mark.getTopRight() }, NoteMarkTint::stroke);
+            }
+
+            text = text.withTrimmedLeft (size + NoteMarkTint::inset);
+        }
+
+        if (bounds.getHeight() >= 11.0f && text.getWidth() >= 24.0f)
+        {
+            g.setColour (ink);
             g.setFont (juce::FontOptions (std::min (TextSize::small, bounds.getHeight() - 2.0f)));
-            g.drawText (juce::MidiMessage::getMidiNoteName (note.pitch, true, true, 4), bounds.reduced (3.0f, 0.0f),
-                        juce::Justification::centredLeft, false);
+            g.drawText (juce::MidiMessage::getMidiNoteName (note.pitch, true, true, 4), text, juce::Justification::centredLeft, false);
         }
     }
 
@@ -372,18 +398,19 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
             continue;
 
         g.setColour (p.accent.withAlpha (0.45f));
+        const auto shape = snapToPixels (g, bounds);
 
         if (roll.drumMode)
             g.fillPath (makeDiamond (bounds));
         else
-            g.fillRoundedRectangle (bounds, noteCorner);
+            g.fillRoundedRectangle (shape, noteCorner);
 
         g.setColour (p.accent);
 
         if (roll.drumMode)
             g.strokePath (makeDiamond (bounds), juce::PathStrokeType (1.5f));
         else
-            g.drawRoundedRectangle (bounds, noteCorner, 1.5f);
+            g.drawRoundedRectangle (shape.reduced (0.75f), noteCorner, 1.5f);
     }
 }
 

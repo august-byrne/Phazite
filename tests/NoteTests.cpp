@@ -506,3 +506,45 @@ TEST_CASE ("The piano roll's key menu, Alt and the wheel, and an applied transfo
     CHECK (replaced.front().note->getNoteNumber() == 67);
     CHECK (undo.getUndoDescription() == juce::String ("Transpose Notes"));
 }
+
+TEST_CASE ("Slide and portamento notes are switched by their commands, each one undo step, and their copies keep them")
+{
+    Notes n;
+    auto& c = n.add (60, 4.0, 2.0);
+    auto& e = n.add (64, 5.0, 1.0);
+    n.select ({ &e });
+    CHECK_FALSE (n.registry.find ("note.slide")->isTicked());
+
+    // A slide note, saved on the song's note as well as shown.
+    REQUIRE (n.registry.invoke ("note.slide"));
+    CHECK (n.registry.find ("note.slide")->isTicked());
+    CHECK (phazite::getNoteData (*n.clip, e).slide);
+    CHECK_FALSE (phazite::getNoteData (*n.clip, e).portamento);
+    CHECK_FALSE (phazite::getNoteData (*n.clip, c).slide);
+    CHECK (phazite::describeUndo (n.edit.get()) == juce::String ("Undo Slide Note"));
+
+    // Portamento on both; with one of them already, it goes on for the other.
+    n.select ({ &c, &e });
+    REQUIRE (n.registry.invoke ("note.portamento"));
+    CHECK (n.registry.find ("note.portamento")->isTicked());
+    CHECK (phazite::getNoteData (*n.clip, c).portamento);
+    CHECK_FALSE (n.registry.find ("note.slide")->isTicked()); // not every selected note is a slide note
+
+    // Copies keep them.
+    n.select ({ &e });
+    REQUIRE (n.registry.invoke ("edit.duplicate"));
+    auto copies = 0;
+
+    for (auto* note : n.clip->getSequence().getNotes())
+        if (const auto data = phazite::getNoteData (*n.clip, *note); data.pitch == 64 && data.slide && data.portamento)
+            ++copies;
+
+    CHECK (copies == 2);
+
+    // Undone, step by step.
+    phazite::undo (*n.edit);
+    phazite::undo (*n.edit);
+    CHECK_FALSE (phazite::getNoteData (*n.clip, c).portamento);
+    phazite::undo (*n.edit);
+    CHECK_FALSE (phazite::getNoteData (*n.clip, e).slide);
+}
