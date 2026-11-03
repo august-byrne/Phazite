@@ -123,17 +123,27 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
         setActiveEditor (&editor);
     };
 
-    // The views move between the areas by their tabs (Panels.h).
-    for (auto* area : { &upperArea, &lowerArea })
+    // The views move between the areas by their tabs (Panels.h), and two areas side by side keep their shares of their row.
+    for (auto* area : getAreas())
     {
-        area->onMove = [this] (View view, Panel to, int index) { moveView (view, to, index); };
+        area->onMove = [this] (View view, ViewPlace to, int index) { moveView (view, to, index); };
+        area->onPlaceBeside = [this] (View view, Panel row, bool left) { placeViewBeside (view, row, left); };
         area->onReset = [this] { commands.invoke ("view.resetViewPlaces"); };
+    }
+
+    for (auto* row : { &upperRow, &lowerRow })
+    {
+        row->onShareChanged = [this, row]
+        {
+            panels.rowShares[row == &upperRow ? 0 : 1] = row->share;
+            settings.set (Settings::panelLayout, panels.toText());
+        };
     }
 
     clipEditor.onEditorChanged = [this]
     {
-        upperArea.refreshTabs();
-        lowerArea.refreshTabs();
+        for (auto* area : getAreas())
+            area->refreshTabs();
     };
 
     // Enter or a double-click in the browser, and the plug-in picker.
@@ -146,7 +156,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
                                                              &inspector, &statusBar, &browserButtons, &inspectorButtons })
         addAndMakeVisible (c);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &upperArea, &editorDivider, &lowerArea, &songButtons, &editorButtons })
+    for (auto* c : std::initializer_list<juce::Component*> { &upperRow, &editorDivider, &lowerRow, &songButtons, &editorButtons })
         centre.addAndMakeVisible (c);
 
     centre.onResize = [this] { layOutCentre(); };
@@ -156,7 +166,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     browserDivider.onDrag = [this] (int distance) { dragDivider (Panel::browser, distance); };
     inspectorDivider.onDragStart = [this] { sizeAtDragStart = inspector.getWidth(); };
     inspectorDivider.onDrag = [this] (int distance) { dragDivider (Panel::inspector, distance); };
-    editorDivider.onDragStart = [this] { sizeAtDragStart = lowerArea.getHeight(); };
+    editorDivider.onDragStart = [this] { sizeAtDragStart = lowerRow.getHeight(); };
     editorDivider.onDrag = [this] (int distance) { dragDivider (Panel::editor, distance); };
 
     // Clicking in an editor makes it the one the time line's commands act on; so does the keyboard focus
@@ -189,6 +199,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     playlist.setScrollingContinuously (settings.get (Settings::scrollContinuously));
     pianoRoll.setScrollingContinuously (settings.get (Settings::scrollContinuously));
     panels.setFromText (settings.get (Settings::panelLayout));
+    upperRow.share = panels.rowShares[0];
+    lowerRow.share = panels.rowShares[1];
     viewPlaces = ViewPlaces::fromString (settings.get (Settings::viewPlaces));
     placeViews();
     updateLayout();
@@ -262,13 +274,18 @@ void AppShell::setLayout (Layout layout)
 
 ViewArea& AppShell::getAreaOf (ViewTab tab)
 {
-    return upperArea.holds (tab) ? upperArea : lowerArea;
+    return upperRow.holds (tab) ? upperRow.getAreaOf (tab) : lowerRow.getAreaOf (tab);
+}
+
+std::array<ViewArea*, 4> AppShell::getAreas()
+{
+    return { &upperRow.getArea (0), &upperRow.getArea (1), &lowerRow.getArea (0), &lowerRow.getArea (1) };
 }
 
 bool AppShell::takesRoom (Panel panel) const
 {
-    // An area without views takes none, as if it were hidden.
-    if ((panel == Panel::song && upperArea.isEmpty()) || (panel == Panel::editor && lowerArea.isEmpty()))
+    // A row without views takes none, as if it were hidden.
+    if ((panel == Panel::song && upperRow.isEmpty()) || (panel == Panel::editor && lowerRow.isEmpty()))
         return false;
 
     return panels.takesRoom (panel);
@@ -318,16 +335,52 @@ void AppShell::revealView (ViewTab tab)
 
 void AppShell::placeViews()
 {
-    upperArea.setViews (viewPlaces.upper);
-    lowerArea.setViews (viewPlaces.lower);
+    upperRow.setViews (viewPlaces.upper);
+    lowerRow.setViews (viewPlaces.lower);
+
+    // Where a view dragged over an area can go besides its tabs: beside it while its row has room, and into a row without
+    // views (so that a row emptied can be filled again).
+    for (auto* area : getAreas())
+    {
+        const auto row = area->getArea();
+        area->setDropSides (viewPlaces.hasRoomBeside (row), viewPlaces.isEmpty (row == Panel::song ? Panel::editor : Panel::song));
+    }
 }
 
-void AppShell::moveView (View view, Panel area, int index)
+void AppShell::moveView (View view, ViewPlace place, int index)
 {
-    viewPlaces.move (view, area, index);
+    viewPlaces.move (view, place, index);
     settings.set (Settings::viewPlaces, viewPlaces.toString());
     placeViews();
+    revealMoved (view);
+}
 
+void AppShell::placeViewBeside (View view, Panel row, bool left)
+{
+    viewPlaces.placeBeside (view, row, left);
+    settings.set (Settings::viewPlaces, viewPlaces.toString());
+    placeViews();
+    revealMoved (view);
+}
+
+void AppShell::bringViewsBack (Panel row)
+{
+    // Its own views, as they start (the upper row's the playlist and the mixer, the lower one's the clip editor and the
+    // devices), into its area, from wherever they went.
+    if (! viewPlaces.isEmpty (row))
+        return;
+
+    const ViewPlaces start;
+
+    for (const auto view : start.getViews ({ row, 0 }))
+        viewPlaces.move (view, { row, 0 });
+
+    settings.set (Settings::viewPlaces, viewPlaces.toString());
+    placeViews();
+}
+
+void AppShell::revealMoved (View view)
+{
     // It shows where it went: the devices on the page they showed.
     switch (view)
     {
@@ -464,12 +517,12 @@ juce::Component& AppShell::getPanel (Panel which)
         case Panel::browser:
             return browser;
         case Panel::song:
-            return upperArea;
+            return upperRow;
         case Panel::inspector:
             return inspector;
         case Panel::editor:
         default:
-            return lowerArea;
+            return lowerRow;
     }
 }
 
@@ -508,7 +561,17 @@ std::unique_ptr<AppShell::PanelWindow>& AppShell::getWindow (Panel which)
 
 void AppShell::togglePanel (Panel panel)
 {
-    panels.toggle (panel);
+    // A row left without views shows with its own views brought back to it, rather than its switch doing nothing.
+    if ((panel == Panel::song || panel == Panel::editor) && viewPlaces.isEmpty (panel))
+    {
+        bringViewsBack (panel);
+        panels.show (panel);
+    }
+    else
+    {
+        panels.toggle (panel);
+    }
+
     updateLayout();
 }
 
@@ -578,9 +641,9 @@ void AppShell::updateLayout()
         inspector.setVisible (inspectorDocked);
 
     if (editorWindow == nullptr)
-        lowerArea.setVisible (editorDocked);
+        lowerRow.setVisible (editorDocked);
 
-    upperArea.setVisible (songDocked);
+    upperRow.setVisible (songDocked);
     centre.setVisible (centreDocked);
     browserDivider.setVisible (browserDocked && centreDocked);
     inspectorDivider.setVisible (inspectorDocked && centreDocked);
@@ -759,16 +822,16 @@ void AppShell::layOutCentre()
 
     if (songDocked && editorDocked)
     {
-        lowerArea.setBounds (area.removeFromBottom (panels.getEditorHeight (area.getHeight())));
+        lowerRow.setBounds (area.removeFromBottom (panels.getEditorHeight (area.getHeight())));
         editorDivider.setBounds (area.removeFromBottom (Shell::dividerSize));
     }
     else if (editorDocked)
     {
-        lowerArea.setBounds (area);
+        lowerRow.setBounds (area);
     }
 
     if (songDocked)
-        upperArea.setBounds (area);
+        upperRow.setBounds (area);
 
     placePanelButtons();
 }
@@ -982,8 +1045,8 @@ void AppShell::refreshShortcutTexts()
 {
     titleBar.refreshTooltips();
     topBar.refreshTooltips();
-    upperArea.refreshTooltips (commands);
-    lowerArea.refreshTooltips (commands);
+    for (auto* area : getAreas())
+        area->refreshTooltips (commands);
 
     for (const auto panel : allPanels)
         getButtons (panel).refreshTooltips();

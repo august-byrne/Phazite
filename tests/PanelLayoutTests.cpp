@@ -119,8 +119,11 @@ TEST_CASE ("The panels' layout goes into the settings as text, and back")
     layout.browserWidth = 300;
     layout.inspectorWidth = 200;
     layout.editorShare = 0.6;
+    layout.rowShares = { 0.3, 0.5 };
     const auto text = layout.toText();
-    CHECK (text == juce::String ("shown=song,editor,inspector maximized=editor browser=300 inspector=200 editor=0.600"));
+    CHECK (text
+           == juce::String ("shown=song,editor,inspector maximized=editor browser=300 inspector=200 editor=0.600 upperSplit=0.300 "
+                            "lowerSplit=0.500"));
 
     PanelLayout read;
     read.setFromText (text);

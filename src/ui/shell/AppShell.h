@@ -113,8 +113,8 @@ private:
     DevicesView devices;                                                      // the selected track's
     ClipEditorView clipEditor { projectContext, pianoRoll, audioClipEditor }; // the selected clip's
     ViewPlaces viewPlaces;                                                    // which views each area holds; the settings keep it
-    ViewArea upperArea { Panel::song, { playlist, mixer, clipEditor, devices } };
-    ViewArea lowerArea { Panel::editor, { playlist, mixer, clipEditor, devices } };
+    ViewRow upperRow { Panel::song, { playlist, mixer, clipEditor, devices } };
+    ViewRow lowerRow { Panel::editor, { playlist, mixer, clipEditor, devices } };
     StatusBar statusBar;
     Guide guide;     // the hint bar's next step for newcomers
     Lessons lessons; // Help > Lessons, in the lesson card while one runs
@@ -170,14 +170,18 @@ private:
     void updateAudioAlert();
     void changeListenerCallback (juce::ChangeBroadcaster*) override { updateAudioAlert(); } // the audio devices changed
 
-    ViewArea& getAreaOf (ViewTab);               // the area that holds it
-    bool takesRoom (Panel) const;                // PanelLayout::takesRoom(), and for the two areas, holding a view
-    void showView (ViewTab);                     // in its area; in the lower panel, or the panel hidden if it shows it, as FL Studio's F7
-    void revealView (ViewTab);                   // in its area, even if it shows already
-    void moveView (View, Panel area, int index); // into that area (ViewPlaces::move()), where it shows
-    void resetViewPlaces();                      // every view back where it starts
-    void placeViews();                           // in the areas, as viewPlaces says
-    void showSelectedDevice();                   // in the Devices view (the "device.show" command)
+    ViewArea& getAreaOf (ViewTab);              // the area that holds it
+    bool takesRoom (Panel) const;               // PanelLayout::takesRoom(), and for the two areas, holding a view
+    void showView (ViewTab);                    // in its area; in the lower panel, or the panel hidden if it shows it, as FL Studio's F7
+    void revealView (ViewTab);                  // in its area, even if it shows already
+    void moveView (View, ViewPlace, int index); // into that area (ViewPlaces::move()), where it shows
+    void placeViewBeside (View, Panel row, bool left); // in an area of its own beside a row's (ViewPlaces::placeBeside())
+    void revealMoved (View);                           // where it went
+    void bringViewsBack (Panel row);                   // to a row without views, as it is shown: its own, as they start
+    std::array<ViewArea*, 4> getAreas();               // the upper row's two, then the lower one's
+    void resetViewPlaces();                            // every view back where it starts
+    void placeViews();                                 // in the areas, as viewPlaces says
+    void showSelectedDevice();                         // in the Devices view (the "device.show" command)
     void placePanelButtons();
     void setActiveEditor (TimelineEditor*);
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track

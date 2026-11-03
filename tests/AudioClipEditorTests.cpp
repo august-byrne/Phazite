@@ -394,7 +394,7 @@ TEST_CASE ("The clip editor's tab shows the piano roll or the audio clip editor,
     phazite::ui::DevicesView devices { screen.commands, screen.context };
     phazite::ui::ClipEditorView clipEditor { screen.context, pianoRoll, audioEditor };
     juce::Component playlist, mixer;
-    phazite::ui::ViewArea area { phazite::ui::Panel::editor, { playlist, mixer, clipEditor, devices } };
+    phazite::ui::ViewArea area { { phazite::ui::Panel::editor, 0 }, { playlist, mixer, clipEditor, devices } };
     area.setViews ({ View::clipEditor, View::devices });
     clipEditor.onEditorChanged = [&area] { area.refreshTabs(); }; // as the shell does
     phazite::test::TestWindow window { area, 1000, 400 };

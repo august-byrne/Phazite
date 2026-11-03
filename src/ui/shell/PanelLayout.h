@@ -59,6 +59,10 @@ public:
     int browserWidth = Shell::browserWidth, inspectorWidth = Shell::inspectorWidth;
     double editorShare = Shell::editorShare;
 
+    // While a row of the centre has two areas side by side (Panels.h: ViewRow), the left one's share of its width: the upper
+    // row's, then the lower one's.
+    std::array<double, 2> rowShares { 0.5, 0.5 };
+
     // The side panels' widths in a window this wide (0 for one that takes no room): as kept, but narrower, down to their
     // least, where the centre would otherwise be narrower than its least; a maximized one, the whole width. And the editor
     // dock's height under the song's views in a centre this tall, each at least its least.
@@ -77,8 +81,8 @@ public:
     juce::String getMaximizeName (Panel) const;
     juce::String getMaximizeInUseName() const;
 
-    // For the settings ("shown=browser,song,editor maximized=song browser=240 inspector=260 editor=0.45"), and back: what
-    // a text doesn't say, or says wrongly, stays as it is.
+    // For the settings ("shown=browser,song,editor maximized=song browser=240 inspector=260 editor=0.45 upperSplit=0.5
+    // lowerSplit=0.5"), and back: what a text doesn't say, or says wrongly, stays as it is.
     juce::String toText() const;
     void setFromText (const juce::String&);
 

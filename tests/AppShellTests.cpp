@@ -82,7 +82,8 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     auto* song = dynamic_cast<juce::TabbedComponent*> (phazite::test::findComponentWithTitle (screen.shell, "Upper panel"));
     REQUIRE (song != nullptr);
     CHECK (song->getTabNames() == juce::StringArray { "Playlist", "Mixer" });
-    auto* dock = dynamic_cast<juce::TabbedComponent*> (&screen.shell.getPanel (phazite::ui::Panel::editor));
+    auto* dock = dynamic_cast<juce::TabbedComponent*> (
+        phazite::test::findComponentWithTitle (screen.shell.getPanel (phazite::ui::Panel::editor), "Lower panel"));
     REQUIRE (dock != nullptr);
     CHECK (dock->getTabNames() == juce::StringArray { "Piano roll", "Instrument", "Effects" });
 

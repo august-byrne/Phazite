@@ -246,7 +246,8 @@ juce::String PanelLayout::toText() const
     if (maximized.has_value())
         text << " maximized=" << getPanelKey (*maximized);
 
-    text << " browser=" << browserWidth << " inspector=" << inspectorWidth << " editor=" << juce::String (editorShare, 3);
+    text << " browser=" << browserWidth << " inspector=" << inspectorWidth << " editor=" << juce::String (editorShare, 3)
+         << " upperSplit=" << juce::String (rowShares[0], 3) << " lowerSplit=" << juce::String (rowShares[1], 3);
     return text;
 }
 
@@ -286,6 +287,11 @@ void PanelLayout::setFromText (const juce::String& text)
         {
             if (const auto share = value.getDoubleValue(); share >= Shell::minimumEditorShare && share <= Shell::maximumEditorShare)
                 editorShare = share;
+        }
+        else if (key == "upperSplit" || key == "lowerSplit")
+        {
+            if (const auto share = value.getDoubleValue(); share > 0.0 && share < 1.0)
+                rowShares[key == "upperSplit" ? 0 : 1] = share;
         }
     }
 

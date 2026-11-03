@@ -130,6 +130,7 @@ namespace Shell
     inline constexpr int minimumBrowserWidth = 160, maximumBrowserWidth = 480, browserWidth = 240;
     inline constexpr int minimumInspectorWidth = 180, maximumInspectorWidth = 420, inspectorWidth = 260;
     inline constexpr int minimumCentreWidth = 300, minimumCentreHeight = 120; // the song's views, and the editor dock
+    inline constexpr int minimumAreaWidth = 240; // an area of views beside another in a row of the centre (ui/shell/Panels.h)
     inline constexpr double minimumEditorShare = 0.1, maximumEditorShare = 0.85, editorShare = 0.45; // of the centre's height
     inline constexpr double mixEditorShare = 0.4; // in the Mix layout, which gives the mixer more
 } // namespace Shell

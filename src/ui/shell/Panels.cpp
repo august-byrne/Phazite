@@ -9,6 +9,7 @@
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -52,6 +53,11 @@ namespace
         return area == Panel::song ? "the Lower Panel" : "the Upper Panel";
     }
 
+    Panel getOtherRow (Panel row)
+    {
+        return row == Panel::song ? Panel::editor : Panel::song;
+    }
+
     // A view by the name the settings and drags give it.
     std::optional<View> findView (const juce::String& name)
     {
@@ -81,28 +87,84 @@ View getView (ViewTab tab)
 }
 
 //==============================================================================
-Panel ViewPlaces::getArea (View view) const
+ViewPlaces::Row& ViewPlaces::getRow (Panel row)
 {
-    return std::find (upper.begin(), upper.end(), view) != upper.end() ? Panel::song : Panel::editor;
+    return row == Panel::song ? upper : lower;
 }
 
-const std::vector<View>& ViewPlaces::getViews (Panel area) const
+const ViewPlaces::Row& ViewPlaces::getRow (Panel row) const
 {
-    return area == Panel::song ? upper : lower;
+    return row == Panel::song ? upper : lower;
 }
 
-void ViewPlaces::move (View view, Panel area, int index)
+ViewPlace ViewPlaces::getPlace (View view) const
 {
-    auto& to = area == Panel::song ? upper : lower;
+    for (const auto row : { Panel::song, Panel::editor })
+        for (int column = 0; column < 2; ++column)
+            if (const auto& views = getRow (row)[(size_t) column]; std::find (views.begin(), views.end(), view) != views.end())
+                return { row, column };
+
+    return {};
+}
+
+const std::vector<View>& ViewPlaces::getViews (ViewPlace place) const
+{
+    return getRow (place.row)[(size_t) juce::jlimit (0, 1, place.column)];
+}
+
+bool ViewPlaces::isEmpty (Panel row) const
+{
+    return getRow (row)[0].empty() && getRow (row)[1].empty();
+}
+
+bool ViewPlaces::hasRoomBeside (Panel row) const
+{
+    return getRow (row)[0].empty() || getRow (row)[1].empty();
+}
+
+void ViewPlaces::tidy()
+{
+    for (auto* row : { &upper, &lower })
+        if ((*row)[0].empty())
+            std::swap ((*row)[0], (*row)[1]);
+}
+
+void ViewPlaces::move (View view, ViewPlace place, int index)
+{
+    auto& to = getRow (place.row)[(size_t) juce::jlimit (0, 1, place.column)];
 
     // Within an area, the index counts the views before the one moved.
     if (const auto at = std::find (to.begin(), to.end(), view); at != to.end() && index > (int) std::distance (to.begin(), at))
         --index;
 
-    for (auto* views : { &upper, &lower })
-        views->erase (std::remove (views->begin(), views->end(), view), views->end());
+    for (auto* row : { &upper, &lower })
+        for (auto& views : *row)
+            views.erase (std::remove (views.begin(), views.end(), view), views.end());
 
     to.insert (juce::isPositiveAndBelow (index, (int) to.size() + 1) ? to.begin() + index : to.end(), view);
+    tidy();
+}
+
+void ViewPlaces::placeBeside (View view, Panel row, bool left)
+{
+    for (auto* each : { &upper, &lower })
+        for (auto& views : *each)
+            views.erase (std::remove (views.begin(), views.end(), view), views.end());
+
+    tidy();
+    auto& areas = getRow (row);
+
+    // Into the row, if it has no views left; beside its one area; or into the area on that side, if it has two.
+    if (areas[0].empty())
+        areas[0] = { view };
+    else if (! areas[1].empty())
+        areas[left ? 0 : 1].push_back (view);
+    else if (left)
+        areas = { std::vector { view }, areas[0] };
+    else
+        areas[1] = { view };
+
+    tidy();
 }
 
 juce::String ViewPlaces::toString() const
@@ -117,38 +179,51 @@ juce::String ViewPlaces::toString() const
         return names.joinIntoString (",");
     };
 
-    return join (upper) + ";" + join (lower);
+    // A row's second area only while it has views.
+    const auto joinRow = [&join] (const Row& row) { return join (row[0]) + (row[1].empty() ? juce::String() : "|" + join (row[1])); };
+    return joinRow (upper) + ";" + joinRow (lower);
 }
 
 ViewPlaces ViewPlaces::fromString (const juce::String& text)
 {
-    const auto areas = juce::StringArray::fromTokens (text, ";", {});
+    const auto rows = juce::StringArray::fromTokens (text, ";", {});
 
-    if (areas.size() != 2)
+    if (rows.size() != 2)
         return {};
 
     ViewPlaces places;
-    places.upper.clear();
-    places.lower.clear();
+    places.upper = {};
+    places.lower = {};
+    std::vector<View> seen;
 
     for (int i = 0; i < 2; ++i)
     {
-        for (const auto& name : juce::StringArray::fromTokens (areas[i], ",", {}))
+        const auto areas = juce::StringArray::fromTokens (rows[i], "|", {});
+
+        if (areas.size() > 2)
+            return {};
+
+        for (int column = 0; column < areas.size(); ++column)
         {
-            const auto view = findView (name);
+            for (const auto& name : juce::StringArray::fromTokens (areas[column], ",", {}))
+            {
+                const auto view = findView (name);
 
-            if (! view.has_value())
-                return {};
+                if (! view.has_value())
+                    return {};
 
-            (i == 0 ? places.upper : places.lower).push_back (*view);
+                places.getRow (i == 0 ? Panel::song : Panel::editor)[(size_t) column].push_back (*view);
+                seen.push_back (*view);
+            }
         }
     }
 
     // Every view once.
     for (const auto view : allViews)
-        if (std::count (places.upper.begin(), places.upper.end(), view) + std::count (places.lower.begin(), places.lower.end(), view) != 1)
+        if (std::count (seen.begin(), seen.end(), view) != 1)
             return {};
 
+    places.tidy();
     return places;
 }
 
@@ -277,12 +352,12 @@ void ViewArea::Holder::resized()
         view->setBounds (getLocalBounds());
 }
 
-ViewArea::ViewArea (Panel which, const Views& shown)
+ViewArea::ViewArea (ViewPlace which, const Views& shown)
     : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop),
-      area (which),
+      place (which),
       views (shown)
 {
-    setTitle (area == Panel::song ? "Upper panel" : "Lower panel");
+    setTitle (juce::String (place.row == Panel::song ? "Upper panel" : "Lower panel") + (place.column == 0 ? "" : ", right"));
     setTabBarDepth (tabBarDepth);
     setOutline (0);
 
@@ -425,7 +500,7 @@ void ViewArea::refreshTabs()
         if (auto* button = bar.getTabButton (i))
         {
             button->setComponentID (getCommandID (tab));
-            const auto text = about + ". Drag the tab to " + getOtherAreaName (area).toLowerCase() + " to move it there";
+            const auto text = about + ". Drag the tab onto another panel to move it there, or onto a panel's side to put it beside";
 
             // The audio clip editor has no key of its own.
             const auto keyed = shortcuts != nullptr && ! (tab == ViewTab::clipEditor && views.clipEditor.showsAudioClip());
@@ -445,14 +520,14 @@ void ViewArea::popupMenuClickOnTab (int index, const juce::String&)
         return;
 
     const auto view = getView (tabs[(size_t) index]);
-    const auto other = area == Panel::song ? Panel::editor : Panel::song;
+    const auto other = getOtherRow (place.row);
     const juce::Component::SafePointer<ViewArea> safeThis (this);
     juce::PopupMenu menu;
-    menu.addItem ("Move to " + getOtherAreaName (area),
+    menu.addItem ("Move to " + getOtherAreaName (place.row),
                   [safeThis, view, other]
                   {
                       if (safeThis != nullptr && safeThis->onMove != nullptr)
-                          safeThis->onMove (view, other, -1);
+                          safeThis->onMove (view, { other, 0 }, -1);
                   });
     menu.addItem ("Reset View Places",
                   [safeThis]
@@ -466,7 +541,7 @@ void ViewArea::popupMenuClickOnTab (int index, const juce::String&)
 void ViewArea::resized()
 {
     juce::TabbedComponent::resized();
-    leaveCorner (*this, area == Panel::song ? 2 : 3); // maximize and hide; the lower panel's own window too
+    leaveCorner (*this, cornerButtons); // the row's maximize and hide, and the lower row's own window, in its right area
 
     for (auto& holder : holders)
         holder.resized();
@@ -526,19 +601,66 @@ float ViewArea::getDropLineX (int index) const
     return (float) bar.getX();
 }
 
+void ViewArea::setDropSides (bool beside, bool otherRow)
+{
+    canGoBeside = beside;
+    canMakeRow = otherRow;
+}
+
+void ViewArea::setCornerButtons (int buttons)
+{
+    if (std::exchange (cornerButtons, buttons) != buttons)
+        resized();
+}
+
+ViewArea::Drop ViewArea::getDropAt (juce::Point<int> position) const
+{
+    // Over the tabs, among them; on the views, a quarter of the way in from their left or right edge, beside this area, while
+    // its row has room, and from its edge toward a row without views, into that row; anywhere else, among the tabs too.
+    if (getTabbedButtonBar().getBounds().contains (position))
+        return Drop::tabs;
+
+    const auto content = getLocalBounds().withTrimmedTop (getTabBarDepth());
+
+    if (canGoBeside && position.x < content.getX() + content.getWidth() / 4)
+        return Drop::left;
+
+    if (canGoBeside && position.x >= content.getRight() - content.getWidth() / 4)
+        return Drop::right;
+
+    const auto towardOtherRow = place.row == Panel::song ? position.y >= content.getBottom() - content.getHeight() / 4
+                                                         : position.y < content.getY() + content.getHeight() / 4;
+    return canMakeRow && towardOtherRow ? Drop::otherRow : Drop::tabs;
+}
+
 void ViewArea::paintOverChildren (juce::Graphics& g)
 {
-    if (! dropIndex.has_value())
+    if (! drop.has_value())
         return;
 
-    // The whole area tinted, and a line in the tab bar where the tab would go.
     const auto accent = getPalette (*this).accent;
+    const auto content = getLocalBounds().withTrimmedTop (getTabBarDepth());
     g.setColour (accent.withAlpha (ViewDropTint::wash));
+
+    // Beside it, or in the other row: the half of it where the view would go, tinted, with a line along its edge.
+    if (drop != Drop::tabs)
+    {
+        const auto half = drop == Drop::left         ? content.withWidth (content.getWidth() / 2)
+                          : drop == Drop::right      ? content.withTrimmedLeft (content.getWidth() / 2)
+                          : place.row == Panel::song ? content.withTrimmedTop (content.getHeight() / 2)
+                                                     : content.withHeight (content.getHeight() / 2);
+        g.fillRect (half);
+        g.setColour (accent);
+        g.drawRect (half.toFloat(), ViewDropTint::line);
+        return;
+    }
+
+    // Among the tabs: the whole area tinted, and a line in the tab bar where the tab would go.
     g.fillRect (getLocalBounds());
     g.setColour (accent);
     const auto bar = getTabbedButtonBar().getBounds().toFloat();
-    g.fillRect (
-        juce::Rectangle<float> (getDropLineX (*dropIndex) - ViewDropTint::line / 2.0f, bar.getY(), ViewDropTint::line, bar.getHeight()));
+    g.fillRect (juce::Rectangle<float> (getDropLineX (dropIndex.value_or (-1)) - ViewDropTint::line / 2.0f, bar.getY(), ViewDropTint::line,
+                                        bar.getHeight()));
 }
 
 bool ViewArea::isInterestedInDragSource (const SourceDetails& details)
@@ -553,8 +675,12 @@ void ViewArea::itemDragEnter (const SourceDetails& details)
 
 void ViewArea::itemDragMove (const SourceDetails& details)
 {
-    if (const auto index = getDropIndexAt (details.localPosition); index != dropIndex)
+    const auto at = getDropAt (details.localPosition);
+    const auto index = at == Drop::tabs ? std::optional (getDropIndexAt (details.localPosition)) : std::nullopt;
+
+    if (at != drop || index != dropIndex)
     {
+        drop = at;
         dropIndex = index;
         repaint();
     }
@@ -562,17 +688,111 @@ void ViewArea::itemDragMove (const SourceDetails& details)
 
 void ViewArea::itemDragExit (const SourceDetails&)
 {
+    drop.reset();
     dropIndex.reset();
     repaint();
 }
 
 void ViewArea::itemDropped (const SourceDetails& details)
 {
+    const auto at = drop.value_or (getDropAt (details.localPosition));
     const auto index = dropIndex.value_or (getDropIndexAt (details.localPosition));
+    drop.reset();
     dropIndex.reset();
     repaint();
 
-    if (const auto view = readViewDrag (details.description); view.has_value() && onMove != nullptr)
-        onMove (*view, area, index);
+    const auto view = readViewDrag (details.description);
+
+    if (! view.has_value())
+        return;
+
+    if ((at == Drop::left || at == Drop::right) && onPlaceBeside != nullptr)
+        onPlaceBeside (*view, place.row, at == Drop::left);
+    else if (at == Drop::otherRow && onMove != nullptr)
+        onMove (*view, { getOtherRow (place.row), 0 }, -1);
+    else if (onMove != nullptr)
+        onMove (*view, place, index);
+}
+
+//==============================================================================
+ViewRow::ViewRow (Panel which, const ViewArea::Views& views)
+    : row (which),
+      divider (which == Panel::song ? "Line between the upper areas" : "Line between the lower areas", true)
+{
+    setTitle (row == Panel::song ? "Upper row" : "Lower row");
+
+    for (int column = 0; column < 2; ++column)
+    {
+        areas[(size_t) column] = std::make_unique<ViewArea> (ViewPlace { row, column }, views);
+        addChildComponent (*areas[(size_t) column]);
+    }
+
+    // Dragged, the line gives one area more of the row and the other less, each keeping its least.
+    divider.onDragStart = [this] { shareAtDragStart = share; };
+    divider.onDrag = [this] (int distance)
+    {
+        const auto room = std::max (1, getWidth() - Shell::dividerSize);
+        const auto least = std::min (0.5, (double) Shell::minimumAreaWidth / room);
+        share = juce::jlimit (least, 1.0 - least, shareAtDragStart + (double) distance / room);
+        resized();
+
+        if (onShareChanged != nullptr)
+            onShareChanged();
+    };
+
+    addChildComponent (divider);
+}
+
+void ViewRow::setViews (const ViewPlaces::Row& views)
+{
+    for (size_t column = 0; column < 2; ++column)
+    {
+        areas[column]->setViews (views[column]);
+        areas[column]->setVisible (! views[column].empty());
+    }
+
+    resized();
+}
+
+bool ViewRow::isEmpty() const noexcept
+{
+    return areas[0]->isEmpty() && areas[1]->isEmpty();
+}
+
+bool ViewRow::holds (ViewTab tab) const
+{
+    return areas[0]->holds (tab) || areas[1]->holds (tab);
+}
+
+ViewArea& ViewRow::getAreaOf (ViewTab tab)
+{
+    return areas[1]->holds (tab) ? *areas[1] : *areas[0];
+}
+
+void ViewRow::resized()
+{
+    // Two areas side by side at their shares, with the line between them; or one, the whole row. The row's panel buttons
+    // are in the right one's corner: the upper row's maximize and hide, the lower one's its own window too.
+    const auto both = ! areas[0]->isEmpty() && ! areas[1]->isEmpty();
+    const auto buttons = row == Panel::song ? 2 : 3;
+    auto area = getLocalBounds();
+    divider.setVisible (both);
+
+    if (both)
+    {
+        const auto room = std::max (0, area.getWidth() - Shell::dividerSize);
+        areas[0]->setBounds (area.removeFromLeft (juce::roundToInt (share * room)));
+        divider.setBounds (area.removeFromLeft (Shell::dividerSize));
+        areas[1]->setBounds (area);
+        areas[0]->setCornerButtons (0);
+        areas[1]->setCornerButtons (buttons);
+        return;
+    }
+
+    for (auto& each : areas)
+    {
+        each->setBounds (area);
+        each->setCornerButtons (buttons);
+    }
 }
 } // namespace phazite::ui
