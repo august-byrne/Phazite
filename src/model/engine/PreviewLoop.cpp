@@ -11,41 +11,34 @@ namespace
     // loop goes round as smoothly as the loop does: a little more than Rubber Band's window.
     constexpr double wrapSeconds = 0.1;
 
-    // The loop Tracktion's preview Edit would stretch as it plays (its auto-tempo), on its first track, if it has one.
-    te::WaveAudioClip* findStretchedClip (te::Edit& edit)
+    // How long the reading thread waits for a part of the loop the render hasn't reached: past it, the part plays as
+    // silence. The render keeps ahead of what plays once the loop is ready to play (isReadyToPlay()).
+    constexpr int waitMilliseconds = 5000;
+
+    class LoopReader final : public engine::SampleReader
     {
-        if (const auto tracks = te::getAudioTracks (edit); ! tracks.isEmpty())
-            for (auto* clip : tracks.getFirst()->getClips())
-                if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip); wave != nullptr && wave->getAutoTempo())
-                    return wave;
+    public:
+        explicit LoopReader (std::shared_ptr<const StretchedLoop> stretched)
+            : loop (std::move (stretched))
+        {
+        }
 
-        return nullptr;
-    }
+        int getNumChannels() const override { return loop->getNumChannels(); }
+        double getSampleRate() const override { return loop->getSampleRate(); }
+        std::int64_t getLength() const override { return loop->getLength(); }
 
-    // The player of stretched loops: on a track of its own, after the three of Tracktion's preview Edit, which keeps it
-    // from one sound to the next.
-    constexpr int loopTrack = 3;
+        bool read (juce::AudioBuffer<float>& buffer, std::int64_t start, int numSamples) override
+        {
+            if (! loop->waitUntilRendered (start + numSamples, waitMilliseconds))
+                return false;
 
-    PreviewLoopPlugin* findLoopPlayer (te::Edit& edit)
-    {
-        if (const auto tracks = te::getAudioTracks (edit); tracks.size() > loopTrack)
-            for (auto* plugin : tracks[loopTrack]->pluginList)
-                if (auto* player = dynamic_cast<PreviewLoopPlugin*> (plugin))
-                    return player;
+            loop->read (start, buffer.getArrayOfWritePointers(), buffer.getNumChannels(), numSamples);
+            return true;
+        }
 
-        return nullptr;
-    }
-
-    PreviewLoopPlugin* addLoopPlayer (te::Edit& edit)
-    {
-        if (auto* player = findLoopPlayer (edit))
-            return player;
-
-        edit.ensureNumberOfAudioTracks (loopTrack + 1);
-        te::getAudioTracks (edit)[loopTrack]->pluginList.insertPlugin (
-            edit.getPluginCache().createNewPlugin (PreviewLoopPlugin::xmlTypeName, {}), 0, nullptr);
-        return findLoopPlayer (edit);
-    }
+    private:
+        std::shared_ptr<const StretchedLoop> loop;
+    };
 } // namespace
 
 StretchedLoop::StretchedLoop (te::Engine& engine, const juce::File& file, double timeRatio, double rate)
@@ -80,9 +73,9 @@ bool StretchedLoop::isReadyToPlay() const
     if (isComplete())
         return true;
 
-    const auto renderedSeconds = (double) ready.load (std::memory_order_acquire) / sampleRate;
+    const auto rendered = ready.load (std::memory_order_acquire);
     const auto spentSeconds = (juce::Time::getMillisecondCounterHiRes() - startedAt) / 1000.0;
-    return renderedSeconds >= 0.25 && renderedSeconds >= 2.0 * spentSeconds;
+    return rendered >= engine::AudioFile::chunkSamples && (double) rendered / sampleRate >= 2.0 * spentSeconds;
 }
 
 void StretchedLoop::read (juce::int64 position, float* const* channels, int numChannels, int numFrames) const noexcept
@@ -148,81 +141,23 @@ void StretchedLoop::run()
         ready.store (length, std::memory_order_release);
 }
 
-//==============================================================================
-const char* PreviewLoopPlugin::xmlTypeName = "phazitePreviewLoop";
-
-PreviewLoopPlugin::PreviewLoopPlugin (te::PluginCreationInfo info)
-    : te::Plugin (info)
+bool StretchedLoop::waitUntilRendered (juce::int64 end, int timeoutMilliseconds) const
 {
-}
+    const auto until = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMilliseconds;
 
-PreviewLoopPlugin::~PreviewLoopPlugin()
-{
-    notifyListenersOfDeletion();
-}
-
-void PreviewLoopPlugin::setLoop (const StretchedLoop* newLoop) noexcept
-{
-    loop.store (newLoop, std::memory_order_release);
-}
-
-void PreviewLoopPlugin::initialise (const te::PluginInitialisationInfo& info)
-{
-    sampleRate = info.sampleRate;
-}
-
-void PreviewLoopPlugin::applyToBuffer (const te::PluginRenderContext& context)
-{
-    if (context.destBuffer == nullptr || context.bufferNumSamples <= 0)
-        return;
-
-    auto& buffer = *context.destBuffer;
-    const auto* playing = loop.load (std::memory_order_acquire);
-
-    // Rendered for the rate it plays at; not while the preview is stopped.
-    if (playing == nullptr || ! context.isPlaying || ! juce::exactlyEqual (playing->getSampleRate(), sampleRate))
+    while (ready.load (std::memory_order_acquire) < std::min (end, length))
     {
-        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-            buffer.clear (channel, context.bufferStartSample, context.bufferNumSamples);
+        if (! isThreadRunning() || juce::Time::getMillisecondCounter() >= until)
+            return ready.load (std::memory_order_acquire) >= std::min (end, length);
 
-        return;
+        juce::Thread::sleep (2);
     }
 
-    float* channels[2] {};
-    const auto numChannels = std::min (buffer.getNumChannels(), 2);
-
-    for (int channel = 0; channel < numChannels; ++channel)
-        channels[channel] = buffer.getWritePointer (channel, context.bufferStartSample);
-
-    playing->read ((juce::int64) std::llround (context.editTime.getStart().inSeconds() * sampleRate), channels, numChannels,
-                   context.bufferNumSamples);
+    return true;
 }
 
-//==============================================================================
-std::unique_ptr<StretchedLoop> stretchPreviewLoop (te::Edit& preview, const juce::File& file)
+std::unique_ptr<engine::SampleReader> makeLoopReader (std::shared_ptr<const StretchedLoop> loop)
 {
-    auto* clip = findStretchedClip (preview);
-    const auto fileSeconds = te::AudioFile (preview.engine, file).getLength();
-
-    if (clip == nullptr || fileSeconds <= 0.0)
-        return {};
-
-    // As long as Tracktion made the clip: the loop's beats at the song's tempo.
-    auto loop = std::make_unique<StretchedLoop> (preview.engine, file, clip->getPosition().getLength().inSeconds() / fileSeconds,
-                                                 preview.engine.getDeviceManager().getSampleRate());
-    auto* player = loop->isValid() ? addLoopPlayer (preview) : nullptr;
-
-    if (player == nullptr)
-        return {};
-
-    clip->disabled = true;
-    player->setLoop (loop.get());
-    return loop;
-}
-
-void clearPreviewLoop (te::Edit& preview)
-{
-    if (auto* player = findLoopPlayer (preview))
-        player->setLoop (nullptr);
+    return std::make_unique<LoopReader> (std::move (loop));
 }
 } // namespace phazite

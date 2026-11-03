@@ -3,7 +3,6 @@
 #include "AudioDevices.h"
 #include "internal/LoudnessMeterPlugin.h"
 #include "internal/PluginScanner.h"
-#include "internal/PreviewLoop.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/PluginParameters.h"
 
@@ -312,9 +311,8 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
     // Plug-ins scanned in Phazite's helper program, with a time limit for each.
     usePluginScannerWithTimeLimit (*engine);
 
-    // Phazite's own plug-in types, which projects can hold, and the browser's player of stretched loops.
+    // Phazite's own plug-in types, which projects can hold.
     engine->getPluginManager().createBuiltInType<LoudnessMeterPlugin>();
-    engine->getPluginManager().createBuiltInType<PreviewLoopPlugin>();
     registerDevices (*engine);
 
     // So that every note played live sounds (ClockKeeper).

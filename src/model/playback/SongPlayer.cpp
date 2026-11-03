@@ -1063,7 +1063,7 @@ std::shared_ptr<engine::AudioFile> SongPlayer::getAudioFile (const juce::File& f
             return nullptr;
         }
 
-        kept = std::make_shared<engine::AudioFile> (std::make_unique<FormatReader> (std::move (formatReader)), blocks);
+        kept = std::make_shared<engine::AudioFile> (makeSampleReader (std::move (formatReader)), blocks);
 
         if (reader != nullptr)
             reader->add (kept);
@@ -1230,5 +1230,10 @@ engine::StripState* SongPlayer::findStrip (std::int64_t id) const
 {
     const auto found = strips.find (id);
     return found != strips.end() ? found->second.get() : nullptr;
+}
+
+std::unique_ptr<engine::SampleReader> makeSampleReader (std::unique_ptr<juce::AudioFormatReader> reader)
+{
+    return std::make_unique<FormatReader> (std::move (reader));
 }
 } // namespace phazite

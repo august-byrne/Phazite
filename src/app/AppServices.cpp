@@ -52,7 +52,7 @@ AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
       recentProjects (settings),
       soundPack (options.packsFolder, options.soundPackRelease),
       library (*engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),
-      previewer (createPreviewer (engine))
+      previewer (createPreviewer (*engineContext))
 {
     // Plug-ins in helper processes (docs/tracktion-migration.md, T3), with their editors in the app's windows; the scan's
     // list, and those that crashed as they loaded kept off.

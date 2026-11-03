@@ -23,6 +23,15 @@ PlaybackHost::~PlaybackHost()
     tracktion.getDeviceManager().deviceManager.removeAudioCallback (this);
     engine.stop();
     engine.dropPlans();
+    previews.stop();
+    previews.dropPlans();
+}
+
+void PlaybackHost::prepareEngines (double sampleRate, int maximumBlockSize)
+{
+    engine.prepare (sampleRate, maximumBlockSize);
+    previews.prepare (sampleRate, maximumBlockSize);
+    previewBlock.setSize (2, std::max (1, maximumBlockSize));
 }
 
 void PlaybackHost::add (PlaybackSession& session)
@@ -80,7 +89,7 @@ PlaybackSession* PlaybackHost::getPlayingSession() const noexcept
 void PlaybackHost::prepare (double sampleRate, int maximumBlockSize, int deviceInputs, int deviceInputLatency)
 {
     running = false; // the tests call the engine from the message thread
-    engine.prepare (sampleRate, maximumBlockSize);
+    prepareEngines (sampleRate, maximumBlockSize);
     numInputs = deviceInputs;
     inputLatency = deviceInputLatency;
     outputLatency = 0;
@@ -93,7 +102,7 @@ void PlaybackHost::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     // The device is stopped meanwhile, so the engine plays nothing. The song is given again for the new rate once the
     // message loop turns: until then a plan for another rate plays silence.
-    engine.prepare (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
+    prepareEngines (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
 
     // Its inputs: the channel of each open one, in the order it hands them.
     const auto open = device->getActiveInputChannels();
@@ -133,7 +142,28 @@ void PlaybackHost::audioDeviceIOCallbackWithContext (const float* const* open, i
         }
     }
 
-    engine.process (inputs.data(), count, outputs, numOutputs, numSamples);
+    process (inputs.data(), count, outputs, numOutputs, numSamples);
+}
+
+void PlaybackHost::process (const float* const* deviceInputs, int numDeviceInputs, float* const* outputs, int numOutputs,
+                            int numSamples) noexcept
+{
+    engine.process (deviceInputs, numDeviceInputs, outputs, numOutputs, numSamples);
+
+    // The previews' sound on top, a stereo pair over the outputs' pairs, in as many blocks as its buffer takes (none before
+    // the engines are first prepared).
+    for (int done = 0; done < numSamples && previewBlock.getNumSamples() > 0;)
+    {
+        const auto length = std::min (numSamples - done, previewBlock.getNumSamples());
+        float* block[] = { previewBlock.getWritePointer (0), previewBlock.getWritePointer (1) };
+        previews.process (block, 2, length);
+
+        for (int channel = 0; channel < numOutputs; ++channel)
+            if (outputs[channel] != nullptr)
+                juce::FloatVectorOperations::add (outputs[channel] + done, block[channel % 2], length);
+
+        done += length;
+    }
 }
 
 void PlaybackHost::timerCallback()

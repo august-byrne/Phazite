@@ -1,63 +1,111 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Preview.h"
 #include "devices/synth/Synth.h"
+#include "internal/EngineContext.h"
 #include "internal/Preview.h"
 #include "internal/PreviewLoop.h"
+#include "model/devices/internal/Devices.h"
+#include "model/mixer/MixerModel.h"
+#include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace phazite
 {
+namespace
+{
+    constexpr std::int64_t soundStrip = 1; // the strip a preview's sound plays on, into the master (0)
+    constexpr double beatsPerBar = 4.0;    // a MIDI file loops over whole bars of four beats
+
+    // A MIDI file's notes, in beats from its start by its ticks per quarter note (not its tempo: it plays at the song's),
+    // or none if it can't be read. A file timed in SMPTE frames plays its seconds as beats at 120 BPM.
+    std::vector<engine::NoteSequence::Note> readMidiNotes (const juce::File& file)
+    {
+        std::vector<engine::NoteSequence::Note> notes;
+        juce::FileInputStream stream (file);
+        juce::MidiFile midi;
+
+        if (! stream.openedOk() || ! midi.readFrom (stream))
+            return notes;
+
+        const auto ticks = midi.getTimeFormat();
+
+        if (ticks <= 0)
+            midi.convertTimestampTicksToSeconds();
+
+        const auto toBeats = [ticks] (double time) { return ticks > 0 ? time / ticks : time * 2.0; };
+
+        for (int track = 0; track < midi.getNumTracks(); ++track)
+        {
+            juce::MidiMessageSequence sequence (*midi.getTrack (track));
+            sequence.updateMatchedPairs();
+
+            for (int i = 0; i < sequence.getNumEvents(); ++i)
+            {
+                const auto* event = sequence.getEventPointer (i);
+
+                if (! event->message.isNoteOn())
+                    continue;
+
+                const auto start = toBeats (event->message.getTimeStamp());
+                const auto end = event->noteOffObject != nullptr ? toBeats (event->noteOffObject->message.getTimeStamp()) : start + 1.0;
+                notes.push_back (
+                    { start, std::max (end, start + 1.0 / 64.0), event->message.getNoteNumber(), event->message.getFloatVelocity() });
+            }
+        }
+
+        std::stable_sort (notes.begin(), notes.end(), [] (const auto& a, const auto& b) { return a.start < b.start; });
+        return notes;
+    }
+} // namespace
+
 struct Previewer::Impl : private juce::Timer
 {
-    explicit Impl (te::Engine& e)
-        : engine (e)
+    Impl (te::Engine& e, PlaybackHost& h)
+        : tracktion (e),
+          host (h),
+          previews (h.getPreviewEngine())
     {
     }
 
     ~Impl() override { stopTimer(); }
 
-    // Stops the sound and lets its playback graph go, which Tracktion would otherwise keep at work for the rest of the
-    // session (docs/performance-audit.md, A3), and then the loop it played, if it was one.
+    // Stops the sound: what it played rings out as a stopped song's does, and its plan stays until the next sound's.
     void release()
     {
         stopTimer();
         starting = false;
-
-        if (edit != nullptr)
-        {
-            edit->getTransport().stop (false, false);
-            edit->getTransport().freePlaybackContext();
-            clearPreviewLoop (*edit);
-        }
-
-        loop.reset();
+        previews.stop();
     }
 
     void start()
     {
         starting = false;
-        edit->getTransport().play (false);
+        previews.play();
         startTimer (250);
     }
 
     // A loop starts once its start is stretched (StretchedLoop::isReadyToPlay()), a moment after it is chosen; a sound
-    // that plays once is released once it has played to its end, as Tracktion would play silence after it.
+    // that plays once is released once it has played to its end.
     void timerCallback() override
     {
         if (starting)
         {
-            if (loop != nullptr && loop->isReadyToPlay())
+            if (loop == nullptr || loop->isReadyToPlay())
                 start();
         }
-        else if (edit == nullptr || ! edit->getTransport().isPlaying())
+        else if (! previews.isPlaying())
         {
             stopTimer();
         }
-        else if (! repeating && edit->getTransport().getPosition() >= getEnd())
+        else if (! repeating && previews.getPlayheadBeat() >= lengthBeats)
         {
             release();
         }
@@ -69,39 +117,43 @@ struct Previewer::Impl : private juce::Timer
         startTimer (5);
     }
 
-    // Where the sound ends, in its Edit.
-    te::TimePosition getEnd() const { return te::toPosition (edit->getLength()); }
+    // The master of the sounds' plans, kept from one sound to the next (made anew for another rate or block size), whose
+    // fader is the previews' volume.
+    std::shared_ptr<engine::StripState> getMaster()
+    {
+        if (master == nullptr || ! juce::exactlyEqual (masterRate, previews.getSampleRate())
+            || masterBlockSize != previews.getMaximumBlockSize())
+        {
+            masterRate = previews.getSampleRate();
+            masterBlockSize = previews.getMaximumBlockSize();
+            master = std::make_shared<engine::StripState>();
+            master->prepare (masterRate, masterBlockSize);
+        }
 
-    te::Engine& engine;
-    std::unique_ptr<te::Edit> edit;
-    std::unique_ptr<StretchedLoop> loop; // a loop's sound, stretched to the project's tempo, while it plays
+        master->getChannel().setVolume (faderPositionToDecibels (volume));
+        return master;
+    }
+
+    te::Engine& tracktion; // its audio formats, and what it knows of loops' beats (until T6)
+    PlaybackHost& host;
+    engine::Engine& previews;
+    std::shared_ptr<engine::StripState> master;
+    double masterRate = 0.0;
+    int masterBlockSize = 0;
+    std::shared_ptr<const StretchedLoop> loop; // a loop's sound, stretched to the project's tempo, which its plan reads
     juce::File file;
+    double lengthBeats = 0.0; // where the sound ends, in its plan's beats: a loop's length
     bool inTime = false;
     bool repeating = false;
     bool starting = false;   // a loop waiting for its start to be stretched
     bool synced = false;     // to the project, while it plays
     bool songPlayed = false; // whether the project played as it started: it stops once that changes
-    float volume = te::decibelsToVolumeFaderPosition (-6.0f);
+    float volume = decibelsToFaderPosition (-6.0f);
 };
 
-std::unique_ptr<Previewer> createPreviewer (te::Engine& engine)
+std::unique_ptr<Previewer> createPreviewer (EngineContext& context)
 {
-    return std::make_unique<Previewer> (std::make_unique<Previewer::Impl> (engine));
-}
-
-std::unique_ptr<te::Edit> createPreviewEdit (te::Engine& engine, const juce::File& file, const te::Edit* project, bool& inTime,
-                                             std::unique_ptr<te::Edit> previous)
-{
-    engine.getAudioFileManager().checkFileForChanges (te::AudioFile (engine, file));
-
-    // Loops keep their own pitch: Tracktion would pull every loop with a known root toward the song's pitch sequence, which
-    // is C in a song without a key, and it ignores major and minor (an A minor loop would go up to C in C major).
-    auto matched = false;
-    const auto synth = te::createValueTree (te::IDs::PLUGIN, te::IDs::type, devices::Synth::typeID);
-    auto edit =
-        te::Edit::createEditForPreviewingFile (engine, file, project, true, false, &matched, synth, {}, false, std::move (previous));
-    inTime = edit != nullptr && matched && project != nullptr;
-    return edit;
+    return std::make_unique<Previewer> (std::make_unique<Previewer::Impl> (getEngine (context), getPlaybackHost (context)));
 }
 
 Previewer::Previewer (std::unique_ptr<Impl> i)
@@ -112,7 +164,7 @@ Previewer::Previewer (std::unique_ptr<Impl> i)
 Previewer::~Previewer()
 {
     stop();
-    impl->edit = nullptr; // on the message thread, before the Engine goes
+    impl->previews.setPlan (nullptr); // freed by the previews' engine once the audio thread can't be playing it
 }
 
 bool Previewer::play (const juce::File& newFile, const ProjectContext& context, bool repeat)
@@ -122,28 +174,110 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
     if (! newFile.existsAsFile())
         return false;
 
-    // Made from the last sound's Edit, which Tracktion empties and fills again. A MIDI file plays on Phazite's synth, at its
-    // defaults.
-    impl->edit = createPreviewEdit (impl->engine, newFile, getEdit (context), impl->inTime, std::move (impl->edit));
+    const auto* project = getEdit (context);
+    auto& previews = impl->previews;
+    const auto rate = previews.getSampleRate();
+    const auto blockSize = previews.getMaximumBlockSize();
+    const auto bpm = project != nullptr ? getTempo (*project) : 120.0;
 
-    if (impl->edit == nullptr)
-        return false;
+    // The sound on a strip of its own.
+    engine::Plan::Strip sound;
+    sound.id = soundStrip;
+    sound.state = std::make_shared<engine::StripState>();
+    sound.state->prepare (rate, blockSize);
+    auto inTime = false;
+    auto lengthBeats = 0.0;
+    std::shared_ptr<const StretchedLoop> loop;
+
+    if (newFile.hasFileExtension ("mid;midi"))
+    {
+        // A MIDI file plays on Phazite's synth, at its defaults, in time with the project, over whole bars.
+        auto notes = readMidiNotes (newFile);
+        const auto* synth = findOwnDevice (devices::Synth::typeID);
+
+        if (notes.empty() || synth == nullptr)
+            return false;
+
+        auto lastEnd = 0.0;
+
+        for (const auto& note : notes)
+            lastEnd = std::max (lastEnd, note.end);
+
+        lengthBeats = std::max (1.0, std::ceil (lastEnd / beatsPerBar - 1.0e-9)) * beatsPerBar;
+        auto node = std::make_shared<engine::DeviceNode> (*synth, createOwnDevice (synth->typeID));
+        node->getRunner().prepare (rate, blockSize);
+        sound.devices.push_back ({ std::move (node) });
+        sound.hasInstrument = true;
+        sound.notes = std::make_shared<const engine::NoteSequence> (std::move (notes), std::vector<engine::NoteSequence::Control>());
+        inTime = project != nullptr;
+    }
+    else
+    {
+        // An audio file. Tracktion keeps what it read of a file by its path, so it reads it again if it changed since: a loop
+        // written again at the same path would otherwise play at its old length.
+        impl->tracktion.getAudioFileManager().checkFileForChanges (te::AudioFile (impl->tracktion, newFile));
+        auto reader = std::unique_ptr<juce::AudioFormatReader> (
+            impl->tracktion.getAudioFileFormatManager().readFormatManager.createReaderFor (newFile));
+
+        if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0)
+            return false;
+
+        // A loop that knows its beats (from its loop data, or from its name when it lasts whole bars) plays in time with the
+        // project, stretched as a clip of it would be, by Rubber Band; at its own pitch. Anything else plays as it is.
+        const auto fileSeconds = (double) reader->lengthInSamples / reader->sampleRate;
+        const auto loopInfo = te::AudioFile (impl->tracktion, newFile).getInfo().loopInfo;
+        inTime = project != nullptr && loopInfo.getNumBeats() > 0.0 && ! loopInfo.isOneShot();
+        std::shared_ptr<engine::AudioFile> audio;
+        engine::AudioRegion region;
+
+        if (inTime)
+        {
+            lengthBeats = loopInfo.getNumBeats();
+            auto stretched = std::make_shared<StretchedLoop> (impl->tracktion, newFile, lengthBeats * 60.0 / bpm / fileSeconds, rate);
+
+            if (! stretched->isValid())
+                return false;
+
+            region.length = stretched->getLength();
+            audio = std::make_shared<engine::AudioFile> (makeLoopReader (stretched), &previews.getBlocksPlayed());
+            loop = std::move (stretched);
+        }
+        else
+        {
+            lengthBeats = fileSeconds * bpm / 60.0;
+            region.length = (std::int64_t) std::llround (fileSeconds * rate);
+            audio = std::make_shared<engine::AudioFile> (makeSampleReader (std::move (reader)), &previews.getBlocksPlayed());
+        }
+
+        impl->host.getPreviewFileReader().add (audio);
+        region.file = std::move (audio);
+        region.state = std::make_shared<engine::RegionState>();
+        sound.audio.push_back (std::move (region));
+    }
+
+    // Its plan: the sound into the master, at the project's tempo, a loop over and over unless repeat is false (a riser
+    // made for some bars plays once, in time); a one-shot once.
+    auto plan = std::make_unique<engine::Plan>();
+    plan->tempo = engine::TempoMap ({ { 0.0, bpm } }, { { 0.0, 4, 4 } }, rate);
+    impl->repeating = inTime && repeat;
+
+    if (impl->repeating)
+        plan->loop = engine::Plan::BeatRange { 0.0, lengthBeats };
+
+    plan->strips.push_back (std::move (sound));
+    engine::Plan::Strip master;
+    master.state = impl->getMaster();
+    master.inputs.push_back ({ 0 });
+    plan->strips.push_back (std::move (master));
+    previews.setPlan (std::move (plan));
+    previews.locate (0.0);
 
     impl->file = newFile;
+    impl->inTime = inTime;
+    impl->loop = std::move (loop);
+    impl->lengthBeats = lengthBeats;
     impl->synced = false;
-    impl->songPlayed = getEdit (context) != nullptr && isSongPlaying (*getEdit (context));
-    impl->edit->setMasterVolumeSliderPos (impl->volume);
-
-    // A loop in time plays stretched as a clip of it would be, by Rubber Band, rather than by the clip Tracktion made of
-    // it, which would stretch it with SoundTouch as it plays (internal/PreviewLoop.h).
-    if (impl->inTime)
-        impl->loop = stretchPreviewLoop (*impl->edit, newFile);
-
-    // A loop repeats until another sound plays or the preview stops; a one-shot plays once.
-    auto& transport = impl->edit->getTransport();
-    impl->repeating = impl->inTime && repeat;
-    transport.looping = impl->repeating;
-    transport.setPosition (te::TimePosition());
+    impl->songPlayed = project != nullptr && isSongPlaying (*project);
 
     if (impl->loop != nullptr)
         impl->startWhenReady();
@@ -156,9 +290,9 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
 
 void Previewer::keepInTime (const ProjectContext& context)
 {
-    auto* project = getEdit (context);
+    const auto* project = getEdit (context);
 
-    if (impl->edit == nullptr || impl->file == juce::File() || project == nullptr)
+    if (impl->file == juce::File() || project == nullptr)
         return;
 
     // The song started or stopped stops the sound heard meanwhile: the transport plays the song, as FL Studio's Stop ends
@@ -171,20 +305,13 @@ void Previewer::keepInTime (const ProjectContext& context)
         return;
     }
 
-    if (! impl->repeating || ! songPlays || impl->synced || ! impl->edit->getTransport().isPlaying())
+    if (! impl->repeating || ! songPlays || impl->synced || impl->starting || impl->lengthBeats <= 0.0)
         return;
 
     // Once it plays: from where the song is in it, the loop counted from the song's start (its first bar), so that its
-    // bars fall on the song's. The song plays on Phazite's engine, whose playhead Tracktion's transport doesn't follow.
-    const auto& tempo = impl->edit->tempoSequence;
-    const auto loopBeats = tempo.toBeats (impl->getEnd()).inBeats();
-
-    if (loopBeats > 0.0)
-    {
-        const auto songBeat = project->tempoSequence.toBeats (getPlayheadTime (*project)).inBeats();
-        impl->edit->getTransport().setPosition (
-            tempo.toTime (toTracktion (BeatPosition::fromBeats (std::fmod (std::max (0.0, songBeat), loopBeats)))));
-    }
+    // bars fall on the song's. Both engines play in the same blocks from then on.
+    if (const auto* session = findSession (*project))
+        impl->previews.locate (std::fmod (std::max (0.0, session->getPlayhead().inBeats()), impl->lengthBeats));
 
     impl->synced = true;
 }
@@ -193,6 +320,7 @@ void Previewer::stop()
 {
     impl->release();
     impl->file = juce::File();
+    impl->loop = nullptr;
     impl->inTime = false;
     impl->repeating = false;
     impl->synced = false;
@@ -203,11 +331,11 @@ bool Previewer::isPlaying() const
     if (impl->starting)
         return true;
 
-    if (impl->edit == nullptr || ! impl->edit->getTransport().isPlaying())
+    if (impl->file == juce::File() || ! impl->previews.isPlaying())
         return false;
 
     // Anything that doesn't repeat has finished once the playhead passes its end.
-    return impl->repeating || impl->edit->getTransport().getPosition() < impl->getEnd();
+    return impl->repeating || impl->previews.getPlayheadBeat() < impl->lengthBeats;
 }
 
 juce::File Previewer::getFile() const
@@ -224,8 +352,8 @@ void Previewer::setVolume (float faderPosition)
 {
     impl->volume = juce::jlimit (0.0f, 1.0f, faderPosition);
 
-    if (impl->edit != nullptr)
-        impl->edit->setMasterVolumeSliderPos (impl->volume);
+    if (impl->master != nullptr)
+        impl->master->getChannel().setVolume (faderPositionToDecibels (impl->volume));
 }
 
 float Previewer::getVolume() const noexcept

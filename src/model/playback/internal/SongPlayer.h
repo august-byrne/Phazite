@@ -157,4 +157,8 @@ private:
     void setChannel (const juce::ValueTree& channelState, bool isMaster);
     void updateAudibility();
 };
+
+// A file's samples as JUCE's formats read them, for the engine's reading threads (or a render's): the song's, and the
+// previews' (model/engine/Preview.cpp).
+std::unique_ptr<engine::SampleReader> makeSampleReader (std::unique_ptr<juce::AudioFormatReader>);
 } // namespace phazite

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's tempo and time signature (src/model/transport/internal/Tempo.h), and what a change of tempo stretches:
 // samples that follow it, which Phazite renders (roadmap step 2.18), and patterns unless they keep their speed.
-#include "HostedDevice.h"
+#include "EnginePlayback.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -13,9 +13,10 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
-#include "model/engine/internal/PreviewLoop.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
@@ -289,46 +290,27 @@ TEST_CASE ("A loop stretched to the song's tempo plays every hit once and on its
 
 TEST_CASE ("A loop previewed in time plays stretched as its clip would be, every hit once and on its beat, round and round")
 {
-    // The browser's preview (model/engine/internal/PreviewLoop.h), which Tracktion stretched with SoundTouch as it played.
-    // A bar at 44.1 kHz, played at 48: stretched and brought to the output's rate in one go. The tests before this one wrote
-    // two bars at the same path, which Tracktion's knowledge of the file still had: the preview reads it again.
-    phazite::test::HostedDevice device;
+    // The browser's preview (model/engine/Preview.cpp), played by Phazite's engine for previews and stretched by Rubber
+    // Band into memory as it starts (internal/PreviewLoop.h), which Tracktion stretched with SoundTouch as it played. A bar
+    // at 44.1 kHz, played at 48: stretched and brought to the output's rate in one go. The tests before this one wrote two
+    // bars at the same path, which Tracktion's knowledge of the file still had: the preview reads it again.
+    phazite::test::EnginePlayback playback; // the previews' engine at 48 kHz too
     phazite::test::TemporaryFolder temp;
     const auto file = writeClicks (temp.folder, 4, 120.0);
-    auto project = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::setTempo (*project, 100.0);
+    phazite::test::TestSong song;
+    song.setTempo (100.0);
 
-    auto inTime = false;
-    auto preview = phazite::createPreviewEdit (phazite::test::getEngine(), file, project.get(), inTime);
-    REQUIRE (preview != nullptr);
-    REQUIRE (inTime);
-    const auto loop = phazite::stretchPreviewLoop (*preview, file);
-    REQUIRE (loop != nullptr);
-    const auto rate = phazite::test::HostedDevice::sampleRate;
-    CHECK (loop->getLength() == (juce::int64) std::lround (2.4 * rate));
+    auto& previews = phazite::getPlaybackHost (phazite::test::getEngineContext()).getPreviewEngine();
+    const auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
+    REQUIRE (previewer->play (file, song.context));
+    REQUIRE (previewer->isInTime());
+    REQUIRE (phazite::test::runTimersUntil ([&previews] { return previews.isPlaying(); }, 60000));
 
-    // Rendered whole first: these blocks are processed faster than they would play.
-    phazite::test::runTimersUntil ([&loop] { return loop->isComplete(); }, 60000);
-    REQUIRE (loop->isComplete());
-
-    auto& transport = preview->getTransport();
-    transport.looping = true;
-    transport.ensureContextAllocated();
-    phazite::test::settle (300);
-    transport.play (false);
-
-    std::vector<float> out;
-    device.process (600,
-                    [&out] (const juce::AudioBuffer<float>& block, int)
-                    {
-                        out.insert (out.end(), block.getReadPointer (0), block.getReadPointer (0) + block.getNumSamples());
-                        return false;
-                    });
-
-    transport.stop (false, false);
-    transport.freePlaybackContext();
-    phazite::clearPreviewLoop (*preview);
-
+    // Played as a render plays, which waits for each part of the loop the render hasn't reached.
+    const auto rate = phazite::test::EnginePlayback::sampleRate;
+    const auto played = previews.render ((int) (6.0 * rate));
+    previewer->stop();
+    const std::vector<float> out (played.getReadPointer (0), played.getReadPointer (0) + played.getNumSamples());
     // From the first click, one on each beat at 100 BPM, twice round the bar, and nothing between.
     const auto start = std::find_if (out.begin(), out.end(), [] (float sample) { return std::abs (sample) > 0.01f; });
     REQUIRE (start != out.end());

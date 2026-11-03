@@ -162,7 +162,7 @@ TEST_CASE ("An item's row says what it is and what it does, and the line under t
     CHECK (phazite::BrowserModel::getTooltip (folder).isEmpty());
     CHECK (phazite::BrowserModel::getDetail (folder).isEmpty());
 
-    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
     auto& previewer = *previewerOwner;
     CHECK (phazite::BrowserModel::getPreviewStatus (false, previewer) == juce::String ("Previews are off"));
     CHECK (phazite::BrowserModel::getPreviewStatus (true, previewer) == juce::String ("Click a sound to hear it, drag it into the song"));

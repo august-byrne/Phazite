@@ -43,10 +43,10 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/devices/internal/Wavetables.h"
+#include "model/engine/Preview.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
 #include "model/engine/internal/Preview.h"
-#include "model/engine/internal/PreviewLoop.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Containers.h"
@@ -1323,42 +1323,35 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: a loop previewed in time")
     {
-        // The browser's preview (src/model/engine/Preview.h): Phazite stretches the loop into memory as it starts, at the
-        // output's rate, and its player copies it from there (internal/PreviewLoop.h): steady playback reads no file.
+        // The browser's preview (src/model/engine/Preview.h), played by Phazite's engine for previews beside the song's: Phazite
+        // stretches the loop into memory as it starts, at the output's rate, and the previews' reading thread hands it to
+        // the engine as it would a file (internal/PreviewLoop.h): steady playback reads no file. An empty song plays too.
         SineFile sine;
         phazite::test::TemporaryFolder temp;
         const auto loop = temp.folder.getChildFile ("Loop 120 BPM.wav");
         REQUIRE (sine.getFile().copyFileTo (loop));
 
-        // The output's rate first, which the loop is rendered for.
-        auto& audioIO = phazite::test::getEngine().getDeviceManager().getHostedAudioDeviceInterface();
-        te::HostedAudioDeviceInterface::Parameters params;
-        params.sampleRate = auditSampleRate;
-        params.blockSize = auditBlockSize;
-        audioIO.initialise (params);
-        audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
-        phazite::test::getEngine().getDeviceManager().dispatchPendingUpdates();
-
         auto project = phazite::createSongEdit (phazite::test::getEngine());
         phazite::setTempo (*project, 100.0);
-        auto inTime = false;
-        auto preview = phazite::createPreviewEdit (phazite::test::getEngine(), loop, project.get(), inTime);
-        REQUIRE (preview != nullptr);
-        REQUIRE (inTime);
-        const auto stretched = phazite::stretchPreviewLoop (*preview, loop);
-        REQUIRE (stretched != nullptr);
-        REQUIRE (phazite::test::runTimersUntil ([&stretched] { return stretched->isComplete(); }, 60000));
-        preview->getTransport().looping = true;
+        phazite::ProjectContext context { phazite::test::getEngineContext() };
+        setEdit (context, project.get());
+        const auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
+        auto& previews = phazite::getPlaybackHost (phazite::test::getEngineContext()).getPreviewEngine();
 
-        const auto m = playTracktionAndMeasure (*preview);
+        const auto m =
+            playProjectAndMeasure (context,
+                                   [&]
+                                   {
+                                       REQUIRE (previewer->play (loop, context));
+                                       REQUIRE (previewer->isInTime());
+                                       REQUIRE (phazite::test::runTimersUntil ([&previews] { return previews.isPlaying(); }, 60000));
+                                   });
+        previewer->stop();
+        setEdit (context, nullptr);
         report ("A loop at 120 BPM previewed at 100 BPM, stretched by Phazite as it starts", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
-
-        preview->getTransport().freePlaybackContext();
-        phazite::clearPreviewLoop (*preview);
     }
-
     TEST_CASE ("Real-time audit: two tracks in a folder bus")
     {
         SineFile sine;

@@ -129,7 +129,7 @@ TEST_CASE ("Saving presets: the commands for the selected device and track, and 
     phazite::Settings settings;
     phazite::SoundPack soundPack { song.temp.folder.getChildFile ("Packs") };
     phazite::Library library { phazite::test::getEngineContext(), settings, {}, song.temp.folder.getChildFile ("Presets") };
-    auto previewer = phazite::createPreviewer (phazite::test::getEngine());
+    auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
     phazite::ui::Browser browser { library, *previewer, soundPack, settings, song.context };
     phazite::test::TestWindow window { browser, 320, 700 };
     phazite::CommandRegistry registry;

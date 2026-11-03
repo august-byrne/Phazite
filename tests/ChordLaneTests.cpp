@@ -177,7 +177,7 @@ TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, a
     const auto edit = phazite::createSongEdit (phazite::test::getEngine());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setEdit (context, edit.get());
-    const auto previewer = phazite::createPreviewer (phazite::test::getEngine());
+    const auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
 
     {
         phazite::ui::ProgressionsPanel panel (context, *previewer);

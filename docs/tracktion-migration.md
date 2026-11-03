@@ -32,7 +32,7 @@ Snapshot of 2026-10-30 (Phazite at `a613ff7`, Tracktion 3.5.0 at `bb38617`). Onl
 | Recording | MIDI recording, and Capture through Tracktion's retrospective buffer; for audio, the inputs, their routing, monitoring and timing (Phazite writes the files) | `model/transport/` | Deep | T4 |
 | Audio devices | `te::DeviceManager` around JUCE's device manager | `model/engine/EngineContext.cpp` | Deep | T4 |
 | Rendering | Export and stems (`EditRenderer`, `RenderQueue`, loudness normalization, dither), freeze and bounce (`FreezePointPlugin`, render jobs) | `model/project/Export.cpp`, `model/mixer/Freeze.cpp` | Deep | T5 |
-| Previews | An Edit of its own for each sound the browser plays, its transport and loop | `model/engine/Preview.cpp` | Medium | T5 |
+| Previews | *Gone (T5, step 1):* Phazite's engine for previews plays each sound the browser plays; Tracktion still says which loops know their beats (`te::AudioFile`'s loop data) until T6 | `model/engine/Preview.cpp` | Medium | T5 |
 | Engine setup and settings | The engine, its behaviour and its UI callbacks; Tracktion's `Settings.xml` holds Phazite's own settings too, the plug-in list, the audio setup and the MIDI input's options | `model/engine/EngineSetup.*`, `src/app/AppServices.cpp` | Deep | T3, T4, T6 |
 | Small helpers | The grid's snap levels (`TimecodeSnapType`), scales (`te::Scale`), fade shapes, the loop information in audio files, the audio formats Tracktion reads | `model/arrangement/Grid.cpp`, `model/notes/Notes.cpp`, `model/arrangement/Import.cpp` | Light | T1 |
 
@@ -261,6 +261,9 @@ Recording, its timing, monitoring, Capture and live notes timestamped by the eng
 - Export of the song and its stems with loudness normalization and dither; freezing and bouncing a track in place, the frozen files in the project's Cache folder; the browser's previews: all through Phazite's engine, offline, faster than real time and the same every time.
 - *Done when:* the export, freeze and preview tests pass on Phazite's engine, and a frozen track's file matches what the track plays.
 
+Its steps, on 2026-11-02 (before T4, whose devices Tracktion's preview Edit still played on):
+1. *Previews* (2026-11-02): the browser's previews play on an engine of Phazite's own beside the song's, in the playback host, whose sound is added to the song's after the master (`PlaybackHost::getPreviewEngine()`), with a reading thread of its own. Each sound is a plan of two strips: the sound and a master whose fader is the previews' volume. An audio file is an audio region of it; a loop that knows its beats is the region of its Rubber Band render, which the previews' reading thread reads as a file and waits for there (`makeLoopReader()`, `internal/PreviewLoop.h`), never holding up the song's files; a MIDI file plays its notes, by its ticks per quarter note, on Phazite's synth at its defaults, over whole bars. A loop starts once the first part the engine reads of a file at once (32768 frames, 0.68 s at 48 kHz) is stretched, the render running twice as fast as it plays, rather than a quarter of a second. Tracktion's preview Edit, `PreviewLoopPlugin` and `createPreviewEdit()` are gone; the in-time preview's test plays it as a render does, and its guarded scenario in the real-time audit plays it beside an empty song and allocates nothing in steady playback.
+
 ### T6. Tracktion removed (M)
 
 - The bridge, the prelude (`model/base/internal/Tracktion.h`), the `internal/` headers that only exist for Tracktion, every workaround in the [list below](#tracktion-isms-to-drop), and Tracktion's `Settings.xml` go.
@@ -386,7 +389,7 @@ Conventions and workarounds that exist only because Tracktion works the way it d
 | Low Latency means turning delay compensation off and remaking the playback context | `internal/EngineSetup.h` | the engine changes its own buffer and latency |
 | Modulators keep where they were from one render to the next (an LFO's phase, a note follower's last note), so the same Edit rendered twice can differ | the golden renders' candidate engine renders a fresh Edit built from a copy of the song (`tests/RenderHarness.h`) | an engine that starts every render from the song's start |
 | A new Edit's master fader at -3 dB, which an export's stems leave out with the master's devices | the song keeps the master's volume, -3 dB until it is set, as Phazite's default (T1, step 5e); the stems' golden test adds them up at the master's level (`tests/GoldenMixerTests.cpp`) | the master's level the document's, Phazite's default |
-| The playback context freed by renders and kept alive by previews | restored after renders (`Freeze.cpp`), freed after previews (`Preview.cpp`) | offline renders of their own |
+| The playback context freed by renders | restored after renders (`Freeze.cpp`); previews no longer keep it (T5, step 1) | offline renders of their own |
 | Volume and pan and the click read message-thread values on the audio thread, meters allocate in their first block, the tempo map is swapped under a lock (audit findings 8, 14, 2 and 12) | reported upstream; measured by the audit | values handed over as the rules require |
 | The song's length counts only what Tracktion holds | `getSongEnd()`, `getTimelineEnd()` | the document's own extent |
 | Guide notes only if the engine behaviour says so | the piano roll forces them | the engine plays what the piano roll asks |
@@ -414,5 +417,5 @@ Conventions and workarounds that exist only because Tracktion works the way it d
 | Plug-in windows opened and closed through Tracktion's UI behaviour | `AppUIBehaviour`, `PluginWindow` | windows of Phazite's own host |
 | The scanner talks to its child process without a lock | the plug-in list's scan uses one thread (`MainWindow.cpp`) | Phazite's own scanner |
 | Phazite's own settings, the plug-in list, the audio setup and the count-in (as Tracktion's enum number) in Tracktion's `Settings.xml` | `PropertyStorage` | a settings file of Phazite's own |
-| A preview Edit with three tracks of Tracktion's making | `PreviewLoopPlugin` plays on a fourth (`Preview.cpp`); pitch matching off, as it ignores major and minor | previews from Phazite's engine |
+| A preview Edit with three tracks of Tracktion's making | *Gone (T5, step 1):* each sound is a plan of its own on Phazite's engine for previews (`Preview.cpp`), which never pulls a loop's pitch | previews from Phazite's engine |
 | Freezing: Tracktion renders on the message thread, unfreezes through undo, unfreezes a track whose file isn't in its own folder as a project opens, and leaves deleted tracks' files behind | the song keeps which tracks are frozen (T1, step 8), and the mirror plays their files from the project's Cache folder once the Edit is built (T1, step 10), so Tracktion finds no frozen track as it makes it; `Freeze.cpp` flips Tracktion's frozen flag without its listener, and cleans up after Tracktion | freezing of Phazite's own |

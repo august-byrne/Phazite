@@ -30,6 +30,17 @@ public:
     engine::Engine& getEngine() noexcept { return engine; }
     engine::FileReader& getFileReader() noexcept { return fileReader; } // the audio files the engine plays, read ahead
 
+    // The browser's previews (model/engine/Preview.cpp; docs/tracktion-migration.md, T5): an engine of their own, which
+    // plays beside the song's, its sound added to the song's after the master, prepared as the song's is; and a reading
+    // thread of its own for what it plays, where a loop stretched as it starts waits for its render, never holding up the
+    // song's files.
+    engine::Engine& getPreviewEngine() noexcept { return previews; }
+    engine::FileReader& getPreviewFileReader() noexcept { return previewFiles; }
+
+    // The audio thread, or a test as a device would: plays a block of the song's engine with the device's open inputs (by
+    // their channels), and the previews' added to it.
+    void process (const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples) noexcept;
+
     // The sessions of the projects open (model/playback/internal/PlaybackSession.h): the one added last plays, and the one
     // before it again when it goes (a test's second project). As one goes, what the engine played of it goes too (plug-ins
     // among it, which the project's Edit owns), once the audio thread can't be playing it; and so do the notes played into
@@ -57,6 +68,10 @@ private:
     te::Engine& tracktion;
     engine::Engine engine;
     engine::FileReader fileReader;
+    engine::Engine previews;
+    engine::FileReader previewFiles;
+    juce::AudioBuffer<float> previewBlock; // the audio thread's, made as the engines are prepared
+    void prepareEngines (double sampleRate, int maximumBlockSize);
     std::vector<PlaybackSession*> sessions;
     std::atomic<bool> running { false }; // a device calls the engine from its own thread
     void letGoOfPlans();

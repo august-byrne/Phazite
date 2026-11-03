@@ -85,7 +85,7 @@ struct BrowserScreen
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // with the Edit open
     phazite::Settings settings;
     phazite::Library library { phazite::test::getEngineContext(), settings, soundPack.getFolder() };
-    std::unique_ptr<phazite::Previewer> previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
+    std::unique_ptr<phazite::Previewer> previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
     phazite::Previewer& previewer = *previewerOwner;
     phazite::ui::Browser browser { library, previewer, soundPack, settings, context };
     phazite::test::TestWindow window { browser, 320, 700 };
@@ -391,7 +391,7 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     phazite::SoundPack soundPack (packs.folder, source.release);
     phazite::Settings settings;
     phazite::Library library (phazite::test::getEngineContext(), settings, soundPack.getFolder());
-    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
     auto& previewer = *previewerOwner;
     const phazite::ProjectContext noProject (phazite::test::getEngineContext());
     phazite::ui::Browser browser (library, previewer, soundPack, settings, noProject);

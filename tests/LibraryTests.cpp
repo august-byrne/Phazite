@@ -100,7 +100,7 @@ TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")
     const auto loop = writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
     const auto kick = writeSound (temp.folder.getChildFile ("Kick.wav"), 0.4);
 
-    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngine());
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
     auto& previewer = *previewerOwner;
     REQUIRE (previewer.play (loop, context));
     CHECK (previewer.isInTime());
