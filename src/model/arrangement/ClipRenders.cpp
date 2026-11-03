@@ -286,12 +286,12 @@ void ClipRenders::handleAsyncUpdate()
 
     for (const auto& render : done)
     {
-        if (const auto running = this->running.find (render); running != this->running.end())
+        if (const auto found = running.find (render); found != running.end())
         {
-            if (! running->second->stopped.load())
-                framesMade += running->second->length;
+            if (! found->second->stopped.load())
+                framesMade += found->second->length;
 
-            this->running.erase (running);
+            running.erase (found);
         }
 
         if (render.existsAsFile())

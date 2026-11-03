@@ -170,6 +170,6 @@ int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
     const auto added = importFiles (song, paths, {}, BeatPosition());
     song.getUndoManager().clearUndoHistory(); // the project was just opened: restoring it is no undo step
     edit.getUndoManager().clearUndoHistory();
-    return added.size();
+    return (int) added.size();
 }
 } // namespace phazite
