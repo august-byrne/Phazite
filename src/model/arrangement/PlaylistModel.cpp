@@ -14,6 +14,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 
+#include <algorithm>
 #include <numeric>
 
 namespace phazite
@@ -72,13 +73,15 @@ namespace
 
     // A track's row; its color is its row's in the palette unless it has its own. The master's is gray. Without the colors
     // of the folders it is in, which getPlaylistRows() knows from the folders before it.
-    TrackRow makeRow (te::Track& track, int index)
+    TrackRow makeRow (const te::Edit& edit, TrackID id, int index)
     {
+        const auto& song = getSong (edit);
+        const auto state = findTrackState (song, id);
         TrackRow row;
-        row.id = getTrackID (track);
-        row.collapsed = isCollapsed (track); // the master's: its lanes are thin rows
+        row.id = id;
+        row.collapsed = isCollapsed (song, id); // the master's: its lanes are thin rows
 
-        if (track.isMasterTrack())
+        if (state.hasType (schema::MASTER))
         {
             row.name = "Master";
             row.colour = getTrackColours().back().colour;
@@ -86,18 +89,17 @@ namespace
             return row;
         }
 
-        const auto state = findTrackState (track);
-        row.name = getTrackName (track);
-        row.colour = getTrackColour (track, index);
+        row.name = getTrackName (song, id);
+        row.colour = getTrackColour (song, id, index);
         row.kind = isFolderState (state) ? TrackType::folder : (isReturnState (state) ? TrackType::returnTrack : TrackType::track);
 
         for (auto folder = state.getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
             ++row.depth;
 
-        row.pinned = isPinned (track);
-        row.savedHeight = getSavedTrackHeight (track);
+        row.pinned = isPinned (song, id);
+        row.savedHeight = getSavedTrackHeight (song, id);
 
-        if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))
+        if (auto* audio = dynamic_cast<te::AudioTrack*> (phazite::findTrack (edit, state)))
         {
             row.hasInstrument = hasInstrument (*audio);
             row.frozen = audio->isFrozen (te::Track::individualFreeze);
@@ -172,16 +174,17 @@ std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
     if (edit == nullptr)
         return rows;
 
-    const auto tracks = getPlaylistTracks (*edit);
+    const auto& song = getSong (*edit);
+    const auto ids = getTrackIDs (song);
     std::vector<TrackRow> returns;
     std::vector<juce::Colour> folders; // the colors of the folders the row goes in, by depth: each folder comes before its tracks
 
-    for (int i = 0; i < tracks.size(); ++i)
+    for (size_t i = 0; i < ids.size(); ++i)
     {
-        if (isHiddenInCollapsedFolder (*tracks[i]))
+        if (isHiddenInCollapsedFolder (song, ids[i]))
             continue;
 
-        auto row = makeRow (*tracks[i], i);
+        auto row = makeRow (*edit, ids[i], (int) i);
         folders.resize ((size_t) row.depth);
         row.folderColours = folders;
 
@@ -192,7 +195,7 @@ std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
         // too (docs/design.md, section 6).
         if (row.kind != TrackType::returnTrack)
             rows.push_back (std::move (row));
-        else if (! getLanes (*tracks[i]).empty())
+        else if (auto* track = findTrack (context, ids[i]); track != nullptr && ! getLanes (*track).empty())
             returns.push_back (std::move (row));
     }
 
@@ -202,18 +205,17 @@ std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
 
 std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
 {
-    auto* edit = getEdit (context);
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr)
+    if (song == nullptr || ! findTrackState (*song, id).isValid())
         return {};
 
-    const auto tracks = getPlaylistTracks (*edit);
-    auto row = makeRow (*track, tracks.indexOf (track));
+    const auto ids = getTrackIDs (*song);
+    const auto indexOf = [&ids] (TrackID track) { return (int) (std::find (ids.begin(), ids.end(), track) - ids.begin()); };
+    auto row = makeRow (*getEdit (context), id, indexOf (id));
 
-    for (auto folder = findTrackState (*track).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
-        if (auto* folderTrack = te::findTrackForID (*edit, toTracktion (getTrackID (folder))))
-            row.folderColours.insert (row.folderColours.begin(), getTrackColour (*folderTrack, tracks.indexOf (folderTrack)));
+    for (auto folder = findTrackState (*song, id).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
+        row.folderColours.insert (row.folderColours.begin(), getTrackColour (*song, getTrackID (folder), indexOf (getTrackID (folder))));
 
     return row;
 }
@@ -226,32 +228,35 @@ std::optional<TrackRow> getMasterRow (const ProjectContext& context)
     if (master == nullptr || getLanes (*master).empty())
         return {};
 
-    return makeRow (*master, -1);
+    return makeRow (*edit, getTrackID (*master), -1);
 }
 
 std::vector<TrackID> getAllPlaylistTracks (const ProjectContext& context)
 {
-    std::vector<TrackID> ids;
-
-    if (auto* edit = getEdit (context))
-        for (auto* track : getPlaylistTracks (*edit))
-            ids.push_back (getTrackID (*track));
-
-    return ids;
+    auto* song = findSong (context);
+    return song != nullptr ? getTrackIDs (*song) : std::vector<TrackID>();
 }
 
 bool isInside (const ProjectContext& context, TrackID track, TrackID folder)
 {
-    auto* inner = findTrack (context, track);
-    auto* outer = findTrack (context, folder);
-    return inner != nullptr && outer != nullptr && inner != outer && inner->isAChildOf (*outer);
+    auto* song = findSong (context);
+
+    if (song == nullptr || track == folder || ! findTrackState (*song, folder).isValid())
+        return false;
+
+    for (auto parent = findTrackState (*song, track).getParent(); parent.hasType (schema::TRACK); parent = parent.getParent())
+        if (getTrackID (parent) == folder)
+            return true;
+
+    return false;
 }
 
 FolderSummary getFolderSummary (const ProjectContext& context, TrackID folder)
 {
     FolderSummary summary;
+    auto* song = findSong (context);
 
-    if (findTrack (context, folder) == nullptr)
+    if (song == nullptr || ! findTrackState (*song, folder).isValid())
         return summary;
 
     for (const auto id : getAllPlaylistTracks (context))
@@ -272,14 +277,14 @@ FolderSummary getFolderSummary (const ProjectContext& context, TrackID folder)
 
 void setCollapsed (ProjectContext& context, TrackID id, bool collapsed)
 {
-    if (auto* track = findTrack (context, id))
-        setCollapsed (*track, collapsed);
+    if (auto* song = findSong (context))
+        setCollapsed (*song, id, collapsed);
 }
 
 void setSavedTrackHeight (ProjectContext& context, TrackID id, int height)
 {
-    if (auto* track = findTrack (context, id))
-        setSavedTrackHeight (*track, height);
+    if (auto* song = findSong (context))
+        setSavedTrackHeight (*song, id, height);
 }
 
 bool isAnyRowExpanded (const ProjectContext& context)

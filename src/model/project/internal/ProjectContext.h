@@ -5,6 +5,7 @@
 #pragma once
 
 #include "model/arrangement/internal/Selection.h"
+#include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -16,6 +17,7 @@ class ProjectContext;
 struct Clipboard;
 
 te::Edit* getEdit (const ProjectContext&); // nullptr while no project is open
+Song* findSong (const ProjectContext&);    // the open project's song (model/base/Song.h), or nullptr
 Selection& getSelection (ProjectContext&);
 const Selection& getSelection (const ProjectContext&);
 RangeSelection& getRangeSelection (ProjectContext&);

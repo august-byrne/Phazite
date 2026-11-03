@@ -2,7 +2,8 @@
 <!-- The First Beat example song (ExampleSongs.h), saved, reopened and saved again: tests/GoldenProjectTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
 <PHAZITE loop="1"
          nextID="1105">
-  <MASTER fader="1001"/>
+  <MASTER fader="1001"
+          id="1009"/>
   <TEMPOMAP>
     <TEMPO beat="0"
            bpm="120"/>

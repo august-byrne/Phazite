@@ -240,7 +240,7 @@ void reconcileModulation (te::Edit& edit)
 {
     for (const auto& state : getTrackStates (edit))
     {
-        auto* track = te::findTrackForID (edit, toTracktion (getTrackID (state)));
+        auto* track = findTrack (edit, state);
 
         if (track == nullptr)
             continue;

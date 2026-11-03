@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- A new, empty project (Project::create), saved, reopened and saved again: tests/GoldenProjectTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
-<PHAZITE nextID="1005">
-  <MASTER fader="1001"/>
+<PHAZITE nextID="1010">
+  <MASTER fader="1001"
+          id="1009"/>
   <TEMPOMAP>
     <TEMPO beat="0"
            bpm="120"/>

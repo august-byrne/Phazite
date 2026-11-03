@@ -54,11 +54,6 @@ namespace
         return {};
     }
 
-    te::Track* findTrack (const te::Edit& edit, const juce::ValueTree& state)
-    {
-        return state.isValid() ? te::findTrackForID (edit, toTracktion (getTrackID (state))) : nullptr;
-    }
-
     // A new track's element, of a kind, with an ID of the song's (Song::makeID()), and its fader's: a folder starts as a bus
     // (design question 11).
     juce::ValueTree makeTrackState (te::Edit& edit, const char* kind, juce::Colour colour)
@@ -278,6 +273,11 @@ juce::ValueTree getTrackList (te::Edit& edit)
     return phazite.getOrCreateChildWithName (schema::TRACKS, nullptr);
 }
 
+juce::ValueTree findTrackList (const Song& song)
+{
+    return song.getState().getChildWithName (schema::TRACKS);
+}
+
 juce::ValueTree findTrackList (const te::Edit& edit)
 {
     return findPhaziteState (edit).getChildWithName (schema::TRACKS);
@@ -290,8 +290,12 @@ juce::ValueTree getMasterState (te::Edit& edit)
     if (auto master = phazite.getChildWithName (schema::MASTER); master.isValid())
         return master;
 
-    // With the master's fader, Tracktion's, which it makes with the Edit (and createEditFromSong() with the song's ID).
+    // With the master's ID and its fader's, those of Tracktion's master track and fader, which it makes with the Edit (and
+    // createEditFromSong() with the song's IDs).
     juce::ValueTree master (schema::MASTER);
+
+    if (auto* track = edit.getMasterTrack())
+        master.setProperty (schema::trackID, (juce::int64) track->itemID.getRawID(), nullptr);
 
     if (const auto fader = edit.getMasterVolumePlugin())
         master.setProperty (schema::channelFader, (juce::int64) fader->itemID.getRawID(), nullptr);
@@ -300,25 +304,38 @@ juce::ValueTree getMasterState (te::Edit& edit)
     return master;
 }
 
-juce::ValueTree findTrackState (const te::Edit& edit, TrackID id)
+juce::ValueTree findTrackState (const Song& song, TrackID id)
 {
+    if (! id.isValid())
+        return {};
+
     // The master's is its own element, with its view (its lanes).
-    if (auto* master = edit.getMasterTrack(); master != nullptr && getTrackID (*master) == id)
-        return findPhaziteState (edit).getChildWithName (schema::MASTER);
+    if (const auto master = song.getState().getChildWithName (schema::MASTER); getTrackID (master) == id)
+        return master;
 
-    return findIn (findTrackList (edit), id);
+    return findIn (findTrackList (song), id);
 }
 
-juce::ValueTree findTrackState (const te::Track& track)
-{
-    return findTrackState (track.edit, getTrackID (track));
-}
-
-std::vector<juce::ValueTree> getTrackStates (const te::Edit& edit)
+std::vector<juce::ValueTree> getTrackStates (const Song& song)
 {
     std::vector<juce::ValueTree> states;
-    collectTrackStates (findTrackList (edit), states);
+    collectTrackStates (findTrackList (song), states);
     return states;
+}
+
+std::vector<TrackID> getTrackIDs (const Song& song)
+{
+    std::vector<TrackID> ids;
+
+    for (const auto& state : getTrackStates (song))
+        ids.push_back (getTrackID (state));
+
+    return ids;
+}
+
+te::Track* findTrack (const te::Edit& edit, const juce::ValueTree& state)
+{
+    return state.isValid() ? te::findTrackForID (edit, toTracktion (getTrackID (state))) : nullptr;
 }
 
 TrackID getTrackID (const juce::ValueTree& state)
@@ -336,19 +353,19 @@ bool isReturnState (const juce::ValueTree& state)
     return state[schema::trackKind].toString() == schema::trackIsReturn;
 }
 
-juce::String getTrackName (const te::Track& track)
+juce::String getTrackName (const Song& song, TrackID id)
 {
-    const auto state = findTrackState (track);
+    const auto state = findTrackState (song, id);
 
     if (! state.isValid())
-        return track.getName();
+        return {};
 
     if (const auto name = state[schema::trackName].toString(); name.isNotEmpty() || isFolderState (state))
         return name;
 
     auto number = 1;
 
-    for (const auto& other : getTrackStates (track.edit))
+    for (const auto& other : getTrackStates (song))
     {
         if (other == state)
             break;
@@ -360,9 +377,20 @@ juce::String getTrackName (const te::Track& track)
     return "Track " + juce::String (number);
 }
 
-bool isReturnTrack (const te::Track& track)
+juce::String getTrackName (const te::Track& track)
 {
-    return isReturnState (findTrackState (track));
+    const auto& song = getSong (track.edit);
+    return findTrackState (song, getTrackID (track)).isValid() ? getTrackName (song, getTrackID (track)) : track.getName();
+}
+
+bool isReturnTrack (const Song& song, TrackID id)
+{
+    return isReturnState (findTrackState (song, id));
+}
+
+TrackID getParentFolder (const Song& song, TrackID id)
+{
+    return getTrackID (findTrackState (song, id).getParent());
 }
 
 te::FolderTrack* getParentFolder (const te::Track& track)
@@ -370,54 +398,58 @@ te::FolderTrack* getParentFolder (const te::Track& track)
     return dynamic_cast<te::FolderTrack*> (findTrack (track.edit, findTrackState (track).getParent()));
 }
 
-bool isTrackMuted (const te::Track& track, bool orInMutedFolder)
+bool isTrackMuted (const Song& song, TrackID id, bool orInMutedFolder)
 {
-    for (auto state = findTrackState (track); state.hasType (schema::TRACK); state = state.getParent())
+    for (auto state = findTrackState (song, id); state.hasType (schema::TRACK); state = state.getParent())
         if ((bool) state[schema::trackMute] || ! orInMutedFolder)
             return state[schema::trackMute];
 
     return false;
 }
 
-bool isTrackSoloed (const te::Track& track)
+bool isTrackSoloed (const Song& song, TrackID id)
 {
-    return findTrackState (track)[schema::trackSolo];
+    return findTrackState (song, id)[schema::trackSolo];
 }
 
-bool areAnyTracksSoloed (const te::Edit& edit)
+bool areAnyTracksSoloed (const Song& song)
 {
-    const auto states = getTrackStates (edit);
+    const auto states = getTrackStates (song);
     return std::any_of (states.begin(), states.end(), [] (const juce::ValueTree& state) { return (bool) state[schema::trackSolo]; });
 }
 
-void setTrackMuted (te::Track& track, bool muted, juce::UndoManager* undo)
+void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
 {
-    if (auto state = findTrackState (track); state.isValid() && (bool) state[schema::trackMute] != muted)
+    if (auto state = findTrackState (song, id); state.isValid() && (bool) state[schema::trackMute] != muted)
     {
         state.setProperty (schema::trackMute, muted, undo);
-        mirror::reconcileTracks (track.edit);
+        song.reconcile (Song::Part::tracks);
     }
 }
 
-void setTrackSoloed (te::Track& track, bool soloed)
+void setTrackSoloed (Song& song, TrackID id, bool soloed)
 {
-    if (auto state = findTrackState (track); state.isValid() && (bool) state[schema::trackSolo] != soloed)
+    if (auto state = findTrackState (song, id); state.isValid() && (bool) state[schema::trackSolo] != soloed)
     {
         state.setProperty (schema::trackSolo, soloed, nullptr);
-        mirror::reconcileTracks (track.edit);
+        song.reconcile (Song::Part::tracks);
     }
 }
 
-void setTrackName (te::Track& track, const juce::String& name)
+void setTrackName (Song& song, TrackID id, const juce::String& name)
 {
-    findTrackState (track).setProperty (schema::trackName, name, getUndo (track.edit));
-    mirror::reconcileTracks (track.edit);
+    if (auto state = findTrackState (song, id); state.isValid())
+        state.setProperty (schema::trackName, name, &song.getUndoManager());
+
+    song.reconcile (Song::Part::tracks);
 }
 
-void setTrackColour (te::Track& track, juce::Colour colour)
+void setTrackColour (Song& song, TrackID id, juce::Colour colour)
 {
-    findTrackState (track).setProperty (schema::trackColour, colour.toString(), getUndo (track.edit));
-    mirror::reconcileTracks (track.edit);
+    if (auto state = findTrackState (song, id); state.isValid())
+        state.setProperty (schema::trackColour, colour.toString(), &song.getUndoManager());
+
+    song.reconcile (Song::Part::tracks);
 }
 
 te::AudioTrack* insertPlainTrack (te::Edit& edit, te::Track* after)
@@ -432,9 +464,9 @@ te::AudioTrack* insertPlainTrack (te::Edit& edit, te::Track* after)
 }
 
 //==============================================================================
-juce::Colour getTrackColour (const te::Track& track, int row)
+juce::Colour getTrackColour (const Song& song, TrackID id, int row)
 {
-    if (const auto colour = juce::Colour::fromString (findTrackState (track)[schema::trackColour].toString()); ! colour.isTransparent())
+    if (const auto colour = juce::Colour::fromString (findTrackState (song, id)[schema::trackColour].toString()); ! colour.isTransparent())
         return colour;
 
     const auto& colours = getTrackColours();
@@ -446,7 +478,7 @@ juce::Array<te::Track*> getPlaylistTracks (const te::Edit& edit)
 {
     juce::Array<te::Track*> tracks;
 
-    for (const auto& state : getTrackStates (edit))
+    for (const auto& state : getTrackStates (getSong (edit)))
         if (auto* track = findTrack (edit, state))
             tracks.add (track);
 
@@ -489,70 +521,76 @@ te::TrackInsertPoint getInsertPointAfter (te::Track& track)
 }
 
 //==============================================================================
-std::optional<int> getSavedTrackHeight (const te::Track& track)
+std::optional<int> getSavedTrackHeight (const Song& song, TrackID id)
 {
-    if (const auto* height = findTrackState (track).getPropertyPointer (schema::trackHeight))
+    if (const auto* height = findTrackState (song, id).getPropertyPointer (schema::trackHeight))
         return (int) *height;
 
     return std::nullopt;
 }
 
-void setSavedTrackHeight (te::Track& track, int height)
+void setSavedTrackHeight (Song& song, TrackID id, int height)
 {
-    findTrackState (track).setProperty (schema::trackHeight, height, nullptr);
+    if (auto state = findTrackState (song, id); state.isValid())
+        state.setProperty (schema::trackHeight, height, nullptr);
 }
 
-bool isCollapsed (const te::Track& track)
+bool isCollapsed (const Song& song, TrackID id)
 {
-    return findTrackState (track).getProperty (schema::trackCollapsed, false);
+    return findTrackState (song, id).getProperty (schema::trackCollapsed, false);
 }
 
-void setCollapsed (te::Track& track, bool collapsed)
+void setCollapsed (Song& song, TrackID id, bool collapsed)
 {
-    findTrackState (track).setProperty (schema::trackCollapsed, collapsed, nullptr);
+    if (auto state = findTrackState (song, id); state.isValid())
+        state.setProperty (schema::trackCollapsed, collapsed, nullptr);
 }
 
-bool isPinned (const te::Track& track)
+bool isPinned (const Song& song, TrackID id)
 {
-    return findTrackState (track).getProperty (schema::trackPinned, false);
+    return findTrackState (song, id).getProperty (schema::trackPinned, false);
 }
 
-void setPinned (te::Track& track, bool pinned)
+void setPinned (Song& song, TrackID id, bool pinned)
 {
-    findTrackState (track).setProperty (schema::trackPinned, pinned, nullptr);
+    if (auto state = findTrackState (song, id); state.isValid())
+        state.setProperty (schema::trackPinned, pinned, nullptr);
 }
 
-bool isHiddenInCollapsedFolder (const te::Track& track)
+bool isHiddenInCollapsedFolder (const Song& song, TrackID id)
 {
-    for (auto folder = findTrackState (track).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
+    for (auto folder = findTrackState (song, id).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
         if ((bool) folder.getProperty (schema::trackCollapsed, false))
             return true;
 
     return false;
 }
 
-void toggleSoloAlone (te::Track& track)
+void toggleSoloAlone (Song& song, TrackID id)
 {
-    auto alone = isTrackSoloed (track);
-    const auto state = findTrackState (track);
+    auto state = findTrackState (song, id);
 
-    for (auto other : getTrackStates (track.edit))
+    if (! state.isValid())
+        return;
+
+    auto alone = isTrackSoloed (song, id);
+
+    for (auto other : getTrackStates (song))
         if (other != state && (bool) other[schema::trackSolo])
             alone = false;
 
-    for (auto other : getTrackStates (track.edit))
+    for (auto other : getTrackStates (song))
         if (other != state)
             other.setProperty (schema::trackSolo, false, nullptr);
 
-    findTrackState (track).setProperty (schema::trackSolo, ! alone, nullptr);
-    mirror::reconcileTracks (track.edit);
+    state.setProperty (schema::trackSolo, ! alone, nullptr);
+    song.reconcile (Song::Part::tracks);
 }
 
-bool isSilencedBySolo (const te::Track& track)
+bool isSilencedBySolo (const Song& song, TrackID id)
 {
-    const auto state = findTrackState (track);
-    return areAnyTracksSoloed (track.edit) && ! isSoloedOrInSoloedFolder (state) && ! isReturnState (state)
-           && ! isTrackMuted (track, false);
+    const auto state = findTrackState (song, id);
+    return areAnyTracksSoloed (song) && ! isSoloedOrInSoloedFolder (state) && ! isReturnState (state) && ! isTrackMuted (song, id, false);
 }
 
 //==============================================================================

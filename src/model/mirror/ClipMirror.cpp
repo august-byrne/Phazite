@@ -239,7 +239,7 @@ namespace
 
     te::ClipTrack* findTrackOf (te::Edit& edit, const juce::ValueTree& clipState)
     {
-        return dynamic_cast<te::ClipTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (clipState.getParent()))));
+        return dynamic_cast<te::ClipTrack*> (findTrack (edit, clipState.getParent()));
     }
 
     // A track's elements in the order Tracktion keeps them (ClipOwner's sortClips()): the rest first, then its automation,

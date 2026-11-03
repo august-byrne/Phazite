@@ -5,7 +5,8 @@
          nextID="1070"
          outline="rock"
          playStart="2">
-  <MASTER fader="1001"/>
+  <MASTER fader="1001"
+          id="1009"/>
   <SECTIONS>
     <SECTION energy="0.45"
              id="1040"

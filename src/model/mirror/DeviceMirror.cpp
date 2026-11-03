@@ -494,8 +494,13 @@ juce::ValueTree makeEditState (const juce::ValueTree& song)
     // (findNextID()) is past IDs Tracktion doesn't see there (its faders', its alias groups').
     juce::ValueTree state (te::IDs::EDIT);
     state.setProperty (te::IDs::id, (juce::int64) findNextID (song) - 1, nullptr);
+    const auto master = song.getChildWithName (schema::MASTER);
 
-    if (const auto fader = te::EditItemID::fromVar (song.getChildWithName (schema::MASTER)[schema::channelFader]); fader.isValid())
+    // Tracktion's master track with the master's ID, which it keeps from its element.
+    if (master.hasProperty (schema::trackID))
+        state.appendChild (juce::ValueTree (te::IDs::MASTERTRACK, { { te::IDs::id, master[schema::trackID] } }), nullptr);
+
+    if (const auto fader = te::EditItemID::fromVar (master[schema::channelFader]); fader.isValid())
     {
         auto volume = te::VolumeAndPanPlugin::create();
         fader.writeID (volume, nullptr);
@@ -512,13 +517,12 @@ void reconcileDevices (te::Edit& edit)
 
     // The returns' inputs first, whose buses the sends find.
     for (const auto& state : states)
-        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (state))));
-            track != nullptr && isReturnTrack (*track))
+        if (auto* track = dynamic_cast<te::AudioTrack*> (findTrack (edit, state)); track != nullptr && isReturnTrack (*track))
             reconcileReturn (edit, *track);
 
     for (const auto& state : states)
     {
-        if (auto* track = te::findTrackForID (edit, toTracktion (getTrackID (state))))
+        if (auto* track = findTrack (edit, state))
         {
             reconcileChain (edit, track->pluginList, state);
             reconcileFader (getVolumeDevice (*track), state, 0.0f);
@@ -538,7 +542,7 @@ void reconcileDevices (te::Edit& edit)
     // Edit's temporary folder, or live.
     for (const auto& state : states)
     {
-        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (state)))))
+        if (auto* track = dynamic_cast<te::AudioTrack*> (findTrack (edit, state)))
         {
             if (const auto frozen = (bool) state[schema::trackFrozen]; frozen && ! track->isFrozen (te::Track::individualFreeze))
                 playFrozenFile (*track);

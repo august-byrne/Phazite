@@ -332,6 +332,12 @@ te::Edit* getEdit (const ProjectContext& context)
     return context.getImpl().selection.getEdit();
 }
 
+Song* findSong (const ProjectContext& context)
+{
+    auto* edit = getEdit (context);
+    return edit != nullptr ? &getSong (*edit) : nullptr;
+}
+
 Selection& getSelection (ProjectContext& context)
 {
     return context.getImpl().selection;

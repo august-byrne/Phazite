@@ -57,7 +57,8 @@
   </CHORDLANE>
   <LASTKEY keyRoot="2"
            keyScale="minor"/>
-  <MASTER fader="1001">
+  <MASTER fader="1001"
+          id="1009">
     <DEVICE id="1049"
             type="phaziteReverb"/>
   </MASTER>

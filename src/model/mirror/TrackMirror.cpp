@@ -244,7 +244,7 @@ void reconcileTracks (te::Edit& edit)
 void reconcileTrackSwitches (te::Edit& edit)
 {
     for (const auto& state : getTrackStates (edit))
-        if (auto* track = te::findTrackForID (edit, toTracktion (getTrackID (state))))
+        if (auto* track = findTrack (edit, state))
             setSwitches (*track, state);
 
     // The master's write mode, from its own element.

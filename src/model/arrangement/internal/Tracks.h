@@ -7,6 +7,7 @@
 
 #include "model/arrangement/PlaylistValues.h"
 #include "model/arrangement/TrackColours.h"
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -18,55 +19,111 @@ namespace phazite
 class CommandRegistry;
 
 //==============================================================================
-// The song's tracks as Phazite's record holds them: a TRACK element for each (Schema.h), folders holding theirs.
+// The song's tracks as Phazite's record holds them: a TRACK element for each (Schema.h), folders holding theirs, and the
+// master's own element. Found by their IDs in the song (docs/tracktion-migration.md, T6 step 3); the same for one of
+// Tracktion's tracks, until the model's callers hold IDs alone.
 
 // The track list, which every project has (Project adds it as the project opens, with the master's element, MASTER):
 // added if the song has none yet, without an undo step; or found without adding it (then invalid).
 juce::ValueTree getTrackList (te::Edit&);
+juce::ValueTree findTrackList (const Song&);
 juce::ValueTree findTrackList (const te::Edit&);
 juce::ValueTree getMasterState (te::Edit&);
 
-// A track's element, anywhere in the list; invalid for one that is gone. And each track's, top to bottom, every folder
-// before its tracks.
-juce::ValueTree findTrackState (const te::Edit&, TrackID);
-juce::ValueTree findTrackState (const te::Track&);
-std::vector<juce::ValueTree> getTrackStates (const te::Edit&);
+// A track's element, anywhere in the list, or the master's; invalid for one that is gone. And each track's, top to bottom,
+// every folder before its tracks (not the master), and their IDs.
+juce::ValueTree findTrackState (const Song&, TrackID);
+std::vector<juce::ValueTree> getTrackStates (const Song&);
+std::vector<TrackID> getTrackIDs (const Song&);
 
 TrackID getTrackID (const juce::ValueTree& trackState);
 bool isFolderState (const juce::ValueTree& trackState);
 bool isReturnState (const juce::ValueTree& trackState);
 
-// A track's name as the song shows it: its own, or for a track or a return without one, its number among them, "Track 3",
-// as Tracktion numbers them.
-juce::String getTrackName (const te::Track&);
+// A track's name as the song shows it: its own, or for a track or a return without one, its number among them, "Track 3".
+juce::String getTrackName (const Song&, TrackID);
 
 // What a track is: a return (it takes in what tracks send to it, and no solo silences it).
-bool isReturnTrack (const te::Track&);
+bool isReturnTrack (const Song&, TrackID);
 
-// The folder a track is in, or nullptr.
-te::FolderTrack* getParentFolder (const te::Track&);
+// The folder a track is in, or none.
+TrackID getParentFolder (const Song&, TrackID);
 
 // Mute and solo, each track's own switch: muted with its folders' mutes too, or only its own.
-bool isTrackMuted (const te::Track&, bool orInMutedFolder);
-bool isTrackSoloed (const te::Track&);
-bool areAnyTracksSoloed (const te::Edit&);
+bool isTrackMuted (const Song&, TrackID, bool orInMutedFolder);
+bool isTrackSoloed (const Song&, TrackID);
+bool areAnyTracksSoloed (const Song&);
 
 // The switches set, not as undo steps (as in many DAWs); a mute in the caller's undo step with its undo manager (a bounce
 // mutes the track it rendered as part of its step).
-void setTrackMuted (te::Track&, bool, juce::UndoManager* = nullptr);
-void setTrackSoloed (te::Track&, bool);
+void setTrackMuted (Song&, TrackID, bool, juce::UndoManager* = nullptr);
+void setTrackSoloed (Song&, TrackID, bool);
 
 // A track's name and color, in the caller's undo step (renameTrack() and setTrackColours() are steps of their own).
-void setTrackName (te::Track&, const juce::String&);
-void setTrackColour (te::Track&, juce::Colour);
+void setTrackName (Song&, TrackID, const juce::String&);
+void setTrackColour (Song&, TrackID, juce::Colour);
+
+// A track's color: its own, or else the palette's color for its row, so every track has one.
+juce::Colour getTrackColour (const Song&, TrackID, int row);
+
+// View settings the project keeps for each track, without undo steps; their on-screen meaning is the playlist's
+// (ui/playlist/TrackHeights.h).
+std::optional<int> getSavedTrackHeight (const Song&, TrackID); // schema::trackHeight as saved, nothing if never set
+void setSavedTrackHeight (Song&, TrackID, int height);         // as given: the playlist clamps
+
+// A collapsed track is a thin row in the playlist, with only its name, and a collapsed folder hides its tracks.
+// A pinned track stays in view while the others scroll. Projects keep both, without undo steps, as they keep
+// track heights.
+bool isCollapsed (const Song&, TrackID);
+void setCollapsed (Song&, TrackID, bool);
+bool isPinned (const Song&, TrackID);
+void setPinned (Song&, TrackID, bool);
+
+// True if the track is inside a collapsed folder, so the playlist doesn't show it.
+bool isHiddenInCollapsedFolder (const Song&, TrackID);
+
+// Solo never changes a track's mute switch. Solos a track alone, unsoloing the others, as a right-click on FL Studio's mute
+// switch does; or unsolos it if it is the only one.
+void toggleSoloAlone (Song&, TrackID);
+
+// True if a track is silent because other tracks are soloed, though it isn't muted itself.
+bool isSilencedBySolo (const Song&, TrackID);
+
+//==============================================================================
+// The same for Tracktion's tracks, while the model's callers hold them; and Tracktion's track for a track's element, or
+// nullptr.
+te::Track* findTrack (const te::Edit&, const juce::ValueTree& trackState);
+
+juce::String getTrackName (const te::Track&); // or Tracktion's name for a track the song hasn't
+te::FolderTrack* getParentFolder (const te::Track&);
+
+// clang-format off
+inline juce::ValueTree findTrackState (const te::Edit& edit, TrackID id) { return findTrackState (getSong (edit), id); }
+inline juce::ValueTree findTrackState (const te::Track& track) { return findTrackState (getSong (track.edit), getTrackID (track)); }
+inline std::vector<juce::ValueTree> getTrackStates (const te::Edit& edit) { return getTrackStates (getSong (edit)); }
+inline bool isReturnTrack (const te::Track& track) { return isReturnTrack (getSong (track.edit), getTrackID (track)); }
+inline bool isTrackMuted (const te::Track& track, bool orInMutedFolder) { return isTrackMuted (getSong (track.edit), getTrackID (track), orInMutedFolder); }
+inline bool isTrackSoloed (const te::Track& track) { return isTrackSoloed (getSong (track.edit), getTrackID (track)); }
+inline bool areAnyTracksSoloed (const te::Edit& edit) { return areAnyTracksSoloed (getSong (edit)); }
+inline void setTrackMuted (te::Track& track, bool muted, juce::UndoManager* undo = nullptr) { setTrackMuted (getSong (track.edit), getTrackID (track), muted, undo); }
+inline void setTrackSoloed (te::Track& track, bool soloed) { setTrackSoloed (getSong (track.edit), getTrackID (track), soloed); }
+inline void setTrackName (te::Track& track, const juce::String& name) { setTrackName (getSong (track.edit), getTrackID (track), name); }
+inline void setTrackColour (te::Track& track, juce::Colour colour) { setTrackColour (getSong (track.edit), getTrackID (track), colour); }
+inline juce::Colour getTrackColour (const te::Track& track, int row) { return getTrackColour (getSong (track.edit), getTrackID (track), row); }
+inline std::optional<int> getSavedTrackHeight (const te::Track& track) { return getSavedTrackHeight (getSong (track.edit), getTrackID (track)); }
+inline void setSavedTrackHeight (te::Track& track, int height) { setSavedTrackHeight (getSong (track.edit), getTrackID (track), height); }
+inline bool isCollapsed (const te::Track& track) { return isCollapsed (getSong (track.edit), getTrackID (track)); }
+inline void setCollapsed (te::Track& track, bool collapsed) { setCollapsed (getSong (track.edit), getTrackID (track), collapsed); }
+inline bool isPinned (const te::Track& track) { return isPinned (getSong (track.edit), getTrackID (track)); }
+inline void setPinned (te::Track& track, bool pinned) { setPinned (getSong (track.edit), getTrackID (track), pinned); }
+inline bool isHiddenInCollapsedFolder (const te::Track& track) { return isHiddenInCollapsedFolder (getSong (track.edit), getTrackID (track)); }
+inline void toggleSoloAlone (te::Track& track) { toggleSoloAlone (getSong (track.edit), getTrackID (track)); }
+inline bool isSilencedBySolo (const te::Track& track) { return isSilencedBySolo (getSong (track.edit), getTrackID (track)); }
+// clang-format on
 
 // An empty track after another (at the end if that is nullptr), with no color or key of its own (its row's color in the
 // palette), not selected, as Tracktion makes one: the track a bounce renders onto, and those a new song starts with.
 te::AudioTrack* insertPlainTrack (te::Edit&, te::Track* after);
-
-//==============================================================================
-// A track's color: its own, or else the palette's color for its row, so every track has one.
-juce::Colour getTrackColour (const te::Track&, int row);
 
 //==============================================================================
 // The tracks the playlist shows, top to bottom: tracks, returns and folders, including the tracks inside folders.
@@ -82,12 +139,6 @@ juce::Array<te::Track*> getSelectedOutermostTracks (const Selection&);
 // The place right after a track, in the same folder. (Tracktion's TrackInsertPoint (track, false)
 // means the start of the list for the first top-level track.)
 te::TrackInsertPoint getInsertPointAfter (te::Track&);
-
-//==============================================================================
-// View settings the project keeps for each track, without undo steps; their on-screen meaning is the playlist's
-// (ui/playlist/TrackHeights.h).
-std::optional<int> getSavedTrackHeight (const te::Track&); // schema::trackHeight as saved, nothing if never set
-void setSavedTrackHeight (te::Track&, int height);         // as given: the playlist clamps
 
 //==============================================================================
 // Inserts an empty track after another one (at the end if that is nullptr), in the palette's next
@@ -121,24 +172,6 @@ void moveTrackIntoFolder (te::Track&, te::FolderTrack&);
 
 // Takes a folder's tracks out, to where the folder was, and deletes the folder.
 void ungroupFolder (te::FolderTrack&);
-
-// A collapsed track is a thin row in the playlist, with only its name, and a collapsed folder hides its tracks.
-// A pinned track stays in view while the others scroll. Projects keep both, without undo steps, as they keep
-// track heights.
-bool isCollapsed (const te::Track&);
-void setCollapsed (te::Track&, bool);
-bool isPinned (const te::Track&);
-void setPinned (te::Track&, bool);
-
-// True if the track is inside a collapsed folder, so the playlist doesn't show it.
-bool isHiddenInCollapsedFolder (const te::Track&);
-
-// Solo, which Tracktion keeps apart from mute: soloing never changes a track's mute switch. Solos a track alone,
-// unsoloing the others, as a right-click on FL Studio's mute switch does; or unsolos it if it is the only one.
-void toggleSoloAlone (te::Track&);
-
-// True if a track is silent because other tracks are soloed, though it isn't muted itself.
-bool isSilencedBySolo (const te::Track&);
 
 //==============================================================================
 // What the track commands do. These don't start an undo step: the command does (Command::undoTarget).

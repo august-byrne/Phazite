@@ -111,7 +111,7 @@ inline const juce::Identifier TRACKS { "TRACKS" };
 // Child of TRACKS, or of a folder's TRACK: a track.
 inline const juce::Identifier TRACK { "TRACK" };
 
-// On TRACK. int64, more than 0: its ID (TrackID), which while T1 lasts is its Tracktion track's.
+// On TRACK, and on MASTER. int64, more than 0: its ID (TrackID), which Tracktion's track (its master track) takes too.
 inline const juce::Identifier trackID { "id" };
 
 // On TRACK: what it is: trackIsTrack (a track, which holds clips), trackIsFolder (a folder, which holds tracks) or
@@ -196,7 +196,8 @@ inline const juce::Identifier drumOrder { "drumOrder" };
 inline const juce::Identifier drumHidden { "drumHidden" };
 
 // Child of PHAZITE, which every project has: the master channel's own element, with its write mode
-// (trackAutomationMode), its volume and pan (channelVolume, channelPan), its devices, and its automation lanes (LANE, view).
+// (trackAutomationMode), its volume and pan (channelVolume, channelPan), its devices, and its automation lanes (LANE, view),
+// with an ID of the song's (trackID) like a track's.
 inline const juce::Identifier MASTER { "MASTER" };
 
 // Child of TRACK and of MASTER, one for each automation lane the playlist shows under the track, in their order
